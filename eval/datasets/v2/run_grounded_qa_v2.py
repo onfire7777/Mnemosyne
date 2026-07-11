@@ -22,7 +22,10 @@ _GOLD_FIELDS = {"gold_answer", "gold_aliases", "relevant_doc_ids", "distractor_a
 _ROOT = Path(__file__).resolve().parents[3]
 _FROZEN_DATASET = Path(__file__).with_name("qa_hard_v2.json").resolve()
 _FROZEN_SHA256 = "1864974807f2171904a5e5f04b727b3cbfb258f94c1280106ecc08a4dade52e2"
+_SCALE_DATASET = Path(__file__).with_name("qa_scale_dev_v1.json").resolve()
+_SCALE_SHA256 = "54b3cf83e95bb023f4eff65d2ac2d25eff621685d5ef9f58fd75432ac294c8d2"
 _FROZEN_BATCH_TIMEOUT_SECONDS = 3600
+_PREFLIGHT_SCHEMA = "grounded-qa-scale-preflight-v1"
 
 
 def load_dataset(path: Path, *, allow_frozen: bool = False) -> dict[str, Any]:
@@ -202,6 +205,49 @@ def _write_exclusive(path: Path, value: object) -> None:
         os.fsync(handle.fileno())
 
 
+def _digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _validated_preflight(
+    path: Path,
+    *,
+    candidate_digest: str,
+    runtime_digest: str,
+) -> tuple[dict[str, Any], str]:
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("scale preflight receipt must be a real file")
+    raw = path.read_bytes()
+    value = json.loads(raw)
+    expected = {
+        "candidate_manifest_sha256",
+        "dataset_sha256",
+        "metrics",
+        "result_sha256",
+        "retrieval",
+        "runtime_manifest_sha256",
+        "schema",
+        "trace_count",
+    }
+    if not isinstance(value, dict) or set(value) != expected:
+        raise ValueError("scale preflight receipt schema mismatch")
+    if (
+        value["schema"] != _PREFLIGHT_SCHEMA
+        or value["candidate_manifest_sha256"] != candidate_digest
+        or value["runtime_manifest_sha256"] != runtime_digest
+        or value["dataset_sha256"] != _SCALE_SHA256
+        or value["trace_count"] != 24
+        or value["metrics"] != {"exact_match": 1.0, "token_f1": 1.0}
+        or value["retrieval"] != {"ndcg_at_5": 1.0, "recall_at_5": 1.0}
+        or not isinstance(value["result_sha256"], str)
+        or len(value["result_sha256"]) != 64
+    ):
+        raise ValueError("scale preflight receipt did not pass the exact gate")
+    return value, hashlib.sha256(raw).hexdigest()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=Path, required=True)
@@ -210,6 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--attempt-ledger", type=Path)
     parser.add_argument("--runtime-manifest", type=Path)
+    parser.add_argument("--preflight-receipt", type=Path)
+    parser.add_argument("--write-preflight-receipt", type=Path)
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--execute-frozen", action="store_true")
     args = parser.parse_args(argv)
@@ -222,11 +270,32 @@ def main(argv: list[str] | None = None) -> int:
     output = _external_new_path(args.output, "grounded QA output")
     store = _external_new_path(args.store, "grounded QA store")
     frozen = args.dataset.resolve() == _FROZEN_DATASET
+    scale = args.dataset.resolve() == _SCALE_DATASET
+    candidate_digest = hashlib.sha256(args.candidate_manifest.read_bytes()).hexdigest()
+    if args.write_preflight_receipt is not None and args.write_preflight_receipt.expanduser().resolve() in {
+        output,
+        store,
+    }:
+        raise ValueError("scale preflight receipt must have a distinct external path")
     if frozen:
-        if not args.execute_frozen or args.attempt_ledger is None or args.runtime_manifest is None:
-            raise ValueError("frozen execution requires attempt ledger and runtime manifest")
+        if (
+            not args.execute_frozen
+            or args.attempt_ledger is None
+            or args.runtime_manifest is None
+            or args.preflight_receipt is None
+            or args.write_preflight_receipt is not None
+        ):
+            raise ValueError(
+                "frozen execution requires attempt ledger, runtime manifest, and scale preflight receipt"
+            )
         if hashlib.sha256(args.dataset.read_bytes()).hexdigest() != _FROZEN_SHA256:
             raise ValueError("frozen dataset digest mismatch")
+        runtime_digest = hashlib.sha256(args.runtime_manifest.read_bytes()).hexdigest()
+        _, preflight_digest = _validated_preflight(
+            args.preflight_receipt,
+            candidate_digest=candidate_digest,
+            runtime_digest=runtime_digest,
+        )
         runtime_env = grounded_runtime_environment(
             args.runtime_manifest, candidate, args.ollama_url, repo_root=_ROOT
         )
@@ -234,20 +303,30 @@ def main(argv: list[str] | None = None) -> int:
         if args.attempt_ledger.expanduser().resolve() != attempt_root:
             raise ValueError(f"attempt root must be the canonical path: {attempt_root}")
         attempt_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        candidate_digest = hashlib.sha256(args.candidate_manifest.read_bytes()).hexdigest()
         ledger = attempt_root / f"{candidate_digest}-qa_hard_v2.json"
         _write_exclusive(
             ledger,
             {
                 "candidate_manifest_sha256": candidate_digest,
                 "dataset_sha256": _FROZEN_SHA256,
-                "runtime_manifest_sha256": hashlib.sha256(args.runtime_manifest.read_bytes()).hexdigest(),
+                "preflight_receipt_sha256": preflight_digest,
+                "runtime_manifest_sha256": runtime_digest,
                 "split": "qa_hard_v2",
             },
         )
     else:
         if args.execute_frozen:
             raise ValueError("--execute-frozen is restricted to canonical qa_hard_v2")
+        if args.preflight_receipt is not None:
+            raise ValueError("--preflight-receipt is restricted to frozen execution")
+        if args.write_preflight_receipt is not None and (
+            not scale or args.runtime_manifest is None
+        ):
+            raise ValueError(
+                "scale preflight receipts require the canonical scale dataset and runtime manifest"
+            )
+        if scale and hashlib.sha256(args.dataset.read_bytes()).hexdigest() != _SCALE_SHA256:
+            raise ValueError("scale preflight dataset digest mismatch")
         runtime_env = (
             grounded_runtime_environment(
                 args.runtime_manifest, candidate, args.ollama_url, repo_root=_ROOT
@@ -259,10 +338,38 @@ def main(argv: list[str] | None = None) -> int:
     cli = MnemoCLI(
         store=str(store),
         env=runtime_env,
-        timeout_s=_FROZEN_BATCH_TIMEOUT_SECONDS if frozen else 120.0,
+        timeout_s=_FROZEN_BATCH_TIMEOUT_SECONDS if frozen or scale else 120.0,
     )
     result = evaluate(dataset, cli)
-    result["candidate_manifest_sha256"] = hashlib.sha256(args.candidate_manifest.read_bytes()).hexdigest()
+    result["candidate_manifest_sha256"] = candidate_digest
+    if args.write_preflight_receipt is not None:
+        metrics = result.get("qa", {}).get("metrics")
+        retrieval = result.get("retrieval")
+        if (
+            result.get("trace_count") != 24
+            or metrics != {"exact_match": 1.0, "token_f1": 1.0}
+            or retrieval != {"ndcg_at_5": 1.0, "recall_at_5": 1.0}
+            or any(row.get("abstained") is not False for row in result.get("traces", []))
+        ):
+            raise ValueError("scale preflight result did not pass the exact gate")
+        receipt = _external_new_path(
+            args.write_preflight_receipt, "scale preflight receipt"
+        )
+        _write_exclusive(
+            receipt,
+            {
+                "candidate_manifest_sha256": candidate_digest,
+                "dataset_sha256": _SCALE_SHA256,
+                "metrics": metrics,
+                "result_sha256": _digest(result),
+                "retrieval": retrieval,
+                "runtime_manifest_sha256": hashlib.sha256(
+                    args.runtime_manifest.read_bytes()
+                ).hexdigest(),
+                "schema": _PREFLIGHT_SCHEMA,
+                "trace_count": 24,
+            },
+        )
     _write_exclusive(output, result)
     return 0
 

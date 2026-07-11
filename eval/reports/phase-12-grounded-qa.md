@@ -156,4 +156,17 @@ attempt. Phase 12 evaluation already uses host Ollama 0.24.0 directly at
 `127.0.0.1:11434` with `qwen3:8b` on 100% GPU, so the production Colima
 performance apply would not accelerate this evaluator and remains deferred.
 
+A host-Metal `qwen3:14b` feasibility probe was rejected before
+preregistration: the model occupied 9.8 GB at 100% GPU on the 16 GB host,
+reduced free memory to roughly 60 MB, and failed to produce a trivial one-token
+response within 300 seconds. The model is installed externally for possible
+future use on larger hardware, but it is not a candidate on this machine.
+
+Future protected attempts now require a no-overwrite, candidate/runtime-bound
+receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
+batch wrapper must complete all 24 traces with no abstentions, EM/F1 1.0, and
+Recall@5/nDCG@5 1.0 under the same 3,600-second outer bound. The frozen attempt
+ledger binds the receipt digest before execution, preventing another
+small-synthetic-pass/large-wrapper-timeout loss like v12.
+
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

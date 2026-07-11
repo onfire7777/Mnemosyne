@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -7,6 +8,10 @@ from typing import Any
 import pytest
 
 from eval.datasets.v2.run_grounded_qa_v2 import (
+    _PREFLIGHT_SCHEMA,
+    _SCALE_DATASET,
+    _SCALE_SHA256,
+    _validated_preflight,
     compare_retrieval_baseline,
     evaluate,
     load_dataset,
@@ -105,6 +110,38 @@ def test_no_recall_comparator_reports_exact_regressions() -> None:
 
 def test_frozen_batch_timeout_covers_multi_question_local_inference() -> None:
     assert runner._FROZEN_BATCH_TIMEOUT_SECONDS == 3600
+
+
+def test_scale_preflight_dataset_and_receipt_are_exactly_bound(tmp_path: Path) -> None:
+    assert _SCALE_DATASET.is_file()
+    assert hashlib.sha256(_SCALE_DATASET.read_bytes()).hexdigest() == _SCALE_SHA256
+    assert len(load_dataset(_SCALE_DATASET)["queries"]) == 24
+    receipt = tmp_path / "receipt.json"
+    value = {
+        "candidate_manifest_sha256": "a" * 64,
+        "dataset_sha256": _SCALE_SHA256,
+        "metrics": {"exact_match": 1.0, "token_f1": 1.0},
+        "result_sha256": "c" * 64,
+        "retrieval": {"ndcg_at_5": 1.0, "recall_at_5": 1.0},
+        "runtime_manifest_sha256": "b" * 64,
+        "schema": _PREFLIGHT_SCHEMA,
+        "trace_count": 24,
+    }
+    receipt.write_text(json.dumps(value))
+    validated, digest = _validated_preflight(
+        receipt,
+        candidate_digest="a" * 64,
+        runtime_digest="b" * 64,
+    )
+    assert validated == value and len(digest) == 64
+    value["trace_count"] = 23
+    receipt.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="exact gate"):
+        _validated_preflight(
+            receipt,
+            candidate_digest="a" * 64,
+            runtime_digest="b" * 64,
+        )
 
 
 def test_attempt_and_result_paths_are_external_exclusive_and_non_symlink(

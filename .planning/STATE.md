@@ -240,3 +240,10 @@ Synthetic-only hop-0 redesign is next. The evaluator already uses host Ollama
 apply is not an evaluator speedup and remains deferred to its production
 evidence window. GitHub exact CI remains externally blocked by billing;
 external board seating and third-party reproduction remain human-owned gates.
+
+Latest checkpoint (2026-07-11): The qwen3:14b host-Metal feasibility probe is
+rejected on the current 16 GB host after consuming 9.8 GB GPU memory and
+failing to emit one token within 300 seconds. No model-upgrade candidate was
+preregistered. A canonical 24-question development-scale exact-wrapper gate is
+now being added as a mandatory, digest-bound prerequisite for every future
+protected attempt, closing the v12 batch-timeout hole before further QA work.
