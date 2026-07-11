@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from collections import Counter
 from dataclasses import replace
@@ -15,6 +16,13 @@ from eval.public.scoring import score_profile
 _CLEANED = "longmemeval_s_cleaned.json"
 _ORACLE = "longmemeval_oracle.json"
 _PROFILE = "longmemeval-retrieval-v1"
+_REDACTION = "[REDACTED_SECRET]"
+_SECRET = re.compile(
+    r"(?:-----BEGIN (?P<label>[A-Z ]*PRIVATE KEY)-----[\s\S]{0,65536}?"
+    r"-----END (?P=label)-----|gh[pousr]_[A-Za-z0-9]{20,}|"
+    r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----|-----END [A-Z ]*PRIVATE KEY-----)"
+)
 
 
 def run(
@@ -22,7 +30,7 @@ def run(
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     """Normalize LongMemEval, run isolated CLI retrieval, and score session recall."""
     normalized = (
-        _normalize_assets(benchmark["assets"])
+        normalize(benchmark)
         if "assets" in benchmark
         else _validate_normalized(benchmark)
     )
@@ -104,7 +112,9 @@ def run(
     return normalized, traces, score_profile(_PROFILE, labels, traces)
 
 
-def _normalize_assets(assets: Any) -> dict[str, Any]:
+def normalize(value: dict[str, Any]) -> dict[str, Any]:
+    """Normalize pinned raw assets before any CLI evaluation side effect."""
+    assets = value.get("assets")
     if not isinstance(assets, dict) or set(assets) != {_CLEANED, _ORACLE}:
         raise ValueError("LongMemEval requires the exact cleaned and oracle assets")
     cleaned, oracle = assets[_CLEANED], assets[_ORACLE]
@@ -113,6 +123,7 @@ def _normalize_assets(assets: Any) -> dict[str, Any]:
     oracle_by_id = _index_questions(oracle, "oracle")
     corpus: list[dict[str, Any]] = []
     questions: list[dict[str, Any]] = []
+    redaction_count = 0
     seen: set[str] = set()
     for row in cleaned:
         if not isinstance(row, dict):
@@ -155,9 +166,11 @@ def _normalize_assets(assets: Any) -> dict[str, Any]:
                 if counts[session_id] == 1
                 else f"{session_id}#occurrence-{occurrence}"
             )
+            content, matched = _render_session(session)
+            redaction_count += matched
             corpus.append(
                 {
-                    "content": _render_session(session),
+                    "content": content,
                     "question_id": question_id,
                     "session_id": record_id,
                     "source_session_id": session_id,
@@ -173,7 +186,15 @@ def _normalize_assets(assets: Any) -> dict[str, Any]:
         )
     if set(oracle_by_id) != seen:
         raise ValueError("LongMemEval oracle question set does not match cleaned asset")
-    return {"corpus": corpus, "k": 5, "questions": questions}
+    return {
+        "corpus": corpus,
+        "k": 5,
+        "questions": questions,
+        "redactions": {
+            "replacement": _REDACTION,
+            "secret_like_matches": redaction_count,
+        },
+    }
 
 
 def _validate_normalized(benchmark: dict[str, Any]) -> dict[str, Any]:
@@ -187,6 +208,15 @@ def _validate_normalized(benchmark: dict[str, Any]) -> dict[str, Any]:
         or not questions
     ):
         raise ValueError("normalized LongMemEval benchmark is empty")
+    redactions = benchmark.get("redactions")
+    if (
+        not isinstance(redactions, dict)
+        or redactions.get("replacement") != _REDACTION
+        or not isinstance(redactions.get("secret_like_matches"), int)
+        or isinstance(redactions.get("secret_like_matches"), bool)
+        or redactions["secret_like_matches"] < 0
+    ):
+        raise ValueError("normalized LongMemEval redaction metadata is invalid")
     question_ids = {
         _string(row.get("question_id"), "question_id")
         for row in questions
@@ -249,7 +279,7 @@ def _oracle_turns(row: dict[str, Any], cleaned_ids: list[str]) -> dict[str, list
     return answer_turns
 
 
-def _render_session(session: Any) -> str:
+def _render_session(session: Any) -> tuple[str, int]:
     if not isinstance(session, list) or not session:
         raise ValueError("LongMemEval session must contain turns")
     rendered: list[str] = []
@@ -261,7 +291,7 @@ def _render_session(session: Any) -> str:
         if not isinstance(content, str):
             raise ValueError("LongMemEval turn content must be a string")
         rendered.append(f"{role}: {content}")
-    return "\n".join(rendered)
+    return _SECRET.subn(_REDACTION, "\n".join(rendered))
 
 
 def _tenant(question_id: str) -> str:

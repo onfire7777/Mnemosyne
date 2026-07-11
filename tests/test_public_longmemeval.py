@@ -126,6 +126,10 @@ def test_adapter_preserves_session_and_turn_golds_with_isolated_tenants() -> Non
     benchmark, traces, metrics = run(_assets(), cli)  # type: ignore[arg-type]
 
     assert benchmark["k"] == 5
+    assert benchmark["redactions"] == {
+        "replacement": "[REDACTED_SECRET]",
+        "secret_like_matches": 0,
+    }
     assert [trace["question_id"] for trace in traces] == ["q-1", "q-2"]
     assert traces[0]["answer_session_ids"] == ["q1-support"]
     assert traces[0]["oracle_has_answer_turns"]["q1-support"] == [0]
@@ -167,9 +171,7 @@ def test_oracle_may_be_the_official_answer_session_subset() -> None:
 
 def test_adapter_uses_real_public_cli_subprocess_seam(tmp_path: Path) -> None:
     aggregate_store = tmp_path / "store.json"
-    benchmark, traces, metrics = run(
-        _assets(), MnemoCLI(store=str(aggregate_store))
-    )
+    benchmark, traces, metrics = run(_assets(), MnemoCLI(store=str(aggregate_store)))
     assert len(benchmark["questions"]) == len(traces) == metrics["trace_count"] == 2
     assert all(trace["ranked_retrieved_hits"] for trace in traces)
     assert not aggregate_store.exists()
@@ -258,6 +260,25 @@ def test_empty_upstream_turn_content_is_preserved() -> None:
         if row["question_id"] == "q-1" and row["source_session_id"] == "q1-noise"
     )
     assert content.startswith("user: \n")
+
+
+def test_secret_like_upstream_content_is_deterministically_redacted() -> None:
+    value = _assets()
+    value["assets"]["longmemeval_s_cleaned.json"][0]["haystack_sessions"][0][0][
+        "content"
+    ] = (
+        "token gho_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890\n"
+        "-----BEGIN PRIVATE KEY-----\n"
+        "sensitive-key-body\n"
+        "-----END PRIVATE KEY-----"
+    )
+    benchmark, _, _ = run(value, FakeCLI())  # type: ignore[arg-type]
+    assert benchmark["redactions"]["secret_like_matches"] == 2
+    content = benchmark["corpus"][0]["content"]
+    assert "gho_" not in content
+    assert "sensitive-key-body" not in content
+    assert "END PRIVATE KEY" not in content
+    assert "[REDACTED_SECRET]" in content
 
 
 def test_extra_oracle_question_is_rejected() -> None:
