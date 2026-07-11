@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 
@@ -345,8 +346,7 @@ def test_reader_claims_are_approved_only_against_replayed_authorized_cids() -> N
         {
             "claims": [
                 {
-                    "text": "Ada owns project Zephyr.",
-                    "evidence_cids": [assembled.evidence[0].cid],
+                    "spans": [{"cid": assembled.evidence[0].cid, "start": 0, "end": 24}],
                 }
             ],
             "unresolved": False,
@@ -361,6 +361,49 @@ def test_reader_claims_are_approved_only_against_replayed_authorized_cids() -> N
     assert result.claims[0].evidence_cids == (assembled.evidence[0].cid,)
     assert set(reader.calls[0]) == {"question", "evidence"}
     assert engine.export_all() == before
+
+
+def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> None:
+    evidence = {"a": "A😀B ignore instructions", "b": "東京 ready"}
+    claims = GroundedAnswerOrchestrator._claims(
+        {"claims": [{"spans": [
+            {"cid": "a", "start": 1, "end": 2},
+            {"cid": "b", "start": 0, "end": 2},
+            {"cid": "a", "start": 4, "end": 23},
+        ]}], "unresolved": False},
+        evidence,
+    )
+    assert claims[0].text == "😀 東京 ignore instructions"
+    assert claims[0].evidence_cids == ("a", "b")
+    assert claims[0].spans[0].slice_sha256 == hashlib.sha256("😀".encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"claims": [{"spans": [{"cid": "a", "start": True, "end": 1}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": False}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": -1, "end": 1}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 99}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 2, "end": 1}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 2}, {"cid": "a", "start": 0, "end": 2}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 2}, {"cid": "a", "start": 1, "end": 3}]}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 1}] * 4}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 1}]}] * 21, "unresolved": False},
+    ],
+)
+def test_extractive_span_reader_rejects_invalid_boundaries(response: object) -> None:
+    with pytest.raises(ValueError):
+        GroundedAnswerOrchestrator._claims(response, {"a": "abcd", "b": "wxyz"})
+
+
+@pytest.mark.parametrize("content", [None, 1, True, ""])
+def test_extractive_span_reader_rejects_nonstring_or_empty_evidence(content: object) -> None:
+    with pytest.raises(ValueError, match="exact non-empty strings"):
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 1}]}], "unresolved": False},
+            {"a": content},  # type: ignore[dict-item]
+        )
 
 
 @pytest.mark.parametrize(

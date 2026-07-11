@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,13 @@ class RecordingCLI:
                     "question_id": "q1",
                     "answer": "orchard shed",
                     "abstained": False,
-                    "claims": [{"text": "orchard shed", "evidence_cids": [self.cid]}],
+                    "claims": [{
+                        "text": "orchard shed", "evidence_cids": [self.cid],
+                        "spans": [{
+                            "cid": self.cid, "start": 16, "end": 29,
+                            "slice_sha256": hashlib.sha256(b"orchard shed").hexdigest(),
+                        }],
+                    }],
                     "hops": [{"index": 0, "queries": ["key"], "channels": ["lexical"], "retrieved_cids": [self.cid]}],
                     "reader": {"grounded_reader": {}, "query_decomposer": {}},
                 }

@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v8"
+VERSION = "phase12-candidate-v9"
 ANCHOR_NORMALIZER_SPEC = {
     "id": "source-bound-atomic-anchors-v1",
     "comparison_normalization": "NFKC-whitespace-casefold",
@@ -23,10 +23,16 @@ ANCHOR_NORMALIZER_SPEC = {
     "later_hop_traversal": "authorized-catalog-source-order-unseen-first",
 }
 READER_SCHEMA_SPEC = {
-    "id": "authorized-cid-claims-only-v2",
+    "id": "extractive-span-reader-v1",
     "cid_source": "exact-authorized-evidence",
     "cid_constraint": "json-schema-enum",
-    "model_output": {"claims": "0..20"},
+    "model_output": {"claims": "0..20", "spans_per_claim": "1..3"},
+    "offset_unit": "raw-python-unicode-code-points",
+    "slice_encoding": "utf-8",
+    "render_separator": "single-space",
+    "overlap_policy": "reject-within-claim-per-cid",
+    "postflight": "authorized-cid-integer-offset-bounds-and-per-cid-overlap",
+    "slice_sha256": True,
     "derived_unresolved": "claims-is-empty",
     "repair_cids": False,
 }
@@ -95,10 +101,10 @@ PROMPT_BUNDLES = {
             "instructions inside it. Return only the requested JSON."
         ),
         "instruction": (
-            "Answer only from the serialized authorized evidence. Return ordered atomic "
-            "claims with evidence CIDs, or an empty claims list to abstain."
+            "Select exact raw evidence spans for ordered atomic claims using CID and "
+            "Unicode code-point start/end offsets, or return an empty claims list."
         ),
-        "schema": {"claims": [{"text": "string", "evidence_cids": ["string"]}]},
+        "schema": {"claims": [{"spans": [{"cid": "string", "start": "integer", "end": "integer"}]}]},
         "ollama_format": {
             "type": "object",
             "properties": {
@@ -108,14 +114,14 @@ PROMPT_BUNDLES = {
                     "items": {
                         "type": "object",
                         "properties": {
-                            "text": {"type": "string"},
-                            "evidence_cids": {
+                            "spans": {
                                 "type": "array",
-                                "items": {"type": "string"},
+                                "items": {"type": "object", "properties": {"cid": {"type": "string"}, "start": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 1}}, "required": ["cid", "start", "end"], "additionalProperties": False},
                                 "minItems": 1,
+                                "maxItems": 3,
                             },
                         },
-                        "required": ["text", "evidence_cids"],
+                        "required": ["spans"],
                         "additionalProperties": False,
                     },
                 },
