@@ -313,7 +313,16 @@ class MemoryEngine(Protocol):
     def as_of(self, subject: str, predicate: str, t: datetime, tenant_id: str | None = None, branch: str = "main") -> list[Assertion]:
         raise NotImplementedError
 
-    def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        deep: bool = False,
+        filt: dict[str, Any] | None = None,
+        *,
+        record_access: bool = True,
+    ) -> RetrievalResult:
         raise NotImplementedError
 
     def set_calibration(self, calibration: CalibrationSet) -> None:
@@ -1643,7 +1652,16 @@ class LocalMemoryEngine:
     #: explain["channels"] key names consumed by the shared pipeline.
     retrieval_explain_channel_keys: tuple[str, str, str] = ("dense_hash", "lexical", "graph_ppr")
 
-    def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        deep: bool = False,
+        filt: dict[str, Any] | None = None,
+        *,
+        record_access: bool = True,
+    ) -> RetrievalResult:
         return run_retrieval_pipeline(
             self,
             query=query,
@@ -1652,6 +1670,7 @@ class LocalMemoryEngine:
             deep=deep,
             filt=filt,
             policy=self.policy,
+            record_access=record_access,
         )
 
     def set_calibration(self, calibration: CalibrationSet) -> None:

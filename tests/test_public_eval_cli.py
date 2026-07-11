@@ -113,6 +113,87 @@ def test_capture_batch_rejects_symlink(tmp_path: Path) -> None:
         MnemoCLI(store=str(tmp_path / "store.json")).capture_batch(linked)
 
 
+def test_capture_batch_preserves_only_safe_episode_adjacency_metadata(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "store.json"
+    cli = MnemoCLI(store=str(store))
+    rows = tmp_path / "episode.jsonl"
+    rows.write_text(
+        json.dumps(
+            {
+                "tenant": "t",
+                "user": "u",
+                "source_type": "benchmark",
+                "source_identity": "source-a",
+                "session_id": "session-a",
+                "turn_index": 2,
+                "content": "safe episode turn",
+            }
+        )
+        + "\n"
+    )
+    cli.capture_batch(rows)
+    evidence = json.loads(store.read_text())["evidence"][0]
+    assert evidence["session_id"] == "session-a"
+    assert evidence["metadata"]["episode"] == {
+        "session_id": "session-a",
+        "source_identity": "source-a",
+        "turn_index": 2,
+    }
+    assert not {"oracle_answer", "answer_session_ids"} & set(evidence["metadata"])
+
+    for unsafe in (
+        {"oracle_answer": "secret"},
+        {"answer_session_ids": ["session-a"]},
+        {"session_id": "session-a", "turn_index": -1},
+    ):
+        bad = tmp_path / "unsafe.jsonl"
+        bad.write_text(
+            json.dumps(
+                {
+                    "tenant": "t",
+                    "user": "u",
+                    "source_type": "benchmark",
+                    "source_identity": "source-a",
+                    "content": "unsafe",
+                    **unsafe,
+                }
+            )
+            + "\n"
+        )
+        before = store.read_bytes()
+        with pytest.raises(CLIError):
+            cli.capture_batch(bad)
+        assert store.read_bytes() == before
+
+
+def test_single_capture_preserves_exact_safe_episode_metadata(tmp_path: Path) -> None:
+    store = tmp_path / "single.json"
+    cli = MnemoCLI(store=str(store))
+    result = cli.capture(
+        "t", "u", "safe turn", source_type="benchmark",
+        source_identity="source-a", session_id="session-a", turn_index=0,
+    )
+    evidence = json.loads(store.read_text())["evidence"][0]
+    assert evidence["cid"] == result["cid"]
+    assert evidence["source_identity"] == "source-a"
+    assert evidence["session_id"] == "session-a"
+    assert evidence["metadata"]["episode"] == {
+        "session_id": "session-a",
+        "source_identity": "source-a",
+        "turn_index": 0,
+    }
+
+    before = store.read_bytes()
+    with pytest.raises(CLIError, match="requires"):
+        cli.capture(
+            "t", "u", "unsafe", source_type="benchmark",
+            source_identity="source-a", session_id="session-a",
+        )
+    assert store.read_bytes() == before
+
+
 def test_evaluation_read_only_allows_concurrent_queries_without_store_writes(
     tmp_path: Path,
 ) -> None:

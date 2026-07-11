@@ -3091,7 +3091,16 @@ class SqliteEngine:
                         self._write_evidence_mutable(conn, item)
         return result
 
-    def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        deep: bool = False,
+        filt: dict[str, Any] | None = None,
+        *,
+        record_access: bool = True,
+    ) -> RetrievalResult:
         """Delegate to the engine-agnostic shared pipeline exactly as
         ``LocalMemoryEngine.retrieve`` does (spec §4.0). SqliteEngine implements
         ``RetrievalPipelineOps`` via the SQL-pushdown channel searches + the ops
@@ -3106,6 +3115,7 @@ class SqliteEngine:
             deep=deep,
             filt=filt,
             policy=self.policy,
+            record_access=record_access,
         )
 
     def forget(

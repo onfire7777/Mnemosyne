@@ -330,6 +330,7 @@ def run_retrieval_pipeline(
     deep: bool,
     filt: dict[str, Any] | None,
     policy: OperatingPolicy,
+    record_access: bool = True,
 ) -> RetrievalResult:
     """The shared retrieve() orchestration — LocalMemoryEngine's body verbatim."""
 
@@ -353,7 +354,11 @@ def run_retrieval_pipeline(
     if cache_key is not None:
         cached = _result_cache_get(cache_key)
         if cached is not None:
-            cached.explain["read_marks"] = ops._record_retrieval_access(cached.hits)
+            cached.explain["read_marks"] = (
+                {"assertions": 0, "evidence": 0}
+                if not record_access
+                else ops._record_retrieval_access(cached.hits)
+            )
             cached.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=True, stored=False)
             return cached
     if parallel_channels_enabled():
@@ -364,6 +369,7 @@ def run_retrieval_pipeline(
                 ops.graph_ppr,
                 tokenize(query),
                 graph_k,
+                as_of=effective_filter.get("as_of"),
                 tenant_id=tenant_id,
                 branch=branch,
                 use_cache=not deep,
@@ -379,6 +385,7 @@ def run_retrieval_pipeline(
             ops.graph_ppr(
                 tokenize(query),
                 graph_k,
+                as_of=effective_filter.get("as_of"),
                 tenant_id=tenant_id,
                 branch=branch,
                 use_cache=not deep,
@@ -403,7 +410,11 @@ def run_retrieval_pipeline(
     )
     budgeted, used = ops._fit_budget(ordered, policy.token_budget)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
-    read_marks = ops._record_retrieval_access(budgeted)
+    read_marks = (
+        {"assertions": 0, "evidence": 0}
+        if not record_access
+        else ops._record_retrieval_access(budgeted)
+    )
     calibration = ops._calibration_for(tenant_id, "fact")
     threshold = conformal_threshold(calibration) if calibration else policy.abstention_threshold
     support_report = query_support(query, budgeted)

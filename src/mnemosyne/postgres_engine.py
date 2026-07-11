@@ -3161,7 +3161,16 @@ class PostgresEngine:
         "postgres_graph_ppr",
     )
 
-    def retrieve(self, query: str, tenant_id: str, branch: str = "main", deep: bool = False, filt: dict[str, Any] | None = None) -> RetrievalResult:
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        deep: bool = False,
+        filt: dict[str, Any] | None = None,
+        *,
+        record_access: bool = True,
+    ) -> RetrievalResult:
         return run_retrieval_pipeline(
             self,
             query=query,
@@ -3170,6 +3179,7 @@ class PostgresEngine:
             deep=deep,
             filt=filt,
             policy=self.policy,
+            record_access=record_access,
         )
 
     def set_calibration(self, calibration: CalibrationSet) -> None:

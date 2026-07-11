@@ -163,6 +163,8 @@ class MnemoCLI:
         trust_tier: int | None = None,
         branch: str | None = None,
         source_identity: str | None = None,
+        session_id: str | None = None,
+        turn_index: int | None = None,
     ) -> dict[str, Any]:
         args = [
             "--tenant", tenant, "--user", user,
@@ -175,6 +177,10 @@ class MnemoCLI:
             args += ["--branch", branch]
         if source_identity:
             args += ["--source-identity", source_identity]
+        if session_id:
+            args += ["--session-id", session_id]
+        if turn_index is not None:
+            args += ["--turn-index", str(turn_index)]
         return self.run("capture", *args).json
 
     def capture_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
