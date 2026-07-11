@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 from collections import Counter
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -29,11 +30,17 @@ def run(
     for document in normalized["corpus"]:
         by_question.setdefault(document["question_id"], []).append(document)
 
-    cid_to_session: dict[str, str] = {}
+    traces: list[dict[str, Any]] = []
+    labels: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="mneme-longmemeval-") as temp:
-        for question in normalized["questions"]:
+        for question_index, question in enumerate(normalized["questions"]):
             question_id = question["question_id"]
             tenant = _tenant(question_id)
+            question_cli = (
+                replace(cli, store=str(Path(temp) / f"{question_index}.store.json"))
+                if isinstance(cli, MnemoCLI)
+                else cli
+            )
             rows = [
                 {
                     "tenant": tenant,
@@ -44,7 +51,7 @@ def run(
                 }
                 for document in by_question[question_id]
             ]
-            batch = Path(temp) / f"{question_id}.jsonl"
+            batch = Path(temp) / f"{question_index}.jsonl"
             batch.write_text(
                 "".join(
                     json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
@@ -52,54 +59,48 @@ def run(
                 ),
                 encoding="utf-8",
             )
-            captured = cli.capture_batch(batch)
+            captured = question_cli.capture_batch(batch)
             results = captured.get("results")
             if not isinstance(results, list) or len(results) != len(rows):
                 raise ValueError(
                     "LongMemEval batch capture returned an invalid result count"
                 )
+            cid_to_session: dict[str, str] = {}
             for row, result in zip(rows, results, strict=True):
                 cid = result.get("cid") if isinstance(result, dict) else None
                 if not isinstance(cid, str) or not cid:
                     raise ValueError("LongMemEval batch capture omitted a CID")
-                key = f"{row['tenant']}\0{cid}"
-                if key in cid_to_session:
+                if cid in cid_to_session:
                     raise ValueError(
                         "LongMemEval batch capture returned a duplicate CID"
                     )
-                cid_to_session[key] = row["source_identity"]
-
-    traces: list[dict[str, Any]] = []
-    labels: list[dict[str, Any]] = []
-    for question in normalized["questions"]:
-        question_id = question["question_id"]
-        tenant = _tenant(question_id)
-        result = cli.search(tenant, question["query"])
-        ranked: list[str] = []
-        for hit in result.get("hits", []):
-            session_id = cid_to_session.get(f"{tenant}\0{hit.get('id')}")
-            if session_id is not None and session_id not in ranked:
-                ranked.append(session_id)
-        if not ranked:
-            raise ValueError(
-                f"LongMemEval question {question_id} returned no mapped sessions"
+                cid_to_session[cid] = row["source_identity"]
+            result = question_cli.search(tenant, question["query"])
+            ranked: list[str] = []
+            for hit in result.get("hits", []):
+                session_id = cid_to_session.get(hit.get("id"))
+                if session_id is not None and session_id not in ranked:
+                    ranked.append(session_id)
+            if not ranked:
+                raise ValueError(
+                    f"LongMemEval question {question_id} returned no mapped sessions"
+                )
+            gold = question["answer_session_ids"]
+            labels.append({"question_id": question_id, "gold_references": gold})
+            traces.append(
+                {
+                    "answer": ranked[0],
+                    "answer_session_ids": gold,
+                    "gold_references": gold,
+                    "oracle_has_answer_turns": question["oracle_has_answer_turns"],
+                    "question_id": question_id,
+                    "ranked_retrieved_hits": ranked[:5],
+                    "scoring_family": "deterministic-retrieval",
+                    "stored_records": [
+                        document["session_id"] for document in by_question[question_id]
+                    ],
+                }
             )
-        gold = question["answer_session_ids"]
-        labels.append({"question_id": question_id, "gold_references": gold})
-        traces.append(
-            {
-                "answer": ranked[0],
-                "answer_session_ids": gold,
-                "gold_references": gold,
-                "oracle_has_answer_turns": question["oracle_has_answer_turns"],
-                "question_id": question_id,
-                "ranked_retrieved_hits": ranked[:5],
-                "scoring_family": "deterministic-retrieval",
-                "stored_records": [
-                    document["session_id"] for document in by_question[question_id]
-                ],
-            }
-        )
     return normalized, traces, score_profile(_PROFILE, labels, traces)
 
 
