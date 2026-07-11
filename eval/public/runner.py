@@ -5,21 +5,24 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from eval.harness.cli_driver import MnemoCLI
-from eval.public.adapters import hipporag_multihop, longmemeval, smoke
+from eval.public.adapters import hipporag_multihop, longmemeval, qa_smoke, smoke
 from eval.public.assets import AssetSpec, load_asset_set
-from eval.public.bundle import write_bundle
+from eval.public.bundle import _canonical, write_bundle
 
 ROOT = Path(__file__).parent
 _HEX = set("0123456789abcdef")
 _ADAPTERS = {
     "hipporag-multihop": hipporag_multihop.run,
     "longmemeval": longmemeval.run,
+    "qa-smoke": qa_smoke.run,
     "smoke": smoke.run,
 }
 _NORMALIZERS = {
@@ -30,11 +33,27 @@ _PROFILE_CONTRACTS = {
     "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
     "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
     "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
+    "qa-em-f1-v1": ("qa", "bootstrap"),
+}
+
+_FROZEN_RETRIEVAL_BASELINES = {
+    "hipporag-2wiki": {"recall_at_2": 0.17525, "recall_at_5": 0.23725},
+    "hipporag-hotpot": {"recall_at_2": 0.319, "recall_at_5": 0.374},
+    "hipporag-musique": {"recall_at_2": 0.08083333333333333, "recall_at_5": 0.10416666666666667},
+    "longmemeval-retrieval": {"ndcg_at_5": 0.2967188496001503, "recall_at_5": 0.2806},
+}
+_FROZEN_PHASE11_CUSTODY = {
+    "hipporag-2wiki": {"report_sha256": "7856c425c913d61db62caefc3af033c53d76ed406b27a4ebc190dd9f88951abe", "manifest_sha256": "dfdbd61f14ae62eda7cfe21058f2d7354c48f1b6e26cd134302855c352d97626"},
+    "hipporag-hotpot": {"report_sha256": "d4b55046b114b8d7241a794392f375c152f11700a42fef454315b149636ade34", "manifest_sha256": "a7df98161a307b44bff44c9892b83728ff6269ebc233c2be377552f3345032fa"},
+    "hipporag-musique": {"report_sha256": "85e063aa81fed06e2f1c8e36b8311207fc18912357f3fdbf73e1e6243e6eda76", "manifest_sha256": "6167926faad5fd95f3d8d340fead4c5d17495abd6faa5f88c361e3e91c508277"},
+    "longmemeval-retrieval": {"report_sha256": "432cf16a755ca70bb5bc764a7e7cde30cde362675b395247e9c5f8b332689676", "manifest_sha256": "01e621fc245a951c5761ccc08be96e688d83b7a080d13499f5f9ef8426e48208"},
 }
 
 
 def load_registry() -> dict[str, dict[str, Any]]:
     registry = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
+    protocol = registry.pop("_qa_protocol", None)
+    validate_qa_protocol(protocol)
     for name, suite in registry.items():
         revision, digest = suite.get("revision", ""), suite.get("dataset_sha256", "")
         if len(revision) != 40 or set(revision) - _HEX:
@@ -49,17 +68,137 @@ def load_registry() -> dict[str, dict[str, Any]]:
     return registry
 
 
+def load_qa_protocol() -> dict[str, Any]:
+    raw = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
+    protocol = raw.get("_qa_protocol")
+    validate_qa_protocol(protocol)
+    return protocol
+
+
+def validate_qa_protocol(protocol: Any) -> None:
+    expected_keys = {"abstention", "candidate_manifest_schema", "decoding", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
+    if not isinstance(protocol, dict) or set(protocol) != expected_keys or protocol.get("version") != "phase12-candidate-v1":
+        raise ValueError("frozen QA protocol is missing or has the wrong version")
+    if protocol.get("retrieval_baselines") != _FROZEN_RETRIEVAL_BASELINES:
+        raise ValueError("frozen retrieval baselines may not be weakened")
+    if protocol.get("scoring_profile") != "qa-em-f1-v1":
+        raise ValueError("frozen QA scoring profile mismatch")
+    if protocol.get("held_out_policy") != {"development_use": False, "max_attempts": 1, "transport_retries": 0}:
+        raise ValueError("held-out split may not be used as development data")
+    expected = {
+        "model": {"provider": "ollama", "selector": "qwen3:4b", "resolved_content_sha256_required": True},
+        "prompt": {"template": "Answer only from the serialized authorized evidence. Return ordered atomic claims with evidence CIDs or abstain.", "serializer": "authorized-evidence-json-v1", "template_and_serializer_sha256_required": True},
+        "decoding": {"temperature": 0, "top_p": 1.0, "top_k": 1, "seed": 1234, "num_predict": 512, "stop": []},
+        "evidence_budget": {"max_records": 20, "max_characters": 24000, "max_hops": 3},
+        "abstention": {"answer": "", "claims": [], "abstained": True},
+        "split_roles": {"synthetic": "development", "qa_hard_v2": "frozen-internal", "longmemeval-cleaned": "held-out-test", "hipporag-validation": "held-out-validation"},
+        "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"},
+        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "transport_retries"]},
+    }
+    if any(protocol.get(key) != value for key, value in expected.items()) or protocol.get("phase11_custody") != _FROZEN_PHASE11_CUSTODY:
+        raise ValueError("frozen QA protocol custody is not the exact canonical contract")
+
+
+def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None = None, *, expected_git_sha: str | None = None) -> None:
+    protocol = protocol or load_qa_protocol()
+    validate_qa_protocol(protocol)
+    required = set(protocol["candidate_manifest_schema"]["required"])
+    if not isinstance(manifest, dict) or set(manifest) != required:
+        raise ValueError("candidate manifest schema mismatch")
+    for key in ("git_sha", "model_content_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256"):
+        value = manifest.get(key)
+        length = 40 if key == "git_sha" else 64
+        if not isinstance(value, str) or len(value) != length or set(value) - _HEX:
+            raise ValueError(f"candidate manifest {key} must be exact lowercase hex")
+    if manifest.get("candidate_version") != protocol["version"] or manifest.get("transport_retries") != protocol["held_out_policy"]["transport_retries"]:
+        raise ValueError("candidate manifest does not match preregistered protocol")
+    expected_digests = qa_protocol_digests(protocol)
+    if any(manifest.get(key) != value for key, value in expected_digests.items()):
+        raise ValueError("candidate manifest protocol digests do not match preregistration")
+    try:
+        created = datetime.fromisoformat(manifest["created_at_utc"].replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("candidate manifest UTC timestamp is invalid") from exc
+    if not manifest["created_at_utc"].endswith("Z") or created.tzinfo != UTC:
+        raise ValueError("candidate manifest UTC timestamp is invalid")
+    if expected_git_sha is not None and manifest["git_sha"] != expected_git_sha:
+        raise ValueError("candidate manifest git SHA does not match expected commit")
+
+
+def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str]:
+    protocol = protocol or load_qa_protocol()
+    validate_qa_protocol(protocol)
+    return {
+        "decoding_sha256": hashlib.sha256(_canonical(protocol["decoding"])).hexdigest(),
+        "prompt_sha256": hashlib.sha256(protocol["prompt"]["template"].encode()).hexdigest(),
+        "protocol_sha256": hashlib.sha256(_canonical(protocol)).hexdigest(),
+        "serializer_sha256": hashlib.sha256(protocol["prompt"]["serializer"].encode()).hexdigest(),
+    }
+
+
+def write_candidate_manifest(path: Path | str, manifest: dict[str, Any], *, repo_root: Path | str | None = None) -> None:
+    head = _current_clean_head(Path(repo_root) if repo_root else Path(__file__).resolve().parents[2])
+    validate_candidate_manifest(manifest, expected_git_sha=head)
+    destination = Path(path)
+    _reject_symlink_components(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(destination, flags, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(_canonical(manifest))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(destination, 0o600)
+        directory_fd = os.open(destination.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except FileExistsError:
+        raise FileExistsError(f"refusing to overwrite candidate manifest: {destination}") from None
+    except BaseException:
+        destination.unlink(missing_ok=True)
+        raise
+
+
+def _current_clean_head(repo_root: Path) -> str:
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=True).stdout.strip()
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=repo_root, capture_output=True, text=True, check=True).stdout
+    if len(head) != 40 or set(head) - _HEX or dirty:
+        raise ValueError("candidate manifest requires the current clean exact HEAD")
+    return head
+
+
+def _reject_symlink_components(path: Path) -> None:
+    current = Path(path.anchor) if path.is_absolute() else Path.cwd()
+    parts = path.parts[1:] if path.is_absolute() else path.parts
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            raise ValueError("candidate manifest path components must not be symlinks")
+
+
 def run_public_suite(
     suite_name: str,
     out_dir: Path | str,
     *,
     benchmark_override: dict[str, Any] | None = None,
     dataset_dir: Path | str | None = None,
+    candidate_manifest_path: Path | str | None = None,
 ) -> dict[str, Any]:
     registry = load_registry()
     if suite_name not in registry:
         raise ValueError(f"unknown public suite: {suite_name}")
     suite = registry[suite_name]
+    if suite["family"] == "qa" and candidate_manifest_path is None:
+        raise ValueError(f"{suite_name}: --candidate-manifest is required")
+    if suite["family"] != "qa" and candidate_manifest_path is not None:
+        raise ValueError(f"{suite_name}: --candidate-manifest is QA-only")
+    if suite["family"] == "qa":
+        require_clean_candidate_checkout(_git_sha())
     if dataset_dir is not None and suite_name == "smoke":
         raise ValueError("smoke does not accept --dataset-dir")
     try:
@@ -108,19 +247,39 @@ def run_public_suite(
         raise ValueError(
             f"{suite_name}: normalized benchmark digest does not match registry"
         )
+    interval_method = measured.get("interval", {}).get("method")
+    if suite["scoring_profile"] == "qa-em-f1-v1":
+        interval_method = measured.get("intervals", {}).get("token_f1", {}).get("method")
     if (
         measured.get("family") != suite["family"]
         or measured.get("profile", suite["scoring_profile"]) != suite["scoring_profile"]
-        or measured.get("interval", {}).get("method") != suite["interval_method"]
+        or interval_method != suite["interval_method"]
     ):
         raise ValueError("scoring profile, family, or interval metadata mismatch")
     metadata = {**suite, "suite": suite_name}
+    if suite["family"] == "qa":
+        candidate = json.loads(Path(candidate_manifest_path).read_text(encoding="utf-8"))  # type: ignore[arg-type]
+        validate_candidate_manifest(candidate, expected_git_sha=_git_sha())
+        protocol, digests = load_qa_protocol(), qa_protocol_digests()
+        metadata["reader_custody"] = {
+            "abstention": protocol["abstention"],
+            "candidate_git_sha": candidate["git_sha"],
+            "candidate_manifest_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
+            "decoding": protocol["decoding"],
+            "evidence_budget": protocol["evidence_budget"],
+            "prompt": {"serializer_sha256": digests["serializer_sha256"], "template_sha256": digests["prompt_sha256"]},
+            "protocol_version": protocol["version"],
+            "reader": {"model_content_sha256": candidate["model_content_sha256"], "model_revision": protocol["model"]["selector"], "name": "grounded-reader", "provider": protocol["model"]["provider"], "selector": protocol["model"]["selector"]},
+            "split_role": suite["split_role"],
+            "transport_retries": protocol["held_out_policy"]["transport_retries"],
+        }
     write_bundle(
         Path(out_dir),
         benchmark=benchmark,
         metadata=metadata,
         metrics=measured,
         traces=traces,
+        candidate_manifest_path=candidate_manifest_path,
     )
     return {
         "bundle": str(Path(out_dir).resolve()),
@@ -132,7 +291,14 @@ def run_public_suite(
     }
 
 
-def _canonical(value: Any) -> bytes:
-    return (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
-    ).encode()
+def _git_sha() -> str:
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def require_clean_candidate_checkout(expected_sha: str) -> None:
+    root = Path(__file__).resolve().parents[2]
+    if _git_sha() != expected_sha:
+        raise ValueError("candidate checkout HEAD does not match frozen candidate")
+    dirty = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True).stdout
+    if dirty:
+        raise ValueError("candidate checkout must be clean across the candidate surface")

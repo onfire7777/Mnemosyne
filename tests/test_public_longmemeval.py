@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 
+from eval.public.runner import load_qa_protocol, qa_protocol_digests, validate_candidate_manifest, validate_qa_protocol, write_candidate_manifest
+
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters.longmemeval import run
 from eval.public.bundle import _scoring_labels
@@ -316,3 +318,84 @@ def test_duplicate_capture_cid_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="duplicate CID"):
         run(_assets(), DuplicateCIDCLI())  # type: ignore[arg-type]
+# Phase 12 protocol tests use no held-out asset bytes.
+def test_frozen_qa_protocol_preserves_phase11_baselines_and_single_pass_policy() -> None:
+    protocol = load_qa_protocol()
+    assert protocol["held_out_policy"] == {"development_use": False, "max_attempts": 1, "transport_retries": 0}
+    weakened = dict(protocol)
+    weakened["retrieval_baselines"] = dict(protocol["retrieval_baselines"])
+    weakened["retrieval_baselines"]["longmemeval-retrieval"] = {"recall_at_5": 0.0, "ndcg_at_5": 0.0}
+    with pytest.raises(ValueError, match="weakened"):
+        validate_qa_protocol(weakened)
+    changed_budget = dict(protocol)
+    changed_budget["evidence_budget"] = {**protocol["evidence_budget"], "max_hops": 4}
+    with pytest.raises(ValueError, match="canonical"):
+        validate_qa_protocol(changed_budget)
+
+
+def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import stat
+    import eval.public.runner as runner
+
+    digests = qa_protocol_digests()
+    manifest = {
+        "candidate_version": "phase12-candidate-v1", "created_at_utc": "2026-07-11T00:00:00Z",
+        "git_sha": "a" * 40, "model_content_sha256": "b" * 64,
+        "prompt_sha256": digests["prompt_sha256"], "serializer_sha256": digests["serializer_sha256"],
+        "decoding_sha256": digests["decoding_sha256"], "protocol_sha256": digests["protocol_sha256"],
+        "transport_retries": 0,
+    }
+    validate_candidate_manifest(manifest)
+    with pytest.raises(ValueError, match="expected commit"):
+        validate_candidate_manifest(manifest, expected_git_sha="f" * 40)
+    monkeypatch.setattr(runner, "_current_clean_head", lambda _root: "a" * 40)
+    path = tmp_path / "candidate.json"
+    write_candidate_manifest(path, manifest)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    with pytest.raises(FileExistsError):
+        write_candidate_manifest(path, manifest)
+
+
+def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    import eval.public.runner as runner
+
+    digests = qa_protocol_digests()
+    manifest = {
+        "candidate_version": "phase12-candidate-v1", "created_at_utc": "2026-07-11T00:00:00Z",
+        "git_sha": "a" * 40, "model_content_sha256": "b" * 64, **digests,
+        "transport_retries": 0,
+    }
+    monkeypatch.setattr(runner, "_current_clean_head", lambda _root: "a" * 40)
+    target = tmp_path / "target"
+    target.write_text("unchanged")
+    linked = tmp_path / "linked.json"
+    linked.symlink_to(target)
+    with pytest.raises(ValueError, match="symlinks"):
+        write_candidate_manifest(linked, manifest)
+    assert target.read_text() == "unchanged"
+
+    destination = tmp_path / "race.json"
+    def attempt() -> str:
+        try:
+            write_candidate_manifest(destination, manifest)
+            return "written"
+        except FileExistsError:
+            return "blocked"
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _index: attempt(), range(2)))
+    assert sorted(results) == ["blocked", "written"]
+
+
+def test_candidate_checkout_rejects_dirty_tracked_surface(monkeypatch: pytest.MonkeyPatch) -> None:
+    import eval.public.runner as runner
+
+    class Result:
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    head = "a" * 40
+    monkeypatch.setattr(runner, "_git_sha", lambda: head)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *args, **kwargs: Result(" M eval/public/runner.py\n"))
+    with pytest.raises(ValueError, match="clean"):
+        runner.require_clean_candidate_checkout(head)

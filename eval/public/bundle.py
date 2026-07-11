@@ -41,6 +41,7 @@ def write_bundle(
     metadata: dict[str, Any],
     metrics: dict[str, Any],
     traces: list[dict[str, Any]],
+    candidate_manifest_path: Path | str | None = None,
 ) -> None:
     destination = destination.resolve()
     if destination.exists():
@@ -51,27 +52,61 @@ def write_bundle(
     )
     try:
         _write_json(temp / "benchmark.json", {"data": benchmark, "metadata": metadata})
+        build = {
+            "environment_contract": "uv run --locked",
+            "system_seam": "public-cli-subprocess",
+            "version": 1,
+        }
+        if metadata["family"] == "qa":
+            build["candidate_git_sha"] = _git_sha()
         _write_json(
             temp / "build.json",
-            {
-                "environment_contract": "uv run --locked",
-                "system_seam": "public-cli-subprocess",
-                "version": 1,
-            },
+            build,
         )
         _write_json(
             temp / "config.json",
             {
                 "family": metadata["family"],
                 "interval_method": metadata["interval_method"],
+                **({"interval_methods": metadata.get("interval_methods")} if metadata["family"] == "qa" else {}),
                 "scoring_profile": metadata.get("scoring_profile", "smoke-hit-at-k-v1"),
                 "suite": metadata["suite"],
             },
         )
-        _write_json(
-            temp / "judge.json",
-            {"judge": None, "reader": None, "reason": "retrieval family"},
-        )
+        if metadata["family"] == "qa":
+            custody = metadata.get("reader_custody")
+            if not isinstance(custody, dict):
+                raise BundleError("QA bundle requires reader custody")
+            _write_json(
+                temp / "judge.json",
+                {
+                    "custody": custody,
+                    "judge": "benchmark-owned-qa-em-f1-v1",
+                    "reader": custody.get("reader", {}).get("name"),
+                },
+            )
+            if candidate_manifest_path is None:
+                raise BundleError("QA bundle requires an external candidate manifest path")
+            source = Path(candidate_manifest_path)
+            _reject_symlink_path(source)
+            if not source.is_file():
+                raise BundleError("candidate manifest path must be a real file")
+            candidate_raw = source.read_bytes()
+            candidate = _parse_json(candidate_raw.decode("utf-8"), "candidate manifest")
+            from eval.public.runner import validate_candidate_manifest
+
+            try:
+                validate_candidate_manifest(candidate, expected_git_sha=build["candidate_git_sha"])
+            except ValueError as exc:
+                raise BundleError("candidate manifest does not bind bundle-producing git SHA") from exc
+            if candidate_raw != _canonical(candidate):
+                raise BundleError("candidate manifest bytes must be canonical")
+            (temp / "candidate-manifest.json").write_bytes(candidate_raw)
+        else:
+            _write_json(
+                temp / "judge.json",
+                {"judge": None, "reader": None, "reason": "retrieval family"},
+            )
         _write_json(temp / "metrics.json", metrics)
         (temp / "traces.jsonl").write_bytes(
             b"".join(_canonical(trace) for trace in traces)
@@ -85,9 +120,10 @@ def write_bundle(
             encoding="utf-8",
         )
         os.chmod(temp / "reproduce.sh", 0o755)
+        required = REQUIRED + (("candidate-manifest.json",) if metadata["family"] == "qa" else ())
         _write_json(
             temp / "bundle-manifest.json",
-            {"files": {name: _digest(temp / name) for name in REQUIRED}, "version": 1},
+            {"files": {name: _digest(temp / name) for name in required}, "version": 1},
         )
         temp.rename(destination)
     except BaseException:
@@ -99,10 +135,9 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     root = Path(bundle)
     if not root.is_dir() or root.is_symlink():
         raise BundleError("bundle must be a real directory, not a link")
-    actual, expected = (
-        {entry.name for entry in root.iterdir()},
-        {*REQUIRED, "bundle-manifest.json"},
-    )
+    actual = {entry.name for entry in root.iterdir()}
+    payload_files = REQUIRED + (("candidate-manifest.json",) if "candidate-manifest.json" in actual else ())
+    expected = {*payload_files, "bundle-manifest.json"}
     if actual != expected:
         raise BundleError("inventory mismatch")
     for entry in root.iterdir():
@@ -114,15 +149,16 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if SECRET.search(raw.decode("utf-8", errors="replace")):
         raise BundleError("secret-like material detected")
     manifest = _load_json(root / "bundle-manifest.json")
-    if set(manifest.get("files", {})) != set(REQUIRED):
+    if set(manifest.get("files", {})) != set(payload_files):
         raise BundleError("manifest inventory mismatch")
     for name, expected_digest in manifest["files"].items():
         if _digest(root / name) != expected_digest:
             raise BundleError(f"digest mismatch: {name}")
-    benchmark, config, measured = (
+    benchmark, config, measured, build = (
         _load_json(root / "benchmark.json"),
         _load_json(root / "config.json"),
         _load_json(root / "metrics.json"),
+        _load_json(root / "build.json"),
     )
     judge = _load_json(root / "judge.json")
     traces = [
@@ -145,6 +181,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
         "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
         "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
+        "qa-em-f1-v1": ("qa", "bootstrap"),
     }.get(profile)
     if any(trace.get("scoring_family") != family for trace in traces):
         raise BundleError("metric families may not be blended")
@@ -157,6 +194,8 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         for key in ("reader", "judge")
     ):
         raise BundleError("QA family must disclose its reader and judge")
+    if (family == "qa") != ("candidate-manifest.json" in actual):
+        raise BundleError("QA candidate manifest inventory mismatch")
     if allowed_profile != (family, method):
         raise BundleError("wrong interval-family metadata")
     metadata = benchmark.get("metadata", {})
@@ -165,15 +204,20 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     ):
         raise BundleError("benchmark custody digest mismatch")
     _verify_registry_anchor(metadata)
-    if config != {
+    expected_config = {
         "family": metadata.get("family"),
         "interval_method": metadata.get("interval_method"),
         "scoring_profile": metadata.get("scoring_profile"),
         "suite": metadata.get("suite"),
-    }:
+    }
+    if family == "qa":
+        expected_config["interval_methods"] = metadata.get("interval_methods")
+    if config != expected_config:
         raise BundleError("bundle config does not match canonical registry metadata")
     if measured.get("family") != family:
         raise BundleError("metrics/config family mismatch")
+    if family == "qa":
+        _verify_qa_custody(metadata, judge, benchmark.get("data"), traces, root / "candidate-manifest.json", measured, build)
     if profile == "smoke-hit-at-k-v1":
         if measured.get("interval", {}).get("method") != method:
             raise BundleError("wrong interval-family metadata")
@@ -216,9 +260,10 @@ def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, A
             custody["metadata"]["suite"],
             destination,
             benchmark_override=custody["data"],
+            candidate_manifest_path=(Path(source) / "candidate-manifest.json") if custody["metadata"]["family"] == "qa" else None,
         )
         verify_bundle(destination)
-        for name in REQUIRED:
+        for name in _manifest_files(Path(source)):
             if (Path(source) / name).read_bytes() != (destination / name).read_bytes():
                 raise BundleError(f"reproduction mismatch: {name}")
         return result
@@ -242,7 +287,10 @@ def write_report(
     )
     if source_result != reproduced_result:
         raise BundleError("source and reproduced bundle verification metadata mismatch")
-    for name in REQUIRED:
+    source_files = _manifest_files(source_root)
+    if source_files != _manifest_files(reproduced_root):
+        raise BundleError("source and reproduced bundle inventory mismatch")
+    for name in source_files:
         if (source_root / name).read_bytes() != (reproduced_root / name).read_bytes():
             raise BundleError(f"source and reproduced bundle mismatch: {name}")
     output, note = Path(report_output), Path(report_note)
@@ -379,7 +427,10 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
         source.resolve(), reproduced.resolve()
     ):
         raise BundleError("report evidence projection mismatch")
-    for name in REQUIRED:
+    source_files = _manifest_files(source)
+    if source_files != _manifest_files(reproduced):
+        raise BundleError("reported reproduction inventory mismatch")
+    for name in source_files:
         if (source / name).read_bytes() != (reproduced / name).read_bytes():
             raise BundleError(f"reported reproduction mismatch: {name}")
     if any(
@@ -475,7 +526,7 @@ def _report_evidence(source: Path, reproduced: Path) -> dict[str, Any]:
             "system_seam": build.get("system_seam"),
         },
         "reproduction": {
-            "matched_files": list(REQUIRED),
+            "matched_files": list(_manifest_files(source)),
             "reproduced_bundle": str(reproduced.resolve()),
             "verified": True,
         },
@@ -542,6 +593,219 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
     return labels
 
 
+def _verify_qa_custody(
+    metadata: dict[str, Any],
+    judge: dict[str, Any],
+    benchmark: Any,
+    traces: list[dict[str, Any]],
+    candidate_path: Path,
+    measured: dict[str, Any],
+    build: dict[str, Any],
+) -> None:
+    from eval.public.runner import load_qa_protocol, qa_protocol_digests, require_clean_candidate_checkout, validate_candidate_manifest
+
+    protocol = load_qa_protocol()
+    custody = metadata.get("reader_custody")
+    if not isinstance(custody, dict) or judge.get("custody") != custody:
+        raise BundleError("QA reader custody mismatch")
+    if custody.get("protocol_version") != protocol["version"]:
+        raise BundleError("QA protocol version mismatch")
+    reader = custody.get("reader")
+    if not isinstance(reader, dict) or set(reader) != {"model_content_sha256", "model_revision", "name", "provider", "selector"}:
+        raise BundleError("QA reader model custody is incomplete")
+    expected_reader = {"model_revision": protocol["model"]["selector"], "name": "grounded-reader", "provider": protocol["model"]["provider"], "selector": protocol["model"]["selector"]}
+    if any(reader.get(key) != value for key, value in expected_reader.items()):
+        raise BundleError("QA reader provider and selector must match preregistration")
+    _require_sha256(reader.get("model_content_sha256"), "reader model content")
+    prompt = custody.get("prompt")
+    if not isinstance(prompt, dict) or set(prompt) != {"serializer_sha256", "template_sha256"}:
+        raise BundleError("QA prompt custody is incomplete")
+    _require_sha256(prompt.get("template_sha256"), "prompt template")
+    _require_sha256(prompt.get("serializer_sha256"), "evidence serializer")
+    expected_digests = qa_protocol_digests(protocol)
+    if prompt != {
+        "serializer_sha256": expected_digests["serializer_sha256"],
+        "template_sha256": expected_digests["prompt_sha256"],
+    }:
+        raise BundleError("QA prompt custody does not match preregistration")
+    if custody.get("decoding") != protocol["decoding"]:
+        raise BundleError("QA decoding config does not match preregistration")
+    if custody.get("evidence_budget") != protocol["evidence_budget"]:
+        raise BundleError("QA evidence budget does not match preregistration")
+    if custody.get("abstention") != protocol["abstention"]:
+        raise BundleError("QA abstention rule does not match preregistration")
+    if custody.get("split_role") not in {"frozen-internal", "held-out-test", "held-out-validation"}:
+        raise BundleError("QA split declaration may not be development")
+    if custody.get("transport_retries") != protocol["held_out_policy"]["transport_retries"]:
+        raise BundleError("QA transport retry count does not match preregistration")
+    _require_sha256(custody.get("candidate_manifest_sha256"), "candidate manifest")
+    candidate = _load_json(candidate_path)
+    if not isinstance(build.get("candidate_git_sha"), str):
+        raise BundleError("QA build git SHA is missing")
+    if build["candidate_git_sha"] != _git_sha():
+        raise BundleError("QA build git SHA does not match the verifying checkout")
+    try:
+        require_clean_candidate_checkout(build["candidate_git_sha"])
+    except ValueError as exc:
+        raise BundleError("QA candidate checkout is not clean") from exc
+    try:
+        validate_candidate_manifest(candidate, expected_git_sha=build["candidate_git_sha"])
+    except ValueError as exc:
+        raise BundleError("embedded candidate manifest schema mismatch") from exc
+    if candidate.get("git_sha") != custody.get("candidate_git_sha"):
+        raise BundleError("candidate, build, and custody git SHA mismatch")
+    if _digest(candidate_path) != custody["candidate_manifest_sha256"]:
+        raise BundleError("embedded candidate manifest digest mismatch")
+    if candidate.get("model_content_sha256") != reader["model_content_sha256"]:
+        raise BundleError("candidate manifest model digest mismatch")
+    if metadata.get("interval_methods") != protocol["interval_methods"]:
+        raise BundleError("QA mixed interval declaration mismatch")
+    intervals = measured.get("intervals", {})
+    if {key: value.get("method") for key, value in intervals.items()} != protocol["interval_methods"]:
+        raise BundleError("QA mixed interval metadata mismatch")
+    labels = _scoring_labels(benchmark)
+    if any(not isinstance(label.get("answers"), list) or not label["answers"] for label in labels):
+        raise BundleError("QA benchmark answer labels are missing")
+    for trace in traces:
+        if any(key in trace for key in ("score", "exact_match", "token_f1")):
+            raise BundleError("reader traces may not self-score")
+        answer, claims, abstained = trace.get("answer"), trace.get("claims"), trace.get("abstained")
+        if "authorized_evidence_cids" in trace:
+            raise BundleError("QA trace may not self-attest an authorized CID list")
+        authorized = _authorized_cids_from_hops(
+            trace.get("authorized_retrieval_hops"),
+            benchmark,
+            protocol["evidence_budget"],
+        )
+        expected_fingerprint = hashlib.sha256(_canonical(sorted(authorized))).hexdigest()
+        if trace.get("authorized_evidence_fingerprint") != expected_fingerprint:
+            raise BundleError("QA authorized evidence fingerprint mismatch")
+        if abstained is True:
+            if answer != "" or claims != []:
+                raise BundleError("QA abstention must use the canonical empty output")
+            continue
+        if abstained is not False or not isinstance(answer, str) or not answer or not isinstance(claims, list) or not claims:
+            raise BundleError("non-abstained QA output requires answer and claims")
+        for claim in claims:
+            if not isinstance(claim, dict) or set(claim) != {"evidence_cids", "text"}:
+                raise BundleError("QA claim schema is invalid")
+            if not isinstance(claim["text"], str) or not claim["text"].strip() or not isinstance(claim["evidence_cids"], list) or not claim["evidence_cids"]:
+                raise BundleError("every QA claim requires citations")
+            if any(not isinstance(cid, str) or not cid for cid in claim["evidence_cids"]):
+                raise BundleError("every QA claim requires valid citations")
+            if len(claim["evidence_cids"]) != len(set(claim["evidence_cids"])) or not set(claim["evidence_cids"]) <= set(authorized):
+                raise BundleError("QA claim citations must be a unique authorized subset")
+        rendered = "\n".join(claim["text"].strip() for claim in claims)
+        if answer != rendered:
+            raise BundleError("QA answer must render deterministically from ordered claims")
+
+
+def _authorized_cids_from_hops(
+    value: Any,
+    benchmark: Any,
+    evidence_budget: Any,
+) -> list[str]:
+    if (
+        not isinstance(evidence_budget, dict)
+        or set(evidence_budget)
+        != {"max_characters", "max_hops", "max_records"}
+        or any(
+            not isinstance(evidence_budget.get(key), int)
+            or isinstance(evidence_budget[key], bool)
+            or evidence_budget[key] <= 0
+            for key in evidence_budget
+        )
+    ):
+        raise BundleError("QA evidence budget is invalid")
+    if not isinstance(benchmark, dict) or not isinstance(benchmark.get("corpus"), list):
+        raise BundleError("QA benchmark corpus is missing")
+    anchored: dict[str, dict[str, Any]] = {}
+    for record in benchmark["corpus"]:
+        if not isinstance(record, dict) or set(record) < {"capture", "content", "doc_id", "source_identity"}:
+            raise BundleError("QA benchmark corpus custody is incomplete")
+        if record["capture"].get("content") != record["content"] or record["capture"].get("source_identity") != record["source_identity"]:
+            raise BundleError("QA benchmark capture mapping is inconsistent")
+        anchored[record["doc_id"]] = record["capture"]
+    if not isinstance(value, list) or not value:
+        raise BundleError("QA trace requires retained authorized retrieval hops")
+    if len(value) > evidence_budget["max_hops"]:
+        raise BundleError("QA authorized retrieval exceeds the hop budget")
+    hops: set[int] = set()
+    cids: list[str] = []
+    content_characters = 0
+    for hop in value:
+        if (
+            not isinstance(hop, dict)
+            or set(hop) != {"hop", "rows"}
+            or not isinstance(hop["hop"], int)
+            or isinstance(hop["hop"], bool)
+            or hop["hop"] < 0
+            or hop["hop"] in hops
+        ):
+            raise BundleError("QA authorized retrieval hop schema is invalid")
+        hops.add(hop["hop"])
+        if not isinstance(hop["rows"], list):
+            raise BundleError("QA authorized retrieval rows are invalid")
+        for row in hop["rows"]:
+            if not isinstance(row, dict) or set(row) != {"capture", "cid"}:
+                raise BundleError("QA authorized retrieval row schema is invalid")
+            if not isinstance(row.get("cid"), str) or not row["cid"] or not isinstance(row.get("capture"), dict):
+                raise BundleError("QA authorized retrieval provenance is invalid")
+            recomputed = _engine_evidence_cid(row["capture"])
+            if row["cid"] != recomputed or anchored.get(row["cid"]) != row["capture"]:
+                raise BundleError("QA authorized retrieval row does not match anchored corpus custody")
+            cids.append(row["cid"])
+            content_characters += len(row["capture"]["content"])
+            if len(cids) > evidence_budget["max_records"]:
+                raise BundleError("QA authorized retrieval exceeds the record budget")
+            if content_characters > evidence_budget["max_characters"]:
+                raise BundleError("QA authorized retrieval exceeds the character budget")
+    if [hop["hop"] for hop in value] != list(range(len(value))):
+        raise BundleError("QA authorized retrieval hops must be ordered and contiguous")
+    if len(cids) != len(set(cids)):
+        raise BundleError("QA authorized retrieval rows contain duplicate CIDs")
+    return cids
+
+
+def _engine_evidence_cid(capture: dict[str, Any]) -> str:
+    from mnemosyne.ids import evidence_cid
+
+    required = {"actor", "content", "content_pointer", "modality", "sensitivity", "source_identity", "source_type", "tenant_id", "user_id"}
+    if set(capture) != required:
+        raise BundleError("QA capture envelope schema is incomplete")
+    if not all(isinstance(capture.get(key), str) and capture[key] for key in ("actor", "content", "modality", "source_identity", "source_type", "tenant_id", "user_id")):
+        raise BundleError("QA capture envelope values are invalid")
+    if capture["content_pointer"] is not None or not isinstance(capture["sensitivity"], int) or isinstance(capture["sensitivity"], bool):
+        raise BundleError("QA capture envelope values are invalid")
+    return evidence_cid(
+        capture["content"], tenant_id=capture["tenant_id"], user_id=capture["user_id"],
+        source_type=capture["source_type"], content_pointer=capture["content_pointer"],
+        modality=capture["modality"], sensitivity=capture["sensitivity"],
+    )
+
+
+def _manifest_files(root: Path) -> tuple[str, ...]:
+    manifest = _load_json(root / "bundle-manifest.json")
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        raise BundleError("manifest inventory mismatch")
+    return tuple(sorted(files))
+
+
+def _reject_symlink_path(path: Path) -> None:
+    current = Path(path.anchor) if path.is_absolute() else Path.cwd()
+    parts = path.parts[1:] if path.is_absolute() else path.parts
+    for part in parts:
+        current /= part
+        if current.is_symlink():
+            raise BundleError("candidate manifest path components must not be symlinks")
+
+
+def _require_sha256(value: Any, label: str) -> None:
+    if not isinstance(value, str) or len(value) != 64 or set(value) - set("0123456789abcdef"):
+        raise BundleError(f"QA {label} digest must be exact SHA-256")
+
+
 def _verify_registry_anchor(metadata: dict[str, Any]) -> None:
     from eval.public.runner import load_registry
 
@@ -562,6 +826,8 @@ def _verify_registry_anchor(metadata: dict[str, Any]) -> None:
         "revision",
         "split_role",
         "scoring_profile",
+        "qa_protocol_version",
+        "interval_methods",
         "assets",
     )
     if any(metadata.get(key) != canonical.get(key) for key in anchored):

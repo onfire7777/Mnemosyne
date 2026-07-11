@@ -306,3 +306,28 @@ def test_local_engine_deferred_persistence_flushes_once_or_discards(
     assert not discarded.exists()
     with pytest.raises(RuntimeError, match="transaction was aborted"):
         engine._persist()
+
+
+def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess
+    from eval.public.runner import load_qa_protocol, qa_protocol_digests
+    import eval.public.runner as public_runner
+    from mnemosyne.cli import main
+
+    protocol, digests = load_qa_protocol(), qa_protocol_digests()
+    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    candidate = {
+        "candidate_version": protocol["version"], "created_at_utc": "2026-07-11T00:00:00Z",
+        "git_sha": head, "model_content_sha256": "a" * 64, **digests, "transport_retries": 0,
+    }
+    candidate_path = tmp_path / "candidate.json"
+    candidate_path.write_text(json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n")
+    source, reproduced = tmp_path / "qa-source", tmp_path / "qa-reproduced"
+    report, note = tmp_path / "qa-report.json", tmp_path / "qa-report.md"
+    monkeypatch.setattr(public_runner, "require_clean_candidate_checkout", lambda _sha: None)
+    assert main(["eval-public", "--suite", "qa-smoke", "--candidate-manifest", str(candidate_path), "--out-dir", str(source)]) == 0
+    assert main(["eval-public", "--verify-bundle", str(source)]) == 0
+    assert main(["eval-public", "--reproduce-bundle", str(source), "--out-dir", str(reproduced)]) == 0
+    assert (source / "candidate-manifest.json").read_bytes() == (reproduced / "candidate-manifest.json").read_bytes()
+    assert main(["eval-public", "--write-report", str(source), "--reproduced-bundle", str(reproduced), "--report-output", str(report), "--report-note", str(note)]) == 0
+    assert main(["eval-public", "--verify-report", str(report), "--report-note", str(note)]) == 0
