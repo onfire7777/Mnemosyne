@@ -1,0 +1,35 @@
+{
+  "dataset_id": "qa_scale_dev_v1",
+  "tenant": "dev-scale",
+  "user": "dev-scale-user",
+  "corpus": [
+    {"doc_id": "d1", "content": "Mara owns Helios.", "trust_tier": 0},
+    {"doc_id": "d2", "content": "Helios ships in Q3 2026.", "trust_tier": 0}
+  ],
+  "queries": [
+    {"qid": "q01", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q02", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q03", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q04", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q05", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q06", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q07", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q08", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q09", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q10", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q11", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q12", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q13", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q14", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q15", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q16", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q17", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q18", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q19", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q20", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q21", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q22", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q23", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]},
+    {"qid": "q24", "query": "When does Mara's project ship?", "gold_answer": "Q3 2026", "gold_aliases": ["Q3 2026"], "relevant_doc_ids": ["d1", "d2"]}
+  ]
+}

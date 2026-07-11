@@ -68,6 +68,11 @@
 - Preregister transport retries. A provider failure consumes the held-out
   attempt; record partial/error counts and fail the candidate rather than
   silently rerunning or selecting successful questions.
+- Before every future protected attempt, run the canonical 24-question
+  `qa_scale_dev_v1` dataset through the exact CLI batch wrapper and immutable
+  candidate runtime. Require a no-overwrite receipt bound to candidate,
+  runtime, dataset, and result digests with 24 non-abstained traces, EM/F1 1.0,
+  and Recall@5/nDCG@5 1.0. Bind that receipt digest into the attempt ledger.
 
 ## Required Metrics
 
