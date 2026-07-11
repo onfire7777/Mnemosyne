@@ -49,6 +49,9 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
 - Candidate v6 failed only the synthetic exact-runtime gate and has no protected
   ledger. Candidate v7 deterministically traverses unseen authorized-evidence
   anchors and binds an exact-CID, resolved/unresolved XOR reader schema.
+- Candidate v7 failed its synthetic exact-runtime reader gate and has no
+  protected ledger. Candidate v8 uses claims-only exact-CID generation and
+  derives unresolved state application-side.
 
 ## Completion Boundary
 
