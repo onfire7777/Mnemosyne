@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v6"
+VERSION = "phase12-candidate-v7"
 ANCHOR_NORMALIZER_SPEC = {
     "id": "source-bound-atomic-anchors-v1",
     "comparison_normalization": "NFKC-whitespace-casefold",
@@ -20,6 +20,15 @@ ANCHOR_NORMALIZER_SPEC = {
     "all_queries_must_pass_retrieval": True,
     "consume_abstained_hits": False,
     "max_queries": 4,
+    "later_hop_traversal": "authorized-catalog-source-order-unseen-first",
+}
+READER_SCHEMA_SPEC = {
+    "id": "authorized-cid-xor-schema-v1",
+    "cid_source": "exact-authorized-evidence",
+    "cid_constraint": "json-schema-enum",
+    "resolved": {"unresolved": False, "claims": "1..20"},
+    "unresolved": {"unresolved": True, "claims": "empty"},
+    "repair_cids": False,
 }
 SERIALIZER_SPEC = {
     "id": "authorized-evidence-json-v2",
@@ -162,6 +171,7 @@ def custody() -> dict[str, Any]:
     return {
         "version": VERSION,
         "anchor_normalizer": ANCHOR_NORMALIZER_SPEC,
+        "reader_schema": READER_SCHEMA_SPEC,
         "prompt_bundles": PROMPT_BUNDLES,
         "serializer": SERIALIZER_SPEC,
         "decoding": GENERATION_SPEC,
