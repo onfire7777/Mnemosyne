@@ -31,7 +31,7 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   Non-abstained output is rendered from an ordered atomic-claim list, avoiding
   brittle sentence-to-citation matching.
 - QA correctness is not called calibrated until Phase 15 public-label work.
-- Candidate protocol v5 binds the complete decomposer and reader system/user
+- Candidate protocol v6 binds the complete decomposer and reader system/user
   prompt bundles, response schemas, DATA framing, concrete canonical evidence
   serializer, role-specific Ollama JSON Schemas, and all decoding options. A
   short instruction, generic JSON mode, or serializer label is not sufficient custody.
@@ -41,7 +41,11 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   query-support gate, so any next protected action requires a new candidate.
 - Candidate v4 was rejected at the synthetic live-model gate because its initial
   query remained an inferred intent phrase instead of an atomic literal anchor.
-  No v4 protected attempt ran and no v4 attempt ledger exists; v5 is required.
+  No v4 protected attempt ran and no v4 attempt ledger exists.
+- Candidate v5 was rejected at the synthetic direct-provider gate after it
+  returned a possessive entity plus a general intent noun. No v5 protected run
+  or ledger exists. Candidate v6 deterministically reduces model proposals to
+  literal source-bound atomic anchors before ordinary retrieval.
 
 ## Completion Boundary
 

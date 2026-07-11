@@ -4,7 +4,7 @@ Status: in progress — the consumed v3 frozen run failed systemically; no held-
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v5` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v6` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:4b`, exact content digest required
 - Transport retries: zero; maximum attempts per protected split: one
 - Evidence: at most 20 records, 24,000 characters, and 3 hops
@@ -27,11 +27,16 @@ The v3 `qa_hard_v2` one-shot was consumed and returned 24/24 empty
 abstentions with zero retrieval hops. Aggregate-only diagnosis identified the
 systemic pre-provider query-support gate; no protected question, trace, or
 content was inspected. LongMemEval-QA and Hippo reader evaluation remain not
-run. A new committed v5 candidate is required before any further protected
+run. A new committed v6 candidate is required before any further protected
 action.
 
 Candidate v4 was rejected at the synthetic live-model gate because its initial
 query used inferred intent terms rather than an independently retrievable
 literal anchor. It never reached a protected run and has no attempt ledger.
+
+Candidate v5 was also rejected at the synthetic direct-provider gate: the
+model returned a possessive entity plus a general intent noun. It never reached
+a protected run and has no attempt ledger. Candidate v6 adds deterministic,
+source-bound anchor normalization before ordinary retrieval.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
