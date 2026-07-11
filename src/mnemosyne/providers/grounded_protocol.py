@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v3"
+VERSION = "phase12-candidate-v4"
 SERIALIZER_SPEC = {
     "id": "authorized-evidence-json-v2",
     "encoding": "utf-8",

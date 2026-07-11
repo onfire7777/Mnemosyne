@@ -23,6 +23,10 @@ class RecordingDecomposer:
 
     def decompose(self, payload: dict[str, object]) -> object:
         self.calls.append(payload)
+        if isinstance(self.response, list):
+            return self.response[len(self.calls) - 1]
+        if payload.get("evidence") == [] and self.response == {"queries": []}:
+            return {"queries": [str(payload["question"])]}
         return self.response
 
 
@@ -38,6 +42,11 @@ class RecordingReader:
 
 class FailingReader:
     def read(self, payload: dict[str, object]) -> object:
+        raise RuntimeError("provider unavailable")
+
+
+class FailingDecomposer:
+    def decompose(self, payload: dict[str, object]) -> object:
         raise RuntimeError("provider unavailable")
 
 
@@ -95,7 +104,11 @@ def _engine() -> LocalMemoryEngine:
 
 def test_multi_hop_preserves_complete_immutable_read_context_and_episode_order() -> None:
     engine = _engine()
-    decomposer = RecordingDecomposer({"queries": ["Project Zephyr launches"]})
+    decomposer = RecordingDecomposer([
+        {"queries": ["Ada project"]},
+        {"queries": ["Project Zephyr launches"]},
+        {"queries": []},
+    ])
     context = _context()
     result = GroundedAnswerOrchestrator(engine, decomposer).assemble(
         AnswerRequest(question="When does Ada's project launch?", context=context)
@@ -339,6 +352,15 @@ def test_reader_provider_failure_does_not_retain_unreplayed_trace() -> None:
     assert result.evidence == () and result.trace.hops == ()
 
 
+@pytest.mark.parametrize("decomposer", [FailingDecomposer(), RecordingDecomposer({"bad": []})])
+def test_initial_decomposition_failure_is_existence_silent(decomposer: object) -> None:
+    result = GroundedAnswerOrchestrator(_engine(), decomposer).assemble(  # type: ignore[arg-type]
+        AnswerRequest(question="Ada", context=_context())
+    )
+    assert result.abstained is True
+    assert result.evidence == () and result.trace.hops == ()
+
+
 def test_replay_drift_does_not_retain_stale_trace(monkeypatch: pytest.MonkeyPatch) -> None:
     orchestrator = GroundedAnswerOrchestrator(
         _engine(), RecordingDecomposer({"queries": []})
@@ -419,7 +441,9 @@ def test_two_hop_access_swap_with_same_union_fails_per_hop_replay() -> None:
 
     result = GroundedAnswerOrchestrator(
         SwappingEngine(),  # type: ignore[arg-type]
-        RecordingDecomposer({"queries": ["second"]}),
+        RecordingDecomposer([
+            {"queries": ["first"]}, {"queries": ["second"]}, {"queries": []}
+        ]),
     ).assemble(AnswerRequest(question="first", context=_context()))
     assert result.abstained is True
     assert result.public_reason == "insufficient_authorized_evidence"

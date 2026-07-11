@@ -381,7 +381,8 @@ role = request["prompt_boundary"]["role"]
 metadata = {"role": role, "model": "qwen3:4b", "model_content_digest": "a" * 64,
             **role_digests(role), "decoding_options": GENERATION_SPEC}
 if role == "query_decomposer":
-    response = {"queries": [], "metadata": metadata}
+    evidence = request.get("evidence") or []
+    response = {"queries": ([] if evidence else [request["question"]]), "metadata": metadata}
 else:
     evidence = request.get("evidence") or []
     response = ({"claims": [{"text": evidence[0]["content"],
@@ -424,6 +425,69 @@ json.dump(response, sys.stdout)
     batch = read_only.eval_answer_batch(rows)
     assert [row["question_id"] for row in batch["results"]] == ["q2", "q1"]
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+
+def test_capture_batch_paraphrase_uses_initial_decomposition_and_reaches_reader(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "store.json"
+    cli = MnemoCLI(store=str(store))
+    captures = tmp_path / "captures.jsonl"
+    captures.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "tenant": "dev", "user": "dev-user",
+                    "source_type": "qa-v2-dev", "source_identity": doc,
+                    "content": content, "trust_tier": 0,
+                }
+            )
+            for doc, content in (
+                ("d1", "Mara owns Helios."),
+                ("d2", "Helios ships in Q3 2026."),
+            )
+        ) + "\n"
+    )
+    cli.capture_batch(captures)
+    provider = tmp_path / "decomposing-provider.py"
+    provider.write_text(
+        """import json, sys
+from mnemosyne.providers.grounded_protocol import GENERATION_SPEC, role_digests
+request = json.load(sys.stdin)
+role = request["prompt_boundary"]["role"]
+metadata = {"role": role, "model": "qwen3:4b", "model_content_digest": "a" * 64,
+            **role_digests(role), "decoding_options": GENERATION_SPEC}
+evidence = request.get("evidence") or []
+if role == "query_decomposer":
+    queries = (["Mara"] if not evidence else
+               (["Helios"] if not any("Q3 2026" in row["content"] for row in evidence) else []))
+    response = {"queries": queries, "metadata": metadata}
+else:
+    row = next(item for item in evidence if "Q3 2026" in item["content"])
+    response = {"claims": [{"text": "Q3 2026", "evidence_cids": [row["cid"]]}],
+                "unresolved": False, "metadata": metadata}
+json.dump(response, sys.stdout)
+"""
+    )
+    env = {
+        "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
+        "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
+        "MNEMOSYNE_GROUNDED_READER_COMMAND": f"{sys.executable} {provider}",
+        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "a" * 64,
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+    }
+    rows = tmp_path / "answers.jsonl"
+    rows.write_text(json.dumps({
+        "question_id": "q1", "question": "When does Mara's project ship?",
+        "context": {"tenant_id": "dev", "user_id": "dev-user", "role": "reader"},
+    }) + "\n")
+    result = replace(
+        cli, global_flags=["--evaluation-read-only"], env=env
+    ).eval_answer_batch(rows)["results"][0]
+    assert result["abstained"] is False and result["claims"]
+    assert len(result["hops"]) == 2
+    assert [hop["queries"] for hop in result["hops"]] == [["Mara"], ["Helios"]]
 
 
 def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
