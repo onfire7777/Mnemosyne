@@ -45,6 +45,10 @@
   records are not separated.
 - Temperature zero does not make a reader byte-deterministic; model revision,
   prompt digest, decoding config, and output custody must be disclosed.
+- The original v1 preregistration hashed only a short reader instruction and a
+  serializer identifier. Before any held-out attempt, v2 replaced it with
+  complete role custody for both decomposition and reading, including the
+  injection boundary, schema, DATA framing, and concrete serializer behavior.
 - Ollama tag strings are insufficient identity. Provider preflight must resolve
   and bind the local model content digest; the prompt digest covers system/user
   templates plus evidence serialization, and the decoding digest covers every

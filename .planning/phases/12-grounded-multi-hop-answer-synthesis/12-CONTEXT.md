@@ -31,6 +31,10 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   Non-abstained output is rendered from an ordered atomic-claim list, avoiding
   brittle sentence-to-citation matching.
 - QA correctness is not called calibrated until Phase 15 public-label work.
+- Candidate protocol v2 binds the complete decomposer and reader system/user
+  prompt bundles, response schemas, DATA framing, concrete canonical evidence
+  serializer, and all decoding options. A short instruction or serializer label
+  is not sufficient custody.
 
 ## Completion Boundary
 

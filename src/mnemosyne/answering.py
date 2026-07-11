@@ -216,6 +216,10 @@ class QueryDecomposer(Protocol):
     def decompose(self, payload: dict[str, object]) -> object: ...
 
 
+class GroundedReader(Protocol):
+    def read(self, payload: dict[str, object]) -> object: ...
+
+
 class GroundedAnswerOrchestrator:
     """Assemble authorized evidence without creating a new ranking or write path."""
 
@@ -237,6 +241,43 @@ class GroundedAnswerOrchestrator:
             # Providers and storage are untrusted at this boundary. Any ordinary
             # failure collapses to the same public abstention; process-control
             # BaseExceptions still propagate.
+            return self._abstain()
+
+    def answer(self, request: AnswerRequest, reader: GroundedReader) -> GroundedAnswer:
+        """Validate model-proposed atomic claims against freshly replayed evidence."""
+        assembled = self.assemble(request)
+        if assembled.abstained:
+            return assembled
+        try:
+            proposal = reader.read(
+                {
+                    "question": request.question,
+                    "evidence": [
+                        {"cid": row.cid, "content": row.content}
+                        for row in assembled.evidence
+                    ],
+                }
+            )
+            replayed = self.assemble(request)
+            if replayed.abstained or (
+                replayed.trace.evidence_fingerprint
+                != assembled.trace.evidence_fingerprint
+                or replayed.evidence != assembled.evidence
+                or replayed.trace.hops != assembled.trace.hops
+            ):
+                raise LookupError("authorized evidence changed")
+            claims = self._claims(proposal, {row.cid for row in replayed.evidence})
+            if not claims:
+                return self._abstain()
+            return GroundedAnswer(
+                answer="\n".join(claim.text for claim in claims),
+                claims=claims,
+                evidence=replayed.evidence,
+                episodes=replayed.episodes,
+                trace=replayed.trace,
+                abstained=False,
+            )
+        except Exception:
             return self._abstain()
 
     def _assemble(self, request: AnswerRequest) -> GroundedAnswer:
@@ -380,6 +421,8 @@ class GroundedAnswerOrchestrator:
             filt=context.to_filter(),
             record_access=False,
         )
+        if result.abstained:
+            raise LookupError("retrieval abstained")
         referenced: set[str] = set()
         channels: set[str] = set()
         for hit in result.hits:
@@ -413,6 +456,40 @@ class GroundedAnswerOrchestrator:
                 queries.append(query)
                 seen.add(query.casefold())
         return tuple(sorted(queries, key=lambda item: (item.casefold(), item)))
+
+    @staticmethod
+    def _claims(value: object, authorized_cids: set[str]) -> tuple[AnswerClaim, ...]:
+        if not isinstance(value, dict) or set(value) != {"claims", "unresolved"}:
+            raise ValueError("invalid reader schema")
+        unresolved = value["unresolved"]
+        rows = value["claims"]
+        if not isinstance(unresolved, bool) or not isinstance(rows, list):
+            raise ValueError("invalid reader schema")
+        if unresolved:
+            if rows:
+                raise ValueError("unresolved reader response contains claims")
+            return ()
+        if not rows or len(rows) > 20:
+            raise ValueError("reader must return bounded claims")
+        claims: list[AnswerClaim] = []
+        for row in rows:
+            if not isinstance(row, dict) or set(row) != {"text", "evidence_cids"}:
+                raise ValueError("invalid claim schema")
+            text = row["text"]
+            citations = row["evidence_cids"]
+            if (
+                not isinstance(text, str)
+                or not text.strip()
+                or len(text) > 2_000
+                or not isinstance(citations, list)
+                or not citations
+                or any(not isinstance(cid, str) or not cid for cid in citations)
+                or len(set(citations)) != len(citations)
+                or not set(citations) <= authorized_cids
+            ):
+                raise ValueError("claim is not grounded in authorized evidence")
+            claims.append(AnswerClaim(text.strip(), tuple(citations)))
+        return tuple(claims)
 
     @staticmethod
     def _evidence(cid: str, row: Mapping[str, Any], hop: int) -> AnswerEvidence:

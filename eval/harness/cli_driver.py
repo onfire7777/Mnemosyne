@@ -191,6 +191,20 @@ class MnemoCLI:
         """Run validated search rows with embedded explanations in one process."""
         return self.run("eval-query-batch", "--input-jsonl", str(input_jsonl)).json
 
+    def answer(self, question: str, context: Mapping[str, Any]) -> dict[str, Any]:
+        """Run one bounded, read-only grounded answer through the public CLI."""
+        return self.run(
+            "answer",
+            "--question",
+            question,
+            "--context-json",
+            json.dumps(dict(context), sort_keys=True, separators=(",", ":")),
+        ).json
+
+    def eval_answer_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
+        """Run a prevalidated ordered grounded-answer shard in one process."""
+        return self.run("eval-answer-batch", "--input-jsonl", str(input_jsonl)).json
+
     def search(
         self,
         tenant: str,

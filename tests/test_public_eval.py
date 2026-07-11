@@ -449,7 +449,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         "family": "qa", "independent_external_reproduction": False,
         "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
         "pbpp_headline_eligible": False, "publishable": False,
-        "qa_protocol_version": "phase12-candidate-v1", "revision": "c" * 40,
+        "qa_protocol_version": "phase12-candidate-v2", "revision": "c" * 40,
         "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -532,7 +532,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
     ("field", "value", "message"),
     (
         ("reader", {"name": "grounded-reader", "provider": "ollama", "selector": "latest", "model_revision": "latest", "model_content_sha256": "a" * 64}, "provider and selector"),
-        ("prompt", {"template_sha256": "bad", "serializer_sha256": "b" * 64}, "prompt"),
+        ("prompt", {"aggregate_sha256": "bad", "roles": {}, "serializer_sha256": "b" * 64}, "prompt"),
         ("decoding", {}, "decoding"),
         ("evidence_budget", {}, "evidence budget"),
         ("abstention", {}, "abstention"),
@@ -551,7 +551,7 @@ def test_qa_custody_fails_closed(
     metadata = {
         "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark), "family": "qa",
         "independent_external_reproduction": False, "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
-        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v1",
+        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v2",
         "revision": "c" * 40, "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -570,6 +570,7 @@ def test_qa_custody_fails_closed(
 
 def _qa_custody() -> dict[str, object]:
     from eval.public.runner import load_qa_protocol, qa_protocol_digests
+    from mnemosyne.providers.grounded_protocol import PROMPT_BUNDLES, role_digests
 
     protocol = load_qa_protocol()
     digests = qa_protocol_digests(protocol)
@@ -584,7 +585,14 @@ def _qa_custody() -> dict[str, object]:
         "candidate_manifest_sha256": _canonical_digest(candidate),
         "decoding": protocol["decoding"],
         "evidence_budget": protocol["evidence_budget"],
-        "prompt": {"serializer_sha256": digests["serializer_sha256"], "template_sha256": digests["prompt_sha256"]},
+        "prompt": {
+            "aggregate_sha256": digests["prompt_sha256"],
+            "roles": {
+                role: {"template_sha256": role_digests(role)["prompt_sha256"]}
+                for role in sorted(PROMPT_BUNDLES)
+            },
+            "serializer_sha256": digests["serializer_sha256"],
+        },
         "protocol_version": protocol["version"],
         "reader": {"model_content_sha256": "a" * 64, "model_revision": "qwen3:4b", "name": "grounded-reader", "provider": "ollama", "selector": "qwen3:4b"},
         "split_role": "held-out-test",
