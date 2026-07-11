@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v12"
+VERSION = "phase12-candidate-v13"
 MODEL_SELECTOR = "qwen3:8b"
 MODEL_CONTENT_SHA256 = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
 ANCHOR_NORMALIZER_SPEC = {
