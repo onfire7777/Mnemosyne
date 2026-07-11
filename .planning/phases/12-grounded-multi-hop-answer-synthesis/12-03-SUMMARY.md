@@ -41,7 +41,10 @@ approve its own citations.
 - The broader CLI/runtime/security/parity/provider gate passed to 100% with five
   expected environment-gated skips.
 - Ruff and `git diff --check` passed.
-- Local Ollama exposes `qwen3:4b` with exact content SHA-256
+- Historical preparation used `qwen3:4b`; candidate v10 now binds locally
+  installed `qwen3:8b` at exact manifest SHA-256
+  `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`.
+  The retired `qwen3:4b` candidate used manifest SHA-256
   `359d7dd4bcdab3d86b87d73ac27966f4dbb9f5efdfcc75d34a8764a09474fae7`.
 
 ## Open Runtime Evidence

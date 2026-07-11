@@ -50,6 +50,11 @@
   integer offset boundaries, Unicode code points, cross-CID ordering, per-CID
   overlap, UTF-8 hashes, inert evidence instructions, trace privacy, and bundle
   mutations of text, offsets, hashes, CIDs, and evidence custody.
+- Candidate v9 failed synthetic exact-answer quality and has no protected
+  ledger. Candidate v10 preregisters exact quote selection with `qwen3:8b`
+  digest `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`;
+  tests prove non-substrings fail and repeated quotes choose the lowest raw
+  Unicode code-point occurrence. Preparation remains synthetic-only.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
