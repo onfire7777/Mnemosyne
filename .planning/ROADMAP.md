@@ -7,7 +7,7 @@
 ## v2.0 Phases
 
 - [x] **Phase 10: Public Harness and Neutral Governance Foundation** - Build M1.1 and L0 without publishing a number. (completed 2026-07-10)
-- [ ] **Phase 11: Deterministic Public Retrieval Tracks** - LongMemEval retrieval plus HippoRAG multi-hop deterministic measurement.
+- [x] **Phase 11: Deterministic Public Retrieval Tracks** - LongMemEval retrieval plus HippoRAG multi-hop deterministic measurement. (completed 2026-07-11)
 - [ ] **Phase 12: Grounded Multi-Hop Answer Synthesis** - Close Plan A S1 under public and private regression gates.
 - [ ] **Phase 13: External Benchmark Adapters and Scheduled CI** - MemoryAgentBench, BEAM, and regression-only cadence.
 - [ ] **Phase 14: Reproducibility Standard and Independent Reproduction** - M2/M3 publication eligibility.
@@ -37,16 +37,17 @@ Phase 16 owns final activation and launch readiness.
 deterministic scoring, pinned upstream inputs, confidence intervals, and traces.
 **Requirements:** BENCH-004, BENCH-005, RAIL-001..004
 **Depends on:** Phase 10
-**Plans:** 0/3 complete
+**Plans:** 3/3 plans complete
 
 Plans:
 
-- [ ] 11-01-PLAN.md — Generalize immutable asset and multi-metric bundle custody.
-- [ ] 11-02-PLAN.md — LongMemEval cleaned retrieval-recall track.
-- [ ] 11-03-PLAN.md — HippoRAG three-dataset retrieval and deterministic scorer.
+- [x] 11-01-PLAN.md — Generalize immutable asset and multi-metric bundle custody.
+- [x] 11-02-PLAN.md — LongMemEval cleaned retrieval-recall track.
+- [x] 11-03-PLAN.md — HippoRAG three-dataset retrieval and deterministic scorer.
 
-**Boundary:** Phase 11 can complete BENCH-004. BENCH-005 remains partial until
-Phase 12 supplies disclosed grounded-reader predictions for real EM/F1.
+**Boundary:** Phase 11 completed BENCH-004. BENCH-005 remains partial until
+positive graph/PPR participation is demonstrated and Phase 12 supplies
+disclosed grounded-reader predictions for real EM/F1.
 
 ### Phase 12: Grounded Multi-Hop Answer Synthesis
 
