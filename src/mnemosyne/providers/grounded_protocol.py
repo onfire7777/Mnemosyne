@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v7"
+VERSION = "phase12-candidate-v8"
 ANCHOR_NORMALIZER_SPEC = {
     "id": "source-bound-atomic-anchors-v1",
     "comparison_normalization": "NFKC-whitespace-casefold",
@@ -23,11 +23,11 @@ ANCHOR_NORMALIZER_SPEC = {
     "later_hop_traversal": "authorized-catalog-source-order-unseen-first",
 }
 READER_SCHEMA_SPEC = {
-    "id": "authorized-cid-xor-schema-v1",
+    "id": "authorized-cid-claims-only-v2",
     "cid_source": "exact-authorized-evidence",
     "cid_constraint": "json-schema-enum",
-    "resolved": {"unresolved": False, "claims": "1..20"},
-    "unresolved": {"unresolved": True, "claims": "empty"},
+    "model_output": {"claims": "0..20"},
+    "derived_unresolved": "claims-is-empty",
     "repair_cids": False,
 }
 SERIALIZER_SPEC = {
@@ -96,12 +96,9 @@ PROMPT_BUNDLES = {
         ),
         "instruction": (
             "Answer only from the serialized authorized evidence. Return ordered atomic "
-            "claims with evidence CIDs or abstain."
+            "claims with evidence CIDs, or an empty claims list to abstain."
         ),
-        "schema": {
-            "claims": [{"text": "string", "evidence_cids": ["string"]}],
-            "unresolved": "boolean",
-        },
+        "schema": {"claims": [{"text": "string", "evidence_cids": ["string"]}]},
         "ollama_format": {
             "type": "object",
             "properties": {
@@ -122,9 +119,8 @@ PROMPT_BUNDLES = {
                         "additionalProperties": False,
                     },
                 },
-                "unresolved": {"type": "boolean"},
             },
-            "required": ["claims", "unresolved"],
+            "required": ["claims"],
             "additionalProperties": False,
         },
         "data_prefix": "DATA:\n",
