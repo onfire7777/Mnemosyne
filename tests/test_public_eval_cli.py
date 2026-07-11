@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -187,6 +188,10 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
         def __init__(self, staged: Path) -> None:
             self.staged = staged
             self.calls = 0
+            self.engine = self
+
+        def defer_persistence(self):
+            return nullcontext()
 
         def capture(self, **kwargs: object) -> dict[str, object]:
             self.calls += 1
@@ -209,3 +214,29 @@ def test_capture_batch_rolls_back_a_later_capture_failure(
         cli_module.cmd_capture_batch(args)
     assert store.read_text() == '{"original":true}\n'
     assert not list(tmp_path.glob(".store.json-batch-*"))
+
+
+def test_local_engine_deferred_persistence_flushes_once_or_discards(
+    tmp_path: Path,
+) -> None:
+    from mnemosyne.engine import LocalMemoryEngine
+
+    committed = tmp_path / "committed.json"
+    engine = LocalMemoryEngine(store_path=committed)
+    with engine.defer_persistence():
+        with engine.defer_persistence():
+            engine._persist()
+            engine._persist()
+            assert not committed.exists()
+        assert not committed.exists()
+    assert committed.is_file()
+
+    discarded = tmp_path / "discarded.json"
+    engine = LocalMemoryEngine(store_path=discarded)
+    with pytest.raises(RuntimeError, match="abort"):
+        with engine.defer_persistence():
+            engine._persist()
+            raise RuntimeError("abort")
+    assert not discarded.exists()
+    with pytest.raises(RuntimeError, match="transaction was aborted"):
+        engine._persist()
