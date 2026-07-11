@@ -747,7 +747,9 @@ def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRunti
     from mnemosyne.postgres_runtime_state import PostgresRuntimeState
     from mnemosyne.runtime_state import RuntimeState
 
-    if bool(getattr(args, "evaluation_read_only", False)):
+    if bool(getattr(args, "evaluation_read_only", False)) or bool(
+        getattr(args, "disable_runtime_state", False)
+    ):
         return None
     if args.backend == "postgres":
         dsn = args.postgres_dsn
@@ -1599,20 +1601,22 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
             staged.unlink()
         staged_args = argparse.Namespace(**vars(args))
         staged_args.store = str(staged)
+        staged_args.disable_runtime_state = True
         tools = load_tools(staged_args)
-        results = [
-            tools.capture(
-                tenant_id=row["tenant"],
-                user_id=row["user"],
-                actor=row.get("actor", "user"),
-                source_type=row["source_type"],
-                source_identity=row.get("source_identity"),
-                content=row["content"],
-                branch=row.get("branch", "main"),
-                trust_tier=row.get("trust_tier", 0),
-            )
-            for row in rows
-        ]
+        with tools.engine.defer_persistence():
+            results = [
+                tools.capture(
+                    tenant_id=row["tenant"],
+                    user_id=row["user"],
+                    actor=row.get("actor", "user"),
+                    source_type=row["source_type"],
+                    source_identity=row.get("source_identity"),
+                    content=row["content"],
+                    branch=row.get("branch", "main"),
+                    trust_tier=row.get("trust_tier", 0),
+                )
+                for row in rows
+            ]
         if not staged.is_file() or staged.is_symlink():
             raise ValueError("capture batch did not produce a real staged store")
         os.replace(staged, store)

@@ -9,6 +9,7 @@ import os
 import secrets
 import threading
 from collections import OrderedDict, defaultdict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -455,6 +456,9 @@ class LocalMemoryEngine:
         self.store_path = Path(store_path).expanduser() if store_path else None
         self._journal_dir = Path(journal_dir).expanduser() if journal_dir else None
         self._read_only = read_only
+        self._persistence_defer_depth = 0
+        self._persistence_deferred_dirty = False
+        self._persistence_aborted = False
         self.policy = policy or OperatingPolicy()
         if adapters is None:
             embedding = HashingEmbeddingProvider()
@@ -574,7 +578,12 @@ class LocalMemoryEngine:
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
         self._store_version += 1
+        if self._persistence_aborted:
+            raise RuntimeError("deferred persistence transaction was aborted")
         if self._read_only:
+            return
+        if self._persistence_defer_depth:
+            self._persistence_deferred_dirty = True
             return
         if not self.store_path:
             return
@@ -612,6 +621,26 @@ class LocalMemoryEngine:
         tmp.chmod(0o600)
         tmp.replace(self.store_path)
         self.store_path.chmod(0o600)
+
+    @contextmanager
+    def defer_persistence(self):
+        """Flush many in-process mutations once, or discard the deferred flush."""
+        self._persistence_defer_depth += 1
+        try:
+            yield
+        except BaseException:
+            self._persistence_aborted = True
+            self._persistence_defer_depth -= 1
+            if self._persistence_defer_depth == 0:
+                self._persistence_deferred_dirty = False
+            raise
+        else:
+            self._persistence_defer_depth -= 1
+            if self._persistence_defer_depth == 0 and self._persistence_aborted:
+                raise RuntimeError("deferred persistence transaction was aborted")
+            if self._persistence_defer_depth == 0 and self._persistence_deferred_dirty:
+                self._persistence_deferred_dirty = False
+                self._persist()
 
     def _load(self) -> None:
         data = json.loads(self.store_path.read_text(encoding="utf-8"))
