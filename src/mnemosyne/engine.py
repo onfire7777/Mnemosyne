@@ -1743,6 +1743,8 @@ class LocalMemoryEngine:
         }
 
     def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
+        if self._read_only:
+            return {"assertions": 0, "evidence": 0}
         touched_assertions = 0
         touched_evidence = 0
         now = utc_now()

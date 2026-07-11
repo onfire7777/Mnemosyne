@@ -1626,6 +1626,74 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
     emit({"count": len(results), "ok": True, "results": results})
 
 
+def cmd_eval_query_batch(args: argparse.Namespace) -> None:
+    """Run a bounded, prevalidated search+explain shard in one read-only process."""
+    from mnemosyne.media_limits import ensure_file_within_limit
+
+    if not args.evaluation_read_only:
+        raise ValueError("eval-query-batch requires --evaluation-read-only")
+    path = Path(args.input_jsonl)
+    if args.max_records < 1:
+        raise ValueError("--max-records must be positive")
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("--input-jsonl must be a real file, not a link")
+    ensure_file_within_limit(
+        str(path), limit=max_ingest_bytes(args), label="evaluation query batch"
+    )
+    rows: list[dict[str, str]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, raw in enumerate(handle, 1):
+            if line_number > args.max_records:
+                raise ValueError(
+                    f"evaluation query batch exceeds --max-records={args.max_records}"
+                )
+            try:
+                def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                    value: dict[str, Any] = {}
+                    for key, nested in pairs:
+                        if key in value:
+                            raise ValueError(f"duplicate key: {key}")
+                        value[key] = nested
+                    return value
+
+                row = json.loads(
+                    raw,
+                    parse_constant=lambda value: (_ for _ in ()).throw(
+                        ValueError(value)
+                    ),
+                    object_pairs_hook=unique_object,
+                )
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(
+                    f"evaluation query batch line {line_number} is invalid JSON"
+                ) from exc
+            if (
+                not isinstance(row, dict)
+                or set(row) != {"question_id", "tenant", "query"}
+                or any(not isinstance(value, str) or not value for value in row.values())
+            ):
+                raise ValueError(
+                    f"evaluation query batch line {line_number} has invalid schema"
+                )
+            rows.append(row)
+    if not rows:
+        raise ValueError("evaluation query batch must contain at least one row")
+    if len({row["question_id"] for row in rows}) != len(rows):
+        raise ValueError("evaluation query batch has duplicate question IDs")
+    tools = load_tools(args)
+    results = [
+        {
+            "question_id": row["question_id"],
+            "search": tools.search(tenant_id=row["tenant"], query=row["query"]),
+            "explanation": tools.explain(
+                tenant_id=row["tenant"], query=row["query"]
+            ),
+        }
+        for row in rows
+    ]
+    emit({"count": len(results), "ok": True, "results": results})
+
+
 def load_signed_provenance(args: argparse.Namespace) -> dict[str, Any] | None:
     manifest: dict[str, Any] = {}
     if args.signed_provenance:
@@ -18605,6 +18673,11 @@ def build_parser() -> argparse.ArgumentParser:
     capture_batch.add_argument("--max-records", type=int, default=100_000)
     capture_batch.set_defaults(func=cmd_capture_batch)
 
+    eval_query_batch = sub.add_parser("eval-query-batch")
+    eval_query_batch.add_argument("--input-jsonl", type=Path, required=True)
+    eval_query_batch.add_argument("--max-records", type=int, default=10_000)
+    eval_query_batch.set_defaults(func=cmd_eval_query_batch)
+
     ingest = sub.add_parser("ingest")
     ingest.add_argument("--tenant", required=True)
     ingest.add_argument("--user", required=True)
@@ -20085,10 +20158,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.evaluation_read_only and (
-        args.backend != "local" or args.command not in {"search", "explain"}
+        args.backend != "local"
+        or args.command not in {"search", "explain", "eval-query-batch"}
     ):
         parser.error(
-            "--evaluation-read-only is restricted to local search and explain commands"
+            "--evaluation-read-only is restricted to local evaluation query commands"
         )
     if args.command not in {"session-exchange", "idp-authz-policy-check"}:
         apply_session_identity(args)

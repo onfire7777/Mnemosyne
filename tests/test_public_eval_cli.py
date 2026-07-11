@@ -161,8 +161,73 @@ def test_evaluation_read_only_allows_concurrent_queries_without_store_writes(
         "ordinary.json",
         "ordinary.json.runtime.json",
     }
-    with pytest.raises(CLIError, match="restricted to local search and explain"):
+    with pytest.raises(CLIError, match="restricted to local evaluation query"):
         read_only.capture_batch(rows)
+
+
+def test_evaluation_query_batch_matches_public_search_explain_and_is_read_only(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "store.json"
+    cli = MnemoCLI(store=str(store))
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text(
+        json.dumps(
+            {
+                "tenant": "t",
+                "user": "u",
+                "source_type": "benchmark",
+                "content": "alpha graph evidence",
+            }
+        )
+        + "\n"
+    )
+    cli.capture_batch(rows)
+    queries = tmp_path / "queries.jsonl"
+    query_rows = [
+        {"question_id": "q1", "tenant": "t", "query": "alpha"},
+        {"question_id": "q2", "tenant": "t", "query": "graph"},
+    ]
+    queries.write_text("".join(json.dumps(row) + "\n" for row in query_rows))
+    reversed_queries = tmp_path / "reversed.jsonl"
+    reversed_queries.write_text(
+        "".join(json.dumps(row) + "\n" for row in reversed(query_rows))
+    )
+    singles = []
+    for index, row in enumerate(query_rows):
+        path = tmp_path / f"single-{index}.jsonl"
+        path.write_text(json.dumps(row) + "\n")
+        singles.append(path)
+    duplicate = tmp_path / "duplicate.jsonl"
+    duplicate.write_text(
+        '{"question_id":"q","question_id":"other","tenant":"t","query":"x"}\n'
+    )
+    before = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    read_only = replace(cli, global_flags=["--evaluation-read-only"])
+    result = read_only.eval_query_batch(queries)
+    assert result["count"] == 2
+    assert [row["question_id"] for row in result["results"]] == ["q1", "q2"]
+    assert all(row["search"]["hits"] for row in result["results"])
+    reversed_result = read_only.eval_query_batch(reversed_queries)
+    single_results = [read_only.eval_query_batch(path) for path in singles]
+
+    def projections(payloads: list[dict]) -> dict[str, tuple[list[str], object]]:
+        return {
+            row["question_id"]: (
+                [hit["id"] for hit in row["search"]["hits"]],
+                row["explanation"].get("channels"),
+            )
+            for payload in payloads
+            for row in payload["results"]
+        }
+
+    assert projections([result]) == projections([reversed_result])
+    assert projections([result]) == projections(single_results)
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+    with pytest.raises(CLIError, match="invalid JSON"):
+        read_only.eval_query_batch(duplicate)
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
 
 
 def test_capture_batch_rolls_back_a_later_capture_failure(
