@@ -19,6 +19,9 @@ class HippoRAGSchemaError(ValueError):
     """Pinned HippoRAG assets cannot be normalized without ambiguity."""
 
 
+_QUERY_SHARD_SIZE = 125
+
+
 def run(
     value: dict[str, Any], cli: MnemoCLI
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
@@ -95,7 +98,7 @@ def run(
 
     if isinstance(eval_cli, MnemoCLI):
         questions = benchmark["questions"]
-        chunk_size = (len(questions) + 3) // 4
+        chunk_size = _QUERY_SHARD_SIZE
         with tempfile.TemporaryDirectory(prefix="mneme-hipporag-queries-") as temp:
             batches: list[Path] = []
             expected_counts: list[int] = []

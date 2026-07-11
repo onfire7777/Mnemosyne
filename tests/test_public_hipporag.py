@@ -107,6 +107,7 @@ def test_retrieval_bundle_contract_has_no_qa_columns() -> None:
     run_body = text.split("def run(", 1)[1].split("def normalize", 1)[0]
     assert "qa-em-f1" not in run_body
     assert "score_predictions" not in run_body
+    assert hipporag_multihop._QUERY_SHARD_SIZE == 125
 
 
 def test_adapter_uses_public_batch_search_and_explain() -> None:
