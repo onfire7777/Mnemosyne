@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import stat
 import subprocess
@@ -79,6 +78,7 @@ def install(root: Path, base: Path) -> Path:
             launcher.write_text(
                 "#!/usr/bin/env python3\n"
                 "import runpy,sys\n"
+                "sys.dont_write_bytecode=True\n"
                 "from pathlib import Path\n"
                 "root=Path(__file__).resolve().parents[1]\n"
                 "sys.path.insert(0,str(root/'lib'))\n"
@@ -97,7 +97,13 @@ def install(root: Path, base: Path) -> Path:
         manifest_path = destination / "manifest.json"
         manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")
         manifest_path.chmod(0o400)
-        os.chmod(destination, 0o500)
+        for directory in sorted(
+            (path for path in destination.rglob("*") if path.is_dir()),
+            key=lambda path: len(path.parts),
+            reverse=True,
+        ):
+            directory.chmod(0o500)
+        destination.chmod(0o500)
         return destination
     except BaseException:
         shutil.rmtree(destination, ignore_errors=True)

@@ -5,6 +5,7 @@ import hashlib
 import json
 import stat
 import subprocess
+import os
 from pathlib import Path
 
 import pytest
@@ -97,3 +98,30 @@ def test_runtime_verifier_rejects_forged_tree_and_fresh_manifest(tmp_path: Path)
             "http://127.0.0.1:11434",
             repo_root=repo,
         )
+
+
+def test_runtime_execution_cannot_drift_installed_tree(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    commit = _repo(repo)
+    destination = _module().install(repo, tmp_path / "runtime")
+    before = sorted(path.relative_to(destination) for path in destination.rglob("*"))
+    subprocess.run(
+        [destination / "bin/role-llm"],
+        env={**os.environ, "PYTHONPATH": str(destination / "lib")},
+        check=True,
+        capture_output=True,
+    )
+    after = sorted(path.relative_to(destination) for path in destination.rglob("*"))
+    assert after == before
+    environment = grounded_runtime_environment(
+        destination / "manifest.json",
+        {"git_sha": commit, "model_content_sha256": "a" * 64},
+        "http://127.0.0.1:11434",
+        repo_root=repo,
+    )
+    assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert all(
+        stat.S_IMODE(path.stat().st_mode) & stat.S_IWUSR == 0
+        for path in (destination, *(item for item in destination.rglob("*") if item.is_dir()))
+    )
