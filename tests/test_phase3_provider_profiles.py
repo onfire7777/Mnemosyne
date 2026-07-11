@@ -419,6 +419,13 @@ def test_exact_quote_selector_binds_cids_and_static_limits(monkeypatch) -> None:
             role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": content}]})
 
 
+def test_exact_quote_prompt_requires_answer_only_minimality() -> None:
+    instruction = PROMPT_BUNDLES["grounded_reader"]["instruction"]
+    assert "Return only the answer value" in instruction
+    assert "omit subjects, predicates, and punctuation" in instruction
+    assert "complete evidence sentence is invalid" in instruction
+
+
 def test_grounded_reader_rejects_contradictory_or_fabricated_output(monkeypatch) -> None:
     role_llm = _load_role_llm()
     monkeypatch.setattr(role_llm, "_model_content_digest", lambda: "a" * 64)
