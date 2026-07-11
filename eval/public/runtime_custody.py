@@ -65,6 +65,7 @@ def grounded_runtime_environment(
         "MNEMOSYNE_ROLE_LADDER_TIMEOUT": "300",
         "MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT": "280",
         "MNEMOSYNE_ROLE_LADDER_ALLOW_DETERMINISTIC": "0",
+        "PYTHONDONTWRITEBYTECODE": "1",
         "OLLAMA_MODEL": "qwen3:4b",
         "OLLAMA_TIMEOUT": "280",
         "OLLAMA_URL": ollama_url,
@@ -81,6 +82,7 @@ def _candidate_file(repo: Path, commit: str, relative: str) -> bytes | None:
         return (
             "#!/usr/bin/env python3\n"
             "import runpy,sys\n"
+            "sys.dont_write_bytecode=True\n"
             "from pathlib import Path\n"
             "root=Path(__file__).resolve().parents[1]\n"
             "sys.path.insert(0,str(root/'lib'))\n"
