@@ -258,17 +258,20 @@ class GroundedAnswerOrchestrator:
                     ],
                 }
             )
-            replayed = self.assemble(request)
-            if replayed.abstained or (
-                replayed.trace.evidence_fingerprint
-                != assembled.trace.evidence_fingerprint
-                or replayed.evidence != assembled.evidence
-                or replayed.trace.hops != assembled.trace.hops
-            ):
-                raise LookupError("authorized evidence changed")
+        except Exception:
+            return self._abstain()
+        replayed = self.assemble(request)
+        if replayed.abstained or (
+            replayed.trace.evidence_fingerprint
+            != assembled.trace.evidence_fingerprint
+            or replayed.evidence != assembled.evidence
+            or replayed.trace.hops != assembled.trace.hops
+        ):
+            return self._abstain()
+        try:
             claims = self._claims(proposal, {row.cid for row in replayed.evidence})
             if not claims:
-                return self._abstain()
+                return self._reader_abstain(replayed)
             return GroundedAnswer(
                 answer="\n".join(claim.text for claim in claims),
                 claims=claims,
@@ -278,7 +281,15 @@ class GroundedAnswerOrchestrator:
                 abstained=False,
             )
         except Exception:
-            return self._abstain()
+            return self._reader_abstain(replayed)
+
+    @staticmethod
+    def _reader_abstain(assembled: GroundedAnswer) -> GroundedAnswer:
+        """Preserve authorized retrieval custody when only the reader abstains."""
+        return GroundedAnswer(
+            answer="", claims=(), evidence=assembled.evidence,
+            episodes=assembled.episodes, trace=assembled.trace, abstained=True,
+        )
 
     def _assemble(self, request: AnswerRequest) -> GroundedAnswer:
         if len(request.question) > self.limits.max_query_characters:

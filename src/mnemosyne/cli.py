@@ -18245,6 +18245,8 @@ def cmd_eval_public(args: argparse.Namespace) -> None:
 
     supplied = {
         "candidate_manifest": args.candidate_manifest,
+        "runtime_manifest": args.runtime_manifest,
+        "attempt_ledger": args.attempt_ledger,
         "dataset_dir": args.dataset_dir,
         "out_dir": args.out_dir,
         "reproduced_bundle": args.reproduced_bundle,
@@ -18252,13 +18254,13 @@ def cmd_eval_public(args: argparse.Namespace) -> None:
         "report_note": args.report_note,
     }
     if args.verify_report:
-        if any(supplied[key] is not None for key in ("candidate_manifest", "dataset_dir", "out_dir", "reproduced_bundle", "report_output")):
+        if any(supplied[key] is not None for key in ("candidate_manifest", "runtime_manifest", "attempt_ledger", "dataset_dir", "out_dir", "reproduced_bundle", "report_output")):
             raise ValueError("--verify-report accepts only --report-note")
         if args.report_note is None:
             raise ValueError("--report-note is required with --verify-report")
         result = verify_report(args.verify_report, args.report_note)
     elif args.write_report:
-        if args.candidate_manifest is not None or args.dataset_dir is not None or args.out_dir is not None:
+        if args.candidate_manifest is not None or args.runtime_manifest is not None or args.attempt_ledger is not None or args.dataset_dir is not None or args.out_dir is not None:
             raise ValueError("--write-report does not accept --dataset-dir or --out-dir")
         if args.reproduced_bundle is None or args.report_output is None or args.report_note is None:
             raise ValueError("--reproduced-bundle, --report-output, and --report-note are required with --write-report")
@@ -18268,7 +18270,7 @@ def cmd_eval_public(args: argparse.Namespace) -> None:
             raise ValueError("--verify-bundle does not accept output/report arguments")
         result = verify_bundle(args.verify_bundle)
     elif args.reproduce_bundle:
-        if any(supplied[key] is not None for key in ("candidate_manifest", "dataset_dir", "reproduced_bundle", "report_output", "report_note")):
+        if any(supplied[key] is not None for key in ("candidate_manifest", "runtime_manifest", "attempt_ledger", "dataset_dir", "reproduced_bundle", "report_output", "report_note")):
             raise ValueError("--reproduce-bundle accepts only --out-dir")
         if args.out_dir is None:
             raise ValueError("--out-dir is required with --reproduce-bundle")
@@ -18278,7 +18280,15 @@ def cmd_eval_public(args: argparse.Namespace) -> None:
             raise ValueError("--suite does not accept report arguments")
         if args.out_dir is None:
             raise ValueError("--out-dir is required with --suite")
-        result = run_public_suite(args.suite, args.out_dir, dataset_dir=args.dataset_dir, candidate_manifest_path=args.candidate_manifest)
+        result = run_public_suite(
+            args.suite,
+            args.out_dir,
+            dataset_dir=args.dataset_dir,
+            candidate_manifest_path=args.candidate_manifest,
+            runtime_manifest_path=args.runtime_manifest,
+            attempt_ledger_path=args.attempt_ledger,
+            ollama_url=args.ollama_url,
+        )
     print(json.dumps(result, sort_keys=True))
 
 
@@ -20343,6 +20353,9 @@ def build_parser() -> argparse.ArgumentParser:
     eval_public.add_argument("--out-dir", type=Path)
     eval_public.add_argument("--dataset-dir", type=Path)
     eval_public.add_argument("--candidate-manifest", type=Path)
+    eval_public.add_argument("--runtime-manifest", type=Path)
+    eval_public.add_argument("--attempt-ledger", type=Path)
+    eval_public.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     eval_public.add_argument("--reproduced-bundle", type=Path)
     eval_public.add_argument("--report-output", type=Path)
     eval_public.add_argument("--report-note", type=Path)

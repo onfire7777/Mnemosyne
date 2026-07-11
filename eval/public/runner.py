@@ -9,13 +9,20 @@ import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from unittest.mock import patch
 
 from eval.harness.cli_driver import MnemoCLI
-from eval.public.adapters import hipporag_multihop, longmemeval, qa_smoke, smoke
+from eval.public.adapters import (
+    hipporag_multihop,
+    longmemeval,
+    longmemeval_qa,
+    qa_smoke,
+    smoke,
+)
 from eval.public.assets import AssetSpec, load_asset_set
 from eval.public.bundle import _canonical, write_bundle
+from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import (
     GENERATION_SPEC,
     PROMPT_BUNDLES,
@@ -30,12 +37,16 @@ _HEX = set("0123456789abcdef")
 _ADAPTERS = {
     "hipporag-multihop": hipporag_multihop.run,
     "longmemeval": longmemeval.run,
+    "longmemeval-qa": longmemeval_qa.run,
+    "hipporag-reader-qa": hipporag_multihop.run_reader_qa,
     "qa-smoke": qa_smoke.run,
     "smoke": smoke.run,
 }
 _NORMALIZERS = {
     "hipporag-multihop": hipporag_multihop.normalize,
     "longmemeval": longmemeval.normalize,
+    "longmemeval-qa": longmemeval_qa.normalize,
+    "hipporag-reader-qa": hipporag_multihop.normalize_reader_qa,
 }
 _PROFILE_CONTRACTS = {
     "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
@@ -61,7 +72,9 @@ _FROZEN_PHASE11_CUSTODY = {
 def load_registry() -> dict[str, dict[str, Any]]:
     registry = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
     protocol = registry.pop("_qa_protocol", None)
+    pending = registry.pop("_pending_qa_suites", None)
     validate_qa_protocol(protocol)
+    _validate_pending_qa_suites(pending, registry)
     for name, suite in registry.items():
         revision, digest = suite.get("revision", ""), suite.get("dataset_sha256", "")
         if len(revision) != 40 or set(revision) - _HEX:
@@ -74,6 +87,31 @@ def load_registry() -> dict[str, dict[str, Any]]:
                 f"{name}: invalid scoring profile, family, or interval method"
             )
     return registry
+
+
+def load_pending_qa_suites() -> dict[str, dict[str, Any]]:
+    raw = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
+    pending = raw.get("_pending_qa_suites")
+    registry = {key: value for key, value in raw.items() if not key.startswith("_")}
+    _validate_pending_qa_suites(pending, registry)
+    return pending
+
+
+def _validate_pending_qa_suites(value: object, registry: dict[str, Any]) -> None:
+    if not isinstance(value, dict) or not value:
+        raise ValueError("pending QA suite custody is missing")
+    expected_keys = {"adapter", "requires_grounded_runtime", "source_suite", "status"}
+    for name, row in value.items():
+        if (
+            not isinstance(name, str)
+            or not isinstance(row, dict)
+            or set(row) != expected_keys
+            or row.get("adapter") not in {"longmemeval-qa", "hipporag-reader-qa"}
+            or row.get("requires_grounded_runtime") is not True
+            or row.get("source_suite") not in registry
+            or row.get("status") != "pending-normalized-dataset-custody"
+        ):
+            raise ValueError("pending QA suite registry is invalid")
 
 
 def load_qa_protocol() -> dict[str, Any]:
@@ -101,7 +139,7 @@ def validate_qa_protocol(protocol: Any) -> None:
         "abstention": {"answer": "", "claims": [], "abstained": True},
         "split_roles": {"synthetic": "development", "qa_hard_v2": "frozen-internal", "longmemeval-cleaned": "held-out-test", "hipporag-validation": "held-out-validation"},
         "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"},
-        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "transport_retries"]},
+        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "evidence_budget", "abstention", "transport_retries"]},
     }
     if any(protocol.get(key) != value for key, value in expected.items()) or protocol.get("phase11_custody") != _FROZEN_PHASE11_CUSTODY:
         raise ValueError("frozen QA protocol custody is not the exact canonical contract")
@@ -120,6 +158,8 @@ def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None =
             raise ValueError(f"candidate manifest {key} must be exact lowercase hex")
     if manifest.get("candidate_version") != protocol["version"] or manifest.get("transport_retries") != protocol["held_out_policy"]["transport_retries"]:
         raise ValueError("candidate manifest does not match preregistered protocol")
+    if manifest.get("evidence_budget") != protocol["evidence_budget"] or manifest.get("abstention") != protocol["abstention"]:
+        raise ValueError("candidate manifest budgets or abstention do not match preregistration")
     expected_digests = qa_protocol_digests(protocol)
     if any(manifest.get(key) != value for key, value in expected_digests.items()):
         raise ValueError("candidate manifest protocol digests do not match preregistration")
@@ -142,6 +182,25 @@ def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str
         "protocol_sha256": hashlib.sha256(_canonical(protocol)).hexdigest(),
         "serializer_sha256": hashlib.sha256(grounded_canonical(protocol["prompt"]["serializer"])).hexdigest(),
     }
+
+
+def build_candidate_manifest(
+    *, model_content_sha256: str, git_sha: str, created_at_utc: str
+) -> dict[str, Any]:
+    """Build, but never write, the exact post-commit candidate manifest."""
+    protocol = load_qa_protocol()
+    manifest = {
+        "abstention": protocol["abstention"],
+        "candidate_version": protocol["version"],
+        "created_at_utc": created_at_utc,
+        "evidence_budget": protocol["evidence_budget"],
+        "git_sha": git_sha,
+        "model_content_sha256": model_content_sha256,
+        **qa_protocol_digests(protocol),
+        "transport_retries": protocol["held_out_policy"]["transport_retries"],
+    }
+    validate_candidate_manifest(manifest, protocol)
+    return manifest
 
 
 def write_candidate_manifest(path: Path | str, manifest: dict[str, Any], *, repo_root: Path | str | None = None) -> None:
@@ -196,6 +255,9 @@ def run_public_suite(
     benchmark_override: dict[str, Any] | None = None,
     dataset_dir: Path | str | None = None,
     candidate_manifest_path: Path | str | None = None,
+    runtime_manifest_path: Path | str | None = None,
+    attempt_ledger_path: Path | str | None = None,
+    ollama_url: str = "http://127.0.0.1:11434",
 ) -> dict[str, Any]:
     registry = load_registry()
     if suite_name not in registry:
@@ -205,8 +267,37 @@ def run_public_suite(
         raise ValueError(f"{suite_name}: --candidate-manifest is required")
     if suite["family"] != "qa" and candidate_manifest_path is not None:
         raise ValueError(f"{suite_name}: --candidate-manifest is QA-only")
+    candidate: dict[str, Any] | None = None
+    runtime_env: dict[str, str] = {}
     if suite["family"] == "qa":
-        require_clean_candidate_checkout(_git_sha())
+        candidate_path = Path(candidate_manifest_path)  # type: ignore[arg-type]
+        if candidate_path.is_symlink() or not candidate_path.is_file():
+            raise ValueError("candidate manifest must be a real file")
+        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        validate_candidate_manifest(candidate, expected_git_sha=_git_sha())
+        require_clean_candidate_checkout(candidate["git_sha"])
+        if suite.get("requires_grounded_runtime") is True:
+            if runtime_manifest_path is None or attempt_ledger_path is None:
+                raise ValueError(
+                    f"{suite_name}: --runtime-manifest and --attempt-ledger are required"
+                )
+            runtime_env = grounded_runtime_environment(
+                Path(runtime_manifest_path),
+                candidate,
+                ollama_url,
+                repo_root=Path(__file__).resolve().parents[2],
+            )
+            _claim_qa_attempt(
+                Path(attempt_ledger_path),
+                suite_name=suite_name,
+                suite=suite,
+                candidate_path=candidate_path,
+                runtime_path=Path(runtime_manifest_path),
+            )
+    elif runtime_manifest_path is not None:
+        raise ValueError("--runtime-manifest is QA-only")
+    elif attempt_ledger_path is not None:
+        raise ValueError("--attempt-ledger is protected-QA-only")
     if dataset_dir is not None and suite_name == "smoke":
         raise ValueError("smoke does not accept --dataset-dir")
     try:
@@ -238,6 +329,7 @@ def run_public_suite(
         for key in ("LANG", "LC_ALL", "PATH", "TMPDIR")
         if key in os.environ
     }
+    allowed_env.update(runtime_env)
     with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
         cli = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
         with patch.dict(os.environ, allowed_env, clear=True):
@@ -266,8 +358,7 @@ def run_public_suite(
         raise ValueError("scoring profile, family, or interval metadata mismatch")
     metadata = {**suite, "suite": suite_name}
     if suite["family"] == "qa":
-        candidate = json.loads(Path(candidate_manifest_path).read_text(encoding="utf-8"))  # type: ignore[arg-type]
-        validate_candidate_manifest(candidate, expected_git_sha=_git_sha())
+        assert candidate is not None
         protocol, digests = load_qa_protocol(), qa_protocol_digests()
         metadata["reader_custody"] = {
             "abstention": protocol["abstention"],
@@ -304,6 +395,40 @@ def run_public_suite(
         "suite": suite_name,
         "system_seam": "public-cli-subprocess",
     }
+
+
+def _claim_qa_attempt(
+    path: Path,
+    *,
+    suite_name: str,
+    suite: Mapping[str, Any],
+    candidate_path: Path,
+    runtime_path: Path,
+) -> None:
+    attempt_root = (Path.home() / ".local/state/mnemosyne/qa-attempts").resolve()
+    if path.expanduser().resolve() != attempt_root:
+        raise ValueError(f"QA attempt root must be the canonical path: {attempt_root}")
+    candidate_digest = hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+    destination = attempt_root / f"{candidate_digest}-{suite_name}.json"
+    repo = Path(__file__).resolve().parents[2]
+    if destination == repo or repo in destination.parents or path.is_symlink():
+        raise ValueError("QA attempt ledger must be external and non-symlinked")
+    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    payload = {
+        "candidate_manifest_sha256": candidate_digest,
+        "runtime_manifest_sha256": hashlib.sha256(runtime_path.read_bytes()).hexdigest(),
+        "suite": suite_name,
+        "suite_custody_sha256": hashlib.sha256(_canonical(suite)).hexdigest(),
+    }
+    descriptor = os.open(
+        destination,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o600,
+    )
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(_canonical(payload))
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _git_sha() -> str:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import tempfile
@@ -13,6 +14,7 @@ from typing import Any
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.scoring import score_profile
+from eval.public.custody import capture_cid, first_hop_rows
 
 
 class HippoRAGSchemaError(ValueError):
@@ -224,6 +226,158 @@ def score_predictions(
             }
         )
     return score_profile("qa-em-f1-v1", labels, traces)
+
+
+def run_reader_qa(
+    value: dict[str, Any], cli: MnemoCLI
+) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    """Run the additive reader column without changing retrieval-family traces."""
+    benchmark = normalize_reader_qa(value) if "assets" in value else value
+    _validate_canonical(benchmark)
+    tenant = f"public-hipporag-qa-{benchmark['dataset']}"
+    with tempfile.TemporaryDirectory(prefix="mneme-hipporag-reader-") as temp:
+        capture_path = Path(temp) / "corpus.jsonl"
+        capture_path.write_text(
+            "".join(
+                json.dumps(
+                    {
+                        "content": document["capture"]["content"],
+                        "source_identity": document["capture"]["source_identity"],
+                        "source_type": document["capture"]["source_type"],
+                        "tenant": document["capture"]["tenant_id"],
+                        "user": document["capture"]["user_id"],
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+                for document in benchmark["corpus"]
+            ),
+            encoding="utf-8",
+        )
+        captured = cli.capture_batch(capture_path).get("results")
+        if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):
+            raise HippoRAGSchemaError("reader capture count does not match corpus")
+        cid_to_doc: dict[str, str] = {}
+        for result, document in zip(captured, benchmark["corpus"], strict=True):
+            cid = result.get("cid") if isinstance(result, Mapping) else None
+            if not isinstance(cid, str) or not cid or cid in cid_to_doc or cid != document["doc_id"]:
+                raise HippoRAGSchemaError("reader capture CID custody is invalid")
+            cid_to_doc[cid] = document["doc_id"]
+        answer_path = Path(temp) / "questions.jsonl"
+        answer_path.write_text(
+            "".join(
+                json.dumps(
+                    {
+                        "question_id": question["question_id"],
+                        "question": question["question"],
+                        "context": {"tenant_id": tenant, "user_id": "benchmark-corpus", "role": "reader"},
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+                for question in benchmark["questions"]
+            ),
+            encoding="utf-8",
+        )
+        answer_cli = (
+            replace(cli, global_flags=[*cli.global_flags, "--evaluation-read-only"])
+            if isinstance(cli, MnemoCLI)
+            else cli
+        )
+        payload = answer_cli.eval_answer_batch(answer_path)
+    results = payload.get("results")
+    if not isinstance(results, list) or len(results) != len(benchmark["questions"]):
+        raise HippoRAGSchemaError("reader answer count mismatch")
+    traces: list[dict[str, Any]] = []
+    for question, result in zip(benchmark["questions"], results, strict=True):
+        if not isinstance(result, Mapping) or result.get("question_id") != question["question_id"]:
+            raise HippoRAGSchemaError("reader answer order drift")
+        graph_cids = list(dict.fromkeys(
+            cid
+            for hop in result.get("hops", [])
+            if "graph" in hop.get("channels", []) or "ppr" in hop.get("channels", [])
+            for cid in hop.get("retrieved_cids", [])
+            if cid in cid_to_doc
+        ))
+        traces.append(
+            {
+                "abstained": result.get("abstained"),
+                "answer": result.get("answer"),
+                "authorized_evidence_fingerprint": _qa_fingerprint(
+                    list(dict.fromkeys(
+                        cid
+                        for hop in result.get("hops", [])
+                        for cid in hop.get("retrieved_cids", [])
+                        if cid in cid_to_doc
+                    ))
+                ),
+                "authorized_retrieval_hops": first_hop_rows(
+                    result.get("hops", []),
+                    {row["doc_id"]: row["capture"] for row in benchmark["corpus"]},
+                ),
+                "claims": result.get("claims"),
+                "graph_evidence": {
+                    "evidence_cids": graph_cids,
+                    "participated": bool(graph_cids),
+                    "provenance_linked": bool(graph_cids),
+                },
+                "hops": result.get("hops"),
+                "question_id": question["question_id"],
+                "reader": result.get("reader"),
+                "scoring_family": "qa",
+            }
+        )
+    labels = [
+        {"answers": question["answers"], "question_id": question["question_id"]}
+        for question in benchmark["questions"]
+    ]
+    return benchmark, traces, score_profile("qa-em-f1-v1", labels, traces)
+
+
+def normalize_reader_qa(value: Mapping[str, Any]) -> dict[str, Any]:
+    benchmark = normalize(value)
+    tenant = f"public-hipporag-qa-{benchmark['dataset']}"
+    corpus = []
+    for document in benchmark["corpus"]:
+        capture = {
+            "actor": "user",
+            "content": f"{document['title']}\n{document['content']}",
+            "content_pointer": None,
+            "modality": "text",
+            "sensitivity": 0,
+            "source_identity": document["doc_id"],
+            "source_type": f"hipporag:{benchmark['dataset']}",
+            "tenant_id": tenant,
+            "user_id": "benchmark-corpus",
+        }
+        corpus.append(
+            {
+                **document,
+                "capture": capture,
+                "doc_id": capture_cid(capture),
+            }
+        )
+    old_to_new = {
+        old["doc_id"]: new["doc_id"]
+        for old, new in zip(benchmark["corpus"], corpus, strict=True)
+    }
+    return {
+        **benchmark,
+        "corpus": corpus,
+        "questions": [
+            {
+                **question,
+                "gold_references": [old_to_new[item] for item in question["gold_references"]],
+            }
+            for question in benchmark["questions"]
+        ],
+    }
+
+
+def _qa_fingerprint(cids: list[str]) -> str:
+    return hashlib.sha256((json.dumps(sorted(cids), separators=(",", ":")) + "\n").encode()).hexdigest()
 
 
 def _dataset_name(filename: str) -> str:

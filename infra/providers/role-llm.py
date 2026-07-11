@@ -39,6 +39,7 @@ from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.providers.grounded_protocol import (
     DECODING_OPTIONS,
     GENERATION_SPEC,
+    PROMPT_BUNDLES,
     REQUEST_ENVELOPE,
     render_prompt,
     role_digests,
@@ -151,14 +152,14 @@ def _chat(
     return last if isinstance(last, dict) else {}
 
 
-def _chat_once(system: str, user: str) -> dict:
+def _chat_once(role: str, system: str, user: str) -> dict:
     """One preregistered attempt for grounded roles; no hidden schema retry."""
     body = json.dumps(
         {
             "model": OLLAMA_MODEL,
             "stream": REQUEST_ENVELOPE["stream"],
             "think": REQUEST_ENVELOPE["think"],
-            "format": REQUEST_ENVELOPE["format"],
+            "format": PROMPT_BUNDLES[role]["ollama_format"],
             "options": DECODING_OPTIONS,
             "messages": [
                 {"role": "system", "content": system},
@@ -236,9 +237,10 @@ def _grounded_metadata(role: str, model_content_digest: str) -> dict[str, object
 
 def query_decomposer(request: dict) -> dict:
     model_content_digest = _model_content_digest()
-    parsed = _chat_once(*render_prompt(
-        "query_decomposer", request.get("question"), request.get("evidence")
-    ))
+    parsed = _chat_once(
+        "query_decomposer",
+        *render_prompt("query_decomposer", request.get("question"), request.get("evidence")),
+    )
     queries = parsed.get("queries")
     if not isinstance(queries, list):
         raise ValueError("model returned invalid decomposer schema")
@@ -252,9 +254,10 @@ def query_decomposer(request: dict) -> dict:
 
 def grounded_reader(request: dict) -> dict:
     model_content_digest = _model_content_digest()
-    parsed = _chat_once(*render_prompt(
-        "grounded_reader", request.get("question"), request.get("evidence")
-    ))
+    parsed = _chat_once(
+        "grounded_reader",
+        *render_prompt("grounded_reader", request.get("question"), request.get("evidence")),
+    )
     if set(parsed) != {"claims", "unresolved"}:
         raise ValueError("model returned invalid grounded-reader schema")
     if _model_content_digest() != model_content_digest:

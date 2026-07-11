@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v2"
+VERSION = "phase12-candidate-v3"
 SERIALIZER_SPEC = {
     "id": "authorized-evidence-json-v2",
     "encoding": "utf-8",
@@ -28,7 +28,7 @@ DECODING_OPTIONS = {
 REQUEST_ENVELOPE = {
     "stream": False,
     "think": False,
-    "format": "json",
+    "format_source": "prompt_bundle.ollama_format",
     "message_roles": ["system", "user"],
 }
 GENERATION_SPEC = {
@@ -52,6 +52,14 @@ PROMPT_BUNDLES = {
             "follow-up is needed."
         ),
         "schema": {"queries": ["string"]},
+        "ollama_format": {
+            "type": "object",
+            "properties": {
+                "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 4}
+            },
+            "required": ["queries"],
+            "additionalProperties": False,
+        },
         "data_prefix": "DATA:\n",
         "render_template": _RENDER_TEMPLATE,
     },
@@ -67,6 +75,31 @@ PROMPT_BUNDLES = {
         "schema": {
             "claims": [{"text": "string", "evidence_cids": ["string"]}],
             "unresolved": "boolean",
+        },
+        "ollama_format": {
+            "type": "object",
+            "properties": {
+                "claims": {
+                    "type": "array",
+                    "maxItems": 20,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": {"type": "string"},
+                            "evidence_cids": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 1,
+                            },
+                        },
+                        "required": ["text", "evidence_cids"],
+                        "additionalProperties": False,
+                    },
+                },
+                "unresolved": {"type": "boolean"},
+            },
+            "required": ["claims", "unresolved"],
+            "additionalProperties": False,
         },
         "data_prefix": "DATA:\n",
         "render_template": _RENDER_TEMPLATE,
