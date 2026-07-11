@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
-status: planning
-stopped_at: Phase 11 planned; implementation next
-last_updated: "2026-07-10T22:38:56Z"
-last_activity: 2026-07-10
+status: executing
+stopped_at: Phase 11 retrieval scope complete; Phase 12 planning next
+last_updated: "2026-07-11T07:15:00Z"
+last_activity: 2026-07-11
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 2
-  completed_plans: 2
-  percent: 14
+  completed_phases: 2
+  total_plans: 5
+  completed_plans: 5
+  percent: 29
 ---
 
 # Project State
@@ -32,14 +32,14 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Start the Plan A/Plan B post-v1.0 milestone from the authoritative execution plans.
+**Current focus:** Plan and execute grounded multi-hop answer synthesis after verified deterministic retrieval custody.
 
 ## Current Position
 
-Phase: 11 of 16 — Deterministic Public Retrieval Tracks
-Plan: 0 of 3
-Status: Planned and ready to execute; exact CI externally blocked by GitHub billing
-Last activity: 2026-07-10 — Phase 11 public retrieval research and three execution plans completed
+Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
+Plan: not yet planned
+Status: Phase 11 retrieval scope complete; exact CI externally blocked by GitHub billing
+Last activity: 2026-07-11 — Four Phase 11 bundles verified/reproduced and closure evidence recorded
 
 ## Performance Metrics
 
@@ -64,11 +64,13 @@ Last activity: 2026-07-10 — Phase 11 public retrieval research and three execu
 | 09.2 | 2 | - | - |
 | 09.3 | 1 | - | - |
 | 10 | 2 | - | - |
+| 11 | 3 | - | - |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
 - [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
 - [CI]: GitHub Actions run 29128327918 and its retry were rejected before checkout because account billing failed or the spending limit was reached; exact-SHA CI remains open.
 
