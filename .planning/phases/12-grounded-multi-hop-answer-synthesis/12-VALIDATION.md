@@ -21,6 +21,8 @@
 - Verify candidate prompt custody against the aggregate digest of both complete
   role bundles and verify the concrete serializer and decoding digests; provider
   self-disclosure alone is not evidence.
+- Synthetic provider checks must prove each role-specific Ollama JSON Schema is
+  used; generic `format: json` is not an acceptable substitute.
 - Commit code/config before `qa_hard_v2`; then write a no-overwrite external
   candidate manifest containing the resulting git SHA and all model/prompt/
   config digests. Verify that manifest before every one-shot run. Never patch against individual frozen

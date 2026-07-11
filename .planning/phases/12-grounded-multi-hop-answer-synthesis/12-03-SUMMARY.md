@@ -24,7 +24,8 @@ approve its own citations.
   afterward. Command/model/profile selectors and exact digests fail closed.
 - Provider stdout/stderr are consumed with bounded streaming, so oversized
   command output is rejected before unbounded capture can occur.
-- Candidate protocol v2 binds both complete role prompt bundles, schemas, DATA
+- Candidate protocol v3 binds both complete role prompt bundles, role-specific
+  Ollama JSON Schemas, DATA
   framing/render layout, the concrete canonical evidence serializer, all
   decoding options, and the complete generation request envelope.
 - Evaluation mode disables durable HTTP embedding caches and rejects command
