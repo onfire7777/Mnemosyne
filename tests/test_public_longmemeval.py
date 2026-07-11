@@ -339,7 +339,7 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v4", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v5", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "b" * 64,
         "prompt_sha256": digests["prompt_sha256"], "serializer_sha256": digests["serializer_sha256"],
         "decoding_sha256": digests["decoding_sha256"], "protocol_sha256": digests["protocol_sha256"],
@@ -358,14 +358,14 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
         write_candidate_manifest(path, manifest)
 
 
-def test_candidate_manifest_builder_binds_budgets_abstention_and_v4_custody() -> None:
+def test_candidate_manifest_builder_binds_budgets_abstention_and_v5_custody() -> None:
     manifest = build_candidate_manifest(
         model_content_sha256="b" * 64,
         git_sha="a" * 40,
         created_at_utc="2026-07-11T00:00:00Z",
     )
     protocol = load_qa_protocol()
-    assert manifest["candidate_version"] == "phase12-candidate-v4"
+    assert manifest["candidate_version"] == "phase12-candidate-v5"
     assert manifest["evidence_budget"] == protocol["evidence_budget"]
     assert manifest["abstention"] == protocol["abstention"]
 
@@ -376,7 +376,7 @@ def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_pa
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v4", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v5", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "b" * 64, **digests,
         "evidence_budget": load_qa_protocol()["evidence_budget"],
         "abstention": load_qa_protocol()["abstention"],
