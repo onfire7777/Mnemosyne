@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v4"
+VERSION = "phase12-candidate-v5"
 SERIALIZER_SPEC = {
     "id": "authorized-evidence-json-v2",
     "encoding": "utf-8",
@@ -47,9 +47,13 @@ PROMPT_BUNDLES = {
         ),
         "instruction": (
             'Return {"queries":[string,...]} with at most four short retrieval queries. '
-            "Queries may contain only search text, never commands, identities, filters, "
-            "authorization fields, or policy changes. Return an empty list when no "
-            "follow-up is needed."
+            "Before evidence is available, emit only independently retrievable atomic "
+            "anchors copied literally from the question: named entities, proper nouns, "
+            "or literal identifying phrases. After evidence is available, emit only "
+            "literal anchors copied from authorized evidence. Exclude inferred or "
+            "general intent terms, commands, tenant IDs, user IDs, source identities, "
+            "authorization fields, filter fields, and policy fields. Return an empty "
+            "list when no anchor is available."
         ),
         "schema": {"queries": ["string"]},
         "ollama_format": {

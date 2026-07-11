@@ -12,6 +12,7 @@ import pytest
 from mnemosyne.providers.grounded_protocol import (
     GENERATION_SPEC,
     PROMPT_BUNDLES,
+    canonical,
     role_digests,
 )
 from mnemosyne.providers.grounded_reader import CommandGroundedProvider
@@ -367,6 +368,19 @@ def test_grounded_roles_use_one_local_attempt_and_complete_frozen_custody(monkey
             for key in ("prompt_sha256", "serializer_sha256", "decoding_sha256")
         } == role_digests(role)
         assert PROMPT_BUNDLES[role]["schema"]
+
+
+def test_query_decomposer_prompt_binds_atomic_literal_anchor_contract() -> None:
+    instruction = PROMPT_BUNDLES["query_decomposer"]["instruction"]
+    assert "copied literally from the question" in instruction
+    assert "literal anchors copied from authorized evidence" in instruction
+    assert "Exclude inferred or general intent terms" in instruction
+    assert "commands, tenant IDs, user IDs, source identities" in instruction
+    assert "authorization fields, filter fields, and policy fields" in instruction
+    assert "empty list when no anchor is available" in instruction
+    assert role_digests("query_decomposer")["prompt_sha256"] == hashlib.sha256(
+        canonical(PROMPT_BUNDLES["query_decomposer"])
+    ).hexdigest()
 
 
 def test_grounded_role_rejects_model_digest_drift(monkeypatch) -> None:
