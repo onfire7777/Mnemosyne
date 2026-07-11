@@ -4,7 +4,7 @@ Status: in progress — the consumed v3 frozen run failed systemically; no held-
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v8` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v9` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:4b`, exact content digest required
 - Transport retries: zero; maximum attempts per protected split: one
 - Evidence: at most 20 records, 24,000 characters, and 3 hops
@@ -27,7 +27,7 @@ The v3 `qa_hard_v2` one-shot was consumed and returned 24/24 empty
 abstentions with zero retrieval hops. Aggregate-only diagnosis identified the
 systemic pre-provider query-support gate; no protected question, trace, or
 content was inspected. LongMemEval-QA and Hippo reader evaluation remain not
-run. A new committed v8 candidate is required before any further protected
+run. A new committed v9 candidate is required before any further protected
 action.
 
 Candidate v4 was rejected at the synthetic live-model gate because its initial
@@ -53,5 +53,15 @@ schema. It never reached a protected run and has no ledger. Diagnostics:
 `~/.local/share/mnemosyne/diagnostics/v7-synthetic-transcript/`
 (`result.json` SHA-256 `865be871bd417f68ba653c417b3610a95c5c846c36005ff35feea2f3c4d33e85`,
 `transcript.jsonl` SHA-256 `d0e611354f89582578b4dc4a42bc1ff712d92542edc3188ab0a01bd73f828812`).
+
+Historical candidate v8 (retired) passed structural retrieval but corrupted exact evidence text
+(`Q3 2026` became `Q3 2:026`) at the synthetic reader gate. It never reached a
+protected run and has no ledger. Candidate v9 makes model-authored claim text
+impossible by selecting replay-validated raw evidence spans.
+Candidate v9 public traces retain rendered claim text plus only privacy-safe
+span custody (`cid`, Unicode code-point `start`/`end`, and UTF-8
+`slice_sha256`). Bundle verification reconstructs each slice and the
+single-space rendering from the benchmark capture corpus and exact authorized
+CID mapping rather than trusting trace self-attestation.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

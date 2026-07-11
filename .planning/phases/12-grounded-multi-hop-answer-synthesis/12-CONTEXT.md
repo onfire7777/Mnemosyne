@@ -52,6 +52,13 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
 - Candidate v7 failed its synthetic exact-runtime reader gate and has no
   protected ledger. Candidate v8 uses claims-only exact-CID generation and
   derives unresolved state application-side.
+- Historical candidate v8 (retired) failed its synthetic reader quality gate through copied-text
+  corruption and has no protected ledger. Candidate v9 uses exact raw evidence
+  spans with application-side reconstruction.
+- Candidate v9 rejects non-string or empty evidence without coercion, renders
+  ordered spans with one ASCII space, and hashes each raw slice as UTF-8.
+  Public verification independently reconstructs claim text and hashes from
+  benchmark capture custody and the exact authorized CID mapping.
 
 ## Completion Boundary
 
