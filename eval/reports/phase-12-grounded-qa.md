@@ -4,7 +4,7 @@ Status: in progress — the consumed v3 frozen run failed systemically; no held-
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v12` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v13` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -82,5 +82,11 @@ same full-sentence output and likewise has no protected ledger. Candidate v12
 adds one generic, non-benchmark contrastive contract example so the local model
 must distinguish an answer value from its supporting sentence; no rail, schema,
 model, budget, or retry setting changes.
+Candidate v12 passed the repeated synthetic gate, then consumed its protected
+attempt without a benchmark result because the outer CLI batch wrapper timed
+out at 120 seconds. The ledger exists, the result file does not, and no
+question-level protected data was inspected. Candidate v13 raises only that
+outer frozen-batch process bound to 3,600 seconds; per-provider timeouts, zero
+retries, protocol content, retrieval rails, and answer custody are unchanged.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

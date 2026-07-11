@@ -103,6 +103,10 @@ def test_no_recall_comparator_reports_exact_regressions() -> None:
     assert failed["regressions"]["recall_at_5"] == {"baseline": 1.0, "measured": 0.99}
 
 
+def test_frozen_batch_timeout_covers_multi_question_local_inference() -> None:
+    assert runner._FROZEN_BATCH_TIMEOUT_SECONDS == 3600
+
+
 def test_attempt_and_result_paths_are_external_exclusive_and_non_symlink(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

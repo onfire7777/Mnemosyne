@@ -22,6 +22,7 @@ _GOLD_FIELDS = {"gold_answer", "gold_aliases", "relevant_doc_ids", "distractor_a
 _ROOT = Path(__file__).resolve().parents[3]
 _FROZEN_DATASET = Path(__file__).with_name("qa_hard_v2.json").resolve()
 _FROZEN_SHA256 = "1864974807f2171904a5e5f04b727b3cbfb258f94c1280106ecc08a4dade52e2"
+_FROZEN_BATCH_TIMEOUT_SECONDS = 3600
 
 
 def load_dataset(path: Path, *, allow_frozen: bool = False) -> dict[str, Any]:
@@ -255,7 +256,11 @@ def main(argv: list[str] | None = None) -> int:
             else {}
         )
     dataset = load_dataset(args.dataset, allow_frozen=frozen)
-    cli = MnemoCLI(store=str(store), env=runtime_env)
+    cli = MnemoCLI(
+        store=str(store),
+        env=runtime_env,
+        timeout_s=_FROZEN_BATCH_TIMEOUT_SECONDS if frozen else 120.0,
+    )
     result = evaluate(dataset, cli)
     result["candidate_manifest_sha256"] = hashlib.sha256(args.candidate_manifest.read_bytes()).hexdigest()
     _write_exclusive(output, result)
