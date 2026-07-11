@@ -19,7 +19,7 @@ class HippoRAGSchemaError(ValueError):
     """Pinned HippoRAG assets cannot be normalized without ambiguity."""
 
 
-_QUERY_SHARD_SIZE = 125
+_QUERY_SHARD_SIZE = 50
 
 
 def run(
