@@ -154,9 +154,9 @@ def test_source_bound_anchor_normalizer_dedupes_and_enforces_budget() -> None:
 @pytest.mark.parametrize(
     ("proposal", "source", "expected"),
     [
-        ("project cobalt", "where is project cobalt stored?", ("project cobalt",)),
+        ("project cobalt", "where is project cobalt stored?", ("project cobalt", "cobalt", "project")),
         ("CObALT", "where is cobalt stored?", ("cobalt",)),
-        ("where is cobalt stored", "where is cobalt stored?", ("where is cobalt stored",)),
+        ("where is cobalt stored", "where is cobalt stored?", ("where is cobalt stored", "stored", "cobalt")),
         ("policy field secret", "policy field secret", ()),
     ],
 )

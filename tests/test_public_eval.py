@@ -486,7 +486,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         "family": "qa", "independent_external_reproduction": False,
         "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
         "pbpp_headline_eligible": False, "publishable": False,
-        "qa_protocol_version": "phase12-candidate-v14", "revision": "c" * 40,
+        "qa_protocol_version": "phase12-candidate-v15", "revision": "c" * 40,
         "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -596,7 +596,7 @@ def test_qa_custody_fails_closed(
     metadata = {
         "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark), "family": "qa",
         "independent_external_reproduction": False, "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
-        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v14",
+        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v15",
         "revision": "c" * 40, "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }

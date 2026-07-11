@@ -4,7 +4,7 @@ Status: in progress — consumed v3 and v13 frozen runs failed systemically; no 
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v14` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v15` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -106,5 +106,13 @@ normalizer may recover the exact token-identical source span as a query. The
 fallback rejects command/policy terms and Unicode-confusable control labels,
 retains the existing entity path when available, and still sends every query
 through the unchanged retrieval support and authorization gates.
+
+Candidate v14 passed the original entity synthetic case twice but failed the
+new lowercase literal case twice: the first hop retrieved only the ownership
+record, and the reader returned that record instead of the answer. It never
+reached protected evaluation and has no ledger. Candidate v15 retains the exact
+literal proposal and, only on the fallback path, adds trailing substantive
+source tokens in reverse order within the existing four-query budget. This
+lets lowercase bridge terms participate without changing any retrieval rail.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
