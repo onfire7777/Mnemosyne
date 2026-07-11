@@ -8,6 +8,7 @@ import pytest
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters.longmemeval import run
+from eval.public.bundle import _scoring_labels
 
 
 class FakeCLI:
@@ -150,6 +151,18 @@ def test_normalized_benchmark_reproduction_is_canonical() -> None:
     assert reproduced == benchmark
     assert traces == first_traces
     assert metrics == first_metrics
+
+
+def test_bundle_verifier_projects_session_golds() -> None:
+    benchmark, _, _ = run(_assets(), FakeCLI())  # type: ignore[arg-type]
+    labels = _scoring_labels(benchmark)
+    assert labels == [
+        {"question_id": "q-1", "gold_references": ["q1-support"]},
+        {"question_id": "q-2", "gold_references": ["q2-support"]},
+    ]
+    benchmark["questions"][0]["gold_references"] = ["different"]
+    with pytest.raises(ValueError, match="conflicting benchmark gold fields"):
+        _scoring_labels(benchmark)
 
 
 def test_oracle_may_be_the_official_answer_session_subset() -> None:

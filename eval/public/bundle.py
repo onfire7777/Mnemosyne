@@ -513,9 +513,26 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
         if not isinstance(question, dict):
             raise BundleError("scoring profile question schema is invalid")
         label: dict[str, Any] = {"question_id": question.get("question_id")}
+        present_golds = [
+            question[key]
+            for key in (
+                "gold_references",
+                "answer_session_ids",
+                "gold_doc_ids",
+                "gold_passage_ids",
+            )
+            if key in question
+        ]
+        if len(present_golds) > 1 and any(
+            value != present_golds[0] for value in present_golds[1:]
+        ):
+            raise BundleError("conflicting benchmark gold fields")
         gold = question.get(
             "gold_references",
-            question.get("gold_doc_ids", question.get("gold_passage_ids")),
+            question.get(
+                "answer_session_ids",
+                question.get("gold_doc_ids", question.get("gold_passage_ids")),
+            ),
         )
         if gold is not None:
             label["gold_references"] = gold
