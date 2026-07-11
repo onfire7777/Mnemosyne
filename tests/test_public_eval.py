@@ -32,7 +32,9 @@ def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
     assert result["publishable"] is False
     assert verify_bundle(out)["valid"] is True
 
-    traces = [json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()]
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
     assert traces
     assert all(t["stored_records"] and "ranked_retrieved_hits" in t for t in traces)
     assert all(t["scoring_family"] == "deterministic-retrieval" for t in traces)
@@ -57,17 +59,29 @@ def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -
 
     out3 = tmp_path / "secret"
     run_public_suite("smoke", out3)
-    traces = (out3 / "traces.jsonl").read_text() + '"ghp_abcdefghijklmnopqrstuvwxyz0123456789"\n'
+    traces = (
+        out3 / "traces.jsonl"
+    ).read_text() + '"ghp_abcdefghijklmnopqrstuvwxyz0123456789"\n'
     (out3 / "traces.jsonl").write_text(traces)
     _refresh_digest(out3, "traces.jsonl")
     with pytest.raises(BundleError, match="secret"):
         verify_bundle(out3)
 
+    out3_end = tmp_path / "secret-end"
+    run_public_suite("smoke", out3_end)
+    traces = (out3_end / "traces.jsonl").read_text() + '"-----END PRIVATE KEY-----"\n'
+    (out3_end / "traces.jsonl").write_text(traces)
+    _refresh_digest(out3_end, "traces.jsonl")
+    with pytest.raises(BundleError, match="secret"):
+        verify_bundle(out3_end)
+
     out4 = tmp_path / "count"
     run_public_suite("smoke", out4)
     metrics = json.loads((out4 / "metrics.json").read_text())
     metrics["trace_count"] += 1
-    (out4 / "metrics.json").write_text(json.dumps(metrics, sort_keys=True, separators=(",", ":")) + "\n")
+    (out4 / "metrics.json").write_text(
+        json.dumps(metrics, sort_keys=True, separators=(",", ":")) + "\n"
+    )
     _refresh_digest(out4, "metrics.json")
     with pytest.raises(BundleError, match="count"):
         verify_bundle(out4)
@@ -79,8 +93,12 @@ def test_reproduction_uses_bundle_custody_and_is_canonical(tmp_path: Path) -> No
     run_public_suite("smoke", source)
     reproduce_bundle(source, dest)
     assert verify_bundle(dest)["valid"] is True
-    assert (source / "traces.jsonl").read_bytes() == (dest / "traces.jsonl").read_bytes()
-    assert (source / "metrics.json").read_bytes() == (dest / "metrics.json").read_bytes()
+    assert (source / "traces.jsonl").read_bytes() == (
+        dest / "traces.jsonl"
+    ).read_bytes()
+    assert (source / "metrics.json").read_bytes() == (
+        dest / "metrics.json"
+    ).read_bytes()
     with pytest.raises(FileExistsError):
         reproduce_bundle(source, dest)
 
@@ -97,9 +115,16 @@ def test_bundle_rejects_wrong_or_blended_metric_family(tmp_path: Path) -> None:
 
     blended = tmp_path / "blended"
     run_public_suite("smoke", blended)
-    traces = [json.loads(line) for line in (blended / "traces.jsonl").read_text().splitlines()]
+    traces = [
+        json.loads(line) for line in (blended / "traces.jsonl").read_text().splitlines()
+    ]
     traces[0]["scoring_family"] = "qa"
-    (blended / "traces.jsonl").write_text("".join(json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n" for trace in traces))
+    (blended / "traces.jsonl").write_text(
+        "".join(
+            json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
+            for trace in traces
+        )
+    )
     _refresh_digest(blended, "traces.jsonl")
     with pytest.raises(BundleError, match="blended"):
         verify_bundle(blended)
@@ -117,7 +142,9 @@ def test_bundle_rejects_joint_benchmark_and_manifest_tampering(tmp_path: Path) -
         verify_bundle(out)
 
 
-def test_bundle_rejects_metrics_that_do_not_recompute_from_traces(tmp_path: Path) -> None:
+def test_bundle_rejects_metrics_that_do_not_recompute_from_traces(
+    tmp_path: Path,
+) -> None:
     out = tmp_path / "bad-metrics"
     run_public_suite("smoke", out)
     metrics = json.loads((out / "metrics.json").read_text())
@@ -132,7 +159,9 @@ def test_bundle_rejects_metrics_that_do_not_recompute_from_traces(tmp_path: Path
 def test_bundle_binds_traces_and_metric_to_anchored_benchmark(tmp_path: Path) -> None:
     out = tmp_path / "unbound-trace"
     run_public_suite("smoke", out)
-    traces = [json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()]
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
     traces[0]["question_id"] = "not-in-anchored-benchmark"
     traces[0]["gold_references"] = ["doc-orchard"]
     (out / "traces.jsonl").write_text(
@@ -161,6 +190,30 @@ def test_registry_rejects_unknown_adapter(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr("eval.public.runner.load_registry", lambda: registry)
     with pytest.raises(ValueError, match="unsupported adapter"):
         run_public_suite("smoke", "/unused")
+
+
+def test_asset_digest_preflight_runs_before_cli_evaluation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    registry = load_registry()
+    registry["longmemeval-retrieval"]["dataset_sha256"] = "0" * 64
+    monkeypatch.setattr(runner, "load_registry", lambda: registry)
+    monkeypatch.setattr(runner, "load_asset_set", lambda *_args: {})
+    monkeypatch.setitem(
+        runner._NORMALIZERS, "longmemeval", lambda _value: {"normalized": True}
+    )
+    monkeypatch.setitem(
+        runner._ADAPTERS,
+        "longmemeval",
+        lambda *_args: pytest.fail("adapter ran before digest preflight"),
+    )
+
+    with pytest.raises(ValueError, match="normalized benchmark digest"):
+        run_public_suite(
+            "longmemeval-retrieval", tmp_path / "out", dataset_dir=tmp_path
+        )
 
 
 def test_reproduction_rejects_canonical_output_drift(
@@ -213,35 +266,69 @@ def test_qa_family_requires_disclosed_reader_and_judge(tmp_path: Path) -> None:
     metrics.update(family="qa")
     metrics["interval"]["method"] = "bootstrap"
     _rewrite_json(out / "metrics.json", metrics)
-    traces = [json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()]
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
     for trace in traces:
         trace["scoring_family"] = "qa"
-    (out / "traces.jsonl").write_text("".join(json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n" for trace in traces))
+    (out / "traces.jsonl").write_text(
+        "".join(
+            json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
+            for trace in traces
+        )
+    )
     for name in ("config.json", "metrics.json", "traces.jsonl"):
         _refresh_digest(out, name)
     with pytest.raises(BundleError, match="reader and judge"):
         verify_bundle(out)
 
 
-def test_generalized_registry_profile_recomputes_benchmark_owned_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generalized_registry_profile_recomputes_benchmark_owned_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from eval.public.bundle import write_bundle
 
     benchmark = {
         "corpus": [{"doc_id": "a", "content": "A"}, {"doc_id": "b", "content": "B"}],
         "questions": [{"question_id": "q", "gold_references": ["a", "b"]}],
     }
-    traces = [{"question_id": "q", "gold_references": ["a", "b"], "ranked_retrieved_hits": ["a", "b"], "scoring_family": "deterministic-retrieval", "stored_records": ["a", "b"], "answer": None}]
+    traces = [
+        {
+            "question_id": "q",
+            "gold_references": ["a", "b"],
+            "ranked_retrieved_hits": ["a", "b"],
+            "scoring_family": "deterministic-retrieval",
+            "stored_records": ["a", "b"],
+            "answer": None,
+        }
+    ]
     metadata = {
-        "adapter": "fixture", "dataset_sha256": _canonical_digest(benchmark),
-        "family": "deterministic-retrieval", "independent_external_reproduction": False,
-        "interval_method": "bootstrap", "license": "MIT", "pbpp_headline_eligible": False,
-        "publishable": False, "revision": "a" * 40, "scoring_profile": "hipporag-retrieval-v1",
-        "split_role": "test", "suite": "generalized-fixture",
+        "adapter": "fixture",
+        "dataset_sha256": _canonical_digest(benchmark),
+        "family": "deterministic-retrieval",
+        "independent_external_reproduction": False,
+        "interval_method": "bootstrap",
+        "license": "MIT",
+        "pbpp_headline_eligible": False,
+        "publishable": False,
+        "revision": "a" * 40,
+        "scoring_profile": "hipporag-retrieval-v1",
+        "split_role": "test",
+        "suite": "generalized-fixture",
     }
-    monkeypatch.setattr("eval.public.runner.load_registry", lambda: {"generalized-fixture": dict(metadata)})
-    measured = score_profile("hipporag-retrieval-v1", [{"question_id": "q", "gold_references": ["a", "b"]}], traces)
+    monkeypatch.setattr(
+        "eval.public.runner.load_registry",
+        lambda: {"generalized-fixture": dict(metadata)},
+    )
+    measured = score_profile(
+        "hipporag-retrieval-v1",
+        [{"question_id": "q", "gold_references": ["a", "b"]}],
+        traces,
+    )
     out = tmp_path / "generalized"
-    write_bundle(out, benchmark=benchmark, metadata=metadata, metrics=measured, traces=traces)
+    write_bundle(
+        out, benchmark=benchmark, metadata=metadata, metrics=measured, traces=traces
+    )
     assert verify_bundle(out)["valid"] is True
     metrics = json.loads((out / "metrics.json").read_text())
     metrics["metrics"]["recall_at_2"] = 0.0
@@ -331,11 +418,16 @@ def test_external_multi_asset_adapter_reproduces_from_embedded_custody(
 
     monkeypatch.setattr(runner, "load_registry", lambda: {"external-fixture": suite})
     monkeypatch.setitem(runner._ADAPTERS, "external-fixture", adapter)
+    monkeypatch.setitem(
+        runner._NORMALIZERS, "external-fixture", lambda _value: benchmark
+    )
     source, reproduced = tmp_path / "source", tmp_path / "reproduced"
     run_public_suite("external-fixture", source, dataset_dir=dataset)
     reproduce_bundle(source, reproduced)
     assert verify_bundle(reproduced)["valid"] is True
-    assert (source / "traces.jsonl").read_bytes() == (reproduced / "traces.jsonl").read_bytes()
+    assert (source / "traces.jsonl").read_bytes() == (
+        reproduced / "traces.jsonl"
+    ).read_bytes()
 
 
 def _refresh_digest(bundle: Path, name: str) -> None:

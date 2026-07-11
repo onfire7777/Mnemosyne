@@ -13,6 +13,10 @@
   `821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c`
   (15,388,478 bytes).
 - The pinned Hugging Face dataset card and code repository both declare MIT.
+- The pinned cleaned text contains four secret-shaped substrings: three
+  GitHub-token patterns and one private-key header. Normalization replaces them
+  deterministically with `[REDACTED_SECRET]`, records the count, retains the raw
+  asset digests, and binds the sanitized normalized digest.
 - Pinned asset base URL:
   `https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/`.
   Cite Wu et al., *LongMemEval* (ICLR 2025, arXiv:2410.10813).
