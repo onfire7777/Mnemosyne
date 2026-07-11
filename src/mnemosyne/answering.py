@@ -90,12 +90,13 @@ def _literal_source_spans(proposal: str, source: str) -> tuple[str, ...]:
     ):
         return ()
     words = list(_ANCHOR_TOKEN.finditer(source))
+    control_ranges = _control_ranges(source)
     source_tokens = tuple(_anchor_tokens(match.group(0))[0] for match in words)
     for index in range(len(source_tokens) - len(proposed) + 1):
         if source_tokens[index : index + len(proposed)] != proposed:
             continue
         start, end = words[index].start(), words[index + len(proposed) - 1].end()
-        if any(left < end and start < right for left, right in _control_ranges(source)):
+        if any(left < end and start < right for left, right in control_ranges):
             return ()
         exact = source[start:end]
         trailing = [
@@ -105,7 +106,20 @@ def _literal_source_spans(proposal: str, source: str) -> tuple[str, ...]:
             and not _FALLBACK_DENY_TERMS.intersection(_anchor_tokens(match.group(0)))
         ]
         return tuple(dict.fromkeys((exact, *trailing)))
-    return ()
+    shared = [
+        (match.group(0), index)
+        for index, match in enumerate(words)
+        if _anchor_tokens(match.group(0))[0] in proposed
+        and _substantive(match.group(0))
+        and not _FALLBACK_DENY_TERMS.intersection(_anchor_tokens(match.group(0)))
+        and not any(
+            left < match.end() and match.start() < right
+            for left, right in control_ranges
+        )
+    ]
+    if not shared:
+        return ()
+    return (min(shared, key=lambda item: (-len(item[0]), item[1]))[0],)
 
 
 def _authorized_literal_tokens(source: str) -> tuple[str, ...]:

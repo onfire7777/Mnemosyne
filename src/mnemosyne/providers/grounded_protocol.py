@@ -7,7 +7,7 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v17"
+VERSION = "phase12-candidate-v18"
 MODEL_SELECTOR = "qwen3:8b"
 MODEL_CONTENT_SHA256 = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
 ANCHOR_NORMALIZER_SPEC = {
@@ -20,6 +20,7 @@ ANCHOR_NORMALIZER_SPEC = {
     "literal_fallback": {
         "only_without_entity_match": True,
         "exact_source_token_span": True,
+        "partial_proposal_fallback": "longest-shared-substantive-source-token",
         "trailing_substantive_tokens": "later-hops-only-reverse-source-order-within-query-budget",
         "deny_terms": ["command", "commands", "ignore", "instruction", "instructions", "policy"],
         "confusable_control_labels_fail_closed": True,

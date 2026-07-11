@@ -4,7 +4,7 @@ Status: in progress — consumed v3 and v13 frozen runs failed systemically; no 
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v17` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v18` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -129,5 +129,18 @@ instead of proposing the unseen bridge. Candidate v17 extends deterministic
 later-hop traversal to safe substantive tokens from authorized evidence in
 reverse source order; control ranges, deny terms, budgets, and ordinary
 retrieval authorization remain enforced.
+
+Candidate v17 passed all four expanded synthetic gates, then its single
+protected attempt answered 2/24 with three hops and canonical claims while 22
+items abstained at zero hops. Aggregate-only metrics were EM/F1
+`0.08333333333333333`, Recall@5 `0.08333333333333333`, and nDCG@5 `0.0625`.
+No protected content or per-ID result was inspected. Result SHA-256:
+`908d50dd3ce340ba09ccb1e248749d175b11cb5d1a96b2a1bcb484d0cfb69d11`;
+ledger SHA-256:
+`c3826c2e7f4777e9361086e7648ad7adcee3786f8cb1d50436ee7e6fa1d7fe45`.
+Candidate v18 adds a fail-closed partial-proposal fallback: when no full literal
+span matches, select only the longest substantive source token also present in
+the proposal. Control and command terms remain ineligible, and the selected
+token still passes through ordinary retrieval and authorization.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

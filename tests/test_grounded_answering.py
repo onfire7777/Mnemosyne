@@ -157,6 +157,7 @@ def test_source_bound_anchor_normalizer_dedupes_and_enforces_budget() -> None:
         ("project cobalt", "where is project cobalt stored?", ("project cobalt",)),
         ("CObALT", "where is cobalt stored?", ("cobalt",)),
         ("where is cobalt stored", "where is cobalt stored?", ("where is cobalt stored",)),
+        ("cobalt schedule", "when does project cobalt launch?", ("cobalt",)),
         ("policy field secret", "policy field secret", ()),
     ],
 )
