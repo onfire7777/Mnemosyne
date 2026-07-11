@@ -7,7 +7,20 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v5"
+VERSION = "phase12-candidate-v6"
+ANCHOR_NORMALIZER_SPEC = {
+    "id": "source-bound-atomic-anchors-v1",
+    "comparison_normalization": "NFKC-whitespace-casefold",
+    "source_scope": {"hop0": "question", "later_hops": "authorized-evidence"},
+    "selection": "literal-entity-span-contained-in-model-proposal",
+    "entity_classes": ["proper-name", "multiword-proper-name", "acronym", "mixed-alnum"],
+    "possessive_matching": True,
+    "dedupe": "stable-casefold",
+    "substantive_terms": "mnemosyne.retrieval.query_support-v1",
+    "all_queries_must_pass_retrieval": True,
+    "consume_abstained_hits": False,
+    "max_queries": 4,
+}
 SERIALIZER_SPEC = {
     "id": "authorized-evidence-json-v2",
     "encoding": "utf-8",
@@ -148,6 +161,7 @@ def role_digests(role: str) -> dict[str, str]:
 def custody() -> dict[str, Any]:
     return {
         "version": VERSION,
+        "anchor_normalizer": ANCHOR_NORMALIZER_SPEC,
         "prompt_bundles": PROMPT_BUNDLES,
         "serializer": SERIALIZER_SPEC,
         "decoding": GENERATION_SPEC,

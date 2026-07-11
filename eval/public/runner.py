@@ -24,6 +24,7 @@ from eval.public.assets import AssetSpec, load_asset_set
 from eval.public.bundle import _canonical, write_bundle
 from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import (
+    ANCHOR_NORMALIZER_SPEC,
     GENERATION_SPEC,
     PROMPT_BUNDLES,
     SERIALIZER_SPEC,
@@ -122,7 +123,7 @@ def load_qa_protocol() -> dict[str, Any]:
 
 
 def validate_qa_protocol(protocol: Any) -> None:
-    expected_keys = {"abstention", "candidate_manifest_schema", "decoding", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
+    expected_keys = {"abstention", "anchor_normalizer", "candidate_manifest_schema", "decoding", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
     if not isinstance(protocol, dict) or set(protocol) != expected_keys or protocol.get("version") != GROUNDED_PROTOCOL_VERSION:
         raise ValueError("frozen QA protocol is missing or has the wrong version")
     if protocol.get("retrieval_baselines") != _FROZEN_RETRIEVAL_BASELINES:
@@ -137,9 +138,10 @@ def validate_qa_protocol(protocol: Any) -> None:
         "decoding": GENERATION_SPEC,
         "evidence_budget": {"max_records": 20, "max_characters": 24000, "max_hops": 3},
         "abstention": {"answer": "", "claims": [], "abstained": True},
+        "anchor_normalizer": ANCHOR_NORMALIZER_SPEC,
         "split_roles": {"synthetic": "development", "qa_hard_v2": "frozen-internal", "longmemeval-cleaned": "held-out-test", "hipporag-validation": "held-out-validation"},
         "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"},
-        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "evidence_budget", "abstention", "transport_retries"]},
+        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "anchor_normalizer_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "evidence_budget", "abstention", "transport_retries"]},
     }
     if any(protocol.get(key) != value for key, value in expected.items()) or protocol.get("phase11_custody") != _FROZEN_PHASE11_CUSTODY:
         raise ValueError("frozen QA protocol custody is not the exact canonical contract")
@@ -151,7 +153,7 @@ def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None =
     required = set(protocol["candidate_manifest_schema"]["required"])
     if not isinstance(manifest, dict) or set(manifest) != required:
         raise ValueError("candidate manifest schema mismatch")
-    for key in ("git_sha", "model_content_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256"):
+    for key in ("git_sha", "model_content_sha256", "anchor_normalizer_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256"):
         value = manifest.get(key)
         length = 40 if key == "git_sha" else 64
         if not isinstance(value, str) or len(value) != length or set(value) - _HEX:
@@ -177,6 +179,7 @@ def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str
     protocol = protocol or load_qa_protocol()
     validate_qa_protocol(protocol)
     return {
+        "anchor_normalizer_sha256": hashlib.sha256(grounded_canonical(protocol["anchor_normalizer"])).hexdigest(),
         "decoding_sha256": hashlib.sha256(grounded_canonical(protocol["decoding"])).hexdigest(),
         "prompt_sha256": hashlib.sha256(grounded_canonical(protocol["prompt"]["roles"])).hexdigest(),
         "protocol_sha256": hashlib.sha256(_canonical(protocol)).hexdigest(),
