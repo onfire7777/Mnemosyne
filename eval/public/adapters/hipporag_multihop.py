@@ -33,6 +33,7 @@ def run(
         )
         eval_cli = replace(
             capture_cli,
+            timeout_s=max(capture_cli.timeout_s, 1_800.0),
             global_flags=[*capture_cli.global_flags, read_only_flag],
         )
     else:
@@ -72,14 +73,16 @@ def run(
         cid_to_doc[cid] = document["doc_id"]
     stored = [document["doc_id"] for document in corpus]
 
-    def evaluate(question: dict[str, Any]) -> dict[str, Any]:
-        search = eval_cli.search(tenant, question["question"])
+    def make_trace(
+        question: dict[str, Any],
+        search: Mapping[str, Any],
+        explanation: Mapping[str, Any],
+    ) -> dict[str, Any]:
         ranked = [
             cid_to_doc[hit["id"]]
             for hit in search.get("hits", [])
             if hit.get("id") in cid_to_doc
         ]
-        explanation = eval_cli.explain(tenant, question["question"])
         return {
             "answer": None,
             "gold_references": question["gold_references"],
@@ -91,10 +94,72 @@ def run(
         }
 
     if isinstance(eval_cli, MnemoCLI):
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            traces = list(executor.map(evaluate, benchmark["questions"]))
+        questions = benchmark["questions"]
+        chunk_size = (len(questions) + 3) // 4
+        with tempfile.TemporaryDirectory(prefix="mneme-hipporag-queries-") as temp:
+            batches: list[Path] = []
+            expected_counts: list[int] = []
+            for index, start in enumerate(range(0, len(questions), chunk_size)):
+                chunk = questions[start : start + chunk_size]
+                path = Path(temp) / f"{index}.jsonl"
+                path.write_text(
+                    "".join(
+                        json.dumps(
+                            {
+                                "question_id": question["question_id"],
+                                "query": question["question"],
+                                "tenant": tenant,
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                        for question in chunk
+                    ),
+                    encoding="utf-8",
+                )
+                batches.append(path)
+                expected_counts.append(len(chunk))
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                payloads = list(executor.map(eval_cli.eval_query_batch, batches))
+        evaluated: list[dict[str, Any]] = []
+        for payload, expected_count in zip(payloads, expected_counts, strict=True):
+            if not isinstance(payload, Mapping):
+                raise HippoRAGSchemaError("evaluation query batch payload is invalid")
+            rows = payload.get("results")
+            if (
+                payload.get("ok") is not True
+                or payload.get("count") != expected_count
+                or not isinstance(rows, list)
+                or len(rows) != expected_count
+                or any(
+                    not isinstance(row, dict)
+                    or not isinstance(row.get("question_id"), str)
+                    or not row["question_id"]
+                    or not isinstance(row.get("search"), Mapping)
+                    or not isinstance(row.get("explanation"), Mapping)
+                    for row in rows
+                )
+            ):
+                raise HippoRAGSchemaError("evaluation query batch payload is invalid")
+            evaluated.extend(rows)
+        if [row.get("question_id") for row in evaluated] != [
+            question["question_id"] for question in questions
+        ]:
+            raise HippoRAGSchemaError("evaluation query batch order or count drift")
+        traces = [
+            make_trace(question, row.get("search", {}), row.get("explanation", {}))
+            for question, row in zip(questions, evaluated, strict=True)
+        ]
     else:
-        traces = [evaluate(question) for question in benchmark["questions"]]
+        traces = [
+            make_trace(
+                question,
+                eval_cli.search(tenant, question["question"]),
+                eval_cli.explain(tenant, question["question"]),
+            )
+            for question in benchmark["questions"]
+        ]
     labels = [
         {
             "question_id": question["question_id"],
