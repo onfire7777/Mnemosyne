@@ -33,7 +33,10 @@
   protected action.
 - Candidate v4 failed the synthetic live-model gate before any protected run or
   ledger creation; its inferred intent query was not an atomic literal anchor.
-  Candidate v5 is therefore required for any next protected action.
+  A new candidate was therefore required for any next protected action.
+- Candidate v5 also failed its synthetic direct-provider gate and has no
+  protected ledger. Candidate v6 binds deterministic source-bound anchor
+  normalization and is required before any next protected action.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
