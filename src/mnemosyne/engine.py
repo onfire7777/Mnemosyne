@@ -450,9 +450,11 @@ class LocalMemoryEngine:
         policy: OperatingPolicy | None = None,
         adapters: RetrievalAdapters | None = None,
         journal_dir: str | os.PathLike[str] | None = None,
+        read_only: bool = False,
     ):
         self.store_path = Path(store_path).expanduser() if store_path else None
         self._journal_dir = Path(journal_dir).expanduser() if journal_dir else None
+        self._read_only = read_only
         self.policy = policy or OperatingPolicy()
         if adapters is None:
             embedding = HashingEmbeddingProvider()
@@ -572,6 +574,8 @@ class LocalMemoryEngine:
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
         self._store_version += 1
+        if self._read_only:
+            return
         if not self.store_path:
             return
         parent = self.store_path.parent

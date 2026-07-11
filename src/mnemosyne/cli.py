@@ -486,7 +486,11 @@ def load_engine(args: argparse.Namespace) -> MemoryEngine:
         # --store doubles as the per-tenant SQLite root directory (one
         # <tenant>.db per tenant), mirroring how local/postgres read --store/DSN.
         return SqliteEngine(Path(args.store), adapters=load_retrieval_adapters(args))
-    return LocalMemoryEngine(store_path=Path(args.store), adapters=load_retrieval_adapters(args))
+    return LocalMemoryEngine(
+        store_path=Path(args.store),
+        adapters=load_retrieval_adapters(args),
+        read_only=bool(getattr(args, "evaluation_read_only", False)),
+    )
 
 
 def load_provenance_verifier(args: argparse.Namespace) -> SignedProvenanceVerifier | C2paToolVerifier:
@@ -743,6 +747,8 @@ def load_runtime_state(args: argparse.Namespace) -> RuntimeState | PostgresRunti
     from mnemosyne.postgres_runtime_state import PostgresRuntimeState
     from mnemosyne.runtime_state import RuntimeState
 
+    if bool(getattr(args, "evaluation_read_only", False)):
+        return None
     if args.backend == "postgres":
         dsn = args.postgres_dsn
         if not dsn:
@@ -18017,6 +18023,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--backend", choices=["local", "postgres", "sqlite"], default=default_backend(), help="Storage backend")
     parser.add_argument("--store", default=str(default_store()), help="Path to local JSON store")
+    parser.add_argument(
+        "--evaluation-read-only",
+        action="store_true",
+        help="Disable local-store persistence for deterministic search/explain evaluation",
+    )
     parser.add_argument("--postgres-dsn", default=default_postgres_dsn(), help="PostgreSQL DSN for --backend postgres")
     parser.add_argument(
         "--postgres-require-safe-role",
@@ -20069,6 +20080,12 @@ def main(argv: list[str] | None = None) -> int:
     maybe_autotune()
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.evaluation_read_only and (
+        args.backend != "local" or args.command not in {"search", "explain"}
+    ):
+        parser.error(
+            "--evaluation-read-only is restricted to local search and explain commands"
+        )
     if args.command not in {"session-exchange", "idp-authz-policy-check"}:
         apply_session_identity(args)
     args.func(args)

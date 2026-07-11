@@ -6,6 +6,8 @@ import json
 import math
 import tempfile
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,19 @@ def run(
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     benchmark = normalize(value) if "assets" in value else value
     _validate_canonical(benchmark)
+    if isinstance(cli, MnemoCLI):
+        read_only_flag = "--evaluation-read-only"
+        capture_cli = replace(
+            cli,
+            timeout_s=max(cli.timeout_s, 600.0),
+            global_flags=[flag for flag in cli.global_flags if flag != read_only_flag],
+        )
+        eval_cli = replace(
+            capture_cli,
+            global_flags=[*capture_cli.global_flags, read_only_flag],
+        )
+    else:
+        capture_cli = eval_cli = cli
     corpus = benchmark["corpus"]
     tenant = f"public-hipporag-{benchmark['dataset']}"
     with tempfile.TemporaryDirectory(prefix="mneme-hipporag-") as temp:
@@ -43,7 +58,7 @@ def run(
             ),
             encoding="utf-8",
         )
-        captured = cli.capture_batch(batch)
+        captured = capture_cli.capture_batch(batch)
     results = captured.get("results", [])
     if len(results) != len(corpus):
         raise HippoRAGSchemaError("capture batch count does not match corpus")
@@ -56,26 +71,30 @@ def run(
             raise HippoRAGSchemaError("capture batch returned a duplicate CID")
         cid_to_doc[cid] = document["doc_id"]
     stored = [document["doc_id"] for document in corpus]
-    traces: list[dict[str, Any]] = []
-    for question in benchmark["questions"]:
-        search = cli.search(tenant, question["question"])
+
+    def evaluate(question: dict[str, Any]) -> dict[str, Any]:
+        search = eval_cli.search(tenant, question["question"])
         ranked = [
             cid_to_doc[hit["id"]]
             for hit in search.get("hits", [])
             if hit.get("id") in cid_to_doc
         ]
-        explanation = cli.explain(tenant, question["question"])
-        traces.append(
-            {
-                "answer": None,
-                "gold_references": question["gold_references"],
-                "graph_evidence": _graph_evidence(search, explanation),
-                "question_id": question["question_id"],
-                "ranked_retrieved_hits": ranked,
-                "scoring_family": "deterministic-retrieval",
-                "stored_records": stored,
-            }
-        )
+        explanation = eval_cli.explain(tenant, question["question"])
+        return {
+            "answer": None,
+            "gold_references": question["gold_references"],
+            "graph_evidence": _graph_evidence(search, explanation),
+            "question_id": question["question_id"],
+            "ranked_retrieved_hits": ranked,
+            "scoring_family": "deterministic-retrieval",
+            "stored_records": stored,
+        }
+
+    if isinstance(eval_cli, MnemoCLI):
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            traces = list(executor.map(evaluate, benchmark["questions"]))
+    else:
+        traces = [evaluate(question) for question in benchmark["questions"]]
     labels = [
         {
             "question_id": question["question_id"],
