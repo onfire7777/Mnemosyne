@@ -4,7 +4,7 @@ Status: in progress — the consumed v3 frozen run failed systemically; no held-
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v11` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v12` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -77,5 +77,10 @@ shortest answer value. Retrieval remained perfect and two-hop; it never reached
 protected evaluation and has no protected ledger. Candidate v11 makes the
 answer-only minimality contract explicit while preserving exact raw-substring
 selection, zero retries, and all frozen retrieval and authorization rails.
+Candidate v11 was rejected at the repeated synthetic exact-answer gate for the
+same full-sentence output and likewise has no protected ledger. Candidate v12
+adds one generic, non-benchmark contrastive contract example so the local model
+must distinguish an answer value from its supporting sentence; no rail, schema,
+model, budget, or retry setting changes.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

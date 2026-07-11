@@ -424,6 +424,7 @@ def test_exact_quote_prompt_requires_answer_only_minimality() -> None:
     assert "Return only the answer value" in instruction
     assert "omit subjects, predicates, and punctuation" in instruction
     assert "complete evidence sentence is invalid" in instruction
+    assert "select quote '1999', not the full sentence" in instruction
 
 
 def test_grounded_reader_rejects_contradictory_or_fabricated_output(monkeypatch) -> None:
