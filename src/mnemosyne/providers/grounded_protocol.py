@@ -7,16 +7,22 @@ import json
 from typing import Any
 
 
-VERSION = "phase12-candidate-v13"
+VERSION = "phase12-candidate-v14"
 MODEL_SELECTOR = "qwen3:8b"
 MODEL_CONTENT_SHA256 = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
 ANCHOR_NORMALIZER_SPEC = {
     "id": "source-bound-atomic-anchors-v1",
     "comparison_normalization": "NFKC-whitespace-casefold",
     "source_scope": {"hop0": "question", "later_hops": "authorized-evidence"},
-    "selection": "literal-entity-span-contained-in-model-proposal",
+    "selection": "entity-span-or-exact-literal-proposal-fallback",
     "entity_classes": ["proper-name", "multiword-proper-name", "acronym", "mixed-alnum"],
     "possessive_matching": True,
+    "literal_fallback": {
+        "only_without_entity_match": True,
+        "exact_source_token_span": True,
+        "deny_terms": ["command", "commands", "ignore", "instruction", "instructions", "policy"],
+        "confusable_control_labels_fail_closed": True,
+    },
     "dedupe": "stable-casefold",
     "substantive_terms": "mnemosyne.retrieval.query_support-v1",
     "all_queries_must_pass_retrieval": True,

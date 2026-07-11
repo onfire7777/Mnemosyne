@@ -4,7 +4,7 @@ Status: in progress — consumed v3 and v13 frozen runs failed systemically; no 
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v13` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v14` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -99,5 +99,12 @@ Attempt-ledger SHA-256:
 `3addbc57c640c64c8bbc807bbcce348075ff3e54e10374c4fc1b851a5c3c3a9e`.
 The held-out LongMemEval and Hippo reader runs remain blocked by the frozen QA
 threshold, and publication flags remain false.
+
+Candidate v14 addresses only the aggregate zero-hop class without inspecting
+protected content: when a model proposal contains no recognized entity, the
+normalizer may recover the exact token-identical source span as a query. The
+fallback rejects command/policy terms and Unicode-confusable control labels,
+retains the existing entity path when available, and still sends every query
+through the unchanged retrieval support and authorization gates.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
