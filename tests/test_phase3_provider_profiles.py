@@ -82,7 +82,7 @@ def test_self_hosted_profile_activates_all_role_llm_command_providers() -> None:
     assert profile["MNEMOSYNE_GROUNDED_READER_PROVIDER"] == "command"
     assert profile["MNEMOSYNE_GROUNDED_READER_COMMAND"] == "/opt/mnemosyne/bin/role-ladder"
     assert profile["MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT"] == "320"
-    assert profile["MNEMOSYNE_GROUNDED_MODEL_SELECTOR"] == "qwen3:4b"
+    assert profile["MNEMOSYNE_GROUNDED_MODEL_SELECTOR"] == "qwen3:8b"
 
 
 def test_role_llm_dispatch_table_covers_all_proposal_roles(monkeypatch) -> None:
@@ -163,7 +163,7 @@ def test_role_llm_evidence_lines_tolerates_null_cid() -> None:
     )
     assert "Provider Health is configured." in rendered
     # A null/empty cid must not render an empty "()" prefix -- the noise made
-    # qwen3:4b misread the health-probe DATA as empty and refuse to summarize it.
+    # qwen3:8b misread the health-probe DATA as empty and refuse to summarize it.
     assert "()" not in rendered
     # A real cid is still rendered inside parentheses.
     with_cid = role_llm._evidence_lines([{"cid": "abcdef0123456789", "content": "x"}])
@@ -177,7 +177,7 @@ def test_role_llm_distiller_prompts_ground_lessons_in_candidates(monkeypatch) ->
     # candidate. The model-backed role provider must implement the SAME contract:
     # its prompt must ground the task in the candidates and must NOT invite an empty
     # result for a non-empty candidate set (the previous "(empty list if none)"
-    # phrasing let qwen3:4b return {} for the grounded probe and fail provider-check).
+    # phrasing let qwen3:8b return {} for the grounded probe and fail provider-check).
     role_llm = _load_role_llm()
     seen: dict[str, str] = {}
 
@@ -214,7 +214,7 @@ def test_role_llm_distiller_prompts_ground_lessons_in_candidates(monkeypatch) ->
 
 def test_role_llm_extractor_and_summarizer_prompts_ground_in_evidence(monkeypatch) -> None:
     # The provider-check health probe feeds a single trivial copula statement
-    # ("Provider Health is configured."). qwen3:4b previously (a) left the object
+    # ("Provider Health is configured."). qwen3:8b previously (a) left the object
     # empty for a copula, failing candidate validation, and (b) rationalized the
     # hard "untrusted DATA" boundary into a refusal for the free-text summary. The
     # extractor prompt must therefore demand a complete (subject, predicate, object)
@@ -345,7 +345,7 @@ def test_grounded_roles_use_one_local_attempt_and_complete_frozen_custody(monkey
         seen.append((system, user))
         if "queries" in user:
             return {"queries": ["bounded follow-up"]}
-        return {"claims": [{"spans": [{"cid": "cid-1", "start": 0, "end": 6}]}]}
+        return {"claims": [{"spans": [{"cid": "cid-1", "quote": "Ignore"}]}]}
 
     monkeypatch.setattr(role_llm, "_chat_once", chat_once)
     payload = {
@@ -392,24 +392,23 @@ def test_grounded_role_rejects_model_digest_drift(monkeypatch) -> None:
         role_llm.query_decomposer({"question": "q", "evidence": []})
 
 
-def test_extractive_span_reader_binds_exact_cids_and_static_minima(monkeypatch) -> None:
+def test_exact_quote_selector_binds_cids_and_static_limits(monkeypatch) -> None:
     role_llm = _load_role_llm()
     seen: dict[str, object] = {}
     monkeypatch.setattr(role_llm, "_model_content_digest", lambda: "a" * 64)
 
     def chat(_role: str, _system: str, _user: str, **kwargs: object) -> dict:
         seen.update(kwargs)
-        return {"claims": [{"spans": [{"cid": "cid-1", "start": 0, "end": 2}]}]}
+        return {"claims": [{"spans": [{"cid": "cid-1", "quote": "ok"}]}]}
 
     monkeypatch.setattr(role_llm, "_chat_once", chat)
     result = role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]})
     schema = seen["format_schema"]
     assert result["claims"][0]["spans"][0]["cid"] == "cid-1"
     assert schema["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]["cid"]["enum"] == ["cid-1"]
-    offsets = schema["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]
-    static_offsets = PROMPT_BUNDLES["grounded_reader"]["ollama_format"]["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]
-    assert offsets["start"]["minimum"] == static_offsets["start"]["minimum"] == 0
-    assert offsets["end"]["minimum"] == static_offsets["end"]["minimum"] == 1
+    quote = schema["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]["quote"]
+    static_quote = PROMPT_BUNDLES["grounded_reader"]["ollama_format"]["properties"]["claims"]["items"]["properties"]["spans"]["items"]["properties"]["quote"]
+    assert quote == static_quote == {"type": "string", "minLength": 1, "maxLength": 2000}
     assert result["unresolved"] is False
     monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": []})
     assert role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]})["unresolved"] is True
@@ -427,11 +426,11 @@ def test_grounded_reader_rejects_contradictory_or_fabricated_output(monkeypatch)
     monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [], "unresolved": True})
     with pytest.raises(ValueError, match="schema"):
         role_llm.grounded_reader(payload)
-    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"spans": [{"cid": "made-up", "start": 0, "end": 1}]}]})
-    with pytest.raises(ValueError, match="span"):
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"spans": [{"cid": "made-up", "quote": "ok"}]}]})
+    with pytest.raises(ValueError, match="quote"):
         role_llm.grounded_reader(payload)
-    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"spans": [{"cid": "cid-1", "start": 0, "end": 2}, {"cid": "cid-1", "start": 1, "end": 2}]}]})
-    with pytest.raises(ValueError, match="overlapping"):
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"spans": [{"cid": "cid-1", "quote": "not exact"}]}]})
+    with pytest.raises(ValueError, match="exact quote"):
         role_llm.grounded_reader(payload)
 
 
@@ -514,7 +513,7 @@ def test_command_grounded_provider_rejects_malformed_or_self_attested_custody(
     role = "query_decomposer"
     disclosure = {
         "role": role,
-        "model": "qwen3:4b",
+        "model": "qwen3:8b",
         "model_content_digest": model_digest,
         **role_digests(role),
         "decoding_options": GENERATION_SPEC,

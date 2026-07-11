@@ -12,7 +12,7 @@ intervals. Families are never aggregated.
 
 ## Frozen Phase 12 QA protocol
 
-The `_qa_protocol` registry entry preregisters the static `qwen3:4b` Ollama
+The `_qa_protocol` registry entry preregisters the static `qwen3:8b` Ollama
 selector, exact decoding options, evidence and hop budgets, canonical empty
 answer abstention, `qa-em-f1-v1`, frozen split roles, zero transport retries,
 and a single held-out attempt. A post-commit candidate manifest is external,

@@ -9,10 +9,14 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+from mnemosyne.providers.grounded_protocol import MODEL_CONTENT_SHA256, MODEL_SELECTOR
+
 
 def grounded_runtime_environment(
     path: Path, candidate: Mapping[str, Any], ollama_url: str, *, repo_root: Path
 ) -> dict[str, str]:
+    if candidate.get("model_content_sha256") != MODEL_CONTENT_SHA256:
+        raise ValueError("candidate model content digest does not match preregistration")
     if path.is_symlink() or not path.is_file():
         raise ValueError("runtime manifest must be a real external file")
     root = path.resolve().parent
@@ -58,7 +62,7 @@ def grounded_runtime_environment(
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": str(role_ladder),
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
         "MNEMOSYNE_GROUNDED_READER_COMMAND": str(role_ladder),
-        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": MODEL_SELECTOR,
         "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": candidate["model_content_sha256"],
         "MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT": "320",
         "MNEMOSYNE_ROLE_LADDER_LOCAL_COMMAND": str(role_llm),
@@ -66,7 +70,7 @@ def grounded_runtime_environment(
         "MNEMOSYNE_ROLE_LADDER_LOCAL_TIMEOUT": "280",
         "MNEMOSYNE_ROLE_LADDER_ALLOW_DETERMINISTIC": "0",
         "PYTHONDONTWRITEBYTECODE": "1",
-        "OLLAMA_MODEL": "qwen3:4b",
+        "OLLAMA_MODEL": MODEL_SELECTOR,
         "OLLAMA_TIMEOUT": "280",
         "OLLAMA_URL": ollama_url,
     }
