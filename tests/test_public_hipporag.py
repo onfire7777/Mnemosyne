@@ -159,6 +159,10 @@ def test_graph_evidence_requires_positive_graph_signal() -> None:
         {"metadata": {"channel_scores": {"graph_ppr": 0.25}}}, {"channels": []}
     )
     assert positive["observed"] is True
+    nested_backend = hipporag_multihop._graph_evidence(
+        {}, {"adapters": {"graph_backend": "local-ppr"}, "channels": {"graph": 1}}
+    )
+    assert nested_backend["graph_backend"] == "local-ppr"
     assert (
         hipporag_multihop._graph_evidence({}, {"channels": {"graph": 0}})["observed"]
         is False

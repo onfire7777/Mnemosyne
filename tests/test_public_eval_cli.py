@@ -149,11 +149,12 @@ def test_evaluation_read_only_allows_concurrent_queries_without_store_writes(
     ordinary_store.write_bytes(store.read_bytes())
     ordinary = MnemoCLI(store=str(ordinary_store))
     ordinary_search = ordinary.search("t", "alpha")
-    ordinary_explain = ordinary.explain("t", "alpha")
     assert [hit["id"] for hit in results[0][0]["hits"]] == [
         hit["id"] for hit in ordinary_search["hits"]
     ]
-    assert results[0][1].get("channels") == ordinary_explain.get("channels")
+    assert results[0][1]["explain"].get("channels") == ordinary_search["explain"].get(
+        "channels"
+    )
     assert {
         path: hashlib.sha256(path.read_bytes()).hexdigest() for path in state_files
     } == before
