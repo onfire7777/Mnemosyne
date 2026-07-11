@@ -145,7 +145,7 @@
     "license": "CC0-1.0",
     "pbpp_headline_eligible": false,
     "publishable": false,
-    "qa_protocol_version": "phase12-candidate-v15",
+    "qa_protocol_version": "phase12-candidate-v16",
     "revision": "2f6e3a8d87f54af89d5c687eb2b0418ef124a9c7",
     "scoring_profile": "qa-em-f1-v1",
     "split_role": "frozen-internal"
@@ -191,7 +191,7 @@
     }
   },
   "_qa_protocol": {
-    "version": "phase12-candidate-v15",
+    "version": "phase12-candidate-v16",
     "anchor_normalizer": {
       "id": "source-bound-atomic-anchors-v1",
       "comparison_normalization": "NFKC-whitespace-casefold",
@@ -210,7 +210,7 @@
       "literal_fallback": {
         "only_without_entity_match": true,
         "exact_source_token_span": true,
-        "trailing_substantive_tokens": "reverse-source-order-within-query-budget",
+        "trailing_substantive_tokens": "later-hops-only-reverse-source-order-within-query-budget",
         "deny_terms": [
           "command",
           "commands",

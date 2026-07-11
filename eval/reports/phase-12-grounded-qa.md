@@ -4,7 +4,7 @@ Status: in progress — consumed v3 and v13 frozen runs failed systemically; no 
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v15` (new candidate required; not yet executed)
+- Protocol: `phase12-candidate-v16` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -114,5 +114,12 @@ reached protected evaluation and has no ledger. Candidate v15 retains the exact
 literal proposal and, only on the fallback path, adds trailing substantive
 source tokens in reverse order within the existing four-query budget. This
 lets lowercase bridge terms participate without changing any retrieval rail.
+
+Candidate v15 failed both lowercase synthetic repetitions at hop 0 and has no
+protected ledger. Synthetic-only direct decomposition showed the proposal
+`project cobalt launch`; expanding the question predicate created an
+unsupported mandatory query. Candidate v16 therefore keeps hop 0 to the exact
+literal proposal and enables trailing-token expansion only on later hops, where
+the source is authorized retrieved evidence.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

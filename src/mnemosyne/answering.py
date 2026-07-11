@@ -157,7 +157,11 @@ def _entity_spans(source: str) -> tuple[str, ...]:
 
 
 def _source_bound_anchors(
-    proposals: list[str], sources: tuple[str, ...], limits: AnswerLimits
+    proposals: list[str],
+    sources: tuple[str, ...],
+    limits: AnswerLimits,
+    *,
+    expand_literal_tokens: bool = False,
 ) -> tuple[str, ...]:
     catalog = tuple(anchor for source in sources for anchor in _entity_spans(source))
     selected: list[str] = []
@@ -179,7 +183,8 @@ def _source_bound_anchors(
         if matched_entity:
             continue
         for source in sources:
-            for anchor in _literal_source_spans(proposal, source):
+            spans = _literal_source_spans(proposal, source)
+            for anchor in spans if expand_literal_tokens else spans[:1]:
                 if _comparison(anchor) in seen:
                     continue
                 if len(anchor) > limits.max_query_characters:
@@ -194,7 +199,9 @@ def _source_bound_anchors(
 def _later_hop_anchors(
     proposals: list[str], sources: tuple[str, ...], seen: set[str], limits: AnswerLimits
 ) -> tuple[str, ...]:
-    selected = _source_bound_anchors(proposals, sources, limits)
+    selected = _source_bound_anchors(
+        proposals, sources, limits, expand_literal_tokens=True
+    )
     catalog = tuple(anchor for source in sources for anchor in _entity_spans(source))
     ordered: list[str] = []
     keys = set(seen)
