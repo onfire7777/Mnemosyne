@@ -41,8 +41,15 @@
   ledger. Candidate v7 then bound deterministic later-hop traversal plus
   dynamic exact-CID/XOR reader schemas before its reader gate.
 - Candidate v7 failed its synthetic exact-runtime reader gate and has no
-  protected ledger. Candidate v8 binds claims-only exact-CID generation with
-  application-derived unresolved state before any next protected action.
+  protected ledger. Candidate v8 then bound claims-only exact-CID generation
+  with application-derived unresolved state before its reader quality gate.
+- Historical candidate v8 (retired) failed its synthetic reader quality gate and has no protected
+  ledger. Candidate v9 binds replay-validated extractive spans before any next
+  protected action.
+- Candidate v9 synthetic validation covers strict string content, Boolean and
+  integer offset boundaries, Unicode code points, cross-CID ordering, per-CID
+  overlap, UTF-8 hashes, inert evidence instructions, trace privacy, and bundle
+  mutations of text, offsets, hashes, CIDs, and evidence custody.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
