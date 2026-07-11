@@ -138,6 +138,23 @@ def _source_bound_anchors(
     return tuple(selected)
 
 
+def _later_hop_anchors(
+    proposals: list[str], sources: tuple[str, ...], seen: set[str], limits: AnswerLimits
+) -> tuple[str, ...]:
+    selected = _source_bound_anchors(proposals, sources, limits)
+    catalog = tuple(anchor for source in sources for anchor in _entity_spans(source))
+    ordered: list[str] = []
+    keys = set(seen)
+    for anchor in (*catalog, *selected):
+        key = _comparison(anchor)
+        if key not in keys:
+            ordered.append(anchor)
+            keys.add(key)
+        if len(ordered) == limits.max_queries_per_hop:
+            break
+    return tuple(ordered)
+
+
 @dataclass(frozen=True, slots=True)
 class AnswerReadContext:
     """Complete immutable caller context reapplied at every retrieval hop."""
@@ -428,12 +445,12 @@ class GroundedAnswerOrchestrator:
         cid_hop: dict[str, int] = {}
         hops: list[AnswerHop] = []
         for hop_index in range(self.limits.max_hops):
-            fresh_queries = tuple(query for query in queries if query.casefold() not in seen_queries)
+            fresh_queries = tuple(query for query in queries if _comparison(query) not in seen_queries)
             if not fresh_queries:
                 break
             if len(fresh_queries) > self.limits.max_queries_per_hop:
                 raise ValueError("query budget exceeded")
-            seen_queries.update(query.casefold() for query in fresh_queries)
+            seen_queries.update(_comparison(query) for query in fresh_queries)
             referenced: set[str] = set()
             channels: set[str] = set()
             for query in fresh_queries:
@@ -468,9 +485,11 @@ class GroundedAnswerOrchestrator:
                     for cid, row in sorted(authorized.items())
                 ],
             }
-            queries = self._queries(
-                self.decomposer.decompose(payload),
-                sources=tuple(str(row["content"]) for row in payload["evidence"]),
+            response = self.decomposer.decompose(payload)
+            sources = tuple(str(row["content"]) for row in payload["evidence"])
+            proposals = self._query_proposals(response)
+            queries = _later_hop_anchors(
+                proposals, sources, seen_queries, self.limits
             )
             if not queries:
                 break
@@ -582,6 +601,9 @@ class GroundedAnswerOrchestrator:
         return referenced, channels
 
     def _queries(self, value: object, *, sources: tuple[str, ...]) -> tuple[str, ...]:
+        return _source_bound_anchors(self._query_proposals(value), sources, self.limits)
+
+    def _query_proposals(self, value: object) -> list[str]:
         if not isinstance(value, dict) or set(value) != {"queries"}:
             raise ValueError("invalid decomposer schema")
         raw = value["queries"]
@@ -593,10 +615,11 @@ class GroundedAnswerOrchestrator:
             if not isinstance(item, str) or not item.strip() or len(item) > self.limits.max_query_characters:
                 raise ValueError("invalid decomposer query")
             proposal = item.strip()
-            if proposal.casefold() not in seen:
+            key = _comparison(proposal)
+            if key not in seen:
                 proposals.append(proposal)
-                seen.add(proposal.casefold())
-        return _source_bound_anchors(proposals, sources, self.limits)
+                seen.add(key)
+        return proposals
 
     @staticmethod
     def _claims(value: object, authorized_cids: set[str]) -> tuple[AnswerClaim, ...]:

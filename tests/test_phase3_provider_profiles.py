@@ -341,7 +341,7 @@ def test_grounded_roles_use_one_local_attempt_and_complete_frozen_custody(monkey
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(role_llm, "_model_content_digest", lambda: model_digest)
 
-    def chat_once(_role: str, system: str, user: str) -> dict:
+    def chat_once(_role: str, system: str, user: str, **_kwargs: object) -> dict:
         seen.append((system, user))
         if "queries" in user:
             return {"queries": ["bounded follow-up"]}
@@ -390,6 +390,55 @@ def test_grounded_role_rejects_model_digest_drift(monkeypatch) -> None:
     monkeypatch.setattr(role_llm, "_chat_once", lambda *_args: {"queries": []})
     with pytest.raises(ValueError, match="changed during generation"):
         role_llm.query_decomposer({"question": "q", "evidence": []})
+
+
+def test_grounded_reader_binds_exact_cids_and_xor_schema(monkeypatch) -> None:
+    role_llm = _load_role_llm()
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(role_llm, "_model_content_digest", lambda: "a" * 64)
+
+    def chat(_role: str, _system: str, _user: str, **kwargs: object) -> dict:
+        seen.update(kwargs)
+        return {"claims": [{"text": "ok", "evidence_cids": ["cid-1"]}], "unresolved": False}
+
+    monkeypatch.setattr(role_llm, "_chat_once", chat)
+    result = role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]})
+    schema = seen["format_schema"]
+    assert result["claims"][0]["evidence_cids"] == ["cid-1"]
+    assert schema["oneOf"][0]["properties"]["claims"]["items"]["properties"]["evidence_cids"]["items"]["enum"] == ["cid-1"]
+    assert schema["oneOf"][1]["properties"]["claims"]["maxItems"] == 0
+    with pytest.raises(ValueError, match="CIDs"):
+        role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "a"}, {"cid": "cid-1", "content": "b"}]})
+
+
+def test_grounded_reader_rejects_contradictory_or_fabricated_output(monkeypatch) -> None:
+    role_llm = _load_role_llm()
+    monkeypatch.setattr(role_llm, "_model_content_digest", lambda: "a" * 64)
+    payload = {"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]}
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"text": "bad", "evidence_cids": ["cid-1"]}], "unresolved": True})
+    with pytest.raises(ValueError, match="contradictory"):
+        role_llm.grounded_reader(payload)
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [{"text": "bad", "evidence_cids": ["made-up"]}], "unresolved": False})
+    with pytest.raises(ValueError, match="unauthorized"):
+        role_llm.grounded_reader(payload)
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        {"text": "ok", "evidence_cids": ["cid-1"], "extra": True},
+        {"text": "", "evidence_cids": ["cid-1"]},
+        {"text": 1, "evidence_cids": ["cid-1"]},
+        {"text": "x" * 2001, "evidence_cids": ["cid-1"]},
+        {"text": "ok", "evidence_cids": [1]},
+    ],
+)
+def test_grounded_reader_postflight_rejects_invalid_claims(monkeypatch, claim) -> None:
+    role_llm = _load_role_llm()
+    monkeypatch.setattr(role_llm, "_model_content_digest", lambda: "a" * 64)
+    monkeypatch.setattr(role_llm, "_chat_once", lambda *_args, **_kwargs: {"claims": [claim], "unresolved": False})
+    with pytest.raises(ValueError, match="claim|evidence CID"):
+        role_llm.grounded_reader({"question": "q", "evidence": [{"cid": "cid-1", "content": "ok"}]})
 
 
 def test_grounded_role_sends_preregistered_role_specific_ollama_schema(monkeypatch) -> None:

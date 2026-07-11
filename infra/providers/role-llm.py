@@ -152,14 +152,14 @@ def _chat(
     return last if isinstance(last, dict) else {}
 
 
-def _chat_once(role: str, system: str, user: str) -> dict:
+def _chat_once(role: str, system: str, user: str, *, format_schema: dict | None = None) -> dict:
     """One preregistered attempt for grounded roles; no hidden schema retry."""
     body = json.dumps(
         {
             "model": OLLAMA_MODEL,
             "stream": REQUEST_ENVELOPE["stream"],
             "think": REQUEST_ENVELOPE["think"],
-            "format": PROMPT_BUNDLES[role]["ollama_format"],
+            "format": format_schema or PROMPT_BUNDLES[role]["ollama_format"],
             "options": DECODING_OPTIONS,
             "messages": [
                 {"role": "system", "content": system},
@@ -253,13 +253,52 @@ def query_decomposer(request: dict) -> dict:
 
 
 def grounded_reader(request: dict) -> dict:
+    evidence = request.get("evidence")
+    if not isinstance(evidence, list) or not evidence or len(evidence) > 20:
+        raise ValueError("grounded reader requires authorized evidence")
+    cids = []
+    for row in evidence:
+        cid = row.get("cid") if isinstance(row, dict) else None
+        if not isinstance(cid, str) or not cid or len(cid) > 512 or cid in cids:
+            raise ValueError("grounded reader evidence CIDs are invalid")
+        cids.append(cid)
+    claim = {
+        "type": "object",
+        "properties": {
+            "text": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "evidence_cids": {"type": "array", "items": {"type": "string", "enum": cids}, "minItems": 1, "uniqueItems": True},
+        },
+        "required": ["text", "evidence_cids"], "additionalProperties": False,
+    }
+    schema = {
+        "type": "object",
+        "oneOf": [
+            {"properties": {"claims": {"type": "array", "items": claim, "minItems": 1, "maxItems": 20}, "unresolved": {"const": False}}, "required": ["claims", "unresolved"], "additionalProperties": False},
+            {"properties": {"claims": {"type": "array", "maxItems": 0}, "unresolved": {"const": True}}, "required": ["claims", "unresolved"], "additionalProperties": False},
+        ],
+    }
     model_content_digest = _model_content_digest()
     parsed = _chat_once(
         "grounded_reader",
         *render_prompt("grounded_reader", request.get("question"), request.get("evidence")),
+        format_schema=schema,
     )
     if set(parsed) != {"claims", "unresolved"}:
         raise ValueError("model returned invalid grounded-reader schema")
+    claims, unresolved = parsed["claims"], parsed["unresolved"]
+    if not isinstance(unresolved, bool) or not isinstance(claims, list) or (
+        unresolved and claims
+    ) or (not unresolved and (not claims or len(claims) > 20)):
+        raise ValueError("model returned contradictory grounded-reader schema")
+    for row in claims:
+        if not isinstance(row, dict) or set(row) != {"text", "evidence_cids"}:
+            raise ValueError("model returned invalid claim schema")
+        text = row["text"]
+        cited = row.get("evidence_cids") if isinstance(row, dict) else None
+        if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+            raise ValueError("model returned invalid claim text")
+        if not isinstance(cited, list) or not cited or any(not isinstance(cid, str) or not cid for cid in cited) or len(cited) != len(set(cited)) or not set(cited) <= set(cids):
+            raise ValueError("model returned unauthorized evidence CID")
     if _model_content_digest() != model_content_digest:
         raise ValueError("configured Ollama model changed during generation")
     return {

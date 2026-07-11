@@ -12,6 +12,8 @@ from mnemosyne.answering import (
     AnswerRequest,
     GroundedAnswerOrchestrator,
     _source_bound_anchors,
+    _later_hop_anchors,
+    _comparison,
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Hit, Relation, RetrievalResult
@@ -148,6 +150,15 @@ def test_source_bound_anchor_normalizer_dedupes_and_enforces_budget() -> None:
         )
 
 
+def test_later_hop_dedupes_nfkc_equivalent_seen_anchor() -> None:
+    assert _later_hop_anchors(
+        ["Q３-2026"],
+        ("Q３-2026 is planned",),
+        {_comparison("Q3-2026")},
+        AnswerLimits(),
+    ) == ()
+
+
 def test_multi_hop_preserves_complete_immutable_read_context_and_episode_order() -> None:
     engine = _engine()
     decomposer = RecordingDecomposer([
@@ -161,7 +172,7 @@ def test_multi_hop_preserves_complete_immutable_read_context_and_episode_order()
     )
 
     assert result.abstained is False
-    assert len(result.trace.hops) == 2
+    assert len(result.trace.hops) == 3
     assert all(hop.context == context for hop in result.trace.hops)
     assert asdict(context) == asdict(_context())
     assert [row.turn_index for row in result.evidence] == [0, 1]
@@ -369,7 +380,7 @@ def test_reader_schema_citations_and_abstention_fail_closed(response: object) ->
     ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(response))
     assert result.abstained is True
     assert result.answer == "" and result.claims == ()
-    assert len(result.evidence) == 1
+    assert len(result.evidence) == 2
     assert result.trace.hops and result.trace.evidence_fingerprint
 
 

@@ -460,7 +460,7 @@ metadata = {"role": role, "model": "qwen3:4b", "model_content_digest": "a" * 64,
 evidence = request.get("evidence") or []
 if role == "query_decomposer":
     queries = (["Mara"] if not evidence else
-               (["Helios"] if not any("Q3 2026" in row["content"] for row in evidence) else []))
+               (["Mara", "project", "ship"] if not any("Q3 2026" in row["content"] for row in evidence) else []))
     response = {"queries": queries, "metadata": metadata}
 else:
     row = next(item for item in evidence if "Q3 2026" in item["content"])
