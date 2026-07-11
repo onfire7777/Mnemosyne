@@ -1,10 +1,10 @@
 # Phase 12 Grounded QA Evidence
 
-Status: preparation only — no frozen or held-out result exists.
+Status: in progress — the consumed v3 frozen run failed systemically; no held-out result exists.
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v3`
+- Protocol: `phase12-candidate-v4` (new candidate required; not yet executed)
 - Reader/decomposer: local Ollama `qwen3:4b`, exact content digest required
 - Transport retries: zero; maximum attempts per protected split: one
 - Evidence: at most 20 records, 24,000 characters, and 3 hops
@@ -23,8 +23,11 @@ Status: preparation only — no frozen or held-out result exists.
 
 ## Results
 
-Not run. `qa_hard_v2`, LongMemEval-QA, and Hippo reader evaluation remain
-protected one-shot actions after the candidate commit, external manifest,
-immutable runtime install, and successful configured provider smoke.
+The v3 `qa_hard_v2` one-shot was consumed and returned 24/24 empty
+abstentions with zero retrieval hops. Aggregate-only diagnosis identified the
+systemic pre-provider query-support gate; no protected question, trace, or
+content was inspected. LongMemEval-QA and Hippo reader evaluation remain not
+run. A new committed v4 candidate is required before any further protected
+action.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.

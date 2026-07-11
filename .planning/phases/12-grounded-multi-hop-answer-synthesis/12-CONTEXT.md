@@ -31,10 +31,14 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   Non-abstained output is rendered from an ordered atomic-claim list, avoiding
   brittle sentence-to-citation matching.
 - QA correctness is not called calibrated until Phase 15 public-label work.
-- Candidate protocol v3 binds the complete decomposer and reader system/user
+- Candidate protocol v4 binds the complete decomposer and reader system/user
   prompt bundles, response schemas, DATA framing, concrete canonical evidence
   serializer, role-specific Ollama JSON Schemas, and all decoding options. A
   short instruction, generic JSON mode, or serializer label is not sufficient custody.
+- The v3 frozen attempt is consumed: aggregate output was 24/24 canonical empty
+  abstentions with zero retrieval hops. No protected per-question trace or
+  content was inspected. Aggregate-only diagnosis found a systemic pre-provider
+  query-support gate, so any next protected action requires a new v4 candidate.
 
 ## Completion Boundary
 
