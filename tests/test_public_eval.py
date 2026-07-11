@@ -430,6 +430,258 @@ def test_external_multi_asset_adapter_reproduces_from_embedded_custody(
     ).read_bytes()
 
 
+def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public.bundle import write_bundle
+
+    from mnemosyne.ids import evidence_cid
+    capture = _capture("The red fox.")
+    cid = evidence_cid(capture["content"], tenant_id=capture["tenant_id"], user_id=capture["user_id"], source_type=capture["source_type"], content_pointer=capture["content_pointer"], modality=capture["modality"], sensitivity=capture["sensitivity"])
+    benchmark = {
+        "corpus": [{"capture": capture, "content": "The red fox.", "doc_id": cid, "source_identity": "synthetic-fixture"}],
+        "questions": [{"answers": ["red fox"], "question_id": "q1"}],
+    }
+    custody = _qa_custody()
+    candidate = custody.pop("_candidate")
+    metadata = {
+        "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark),
+        "family": "qa", "independent_external_reproduction": False,
+        "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
+        "pbpp_headline_eligible": False, "publishable": False,
+        "qa_protocol_version": "phase12-candidate-v1", "revision": "c" * 40,
+        "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
+        "split_role": "held-out-test", "suite": "qa-fixture",
+    }
+    canonical = {key: value for key, value in metadata.items() if key not in {"reader_custody", "candidate_manifest"}}
+    monkeypatch.setattr("eval.public.runner.load_registry", lambda: {"qa-fixture": canonical})
+    monkeypatch.setattr("eval.public.runner.require_clean_candidate_checkout", lambda _sha: None)
+    traces = [{
+        "abstained": False, "answer": "red fox", "authorized_retrieval_hops": [_hop(0, cid, "The red fox.")],
+        "authorized_evidence_fingerprint": _evidence_fingerprint([cid]),
+        "claims": [{"evidence_cids": [cid], "text": "red fox"}],
+        "question_id": "q1", "scoring_family": "qa",
+    }]
+    measured = score_profile("qa-em-f1-v1", [{"answers": ["red fox"], "question_id": "q1"}], traces)
+    out = tmp_path / "qa"
+    candidate_path = tmp_path / "candidate.json"
+    _rewrite_json(candidate_path, candidate)
+    write_bundle(out, benchmark=benchmark, metadata=metadata, metrics=measured, traces=traces, candidate_manifest_path=candidate_path)
+    assert verify_bundle(out) == {"family": "qa", "suite": "qa-fixture", "valid": True}
+    judge = json.loads((out / "judge.json").read_text())
+    assert judge["custody"] == custody
+
+    import shutil
+
+    for name, mutate, message in (
+        ("answer", lambda trace: trace.update(answer="not rendered"), "deterministically"),
+        ("fingerprint", lambda trace: trace.update(authorized_evidence_fingerprint="0" * 64), "fingerprint"),
+        ("outside", lambda trace: _fabricate_outside(trace), "anchored corpus"),
+        ("duplicate", lambda trace: trace.update(authorized_retrieval_hops=[_hop(0, cid, "The red fox."), _hop(1, cid, "The red fox.")]), "duplicate"),
+    ):
+        attacked = tmp_path / f"qa-{name}"
+        shutil.copytree(out, attacked)
+        rows = [json.loads(line) for line in (attacked / "traces.jsonl").read_text().splitlines()]
+        mutate(rows[0])
+        (attacked / "traces.jsonl").write_text("".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows))
+        _refresh_digest(attacked, "traces.jsonl")
+        with pytest.raises(BundleError, match=message):
+            verify_bundle(attacked)
+
+    wrong_interval = tmp_path / "qa-interval"
+    shutil.copytree(out, wrong_interval)
+    metrics = json.loads((wrong_interval / "metrics.json").read_text())
+    metrics["intervals"]["exact_match"]["method"] = "bootstrap"
+    _rewrite_json(wrong_interval / "metrics.json", metrics)
+    _refresh_digest(wrong_interval, "metrics.json")
+    with pytest.raises(BundleError, match="mixed interval"):
+        verify_bundle(wrong_interval)
+
+    changed_candidate = tmp_path / "qa-candidate"
+    shutil.copytree(out, changed_candidate)
+    candidate_payload = json.loads((changed_candidate / "candidate-manifest.json").read_text())
+    candidate_payload["git_sha"] = "f" * 40
+    _rewrite_json(changed_candidate / "candidate-manifest.json", candidate_payload)
+    _refresh_digest(changed_candidate, "candidate-manifest.json")
+    with pytest.raises(BundleError, match="candidate manifest"):
+        verify_bundle(changed_candidate)
+
+    wrong_sha = tmp_path / "qa-self-consistent-wrong-sha"
+    shutil.copytree(out, wrong_sha)
+    wrong = "f" * 40
+    build = json.loads((wrong_sha / "build.json").read_text())
+    build["candidate_git_sha"] = wrong
+    _rewrite_json(wrong_sha / "build.json", build)
+    embedded = json.loads((wrong_sha / "candidate-manifest.json").read_text())
+    embedded["git_sha"] = wrong
+    _rewrite_json(wrong_sha / "candidate-manifest.json", embedded)
+    embedded_digest = hashlib.sha256((wrong_sha / "candidate-manifest.json").read_bytes()).hexdigest()
+    benchmark_payload = json.loads((wrong_sha / "benchmark.json").read_text())
+    benchmark_payload["metadata"]["reader_custody"].update(candidate_git_sha=wrong, candidate_manifest_sha256=embedded_digest)
+    _rewrite_json(wrong_sha / "benchmark.json", benchmark_payload)
+    judge_payload = json.loads((wrong_sha / "judge.json").read_text())
+    judge_payload["custody"].update(candidate_git_sha=wrong, candidate_manifest_sha256=embedded_digest)
+    _rewrite_json(wrong_sha / "judge.json", judge_payload)
+    for filename in ("build.json", "candidate-manifest.json", "benchmark.json", "judge.json"):
+        _refresh_digest(wrong_sha, filename)
+    with pytest.raises(BundleError, match="verifying checkout"):
+        verify_bundle(wrong_sha)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    (
+        ("reader", {"name": "grounded-reader", "provider": "ollama", "selector": "latest", "model_revision": "latest", "model_content_sha256": "a" * 64}, "provider and selector"),
+        ("prompt", {"template_sha256": "bad", "serializer_sha256": "b" * 64}, "prompt"),
+        ("decoding", {}, "decoding"),
+        ("evidence_budget", {}, "evidence budget"),
+        ("abstention", {}, "abstention"),
+        ("split_role", "development", "split"),
+    ),
+)
+def test_qa_custody_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: object, message: str
+) -> None:
+    from eval.public.bundle import write_bundle
+
+    benchmark = {"questions": [{"answers": ["x"], "question_id": "q"}]}
+    custody = _qa_custody()
+    candidate = custody.pop("_candidate")
+    custody[field] = value
+    metadata = {
+        "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark), "family": "qa",
+        "independent_external_reproduction": False, "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
+        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v1",
+        "revision": "c" * 40, "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
+        "split_role": "held-out-test", "suite": "qa-fixture",
+    }
+    canonical = {key: nested for key, nested in metadata.items() if key not in {"reader_custody", "candidate_manifest"}}
+    monkeypatch.setattr("eval.public.runner.load_registry", lambda: {"qa-fixture": canonical})
+    monkeypatch.setattr("eval.public.runner.require_clean_candidate_checkout", lambda _sha: None)
+    traces = [{"abstained": True, "answer": "", "authorized_retrieval_hops": [{"hop": 0, "rows": []}], "authorized_evidence_fingerprint": _evidence_fingerprint([]), "claims": [], "question_id": "q", "scoring_family": "qa"}]
+    measured = score_profile("qa-em-f1-v1", [{"answers": ["x"], "question_id": "q"}], traces)
+    out = tmp_path / field
+    candidate_path = tmp_path / f"{field}-candidate.json"
+    _rewrite_json(candidate_path, candidate)
+    write_bundle(out, benchmark=benchmark, metadata=metadata, metrics=measured, traces=traces, candidate_manifest_path=candidate_path)
+    with pytest.raises(BundleError, match=message):
+        verify_bundle(out)
+
+
+def _qa_custody() -> dict[str, object]:
+    from eval.public.runner import load_qa_protocol, qa_protocol_digests
+
+    protocol = load_qa_protocol()
+    digests = qa_protocol_digests(protocol)
+    candidate = {
+        "candidate_version": protocol["version"], "created_at_utc": "2026-07-11T00:00:00Z",
+        "git_sha": __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip(), "model_content_sha256": "a" * 64,
+        **digests, "transport_retries": 0,
+    }
+    custody = {
+        "abstention": protocol["abstention"],
+        "candidate_git_sha": candidate["git_sha"],
+        "candidate_manifest_sha256": _canonical_digest(candidate),
+        "decoding": protocol["decoding"],
+        "evidence_budget": protocol["evidence_budget"],
+        "prompt": {"serializer_sha256": digests["serializer_sha256"], "template_sha256": digests["prompt_sha256"]},
+        "protocol_version": protocol["version"],
+        "reader": {"model_content_sha256": "a" * 64, "model_revision": "qwen3:4b", "name": "grounded-reader", "provider": "ollama", "selector": "qwen3:4b"},
+        "split_role": "held-out-test",
+        "transport_retries": 0,
+    }
+    custody["_candidate"] = candidate
+    return custody
+
+
+def _evidence_fingerprint(cids: list[str]) -> str:
+    return _canonical_digest(sorted(cids))
+
+
+def _hop(index: int, cid: str, content: str) -> dict[str, object]:
+    return {"hop": index, "rows": [{"capture": _capture(content), "cid": cid}]}
+
+
+def _capture(content: str) -> dict[str, object]:
+    return {"actor": "user", "content": content, "content_pointer": None, "modality": "text", "sensitivity": 0, "source_identity": "synthetic-fixture", "source_type": "benchmark", "tenant_id": "qa-test", "user_id": "benchmark-user"}
+
+
+def _fabricate_outside(trace: dict[str, object]) -> None:
+    from mnemosyne.ids import evidence_cid
+    capture = _capture("outside")
+    cid = evidence_cid(capture["content"], tenant_id=capture["tenant_id"], user_id=capture["user_id"], source_type=capture["source_type"], content_pointer=capture["content_pointer"], modality=capture["modality"], sensitivity=capture["sensitivity"])
+    trace.update(authorized_retrieval_hops=[_hop(0, cid, "outside")], authorized_evidence_fingerprint=_evidence_fingerprint([cid]))
+    trace["claims"][0].update(evidence_cids=[cid])
+
+
+@pytest.mark.parametrize(
+    ("hops", "budget", "message"),
+    (
+        (
+            [{"hop": index, "rows": []} for index in range(4)],
+            {"max_characters": 24000, "max_hops": 3, "max_records": 20},
+            "hop budget",
+        ),
+        (
+            [{"hop": 0, "rows": []}],
+            {"max_characters": 24000, "max_hops": 3, "max_records": 20},
+            "record budget",
+        ),
+        (
+            [{"hop": 0, "rows": []}],
+            {"max_characters": 24000, "max_hops": 3, "max_records": 20},
+            "character budget",
+        ),
+        (
+            [{"hop": 1, "rows": []}],
+            {"max_characters": 24000, "max_hops": 3, "max_records": 20},
+            "ordered and contiguous",
+        ),
+        (
+            [{"hop": False, "rows": []}],
+            {"max_characters": 24000, "max_hops": 3, "max_records": 20},
+            "hop schema",
+        ),
+    ),
+)
+def test_qa_authorized_retrieval_enforces_frozen_evidence_budget(
+    hops: list[dict[str, object]],
+    budget: dict[str, int],
+    message: str,
+) -> None:
+    from eval.public.bundle import _authorized_cids_from_hops
+    from mnemosyne.ids import evidence_cid
+
+    count = 21 if message == "record budget" else 1
+    content = "x" * 24001 if message == "character budget" else "evidence"
+    corpus = []
+    rows = []
+    for index in range(count):
+        capture = _capture(f"{content}{index}")
+        cid = evidence_cid(
+            capture["content"],
+            tenant_id=capture["tenant_id"],
+            user_id=capture["user_id"],
+            source_type=capture["source_type"],
+            content_pointer=capture["content_pointer"],
+            modality=capture["modality"],
+            sensitivity=capture["sensitivity"],
+        )
+        corpus.append(
+            {
+                "capture": capture,
+                "content": capture["content"],
+                "doc_id": cid,
+                "source_identity": capture["source_identity"],
+            }
+        )
+        rows.append({"capture": capture, "cid": cid})
+    if message in {"record budget", "character budget"}:
+        hops[0]["rows"] = rows
+    with pytest.raises(BundleError, match=message):
+        _authorized_cids_from_hops(hops, {"corpus": corpus}, budget)
+
+
 def _refresh_digest(bundle: Path, name: str) -> None:
     import hashlib
 

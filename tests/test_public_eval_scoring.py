@@ -48,3 +48,10 @@ def test_every_trace_must_declare_exact_scoring_family() -> None:
     labels = [{"question_id": "q", "gold_references": ["a"]}]
     with pytest.raises(ScoringError, match="family"):
         score_profile("hipporag-retrieval-v1", labels, [{"question_id": "q", "ranked_retrieved_hits": ["a"]}])
+
+
+def test_qa_abstention_scores_only_canonical_empty_answer() -> None:
+    labels = [{"answers": ["known"], "question_id": "q"}]
+    traces = [{"answer": "", "question_id": "q", "scoring_family": "qa"}]
+    scored = score_profile("qa-em-f1-v1", labels, traces)
+    assert scored["metrics"] == {"exact_match": 0.0, "token_f1": 0.0}
