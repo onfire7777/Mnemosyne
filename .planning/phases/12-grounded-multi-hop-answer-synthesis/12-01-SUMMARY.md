@@ -21,9 +21,10 @@ their unchanged path.
 - The complete Phase 12 protocol, split roles, retry/attempt policy, evidence
   budgets, canonical abstention, Phase 11 metrics, and Phase 11 report/manifest
   digests are exact and machine-locked.
-- Before any held-out attempt, protocol v2 strengthened custody to aggregate the
+- Before any held-out attempt, protocol v3 strengthened custody to aggregate the
   complete query-decomposer and grounded-reader prompt bundles, schemas, DATA
-  framing, concrete canonical evidence serializer, and full decoding options.
+  framing, role-specific Ollama JSON Schemas, concrete canonical evidence
+  serializer, and full decoding/generation envelope.
 - Candidate manifests are created no-overwrite with exclusive final-path
   creation, symlink rejection, mode `0600`, file/directory fsync, exact clean
   checkout binding, and embedded canonical bytes.
