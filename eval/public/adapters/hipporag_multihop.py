@@ -336,6 +336,11 @@ def _graph_evidence(
             evidence["observed"] = True
     if "graph_backend" in explanation:
         evidence["graph_backend"] = explanation["graph_backend"]
+    adapters = explanation.get("adapters")
+    if "graph_backend" not in evidence and isinstance(adapters, Mapping):
+        graph_backend = adapters.get("graph_backend")
+        if isinstance(graph_backend, str) and graph_backend:
+            evidence["graph_backend"] = graph_backend
     return evidence
 
 

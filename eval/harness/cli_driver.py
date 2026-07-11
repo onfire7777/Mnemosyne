@@ -182,7 +182,7 @@ class MnemoCLI:
         return self.run("capture-batch", "--input-jsonl", str(input_jsonl)).json
 
     def eval_query_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
-        """Run validated search+explain rows through one public CLI process."""
+        """Run validated search rows with embedded explanations in one process."""
         return self.run("eval-query-batch", "--input-jsonl", str(input_jsonl)).json
 
     def search(

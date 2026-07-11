@@ -1627,7 +1627,7 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
 
 
 def cmd_eval_query_batch(args: argparse.Namespace) -> None:
-    """Run a bounded, prevalidated search+explain shard in one read-only process."""
+    """Run a bounded search shard and retain each result's embedded explanation."""
     from mnemosyne.media_limits import ensure_file_within_limit
 
     if not args.evaluation_read_only:
@@ -1681,16 +1681,19 @@ def cmd_eval_query_batch(args: argparse.Namespace) -> None:
     if len({row["question_id"] for row in rows}) != len(rows):
         raise ValueError("evaluation query batch has duplicate question IDs")
     tools = load_tools(args)
-    results = [
-        {
-            "question_id": row["question_id"],
-            "search": tools.search(tenant_id=row["tenant"], query=row["query"]),
-            "explanation": tools.explain(
-                tenant_id=row["tenant"], query=row["query"]
-            ),
-        }
-        for row in rows
-    ]
+    results = []
+    for row in rows:
+        search = tools.search(tenant_id=row["tenant"], query=row["query"])
+        explanation = search.get("explain") if isinstance(search, dict) else None
+        if not isinstance(explanation, dict):
+            raise ValueError("evaluation search result is missing embedded explanation")
+        results.append(
+            {
+                "question_id": row["question_id"],
+                "search": search,
+                "explanation": explanation,
+            }
+        )
     emit({"count": len(results), "ok": True, "results": results})
 
 
