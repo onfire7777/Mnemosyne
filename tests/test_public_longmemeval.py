@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from eval.public.runner import load_qa_protocol, qa_protocol_digests, validate_candidate_manifest, validate_qa_protocol, write_candidate_manifest
+from eval.public.runner import build_candidate_manifest, load_qa_protocol, qa_protocol_digests, validate_candidate_manifest, validate_qa_protocol, write_candidate_manifest
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters.longmemeval import run
@@ -339,10 +339,12 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v2", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v3", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "b" * 64,
         "prompt_sha256": digests["prompt_sha256"], "serializer_sha256": digests["serializer_sha256"],
         "decoding_sha256": digests["decoding_sha256"], "protocol_sha256": digests["protocol_sha256"],
+        "evidence_budget": load_qa_protocol()["evidence_budget"],
+        "abstention": load_qa_protocol()["abstention"],
         "transport_retries": 0,
     }
     validate_candidate_manifest(manifest)
@@ -356,14 +358,28 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
         write_candidate_manifest(path, manifest)
 
 
+def test_candidate_manifest_builder_binds_budgets_abstention_and_v3_custody() -> None:
+    manifest = build_candidate_manifest(
+        model_content_sha256="b" * 64,
+        git_sha="a" * 40,
+        created_at_utc="2026-07-11T00:00:00Z",
+    )
+    protocol = load_qa_protocol()
+    assert manifest["candidate_version"] == "phase12-candidate-v3"
+    assert manifest["evidence_budget"] == protocol["evidence_budget"]
+    assert manifest["abstention"] == protocol["abstention"]
+
+
 def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from concurrent.futures import ThreadPoolExecutor
     import eval.public.runner as runner
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v2", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v3", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "b" * 64, **digests,
+        "evidence_budget": load_qa_protocol()["evidence_budget"],
+        "abstention": load_qa_protocol()["abstention"],
         "transport_retries": 0,
     }
     monkeypatch.setattr(runner, "_current_clean_head", lambda _root: "a" * 40)

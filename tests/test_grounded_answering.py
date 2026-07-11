@@ -36,6 +36,11 @@ class RecordingReader:
         return self.response
 
 
+class FailingReader:
+    def read(self, payload: dict[str, object]) -> object:
+        raise RuntimeError("provider unavailable")
+
+
 def _context() -> AnswerReadContext:
     return AnswerReadContext(
         tenant_id="tenant-a",
@@ -304,7 +309,9 @@ def test_reader_schema_citations_and_abstention_fail_closed(response: object) ->
         _engine(), RecordingDecomposer({"queries": []})
     ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(response))
     assert result.abstained is True
-    assert result.answer == "" and result.claims == () and result.evidence == ()
+    assert result.answer == "" and result.claims == ()
+    assert len(result.evidence) == 1
+    assert result.trace.hops and result.trace.evidence_fingerprint
 
 
 def test_retrieval_abstention_prevents_reader_execution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -322,6 +329,36 @@ def test_retrieval_abstention_prevents_reader_execution(monkeypatch: pytest.Monk
     ).answer(AnswerRequest(question="Ada", context=_context()), reader)
     assert result.abstained is True
     assert reader.calls == []
+
+
+def test_reader_provider_failure_does_not_retain_unreplayed_trace() -> None:
+    result = GroundedAnswerOrchestrator(
+        _engine(), RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), FailingReader())
+    assert result.abstained is True
+    assert result.evidence == () and result.trace.hops == ()
+
+
+def test_replay_drift_does_not_retain_stale_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    orchestrator = GroundedAnswerOrchestrator(
+        _engine(), RecordingDecomposer({"queries": []})
+    )
+    original = orchestrator.assemble
+    calls = 0
+
+    def drifting(request: AnswerRequest):
+        nonlocal calls
+        calls += 1
+        result = original(request)
+        return replace(result, evidence=()) if calls == 2 else result
+
+    monkeypatch.setattr(orchestrator, "assemble", drifting)
+    result = orchestrator.answer(
+        AnswerRequest(question="Ada", context=_context()),
+        RecordingReader({"claims": [], "unresolved": True}),
+    )
+    assert result.abstained is True
+    assert result.evidence == () and result.trace.hops == ()
 
 
 def test_temporal_scope_is_timezone_aware_and_reaches_graph_ppr(

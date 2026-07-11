@@ -555,7 +555,9 @@ def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monke
     head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     candidate = {
         "candidate_version": protocol["version"], "created_at_utc": "2026-07-11T00:00:00Z",
-        "git_sha": head, "model_content_sha256": "a" * 64, **digests, "transport_retries": 0,
+        "git_sha": head, "model_content_sha256": "a" * 64, **digests,
+        "evidence_budget": protocol["evidence_budget"],
+        "abstention": protocol["abstention"], "transport_retries": 0,
     }
     candidate_path = tmp_path / "candidate.json"
     candidate_path.write_text(json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n")

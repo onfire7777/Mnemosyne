@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import hashlib
 import json
 import sys
@@ -339,7 +340,7 @@ def test_grounded_roles_use_one_local_attempt_and_complete_frozen_custody(monkey
     seen: list[tuple[str, str]] = []
     monkeypatch.setattr(role_llm, "_model_content_digest", lambda: model_digest)
 
-    def chat_once(system: str, user: str) -> dict:
+    def chat_once(_role: str, system: str, user: str) -> dict:
         seen.append((system, user))
         if "queries" in user:
             return {"queries": ["bounded follow-up"]}
@@ -375,6 +376,29 @@ def test_grounded_role_rejects_model_digest_drift(monkeypatch) -> None:
     monkeypatch.setattr(role_llm, "_chat_once", lambda *_args: {"queries": []})
     with pytest.raises(ValueError, match="changed during generation"):
         role_llm.query_decomposer({"question": "q", "evidence": []})
+
+
+def test_grounded_role_sends_preregistered_role_specific_ollama_schema(monkeypatch) -> None:
+    role_llm = _load_role_llm()
+    seen: dict[str, object] = {}
+
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            self.close()
+
+    def open_request(request, **_kwargs):
+        seen.update(json.loads(request.data))
+        return Response(b'{"message":{"content":"{\\"queries\\":[]}"}}')
+
+    monkeypatch.setattr(role_llm, "safe_urlopen", open_request)
+    monkeypatch.setattr(role_llm, "validate_fetch_url", lambda *_args, **_kwargs: object())
+    result = role_llm._chat_once("query_decomposer", "system", "user")
+    assert result == {"queries": []}
+    assert seen["format"] == PROMPT_BUNDLES["query_decomposer"]["ollama_format"]
+    assert seen["stream"] is False and seen["think"] is False
 
 
 def test_bounded_command_rejects_output_before_unbounded_capture() -> None:

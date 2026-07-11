@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+from mnemosyne.ids import evidence_cid
 
 from eval.public.adapters import hipporag_multihop
 
@@ -11,6 +13,7 @@ from eval.public.adapters.hipporag_multihop import (
     HippoRAGSchemaError,
     normalize,
     run,
+    run_reader_qa,
     score_predictions,
 )
 
@@ -147,6 +150,51 @@ def test_adapter_uses_public_batch_search_and_explain() -> None:
     assert benchmark["dataset"] == "hotpot"
     assert traces[0]["graph_evidence"]["observed"] is True
     assert metrics["metrics"] == {"recall_at_2": 1.0, "recall_at_5": 1.0}
+
+
+def test_reader_qa_is_additive_gold_isolated_and_graph_provenance_linked() -> None:
+    class FakeCLI:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, Any]] = []
+            self.cid = ""
+
+        def capture_batch(self, path: Path) -> dict[str, Any]:
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+            self.payloads.extend(rows)
+            row = rows[0]
+            self.cid = evidence_cid(
+                row["content"], tenant_id=row["tenant"], user_id=row["user"],
+                source_type=row["source_type"], content_pointer=None,
+                modality="text", sensitivity=0,
+            )
+            return {"results": [{"cid": self.cid}]}
+
+        def eval_answer_batch(self, path: Path) -> dict[str, Any]:
+            self.payloads.extend(json.loads(line) for line in path.read_text().splitlines())
+            return {
+                "results": [{
+                    "question_id": "q",
+                    "answer": "alpha",
+                    "abstained": False,
+                    "claims": [{"text": "alpha", "evidence_cids": [self.cid]}],
+                    "hops": [{"index": 0, "queries": ["What?"], "channels": ["graph", "ppr"], "retrieved_cids": [self.cid]}],
+                    "reader": {"grounded_reader": {}, "query_decomposer": {}},
+                }]
+            }
+
+    value = {
+        "assets": {
+            "hotpotqa_corpus.json": [{"title": "A", "text": "alpha"}],
+            "hotpotqa.json": [{"_id": "q", "answer": "alpha", "question": "What?", "supporting_facts": [["A", 0]]}],
+        }
+    }
+    cli = FakeCLI()
+    _, traces, metrics = run_reader_qa(value, cli)  # type: ignore[arg-type]
+    assert metrics["metrics"] == {"exact_match": 1.0, "token_f1": 1.0}
+    assert traces[0]["graph_evidence"] == {
+        "evidence_cids": [cli.cid], "participated": True, "provenance_linked": True,
+    }
+    assert all("answer" not in row for row in cli.payloads)
 
 
 def test_graph_evidence_requires_positive_graph_signal() -> None:

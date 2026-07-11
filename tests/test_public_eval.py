@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
-from eval.public.runner import load_registry, run_public_suite
+from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
 from eval.public.scoring import score_profile
 
 
@@ -23,6 +23,21 @@ def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
     assert suite["publishable"] is False
     assert suite["pbpp_headline_eligible"] is False
     assert suite["independent_external_reproduction"] is False
+
+
+def test_reader_qa_suites_are_registered_pending_exact_dataset_custody() -> None:
+    pending = load_pending_qa_suites()
+    assert set(pending) == {
+        "longmemeval-qa",
+        "hipporag-2wiki-reader-qa",
+        "hipporag-hotpot-reader-qa",
+        "hipporag-musique-reader-qa",
+    }
+    assert all(row["requires_grounded_runtime"] is True for row in pending.values())
+    assert all(
+        row["status"] == "pending-normalized-dataset-custody"
+        for row in pending.values()
+    )
 
 
 def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
@@ -283,6 +298,28 @@ def test_qa_family_requires_disclosed_reader_and_judge(tmp_path: Path) -> None:
         verify_bundle(out)
 
 
+def test_qa_candidate_is_validated_before_adapter_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import eval.public.runner as runner
+
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text("{}")
+    called = False
+
+    def adapter(*_args: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("adapter must not execute")
+
+    monkeypatch.setitem(runner._ADAPTERS, "qa-smoke", adapter)
+    with pytest.raises(ValueError, match="schema"):
+        run_public_suite(
+            "qa-smoke", tmp_path / "out", candidate_manifest_path=candidate
+        )
+    assert called is False
+
+
 def test_generalized_registry_profile_recomputes_benchmark_owned_metrics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -449,7 +486,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         "family": "qa", "independent_external_reproduction": False,
         "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
         "pbpp_headline_eligible": False, "publishable": False,
-        "qa_protocol_version": "phase12-candidate-v2", "revision": "c" * 40,
+        "qa_protocol_version": "phase12-candidate-v3", "revision": "c" * 40,
         "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -551,7 +588,7 @@ def test_qa_custody_fails_closed(
     metadata = {
         "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark), "family": "qa",
         "independent_external_reproduction": False, "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
-        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v2",
+        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v3",
         "revision": "c" * 40, "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -577,7 +614,8 @@ def _qa_custody() -> dict[str, object]:
     candidate = {
         "candidate_version": protocol["version"], "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip(), "model_content_sha256": "a" * 64,
-        **digests, "transport_retries": 0,
+        **digests, "evidence_budget": protocol["evidence_budget"],
+        "abstention": protocol["abstention"], "transport_retries": 0,
     }
     custody = {
         "abstention": protocol["abstention"],

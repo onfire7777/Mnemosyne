@@ -773,7 +773,7 @@ def _authorized_cids_from_hops(
 
 
 def _engine_evidence_cid(capture: dict[str, Any]) -> str:
-    from mnemosyne.ids import evidence_cid
+    from eval.public.custody import capture_cid
 
     required = {"actor", "content", "content_pointer", "modality", "sensitivity", "source_identity", "source_type", "tenant_id", "user_id"}
     if set(capture) != required:
@@ -782,11 +782,7 @@ def _engine_evidence_cid(capture: dict[str, Any]) -> str:
         raise BundleError("QA capture envelope values are invalid")
     if capture["content_pointer"] is not None or not isinstance(capture["sensitivity"], int) or isinstance(capture["sensitivity"], bool):
         raise BundleError("QA capture envelope values are invalid")
-    return evidence_cid(
-        capture["content"], tenant_id=capture["tenant_id"], user_id=capture["user_id"],
-        source_type=capture["source_type"], content_pointer=capture["content_pointer"],
-        modality=capture["modality"], sensitivity=capture["sensitivity"],
-    )
+    return capture_cid(capture)
 
 
 def _manifest_files(root: Path) -> tuple[str, ...]:
