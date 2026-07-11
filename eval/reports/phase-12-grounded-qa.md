@@ -1,10 +1,10 @@
 # Phase 12 Grounded QA Evidence
 
-Status: in progress — consumed v3 and v13 frozen runs failed systemically; no held-out result exists.
+Status: in progress — consumed v3, v13, v17, and v18 frozen runs remain below threshold; no held-out result exists.
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v18` (new candidate required; not yet executed)
+- Protocol: no next candidate preregistered; v18 is consumed and below threshold
 - Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
@@ -142,5 +142,18 @@ Candidate v18 adds a fail-closed partial-proposal fallback: when no full literal
 span matches, select only the longest substantive source token also present in
 the proposal. Control and command terms remain ineligible, and the selected
 token still passes through ordinary retrieval and authorization.
+
+Candidate v18 passed all four expanded synthetic gates, then reproduced v17's
+protected aggregate exactly: 2/24 answered, 22 zero-hop abstentions, EM/F1
+`0.08333333333333333`, Recall@5 `0.08333333333333333`, and nDCG@5 `0.0625`.
+No protected content or per-ID result was inspected. Result SHA-256:
+`9c3fbb85704afceeff9a23d30fc6cabcc1f8e8aa80db9f1fb7d9ff2f300e303d`;
+ledger SHA-256:
+`5d68a738b3e3f7270e0f802a31c07e3425bf94516956df4027a2efb9a5781c41`.
+Because v18 made no aggregate improvement, no v19 candidate is preregistered;
+the next action is synthetic-only redesign, not another speculative protected
+attempt. Phase 12 evaluation already uses host Ollama 0.24.0 directly at
+`127.0.0.1:11434` with `qwen3:8b` on 100% GPU, so the production Colima
+performance apply would not accelerate this evaluator and remains deferred.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
