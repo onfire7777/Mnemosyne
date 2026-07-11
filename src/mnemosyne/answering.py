@@ -294,7 +294,9 @@ class GroundedAnswerOrchestrator:
     def _assemble(self, request: AnswerRequest) -> GroundedAnswer:
         if len(request.question) > self.limits.max_query_characters:
             raise ValueError("question budget exceeded")
-        queries = (request.question.strip(),)
+        queries = self._queries(
+            self.decomposer.decompose({"question": request.question, "evidence": []})
+        )
         seen_queries: set[str] = set()
         authorized: dict[str, dict[str, Any]] = {}
         hop_maps: list[dict[str, dict[str, Any]]] = []
