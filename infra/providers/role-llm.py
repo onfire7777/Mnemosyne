@@ -272,10 +272,8 @@ def grounded_reader(request: dict) -> dict:
     }
     schema = {
         "type": "object",
-        "oneOf": [
-            {"properties": {"claims": {"type": "array", "items": claim, "minItems": 1, "maxItems": 20}, "unresolved": {"const": False}}, "required": ["claims", "unresolved"], "additionalProperties": False},
-            {"properties": {"claims": {"type": "array", "maxItems": 0}, "unresolved": {"const": True}}, "required": ["claims", "unresolved"], "additionalProperties": False},
-        ],
+        "properties": {"claims": {"type": "array", "items": claim, "maxItems": 20}},
+        "required": ["claims"], "additionalProperties": False,
     }
     model_content_digest = _model_content_digest()
     parsed = _chat_once(
@@ -283,13 +281,11 @@ def grounded_reader(request: dict) -> dict:
         *render_prompt("grounded_reader", request.get("question"), request.get("evidence")),
         format_schema=schema,
     )
-    if set(parsed) != {"claims", "unresolved"}:
+    if set(parsed) != {"claims"}:
         raise ValueError("model returned invalid grounded-reader schema")
-    claims, unresolved = parsed["claims"], parsed["unresolved"]
-    if not isinstance(unresolved, bool) or not isinstance(claims, list) or (
-        unresolved and claims
-    ) or (not unresolved and (not claims or len(claims) > 20)):
-        raise ValueError("model returned contradictory grounded-reader schema")
+    claims = parsed["claims"]
+    if not isinstance(claims, list) or len(claims) > 20:
+        raise ValueError("model returned invalid grounded-reader claims")
     for row in claims:
         if not isinstance(row, dict) or set(row) != {"text", "evidence_cids"}:
             raise ValueError("model returned invalid claim schema")
@@ -302,7 +298,8 @@ def grounded_reader(request: dict) -> dict:
     if _model_content_digest() != model_content_digest:
         raise ValueError("configured Ollama model changed during generation")
     return {
-        **parsed,
+        "claims": claims,
+        "unresolved": not claims,
         "metadata": _grounded_metadata("grounded_reader", model_content_digest),
     }
 
