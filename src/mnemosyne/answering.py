@@ -25,6 +25,7 @@ _CONTROL_LABELS = (
     re.compile(r"filter(?:[\s_-]*fields?)\b", re.IGNORECASE),
     re.compile(r"policy(?:[\s_-]*fields?)\b", re.IGNORECASE),
 )
+_FALLBACK_DENY_TERMS = {"command", "commands", "ignore", "instruction", "instructions", "policy"}
 
 
 def _comparison(value: str) -> str:
@@ -74,6 +75,30 @@ def _contains_token_span(proposal: str, anchor: str) -> bool:
         proposed[index : index + len(expected)] == expected
         for index in range(len(proposed) - len(expected) + 1)
     )
+
+
+def _literal_source_span(proposal: str, source: str) -> str | None:
+    """Return the exact source slice for a token-identical model proposal."""
+    proposed = _anchor_tokens(proposal)
+    normalized_source = unicodedata.normalize("NFKC", source)
+    if (
+        not proposed
+        or _contains_control_label(proposal)
+        or (normalized_source != source and _contains_control_label(normalized_source))
+        or _FALLBACK_DENY_TERMS.intersection(proposed)
+        or not _substantive(proposal)
+    ):
+        return None
+    words = list(_ANCHOR_TOKEN.finditer(source))
+    source_tokens = tuple(_anchor_tokens(match.group(0))[0] for match in words)
+    for index in range(len(source_tokens) - len(proposed) + 1):
+        if source_tokens[index : index + len(proposed)] != proposed:
+            continue
+        start, end = words[index].start(), words[index + len(proposed) - 1].end()
+        if any(left < end and start < right for left, right in _control_ranges(source)):
+            return None
+        return source[start:end]
+    return None
 
 
 def _entity_spans(source: str) -> tuple[str, ...]:
@@ -133,6 +158,7 @@ def _source_bound_anchors(
     for proposal in proposals:
         if _contains_control_label(proposal):
             continue
+        matched_entity = False
         for anchor in catalog:
             key = _comparison(anchor)
             if _contains_token_span(proposal, anchor) and key not in seen:
@@ -140,8 +166,21 @@ def _source_bound_anchors(
                     raise ValueError("normalized anchor exceeds query budget")
                 selected.append(anchor)
                 seen.add(key)
+                matched_entity = True
                 if len(selected) > limits.max_queries_per_hop:
                     raise ValueError("normalized anchor count exceeds query budget")
+        if matched_entity:
+            continue
+        for source in sources:
+            anchor = _literal_source_span(proposal, source)
+            if anchor is None or _comparison(anchor) in seen:
+                continue
+            if len(anchor) > limits.max_query_characters:
+                raise ValueError("normalized anchor exceeds query budget")
+            selected.append(anchor)
+            seen.add(_comparison(anchor))
+            if len(selected) > limits.max_queries_per_hop:
+                raise ValueError("normalized anchor count exceeds query budget")
     return tuple(selected)
 
 

@@ -145,7 +145,7 @@
     "license": "CC0-1.0",
     "pbpp_headline_eligible": false,
     "publishable": false,
-    "qa_protocol_version": "phase12-candidate-v13",
+    "qa_protocol_version": "phase12-candidate-v14",
     "revision": "2f6e3a8d87f54af89d5c687eb2b0418ef124a9c7",
     "scoring_profile": "qa-em-f1-v1",
     "split_role": "frozen-internal"
@@ -191,7 +191,7 @@
     }
   },
   "_qa_protocol": {
-    "version": "phase12-candidate-v13",
+    "version": "phase12-candidate-v14",
     "anchor_normalizer": {
       "id": "source-bound-atomic-anchors-v1",
       "comparison_normalization": "NFKC-whitespace-casefold",
@@ -199,7 +199,7 @@
         "hop0": "question",
         "later_hops": "authorized-evidence"
       },
-      "selection": "literal-entity-span-contained-in-model-proposal",
+      "selection": "entity-span-or-exact-literal-proposal-fallback",
       "entity_classes": [
         "proper-name",
         "multiword-proper-name",
@@ -207,6 +207,19 @@
         "mixed-alnum"
       ],
       "possessive_matching": true,
+      "literal_fallback": {
+        "only_without_entity_match": true,
+        "exact_source_token_span": true,
+        "deny_terms": [
+          "command",
+          "commands",
+          "ignore",
+          "instruction",
+          "instructions",
+          "policy"
+        ],
+        "confusable_control_labels_fail_closed": true
+      },
       "dedupe": "stable-casefold",
       "substantive_terms": "mnemosyne.retrieval.query_support-v1",
       "all_queries_must_pass_retrieval": true,

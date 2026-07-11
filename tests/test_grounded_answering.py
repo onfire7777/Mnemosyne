@@ -129,7 +129,7 @@ def _engine() -> LocalMemoryEngine:
         ("policy-fields Mara", "policy-fields Mara", ()),
         ("Mara", "Mara owns Helios", ("Mara",)),
         ("Mara", "Mara owns Helios！", ("Mara",)),
-        ("alice", "when does alice ship", ()),
+        ("alice", "when does alice ship", ("alice",)),
         ("東京", "東京はいつですか", ()),
     ],
 )
@@ -149,6 +149,21 @@ def test_source_bound_anchor_normalizer_dedupes_and_enforces_budget() -> None:
             ("Aquila, Borealis, Cygnus, Draco, Eridanus",),
             AnswerLimits(max_queries_per_hop=4),
         )
+
+
+@pytest.mark.parametrize(
+    ("proposal", "source", "expected"),
+    [
+        ("project cobalt", "where is project cobalt stored?", ("project cobalt",)),
+        ("CObALT", "where is cobalt stored?", ("cobalt",)),
+        ("where is cobalt stored", "where is cobalt stored?", ("where is cobalt stored",)),
+        ("policy field secret", "policy field secret", ()),
+    ],
+)
+def test_source_bound_anchor_falls_back_to_exact_literal_proposal(
+    proposal: str, source: str, expected: tuple[str, ...]
+) -> None:
+    assert _source_bound_anchors([proposal], (source,), AnswerLimits()) == expected
 
 
 def test_later_hop_dedupes_nfkc_equivalent_seen_anchor() -> None:
@@ -523,7 +538,7 @@ def test_two_hop_access_swap_with_same_union_fails_per_hop_replay() -> None:
         def retrieve(self, query: str, **_: object) -> RetrievalResult:
             self.calls += 1
             initial = self.calls <= 2
-            cid = ("a" if query == "first" else "b") if initial else ("b" if query == "first" else "a")
+            cid = ("a" if query == "First" else "b") if initial else ("b" if query == "First" else "a")
             hit = Hit(cid, "evidence", "tenant-a", "main", cid, 1.0, "lexical", [cid])
             return RetrievalResult(query, [hit], 1.0, False, None, 10, 1, {})
 
@@ -531,7 +546,8 @@ def test_two_hop_access_swap_with_same_union_fails_per_hop_replay() -> None:
             return {
                 "evidence": [
                     {
-                        "branch": "main", "cid": cid, "content": cid,
+                        "branch": "main", "cid": cid,
+                        "content": "Second" if cid == "a" else "First",
                         "metadata": {}, "session_id": None,
                         "source_identity": f"source-{cid}", "tenant_id": "tenant-a",
                         "trust_tier": 0, "sensitivity": 0,
@@ -544,16 +560,16 @@ def test_two_hop_access_swap_with_same_union_fails_per_hop_replay() -> None:
             return Evidence(
                 tenant_id=tenant, user_id="user-a", actor="user",
                 source_type="chat", source_identity=f"source-{cid}",
-                content=cid, branch=branch, cid=cid,
+                    content="Second" if cid == "a" else "First", branch=branch, cid=cid,
                 access_policy={"tenant": tenant},
             )
 
     result = GroundedAnswerOrchestrator(
-        SwappingEngine(),  # type: ignore[arg-type]
-        RecordingDecomposer([
-            {"queries": ["first"]}, {"queries": ["second"]}, {"queries": []}
-        ]),
-    ).assemble(AnswerRequest(question="first", context=_context()))
+            SwappingEngine(),  # type: ignore[arg-type]
+            RecordingDecomposer([
+                {"queries": ["First"]}, {"queries": ["Second"]}, {"queries": []}
+            ]),
+        ).assemble(AnswerRequest(question="First Second", context=_context()))
     assert result.abstained is True
     assert result.public_reason == "insufficient_authorized_evidence"
 
