@@ -1,6 +1,6 @@
 # Phase 12 Grounded QA Evidence
 
-Status: in progress — the consumed v3 frozen run failed systemically; no held-out result exists.
+Status: in progress — consumed v3 and v13 frozen runs failed systemically; no held-out result exists.
 
 ## Preregistered Candidate
 
@@ -88,5 +88,16 @@ out at 120 seconds. The ledger exists, the result file does not, and no
 question-level protected data was inspected. Candidate v13 raises only that
 outer frozen-batch process bound to 3,600 seconds; per-provider timeouts, zero
 retries, protocol content, retrieval rails, and answer custody are unchanged.
+
+Candidate v13 passed both repeated immutable-runtime synthetic gates, then its
+single protected `qa_hard_v2` attempt completed with 24/24 canonical
+abstentions, zero retrieval hops, zero claims, EM/F1 0, and Recall@5/nDCG@5 0.
+Only these aggregate metrics and structural counts were inspected; no protected
+question, answer, trace content, or per-ID failure was read. Result SHA-256:
+`af3497af93d07abe86217cc7cfb8408ae3b41e38dd94cb67be23d7c76242ee2d`.
+Attempt-ledger SHA-256:
+`3addbc57c640c64c8bbc807bbcce348075ff3e54e10374c4fc1b851a5c3c3a9e`.
+The held-out LongMemEval and Hippo reader runs remain blocked by the frozen QA
+threshold, and publication flags remain false.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
