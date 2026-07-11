@@ -59,6 +59,11 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   ordered spans with one ASCII space, and hashes each raw slice as UTF-8.
   Public verification independently reconstructs claim text and hashes from
   benchmark capture custody and the exact authorized CID mapping.
+- Candidate v9's authored-offset selector failed synthetic exact-answer quality
+  and has no protected ledger. Candidate v10 uses `qwen3:8b` at manifest digest
+  `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`.
+  The model selects exact `{cid, quote}` substrings; application code derives
+  the lowest raw occurrence, offsets, UTF-8 hash, and rendering without repair.
 
 ## Completion Boundary
 

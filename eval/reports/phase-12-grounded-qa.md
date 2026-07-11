@@ -4,8 +4,9 @@ Status: in progress — the consumed v3 frozen run failed systemically; no held-
 
 ## Preregistered Candidate
 
-- Protocol: `phase12-candidate-v9` (new candidate required; not yet executed)
-- Reader/decomposer: local Ollama `qwen3:4b`, exact content digest required
+- Protocol: `phase12-candidate-v10` (new candidate required; not yet executed)
+- Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
+  `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
 - Evidence: at most 20 records, 24,000 characters, and 3 hops
 - Canonical abstention: empty answer, empty claims, `abstained=true`
@@ -63,5 +64,12 @@ span custody (`cid`, Unicode code-point `start`/`end`, and UTF-8
 `slice_sha256`). Bundle verification reconstructs each slice and the
 single-space rendering from the benchmark capture corpus and exact authorized
 CID mapping rather than trusting trace self-attestation.
+Candidate v9's model-authored offset selector failed synthetic exact-answer
+quality and never reached protected evaluation; it has no protected ledger.
+Candidate v10 replaces authored offsets with exact `{cid, quote}` selection.
+The application rejects any non-substring and deterministically selects the
+lowest raw Unicode code-point occurrence before deriving the unchanged public
+offset and hash custody. The installed `qwen3:8b` manifest digest above was
+verified locally for synthetic-only preparation; no protected run was made.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
