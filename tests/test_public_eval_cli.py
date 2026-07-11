@@ -492,8 +492,13 @@ json.dump(response, sys.stdout)
         cli, global_flags=["--evaluation-read-only"], env=env
     ).eval_answer_batch(rows)["results"][0]
     assert result["abstained"] is False and result["claims"]
-    assert len(result["hops"]) == 2
-    assert [hop["queries"] for hop in result["hops"]] == [["Mara"], ["Helios"]]
+    assert len(result["hops"]) == 3
+    assert result["hops"][2]["queries"] == ["2026", "ships"]
+    assert [hop["queries"] for hop in result["hops"]] == [
+        ["Mara"],
+        ["Helios"],
+        ["2026", "ships"],
+    ]
 
 
 def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
