@@ -56,13 +56,13 @@ provenance-grounded reader that reaches the accepted QA target without recall
 or safety regression.
 **Requirements:** CAP-001, CAP-002, CAP-003, RAIL-001..004
 **Depends on:** Phase 11
-**Plans:** 2/4 complete
+**Plans:** 3/4 complete
 
 Plans:
 
 - [x] 12-01-PLAN.md — Freeze candidate protocol and complete separate public QA custody.
 - [x] 12-02-PLAN.md — Bounded multi-hop/PPR and episode-aware orchestration.
-- [ ] 12-03-PLAN.md — Grounded Ollama reader and read-only public answer surface.
+- [x] 12-03-PLAN.md — Grounded Ollama reader and read-only public answer surface.
 - [ ] 12-04-PLAN.md — Frozen internal/held-out evidence and no-regression closure.
 
 **Boundary:** Phase 12 does not close from implementation alone. CAP-003 requires

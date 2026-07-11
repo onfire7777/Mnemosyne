@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 Plan 12-02 complete; Plan 12-03 implementation next
-last_updated: "2026-07-11T16:30:00Z"
+stopped_at: Phase 12 Plan 12-03 source scope complete; installed provider gate before Plan 12-04 evidence
+last_updated: "2026-07-11T17:30:00Z"
 last_activity: 2026-07-11
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 29
 ---
 
@@ -37,9 +37,9 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
-Plan: 2 of 4
-Status: Bounded grounded orchestration complete; grounded reader/public answer implementation next; exact CI externally blocked by GitHub billing
-Last activity: 2026-07-11 — Bounded grounded orchestration shipped at `main@eb81ea9`
+Plan: 3 of 4
+Status: Grounded reader/public answer source complete; installed command transport and live provider success required before frozen evidence; exact CI externally blocked by GitHub billing
+Last activity: 2026-07-11 — Grounded reader transport and public answer surface shipped at `main@6ebbbb9`
 
 ## Performance Metrics
 
@@ -65,12 +65,14 @@ Last activity: 2026-07-11 — Bounded grounded orchestration shipped at `main@eb
 | 09.3 | 1 | - | - |
 | 10 | 2 | - | - |
 | 11 | 3 | - | - |
-| 12 | 2 complete | 4 | pending |
+| 12 | 3 complete | 4 | pending |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [Phase 12]: Candidate protocol v2 was preregistered before any held-out attempt so manifests bind both complete role prompts/rendering, the concrete serializer, and the full generation envelope; Phase 11 custody/baselines remain unchanged.
+- [Phase 12]: Local Ollama model identity is verified, but absent installed `/opt` role commands and a timed-out direct decomposer smoke keep runtime readiness open; Plan 12-04 may not consume a frozen/held-out attempt until that gate is real.
 - [Phase 12]: Answer orchestration reuses shared deep retrieval/PPR and a typed `record_access=False` control; no alternate ranking/graph stack or new dependency was introduced.
 - [Phase 12]: Every hop reuses the exact normalized authorization/temporal context and is independently replayed before emission; any drift collapses to generic abstention.
 - [Phase 12]: QA bundle creation and verification are exact-clean-checkout operations; candidate manifests are external no-overwrite artifacts whose canonical bytes are embedded and verified end to end.
