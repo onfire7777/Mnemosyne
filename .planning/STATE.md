@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 Plan 12-01 complete; Plan 12-02 implementation next
-last_updated: "2026-07-11T15:30:00Z"
+stopped_at: Phase 12 Plan 12-02 complete; Plan 12-03 implementation next
+last_updated: "2026-07-11T16:30:00Z"
 last_activity: 2026-07-11
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
   percent: 29
 ---
 
@@ -37,9 +37,9 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
-Plan: 1 of 4
-Status: Public QA custody complete; bounded orchestration implementation next; exact CI externally blocked by GitHub billing
-Last activity: 2026-07-11 — Frozen public QA custody shipped at `main@b2b07b3`
+Plan: 2 of 4
+Status: Bounded grounded orchestration complete; grounded reader/public answer implementation next; exact CI externally blocked by GitHub billing
+Last activity: 2026-07-11 — Bounded grounded orchestration shipped at `main@eb81ea9`
 
 ## Performance Metrics
 
@@ -65,12 +65,14 @@ Last activity: 2026-07-11 — Frozen public QA custody shipped at `main@b2b07b3`
 | 09.3 | 1 | - | - |
 | 10 | 2 | - | - |
 | 11 | 3 | - | - |
-| 12 | 1 complete | 4 | pending |
+| 12 | 2 complete | 4 | pending |
 
 ## Accumulated Context
 
 ### Decisions
 
+- [Phase 12]: Answer orchestration reuses shared deep retrieval/PPR and a typed `record_access=False` control; no alternate ranking/graph stack or new dependency was introduced.
+- [Phase 12]: Every hop reuses the exact normalized authorization/temporal context and is independently replayed before emission; any drift collapses to generic abstention.
 - [Phase 12]: QA bundle creation and verification are exact-clean-checkout operations; candidate manifests are external no-overwrite artifacts whose canonical bytes are embedded and verified end to end.
 - [Phase 12]: QA claims cite real Mnemosyne evidence CIDs recomputed from complete capture envelopes and corpus custody, with frozen hop/record/character budgets enforced by the verifier.
 - [Phase 12]: Freeze candidate protocol and Phase 11 baselines before implementation; use synthetic/dev fixtures only for iteration, then run `qa_hard_v2` and held-out LongMemEval-QA under preregistered single-pass controls.
