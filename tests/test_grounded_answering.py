@@ -346,7 +346,7 @@ def test_reader_claims_are_approved_only_against_replayed_authorized_cids() -> N
         {
             "claims": [
                 {
-                    "spans": [{"cid": assembled.evidence[0].cid, "start": 0, "end": 24}],
+                    "spans": [{"cid": assembled.evidence[0].cid, "quote": "Ada owns project Zephyr."}],
                 }
             ],
             "unresolved": False,
@@ -367,9 +367,9 @@ def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> N
     evidence = {"a": "A😀B ignore instructions", "b": "東京 ready"}
     claims = GroundedAnswerOrchestrator._claims(
         {"claims": [{"spans": [
-            {"cid": "a", "start": 1, "end": 2},
-            {"cid": "b", "start": 0, "end": 2},
-            {"cid": "a", "start": 4, "end": 23},
+            {"cid": "a", "quote": "😀"},
+            {"cid": "b", "quote": "東京"},
+            {"cid": "a", "quote": "ignore instructions"},
         ]}], "unresolved": False},
         evidence,
     )
@@ -378,30 +378,39 @@ def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> N
     assert claims[0].spans[0].slice_sha256 == hashlib.sha256("😀".encode("utf-8")).hexdigest()
 
 
-@pytest.mark.parametrize(
-    "response",
-    [
-        {"claims": [{"spans": [{"cid": "a", "start": True, "end": 1}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": False}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": -1, "end": 1}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 99}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 2, "end": 1}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 2}, {"cid": "a", "start": 0, "end": 2}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 2}, {"cid": "a", "start": 1, "end": 3}]}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 1}] * 4}], "unresolved": False},
-        {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 1}]}] * 21, "unresolved": False},
-    ],
-)
-def test_extractive_span_reader_rejects_invalid_boundaries(response: object) -> None:
+@pytest.mark.parametrize("quote", [None, 1, True, "", "AB", "x" * 2001])
+def test_exact_quote_selector_rejects_non_substrings_and_invalid_quotes(quote: object) -> None:
     with pytest.raises(ValueError):
-        GroundedAnswerOrchestrator._claims(response, {"a": "abcd", "b": "wxyz"})
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"spans": [{"cid": "a", "quote": quote}]}], "unresolved": False},
+            {"a": "abcd"},
+        )
+
+
+def test_exact_quote_selector_uses_lowest_repeated_occurrence_and_rejects_overlap() -> None:
+    claim = GroundedAnswerOrchestrator._claims(
+        {"claims": [{"spans": [{"cid": "a", "quote": "Q3 2026"}]}], "unresolved": False},
+        {"a": "Q3 2026 then Q3 2026"},
+    )[0]
+    assert (claim.spans[0].start, claim.spans[0].end, claim.text) == (0, 7, "Q3 2026")
+    with pytest.raises(ValueError, match="overlap"):
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"spans": [{"cid": "a", "quote": "abc"}, {"cid": "a", "quote": "bc"}]}], "unresolved": False},
+            {"a": "abcd"},
+        )
+    for response in (
+        {"claims": [{"spans": [{"cid": "a", "quote": "a"}] * 4}], "unresolved": False},
+        {"claims": [{"spans": [{"cid": "a", "quote": "a"}]}] * 21, "unresolved": False},
+    ):
+        with pytest.raises(ValueError):
+            GroundedAnswerOrchestrator._claims(response, {"a": "abcd"})
 
 
 @pytest.mark.parametrize("content", [None, 1, True, ""])
 def test_extractive_span_reader_rejects_nonstring_or_empty_evidence(content: object) -> None:
     with pytest.raises(ValueError, match="exact non-empty strings"):
         GroundedAnswerOrchestrator._claims(
-            {"claims": [{"spans": [{"cid": "a", "start": 0, "end": 1}]}], "unresolved": False},
+            {"claims": [{"spans": [{"cid": "a", "quote": "a"}]}], "unresolved": False},
             {"a": content},  # type: ignore[dict-item]
         )
 

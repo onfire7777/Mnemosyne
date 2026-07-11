@@ -27,6 +27,8 @@ from mnemosyne.providers.grounded_protocol import (
     ANCHOR_NORMALIZER_SPEC,
     READER_SCHEMA_SPEC,
     GENERATION_SPEC,
+    MODEL_CONTENT_SHA256,
+    MODEL_SELECTOR,
     PROMPT_BUNDLES,
     SERIALIZER_SPEC,
     VERSION as GROUNDED_PROTOCOL_VERSION,
@@ -134,7 +136,7 @@ def validate_qa_protocol(protocol: Any) -> None:
     if protocol.get("held_out_policy") != {"development_use": False, "max_attempts": 1, "transport_retries": 0}:
         raise ValueError("held-out split may not be used as development data")
     expected = {
-        "model": {"provider": "ollama", "selector": "qwen3:4b", "resolved_content_sha256_required": True},
+        "model": {"provider": "ollama", "selector": MODEL_SELECTOR, "content_sha256": MODEL_CONTENT_SHA256, "resolved_content_sha256_required": True},
         "prompt": {"roles": PROMPT_BUNDLES, "serializer": SERIALIZER_SPEC, "complete_role_custody_sha256_required": True},
         "decoding": GENERATION_SPEC,
         "evidence_budget": {"max_records": 20, "max_characters": 24000, "max_hops": 3},
@@ -164,6 +166,8 @@ def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None =
         raise ValueError("candidate manifest does not match preregistered protocol")
     if manifest.get("evidence_budget") != protocol["evidence_budget"] or manifest.get("abstention") != protocol["abstention"]:
         raise ValueError("candidate manifest budgets or abstention do not match preregistration")
+    if manifest.get("model_content_sha256") != protocol["model"]["content_sha256"]:
+        raise ValueError("candidate manifest model digest does not match preregistration")
     expected_digests = qa_protocol_digests(protocol)
     if any(manifest.get(key) != value for key, value in expected_digests.items()):
         raise ValueError("candidate manifest protocol digests do not match preregistration")

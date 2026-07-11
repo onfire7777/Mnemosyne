@@ -669,16 +669,19 @@ class GroundedAnswerOrchestrator:
             spans: list[AnswerSpan] = []
             occupied: dict[str, list[tuple[int, int]]] = {}
             for raw in raw_spans:
-                if not isinstance(raw, dict) or set(raw) != {"cid", "start", "end"}:
+                if not isinstance(raw, dict) or set(raw) != {"cid", "quote"}:
                     raise ValueError("claim span schema is invalid")
-                cid, start, end = raw["cid"], raw["start"], raw["end"]
-                if not isinstance(cid, str) or cid not in evidence or not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool) or not (0 <= start < end <= len(evidence[cid])):
-                    raise ValueError("claim span is outside authorized evidence")
+                cid, quote = raw["cid"], raw["quote"]
+                if not isinstance(cid, str) or cid not in evidence or not isinstance(quote, str) or not quote or len(quote) > 2_000:
+                    raise ValueError("claim quote is invalid")
+                start = evidence[cid].find(quote)
+                if start < 0:
+                    raise ValueError("claim quote is outside authorized evidence")
+                end = start + len(quote)
                 if any(start < right and left < end for left, right in occupied.setdefault(cid, [])):
                     raise ValueError("claim spans overlap")
                 occupied[cid].append((start, end))
-                text = evidence[cid][start:end]
-                spans.append(AnswerSpan(cid, start, end, hashlib.sha256(text.encode("utf-8")).hexdigest()))
+                spans.append(AnswerSpan(cid, start, end, hashlib.sha256(quote.encode("utf-8")).hexdigest()))
             rendered = " ".join(evidence[span.cid][span.start:span.end] for span in spans)
             if not rendered.strip() or len(rendered) > 2_000:
                 raise ValueError("claim span rendering is invalid")

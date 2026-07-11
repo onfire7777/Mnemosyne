@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from eval.public.runtime_custody import grounded_runtime_environment
+from mnemosyne.providers.grounded_protocol import MODEL_CONTENT_SHA256
 
 
 INSTALLER = Path(__file__).parents[1] / "infra/providers/install-grounded-runtime.py"
@@ -94,7 +95,7 @@ def test_runtime_verifier_rejects_forged_tree_and_fresh_manifest(tmp_path: Path)
     with pytest.raises(ValueError, match="candidate git custody"):
         grounded_runtime_environment(
             manifest_path,
-            {"git_sha": commit, "model_content_sha256": "a" * 64},
+            {"git_sha": commit, "model_content_sha256": MODEL_CONTENT_SHA256},
             "http://127.0.0.1:11434",
             repo_root=repo,
         )
@@ -116,7 +117,7 @@ def test_runtime_execution_cannot_drift_installed_tree(tmp_path: Path) -> None:
     assert after == before
     environment = grounded_runtime_environment(
         destination / "manifest.json",
-        {"git_sha": commit, "model_content_sha256": "a" * 64},
+        {"git_sha": commit, "model_content_sha256": MODEL_CONTENT_SHA256},
         "http://127.0.0.1:11434",
         repo_root=repo,
     )

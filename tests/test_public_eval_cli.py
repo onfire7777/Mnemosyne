@@ -378,15 +378,15 @@ import json, sys
 from mnemosyne.providers.grounded_protocol import GENERATION_SPEC, role_digests
 request = json.load(sys.stdin)
 role = request["prompt_boundary"]["role"]
-metadata = {"role": role, "model": "qwen3:4b", "model_content_digest": "a" * 64,
+metadata = {"role": role, "model": "qwen3:8b", "model_content_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
             **role_digests(role), "decoding_options": GENERATION_SPEC}
 if role == "query_decomposer":
     evidence = request.get("evidence") or []
     response = {"queries": ([] if evidence else [request["question"]]), "metadata": metadata}
 else:
     evidence = request.get("evidence") or []
-    response = ({"claims": [{"spans": [{"cid": evidence[0]["cid"], "start": 0,
-                "end": len(evidence[0]["content"])}]}],
+    response = ({"claims": [{"spans": [{"cid": evidence[0]["cid"],
+                "quote": evidence[0]["content"]}]}],
                 "unresolved": False, "metadata": metadata} if evidence else
                 {"claims": [], "unresolved": True, "metadata": metadata})
 json.dump(response, sys.stdout)
@@ -398,8 +398,8 @@ json.dump(response, sys.stdout)
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
         "MNEMOSYNE_GROUNDED_READER_COMMAND": f"{sys.executable} {provider}",
-        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "a" * 64,
-        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:8b",
     }
     read_only = replace(
         ordinary, global_flags=["--evaluation-read-only"], env=env
@@ -461,7 +461,7 @@ def test_capture_batch_paraphrase_uses_initial_decomposition_and_reaches_reader(
 from mnemosyne.providers.grounded_protocol import GENERATION_SPEC, role_digests
 request = json.load(sys.stdin)
 role = request["prompt_boundary"]["role"]
-metadata = {"role": role, "model": "qwen3:4b", "model_content_digest": "a" * 64,
+metadata = {"role": role, "model": "qwen3:8b", "model_content_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
             **role_digests(role), "decoding_options": GENERATION_SPEC}
 evidence = request.get("evidence") or []
 if role == "query_decomposer":
@@ -470,7 +470,7 @@ if role == "query_decomposer":
     response = {"queries": queries, "metadata": metadata}
 else:
     row = next(item for item in evidence if "Q3 2026" in item["content"])
-    response = {"claims": [{"spans": [{"cid": row["cid"], "start": 16, "end": 23}]}],
+    response = {"claims": [{"spans": [{"cid": row["cid"], "quote": "Q3 2026"}]}],
                 "unresolved": False, "metadata": metadata}
 json.dump(response, sys.stdout)
 """
@@ -480,8 +480,8 @@ json.dump(response, sys.stdout)
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
         "MNEMOSYNE_GROUNDED_READER_COMMAND": f"{sys.executable} {provider}",
-        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "a" * 64,
-        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:8b",
     }
     rows = tmp_path / "answers.jsonl"
     rows.write_text(json.dumps({
@@ -512,8 +512,8 @@ def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
         "MNEMOSYNE_GROUNDED_READER_COMMAND": f"{sys.executable} {provider}",
-        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "a" * 64,
-        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:4b",
+        "MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+        "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": "qwen3:8b",
         "MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT": "0.01",
     }
     read_only = replace(ordinary, global_flags=["--evaluation-read-only"], env=env)
@@ -625,7 +625,7 @@ def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monke
     head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
     candidate = {
         "candidate_version": protocol["version"], "created_at_utc": "2026-07-11T00:00:00Z",
-        "git_sha": head, "model_content_sha256": "a" * 64, **digests,
+        "git_sha": head, "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41", **digests,
         "evidence_budget": protocol["evidence_budget"],
         "abstention": protocol["abstention"], "transport_retries": 0,
     }

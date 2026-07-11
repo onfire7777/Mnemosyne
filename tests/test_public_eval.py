@@ -486,7 +486,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         "family": "qa", "independent_external_reproduction": False,
         "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
         "pbpp_headline_eligible": False, "publishable": False,
-        "qa_protocol_version": "phase12-candidate-v9", "revision": "c" * 40,
+        "qa_protocol_version": "phase12-candidate-v10", "revision": "c" * 40,
         "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -576,7 +576,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     (
-        ("reader", {"name": "grounded-reader", "provider": "ollama", "selector": "latest", "model_revision": "latest", "model_content_sha256": "a" * 64}, "provider and selector"),
+        ("reader", {"name": "grounded-reader", "provider": "ollama", "selector": "latest", "model_revision": "latest", "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"}, "provider and selector"),
         ("prompt", {"aggregate_sha256": "bad", "roles": {}, "serializer_sha256": "b" * 64}, "prompt"),
         ("decoding", {}, "decoding"),
         ("evidence_budget", {}, "evidence budget"),
@@ -596,7 +596,7 @@ def test_qa_custody_fails_closed(
     metadata = {
         "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark), "family": "qa",
         "independent_external_reproduction": False, "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
-        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v9",
+        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v10",
         "revision": "c" * 40, "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -621,7 +621,7 @@ def _qa_custody() -> dict[str, object]:
     digests = qa_protocol_digests(protocol)
     candidate = {
         "candidate_version": protocol["version"], "created_at_utc": "2026-07-11T00:00:00Z",
-        "git_sha": __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip(), "model_content_sha256": "a" * 64,
+        "git_sha": __import__("subprocess").run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip(), "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
         **digests, "evidence_budget": protocol["evidence_budget"],
         "abstention": protocol["abstention"], "transport_retries": 0,
     }
@@ -640,7 +640,7 @@ def _qa_custody() -> dict[str, object]:
             "serializer_sha256": digests["serializer_sha256"],
         },
         "protocol_version": protocol["version"],
-        "reader": {"model_content_sha256": "a" * 64, "model_revision": "qwen3:4b", "name": "grounded-reader", "provider": "ollama", "selector": "qwen3:4b"},
+        "reader": {"model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41", "model_revision": "qwen3:8b", "name": "grounded-reader", "provider": "ollama", "selector": "qwen3:8b"},
         "split_role": "held-out-test",
         "transport_retries": 0,
     }

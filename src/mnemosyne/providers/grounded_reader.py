@@ -10,7 +10,11 @@ import re
 import shlex
 import subprocess
 from dataclasses import dataclass, field
-from mnemosyne.providers.grounded_protocol import role_digests
+from mnemosyne.providers.grounded_protocol import (
+    MODEL_CONTENT_SHA256,
+    MODEL_SELECTOR,
+    role_digests,
+)
 from mnemosyne.providers.bounded_command import (
     CommandOutputLimitError,
     run_bounded_command,
@@ -55,7 +59,7 @@ class CommandGroundedProvider:
     timeout_seconds: float = 30.0
     max_input_bytes: int = 64 * 1024
     max_output_bytes: int = 256 * 1024
-    expected_model: str = "qwen3:4b"
+    expected_model: str = MODEL_SELECTOR
     expected_model_content_sha256: str | None = None
     _disclosures: dict[str, dict[str, object]] = field(default_factory=dict, init=False)
 
@@ -83,10 +87,12 @@ class CommandGroundedProvider:
             raise ValueError("grounded answer role providers must use command transport")
         model_digest = os.environ.get("MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256", "")
         model = os.environ.get("MNEMOSYNE_GROUNDED_MODEL_SELECTOR", "")
-        if model != "qwen3:4b":
+        if model != MODEL_SELECTOR:
             raise ValueError("grounded reader model selector does not match preregistration")
         if not _MODEL_DIGEST.fullmatch(model_digest):
             raise ValueError("grounded reader expected model content digest is not configured")
+        if model_digest != MODEL_CONTENT_SHA256:
+            raise ValueError("grounded reader model content digest does not match preregistration")
         return cls(
             query,
             reader,
