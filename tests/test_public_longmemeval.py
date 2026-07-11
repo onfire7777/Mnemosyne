@@ -166,11 +166,13 @@ def test_oracle_may_be_the_official_answer_session_subset() -> None:
 
 
 def test_adapter_uses_real_public_cli_subprocess_seam(tmp_path: Path) -> None:
+    aggregate_store = tmp_path / "store.json"
     benchmark, traces, metrics = run(
-        _assets(), MnemoCLI(store=str(tmp_path / "store.json"))
+        _assets(), MnemoCLI(store=str(aggregate_store))
     )
     assert len(benchmark["questions"]) == len(traces) == metrics["trace_count"] == 2
     assert all(trace["ranked_retrieved_hits"] for trace in traces)
+    assert not aggregate_store.exists()
 
 
 @pytest.mark.parametrize(
@@ -205,10 +207,7 @@ def test_search_results_cannot_cross_question_tenant_boundary() -> None:
     class ContaminatingCLI(FakeCLI):
         def search(self, tenant: str, query: str) -> dict[str, Any]:
             own = super().search(tenant, query)["hits"]
-            foreign = next(
-                index for index, row in enumerate(self.rows) if row["tenant"] != tenant
-            )
-            return {"hits": [{"id": f"cid-{foreign}"}, *own]}
+            return {"hits": [{"id": "foreign-or-unknown-cid"}, *own]}
 
     _, traces, _ = run(_assets(), ContaminatingCLI())  # type: ignore[arg-type]
     assert all(
