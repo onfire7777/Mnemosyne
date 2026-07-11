@@ -154,9 +154,9 @@ def test_source_bound_anchor_normalizer_dedupes_and_enforces_budget() -> None:
 @pytest.mark.parametrize(
     ("proposal", "source", "expected"),
     [
-        ("project cobalt", "where is project cobalt stored?", ("project cobalt", "cobalt", "project")),
+        ("project cobalt", "where is project cobalt stored?", ("project cobalt",)),
         ("CObALT", "where is cobalt stored?", ("cobalt",)),
-        ("where is cobalt stored", "where is cobalt stored?", ("where is cobalt stored", "stored", "cobalt")),
+        ("where is cobalt stored", "where is cobalt stored?", ("where is cobalt stored",)),
         ("policy field secret", "policy field secret", ()),
     ],
 )
@@ -164,6 +164,20 @@ def test_source_bound_anchor_falls_back_to_exact_literal_proposal(
     proposal: str, source: str, expected: tuple[str, ...]
 ) -> None:
     assert _source_bound_anchors([proposal], (source,), AnswerLimits()) == expected
+
+
+def test_later_hop_literal_fallback_expands_trailing_source_tokens() -> None:
+    assert _source_bound_anchors(
+        ["project cobalt belongs to team juniper"],
+        ("project cobalt belongs to team juniper.",),
+        AnswerLimits(),
+        expand_literal_tokens=True,
+    ) == (
+        "project cobalt belongs to team juniper",
+        "juniper",
+        "team",
+        "belongs",
+    )
 
 
 def test_later_hop_dedupes_nfkc_equivalent_seen_anchor() -> None:
