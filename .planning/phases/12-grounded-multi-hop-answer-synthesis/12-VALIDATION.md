@@ -29,8 +29,11 @@
   failures without creating and preregistering a new candidate version.
 - Candidate v3 consumed its `qa_hard_v2` attempt and failed systemically with
   24/24 empty abstentions and zero retrieval hops. No protected per-question
-  inspection occurred; v4 must be committed and preregistered before another
+  inspection occurred; a new candidate must be committed and preregistered before another
   protected action.
+- Candidate v4 failed the synthetic live-model gate before any protected run or
+  ledger creation; its inferred intent query was not an atomic literal anchor.
+  Candidate v5 is therefore required for any next protected action.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
