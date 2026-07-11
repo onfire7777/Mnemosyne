@@ -55,6 +55,14 @@
   digest `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`;
   tests prove non-substrings fail and repeated quotes choose the lowest raw
   Unicode code-point occurrence. Preparation remains synthetic-only.
+- Candidate v17 consumed one protected attempt after passing the expanded
+  repeated entity/lowercase synthetic gate. Aggregate-only results were 2/24
+  answered, 22 zero-hop abstentions, EM/F1 0.08333333333333333, Recall@5
+  0.08333333333333333, and nDCG@5 0.0625.
+- Candidate v18 passed the same expanded synthetic gate and reproduced the v17
+  protected aggregate exactly. No per-question protected data was inspected.
+  This non-improvement blocks speculative v19 execution; redesign and validate
+  hop-0 behavior on synthetic data first.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out

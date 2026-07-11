@@ -64,6 +64,18 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`.
   The model selects exact `{cid, quote}` substrings; application code derives
   the lowest raw occurrence, offsets, UTF-8 hash, and rendering without repair.
+- Candidates v10-v16 were rejected or consumed under the documented immutable
+  one-shot protocol while hardening answer-only quote selection, batch timeout
+  custody, lowercase literal anchors, and evidence-only bridge traversal.
+- Candidate v17 passed the expanded repeated synthetic gate and answered 2/24
+  frozen QA items; 22 abstained before hop 0. Candidate v18 added a longest
+  shared literal-token fallback and reproduced the same aggregate exactly.
+  No protected question, answer, trace content, or per-ID failure was inspected.
+  No v19 candidate is preregistered; synthetic-only hop-0 redesign is required
+  before another protected action.
+- Phase 12 already invokes host Ollama 0.24.0 directly at `127.0.0.1:11434`
+  with `qwen3:8b` on 100% GPU. The production Colima performance apply does not
+  accelerate this evaluator and remains outside this capture lane.
 
 ## Completion Boundary
 

@@ -230,3 +230,13 @@ Latest active checkpoint (2026-06-30): Phase 8 provenance fail-open source contr
 ## Operator Next Steps
 
 - Start the next milestone with $gsd-new-milestone
+
+Latest checkpoint (2026-07-11): Phase 12 remains the active Plan B critical
+path. Candidate v18 is committed and consumed; it reproduced v17's protected
+aggregate (2/24 answered, 22 zero-hop abstentions, EM/F1 0.08333333333333333)
+without inspecting protected content. No v19 candidate is preregistered.
+Synthetic-only hop-0 redesign is next. The evaluator already uses host Ollama
+0.24.0 directly with qwen3:8b on 100% GPU, so the production Colima performance
+apply is not an evaluator speedup and remains deferred to its production
+evidence window. GitHub exact CI remains externally blocked by billing;
+external board seating and third-party reproduction remain human-owned gates.
