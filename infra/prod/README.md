@@ -30,6 +30,13 @@ docker compose -f infra/docker-compose.prod.yml up -d
 # trust the step-ca root on the host so chains validate (no tls_insecure_skip_verify anywhere)
 ```
 
+On a rerun, bootstrap exports the live Step CA root to
+`step-ca-root.crt.next` first. If it differs from the active trust bundle,
+bootstrap exits `78` and leaves the active file unchanged. Treat that as a CA
+migration checkpoint: validate and rotate every dependent leaf/client
+certificate in a maintenance window before publishing the staged root. Never
+collapse a compatibility bundle merely because one leaf validates.
+
 ## Profile + readiness
 ```bash
 cp infra/profiles/self-hosted.env /secure/outside/repo/production-render.env
@@ -45,8 +52,9 @@ offline `production-evidence-verify` with the independently retained fingerprint
 Rows flip Partial->Done only from that real evidence path; `capture-bc10` is the current attested bundle.
 
 ## Security gates that MUST hold before capture (see architecture §4)
-Fail-closed defaults (MCP `require_session=1`, object encryption `aesgcm`, sealed Vault, MFA-gated
-elevation, fail-closed provenance); Postgres least-privilege roles (`roles.sql`) with a live
+Fail-closed defaults (MCP `require_session=1`, object encryption `aesgcm`, Vault starts sealed and
+serving remains unavailable until operator unseal, MFA-gated elevation, fail-closed provenance);
+Postgres least-privilege roles (`roles.sql`) with a live
 `rolsuper`/`rolbypassrls` probe; single egress chokepoint; one published port (Caddy); digest-pinned
 images + policy-as-code CI; tamper-evident audit log.
 
