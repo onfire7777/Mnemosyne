@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 candidate v19 exact-SHA CI green on draft PR #11; local hardware admission required before merge and external manifest
-last_updated: "2026-07-12T19:11:25Z"
+stopped_at: Phase 12 candidate v19 code-bearing commit CI green on draft PR #11; final-head CI and local hardware admission required before merge and external manifest
+last_updated: "2026-07-12T19:12:35Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,7 +38,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired and PR head `2b2817d` is pushed on draft PR #11; exact-SHA CI run 29205132770 is green, while local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
+Status: Candidate v19 source/runtime/bundle custody is wired and code-bearing commit `2b2817d` passed exact-SHA CI run 29205132770; every later documentation-only head still requires exact-SHA CI, while local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
 Last activity: 2026-07-12 — Exact-SHA CI passed 2064 unit tests plus Postgres, provider, Ruff, and native-wheel jobs; no protected attempt was made
 
 ## Performance Metrics
@@ -318,7 +318,8 @@ admission floor. No live certificate, private key, Vault state, or container was
 changed.
 
 Latest checkpoint (2026-07-12): GitHub Actions billing is no longer blocking
-execution. Exact-SHA CI run 29205132770 at PR head `2b2817d` completed green:
+execution. Exact-SHA CI run 29205132770 for code-bearing commit `2b2817d`
+completed green:
 Ruff, Postgres integration, Rust provider conformance, macOS and Ubuntu native
 wheels, and unit/drift all passed; unit/drift reported 2064 passed, 106 skipped,
 and 191 deselected. This validates the production Vault TLS regression cases
