@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: Phase 12 runtime cutover is frozen at the operator-held Colima Vault unseal gate; Docker Desktop is stopped with verified external backups and no suite, merge, or protected attempt started
-last_updated: "2026-07-12T22:05:58Z"
+last_updated: "2026-07-12T22:19:56Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -359,3 +359,19 @@ Rotate it to the current root only in a distinct maintenance operation with an
 atomic `.next` validation/cutover and rollback pair; TLS rotation is not the
 immediate unseal action. No local suite, model, CBM refresh, gbrain sync,
 candidate manifest, exact-scale run, or protected attempt was started.
+
+The largest non-project memory consumer, Cotypist, was closed after it regrew
+to about 3.36 GiB RSS. A subsequent lightweight sample reached 56% free memory
+with acceptable load and no resident model, so the runbook-authorized targeted
+planning truth checks ran serialized and passed 4/4. This was not a formal
+three-sample full-workload admission and does not bypass the sealed-Vault
+service-health gate.
+
+The production bootstrap root-cause fix now exports the live Step CA root to a
+mode-0600 `.next` file, rejects symlink/non-regular/empty/invalid candidates,
+and refuses to replace a differing active trust bundle automatically. This
+prevents a bootstrap rerun from collapsing the working dual-root compatibility
+bundle before every dependent certificate is migrated. Red-green evidence:
+the new regression failed before the fix, then `bash -n`, ShellCheck, Ruff, the
+staging regression, and all three existing Vault TLS validator tests passed.
+Vault remains sealed and still requires the operator-held key.

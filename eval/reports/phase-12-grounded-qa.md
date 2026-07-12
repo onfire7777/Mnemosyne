@@ -237,6 +237,16 @@ required to rotate the still-valid Vault leaf from its retained older Step CA
 generation to the current root. No admission threshold changed, and no
 candidate, exact-scale, held-out, or protected attempt was consumed.
 
+After closing Cotypist at roughly 3.36 GiB RSS, one lightweight sample reached
+56% free memory with acceptable host load and no resident model. The four
+runbook-authorized planning/status truth checks passed serialized. This is not
+a formal three-sample full-workload admission: Vault remains sealed and the
+canonical API/stream services remain intentionally stopped. A source-only
+bootstrap fix also stages changed Step CA roots and refuses automatic trust-
+bundle replacement; its red-green regression plus `bash -n`, ShellCheck, Ruff,
+and the three existing synthetic Vault TLS validator cases pass. No candidate,
+model, exact-scale, or protected work ran.
+
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
 batch wrapper must complete all 24 traces with no abstentions, EM/F1 1.0, and
