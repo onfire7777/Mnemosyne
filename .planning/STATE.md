@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 candidate v19 source custody; full-suite hardware admission required before commit and external manifest
-last_updated: "2026-07-12T03:16:13Z"
+stopped_at: Phase 12 candidate v19 committed and pushed on draft PR #11; hardware-admitted full suite required before merge and external manifest
+last_updated: "2026-07-12T18:42:57Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired and focused tests pass; hardware-admitted full suite, clean commit, external manifest, and exact-scale receipt remain required before frozen evidence; exact CI is externally blocked by GitHub billing
-Last activity: 2026-07-11 — Candidate v19 separates deterministic hop-0 decomposition from the pinned reader and binds exact policy, implementation, runtime, and per-trace disclosures; no protected attempt was made
+Status: Candidate v19 source/runtime/bundle custody is wired, focused tests pass, and commit `742cc8e` is pushed on draft PR #11; hardware-admitted full suite, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence; exact CI is externally blocked by GitHub billing
+Last activity: 2026-07-12 — Candidate v19 separates deterministic hop-0 decomposition from the pinned reader and binds exact policy, implementation, runtime, and per-trace disclosures; the source commit is pushed, and no protected attempt was made
 
 ## Performance Metrics
 
