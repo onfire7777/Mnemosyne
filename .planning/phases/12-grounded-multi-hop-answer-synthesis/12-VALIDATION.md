@@ -1,5 +1,10 @@
 # Phase 12 Validation Strategy
 
+All hardware-intensive validation follows
+`.planning/runbooks/HARDWARE-WORKLOAD-PREFLIGHT.md`. Model admission and
+full-scale/protected runs fail closed when its memory, load, residency, GPU,
+swap-delta, topology, health, or serialization gates do not pass.
+
 ## Development Gate
 
 - New synthetic/dev multi-hop, temporal, contradiction, missing-hop, poison,
