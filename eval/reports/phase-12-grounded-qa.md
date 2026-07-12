@@ -159,8 +159,20 @@ performance apply would not accelerate this evaluator and remains deferred.
 A host-Metal `qwen3:14b` feasibility probe was rejected before
 preregistration: the model occupied 9.8 GB at 100% GPU on the 16 GB host,
 reduced free memory to roughly 60 MB, and failed to produce a trivial one-token
-response within 300 seconds. The model is installed externally for possible
-future use on larger hardware, but it is not a candidate on this machine.
+response within 300 seconds. Repeating the probe with Colima fully stopped
+still produced no trivial response within 95 seconds, ruling out the VM's
+reservation as the limiting cause. The model is installed externally for
+possible future use on larger hardware, but it is not a candidate on this
+machine.
+
+A synthetic-only `qwen3.5:9b` probe was also rejected before preregistration.
+The 6.6 GB model fit with the production VM active and completed a cold trivial
+request in 39.237 seconds, but it reproduced the decisive decomposition defect:
+given the lowercase question it proposed `project cobalt`, and after receiving
+authorized evidence that project cobalt belongs to team juniper it again
+proposed `project cobalt` instead of the newly exposed bridge. No protected
+attempt or ledger was created. A model substitution must demonstrate a real
+bridge-selection gain before it can become a custody-bound candidate.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
