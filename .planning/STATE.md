@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: Phase 12 candidate v19 committed and pushed on draft PR #11; hardware-admitted full suite required before merge and external manifest
-last_updated: "2026-07-12T18:53:46Z"
+last_updated: "2026-07-12T19:00:54Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -304,3 +304,14 @@ checked, while all evidence-dependent DoDs remain open. The internal compact
 reader/reranker design pins a no-download 8 GB bakeoff, training-data custody,
 resource ceilings, and a non-generative exact-span architecture. It does not
 alter candidate v19, authorize paid training, or create a public claim.
+
+Latest checkpoint (2026-07-12): The production `mnemo-api` and `mnemo-stream`
+restart loop is localized to a stale Vault leaf/intermediate bundle that no
+longer chains to the currently mounted step-ca root. A no-secret production TLS
+validator and bootstrap fail-closed gate now reject stale roots, incomplete
+bundles, unsafe key modes, hostname drift, and leaf/key mismatch before Vault
+initialization guidance continues. Bash/Python syntax checks and a read-only
+negative check against the live stale bundle pass; the new positive/negative
+pytest cases remain unexecuted until host memory reaches the targeted-test
+admission floor. No live certificate, private key, Vault state, or container was
+changed.

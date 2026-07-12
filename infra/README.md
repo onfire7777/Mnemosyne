@@ -68,7 +68,7 @@ secrets, private keys, and tokens).
 ## Prerequisites
 
 - Docker with Compose v2 (`docker compose version`)
-- `curl`, `jq`, `openssl`, `python3` on the host (used by setup/validation)
+- `curl`, `jq`, `openssl`, `step`, `python3` on the host (used by setup/validation)
 - A Mnemosyne checkout (this repo). Validation auto-detects `./.venv/bin/python`
   and falls back to `python3`. Override with `MNEMOSYNE_PYTHON=...`.
 

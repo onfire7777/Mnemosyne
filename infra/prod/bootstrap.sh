@@ -10,6 +10,8 @@ HOST="${MNEMO_HOST:-mnemo.local}"
 
 echo "==> 0. Preconditions"
 command -v docker >/dev/null || { echo "docker required"; exit 1; }
+command -v openssl >/dev/null || { echo "openssl required"; exit 1; }
+command -v step >/dev/null || { echo "step CLI required"; exit 1; }
 mkdir -p "$SECRETS_DIR"
 umask 077
 
@@ -50,10 +52,22 @@ echo "    ACME provisioner + 90-day (2160h) TLS leaf duration are applied AUTOMA
 echo "    by the step-ca CMD wrapper (infra/step-ca/mnemo-entrypoint.sh) at container start —"
 echo "    no manual 'step ca provisioner add acme' needed; it is idempotent on every boot."
 echo "    Trust the root on the host so backends validate the chain (security/no-skip-verify)."
-echo "    Issue the Vault leaf (infra/vault/vault.hcl expects it under \$MNEMO_SECRETS_DIR/vault-tls/):"
-echo "      mkdir -p $SECRETS_DIR/vault-tls"
-echo "      step ca certificate vault.mnemo.local $SECRETS_DIR/vault-tls/vault.crt \\"
-echo "        $SECRETS_DIR/vault-tls/vault.key --ca-url https://ca.mnemo.local --root $SECRETS_DIR/step-ca-root.crt"
+VAULT_TLS_DIR="$SECRETS_DIR/vault-tls"
+VAULT_CERT="$VAULT_TLS_DIR/vault.crt"
+VAULT_KEY="$VAULT_TLS_DIR/vault.key"
+if [ ! -f "$VAULT_CERT" ] || [ ! -f "$VAULT_KEY" ]; then
+  echo "    Vault TLS material is missing. Issue it from the current step-ca generation, then rerun bootstrap:"
+  echo "      mkdir -p $VAULT_TLS_DIR"
+  echo "      step ca certificate vault.mnemo.local $VAULT_CERT.next \\"
+  echo "        $VAULT_KEY.next --ca-url https://ca.mnemo.local --root $SECRETS_DIR/step-ca-root.crt"
+  echo "      chmod 0600 $VAULT_KEY.next"
+  echo "      infra/validate/validate-production-vault-tls.sh \\"
+  echo "        $SECRETS_DIR/step-ca-root.crt $VAULT_CERT.next $VAULT_KEY.next"
+  echo "      mv $VAULT_CERT.next $VAULT_CERT && mv $VAULT_KEY.next $VAULT_KEY"
+  exit 78
+fi
+"$REPO_ROOT/infra/validate/validate-production-vault-tls.sh" \
+  "$SECRETS_DIR/step-ca-root.crt" "$VAULT_CERT" "$VAULT_KEY"
 
 echo "==> 3. Vault: init + unseal (PRODUCTION = sealed, NO dev mode, NO committed root token)"
 echo "    Run the real flow against the vault service, store unseal/root material in your"
