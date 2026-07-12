@@ -205,6 +205,15 @@ reader. Candidate v19 still requires its
 external post-commit manifest, repeated synthetic validation, and the
 24-question exact-wrapper receipt before any protected attempt.
 
+The 2026-07-12 formal local admission retry failed before any suite or model
+work: the three memory-free samples were 24%, 25%, and 22% against the required
+55% floor. Host and Colima VM load, model residency, topology, and concurrency
+checks otherwise passed; two production services remained in their already
+documented stale-Vault-chain restart loop. Read-only attribution found the
+unrelated Cotypist application using about 3.28 GiB RSS. Nothing was
+terminated, no threshold changed, and the failed admission consumed no
+candidate or protected attempt.
+
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
 batch wrapper must complete all 24 traces with no abstentions, EM/F1 1.0, and

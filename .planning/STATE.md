@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 candidate v19 code-bearing commit CI green on draft PR #11; final-head CI and local hardware admission required before merge and external manifest
-last_updated: "2026-07-12T19:12:35Z"
+stopped_at: Phase 12 candidate v19 draft PR #11 is exact-head CI green at b7ba620; local full-workload admission failed at 24/25/22% free memory, so no suite, merge, or external manifest started
+last_updated: "2026-07-12T19:51:22Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired and code-bearing commit `2b2817d` passed exact-SHA CI run 29205132770; every later documentation-only head still requires exact-SHA CI, while local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
-Last activity: 2026-07-12 — Exact-SHA CI passed 2064 unit tests plus Postgres, provider, Ruff, and native-wheel jobs; no protected attempt was made
+Status: Candidate v19 source/runtime/bundle custody is wired and draft PR #11 head `b7ba620` passed exact-SHA CI run 29206262850 plus CodeRabbit; local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
+Last activity: 2026-07-12 — Final-head CI passed unit/drift, Postgres, provider, Ruff, and native-wheel jobs; the latest formal local admission failed and no protected attempt was made
 
 ## Performance Metrics
 
@@ -350,3 +350,12 @@ Writing the durable gbrain decision page loaded the already-installed local
 `nomic-embed-text` embedding model (578 MB). No CBM refresh or `mnemosyne-code`
 source sync followed. Future gbrain writes/syncs are therefore admitted as
 model/index work under the same preflight instead of being assumed lightweight.
+
+The next formal three-sample full-workload admission retry failed at 24%, 25%,
+and 22% free memory. Host one/five-minute loads stayed within the normal
+full-workload limits, VM loads remained below 1.0/0.75, no Ollama model or
+concurrent intensive process was present, and Colima remained 6 CPU / 12 GiB.
+The dominant reclaimable process was the unrelated Cotypist application at
+about 3.28 GiB RSS. No process was terminated, no threshold was weakened, and
+no local suite, model, CBM refresh, gbrain source sync, or evidence command was
+started.
