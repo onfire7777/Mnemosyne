@@ -185,6 +185,19 @@ evaluation. These results close model substitution as the immediate strategy.
 The next protocol must disclose decomposition separately from the reader and
 pass a broader synthetic matrix before it can become candidate v19.
 
+The first pre-v19 redesign artifact is now an unwired provider-shaped
+extractive hop-0 planner. It emits at most one exact substring of the question,
+fails closed on custody/control terms, and deliberately emits no proposal once
+authorized evidence exists; the already-tested orchestrator remains the sole
+owner of later-hop authorized-evidence traversal and seen-query filtering. A
+versioned 16-case development matrix covers proper and multiword names,
+acronyms, mixed alphanumerics, lowercase project/archive identifiers,
+hyphenation, generic marker use, marker-plus-intent cases, missing identifiers,
+deny terms, and Unicode-confusable control labels. The primitive is not wired
+into runtime custody and is not candidate v19; wiring requires separate
+disclosure, runtime/bundle custody, repeated synthetic validation, and the
+24-question exact-wrapper receipt before any protected attempt.
+
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
 batch wrapper must complete all 24 traces with no abstentions, EM/F1 1.0, and
