@@ -37,6 +37,27 @@ migration checkpoint: validate and rotate every dependent leaf/client
 certificate in a maintenance window before publishing the staged root. Never
 collapse a compatibility bundle merely because one leaf validates.
 
+The MCP ingress uses a short-lived step-ca client certificate. Before any
+capture or hardware-intensive run, validate the full client-auth chain and its
+six-hour renewal floor:
+
+```bash
+SECRETS_DIR=${MNEMO_SECRETS_DIR:-/secure/outside/repo}
+infra/validate/validate-production-mcp-client-tls.sh \
+  "$SECRETS_DIR/stepca-acme-root.crt" \
+  "$SECRETS_DIR/mcp-client.crt" \
+  "$SECRETS_DIR/mcp-client.key"
+```
+
+`stepca-acme-root.crt` is the exact trust pool Caddy mounts for client-auth;
+the broader compatibility bundle is not an admissible substitute. The
+validator is fail-closed for exact trust-pool identity, required OpenSSL
+features, leaf or chain expiry at the renewal horizon, hostname, client-auth
+purpose, chain, key mismatch, symlinks, encrypted keys, and unsafe private-key
+permissions. Never place the private key or the step-ca
+provisioner password in argv, environment snapshots, logs, evidence bundles,
+or the repository.
+
 ## Profile + readiness
 ```bash
 cp infra/profiles/self-hosted.env /secure/outside/repo/production-render.env
