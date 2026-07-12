@@ -1,10 +1,17 @@
 # Mnemosyne — Execution Plan A: The Memory System
 ## Goal: the world's best-performing AI memory system
 
-**Version:** 1.0 · **Date:** 2026-07-08 · **Status:** Proposed (awaiting go)
+**Version:** 1.1 · **Date:** 2026-07-12 · **Status:** In Progress (approved)
 **Scope:** the Mnemosyne engine and its capabilities (`src/mnemosyne/`, plus engine-side `eval/` regression suites).
 **Companion doc:** *Execution Plan B — Benchmarking & the Leaderboard* owns measurement, publication, and the public leaderboard. This plan builds the capabilities; Plan B proves and publishes them. Where this plan says "measured/published," the authority is Plan B.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for gated evidence capture.
+
+**Live execution status (2026-07-12):** Approval is recorded. Phase 12 owns S1
+and is executing Plan 12-04; S2, S3, S4, and the non-gating S5 research track
+are scheduled in Phase 15. `.planning/STATE.md`, `.planning/ROADMAP.md`, and
+`.planning/REQUIREMENTS.md` are the authoritative live trackers. The aggregate
+checklist in this document closes only when its named artifacts and measured
+DoDs exist; implementation progress alone does not check a box.
 
 ---
 
