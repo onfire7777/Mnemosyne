@@ -277,3 +277,10 @@ provider returns no later-hop proposals by design; authorized evidence
 traversal remains exclusively in the existing orchestrator. Full tests and
 Ruff are green. This is development-gate infrastructure, not preregistration,
 and no protected attempt was made.
+
+Latest checkpoint (2026-07-11): Hardware-intensive local work now has a
+mandatory fail-closed preflight runbook for the 16 GiB host and 6 CPU / 12 GiB
+Colima topology. It gates model size/residency, memory pressure, sustained load,
+GPU placement, context, swap deltas, service health, and concurrency before
+model, full-suite, scale, protected, or VM-changing work. Phase 12 validation
+references the runbook directly.
