@@ -486,7 +486,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         "family": "qa", "independent_external_reproduction": False,
         "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
         "pbpp_headline_eligible": False, "publishable": False,
-        "qa_protocol_version": "phase12-candidate-v18", "revision": "c" * 40,
+        "qa_protocol_version": custody["protocol_version"], "revision": "c" * 40,
         "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
@@ -501,7 +501,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
             "spans": [{"cid": cid, "start": 4, "end": 11,
                        "slice_sha256": hashlib.sha256(b"red fox").hexdigest()}],
         }],
-        "question_id": "q1", "scoring_family": "qa",
+        "question_id": "q1", "reader": _qa_trace_reader(), "scoring_family": "qa",
     }]
     measured = score_profile("qa-em-f1-v1", [{"answers": ["red fox"], "question_id": "q1"}], traces)
     out = tmp_path / "qa"
@@ -511,6 +511,52 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
     assert verify_bundle(out) == {"family": "qa", "suite": "qa-fixture", "valid": True}
     judge = json.loads((out / "judge.json").read_text())
     assert judge["custody"] == custody
+
+    zero_hop_trace = {
+        "abstained": True,
+        "answer": "",
+        "authorized_evidence_fingerprint": _evidence_fingerprint([]),
+        "authorized_retrieval_hops": [{"hop": 0, "rows": []}],
+        "claims": [],
+        "question_id": "q1",
+        "reader": _qa_trace_reader(include_grounded=False),
+        "scoring_family": "qa",
+    }
+    zero_hop = tmp_path / "qa-zero-hop-abstention"
+    write_bundle(
+        zero_hop,
+        benchmark=benchmark,
+        metadata=metadata,
+        metrics=score_profile(
+            "qa-em-f1-v1",
+            [{"answers": ["red fox"], "question_id": "q1"}],
+            [zero_hop_trace],
+        ),
+        traces=[zero_hop_trace],
+        candidate_manifest_path=candidate_path,
+    )
+    assert verify_bundle(zero_hop)["valid"] is True
+
+    reader_abstention_trace = {
+        **traces[0],
+        "abstained": True,
+        "answer": "",
+        "claims": [],
+    }
+    reader_abstention = tmp_path / "qa-reader-abstention"
+    write_bundle(
+        reader_abstention,
+        benchmark=benchmark,
+        metadata=metadata,
+        metrics=score_profile(
+            "qa-em-f1-v1",
+            [{"answers": ["red fox"], "question_id": "q1"}],
+            [reader_abstention_trace],
+        ),
+        traces=[reader_abstention_trace],
+        candidate_manifest_path=candidate_path,
+    )
+    assert verify_bundle(reader_abstention)["valid"] is True
 
     import shutil
 
@@ -523,6 +569,10 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
         ("fingerprint", lambda trace: trace.update(authorized_evidence_fingerprint="0" * 64), "fingerprint"),
         ("outside", lambda trace: _fabricate_outside(trace), "anchored corpus"),
         ("duplicate", lambda trace: trace.update(authorized_retrieval_hops=[_hop(0, cid, "The red fox."), _hop(1, cid, "The red fox.")]), "duplicate"),
+        ("reader-missing", lambda trace: trace.pop("reader"), "trace reader disclosure"),
+        ("reader-partial", lambda trace: trace["reader"].pop("grounded_reader"), "incomplete for authorized evidence"),
+        ("decomposer-forged", lambda trace: trace["reader"]["query_decomposer"].update(model_content_digest="0" * 64), "trace reader disclosure"),
+        ("reader-forged", lambda trace: trace["reader"]["grounded_reader"].update(prompt_sha256="0" * 64), "trace reader disclosure"),
     ):
         attacked = tmp_path / f"qa-{name}"
         shutil.copytree(out, attacked)
@@ -577,6 +627,7 @@ def test_qa_bundle_discloses_reader_and_recomputes_benchmark_labels(
     ("field", "value", "message"),
     (
         ("reader", {"name": "grounded-reader", "provider": "ollama", "selector": "latest", "model_revision": "latest", "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"}, "provider and selector"),
+        ("decomposer", {"selector": "forged"}, "decomposer"),
         ("prompt", {"aggregate_sha256": "bad", "roles": {}, "serializer_sha256": "b" * 64}, "prompt"),
         ("decoding", {}, "decoding"),
         ("evidence_budget", {}, "evidence budget"),
@@ -596,14 +647,14 @@ def test_qa_custody_fails_closed(
     metadata = {
         "adapter": "qa-fixture", "dataset_sha256": _canonical_digest(benchmark), "family": "qa",
         "independent_external_reproduction": False, "interval_method": "bootstrap", "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"}, "license": "MIT",
-        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": "phase12-candidate-v18",
+        "pbpp_headline_eligible": False, "publishable": False, "qa_protocol_version": custody["protocol_version"],
         "revision": "c" * 40, "reader_custody": custody, "scoring_profile": "qa-em-f1-v1",
         "split_role": "held-out-test", "suite": "qa-fixture",
     }
     canonical = {key: nested for key, nested in metadata.items() if key not in {"reader_custody", "candidate_manifest"}}
     monkeypatch.setattr("eval.public.runner.load_registry", lambda: {"qa-fixture": canonical})
     monkeypatch.setattr("eval.public.runner.require_clean_candidate_checkout", lambda _sha: None)
-    traces = [{"abstained": True, "answer": "", "authorized_retrieval_hops": [{"hop": 0, "rows": []}], "authorized_evidence_fingerprint": _evidence_fingerprint([]), "claims": [], "question_id": "q", "scoring_family": "qa"}]
+    traces = [{"abstained": True, "answer": "", "authorized_retrieval_hops": [{"hop": 0, "rows": []}], "authorized_evidence_fingerprint": _evidence_fingerprint([]), "claims": [], "question_id": "q", "reader": _qa_trace_reader(include_grounded=False), "scoring_family": "qa"}]
     measured = score_profile("qa-em-f1-v1", [{"answers": ["x"], "question_id": "q"}], traces)
     out = tmp_path / field
     candidate_path = tmp_path / f"{field}-candidate.json"
@@ -630,6 +681,7 @@ def _qa_custody() -> dict[str, object]:
         "candidate_git_sha": candidate["git_sha"],
         "candidate_manifest_sha256": _canonical_digest(candidate),
         "decoding": protocol["decoding"],
+        "decomposer": protocol["decomposer"],
         "evidence_budget": protocol["evidence_budget"],
         "prompt": {
             "aggregate_sha256": digests["prompt_sha256"],
@@ -646,6 +698,27 @@ def _qa_custody() -> dict[str, object]:
     }
     custody["_candidate"] = candidate
     return custody
+
+
+def _qa_trace_reader(*, include_grounded: bool = True) -> dict[str, object]:
+    from mnemosyne.providers.extractive_decomposer import disclosure
+    from mnemosyne.providers.grounded_protocol import (
+        GENERATION_SPEC,
+        MODEL_CONTENT_SHA256,
+        MODEL_SELECTOR,
+        role_digests,
+    )
+
+    value: dict[str, object] = {"query_decomposer": disclosure()}
+    if include_grounded:
+        value["grounded_reader"] = {
+            "role": "grounded_reader",
+            "model": MODEL_SELECTOR,
+            "model_content_digest": MODEL_CONTENT_SHA256,
+            **role_digests("grounded_reader"),
+            "decoding_options": GENERATION_SPEC,
+        }
+    return value
 
 
 def _evidence_fingerprint(cids: list[str]) -> str:

@@ -12,6 +12,7 @@ import pytest
 
 from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import MODEL_CONTENT_SHA256
+from mnemosyne.providers.extractive_decomposer import SELECTOR
 
 
 INSTALLER = Path(__file__).parents[1] / "infra/providers/install-grounded-runtime.py"
@@ -29,7 +30,12 @@ def _repo(path: Path) -> str:
     (path / "src/mnemosyne").mkdir(parents=True)
     (path / "src/mnemosyne/__init__.py").write_text("")
     (path / "src/mnemosyne/providers").mkdir()
-    for name in ("bounded_command.py", "grounded_protocol.py", "grounded_reader.py"):
+    for name in (
+        "bounded_command.py",
+        "extractive_decomposer.py",
+        "grounded_protocol.py",
+        "grounded_reader.py",
+    ):
         (path / "src/mnemosyne/providers" / name).write_text(f"# {name}\n")
     (path / "infra/providers").mkdir(parents=True)
     for name in ("role-llm.py", "role-ladder.py"):
@@ -42,6 +48,16 @@ def _repo(path: Path) -> str:
     return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=path, capture_output=True, text=True, check=True
     ).stdout.strip()
+
+
+def _candidate(repo: Path, commit: str) -> dict[str, str]:
+    return {
+        "git_sha": commit,
+        "model_content_sha256": MODEL_CONTENT_SHA256,
+        "decomposer_implementation_sha256": hashlib.sha256(
+            (repo / "src/mnemosyne/providers/extractive_decomposer.py").read_bytes()
+        ).hexdigest(),
+    }
 
 
 def test_runtime_install_is_commit_addressed_immutable_and_no_symlink(tmp_path: Path) -> None:
@@ -95,7 +111,7 @@ def test_runtime_verifier_rejects_forged_tree_and_fresh_manifest(tmp_path: Path)
     with pytest.raises(ValueError, match="candidate git custody"):
         grounded_runtime_environment(
             manifest_path,
-            {"git_sha": commit, "model_content_sha256": MODEL_CONTENT_SHA256},
+            _candidate(repo, commit),
             "http://127.0.0.1:11434",
             repo_root=repo,
         )
@@ -117,11 +133,15 @@ def test_runtime_execution_cannot_drift_installed_tree(tmp_path: Path) -> None:
     assert after == before
     environment = grounded_runtime_environment(
         destination / "manifest.json",
-        {"git_sha": commit, "model_content_sha256": MODEL_CONTENT_SHA256},
+        _candidate(repo, commit),
         "http://127.0.0.1:11434",
         repo_root=repo,
     )
     assert environment["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert environment["MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR"] == SELECTOR
+    assert environment["MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256"] == _candidate(
+        repo, commit
+    )["decomposer_implementation_sha256"]
     assert all(
         stat.S_IMODE(path.stat().st_mode) & stat.S_IWUSR == 0
         for path in (destination, *(item for item in destination.rglob("*") if item.is_dir()))

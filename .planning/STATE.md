@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 CAP-003 frozen-QA gate; v18 consumed and future attempts require scale preflight
-last_updated: "2026-07-12T00:02:47Z"
+stopped_at: Phase 12 candidate v19 source custody; full-suite hardware admission required before commit and external manifest
+last_updated: "2026-07-12T03:16:13Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Grounded reader/public answer source complete; installed command transport and live provider success required before frozen evidence; exact CI externally blocked by GitHub billing
-Last activity: 2026-07-11 — Grounded reader transport and public answer surface shipped at `main@6ebbbb9`
+Status: Candidate v19 source/runtime/bundle custody is wired and focused tests pass; hardware-admitted full suite, clean commit, external manifest, and exact-scale receipt remain required before frozen evidence; exact CI is externally blocked by GitHub billing
+Last activity: 2026-07-11 — Candidate v19 separates deterministic hop-0 decomposition from the pinned reader and binds exact policy, implementation, runtime, and per-trace disclosures; no protected attempt was made
 
 ## Performance Metrics
 
@@ -235,11 +235,12 @@ Latest active checkpoint (2026-06-30): Phase 8 provenance fail-open source contr
 - Begin external governance-board recruitment without delegating seating or
   ratification to an agent.
 
-Latest checkpoint (2026-07-11): Phase 12 remains the active Plan B critical
-path. Candidate v18 is committed and consumed; it reproduced v17's protected
+Historical checkpoint (2026-07-11): Phase 12 remains the active Plan B critical
+path. At the v18 checkpoint, candidate v18 was committed and consumed; it
+reproduced v17's protected
 aggregate (2/24 answered, 22 zero-hop abstentions, EM/F1 0.08333333333333333)
-without inspecting protected content. No v19 candidate is preregistered.
-Synthetic-only hop-0 redesign is next. The evaluator already uses host Ollama
+without inspecting protected content. No v19 candidate existed at that
+checkpoint, so synthetic-only hop-0 redesign was next. The evaluator already uses host Ollama
 0.24.0 directly with qwen3:8b on 100% GPU, so the production Colima performance
 apply is not an evaluator speedup and remains deferred to its production
 evidence window. GitHub exact CI remains externally blocked by billing;
@@ -269,14 +270,14 @@ authorized evidence exposed Team Juniper. Model substitution is closed as the
 next strategy; decomposition must be separately disclosed and validated on a
 diverse synthetic matrix before any candidate v19 preregistration.
 
-Latest checkpoint (2026-07-11): The pre-v19 decomposer redesign now has an
+Historical checkpoint (2026-07-11): The pre-v19 decomposer redesign had an
 unwired deterministic hop-0 provider primitive and a 16-case synthetic matrix
 covering entity forms, lowercase identifiers, marker misuse, missing
 identifiers, command/policy terms, and Unicode-confusable control labels. The
 provider returns no later-hop proposals by design; authorized evidence
 traversal remains exclusively in the existing orchestrator. Full tests and
-Ruff are green. This is development-gate infrastructure, not preregistration,
-and no protected attempt was made.
+Ruff were green. That checkpoint was development-gate infrastructure, not
+preregistration, and no protected attempt was made.
 
 Latest checkpoint (2026-07-11): Hardware-intensive local work now has a
 mandatory fail-closed preflight runbook for the 16 GiB host and 6 CPU / 12 GiB
@@ -284,3 +285,13 @@ Colima topology. It gates model size/residency, memory pressure, sustained load,
 GPU placement, context, swap deltas, service health, and concurrency before
 model, full-suite, scale, protected, or VM-changing work. Phase 12 validation
 references the runbook directly.
+
+Latest checkpoint (2026-07-11): Candidate v19 source custody is wired without
+using protected data. Deterministic extractive hop-0 decomposition is disclosed
+separately from the pinned `qwen3:8b` reader across the role command,
+self-hosted environment, immutable runtime, registry, candidate-manifest
+schema, public bundle, and verifier. Policy-spec and exact implementation
+digests are distinct, and every public trace must carry an exact role
+disclosure. The 16-case matrix and focused tests pass. External post-commit
+preregistration, a hardware-admitted full suite, and the 24-question exact-scale
+receipt remain required before any protected attempt.

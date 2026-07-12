@@ -339,9 +339,13 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v18", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v19", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
         "anchor_normalizer_sha256": digests["anchor_normalizer_sha256"],
+        "decomposer_spec_sha256": digests["decomposer_spec_sha256"],
+        "decomposer_implementation_sha256": digests[
+            "decomposer_implementation_sha256"
+        ],
         "reader_schema_sha256": digests["reader_schema_sha256"],
         "prompt_sha256": digests["prompt_sha256"], "serializer_sha256": digests["serializer_sha256"],
         "decoding_sha256": digests["decoding_sha256"], "protocol_sha256": digests["protocol_sha256"],
@@ -350,6 +354,10 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
         "transport_retries": 0,
     }
     validate_candidate_manifest(manifest)
+    for field in ("decomposer_spec_sha256", "decomposer_implementation_sha256"):
+        forged = {**manifest, field: "0" * 64}
+        with pytest.raises(ValueError, match="protocol digests"):
+            validate_candidate_manifest(forged)
     with pytest.raises(ValueError, match="expected commit"):
         validate_candidate_manifest(manifest, expected_git_sha="f" * 40)
     monkeypatch.setattr(runner, "_current_clean_head", lambda _root: "a" * 40)
@@ -360,14 +368,20 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
         write_candidate_manifest(path, manifest)
 
 
-def test_candidate_manifest_builder_binds_budgets_abstention_and_v10_custody() -> None:
+def test_candidate_manifest_builder_binds_budgets_abstention_and_v19_custody() -> None:
     manifest = build_candidate_manifest(
         model_content_sha256="500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
         git_sha="a" * 40,
         created_at_utc="2026-07-11T00:00:00Z",
     )
     protocol = load_qa_protocol()
-    assert manifest["candidate_version"] == "phase12-candidate-v18"
+    assert manifest["candidate_version"] == "phase12-candidate-v19"
+    assert manifest["decomposer_spec_sha256"] == qa_protocol_digests()[
+        "decomposer_spec_sha256"
+    ]
+    assert manifest["decomposer_implementation_sha256"] == qa_protocol_digests()[
+        "decomposer_implementation_sha256"
+    ]
     assert manifest["anchor_normalizer_sha256"] == qa_protocol_digests()["anchor_normalizer_sha256"]
     assert manifest["evidence_budget"] == protocol["evidence_budget"]
     assert manifest["abstention"] == protocol["abstention"]
@@ -379,7 +393,7 @@ def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_pa
 
     digests = qa_protocol_digests()
     manifest = {
-        "candidate_version": "phase12-candidate-v18", "created_at_utc": "2026-07-11T00:00:00Z",
+        "candidate_version": "phase12-candidate-v19", "created_at_utc": "2026-07-11T00:00:00Z",
         "git_sha": "a" * 40, "model_content_sha256": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41", **digests,
         "evidence_budget": load_qa_protocol()["evidence_budget"],
         "abstention": load_qa_protocol()["abstention"],

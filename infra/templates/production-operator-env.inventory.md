@@ -77,12 +77,18 @@ config arguments after `argv[0]`.
 - `MNEMOSYNE_SKILL_INDUCER_COMMAND`
 - `MNEMOSYNE_SUMMARIZER_COMMAND`
 - `MNEMOSYNE_QUERY_DECOMPOSER_COMMAND`
+- `MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256`
 - `MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER`
+- `MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR`
 - `MNEMOSYNE_GROUNDED_READER_COMMAND`
 - `MNEMOSYNE_GROUNDED_READER_PROVIDER`
 - `MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT`
 - `MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256`
 - `MNEMOSYNE_GROUNDED_MODEL_SELECTOR`
+
+The query-decomposer content digest binds the exact installed implementation
+bytes. Its separate policy-spec digest is custody-bound in the external
+post-commit candidate manifest.
 
 ## Runtime And Secret-Custody Names
 

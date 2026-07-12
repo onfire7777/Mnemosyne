@@ -71,8 +71,10 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   frozen QA items; 22 abstained before hop 0. Candidate v18 added a longest
   shared literal-token fallback and reproduced the same aggregate exactly.
   No protected question, answer, trace content, or per-ID failure was inspected.
-  No v19 candidate is preregistered; synthetic-only hop-0 redesign is required
-  before another protected action.
+  At that checkpoint no v19 candidate existed, so synthetic-only hop-0 redesign
+  was required. Candidate v19 source custody now exists, but its external
+  post-commit manifest and exact-scale receipt remain required before another
+  protected action.
 - Phase 12 already invokes host Ollama 0.24.0 directly at `127.0.0.1:11434`
   with `qwen3:8b` on 100% GPU. The production Colima performance apply does not
   accelerate this evaluator and remains outside this capture lane.

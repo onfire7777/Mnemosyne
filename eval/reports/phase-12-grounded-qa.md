@@ -4,8 +4,12 @@ Status: in progress — consumed v3, v13, v17, and v18 frozen runs remain below 
 
 ## Preregistered Candidate
 
-- Protocol: no next candidate preregistered; v18 is consumed and below threshold
-- Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
+- Protocol source: candidate v19; external post-commit manifest pending
+- Decomposer: deterministic `mnemosyne-extractive-hop0-v1`, exact policy-spec digest
+  `623c47250430e7f3a00ce0f11053b9c5397d2efcddd89428b556c507fb50805d`
+- Decomposer implementation SHA-256:
+  `1f00f376e79385a52fabd6fd2013d993b4f6eae84cda1e4d0065d462f97e9c6b`
+- Reader: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
 - Evidence: at most 20 records, 24,000 characters, and 3 hops
@@ -28,8 +32,8 @@ The v3 `qa_hard_v2` one-shot was consumed and returned 24/24 empty
 abstentions with zero retrieval hops. Aggregate-only diagnosis identified the
 systemic pre-provider query-support gate; no protected question, trace, or
 content was inspected. LongMemEval-QA and Hippo reader evaluation remain not
-run. A new committed v9 candidate is required before any further protected
-action.
+run. At that checkpoint, a new committed v9 candidate was required before any
+further protected action.
 
 Candidate v4 was rejected at the synthetic live-model gate because its initial
 query used inferred intent terms rather than an independently retrievable
@@ -150,9 +154,9 @@ No protected content or per-ID result was inspected. Result SHA-256:
 `9c3fbb85704afceeff9a23d30fc6cabcc1f8e8aa80db9f1fb7d9ff2f300e303d`;
 ledger SHA-256:
 `5d68a738b3e3f7270e0f802a31c07e3425bf94516956df4027a2efb9a5781c41`.
-Because v18 made no aggregate improvement, no v19 candidate is preregistered;
-the next action is synthetic-only redesign, not another speculative protected
-attempt. Phase 12 evaluation already uses host Ollama 0.24.0 directly at
+Because v18 made no aggregate improvement, no v19 candidate was preregistered
+at that checkpoint; the next action was synthetic-only redesign, not another
+speculative protected attempt. Phase 12 evaluation already uses host Ollama 0.24.0 directly at
 `127.0.0.1:11434` with `qwen3:8b` on 100% GPU, so the production Colima
 performance apply would not accelerate this evaluator and remains deferred.
 
@@ -182,20 +186,23 @@ hop 0; after authorized evidence exposed Team Juniper, it generated two more
 Project Cobalt questions instead of selecting the new bridge. Neither model
 reached answer-minimality, scale preflight, preregistration, or protected
 evaluation. These results close model substitution as the immediate strategy.
-The next protocol must disclose decomposition separately from the reader and
-pass a broader synthetic matrix before it can become candidate v19.
+At that checkpoint, the next protocol had to disclose decomposition separately
+from the reader and pass a broader synthetic matrix before becoming candidate
+v19.
 
-The first pre-v19 redesign artifact is now an unwired provider-shaped
-extractive hop-0 planner. It emits at most one exact substring of the question,
-fails closed on custody/control terms, and deliberately emits no proposal once
-authorized evidence exists; the already-tested orchestrator remains the sole
-owner of later-hop authorized-evidence traversal and seen-query filtering. A
+Candidate v19 now wires a separately disclosed extractive hop-0 planner. It
+emits at most one exact substring of the question, fails closed on
+custody/control terms, and deliberately emits no proposal once authorized
+evidence exists; the already-tested orchestrator remains the sole owner of
+later-hop authorized-evidence traversal and seen-query filtering. A
 versioned 16-case development matrix covers proper and multiword names,
 acronyms, mixed alphanumerics, lowercase project/archive identifiers,
 hyphenation, generic marker use, marker-plus-intent cases, missing identifiers,
-deny terms, and Unicode-confusable control labels. The primitive is not wired
-into runtime custody and is not candidate v19; wiring requires separate
-disclosure, runtime/bundle custody, repeated synthetic validation, and the
+deny terms, and Unicode-confusable control labels. Runtime, environment,
+candidate-manifest, registry, public-bundle, and verifier custody bind the
+decomposer policy spec and exact implementation bytes independently from the
+reader. Candidate v19 still requires its
+external post-commit manifest, repeated synthetic validation, and the
 24-question exact-wrapper receipt before any protected attempt.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound

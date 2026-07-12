@@ -1,4 +1,4 @@
-"""Redistributable development-only QA custody fixture."""
+"""Redistributable QA schema/custody fixture; it does not execute role commands."""
 
 from __future__ import annotations
 
@@ -7,6 +7,13 @@ import hashlib
 from typing import Any
 
 from eval.public.scoring import score_profile
+from mnemosyne.providers.extractive_decomposer import disclosure
+from mnemosyne.providers.grounded_protocol import (
+    GENERATION_SPEC,
+    MODEL_CONTENT_SHA256,
+    MODEL_SELECTOR,
+    role_digests,
+)
 
 
 def run(benchmark: dict[str, Any], _cli: object) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -32,6 +39,16 @@ def run(benchmark: dict[str, Any], _cli: object) -> tuple[list[dict[str, Any]], 
             "text": "red fox",
         }],
         "question_id": "qa-smoke-1",
+        "reader": {
+            "query_decomposer": disclosure(),
+            "grounded_reader": {
+                "role": "grounded_reader",
+                "model": MODEL_SELECTOR,
+                "model_content_digest": MODEL_CONTENT_SHA256,
+                **role_digests("grounded_reader"),
+                "decoding_options": GENERATION_SPEC,
+            },
+        },
         "scoring_family": "qa",
     }
     labels = [{"answers": ["red fox"], "question_id": "qa-smoke-1"}]
