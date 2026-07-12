@@ -207,20 +207,35 @@ external post-commit manifest, repeated synthetic validation, and the
 
 The 2026-07-12 formal local admission retry failed before any suite or model
 work: the three memory-free samples were 24%, 25%, and 22% against the required
-55% floor. Host and Colima VM load, model residency, topology, and concurrency
-checks otherwise passed; two production services remained in their already
-documented stale-Vault-chain restart loop. Read-only attribution found the
-unrelated Cotypist application using about 3.28 GiB RSS. Nothing was
-terminated, no threshold changed, and the failed admission consumed no
-candidate or protected attempt.
+55% floor. A follow-up audit found both the current Colima stack and an older
+Docker Desktop stack live from the same compose project, with Desktop owning
+host port 443 and retaining divergent persistent data.
 
-A follow-up context audit found a second, older 21-container Mnemosyne
-production stack still running under Docker Desktop while the current 20-
-container stack runs under Colima. The stacks use different image/config
-identities, and Docker Desktop owns the host port 443 listener. Although recent
-Desktop API/stream/operator/test logs were idle, it remains a live persistent
-service surface and was not stopped. The hardware gate now also rejects
-duplicate live Mnemosyne compose projects across Docker contexts.
+The authorized cutover selected Colima as canonical. Desktop writers were
+stopped before logical export; password-free globals plus `mnemosyne`,
+`keycloak`, and `mnemosyne_row10` custom dumps were stored outside the
+repository at
+`/Users/admin/mnemosyne-runtime-backups/20260712T220109Z-desktop-linux-pre-cutover/`.
+All three custom dumps passed `pg_restore --list`, all four files are mode
+`0600`, and their SHA-256 values are respectively
+`43499bd8a4699678a362a19b1ead3d32c8eb15eda51452f405dcef53d3c48142`,
+`308cd408b319fbb613a7f43bd0a29e22e4b3d0aea4d0daf5da1d901eb84d203f`,
+`351595b7d88feab24628a8951f54731383883a49b55fcb869d3c3ee8db1360a1`,
+and `011d04b4b15b621f959dd3df5559a300d6d1f4aa92ac925530980d820a5c3293`.
+The Desktop VM and all of its containers are stopped; its engine-local volumes
+remain intact as a rollback source. Divergent databases were not blindly
+overwritten or merged.
+
+Independent live verification corrected the earlier restart-loop diagnosis:
+TLS succeeds through the exact dual-root bundle mounted by API/stream and
+reaches Vault, which returns HTTP 503 because it is sealed. The initialized
+Vault is Shamir 1-of-1, not the documented 5-of-3 intent. API/stream therefore
+fail closed while loading the Vault-backed session keyring and were stopped
+after more than 1,300 retries each. Recovery requires the sole operator-held
+unseal key through an interactive non-logged surface. Separate maintenance is
+required to rotate the still-valid Vault leaf from its retained older Step CA
+generation to the current root. No admission threshold changed, and no
+candidate, exact-scale, held-out, or protected attempt was consumed.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
