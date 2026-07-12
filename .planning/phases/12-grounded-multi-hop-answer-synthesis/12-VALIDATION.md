@@ -7,6 +7,11 @@ swap-delta, topology, health, or serialization gates do not pass.
 
 ## Development Gate
 
+- Candidate v19 separates deterministic extractive hop-0 decomposition from
+  the disclosed `qwen3:8b` reader. The versioned decomposition matrix, runtime
+  disclosure, candidate manifest, and bundle verifier bind the policy spec,
+  exact decomposer implementation bytes, and reader independently without
+  changing later-hop retrieval or authorization behavior.
 - New synthetic/dev multi-hop, temporal, contradiction, missing-hop, poison,
   prompt-injection, fabricated-CID, and episode-contiguity fixtures only.
 - Unit/adversarial tests for hop/query/evidence/token caps, cycle/dedupe,
@@ -64,10 +69,12 @@ swap-delta, topology, health, or serialization gates do not pass.
   repeated entity/lowercase synthetic gate. Aggregate-only results were 2/24
   answered, 22 zero-hop abstentions, EM/F1 0.08333333333333333, Recall@5
   0.08333333333333333, and nDCG@5 0.0625.
-- Candidate v18 passed the same expanded synthetic gate and reproduced the v17
-  protected aggregate exactly. No per-question protected data was inspected.
-  This non-improvement blocks speculative v19 execution; redesign and validate
-  hop-0 behavior on synthetic data first.
+- At the v18 checkpoint, candidate v18 passed the same expanded synthetic gate
+  and reproduced the v17 protected aggregate exactly. No per-question
+  protected data was inspected. That non-improvement blocked speculative v19
+  execution until hop-0 behavior was redesigned and validated on synthetic
+  data. Candidate v19 now satisfies that source-level redesign gate; its full
+  suite, external manifest, and exact-scale receipt remain pending.
 - Run public LongMemEval-QA once across all 500 held-out questions after the
   candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out

@@ -8,6 +8,14 @@ Status: mandatory for hardware-intensive local work
 - Colima: 6 CPUs, 12 GiB memory, production compose stack.
 - Host Ollama: one model at a time; no in-VM Ollama during host-model work.
 
+These thresholds protect this development host; they are not Mnemosyne's
+minimum product requirements. Runtime behavior continues to use the existing
+`floor`, `standard`, `accelerated`, and explicit `frontier` capability tiers:
+lower-end machines retain dependency-light deterministic and pure/ONNX paths,
+while stronger systems may opt into wider batches, parallel channels,
+GPU/Metal providers, larger readers, and hosted rungs without changing the
+floor-tier contract or any security rail.
+
 This runbook applies before model pulls/loads, full test suites, benchmarks,
 index rebuilds, exact-scale evals, protected captures, and VM resizing. A failed
 gate means wait and recheck; it is not permission to raise a timeout or run in

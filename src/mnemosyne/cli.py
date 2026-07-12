@@ -1831,7 +1831,10 @@ def cmd_answer(args: argparse.Namespace) -> None:
     tools = load_tools(args)
     provider = CommandGroundedProvider.from_environment()
     value = _answer_one(tools, args.question, context, provider)
-    if set(provider.disclosure) != {"query_decomposer", "grounded_reader"}:
+    if set(provider.disclosure) not in (
+        {"query_decomposer"},
+        {"query_decomposer", "grounded_reader"},
+    ):
         value["reader"] = {}
     emit(value)
 
@@ -1900,7 +1903,10 @@ def cmd_eval_answer_batch(args: argparse.Namespace) -> None:
     for question_id, question, context in rows:
         provider = CommandGroundedProvider.from_environment()
         value = _answer_one(tools, question, context, provider)
-        if set(provider.disclosure) != {"query_decomposer", "grounded_reader"}:
+        if set(provider.disclosure) not in (
+            {"query_decomposer"},
+            {"query_decomposer", "grounded_reader"},
+        ):
             value["reader"] = {}
         results.append({"question_id": question_id, **value})
     emit({"count": len(results), "ok": True, "results": results})

@@ -44,6 +44,10 @@ from mnemosyne.providers.grounded_protocol import (
     render_prompt,
     role_digests,
 )
+from mnemosyne.providers.extractive_decomposer import (
+    ExtractiveQueryDecomposer,
+    disclosure as extractive_decomposer_disclosure,
+)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama.mnemo.local:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3:8b")
@@ -236,19 +240,12 @@ def _grounded_metadata(role: str, model_content_digest: str) -> dict[str, object
 
 
 def query_decomposer(request: dict) -> dict:
-    model_content_digest = _model_content_digest()
-    parsed = _chat_once(
-        "query_decomposer",
-        *render_prompt("query_decomposer", request.get("question"), request.get("evidence")),
+    parsed = ExtractiveQueryDecomposer().decompose(
+        {"question": request.get("question"), "evidence": request.get("evidence")}
     )
-    queries = parsed.get("queries")
-    if not isinstance(queries, list):
-        raise ValueError("model returned invalid decomposer schema")
-    if _model_content_digest() != model_content_digest:
-        raise ValueError("configured Ollama model changed during generation")
     return {
-        "queries": queries,
-        "metadata": _grounded_metadata("query_decomposer", model_content_digest),
+        "queries": parsed["queries"],
+        "metadata": extractive_decomposer_disclosure(),
     }
 
 

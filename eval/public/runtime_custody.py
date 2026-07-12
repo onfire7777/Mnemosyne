@@ -10,6 +10,9 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 from mnemosyne.providers.grounded_protocol import MODEL_CONTENT_SHA256, MODEL_SELECTOR
+from mnemosyne.providers.extractive_decomposer import (
+    SELECTOR as EXTRACTIVE_DECOMPOSER_SELECTOR,
+)
 
 
 def grounded_runtime_environment(
@@ -29,7 +32,22 @@ def grounded_runtime_environment(
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         raise ValueError("runtime manifest file custody is missing")
-    required = {"bin/role-ladder", "bin/role-llm", "libexec/role-ladder.py", "libexec/role-llm.py", "lib/mnemosyne/providers/bounded_command.py", "lib/mnemosyne/providers/grounded_protocol.py", "lib/mnemosyne/providers/grounded_reader.py"}
+    decomposer_path = "lib/mnemosyne/providers/extractive_decomposer.py"
+    if (
+        candidate.get("decomposer_implementation_sha256")
+        != files.get(decomposer_path)
+    ):
+        raise ValueError("runtime decomposer implementation digest mismatch")
+    required = {
+        "bin/role-ladder",
+        "bin/role-llm",
+        "libexec/role-ladder.py",
+        "libexec/role-llm.py",
+        "lib/mnemosyne/providers/bounded_command.py",
+        decomposer_path,
+        "lib/mnemosyne/providers/grounded_protocol.py",
+        "lib/mnemosyne/providers/grounded_reader.py",
+    }
     if not required <= set(files):
         raise ValueError("runtime manifest is missing required files")
     discovered: set[str] = set()
@@ -60,6 +78,10 @@ def grounded_runtime_environment(
     return {
         "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": str(role_ladder),
+        "MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR": EXTRACTIVE_DECOMPOSER_SELECTOR,
+        "MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256": candidate[
+            "decomposer_implementation_sha256"
+        ],
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
         "MNEMOSYNE_GROUNDED_READER_COMMAND": str(role_ladder),
         "MNEMOSYNE_GROUNDED_MODEL_SELECTOR": MODEL_SELECTOR,
