@@ -19,17 +19,19 @@ PRIVATE_KEY=$3
 HOSTNAME=${VAULT_TLS_HOSTNAME:-vault.mnemo.local}
 
 command -v openssl >/dev/null 2>&1 || fail 'openssl is required'
+command -v python3 >/dev/null 2>&1 || fail 'python3 is required'
 
 for path in "$ROOT_CA" "$CERT_BUNDLE" "$PRIVATE_KEY"; do
   [ ! -L "$path" ] || fail 'certificate inputs must not be symlinks'
   [ -f "$path" ] || fail 'root, certificate bundle, and private key must be regular files'
 done
 
-key_mode=$(stat -f '%Lp' "$PRIVATE_KEY" 2>/dev/null || stat -c '%a' "$PRIVATE_KEY" 2>/dev/null) || \
-  fail 'private-key mode could not be read'
-if (( (8#$key_mode & 8#077) != 0 )); then
-  fail 'private key must not be group/world accessible'
-fi
+python3 - "$PRIVATE_KEY" <<'PY' || fail 'private key must not be group/world accessible'
+import os
+import sys
+
+raise SystemExit(bool(os.stat(sys.argv[1], follow_symlinks=False).st_mode & 0o077))
+PY
 
 certificate_count=$(awk '/-----BEGIN CERTIFICATE-----/{count++} END{print count+0}' "$CERT_BUNDLE")
 [ "$certificate_count" -ge 2 ] || fail 'Vault certificate file must contain the leaf and issuing intermediate'
