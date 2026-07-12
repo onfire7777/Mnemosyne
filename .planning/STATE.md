@@ -268,3 +268,12 @@ returned nonliteral invented search phrases and repeated Project Cobalt after
 authorized evidence exposed Team Juniper. Model substitution is closed as the
 next strategy; decomposition must be separately disclosed and validated on a
 diverse synthetic matrix before any candidate v19 preregistration.
+
+Latest checkpoint (2026-07-11): The pre-v19 decomposer redesign now has an
+unwired deterministic hop-0 provider primitive and a 16-case synthetic matrix
+covering entity forms, lowercase identifiers, marker misuse, missing
+identifiers, command/policy terms, and Unicode-confusable control labels. The
+provider returns no later-hop proposals by design; authorized evidence
+traversal remains exclusively in the existing orchestrator. Full tests and
+Ruff are green. This is development-gate infrastructure, not preregistration,
+and no protected attempt was made.
