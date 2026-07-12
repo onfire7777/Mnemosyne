@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 Plan 12-03 source scope complete; installed provider gate before Plan 12-04 evidence
-last_updated: "2026-07-11T17:30:00Z"
-last_activity: 2026-07-11
+stopped_at: Phase 12 CAP-003 frozen-QA gate; v18 consumed and future attempts require scale preflight
+last_updated: "2026-07-12T00:02:47Z"
+last_activity: 2026-07-12
 progress:
   total_phases: 7
   completed_phases: 2
@@ -229,7 +229,11 @@ Latest active checkpoint (2026-06-30): Phase 8 provenance fail-open source contr
 
 ## Operator Next Steps
 
-- Start the next milestone with $gsd-new-milestone
+- Resolve the GitHub Actions billing block so exact-SHA CI can execute.
+- Manually unseal production Vault after any Colima restart; unseal material is
+  operator-held and must not enter the repository or command logs.
+- Begin external governance-board recruitment without delegating seating or
+  ratification to an agent.
 
 Latest checkpoint (2026-07-11): Phase 12 remains the active Plan B critical
 path. Candidate v18 is committed and consumed; it reproduced v17's protected
@@ -243,7 +247,16 @@ external board seating and third-party reproduction remain human-owned gates.
 
 Latest checkpoint (2026-07-11): The qwen3:14b host-Metal feasibility probe is
 rejected on the current 16 GB host after consuming 9.8 GB GPU memory and
-failing to emit one token within 300 seconds. No model-upgrade candidate was
-preregistered. A canonical 24-question development-scale exact-wrapper gate is
-now being added as a mandatory, digest-bound prerequisite for every future
+failing to emit one token within 300 seconds. A second probe with Colima fully
+stopped still failed to emit the trivial one-token response within 95 seconds,
+so VM reservation was not the limiting cause. No model-upgrade candidate was
+preregistered. The canonical 24-question development-scale exact-wrapper gate
+is committed and mandatory as a digest-bound prerequisite for every future
 protected attempt, closing the v12 batch-timeout hole before further QA work.
+
+Latest checkpoint (2026-07-11): A synthetic-only `qwen3.5:9b` probe also
+remains outside preregistration. It fit the active host topology and completed
+the live role request, but both the no-evidence and authorized-evidence
+lowercase cases proposed `project cobalt`; it did not select the newly exposed
+`team juniper` bridge. Model-family replacement without a demonstrated
+decomposition gain therefore does not justify consuming a protected attempt.
