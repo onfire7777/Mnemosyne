@@ -38,6 +38,7 @@ uptime
 ollama ps
 colima list
 docker ps --format '{{.Names}} {{.Status}}'
+docker context ls
 ```
 
 - Host memory-free percentage: at least 55% before model or protected work.
@@ -49,6 +50,12 @@ docker ps --format '{{.Names}} {{.Status}}'
   capture.
 - Colima must remain at 6 CPU / 12 GiB. Protected work additionally requires
   the expected service count with no restarting or unhealthy service.
+- Exactly one Mnemosyne `infra` compose project may be active across all Docker
+  contexts. Enumerate each reachable context with `docker --context CONTEXT
+  compose ls` and reject admission if the same working directory is live in
+  more than one VM. Do not stop a duplicate until its published ports, data
+  volumes, image/config identity, capture activity, and canonical ownership are
+  established; a second live stack is not disposable merely because it is old.
 
 Targeted unit tests may run below the model/protected thresholds only when
 memory-free is at least 35%, host one-minute load is at most 10, no model is

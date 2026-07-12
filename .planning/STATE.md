@@ -359,3 +359,15 @@ The dominant reclaimable process was the unrelated Cotypist application at
 about 3.28 GiB RSS. No process was terminated, no threshold was weakened, and
 no local suite, model, CBM refresh, gbrain source sync, or evidence command was
 started.
+
+The admission root-cause audit also found two simultaneous Mnemosyne production
+stacks from `/Users/admin/Mnemosyne/infra`: the approved/current Colima context
+has 20 containers, while Docker Desktop has an older 21-container stack from a
+different image/config generation. Docker Desktop owns the host TCP 443
+listener and showed no recent API, stream, operator, test, or capture activity;
+its test runner is only `sleep infinity`, but its stack is still a live service
+surface with persistent data. Colima remains the current context and has the
+known two-service stale-certificate restart loop. No container, VM, application,
+port, or volume was stopped or changed. Reaching the admission threshold now
+requires an explicit external-state choice about the duplicate live stack and
+other consumers rather than an unsafe automatic shutdown.
