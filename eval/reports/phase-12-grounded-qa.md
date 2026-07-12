@@ -174,6 +174,17 @@ proposed `project cobalt` instead of the newly exposed bridge. No protected
 attempt or ledger was created. A model substitution must demonstrate a real
 bridge-selection gain before it can become a custody-bound candidate.
 
+Two final task-specialized reader-family probes were stopped at the same
+synthetic boundary. `ministral-3:8b-instruct-2512-q4_K_M` fit the active host
+topology but returned an empty query list for the lowercase hop-0 Project
+Cobalt case. `granite3.3:8b` returned two nonliteral invented search phrases at
+hop 0; after authorized evidence exposed Team Juniper, it generated two more
+Project Cobalt questions instead of selecting the new bridge. Neither model
+reached answer-minimality, scale preflight, preregistration, or protected
+evaluation. These results close model substitution as the immediate strategy.
+The next protocol must disclose decomposition separately from the reader and
+pass a broader synthetic matrix before it can become candidate v19.
+
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
 batch wrapper must complete all 24 traces with no abstentions, EM/F1 1.0, and

@@ -260,3 +260,11 @@ the live role request, but both the no-evidence and authorized-evidence
 lowercase cases proposed `project cobalt`; it did not select the newly exposed
 `team juniper` bridge. Model-family replacement without a demonstrated
 decomposition gain therefore does not justify consuming a protected attempt.
+
+Latest checkpoint (2026-07-11): Two final task-specific model probes were
+rejected before preregistration. `ministral-3:8b-instruct-2512-q4_K_M`
+returned no hop-0 query for the lowercase Project Cobalt case. `granite3.3:8b`
+returned nonliteral invented search phrases and repeated Project Cobalt after
+authorized evidence exposed Team Juniper. Model substitution is closed as the
+next strategy; decomposition must be separately disclosed and validated on a
+diverse synthetic matrix before any candidate v19 preregistration.
