@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 candidate v19 committed and pushed on draft PR #11; hardware-admitted full suite required before merge and external manifest
-last_updated: "2026-07-12T19:00:54Z"
+stopped_at: Phase 12 candidate v19 exact-SHA CI green on draft PR #11; local hardware admission required before merge and external manifest
+last_updated: "2026-07-12T19:11:25Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired, focused tests pass, and commit `742cc8e` is pushed on draft PR #11; hardware-admitted full suite, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence; exact CI is externally blocked by GitHub billing
-Last activity: 2026-07-12 — Candidate v19 separates deterministic hop-0 decomposition from the pinned reader and binds exact policy, implementation, runtime, and per-trace disclosures; the source commit is pushed, and no protected attempt was made
+Status: Candidate v19 source/runtime/bundle custody is wired and PR head `2b2817d` is pushed on draft PR #11; exact-SHA CI run 29205132770 is green, while local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
+Last activity: 2026-07-12 — Exact-SHA CI passed 2064 unit tests plus Postgres, provider, Ruff, and native-wheel jobs; no protected attempt was made
 
 ## Performance Metrics
 
@@ -229,7 +229,7 @@ Latest active checkpoint (2026-06-30): Phase 8 provenance fail-open source contr
 
 ## Operator Next Steps
 
-- Resolve the GitHub Actions billing block so exact-SHA CI can execute.
+- Preserve the restored exact-SHA CI path and require it on every merge candidate.
 - Manually unseal production Vault after any Colima restart; unseal material is
   operator-held and must not enter the repository or command logs.
 - Begin external governance-board recruitment without delegating seating or
@@ -243,7 +243,8 @@ without inspecting protected content. No v19 candidate existed at that
 checkpoint, so synthetic-only hop-0 redesign was next. The evaluator already uses host Ollama
 0.24.0 directly with qwen3:8b on 100% GPU, so the production Colima performance
 apply is not an evaluator speedup and remains deferred to its production
-evidence window. GitHub exact CI remains externally blocked by billing;
+evidence window. At that historical checkpoint, GitHub exact CI was externally
+blocked by billing; the account-side block was resolved on 2026-07-12;
 external board seating and third-party reproduction remain human-owned gates.
 
 Latest checkpoint (2026-07-11): The qwen3:14b host-Metal feasibility probe is
@@ -315,3 +316,12 @@ negative check against the live stale bundle pass; the new positive/negative
 pytest cases remain unexecuted until host memory reaches the targeted-test
 admission floor. No live certificate, private key, Vault state, or container was
 changed.
+
+Latest checkpoint (2026-07-12): GitHub Actions billing is no longer blocking
+execution. Exact-SHA CI run 29205132770 at PR head `2b2817d` completed green:
+Ruff, Postgres integration, Rust provider conformance, macOS and Ubuntu native
+wheels, and unit/drift all passed; unit/drift reported 2064 passed, 106 skipped,
+and 191 deselected. This validates the production Vault TLS regression cases
+remotely while the Mac remains below local test admission. It does not replace
+the mandatory local synthetic/development-scale protocol gates or authorize a
+protected attempt.
