@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 candidate v19 draft PR #11; local full-workload admission failed at 24/25/22% free memory, so no suite, merge, or external manifest started
-last_updated: "2026-07-12T19:51:22Z"
+stopped_at: Phase 12 runtime cutover is frozen at the operator-held Colima Vault unseal gate; Docker Desktop is stopped with verified external backups and no suite, merge, or protected attempt started
+last_updated: "2026-07-12T22:05:58Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired on draft PR #11, whose live exact-head checks are the CI authority; local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
-Last activity: 2026-07-12 — The latest formal local admission failed; prior PR heads passed unit/drift, Postgres, provider, Ruff, native-wheel, and CodeRabbit checks; no protected attempt was made
+Status: Candidate v19 source/runtime/bundle custody is wired on draft PR #11, whose exact-head CI is green. The duplicate Docker Desktop runtime is frozen and backed up; Colima Vault must be interactively unsealed and the canonical stack made healthy before local full/synthetic verification, merge to `main`, external manifest, or exact-scale evidence
+Last activity: 2026-07-12 — Selected Colima as the canonical runtime, stopped the older Desktop writers/VM without deleting volumes, verified offline database backups, and stopped the sealed-Vault API/stream restart loops; no protected attempt was made
 
 ## Performance Metrics
 
@@ -327,47 +327,35 @@ remotely while the Mac remains below local test admission. It does not replace
 the mandatory local synthetic/development-scale protocol gates or authorize a
 protected attempt.
 
-Latest checkpoint (2026-07-12): The compact grounded-QA path is now reconciled
-with Plan A rather than living only in a research note. S1.2 defaults to a
-disclosed extractive span/no-answer reader, with any generative role-LLM kept
-as a separate comparison track. CAP-011 and Plan A S4.5 track a shadow-only
-Rust/ONNX reader-reranker path through physical 8 GiB Windows/Linux acceptance
-without lowering CAP-003, deterministic retrieval, §31, or §33 gates. The
-acceptance contract separates real product-floor evidence from this 16 GiB
-Mac's safety preflight. Hugging Face repository metadata and CBM integration
-seams were reviewed without downloading QA weights, starting a training job,
-running candidate/QA inference, or changing candidate v19 custody.
+Latest checkpoint (2026-07-12): The compact grounded-QA path is reconciled with
+Plan A. S1.2 defaults to a disclosed extractive span/no-answer reader, while a
+generative role-LLM remains a separate comparison track. CAP-011 and Plan A
+S4.5 reserve an optional Rust/ONNX reader-reranker boundary only after a
+model-quality bakeoff and physical 8 GiB Windows/Linux acceptance; no Rust
+rewrite is justified on the current Phase 12 quality bottleneck.
 
-The lightweight planning truth checks passed under the targeted-test admission
-gate: `tests/test_public_requirement_truth.py` and
-`tests/test_planning_traceability.py` each reported 2 passed. The full local
-suite, model work, and candidate-v19 synthetic/exact-scale gates remain
-unstarted because the host has not produced three qualifying full-workload
-samples and production API/stream services still restart on the stale Vault
-certificate chain.
+The duplicate-runtime cutover selected the documented Colima 6 CPU / 12 GiB
+stack as canonical. All Docker Desktop writers were stopped before export.
+`mnemosyne`, `keycloak`, and `mnemosyne_row10` custom-format dumps plus a
+password-free globals dump were written outside the repository under
+`/Users/admin/mnemosyne-runtime-backups/20260712T220109Z-desktop-linux-pre-cutover/`,
+validated with `pg_restore --list`, restricted to mode `0600`, and SHA-256
+bound. The Desktop VM is stopped; its containers and engine-local volumes are
+retained as a frozen rollback source. Divergent Desktop and Colima data was not
+blindly merged or deleted.
 
-Writing the durable gbrain decision page loaded the already-installed local
-`nomic-embed-text` embedding model (578 MB). No CBM refresh or `mnemosyne-code`
-source sync followed. Future gbrain writes/syncs are therefore admitted as
-model/index work under the same preflight instead of being assumed lightweight.
+The Colima API/stream loop was then localized to an initialized but sealed
+Vault, not a failed TLS handshake. Both services correctly fail closed while
+loading the Vault-backed MCP session keyring. The current Vault is Shamir
+1-of-1 despite the documented 5-of-3 intent, so recovery requires the sole
+operator-held unseal key through an interactive, non-logged surface. API and
+stream were stopped after more than 1,300 retries each to remove needless
+churn. Do not reinitialize Vault, replace its storage, or put unseal material
+in arguments, history, environment snapshots, logs, or repository files.
 
-The next formal three-sample full-workload admission retry failed at 24%, 25%,
-and 22% free memory. Host one/five-minute loads stayed within the normal
-full-workload limits, VM loads remained below 1.0/0.75, no Ollama model or
-concurrent intensive process was present, and Colima remained 6 CPU / 12 GiB.
-The dominant reclaimable process was the unrelated Cotypist application at
-about 3.28 GiB RSS. No process was terminated, no threshold was weakened, and
-no local suite, model, CBM refresh, gbrain source sync, or evidence command was
-started.
-
-The admission root-cause audit also found two simultaneous Mnemosyne production
-stacks from `/Users/admin/Mnemosyne/infra`: the approved/current Colima context
-has 20 containers, while Docker Desktop has an older 21-container stack from a
-different image/config generation. Docker Desktop owns the host TCP 443
-listener and showed no recent API, stream, operator, test, or capture activity;
-its test runner is only `sleep infinity`, but its stack is still a live service
-surface with persistent data. Colima remains the current context and has the
-known two-service stale-certificate restart loop. No container, VM, application,
-port, or volume was stopped or changed. Reaching the admission threshold now
-requires an explicit external-state choice about the duplicate live stack and
-other consumers rather than an unsafe automatic shutdown.
+Separate TLS debt remains: the Vault leaf chains to a retained older Step CA
+generation and currently validates through a deliberate dual-root bundle.
+Rotate it to the current root only in a distinct maintenance operation with an
+atomic `.next` validation/cutover and rollback pair; TLS rotation is not the
+immediate unseal action. No local suite, model, CBM refresh, gbrain sync,
+candidate manifest, exact-scale run, or protected attempt was started.
