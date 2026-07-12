@@ -214,6 +214,14 @@ unrelated Cotypist application using about 3.28 GiB RSS. Nothing was
 terminated, no threshold changed, and the failed admission consumed no
 candidate or protected attempt.
 
+A follow-up context audit found a second, older 21-container Mnemosyne
+production stack still running under Docker Desktop while the current 20-
+container stack runs under Colima. The stacks use different image/config
+identities, and Docker Desktop owns the host port 443 listener. Although recent
+Desktop API/stream/operator/test logs were idle, it remains a live persistent
+service surface and was not stopped. The hardware gate now also rejects
+duplicate live Mnemosyne compose projects across Docker contexts.
+
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
 batch wrapper must complete all 24 traces with no abstentions, EM/F1 1.0, and
