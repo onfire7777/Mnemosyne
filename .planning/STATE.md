@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 runtime cutover is frozen at the operator-held Colima Vault unseal gate; Docker Desktop is stopped with verified external backups and no suite, merge, or protected attempt started
-last_updated: "2026-07-12T22:19:56Z"
+stopped_at: Phase 12 heavy work is paused at the 55% hardware-admission floor after canonical runtime recovery; Vault, API/stream, Caddy, and mTLS are healthy and no suite, merge, or protected attempt started
+last_updated: "2026-07-12T23:01:12Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired on draft PR #11, whose exact-head CI is green. The duplicate Docker Desktop runtime is frozen and backed up; Colima Vault must be interactively unsealed and the canonical stack made healthy before local full/synthetic verification, merge to `main`, external manifest, or exact-scale evidence
-Last activity: 2026-07-12 — Selected Colima as the canonical runtime, stopped the older Desktop writers/VM without deleting volumes, verified offline database backups, and stopped the sealed-Vault API/stream restart loops; no protected attempt was made
+Status: Candidate v19 source/runtime/bundle custody is wired on draft PR #11, whose exact-head CI is green. The duplicate Docker Desktop runtime is frozen and backed up; the canonical Colima runtime is healthy, but the formal 50%/47%/48% memory samples failed the 55% heavy-work admission floor before local full/synthetic verification, merge to `main`, external manifest, or exact-scale evidence
+Last activity: 2026-07-12 — Recovered the original mode-0600 Vault material outside the repository, unsealed Vault without exposing the key, restored API/stream/Caddy, replaced the expired MCP client pair, verified both mTLS health routes, and kept all heavy/protected work paused after the hardware gate failed
 
 ## Performance Metrics
 
@@ -232,6 +232,11 @@ Latest active checkpoint (2026-06-30): Phase 8 provenance fail-open source contr
 - Preserve the restored exact-SHA CI path and require it on every merge candidate.
 - Manually unseal production Vault after any Colima restart; unseal material is
   operator-held and must not enter the repository or command logs.
+- Preserve `vault-init.json` only in the external mode-0600 secrets directory;
+  use its current one-share key through a hidden-input surface and never
+  reinitialize the retained Vault volume.
+- Validate the MCP client pair against Caddy's exact trust pool before heavy
+  work and rotate it before the six-hour short-lived-certificate floor.
 - Begin external governance-board recruitment without delegating seating or
   ratification to an agent.
 
@@ -374,4 +379,34 @@ prevents a bootstrap rerun from collapsing the working dual-root compatibility
 bundle before every dependent certificate is migrated. Red-green evidence:
 the new regression failed before the fix, then `bash -n`, ShellCheck, Ruff, the
 staging regression, and all three existing Vault TLS validator tests passed.
-Vault remains sealed and still requires the operator-held key.
+At that checkpoint Vault remained sealed; the recovery checkpoint below
+supersedes that runtime state.
+
+Latest checkpoint (2026-07-12): The original one-share recovery file was found
+at `/Users/admin/mnemosyne-prod-secrets/vault-init.json`, verified as a regular
+admin-owned mode-`0600` file, and matched to the live initialized Shamir
+1-of-1 seal. Its key was passed only through a hidden PTY input channel—never
+argv, environment, logs, output, history, or the repository—and Vault now
+reports `sealed:false`. The stale interactive prompt was terminated. API and
+stream were restarted, remained at zero restart-count growth, and Caddy again
+owns host port 443 on the canonical Colima stack.
+
+The first authenticated ingress probe then isolated an independently expired
+MCP client certificate. A fresh short-lived pair was issued under the existing
+JWK policy without increasing the CA duration, staged mode `0600`, validated
+for a two-certificate client-auth chain/SAN/key match, atomically published
+with the expired pair retained outside the repository, and its two mounted
+consumers were recreated. `GET /health` and `GET /stream/healthz` both return
+HTTP 200 over TLS 1.3 with required client authentication; fresh API/stream
+logs contain no Vault/TLS/permission/connection/traceback classifications.
+
+The mandatory three-sample hardware retry then recorded 50%, 47%, and 48%
+free memory against the unchanged 55% floor. Loads remained within bounds,
+no model was resident, exactly one `infra` project was active, 20 expected
+services were running with only the in-VM Ollama fallback intentionally
+stopped, Vault remained unsealed, and API/stream restart counts stayed zero.
+Therefore full suites, models, indexes, exact-scale runs, and protected
+captures remain blocked solely by memory admission. Targeted TLS hardening was
+permitted by the separate >=35%/load<=10 rule: Bash syntax, ShellCheck, live
+Vault/MCP validation, Ruff, and all 18 focused TLS/bootstrap tests pass. No
+candidate, exact-scale, held-out, or protected attempt was consumed.

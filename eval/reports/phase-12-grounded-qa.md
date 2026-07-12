@@ -237,7 +237,8 @@ required to rotate the still-valid Vault leaf from its retained older Step CA
 generation to the current root. No admission threshold changed, and no
 candidate, exact-scale, held-out, or protected attempt was consumed.
 
-After closing Cotypist at roughly 3.36 GiB RSS, one lightweight sample reached
+Earlier cutover checkpoint (superseded below): after closing Cotypist at
+roughly 3.36 GiB RSS, one lightweight sample reached
 56% free memory with acceptable host load and no resident model. The four
 runbook-authorized planning/status truth checks passed serialized. This is not
 a formal three-sample full-workload admission: Vault remains sealed and the
@@ -246,6 +247,32 @@ bootstrap fix also stages changed Step CA roots and refuses automatic trust-
 bundle replacement; its red-green regression plus `bash -n`, ShellCheck, Ruff,
 and the three existing synthetic Vault TLS validator cases pass. No candidate,
 model, exact-scale, or protected work ran.
+
+The original one-share recovery file was subsequently found outside the
+repository at `/Users/admin/mnemosyne-prod-secrets/vault-init.json`. File type,
+owner, mode `0600`, one-key schema, and decoded key length matched the live
+initialized Shamir 1-of-1 Vault. The key was supplied only over hidden PTY
+input and never entered argv, environment, output, logs, history, or source.
+Vault now reports `sealed:false`; API and stream restarted with stable zero
+restart growth, Caddy reclaimed port 443, and the obsolete interactive prompt
+was closed.
+
+An authenticated ingress check then found that the independent short-lived MCP
+client certificate had expired. A fresh pair was issued under the unchanged
+JWK duration policy, staged and validated against the exact client-auth chain,
+published with the old pair retained externally, and the mounted blackbox and
+operator consumers were recreated. Both `/health` and `/stream/healthz` return
+HTTP 200 over TLS 1.3 with required client authentication.
+
+The post-recovery formal admission samples were 50%, 47%, and 48% free memory,
+so the unchanged 55% full-workload floor still rejects suites, models, indexes,
+exact-scale evaluation, and protected capture. All other sampled rails passed:
+load bounds, no resident model, one active Colima `infra` project, no
+restarting/unhealthy service, Vault unsealed, and stable API/stream restart
+counts. Under the separate lightweight >=35% rule, targeted production TLS
+hardening passed Bash syntax, ShellCheck, live Vault/MCP validation, Ruff, and
+18 focused TLS/bootstrap cases. This recovery consumed no candidate, held-out,
+or protected attempt and changes no benchmark threshold.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI

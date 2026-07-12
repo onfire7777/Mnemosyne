@@ -41,6 +41,17 @@ docker ps --format '{{.Names}} {{.Status}}'
 docker context ls
 ```
 
+Before the first sample, validate the production mTLS client pair without
+printing its contents:
+
+```sh
+SECRETS_DIR=${MNEMO_SECRETS_DIR:-/secure/outside/repo}
+infra/validate/validate-production-mcp-client-tls.sh \
+  "$SECRETS_DIR/stepca-acme-root.crt" \
+  "$SECRETS_DIR/mcp-client.crt" \
+  "$SECRETS_DIR/mcp-client.key"
+```
+
 - Host memory-free percentage: at least 55% before model or protected work.
 - Host one-minute load: at most 7.0; five-minute load: at most 8.0.
 - VM-only workload equivalent: one-minute at most 4.2 and five-minute at most
@@ -53,6 +64,10 @@ docker context ls
 - Production Vault must be initialized and unsealed through the approved
   operator health surface, and API/stream restart counts must remain stable.
   Never print or persist unseal material while checking this condition.
+- The production MCP client certificate must validate for client-auth use and
+  remain outside its six-hour expiry floor against Caddy's exact client-auth
+  trust pool. A near-expiry or expired leaf or issuing chain rejects heavy-work
+  admission even when the public endpoint still answers.
 - Exactly one Mnemosyne `infra` compose project may be active across all Docker
   contexts. Enumerate each reachable context with `docker --context CONTEXT
   compose ls` and reject admission if the same working directory is live in
