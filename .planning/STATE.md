@@ -406,7 +406,9 @@ no model was resident, exactly one `infra` project was active, 20 expected
 services were running with only the in-VM Ollama fallback intentionally
 stopped, Vault remained unsealed, and API/stream restart counts stayed zero.
 Therefore full suites, models, indexes, exact-scale runs, and protected
-captures remain blocked solely by memory admission. Targeted TLS hardening was
-permitted by the separate >=35%/load<=10 rule: Bash syntax, ShellCheck, live
-Vault/MCP validation, Ruff, and all 18 focused TLS/bootstrap tests pass. No
-candidate, exact-scale, held-out, or protected attempt was consumed.
+captures remain blocked solely by memory admission. The pre-hardening live
+Vault/MCP validation remains preserved as recovery evidence. Under the separate
+>=35%/load<=10 rule, post-hardening Bash syntax, ShellCheck, Ruff, and all 20
+focused TLS/bootstrap tests pass; live Vault/MCP validation was not rerun after
+the validator hardening. No candidate, exact-scale, held-out, or protected
+attempt was consumed.

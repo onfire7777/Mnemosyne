@@ -269,10 +269,12 @@ so the unchanged 55% full-workload floor still rejects suites, models, indexes,
 exact-scale evaluation, and protected capture. All other sampled rails passed:
 load bounds, no resident model, one active Colima `infra` project, no
 restarting/unhealthy service, Vault unsealed, and stable API/stream restart
-counts. Under the separate lightweight >=35% rule, targeted production TLS
-hardening passed Bash syntax, ShellCheck, live Vault/MCP validation, Ruff, and
-18 focused TLS/bootstrap cases. This recovery consumed no candidate, held-out,
-or protected attempt and changes no benchmark threshold.
+counts. The pre-hardening live Vault/MCP validation remains preserved as
+recovery evidence. Under the separate lightweight >=35% rule, post-hardening
+Bash syntax, ShellCheck, Ruff, and 20 focused TLS/bootstrap cases pass; live
+Vault/MCP validation was not rerun after the validator hardening. This recovery
+consumed no candidate, held-out, or protected attempt and changes no benchmark
+threshold.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI

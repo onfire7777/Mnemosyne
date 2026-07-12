@@ -34,6 +34,9 @@ canonical_certificate_count=$(
 ) || fail 'canonical Caddy client-auth root could not be read'
 [ "$canonical_certificate_count" -eq 1 ] || \
   fail 'canonical Caddy client-auth root must contain exactly one certificate'
+if [ -L "$1" ] || [ ! -f "$1" ]; then
+  fail 'caller root must be a regular non-symlink file'
+fi
 cmp -s "$1" "$CANONICAL_ROOT" || \
   fail 'caller root must match the canonical Caddy client-auth root'
 
