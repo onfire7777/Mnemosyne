@@ -82,7 +82,8 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
 ## Completion Boundary
 
 Phase 12 completes CAP-001/CAP-002 only with structural trace and grounding
-proof. CAP-003 requires both frozen `qa_hard_v2` and all-500 public
-LongMemEval-QA point EM and token F1 at least 0.85, with no Phase 11 retrieval
-regression. BENCH-005 also requires reader-produced Hippo EM/F1 and positive,
-provenance-linked graph/PPR participation; otherwise it remains partial.
+proof. CAP-003 requires both frozen `qa_hard_v2` and all-500 held-out
+LongMemEval-QA public-dataset/internal-only point EM and token F1 at least 0.85,
+with no Phase 11 retrieval regression. BENCH-005 also requires reader-produced
+Hippo EM/F1 and positive, provenance-linked graph/PPR participation; otherwise
+it remains partial.

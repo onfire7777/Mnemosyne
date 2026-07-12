@@ -326,3 +326,22 @@ and 191 deselected. This validates the production Vault TLS regression cases
 remotely while the Mac remains below local test admission. It does not replace
 the mandatory local synthetic/development-scale protocol gates or authorize a
 protected attempt.
+
+Latest checkpoint (2026-07-12): The compact grounded-QA path is now reconciled
+with Plan A rather than living only in a research note. S1.2 defaults to a
+disclosed extractive span/no-answer reader, with any generative role-LLM kept
+as a separate comparison track. CAP-011 and Plan A S4.5 track a shadow-only
+Rust/ONNX reader-reranker path through physical 8 GiB Windows/Linux acceptance
+without lowering CAP-003, deterministic retrieval, §31, or §33 gates. The
+acceptance contract separates real product-floor evidence from this 16 GiB
+Mac's safety preflight. Hugging Face repository metadata and CBM integration
+seams were reviewed without downloading weights, starting a job, training,
+running inference, or changing candidate v19 custody.
+
+The lightweight planning truth checks passed under the targeted-test admission
+gate: `tests/test_public_requirement_truth.py` and
+`tests/test_planning_traceability.py` each reported 2 passed. The full local
+suite, model work, and candidate-v19 synthetic/exact-scale gates remain
+unstarted because the host has not produced three qualifying full-workload
+samples and production API/stream services still restart on the stale Vault
+certificate chain.
