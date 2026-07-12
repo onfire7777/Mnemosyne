@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import signal
 import shutil
 import subprocess
 from pathlib import Path
@@ -123,15 +124,27 @@ def _run(
     stdin: str | None = None,
     timeout: float = 10,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    process = subprocess.Popen(
         [str(validator), str(root), str(bundle), str(key)],
         cwd=REPO,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.PIPE if stdin is not None else None,
         text=True,
-        check=False,
         env=env,
-        input=stdin,
-        timeout=timeout,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        raise
+    return subprocess.CompletedProcess(
+        process.args,
+        process.returncode,
+        stdout,
+        stderr,
     )
 
 
@@ -287,9 +300,14 @@ def test_production_tls_validator_rejects_encrypted_private_key_without_prompt(
 
     output = proc.stdout + proc.stderr
     assert proc.returncode == 65
-    assert "private key could not be read" in proc.stderr
+    assert proc.stdout == ""
+    assert (
+        proc.stderr
+        == "production Vault TLS validation failed: private key could not be read\n"
+    )
     assert passphrase.decode() not in output
-    assert encrypted_key.decode() not in output
+    for fragment in encrypted_key.decode().splitlines()[1:-1]:
+        assert fragment not in output
 
 
 def test_production_mcp_client_tls_validator_accepts_matching_bundle(
@@ -456,7 +474,7 @@ def test_production_mcp_client_tls_validator_rejects_weakened_expiry_floor(
     assert "may not weaken the 21600-second floor" in proc.stderr
 
 
-def test_production_mcp_client_tls_validator_rejects_dual_root_trust_pool(
+def test_production_mcp_client_tls_validator_rejects_multicertificate_canonical_root(
     tmp_path: Path,
 ) -> None:
     root, bundle, key = _fixture(
@@ -481,6 +499,66 @@ def test_production_mcp_client_tls_validator_rejects_dual_root_trust_pool(
     assert proc.returncode == 65
     assert "canonical Caddy client-auth root must contain exactly one certificate" in (
         proc.stderr
+    )
+
+
+def test_production_mcp_client_tls_validator_rejects_dual_root_caller_bundle(
+    tmp_path: Path,
+) -> None:
+    root, bundle, key = _fixture(
+        tmp_path,
+        hostname="mcp-client.mnemo.local",
+        extended_key_usage=ExtendedKeyUsageOID.CLIENT_AUTH,
+        stem="mcp-client",
+    )
+    other_root, _, _ = _fixture(tmp_path, stem="other")
+    compatibility_root = tmp_path / "compatibility-root.crt"
+    compatibility_root.write_bytes(root.read_bytes() + other_root.read_bytes())
+
+    proc = _run(
+        compatibility_root,
+        bundle,
+        key,
+        validator=MCP_VALIDATOR,
+        env=_mcp_env(tmp_path, root),
+    )
+
+    assert proc.returncode == 65
+    assert proc.stdout == ""
+    assert (
+        proc.stderr
+        == "production MCP client TLS validation failed: caller root must match the "
+        "canonical Caddy client-auth root\n"
+    )
+
+
+def test_production_mcp_client_tls_validator_rejects_fifo_caller_root_promptly(
+    tmp_path: Path,
+) -> None:
+    root, bundle, key = _fixture(
+        tmp_path,
+        hostname="mcp-client.mnemo.local",
+        extended_key_usage=ExtendedKeyUsageOID.CLIENT_AUTH,
+        stem="mcp-client",
+    )
+    fifo_root = tmp_path / "caller-root.fifo"
+    os.mkfifo(fifo_root)
+
+    proc = _run(
+        fifo_root,
+        bundle,
+        key,
+        validator=MCP_VALIDATOR,
+        env=_mcp_env(tmp_path, root),
+        timeout=1,
+    )
+
+    assert proc.returncode == 65
+    assert proc.stdout == ""
+    assert (
+        proc.stderr
+        == "production MCP client TLS validation failed: caller root must be a regular "
+        "non-symlink file\n"
     )
 
 
