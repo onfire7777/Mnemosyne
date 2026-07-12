@@ -2,6 +2,11 @@
 
 > Paste everything below the line into Codex as the task brief. It is written to be self-contained, but it points Codex at the authoritative in-repo docs as source of truth.
 
+> **Live-status warning (2026-07-12):** This document initiated the program;
+> its original queue is historical. Resume from `.planning/STATE.md`,
+> `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`. Do not restart M4,
+> M1.1, or the archived Phase 8/9 queue.
+
 ---
 
 You are an autonomous engineering agent working in the **Mnemosyne** repository (a mature, local-first AI memory system). Your mission is to execute two coordinated initiatives: **(A)** make Mnemosyne the world's best-performing memory system, and **(B)** benchmark it credibly and stand up the field's neutral memory-benchmark leaderboard.
@@ -25,8 +30,8 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
 - **Stack:** Python ≥3.12 core (only required dep: `cryptography`; optional extras for psycopg/mcp/sqlite-vec) + **Rust** (PyO3 kernels for MMR/PPR; axum embed/rerank sidecar). Embedding service in `services/embedding/` (FastAPI+torch, 1024-dim; deterministic hashing fallback). Self-hosted Docker Compose infra (Postgres, Keycloak, Vault, SeaweedFS, Caddy, step-ca, VictoriaMetrics/Grafana, Ollama role-LLM, c2patool). Surfaces: `mneme` CLI (91 subcommands), `mneme-mcp` (48 MCP tools).
 
 ## 2. Current state
-- **v1.0 is attested** (2026-07-07); strict blueprint parity is Done; Phases 0–8 complete. **Phase 9** (perf/scale) and **Wave E** (memory-capability upgrades, incl. LongMemEval/BEAM wiring) are **open/unbuilt**.
-- Headline numbers **0.977 recall@k / 0.983 nDCG / ECE 0.0063 / poison-block 1.0 / 149.5 ms warm-serial P95** are all from a **PRIVATE internal suite** (`eval/datasets/v2/*`, `eval/calibration/`, `eval/latency_warm/`). **No public benchmark is wired in.** Multi-hop **answer synthesis** is the acknowledged weak spot (`eval/datasets/v2/qa_hard_v2.json` ≈ 0.62). Concurrent (vs warm-serial) P95 is a known open CPU-embed bottleneck.
+- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11; its hardware-admitted full suite, external manifest, exact-scale development receipt, and protected evidence remain pending.
+- The public harness, LongMemEval retrieval, and deterministic HippoRAG retrieval tracks are wired under PBPP custody. No result is externally headline-eligible. Historical private-suite numbers remain internal QA only, and current public/protected claims still require PBPP plus independent reproduction.
 
 ## 3. Strategic decisions you must honor
 - **Honesty pivot → PBPP.** The repo currently forbids headlining public benchmarks. Replace that blanket ban with the **Public-Benchmark Publication Protocol**: a public number may be published only if (a) produced by the pinned `eval/public/` harness, (b) shipped with the full artifact bundle, (c) reporting **retrieval-recall and LLM-judged-QA in SEPARATE columns** with judge model+prompt disclosed, (d) never conflated with the private suite, (e) independently reproducible from the bundle. Private-suite numbers stay internal QA forever.

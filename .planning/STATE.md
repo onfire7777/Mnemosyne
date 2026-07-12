@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: Phase 12 candidate v19 committed and pushed on draft PR #11; hardware-admitted full suite required before merge and external manifest
-last_updated: "2026-07-12T18:42:57Z"
+last_updated: "2026-07-12T18:53:46Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -295,3 +295,12 @@ digests are distinct, and every public trace must carry an exact role
 disclosure. The 16-case matrix and focused tests pass. External post-commit
 preregistration, a hardware-admitted full suite, and the 24-question exact-scale
 receipt remain required before any protected attempt.
+
+Latest checkpoint (2026-07-12): Plan A and Plan B now record the user's approval
+and live In Progress state instead of the obsolete "awaiting go" marker. The
+roadmap and requirements ledger explicitly carry Plan A S2 and S5 through Phase
+15 as CAP-007 through CAP-010; Plan B's completed M4/PBPP aggregate item is
+checked, while all evidence-dependent DoDs remain open. The internal compact
+reader/reranker design pins a no-download 8 GB bakeoff, training-data custody,
+resource ceilings, and a non-generative exact-span architecture. It does not
+alter candidate v19, authorize paid training, or create a public claim.

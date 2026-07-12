@@ -1,10 +1,18 @@
 # Mnemosyne — Execution Plan B: Benchmarking & the Leaderboard
 ## Goal: prove Mnemosyne's results credibly, and build the field's neutral memory-benchmark leaderboard
 
-**Version:** 1.0 · **Date:** 2026-07-08 · **Status:** Proposed (awaiting go)
+**Version:** 1.1 · **Date:** 2026-07-12 · **Status:** In Progress (approved)
 **Scope:** the public benchmark harness (`eval/public/`), the publication protocol, and the greenfield `leaderboard/` + `web/` products.
 **Companion doc:** *Execution Plan A — The Memory System* builds the capabilities this plan measures. This plan owns measurement, publication, and the leaderboard. Where Plan A says "measured/published," the authority is here.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for governance and third-party reproduction.
+
+**Live execution status (2026-07-12):** M4/PBPP and BENCH-001 through
+BENCH-004 are complete. M1.3 remains partial behind Phase 12's grounded-reader
+and positive graph/PPR gates; Phases 13 through 16 own the remaining benchmark,
+reproduction, capability-column, and leaderboard work. External board seating,
+third-party reproduction, and approval of any public number remain human-only.
+`.planning/STATE.md`, `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`
+are the authoritative live trackers.
 
 ---
 
@@ -176,7 +184,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 **Roles:** *eval-eng agent* (M1–M2), *web agent* (L2–L3), *governance/human operator* (L0 board, M3 third-party repro), *research/writing* (L0.4 methods paper). Independent workstreams run as parallel sub-agents; serialize shared-eval-core writes.
 
 ### Definition-of-Done checklist (Plan B)
-- [ ] Charter updated to PBPP; provider-bakeoff README references it (M4).
+- [x] Charter updated to PBPP; provider-bakeoff README references it (M4).
 - [ ] `eval/public/` harness live; LongMemEval-recall, HippoRAG multi-hop, MemoryAgentBench adapter, BEAM runnable with bundles (M1).
 - [ ] Reproducibility bundle standard implemented; agent-reproduces from bundle (M2).
 - [ ] Independent third-party reproduction of headline numbers on file (M3).

@@ -24,6 +24,10 @@
 | [ ] CAP-004 | Public security columns measure attack success under defense across MINJA, AgentPoison, and PoisonedRAG-style cases. | Plan A S3 / Plan B | Planned |
 | [ ] CAP-005 | Public-label calibration emits reliability diagrams, ECE, abstention quality, and judge diagnostics consumable by the bundle. | Plan A S3 | Planned |
 | [ ] CAP-006 | Performance/scale cells provide measured warm and concurrent P95, 100k-item behavior, and provider-default evidence without asserted-only numbers. | Plan A S4 | Planned |
+| [ ] CAP-007 | Fast/medium/slow consolidation cadences plus an asynchronous sleep job reduce forgetting while preserving freshness and expiry semantics. | Plan A S2.1/S2.2 | Planned |
+| [ ] CAP-008 | Global map-reduce sensemaking and surprise-gated writes ship with sensemaking and write-precision/recall regression cells. | Plan A S2.3/S2.4 | Planned |
+| [ ] CAP-009 | The per-tenant cartridge research path has a bounded latency/throughput A/B and a documented go/no-go without adding a model dependency to core. | Plan A S2.5 | Planned |
+| [ ] CAP-010 | Activation-space memory research produces the J-lens tripwire, persona-drift metric, and explicit go/no-go artifact under the same provenance/capability rails as text writes. | Plan A S5 | Planned |
 
 ## Neutral Governance and Leaderboard
 
@@ -52,5 +56,5 @@
 | 12 | CAP-001, CAP-002, CAP-003, BENCH-005 (reader-produced EM/F1 closure), RAIL-001..004 |
 | 13 | BENCH-006, BENCH-007, RAIL-001..004 |
 | 14 | REPRO-001, REPRO-002, RAIL-003, RAIL-004 |
-| 15 | CAP-004, CAP-005, CAP-006, RAIL-001..004 |
+| 15 | CAP-004..010, RAIL-001..004 |
 | 16 | LEAD-001, LEAD-002, LEAD-003, GOV-001, RAIL-003, RAIL-004 |
