@@ -335,8 +335,8 @@ Rust/ONNX reader-reranker path through physical 8 GiB Windows/Linux acceptance
 without lowering CAP-003, deterministic retrieval, §31, or §33 gates. The
 acceptance contract separates real product-floor evidence from this 16 GiB
 Mac's safety preflight. Hugging Face repository metadata and CBM integration
-seams were reviewed without downloading weights, starting a job, training,
-running inference, or changing candidate v19 custody.
+seams were reviewed without downloading QA weights, starting a training job,
+running candidate/QA inference, or changing candidate v19 custody.
 
 The lightweight planning truth checks passed under the targeted-test admission
 gate: `tests/test_public_requirement_truth.py` and
@@ -345,3 +345,8 @@ suite, model work, and candidate-v19 synthetic/exact-scale gates remain
 unstarted because the host has not produced three qualifying full-workload
 samples and production API/stream services still restart on the stale Vault
 certificate chain.
+
+Writing the durable gbrain decision page loaded the already-installed local
+`nomic-embed-text` embedding model (578 MB). No CBM refresh or `mnemosyne-code`
+source sync followed. Future gbrain writes/syncs are therefore admitted as
+model/index work under the same preflight instead of being assumed lightweight.

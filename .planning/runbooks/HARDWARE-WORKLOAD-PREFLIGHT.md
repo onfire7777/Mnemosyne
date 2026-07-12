@@ -23,6 +23,11 @@ index rebuilds, exact-scale evals, protected captures, and VM resizing. A failed
 gate means wait and recheck; it is not permission to raise a timeout or run in
 parallel.
 
+Treat CBM refreshes and gbrain capture/page-write/source-sync operations as
+index/model work unless their configured provider is proven not to invoke a
+local embedding model. A small knowledge write can load Ollama and invalidate
+an otherwise idle sample.
+
 ## Admission check
 
 Take three samples 15 seconds apart. Every sample must pass:
