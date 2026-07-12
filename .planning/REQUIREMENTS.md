@@ -20,7 +20,7 @@
 |---|---|---|---|
 | [ ] CAP-001 | Iterative query decomposition, multi-hop retrieval/PPR, evidence assembly, and grounded reading answer only from provenance-tagged evidence. | Plan A S1 | Planned |
 | [ ] CAP-002 | Every synthesized claim traces to evidence CIDs and the reader abstains when retrieved evidence cannot ground the answer. | Plan A S1 / §31 | Planned |
-| [ ] CAP-003 | `qa_hard_v2` and public LongMemEval-QA reach at least 0.85 under disclosed-reader evaluation without deterministic-recall regression. | Plan A S1 / Plan B | Planned |
+| [ ] CAP-003 | `qa_hard_v2` and the held-out LongMemEval-QA public-dataset/internal-only QA track reach at least 0.85 under disclosed-reader evaluation without deterministic-recall regression. | Plan A S1 / Plan B | Planned |
 | [ ] CAP-004 | Public security columns measure attack success under defense across MINJA, AgentPoison, and PoisonedRAG-style cases. | Plan A S3 / Plan B | Planned |
 | [ ] CAP-005 | Public-label calibration emits reliability diagrams, ECE, abstention quality, and judge diagnostics consumable by the bundle. | Plan A S3 | Planned |
 | [ ] CAP-006 | Performance/scale cells provide measured warm and concurrent P95, 100k-item behavior, and provider-default evidence without asserted-only numbers. | Plan A S4 | Planned |
@@ -28,6 +28,7 @@
 | [ ] CAP-008 | Global map-reduce sensemaking and surprise-gated writes ship with sensemaking and write-precision/recall regression cells. | Plan A S2.3/S2.4 | Planned |
 | [ ] CAP-009 | The per-tenant cartridge research path has a bounded latency/throughput A/B and a documented go/no-go without adding a model dependency to core. | Plan A S2.5 | Planned |
 | [ ] CAP-010 | Activation-space memory research produces the J-lens tripwire, persona-drift metric, and explicit go/no-go artifact under the same provenance/capability rails as text writes. | Plan A S5 | Planned |
+| [ ] CAP-011 | The compact grounded-QA stack passes the physical 8 GiB Windows/Linux acceptance contract without lowering CAP-003, deterministic retrieval, §31, or §33 gates and without adding an ML dependency to Python core. | Plan A S4.5 | Planned |
 
 ## Neutral Governance and Leaderboard
 

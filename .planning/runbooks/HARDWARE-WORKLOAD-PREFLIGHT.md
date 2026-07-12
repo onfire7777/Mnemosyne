@@ -15,6 +15,8 @@ lower-end machines retain dependency-light deterministic and pure/ONNX paths,
 while stronger systems may opt into wider batches, parallel channels,
 GPU/Metal providers, larger readers, and hosted rungs without changing the
 floor-tier contract or any security rail.
+Physical 8 GiB compact-model claims are governed separately by
+`COMPACT-MODEL-8GB-ACCEPTANCE.md`.
 
 This runbook applies before model pulls/loads, full test suites, benchmarks,
 index rebuilds, exact-scale evals, protected captures, and VM resizing. A failed

@@ -75,8 +75,8 @@ swap-delta, topology, health, or serialization gates do not pass.
   execution until hop-0 behavior was redesigned and validated on synthetic
   data. Candidate v19 now satisfies that source-level redesign gate; its full
   suite, external manifest, and exact-scale receipt remain pending.
-- Run public LongMemEval-QA once across all 500 held-out questions after the
-  candidate and `qa_hard_v2` result are frozen.
+- Run the public-source, internal-only LongMemEval-QA track once across all 500
+  held-out questions after the candidate and `qa_hard_v2` result are frozen.
 - Preregister transport retries. A provider failure consumes the held-out
   attempt; record partial/error counts and fail the candidate rather than
   silently rerunning or selecting successful questions.

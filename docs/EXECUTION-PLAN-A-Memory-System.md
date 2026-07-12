@@ -1,7 +1,7 @@
 # Mnemosyne — Execution Plan A: The Memory System
 ## Goal: the world's best-performing AI memory system
 
-**Version:** 1.1 · **Date:** 2026-07-12 · **Status:** In Progress (approved)
+**Version:** 1.2 · **Date:** 2026-07-12 · **Status:** In Progress (approved)
 **Scope:** the Mnemosyne engine and its capabilities (`src/mnemosyne/`, plus engine-side `eval/` regression suites).
 **Companion doc:** *Execution Plan B — Benchmarking & the Leaderboard* owns measurement, publication, and the public leaderboard. This plan builds the capabilities; Plan B proves and publishes them. Where this plan says "measured/published," the authority is Plan B.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for gated evidence capture.
@@ -81,9 +81,9 @@ Mnemosyne already implements a large share of the field's best ideas. This table
 Retrieval is already strong; synthesis (~0.62) is the ceiling on every QA benchmark. This is the single highest-ROI capability.
 
 - **S1.1 Iterative retrieve→read loop.** Query decomposition → PPR spreading-activation hops over the existing graph → evidence assembly, reusing the hybrid retriever (dense + BM25 + PPR + RRF/MMR). Borrow HippoRAG 2's deeper passage integration.
-- **S1.2 Grounded reader/synthesis step.** A disclosed self-hosted role-LLM (Ollama) composes an answer *only* from retrieved, provenance-tagged evidence; fail-closed, retrieved text handled as data (§31 R6). Every claim in the answer must trace to an evidence CID.
+- **S1.2 Grounded reader/synthesis step.** A disclosed self-hosted reader answers *only* from retrieved, provenance-tagged evidence; fail-closed, retrieved text handled as data (§31 R6). The default implementation is an extractive span/no-answer reader whose output is reconstructed and revalidated by the host. A generative role-LLM is permitted only as a separately disclosed comparison track and may not replace the extractive rail. Every claim must trace to an evidence CID.
 - **S1.3 Episode-aware recall.** Add EM-LLM-style event boundaries + temporal-contiguity reads so synthesis pulls coherent episodes, not fragments.
-- **DoD:** `qa_hard_v2` and (via Plan B) public LongMemEval-QA ≥ 0.85; per-hop retrieval traces prove groundedness; no regression on deterministic recall. Targets S-iii.
+- **DoD:** `qa_hard_v2` and (via Plan B) the held-out LongMemEval-QA public-dataset/internal-only track ≥ 0.85; per-hop retrieval traces prove groundedness; no regression on deterministic recall. Targets S-iii.
 
 ### S2 — Capability upgrades (by benchmark ROI)
 - **S2.1 Multi-timescale consolidation spectrum** (Nested Learning CMS): parameterize the warm loop into fast/medium/slow cadences so new writes never overwrite semantic structure at once. DoD: continual-learning regression shows reduced forgetting.
@@ -103,7 +103,8 @@ Clear the §11 measurement-gap register so capability claims are credible at sca
 - **S4.2** Null-embedding production backfill evidence.
 - **S4.3** halfvec / pgvectorscale DiskANN; 100k-item benchmark cells.
 - **S4.4** **Concurrent** P95 (not just warm-serial 149.5 ms) — resolve the known CPU-embed bottleneck.
-- **DoD:** measured distributions in `eval/latency*` and `eval/provider_bakeoff/`; §11 register closed. Targets S-vi.
+- **S4.5** **Physical 8 GiB compact grounded-QA path.** Shadow-bake off the pinned extractive reader/reranker pairs and, only if needed, a purpose-built non-generative student behind the optional Rust/ONNX sidecar boundary. DoD: `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md` passes on physical 8 GiB x86-64 AVX2 Windows and Linux systems without lowering CAP-003, retrieval, §31, or §33 gates; no ML dependency enters Python core. Stronger profiles may add capacity, never weaker quality or custody.
+- **DoD:** measured distributions in `eval/latency*` and `eval/provider_bakeoff/`; §11 register and S4.5 physical-floor acceptance closed. Targets S-vi.
 
 ### S5 — Research track: activation-space memory & introspection (off critical path)
 See §3.5 (below). Requires white-box access to open-weight models — feasible via the self-hosted Ollama role-LLMs. Explicitly labeled research; not gating Goal-A capability targets.
@@ -155,6 +156,7 @@ Anthropic's 2025–26 interpretability line is directly usable — with strict *
 - [ ] Adversarial corpus expanded; attack-success-under-defense capability ready for publication (S3.1).
 - [ ] Calibration reliability artifacts hold vs public labels (S3.2).
 - [ ] §11 measurement-gap register closed: concurrent+warm P95, 100k cells, provider default (S4).
+- [ ] Compact grounded-QA stack passes physical 8 GiB Windows/Linux acceptance with unchanged quality/custody gates (S4.5).
 - [ ] Activation-memory research spike + go/no-go note (S5).
 - [ ] All §31 rails and §33 classes green throughout.
 

@@ -91,7 +91,9 @@ third-party reproduction for at least one headline-eligible result.
 sleep consolidation, freshness/expiry, global map-reduce sensemaking,
 surprise-gated writes, security/calibration evidence, performance/scale
 closure, the cartridge A/B, and the activation-memory go/no-go research note.
-**Requirements:** CAP-004..010, RAIL-001..004
+It also closes the physical 8 GiB compact grounded-QA path without weakening
+the shared quality or custody gates.
+**Requirements:** CAP-004..011, RAIL-001..004
 **Depends on:** Phases 10-14
 **Plans:** Not planned
 
