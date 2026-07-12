@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 candidate v19 draft PR #11 is exact-head CI green at b7ba620; local full-workload admission failed at 24/25/22% free memory, so no suite, merge, or external manifest started
+stopped_at: Phase 12 candidate v19 draft PR #11; local full-workload admission failed at 24/25/22% free memory, so no suite, merge, or external manifest started
 last_updated: "2026-07-12T19:51:22Z"
 last_activity: 2026-07-12
 progress:
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired and draft PR #11 head `b7ba620` passed exact-SHA CI run 29206262850 plus CodeRabbit; local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
-Last activity: 2026-07-12 — Final-head CI passed unit/drift, Postgres, provider, Ruff, and native-wheel jobs; the latest formal local admission failed and no protected attempt was made
+Status: Candidate v19 source/runtime/bundle custody is wired on draft PR #11, whose live exact-head checks are the CI authority; local hardware-admitted full suite/synthetic verification, merge to `main`, external manifest, and exact-scale receipt remain required before frozen evidence
+Last activity: 2026-07-12 — The latest formal local admission failed; prior PR heads passed unit/drift, Postgres, provider, Ruff, native-wheel, and CodeRabbit checks; no protected attempt was made
 
 ## Performance Metrics
 
