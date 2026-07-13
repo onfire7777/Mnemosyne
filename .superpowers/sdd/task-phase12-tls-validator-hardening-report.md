@@ -493,3 +493,58 @@ max_size_bytes=20685
 
 The visible passphrases are synthetic regression fixtures only. No secret or
 private-key payload is present. `git diff --check` passed.
+
+## Final reviewer documentation-finding disposition
+
+The final whole-branch reviewer found one Important documentation-only issue:
+the authoritative project state and Phase 12 evidence report still described
+the pre-fix 20-case focused suite and did not name the categorical encrypted-key
+regressions. The finding is resolved locally, pending reviewer re-check:
+
+- `.planning/STATE.md` now carries the current UTC checkpoint, reports 22
+  focused TLS/bootstrap cases, and names the real empty-password encrypted
+  PKCS#8 and legacy `Proc-Type: 4,ENCRYPTED` regressions.
+- `eval/reports/phase-12-grounded-qa.md` reports the same 22-case evidence and
+  encrypted-key coverage.
+- Both surfaces explicitly preserve the evidence boundary: post-hardening live
+  Vault/MCP validation was not rerun, the 55% heavy-work gate remains binding,
+  and no candidate, exact-scale, held-out, or protected attempt was consumed.
+
+No production or test behavior changed in this documentation follow-up. Exact
+lightweight consistency command:
+
+```bash
+set -e
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+state = Path(".planning/STATE.md").read_text()
+qa = Path("eval/reports/phase-12-grounded-qa.md").read_text()
+
+assert 'last_updated: "2026-07-13T06:34:43Z"' in state
+for name, text in (("STATE", state), ("grounded-QA", qa)):
+    normalized = re.sub(r"\s+", " ", text)
+    assert "22 focused TLS/bootstrap" in normalized
+    assert "empty-password encrypted PKCS#8" in normalized
+    assert "`Proc-Type: 4,ENCRYPTED`" in normalized
+    assert "live Vault/MCP validation was not rerun after the validator hardening" in normalized
+    assert "55%" in text
+    assert "20 focused TLS/bootstrap" not in normalized
+    print(f"{name}: current encrypted-key evidence and custody boundary PASS")
+PY
+git diff --check
+printf 'git-diff-check: PASS\n'
+```
+
+Exit status: `0`.
+
+Exact stdout:
+
+```text
+STATE: current encrypted-key evidence and custody boundary PASS
+grounded-QA: current encrypted-key evidence and custody boundary PASS
+git-diff-check: PASS
+```
+
+Exact stderr: empty.

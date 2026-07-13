@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: Phase 12 heavy work is paused at the 55% hardware-admission floor after canonical runtime recovery; Vault, API/stream, Caddy, and mTLS are healthy and no suite, merge, or protected attempt started
-last_updated: "2026-07-12T23:01:12Z"
+last_updated: "2026-07-13T06:34:43Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -408,7 +408,9 @@ stopped, Vault remained unsealed, and API/stream restart counts stayed zero.
 Therefore full suites, models, indexes, exact-scale runs, and protected
 captures remain blocked solely by memory admission. The pre-hardening live
 Vault/MCP validation remains preserved as recovery evidence. Under the separate
->=35%/load<=10 rule, post-hardening Bash syntax, ShellCheck, Ruff, and all 20
-focused TLS/bootstrap tests pass; live Vault/MCP validation was not rerun after
-the validator hardening. No candidate, exact-scale, held-out, or protected
-attempt was consumed.
+>=35%/load<=10 rule, post-hardening Bash syntax, ShellCheck, Ruff, and all 22
+focused TLS/bootstrap tests pass. The focused regressions categorically reject
+a real empty-password encrypted PKCS#8 key and legacy
+`Proc-Type: 4,ENCRYPTED`; live Vault/MCP validation was not rerun after the
+validator hardening. No candidate, exact-scale, held-out, or protected attempt
+was consumed.
