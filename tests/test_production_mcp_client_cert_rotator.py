@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +28,21 @@ IMAGE = (
     "smallstep/step-ca:0.28.4@sha256:"
     "0f88382ac5af5c6b7bbba0c6e8fcefef52aee6f22ea364df8e02a09ffd0d22f3"
 )
+TRANSACTION_ACTION = "--test-fixture-transaction"
+TRANSACTION_JOURNAL = "transaction.json"
+TRANSACTION_MARKER = "fixture-transaction.json"
+TRANSACTION_FIELDS = {
+    "schema_version",
+    "transaction_id",
+    "created_at",
+    "phase",
+    "old_cert_sha256",
+    "old_key_sha256",
+    "new_cert_sha256",
+    "new_key_sha256",
+    "blackbox_exporter_was_running",
+    "operator_was_running",
+}
 
 
 @dataclass(frozen=True)
@@ -209,6 +226,9 @@ from pathlib import Path
 
 args = sys.argv[1:]
 record = Path({str(record)!r})
+audit = record.with_name("docker-calls.jsonl")
+with audit.open("a", encoding="utf-8") as handle:
+    handle.write(json.dumps(args) + "\\n")
 # macOS injects this after exec into Python processes; the Docker binary does not.
 os.environ.pop("__CF_USER_TEXT_ENCODING", None)
 if args == ["context", "show"]:
@@ -272,6 +292,159 @@ def _stage_path(fixture: TlsFixture, name: str = "stage") -> Path:
     rotation.mkdir(exist_ok=True)
     rotation.chmod(0o700)
     return rotation / name
+
+
+@dataclass(frozen=True)
+class RotationTransactionFixture:
+    current: TlsFixture
+    staged: TlsFixture
+    env: dict[str, str]
+    record: Path
+    old_cert: bytes
+    old_key: bytes
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    return _sha256_bytes(path.read_bytes())
+
+
+def _strict_json(path: Path) -> dict[str, object]:
+    def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate key: {key}")
+            result[key] = value
+        return result
+
+    parsed = json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys
+    )
+    assert isinstance(parsed, dict)
+    return parsed
+
+
+def _enable_transaction_fixture(
+    fixture: TlsFixture,
+    *,
+    blackbox_running: bool = True,
+    operator_running: bool = False,
+) -> Path:
+    marker = _stage_path(fixture, TRANSACTION_MARKER)
+    marker.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "blackbox_exporter_was_running": blackbox_running,
+                "operator_was_running": operator_running,
+            },
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+    )
+    marker.chmod(0o600)
+    return marker
+
+
+def _transaction_fixture(tmp_path: Path) -> RotationTransactionFixture:
+    current = _tls_fixture(tmp_path, remaining=dt.timedelta(hours=8), stem="current")
+    staged = _tls_fixture(
+        tmp_path,
+        remaining=dt.timedelta(hours=24),
+        stem="staged",
+        issuer=current,
+    )
+    docker, record = _write_fake_docker(tmp_path, staged)
+    _enable_transaction_fixture(current)
+    return RotationTransactionFixture(
+        current=current,
+        staged=staged,
+        env=_rotator_env(current, docker, _stage_path(current, "transaction-stage")),
+        record=record,
+        old_cert=current.bundle.read_bytes(),
+        old_key=current.key.read_bytes(),
+    )
+
+
+def _fault_env(
+    env: dict[str, str],
+    *,
+    interrupt_after: str | None = None,
+    fail_fsync: str | None = None,
+    fail_validation: str | None = None,
+    mutate_generation: str | None = None,
+) -> dict[str, str]:
+    result = dict(env)
+    if interrupt_after is not None:
+        result["MCP_CLIENT_ROTATOR_TEST_INTERRUPT_AFTER_PHASE"] = interrupt_after
+    if fail_fsync is not None:
+        result["MCP_CLIENT_ROTATOR_TEST_FAIL_FSYNC"] = fail_fsync
+    if fail_validation is not None:
+        result["MCP_CLIENT_ROTATOR_TEST_FAIL_VALIDATION"] = fail_validation
+    if mutate_generation is not None:
+        result["MCP_CLIENT_ROTATOR_TEST_MUTATE_GENERATION_BEFORE_RENAME"] = (
+            mutate_generation
+        )
+    return result
+
+
+def _recovery_env(
+    tmp_path: Path,
+    transaction: RotationTransactionFixture,
+    name: str,
+    **faults: str,
+) -> tuple[dict[str, str], Path]:
+    fake_root = tmp_path / name
+    fake_root.mkdir()
+    docker, record = _write_fake_docker(fake_root, transaction.staged)
+    env = _rotator_env(
+        transaction.current,
+        docker,
+        _stage_path(transaction.current, f"{name}-stage"),
+    )
+    return _fault_env(env, **faults), record
+
+
+def _journal_path(transaction: RotationTransactionFixture) -> Path:
+    return transaction.current.secrets / ".mcp-client-rotation" / TRANSACTION_JOURNAL
+
+
+def _generation_paths(
+    transaction: RotationTransactionFixture,
+    journal: dict[str, object],
+) -> dict[str, Path]:
+    rotation = transaction.current.secrets / ".mcp-client-rotation"
+    files = [
+        path
+        for path in rotation.iterdir()
+        if path.is_file()
+        and not path.is_symlink()
+        and path.name not in {TRANSACTION_JOURNAL, TRANSACTION_MARKER}
+    ]
+    result: dict[str, Path] = {}
+    for field in (
+        "old_cert_sha256",
+        "old_key_sha256",
+        "new_cert_sha256",
+        "new_key_sha256",
+    ):
+        digest = journal[field]
+        assert isinstance(digest, str)
+        matches = [path for path in files if _sha256_file(path) == digest]
+        assert len(matches) == 1
+        result[field] = matches[0]
+    return result
+
+
+def _docker_calls(record: Path) -> list[list[str]]:
+    audit = record.with_name("docker-calls.jsonl")
+    if not audit.exists():
+        return []
+    return [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
 
 
 def _run_rotator(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
@@ -863,3 +1036,571 @@ def test_preflight_validator_source_is_unchanged() -> None:
     assert "may not weaken the 21600-second floor" in validator.read_text(
         encoding="utf-8"
     )
+
+
+def test_publish_journal_precedes_first_rename_and_is_strict_secret_free(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    proc = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="prepared"),
+        TRANSACTION_ACTION,
+    )
+
+    assert proc.returncode != 0
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    raw_journal = journal_path.read_text(encoding="utf-8")
+    assert len(raw_journal.encode()) <= 4096
+    assert journal_path.stat().st_mode & 0o777 == 0o600
+    assert journal_path.parent.stat().st_mode & 0o777 == 0o700
+    assert set(journal) == TRANSACTION_FIELDS
+    assert journal["schema_version"] == 1
+    assert journal["phase"] == "prepared"
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    assert re.fullmatch(r"[0-9a-f]{32,64}", transaction_id)
+    created_at = journal["created_at"]
+    assert isinstance(created_at, str) and len(created_at) <= 32
+    assert created_at.endswith("Z")
+    assert dt.datetime.fromisoformat(created_at.removesuffix("Z") + "+00:00")
+    assert journal["blackbox_exporter_was_running"] is True
+    assert journal["operator_was_running"] is False
+    assert journal["old_cert_sha256"] == _sha256_bytes(transaction.old_cert)
+    assert journal["old_key_sha256"] == _sha256_bytes(transaction.old_key)
+    assert journal["new_cert_sha256"] == _sha256_file(transaction.staged.bundle)
+    assert journal["new_key_sha256"] == _sha256_file(transaction.staged.key)
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    for secret in (
+        str(transaction.current.secrets),
+        transaction.current.password.read_text(encoding="utf-8").strip(),
+        "ambient-env-canary-must-not-leak",
+        "BEGIN CERTIFICATE",
+        "BEGIN PRIVATE KEY",
+    ):
+        assert secret not in raw_journal
+    generations = _generation_paths(transaction, journal)
+    assert len(set(generations.values())) == 4
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in generations.values())
+
+
+def test_publish_fixture_seam_requires_explicit_action_and_safe_marker(
+    tmp_path: Path,
+) -> None:
+    unsafe = _transaction_fixture(tmp_path / "unsafe")
+    marker = _stage_path(unsafe.current, TRANSACTION_MARKER)
+    marker.chmod(0o644)
+
+    rejected = _run_rotator(unsafe.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 65
+    assert rejected.stdout == "mcp-client-rotation result=preflight_failed\n"
+    assert not _journal_path(unsafe).exists()
+    assert unsafe.current.bundle.read_bytes() == unsafe.old_cert
+    assert unsafe.current.key.read_bytes() == unsafe.old_key
+
+    default = _transaction_fixture(tmp_path / "default")
+    staged_only = _run_rotator(default.env)
+
+    assert staged_only.returncode == 0
+    assert staged_only.stdout == "mcp-client-rotation result=staged_only\n"
+    assert not _journal_path(default).exists()
+    assert default.current.bundle.read_bytes() == default.old_cert
+    assert default.current.key.read_bytes() == default.old_key
+
+
+def test_publish_fixture_seam_ignores_ambient_tmpdir_override(
+    tmp_path: Path,
+) -> None:
+    outside = (
+        REPO
+        / ".superpowers"
+        / "sdd"
+        / f"r1b-untrusted-temp-{os.getpid()}-{tmp_path.name}"
+    )
+    shutil.rmtree(outside, ignore_errors=True)
+    try:
+        transaction = _transaction_fixture(outside)
+        env = dict(transaction.env)
+        env["TMPDIR"] = str(transaction.current.secrets)
+
+        rejected = _run_rotator(env, TRANSACTION_ACTION)
+
+        assert rejected.returncode == 65
+        assert rejected.stdout == "mcp-client-rotation result=preflight_failed\n"
+        assert not _journal_path(transaction).exists()
+        assert transaction.current.bundle.read_bytes() == transaction.old_cert
+        assert transaction.current.key.read_bytes() == transaction.old_key
+    finally:
+        shutil.rmtree(outside, ignore_errors=True)
+
+
+def test_publish_fixture_seam_accepts_bounded_context_mode_pytest_root(
+    tmp_path: Path,
+) -> None:
+    pytest_owner = next(
+        parent for parent in tmp_path.parents if parent.name.startswith("pytest-of-")
+    )
+    temp_root = (
+        pytest_owner.parent.parent
+        if pytest_owner.parent.name.startswith(".ctx-mode-")
+        else pytest_owner.parent
+    )
+    context_root = temp_root / f".ctx-mode-r1b-{os.getpid()}"
+    fixture_root = context_root / pytest_owner.name / "pytest-0" / "fixture"
+    shutil.rmtree(context_root, ignore_errors=True)
+    try:
+        transaction = _transaction_fixture(fixture_root)
+
+        stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+        assert stopped.returncode == 74
+        assert stopped.stdout == "mcp-client-rotation result=publication_failed\n"
+        assert _strict_json(_journal_path(transaction))["phase"] == (
+            "published_validated"
+        )
+    finally:
+        shutil.rmtree(context_root, ignore_errors=True)
+
+
+@pytest.mark.parametrize(
+    ("interrupt_after", "expected_phase", "expected_cert", "expected_key"),
+    [
+        ("certificate_renamed", "prepared", "new", "old"),
+        ("certificate_parent_fsynced", "prepared", "new", "old"),
+        ("certificate_published", "certificate_published", "new", "old"),
+        ("key_renamed", "certificate_published", "new", "new"),
+        ("key_parent_fsynced", "certificate_published", "new", "new"),
+        ("pair_published", "pair_published", "new", "new"),
+    ],
+)
+def test_publish_interrupt_recovers_before_source_validation_and_retains_generations(
+    tmp_path: Path,
+    interrupt_after: str,
+    expected_phase: str,
+    expected_cert: str,
+    expected_key: str,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after=interrupt_after),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode != 0
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == expected_phase
+    expected_cert_bytes = (
+        transaction.staged.bundle.read_bytes()
+        if expected_cert == "new"
+        else transaction.old_cert
+    )
+    expected_key_bytes = (
+        transaction.staged.key.read_bytes()
+        if expected_key == "new"
+        else transaction.old_key
+    )
+    assert transaction.current.bundle.read_bytes() == expected_cert_bytes
+    assert transaction.current.key.read_bytes() == expected_key_bytes
+    generations = _generation_paths(transaction, journal)
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "recovery",
+    )
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not journal_path.exists()
+    assert all(path.exists() for path in generations.values())
+    assert not any(
+        set(call) & {"up", "restart", "recreate", "operator", "blackbox-exporter"}
+        for call in _docker_calls(recovery_record)
+    )
+
+
+@pytest.mark.parametrize(
+    ("interrupt_after", "expected_phase", "expected_key"),
+    [
+        ("old_certificate_restored", "restoring_certificate", "new"),
+        ("old_certificate_parent_fsynced", "restoring_certificate", "new"),
+        ("old_key_restored", "restoring_key", "old"),
+        ("old_key_parent_fsynced", "restoring_key", "old"),
+    ],
+)
+def test_recovery_interrupt_immediately_after_rename_is_resumable(
+    tmp_path: Path,
+    interrupt_after: str,
+    expected_phase: str,
+    expected_key: str,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    first_interrupt = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="pair_published"),
+        TRANSACTION_ACTION,
+    )
+    assert first_interrupt.returncode != 0
+
+    recovery_env, _ = _recovery_env(
+        tmp_path,
+        transaction,
+        "rename-recovery",
+        interrupt_after=interrupt_after,
+    )
+    rename_interrupt = _run_rotator(recovery_env)
+
+    assert rename_interrupt.returncode != 0
+    assert _strict_json(_journal_path(transaction))["phase"] == expected_phase
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    expected_key_bytes = (
+        transaction.staged.key.read_bytes()
+        if expected_key == "new"
+        else transaction.old_key
+    )
+    assert transaction.current.key.read_bytes() == expected_key_bytes
+
+    resumed_env, _ = _recovery_env(tmp_path, transaction, "rename-resumed")
+    resumed = _run_rotator(resumed_env)
+
+    assert resumed.returncode == 0
+    assert resumed.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not _journal_path(transaction).exists()
+
+
+def test_recovery_intent_is_durable_before_first_restore_rename(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    first_interrupt = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="pair_published"),
+        TRANSACTION_ACTION,
+    )
+    assert first_interrupt.returncode != 0
+
+    recovery_env, _ = _recovery_env(
+        tmp_path,
+        transaction,
+        "intent-recovery",
+        interrupt_after="restoring_certificate",
+    )
+    intent_interrupt = _run_rotator(recovery_env)
+
+    assert intent_interrupt.returncode != 0
+    assert _strict_json(_journal_path(transaction))["phase"] == "restoring_certificate"
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+
+    resumed_env, _ = _recovery_env(tmp_path, transaction, "intent-resumed")
+    resumed = _run_rotator(resumed_env)
+
+    assert resumed.returncode == 0
+    assert resumed.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not _journal_path(transaction).exists()
+
+
+def test_recovery_absence_preserves_missing_secret_root_preflight_result(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "missing-secrets"
+    env = {
+        **os.environ,
+        "MNEMO_SECRETS_DIR": str(missing),
+        "MCP_CLIENT_ROTATOR_COMPOSE_FILE": str(COMPOSE),
+        "MCP_CLIENT_ROTATOR_DOCKER_BIN": str(tmp_path / "missing-docker"),
+        "MCP_CLIENT_ROTATOR_STAGE_DIR": str(missing / ".mcp-client-rotation/stage"),
+    }
+
+    proc = _run_rotator(env)
+
+    assert proc.returncode == 65
+    assert proc.stdout == "mcp-client-rotation result=preflight_failed\n"
+    assert "source certificate" in proc.stderr
+
+
+def test_recovery_interrupt_after_certificate_restore_is_resumable(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    first_interrupt = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="pair_published"),
+        TRANSACTION_ACTION,
+    )
+    assert first_interrupt.returncode != 0
+
+    recovery_env, _ = _recovery_env(
+        tmp_path,
+        transaction,
+        "first-recovery",
+        interrupt_after="restoring_key",
+    )
+    second_interrupt = _run_rotator(recovery_env)
+
+    assert second_interrupt.returncode != 0
+    assert _strict_json(_journal_path(transaction))["phase"] == "restoring_key"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+
+    resumed_env, _ = _recovery_env(tmp_path, transaction, "resumed-recovery")
+    resumed = _run_rotator(resumed_env)
+
+    assert resumed.returncode == 0
+    assert resumed.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not _journal_path(transaction).exists()
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "malformed",
+        "duplicate",
+        "unknown",
+        "oversized",
+        "unsafe_mode",
+        "symlink",
+        "generation_mismatch",
+        "canonical_mismatch",
+        "prepared_old_new",
+        "pair_published_new_old",
+        "old_pair_restored_old_new",
+    ],
+)
+def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    prepared = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="prepared"),
+        TRANSACTION_ACTION,
+    )
+    assert prepared.returncode != 0
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    raw_journal = journal_path.read_text(encoding="utf-8").rstrip()
+    if corruption == "malformed":
+        journal_path.write_text("{", encoding="utf-8")
+    elif corruption == "duplicate":
+        journal_path.write_text(
+            raw_journal[:-1] + ',"phase":"pair_published"}',
+            encoding="utf-8",
+        )
+    elif corruption == "unknown":
+        journal_path.write_text(
+            raw_journal[:-1] + ',"unexpected":"value"}',
+            encoding="utf-8",
+        )
+    elif corruption == "oversized":
+        journal_path.write_text(
+            raw_journal[:-1] + ',"padding":"' + ("x" * 4096) + '"}',
+            encoding="utf-8",
+        )
+    elif corruption == "unsafe_mode":
+        journal_path.chmod(0o644)
+    elif corruption == "symlink":
+        backing = journal_path.with_name("journal-backing.json")
+        journal_path.rename(backing)
+        journal_path.symlink_to(backing.name)
+    elif corruption == "generation_mismatch":
+        generation = _generation_paths(transaction, journal)["old_cert_sha256"]
+        generation.write_bytes(generation.read_bytes() + b"corruption")
+    elif corruption == "canonical_mismatch":
+        transaction.current.bundle.write_bytes(b"unrelated-corruption")
+    elif corruption == "prepared_old_new":
+        transaction.current.key.write_bytes(transaction.staged.key.read_bytes())
+    elif corruption == "pair_published_new_old":
+        journal_path.write_text(
+            json.dumps({**journal, "phase": "pair_published"}, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        transaction.current.bundle.write_bytes(transaction.staged.bundle.read_bytes())
+    elif corruption == "old_pair_restored_old_new":
+        journal_path.write_text(
+            json.dumps(
+                {**journal, "phase": "old_pair_restored"}, separators=(",", ":")
+            ),
+            encoding="utf-8",
+        )
+        transaction.current.key.write_bytes(transaction.staged.key.read_bytes())
+    canonical_cert = transaction.current.bundle.read_bytes()
+    canonical_key = transaction.current.key.read_bytes()
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "rejected-recovery",
+    )
+    rejected = _run_rotator(recovery_env)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert os.path.lexists(journal_path)
+    assert transaction.current.bundle.read_bytes() == canonical_cert
+    assert transaction.current.key.read_bytes() == canonical_key
+    assert _docker_calls(recovery_record) == []
+
+
+@pytest.mark.parametrize(
+    ("fail_fsync", "fail_validation", "phase", "expected_cert", "expected_key"),
+    [
+        ("journal-parent", None, "prepared", "old", "old"),
+        ("certificate-parent", None, "prepared", "new", "old"),
+        ("key-parent", None, "certificate_published", "new", "new"),
+        (None, "published", "pair_published", "new", "new"),
+    ],
+)
+def test_publish_fsync_or_validation_failure_retains_evidence_without_consumers(
+    tmp_path: Path,
+    fail_fsync: str | None,
+    fail_validation: str | None,
+    phase: str,
+    expected_cert: str,
+    expected_key: str,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    failed = _run_rotator(
+        _fault_env(
+            transaction.env,
+            fail_fsync=fail_fsync,
+            fail_validation=fail_validation,
+        ),
+        TRANSACTION_ACTION,
+    )
+
+    assert failed.returncode == 74
+    assert failed.stdout == "mcp-client-rotation result=publication_failed\n"
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == phase
+    expected_cert_bytes = (
+        transaction.staged.bundle.read_bytes()
+        if expected_cert == "new"
+        else transaction.old_cert
+    )
+    expected_key_bytes = (
+        transaction.staged.key.read_bytes()
+        if expected_key == "new"
+        else transaction.old_key
+    )
+    assert transaction.current.bundle.read_bytes() == expected_cert_bytes
+    assert transaction.current.key.read_bytes() == expected_key_bytes
+    assert all(
+        path.exists() for path in _generation_paths(transaction, journal).values()
+    )
+    assert "committed" not in journal_path.read_text(encoding="utf-8")
+    assert "activated" not in failed.stdout
+    assert not any(
+        set(call) & {"up", "restart", "recreate", "operator", "blackbox-exporter"}
+        for call in _docker_calls(transaction.record)
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate_generation",
+    ["old_cert", "old_key", "new_cert", "new_key"],
+)
+def test_publish_rebinds_every_generation_digest_before_canonical_rename(
+    tmp_path: Path,
+    mutate_generation: str,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    failed = _run_rotator(
+        _fault_env(transaction.env, mutate_generation=mutate_generation),
+        TRANSACTION_ACTION,
+    )
+
+    assert failed.returncode == 74
+    assert failed.stdout == "mcp-client-rotation result=publication_failed\n"
+    journal_path = _journal_path(transaction)
+    assert _strict_json(journal_path)["phase"] == "prepared"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not any(
+        set(call) & {"up", "restart", "recreate", "operator", "blackbox-exporter"}
+        for call in _docker_calls(transaction.record)
+    )
+
+
+def test_publish_validated_fixture_stays_precommitted_and_is_recoverable(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert stopped.returncode == 74
+    assert stopped.stdout == "mcp-client-rotation result=publication_failed\n"
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "published_validated"
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert "committed" not in journal_path.read_text(encoding="utf-8")
+    assert not any(
+        set(call) & {"up", "restart", "recreate", "operator", "blackbox-exporter"}
+        for call in _docker_calls(transaction.record)
+    )
+
+    recovery_env, _ = _recovery_env(tmp_path, transaction, "validated-recovery")
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not journal_path.exists()
+
+
+def test_recovery_validation_failure_retains_journal_and_generations(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="pair_published"),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode != 0
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    generations = _generation_paths(transaction, journal)
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "failed-validation-recovery",
+        fail_validation="restored",
+    )
+    failed = _run_rotator(recovery_env)
+
+    assert failed.returncode == 74
+    assert failed.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert journal_path.exists()
+    assert _strict_json(journal_path)["phase"] in {
+        "old_pair_restored",
+        "recovery_failed",
+    }
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert all(path.exists() for path in generations.values())
+    assert "committed" not in journal_path.read_text(encoding="utf-8")
+    assert _docker_calls(recovery_record) == []

@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1a is source-complete and green; live issuance, publication, and protected work remain deferred to their later hardware/custody-gated slices
-last_updated: "2026-07-13T08:11:44Z"
-last_activity: 2026-07-12
+stopped_at: Phase 12 production MCP client rotation R1b is source-complete and green; R1c consumer activation and all live/protected work remain deferred to their later hardware/custody-gated slices
+last_updated: "2026-07-13T09:23:36Z"
+last_activity: 2026-07-13
 progress:
   total_phases: 7
   completed_phases: 2
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1a now provides a fail-closed current-pair diagnostic and offline-only staged issuance path with exact Docker confinement; no live issuance, publication, protected attempt, or claim was performed. Later rotation slices and heavy Phase 12 work remain subject to their 55% hardware/custody gates
-Last activity: 2026-07-12 — Completed rotation R1a test-first with 43 focused rotator checks, 21 unchanged-validator regressions, and independent closure review; live Docker/CA/secrets/runtime state was not mutated
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b now adds a strict mode-0600 transaction journal, fsynced same-filesystem old/new generations, canonical certificate-then-key publication, exact crash-state reachability, and startup restoration before ordinary validation. Publication remains fixture-only and stops before consumer activation; R1c and every live/protected action remain subject to their stronger hardware/custody gates
+Last activity: 2026-07-13 — Completed rotation R1b test-first with 38 exact-selector checks, all 81 rotator checks, 22 unchanged TLS/bootstrap regressions, green shell/Python/diff gates, and clean independent operability/security closure reviews; live Docker/CA/secrets/runtime state was not mutated
 
 ## Performance Metrics
 
@@ -73,6 +73,7 @@ Last activity: 2026-07-12 — Completed rotation R1a test-first with 43 focused 
 
 - [Phase 12]: Production MCP client rotation preserves the unchanged six-hour validator. Its separate diagnostic is restricted to the exact canonical current pair, admits only the validator's leaf-expiry-window failure with at most six hours remaining, requires live leaves to have a chain valid now, and permits historical chain probing only for an already-expired leaf.
 - [Phase 12]: Rotation R1a is staged-only and offline-tested: Docker context/network/image/CLI identity, fixed container confinement, secret-free child environment/output, canonical private staging containment, staged ownership/modes/device, and normal post-issuance validation all fail closed before any later publication work.
+- [Phase 12]: Rotation R1b uses a strict bounded secret-free journal and retained mode-0600 generations on the canonical filesystem. File and parent fsyncs bracket each journal/rename transition; startup accepts only phase-reachable old/new pair states, restores and normally validates the old pair before removing a pre-commit journal, and otherwise retains all evidence while failing closed. The publication path remains fixture-only until R1c wires exact consumer activation, probes, commit, and rollback.
 - [Phase 12]: Candidate protocol v2 was preregistered before any held-out attempt so manifests bind both complete role prompts/rendering, the concrete serializer, and the full generation envelope; Phase 11 custody/baselines remain unchanged.
 - [Phase 12]: Local Ollama model identity is verified, but absent installed `/opt` role commands and a timed-out direct decomposer smoke keep runtime readiness open; Plan 12-04 may not consume a frozen/held-out attempt until that gate is real.
 - [Phase 12]: Answer orchestration reuses shared deep retrieval/PPR and a typed `record_access=False` control; no alternate ranking/graph stack or new dependency was introduced.
@@ -83,7 +84,7 @@ Last activity: 2026-07-12 — Completed rotation R1a test-first with 43 focused 
 - [Phase 12]: Reuse shared retrieval/PPR and the existing Ollama role-provider boundary; add a narrow orchestration layer with external CID validation, complete caller-context propagation, and ephemeral answers.
 - [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
 - [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
-- [CI]: GitHub Actions run 29128327918 and its retry were rejected before checkout because account billing failed or the spending limit was reached; exact-SHA CI remains open.
+- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. Exact-SHA CI is restored and remained green through run 29234683178 for pushed head `9c217b99e428bc1b8c6dfa56d3b560809dfb54f5`; each later merge candidate still requires its own exact-head run.
 
 - [Phase 0]: V2 blueprint is controlling; v1 is lineage only.
 - [Phase 0]: Build originally moved to `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` was write-blocked; the current canonical checkout is `/Users/admin/Mnemosyne`.
@@ -416,3 +417,22 @@ a real empty-password encrypted PKCS#8 key and legacy
 `Proc-Type: 4,ENCRYPTED`; live Vault/MCP validation was not rerun after the
 validator hardening. No candidate, exact-scale, held-out, or protected attempt
 was consumed.
+
+Latest checkpoint (2026-07-13): Production MCP client rotation R1b is
+source-complete. A mode-0600, duplicate-key-rejecting, size-bounded journal
+binds unguessable transaction identity, UTC creation time, exact phase,
+old/new certificate and key digests, and prior consumer-state booleans without
+secret values or paths. Old/new generations are retained mode 0600 on the
+canonical filesystem; publication and restoration use file fsync, canonical
+certificate-then-key rename order, parent fsync, and durable phase transitions.
+Startup recovery precedes ordinary pair validation, accepts only exact
+phase-reachable digest states, restores and normally validates the old pair,
+then fsync-removes the journal. Malformed, unsafe, forged, mutated, mixed, or
+unreachable evidence fails closed without overwrite. Test-only fault controls
+are confined to bounded pytest roots with an explicit private marker, and the
+fixture publication path intentionally stops before R1c consumer activation.
+Verification passes 38 exact R1b selector cases, all 81 rotator cases, and 22
+unchanged TLS/bootstrap regressions, plus Bash syntax, ShellCheck, Ruff, and
+diff hygiene; post-fix independent operability and security closure reviews
+are clean. No live issuance, publication, consumer recreation, Docker,
+LaunchAgent, model, index, exact-scale, held-out, or protected action ran.
