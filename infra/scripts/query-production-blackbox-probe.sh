@@ -1,4 +1,5 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S LC_ALL=C /bin/bash
+# shellcheck shell=bash
 # Query the fixed production MCP TLS blackbox metric through the internal Caddy container.
 set -eu
 set +x
