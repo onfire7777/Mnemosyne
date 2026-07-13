@@ -28,7 +28,6 @@ exec "${PYTHON_ENV[@]}" /usr/bin/python3 - "$@" <<'PY'
 from __future__ import annotations
 
 import json
-import math
 import os
 import pwd
 import re
@@ -39,6 +38,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from decimal import Decimal
 
 
 FAILURE = "production-blackbox-probe result=failure\n"
@@ -46,10 +46,16 @@ SUCCESS = "production-blackbox-probe result=success\n"
 SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 QUERY_URL = (
     "http://victoriametrics:8428/api/v1/query?query="
-    "probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
-    "https%3A%2F%2Fmcp.mnemo.local%22%7D"
+    "timestamp%28probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
+    "https%3A%2F%2Fmcp.mnemo.local%22%7D%5B2m%5D%29%20if%20%28"
+    "last_over_time%28probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
+    "https%3A%2F%2Fmcp.mnemo.local%22%7D%5B2m%5D%29%20%3D%3D%201%29"
 )
 MAX_RESPONSE_BYTES = 64 * 1024
+START_EPOCH_PATTERN = re.compile(r"(?:0|[1-9][0-9]{0,18})(?:\.[0-9]{1,9})?")
+SAMPLE_EPOCH_PATTERN = re.compile(
+    r"(?:0|[1-9][0-9]{0,18})(?:\.[0-9]+)?(?:[eE][+-]?[0-9]{1,3})?"
+)
 
 
 def finish(code: int) -> None:
@@ -181,7 +187,7 @@ def reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return value
 
 
-def valid_response(body: bytes, start_epoch: int, now: float) -> bool:
+def valid_response(body: bytes, start_epoch: Decimal, now: Decimal) -> bool:
     def reject_constant(_value: str) -> object:
         raise ValueError("non-finite JSON number")
 
@@ -190,6 +196,7 @@ def valid_response(body: bytes, start_epoch: int, now: float) -> bool:
             body.decode("utf-8"),
             object_pairs_hook=reject_duplicate_keys,
             parse_constant=reject_constant,
+            parse_float=Decimal,
         )
         if type(payload) is not dict or set(payload) != {"status", "data"}:
             return False
@@ -208,22 +215,25 @@ def valid_response(body: bytes, start_epoch: int, now: float) -> bool:
             return False
         metric = series["metric"]
         expected_metric = {
-            "__name__": "probe_success",
             "job": "blackbox-tls",
             "instance": "https://mcp.mnemo.local",
         }
         if type(metric) is not dict or metric != expected_metric:
             return False
         value = series["value"]
-        if type(value) is not list or len(value) != 2 or value[1] != "1":
+        if type(value) is not list or len(value) != 2:
             return False
-        if type(value[1]) is not str or type(value[0]) not in {int, float}:
+        if type(value[0]) not in {int, Decimal} or type(value[1]) is not str:
             return False
-        sample_epoch = float(value[0])
+        if len(value[1]) > 64 or SAMPLE_EPOCH_PATTERN.fullmatch(value[1]) is None:
+            return False
+        query_epoch = Decimal(value[0])
+        sample_epoch = Decimal(value[1])
         return (
-            math.isfinite(sample_epoch)
-            and start_epoch < sample_epoch <= now
-            and now - sample_epoch <= 120
+            query_epoch.is_finite()
+            and sample_epoch.is_finite()
+            and start_epoch < sample_epoch <= query_epoch <= now
+            and now - Decimal(120) <= sample_epoch
         )
     except (KeyError, TypeError, UnicodeDecodeError, ValueError):
         return False
@@ -232,12 +242,14 @@ def valid_response(body: bytes, start_epoch: int, now: float) -> bool:
 def main(arguments: list[str]) -> int:
     if (
         len(arguments) != 1
-        or len(arguments[0]) > 19
-        or re.fullmatch(r"[0-9]+", arguments[0]) is None
+        or len(arguments[0]) > 29
+        or START_EPOCH_PATTERN.fullmatch(arguments[0]) is None
     ):
         return 64
     try:
-        start_epoch = int(arguments[0])
+        start_epoch = Decimal(arguments[0])
+        if start_epoch <= 0:
+            return 64
         executable = docker_binary()
         child_environment = {
             "HOME": pwd.getpwuid(os.getuid()).pw_dir,
@@ -316,7 +328,8 @@ def main(arguments: list[str]) -> int:
         )
         if query is None or query[0] != 0:
             return 1
-        return 0 if valid_response(query[1], start_epoch, time.time()) else 1
+        now = Decimal(time.time_ns()) / Decimal(1_000_000_000)
+        return 0 if valid_response(query[1], start_epoch, now) else 1
     except (OSError, OverflowError, RuntimeError, subprocess.SubprocessError):
         return 1
 

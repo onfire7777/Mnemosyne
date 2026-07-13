@@ -35,12 +35,20 @@ TRANSACTION_MARKER = "fixture-transaction.json"
 BLACKBOX_CONTAINER_ID = "a" * 64
 OPERATOR_CONTAINER_ID = "b" * 64
 RECREATED_BLACKBOX_CONTAINER_ID = "c" * 64
+CADDY_CONTAINER_ID = "d" * 64
 FOREIGN_OWNER_TOKEN = "f" * 64
 VALID_DB_PASSWORD = b"Db_password-1234!"
 VALID_ADMIN_PASSWORD = b"Admin_password-5678!"
 SAME_UID_REPLACEMENT = b"fixture-same-uid-replacement"
 CONSUMER_FORMAT = "{{.ID}}"
 CONSUMER_SNAPSHOT_FORMAT = r'{{.ID}}\t{{.Label "com.docker.compose.service"}}'
+BLACKBOX_QUERY_URL = (
+    "http://victoriametrics:8428/api/v1/query?query="
+    "timestamp%28probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
+    "https%3A%2F%2Fmcp.mnemo.local%22%7D%5B2m%5D%29%20if%20%28"
+    "last_over_time%28probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
+    "https%3A%2F%2Fmcp.mnemo.local%22%7D%5B2m%5D%29%20%3D%3D%201%29"
+)
 DOTENV_RECEIPT_NAME = "compose-env-owner.json"
 COMPOSE_ENV_FIELDS = {
     "schema_version",
@@ -108,6 +116,35 @@ def _consumer_snapshot_bytes(*rows: tuple[str, str]) -> bytes:
     return "".join(f"{identifier}\t{service}\n" for identifier, service in rows).encode(
         "ascii"
     )
+
+
+def _blackbox_probe_calls() -> list[list[str]]:
+    discovery = [
+        "--context",
+        "colima",
+        "ps",
+        "--filter",
+        "status=running",
+        "--filter",
+        "label=com.docker.compose.project=infra",
+        "--filter",
+        "label=com.docker.compose.service=caddy",
+        "--format",
+        "{{.ID}}",
+    ]
+    prefix = [
+        "--context",
+        "colima",
+        "exec",
+        CADDY_CONTAINER_ID,
+        "/bin/busybox",
+        "wget",
+    ]
+    return [
+        discovery,
+        [*prefix, "--help"],
+        [*prefix, "-q", "-O", "-", "-T", "5", "-t", "2", BLACKBOX_QUERY_URL],
+    ]
 
 
 def _direct_probe_call(fixture: TlsFixture, route: str) -> list[str]:
@@ -298,6 +335,7 @@ def _write_fake_docker(
     tmp_path: Path,
     staged: TlsFixture,
     *,
+    direct_probe_record: Path | None = None,
     fail_issuance: bool = False,
     child_canary: str = "",
     context: str = "colima",
@@ -319,6 +357,10 @@ def _write_fake_docker(
     post_compose_snapshot_bytes: bytes | None = None,
     fail_post_compose_snapshot: bool = False,
     replace_owner_token_on_compose: str | None = None,
+    blackbox_query_returncode: int = 0,
+    blackbox_sample_age_seconds: float = 0.0,
+    blackbox_sample_at_last_snapshot: bool = False,
+    blackbox_sample_at_first_direct_probe: bool = False,
 ) -> tuple[Path, Path]:
     record = tmp_path / "docker-record.json"
     post_compose_container_records = list(
@@ -334,6 +376,9 @@ def _write_fake_docker(
         if post_compose_sequential_containers is None
         else post_compose_sequential_containers
     )
+    direct_probe_record_value = (
+        None if direct_probe_record is None else str(direct_probe_record)
+    )
     docker = tmp_path / "fake-docker"
     docker.write_text(
         f"""#!{sys.executable}
@@ -343,6 +388,7 @@ import os
 import shutil
 import stat
 import sys
+import time
 from pathlib import Path
 
 args = sys.argv[1:]
@@ -362,11 +408,14 @@ post_compose_sequential_containers = {post_compose_sequential_container_records!
 compose_transition = record.with_name("compose-transition")
 second_compose_transition = record.with_name("compose-transition-2")
 sequential_query_transition = record.with_name("sequential-query-transition")
+last_snapshot_epoch = record.with_name("last-snapshot-epoch")
 discovery_calls = {{
     "blackbox-exporter": {_consumer_discovery_call("blackbox-exporter")!r},
     "operator": {_consumer_discovery_call("operator")!r},
 }}
 snapshot_call = {_consumer_snapshot_call()!r}
+blackbox_probe_calls = {_blackbox_probe_calls()!r}
+direct_probe_record = {direct_probe_record_value!r}
 
 def active_containers():
     if second_compose_transition.exists():
@@ -400,11 +449,58 @@ if args == snapshot_call:
                 "receipt_path": compose_observation["receipt_path"],
                 "receipt_exists": os.path.lexists(compose_observation["receipt_path"]),
             }}, sort_keys=True) + "\\n")
+        snapshot_time = time.time_ns()
+        last_snapshot_epoch.write_text(
+            f"{{snapshot_time // 1_000_000_000}}.{{snapshot_time % 1_000_000_000:09d}}",
+            encoding="ascii",
+        )
     sys.stdout.buffer.write(payload)
     sys.stdout.buffer.flush()
     raise SystemExit(
         42 if compose_transition.exists() and {fail_post_compose_snapshot!r} else 0
     )
+if args in blackbox_probe_calls:
+    if not compose_transition.exists() or direct_probe_record is None:
+        raise SystemExit(95)
+    probe_path = Path(direct_probe_record)
+    if not probe_path.exists() or len(
+        probe_path.read_text(encoding="utf-8").splitlines()
+    ) != 2:
+        raise SystemExit(96)
+if args == blackbox_probe_calls[0]:
+    print({CADDY_CONTAINER_ID!r})
+    raise SystemExit(0)
+if args == blackbox_probe_calls[1]:
+    raise SystemExit(0)
+if args == blackbox_probe_calls[2]:
+    if {blackbox_query_returncode!r} != 0:
+        raise SystemExit({blackbox_query_returncode!r})
+    query_time = time.time()
+    if {blackbox_sample_at_first_direct_probe!r}:
+        sample_time = probe_path.with_name("first-direct-probe-epoch").read_text(
+            encoding="ascii"
+        )
+    elif {blackbox_sample_at_last_snapshot!r}:
+        sample_time = last_snapshot_epoch.read_text(encoding="ascii")
+    else:
+        sample_time = str(query_time - {blackbox_sample_age_seconds!r})
+    print(json.dumps({{
+        "status": "success",
+        "data": {{
+            "resultType": "vector",
+            "result": [{{
+                "metric": {{
+                    "job": "blackbox-tls",
+                    "instance": "https://mcp.mnemo.local",
+                }},
+                "value": [
+                    query_time,
+                    sample_time,
+                ],
+            }}],
+        }},
+    }}, separators=(",", ":")))
+    raise SystemExit(0)
 for service in ("blackbox-exporter", "operator"):
     if args == discovery_calls[service]:
         identifiers = [
@@ -538,6 +634,7 @@ def _write_fake_curl(
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 record = Path({str(record)!r})
@@ -565,6 +662,12 @@ snapshot = record.with_name("snapshot-observations.jsonl")
 snapshot_count = (
     len(snapshot.read_text(encoding="utf-8").splitlines()) if snapshot.exists() else 0
 )
+if index == 0:
+    probe_time = time.time_ns()
+    record.with_name("first-direct-probe-epoch").write_text(
+        f"{{probe_time // 1_000_000_000}}.{{probe_time % 1_000_000_000:09d}}",
+        encoding="ascii",
+    )
 with record.open("a", encoding="utf-8") as handle:
     handle.write(
         json.dumps(
@@ -748,8 +851,13 @@ def _transaction_fixture(
         stem="staged",
         issuer=current,
     )
-    docker, record = _write_fake_docker(tmp_path, staged, **(docker_options or {}))
     curl, probe_record = _write_fake_curl(tmp_path, staged, **(curl_options or {}))
+    docker, record = _write_fake_docker(
+        tmp_path,
+        staged,
+        direct_probe_record=probe_record,
+        **(docker_options or {}),
+    )
     _enable_transaction_fixture(current, operator_running=operator_running)
     return RotationTransactionFixture(
         current=current,
@@ -2074,12 +2182,13 @@ def test_publish_rebinds_every_generation_digest_before_canonical_rename(
     )
 
 
-def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
+def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_stays_precommitted(
     tmp_path: Path,
 ) -> None:
     transaction = _transaction_fixture(
         tmp_path,
         docker_options={
+            "blackbox_sample_at_first_direct_probe": True,
             "post_compose_containers": (
                 (
                     RECREATED_BLACKBOX_CONTAINER_ID,
@@ -2087,7 +2196,7 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
                     "blackbox-exporter",
                     "running",
                 ),
-            )
+            ),
         },
         curl_options={"responses": ("204", "299")},
     )
@@ -2097,8 +2206,9 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
     assert stopped.returncode == 74
     assert stopped.stdout == "mcp-client-rotation result=publication_failed\n"
     assert (
-        stopped.stderr == "mcp-client-rotation failed: blackbox probe is unavailable "
-        "in the R1c fixture seam\n"
+        stopped.stderr
+        == "mcp-client-rotation failed: durable commit and automatic rollback are "
+        "unavailable in the R1c fixture seam\n"
     )
     journal_path = _journal_path(transaction)
     journal = _strict_json(journal_path)
@@ -2152,8 +2262,108 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
             "snapshot_count": 1,
         },
     ]
+    docker_calls = _docker_calls(transaction.record)
+    assert docker_calls[-3:] == _blackbox_probe_calls()
+    assert all(docker_calls.count(call) == 1 for call in _blackbox_probe_calls())
 
     recovery_env, _ = _recovery_env(tmp_path, transaction, "validated-recovery")
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not journal_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("docker_options", "operator_running"),
+    [
+        pytest.param({"blackbox_query_returncode": 42}, False, id="transport"),
+        pytest.param(
+            {"blackbox_sample_at_last_snapshot": True},
+            False,
+            id="blackbox-only-final-snapshot",
+        ),
+        pytest.param(
+            {
+                "containers": (
+                    (BLACKBOX_CONTAINER_ID, "infra", "blackbox-exporter", "running"),
+                    (OPERATOR_CONTAINER_ID, "infra", "operator", "running"),
+                ),
+                "post_compose_containers": (
+                    (
+                        RECREATED_BLACKBOX_CONTAINER_ID,
+                        "infra",
+                        "blackbox-exporter",
+                        "running",
+                    ),
+                    (OPERATOR_CONTAINER_ID, "infra", "operator", "running"),
+                ),
+                "post_second_compose_containers": (
+                    (
+                        RECREATED_BLACKBOX_CONTAINER_ID,
+                        "infra",
+                        "blackbox-exporter",
+                        "running",
+                    ),
+                    (OPERATOR_CONTAINER_ID, "infra", "operator", "running"),
+                ),
+                "blackbox_sample_at_last_snapshot": True,
+            },
+            True,
+            id="operator-final-snapshot",
+        ),
+        pytest.param(
+            {"blackbox_sample_age_seconds": 30.0},
+            False,
+            id="fresh-before-boundary",
+        ),
+        pytest.param(
+            {"blackbox_sample_age_seconds": 300.0},
+            False,
+            id="stale",
+        ),
+    ],
+)
+def test_fixture_blackbox_failure_retains_precommit_recovery_evidence(
+    tmp_path: Path,
+    docker_options: dict[str, object],
+    operator_running: bool,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+            **docker_options,
+        },
+        curl_options={"responses": ("204", "299")},
+        operator_running=operator_running,
+    )
+
+    failed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert failed.returncode == 74
+    assert failed.stdout == "mcp-client-rotation result=publication_failed\n"
+    assert failed.stderr == "mcp-client-rotation failed: blackbox probe failed\n"
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "published_validated"
+    assert journal["compose_env"] is None
+    assert "committed" not in journal_path.read_text(encoding="utf-8")
+    assert len(_curl_calls(transaction.probe_record)) == 2
+    docker_calls = _docker_calls(transaction.record)
+    assert docker_calls[-3:] == _blackbox_probe_calls()
+    assert all(docker_calls.count(call) == 1 for call in _blackbox_probe_calls())
+
+    recovery_env, _ = _recovery_env(tmp_path, transaction, "blackbox-failure-recovery")
     recovered = _run_rotator(recovery_env)
 
     assert recovered.returncode == 0
@@ -2218,6 +2428,22 @@ def test_direct_probe_rejects_transport_or_non_2xx_and_short_circuits(
     journal_path = _journal_path(transaction)
     assert _strict_json(journal_path)["phase"] == "published_validated"
     assert "committed" not in journal_path.read_text(encoding="utf-8")
+    assert not any(
+        call in _blackbox_probe_calls() for call in _docker_calls(transaction.record)
+    )
+
+    recovery_env, _ = _recovery_env(
+        tmp_path,
+        transaction,
+        "direct-probe-failure-recovery",
+    )
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert not journal_path.exists()
 
 
 @pytest.mark.parametrize(
@@ -2290,6 +2516,9 @@ def test_staged_only_path_never_executes_direct_probes(tmp_path: Path) -> None:
     assert staged.stdout == "mcp-client-rotation result=staged_only\n"
     assert staged.stderr == ""
     assert _curl_calls(transaction.probe_record) == []
+    assert not any(
+        call in _blackbox_probe_calls() for call in _docker_calls(transaction.record)
+    )
     assert not _journal_path(transaction).exists()
 
 

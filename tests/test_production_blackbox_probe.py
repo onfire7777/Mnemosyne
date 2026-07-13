@@ -22,8 +22,10 @@ CANARY = "blackbox-probe-canary-must-not-leak"
 SAFE_PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 QUERY_URL = (
     "http://victoriametrics:8428/api/v1/query?query="
-    "probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
-    "https%3A%2F%2Fmcp.mnemo.local%22%7D"
+    "timestamp%28probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
+    "https%3A%2F%2Fmcp.mnemo.local%22%7D%5B2m%5D%29%20if%20%28"
+    "last_over_time%28probe_success%7Bjob%3D%22blackbox-tls%22%2Cinstance%3D%22"
+    "https%3A%2F%2Fmcp.mnemo.local%22%7D%5B2m%5D%29%20%3D%3D%201%29"
 )
 PS_CALL = [
     "--context",
@@ -66,10 +68,11 @@ QUERY_CALL = [
 
 
 def _vector_payload(
-    timestamp: int | float,
+    sample_timestamp: int | float,
     *,
+    query_timestamp: int | float | None = None,
     metric: dict[str, str] | None = None,
-    value: object = "1",
+    value: object | None = None,
 ) -> dict[str, object]:
     return {
         "status": "success",
@@ -79,11 +82,15 @@ def _vector_payload(
                 {
                     "metric": metric
                     or {
-                        "__name__": "probe_success",
                         "job": "blackbox-tls",
                         "instance": "https://mcp.mnemo.local",
                     },
-                    "value": [timestamp, value],
+                    "value": [
+                        sample_timestamp + 5
+                        if query_timestamp is None
+                        else query_timestamp,
+                        str(sample_timestamp) if value is None else value,
+                    ],
                 }
             ],
         },
@@ -246,7 +253,13 @@ def test_wrapper_sanitizes_locale_before_bash_initialization() -> None:
         pytest.param([""], id="empty"),
         pytest.param(["-1"], id="negative"),
         pytest.param(["+1"], id="leading-plus"),
-        pytest.param(["1.0"], id="fractional"),
+        pytest.param(["0"], id="zero"),
+        pytest.param(["0.0"], id="fractional-zero"),
+        pytest.param(["1."], id="missing-fraction"),
+        pytest.param([".1"], id="missing-integer"),
+        pytest.param(["01.0"], id="leading-zero"),
+        pytest.param(["1.1234567890"], id="excess-fractional-precision"),
+        pytest.param(["1e3"], id="scientific-boundary"),
         pytest.param([" 1"], id="leading-space"),
         pytest.param(["1\n"], id="newline"),
         pytest.param(["9" * 5_000], id="oversized-epoch"),
@@ -254,7 +267,7 @@ def test_wrapper_sanitizes_locale_before_bash_initialization() -> None:
         pytest.param(["1", "https://attacker.invalid"], id="extra-url"),
     ],
 )
-def test_cli_requires_exactly_one_decimal_nonnegative_epoch(
+def test_cli_requires_exactly_one_positive_epoch_with_optional_nanoseconds(
     tmp_path: Path,
     args: list[str],
 ) -> None:
@@ -438,7 +451,7 @@ INVALID_RESPONSE_CASES = (
     "series-not-object",
     "extra-series-field",
     "metric-not-object",
-    "missing-metric-name",
+    "unexpected-metric-name",
     "extra-label",
     "wrong-job",
     "wrong-instance",
@@ -451,13 +464,22 @@ INVALID_RESPONSE_CASES = (
     "overflowing-timestamp",
     "numeric-value",
     "wrong-string-value",
+    "malformed-scientific-value",
+    "oversized-scientific-exponent",
+    "nan-value",
+    "infinite-value",
+    "overflowing-value",
     "sample-equals-start",
+    "sample-equals-subsecond-start",
+    "sample-before-subsecond-start",
+    "query-before-sample",
+    "future-query",
     "stale-sample",
     "future-sample",
 )
 
 
-def _invalid_response(case: str) -> tuple[int, bytes]:
+def _invalid_response(case: str) -> tuple[int | float | str, bytes]:
     now = int(time.time())
     start = now - 20
     payload = _vector_payload(now - 5)
@@ -519,8 +541,8 @@ def _invalid_response(case: str) -> tuple[int, bytes]:
         series["extra"] = True
     elif case == "metric-not-object":
         series["metric"] = []
-    elif case == "missing-metric-name":
-        metric.pop("__name__")
+    elif case == "unexpected-metric-name":
+        metric["__name__"] = "probe_success"
     elif case == "extra-label":
         metric["tenant"] = "primary"
     elif case == "wrong-job":
@@ -530,30 +552,49 @@ def _invalid_response(case: str) -> tuple[int, bytes]:
     elif case == "value-not-array":
         series["value"] = {}
     elif case == "wrong-value-shape":
-        series["value"] = [now - 5]
+        series["value"] = [now]
     elif case == "timestamp-not-number":
-        series["value"] = [str(now - 5), "1"]
+        series["value"] = [str(now), str(now - 5)]
     elif case == "boolean-timestamp":
-        series["value"] = [True, "1"]
+        series["value"] = [True, str(now - 5)]
     elif case == "nan-timestamp":
-        return start, _json_bytes(payload).replace(str(now - 5).encode(), b"NaN", 1)
+        return start, _json_bytes(payload).replace(str(now).encode(), b"NaN", 1)
     elif case == "infinite-timestamp":
-        return start, _json_bytes(payload).replace(
-            str(now - 5).encode(), b"Infinity", 1
-        )
+        return start, _json_bytes(payload).replace(str(now).encode(), b"Infinity", 1)
     elif case == "overflowing-timestamp":
-        return start, _json_bytes(payload).replace(str(now - 5).encode(), b"1e309", 1)
+        return start, _json_bytes(payload).replace(str(now).encode(), b"1e309", 1)
     elif case == "numeric-value":
-        series["value"] = [now - 5, 1]
+        series["value"] = [now, now - 5]
     elif case == "wrong-string-value":
-        series["value"] = [now - 5, "1.0"]
+        series["value"] = [now, "not-a-timestamp"]
+    elif case == "malformed-scientific-value":
+        series["value"] = [now, "1e"]
+    elif case == "oversized-scientific-exponent":
+        series["value"] = [now, "1e+1000"]
+    elif case == "nan-value":
+        series["value"] = [now, "NaN"]
+    elif case == "infinite-value":
+        series["value"] = [now, "Infinity"]
+    elif case == "overflowing-value":
+        series["value"] = [now, "1e309"]
     elif case == "sample-equals-start":
-        series["value"] = [start, "1"]
+        series["value"] = [now, str(start)]
+    elif case == "sample-equals-subsecond-start":
+        start = f"{now - 5}.125000000"
+        series["value"] = [now, start]
+    elif case == "sample-before-subsecond-start":
+        return now - 5.125, _json_bytes(
+            _vector_payload(now - 5.25, query_timestamp=now)
+        )
+    elif case == "query-before-sample":
+        series["value"] = [now - 10, str(now - 5)]
+    elif case == "future-query":
+        series["value"] = [now + 3600, str(now - 5)]
     elif case == "stale-sample":
         start = now - 500
-        series["value"] = [now - 300, "1"]
+        series["value"] = [now, str(now - 300)]
     elif case == "future-sample":
-        series["value"] = [now + 3600, "1"]
+        series["value"] = [now, str(now + 3600)]
     else:  # pragma: no cover - the parametrization is the closed case set
         raise AssertionError(case)
     return start, _json_bytes(payload)
@@ -613,3 +654,43 @@ def test_exact_query_transport_sanitized_environment_and_fresh_success(
     audit_text = audit.read_text(encoding="utf-8")
     assert CANARY not in audit_text
     assert "attacker.invalid" not in audit_text
+
+
+def test_scientific_raw_sample_timestamp_is_accepted(tmp_path: Path) -> None:
+    now = time.time()
+    raw_sample = now - 5
+    proc, _ = _run_probe(
+        tmp_path,
+        [f"{now - 10:.9f}"],
+        _json_bytes(
+            _vector_payload(
+                raw_sample,
+                query_timestamp=now,
+                value=f"{raw_sample:.9e}",
+            )
+        ),
+    )
+
+    assert proc.returncode == 0
+    assert proc.stdout == SUCCESS
+    assert proc.stderr == ""
+
+
+def test_raw_sample_one_nanosecond_after_boundary_is_accepted(tmp_path: Path) -> None:
+    now = int(time.time())
+    second = now - 5
+    proc, _ = _run_probe(
+        tmp_path,
+        [f"{second}.123456788"],
+        _json_bytes(
+            _vector_payload(
+                second,
+                query_timestamp=now,
+                value=f"{second}.123456789",
+            )
+        ),
+    )
+
+    assert proc.returncode == 0
+    assert proc.stdout == SUCCESS
+    assert proc.stderr == ""
