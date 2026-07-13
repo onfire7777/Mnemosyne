@@ -2,6 +2,7 @@
 # Stage a replacement production MCP client certificate through a confined issuer.
 set -euo pipefail
 set +x
+umask 077
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
@@ -114,7 +115,9 @@ transaction_call() {
     "$CERT_BUNDLE" \
     "$PRIVATE_KEY" \
     "$STAGE_DIR" <<'PY'
+import ctypes
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -138,7 +141,11 @@ CERTIFICATE_NAME = "mcp-client.crt"
 PRIVATE_KEY_NAME = "mcp-client.key"
 JOURNAL_NAME = "transaction.json"
 MARKER_NAME = "fixture-transaction.json"
+DOTENV_RECEIPT_NAME = "compose-env-owner.json"
+DB_PASSWORD_NAME = "kc_db_pw"
+ADMIN_PASSWORD_NAME = "kc_admin_pw"
 MAX_JOURNAL_BYTES = 4096
+MAX_RECEIPT_BYTES = 2048
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 DIRECTORY = getattr(os, "O_DIRECTORY", 0)
 if not NOFOLLOW or not DIRECTORY:
@@ -155,6 +162,7 @@ JOURNAL_FIELDS = {
     "new_key_sha256",
     "blackbox_exporter_was_running",
     "operator_was_running",
+    "compose_env",
 }
 PHASES = {
     "prepared",
@@ -166,6 +174,28 @@ PHASES = {
     "old_pair_restored",
 }
 INTERRUPT_POINTS = (PHASES - {"published_validated"}) | {
+    "compose_env_planned",
+    "compose_dotenv_created",
+    "compose_env_owned",
+    "compose_payload_written",
+    "compose_dotenv_payload_fsynced",
+    "compose_env_ready",
+    "compose_receipt_partial_written",
+    "compose_receipt_temp_fsynced",
+    "compose_receipt_linked",
+    "compose_receipt_temp_unlinked",
+    "compose_receipt_link_parent_fsynced",
+    "compose_receipt_durable",
+    "compose_env_cleanup",
+    "compose_dotenv_quarantined",
+    "compose_dotenv_quarantine_parent_fsynced",
+    "compose_dotenv_unlinked",
+    "compose_dotenv_unlink_parent_fsynced",
+    "compose_receipt_quarantined",
+    "compose_receipt_quarantine_parent_fsynced",
+    "compose_receipt_unlinked",
+    "compose_receipt_unlink_parent_fsynced",
+    "compose_env_cleared",
     "certificate_renamed",
     "certificate_parent_fsynced",
     "key_renamed",
@@ -177,6 +207,25 @@ INTERRUPT_POINTS = (PHASES - {"published_validated"}) | {
 }
 FSYNC_FAILURES = {"journal-parent", "certificate-parent", "key-parent"}
 VALIDATION_FAILURES = {"published", "restored"}
+DOTENV_RECEIPT_FIELDS = {
+    "schema_version",
+    "transaction_id",
+    "compose_env",
+}
+COMPOSE_ENV_FIELDS = {
+    "schema_version",
+    "state",
+    "owner_token",
+    "basename",
+    "quarantine_basename",
+    "device",
+    "inode",
+    "uid",
+    "mode",
+    "nlink",
+    "created_at",
+}
+COMPOSE_ENV_STATES = {"planned", "owned", "ready", "cleanup"}
 
 
 def real_absolute(path: str) -> str:
@@ -385,6 +434,719 @@ def write_all(descriptor: int, value: bytes) -> None:
         offset += written
 
 
+def compose_env_artifacts(rotation_fd: int) -> set[str]:
+    artifacts: set[str] = set()
+    for name in os.listdir(rotation_fd):
+        if (
+            name == DOTENV_RECEIPT_NAME
+            or re.fullmatch(
+                r"compose-env[.][0-9a-f]{64}[.](?:tmp|quarantine)",
+                name,
+            )
+            or re.fullmatch(
+                r"[.]compose-env-owner[.][0-9a-f]{32,64}[.]"
+                r"[0-9a-f]{64}[.](?:tmp|quarantine)",
+                name,
+            )
+        ):
+            artifacts.add(name)
+    return artifacts
+
+
+def entry_exists(directory: int, name: str) -> bool:
+    try:
+        stat_entry(directory, name)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def rename_noreplace(directory: int, source: str, target: str) -> None:
+    for name in (source, target):
+        if "/" in name or name in {"", ".", ".."}:
+            reject()
+    library = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    target_bytes = os.fsencode(target)
+    if sys.platform == "darwin" and hasattr(library, "renameatx_np"):
+        function = library.renameatx_np
+        function.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        function.restype = ctypes.c_int
+        result = function(
+            directory,
+            source_bytes,
+            directory,
+            target_bytes,
+            0x00000004 | 0x00000010,
+        )
+    elif sys.platform.startswith("linux") and hasattr(library, "renameat2"):
+        function = library.renameat2
+        function.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        function.restype = ctypes.c_int
+        result = function(directory, source_bytes, directory, target_bytes, 1)
+    else:
+        reject()
+    if result != 0:
+        error = ctypes.get_errno() or errno.EIO
+        raise OSError(error, os.strerror(error), target)
+
+
+def validate_compose_password(
+    secrets_fd: int,
+    secrets_stat: os.stat_result,
+    name: str,
+) -> bytes:
+    descriptor, password_stat = open_regular(secrets_fd, name, exact_mode=0o600)
+    try:
+        value = read_limited(descriptor, 512)
+    finally:
+        os.close(descriptor)
+    if password_stat.st_dev != secrets_stat.st_dev:
+        reject()
+    if len(value) < 16 or re.fullmatch(
+        rb"[A-Za-z0-9._~!@#$%^&*+=,:/?-]+",
+        value,
+    ) is None:
+        reject()
+    return value
+
+
+def compose_passwords(
+    secrets_fd: int,
+    secrets_stat: os.stat_result,
+) -> tuple[bytes, bytes]:
+    return (
+        validate_compose_password(secrets_fd, secrets_stat, DB_PASSWORD_NAME),
+        validate_compose_password(secrets_fd, secrets_stat, ADMIN_PASSWORD_NAME),
+    )
+
+
+def validate_compose_env(value: object) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != COMPOSE_ENV_FIELDS:
+        reject()
+    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        reject()
+    state = value["state"]
+    if state not in COMPOSE_ENV_STATES:
+        reject()
+    token = value["owner_token"]
+    basename = value["basename"]
+    if not isinstance(token, str) or re.fullmatch(r"[0-9a-f]{64}", token) is None:
+        reject()
+    if basename != f"compose-env.{token}.tmp":
+        reject()
+    if value["quarantine_basename"] != f"compose-env.{token}.quarantine":
+        reject()
+    identity_fields = ("device", "inode", "uid", "mode", "nlink")
+    if state == "planned":
+        if any(value[field] is not None for field in identity_fields):
+            reject()
+    else:
+        for field in identity_fields:
+            if type(value[field]) is not int or value[field] < 0:
+                reject()
+        if (
+            value["device"] == 0
+            or value["inode"] == 0
+            or value["uid"] != UID
+            or value["mode"] != 0o600
+            or value["nlink"] != 1
+        ):
+            reject()
+    created_at = value["created_at"]
+    if not isinstance(created_at, str) or re.fullmatch(
+        r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",
+        created_at,
+    ) is None:
+        reject()
+    try:
+        dt.datetime.fromisoformat(created_at[:-1] + "+00:00")
+    except ValueError:
+        reject()
+    return value
+
+
+def validate_dotenv_receipt(value: dict[str, object]) -> dict[str, object]:
+    if set(value) != DOTENV_RECEIPT_FIELDS:
+        reject()
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
+        reject()
+    transaction_id = value["transaction_id"]
+    if not isinstance(transaction_id, str) or re.fullmatch(
+        r"[0-9a-f]{32,64}", transaction_id
+    ) is None:
+        reject()
+    compose_env = validate_compose_env(value["compose_env"])
+    if compose_env["state"] != "ready":
+        reject()
+    return value
+
+
+def compose_receipt(journal: dict[str, object]) -> dict[str, object]:
+    compose_env = validate_compose_env(journal["compose_env"])
+    if compose_env["state"] not in {"ready", "cleanup"}:
+        reject()
+    mirrored = dict(compose_env)
+    mirrored["state"] = "ready"
+    return validate_dotenv_receipt(
+        {
+            "schema_version": 2,
+            "transaction_id": journal["transaction_id"],
+            "compose_env": mirrored,
+        }
+    )
+
+
+def receipt_names(journal: dict[str, object]) -> tuple[str, str]:
+    compose_env = validate_compose_env(journal["compose_env"])
+    transaction_id = str(journal["transaction_id"])
+    token = str(compose_env["owner_token"])
+    prefix = f".compose-env-owner.{transaction_id}.{token}"
+    return f"{prefix}.tmp", f"{prefix}.quarantine"
+
+
+def load_receipt(
+    rotation_fd: int,
+    name: str,
+    expected: dict[str, object],
+    *,
+    allow_incomplete: bool = False,
+    expected_nlink: int = 1,
+) -> os.stat_result:
+    descriptor, receipt_stat = open_regular(rotation_fd, name, exact_mode=0o600)
+    try:
+        chunks: list[bytes] = []
+        remaining = MAX_RECEIPT_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw_receipt = b"".join(chunks)
+    finally:
+        os.close(descriptor)
+    if len(raw_receipt) > MAX_RECEIPT_BYTES:
+        reject()
+    try:
+        receipt = validate_dotenv_receipt(strict_json_bytes(raw_receipt))
+    except TransactionError:
+        if not allow_incomplete:
+            raise
+        receipt = None
+    if (
+        (receipt is not None and receipt != expected)
+        or receipt_stat.st_dev != os.fstat(rotation_fd).st_dev
+        or receipt_stat.st_nlink != expected_nlink
+    ):
+        reject()
+    return receipt_stat
+
+
+def validate_receipt_artifacts(
+    rotation_fd: int,
+    journal: dict[str, object],
+) -> None:
+    compose_env = validate_compose_env(journal["compose_env"])
+    temporary_name, quarantine_name = receipt_names(journal)
+    fixed_exists = entry_exists(rotation_fd, DOTENV_RECEIPT_NAME)
+    temporary_exists = entry_exists(rotation_fd, temporary_name)
+    quarantine_exists = entry_exists(rotation_fd, quarantine_name)
+    if compose_env["state"] not in {"ready", "cleanup"}:
+        if fixed_exists or temporary_exists or quarantine_exists:
+            reject()
+        return
+    expected = compose_receipt(journal)
+    if quarantine_exists and (fixed_exists or temporary_exists):
+        reject()
+    if fixed_exists:
+        fixed_stat = load_receipt(
+            rotation_fd,
+            DOTENV_RECEIPT_NAME,
+            expected,
+            expected_nlink=2 if temporary_exists else 1,
+        )
+        if temporary_exists:
+            temporary_stat = load_receipt(
+                rotation_fd,
+                temporary_name,
+                expected,
+                expected_nlink=2,
+            )
+            if (fixed_stat.st_dev, fixed_stat.st_ino) != (
+                temporary_stat.st_dev,
+                temporary_stat.st_ino,
+            ):
+                reject()
+    elif temporary_exists:
+        load_receipt(
+            rotation_fd,
+            temporary_name,
+            expected,
+            allow_incomplete=True,
+        )
+    elif quarantine_exists:
+        load_receipt(
+            rotation_fd,
+            quarantine_name,
+            expected,
+            allow_incomplete=True,
+        )
+
+
+def open_compose_file(
+    rotation_fd: int,
+    name: str,
+    expected: dict[str, object] | None,
+    *,
+    require_empty: bool = False,
+) -> tuple[int, os.stat_result]:
+    descriptor, value = open_regular(rotation_fd, name, exact_mode=0o600)
+    if (
+        value.st_dev != os.fstat(rotation_fd).st_dev
+        or value.st_nlink != 1
+        or (require_empty and value.st_size != 0)
+    ):
+        os.close(descriptor)
+        reject()
+    if expected is not None and (
+        value.st_dev != expected["device"]
+        or value.st_ino != expected["inode"]
+        or value.st_uid != expected["uid"]
+        or stat.S_IMODE(value.st_mode) != expected["mode"]
+        or value.st_nlink != expected["nlink"]
+    ):
+        os.close(descriptor)
+        reject()
+    return descriptor, value
+
+
+def compose_identity(
+    compose_env: dict[str, object],
+    value: os.stat_result,
+    state: str,
+) -> dict[str, object]:
+    result = dict(compose_env)
+    result.update(
+        {
+            "state": state,
+            "device": value.st_dev,
+            "inode": value.st_ino,
+            "uid": value.st_uid,
+            "mode": stat.S_IMODE(value.st_mode),
+            "nlink": value.st_nlink,
+        }
+    )
+    return validate_compose_env(result)
+
+
+def swap_dotenv_after_validation(
+    rotation_fd: int,
+    name: str,
+    expected: os.stat_result,
+) -> None:
+    value = os.environ.get("MCP_CLIENT_ROTATOR_TEST_SWAP_DOTENV_AFTER_VALIDATION", "")
+    if not value:
+        return
+    if value != "1":
+        reject()
+    load_marker(rotation_fd)
+    current = stat_entry(rotation_fd, name)
+    if (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
+        return
+    os.unlink(name, dir_fd=rotation_fd)
+    descriptor = os.open(
+        name,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+        0o600,
+        dir_fd=rotation_fd,
+    )
+    try:
+        write_all(descriptor, b"fixture-same-uid-replacement")
+        os.fchmod(descriptor, 0o600)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def quarantine_and_validate(
+    rotation_fd: int,
+    source: str,
+    quarantine: str,
+    descriptor: int,
+    expected: os.stat_result,
+    compose_env: dict[str, object],
+) -> int:
+    rename_noreplace(rotation_fd, source, quarantine)
+    interrupt_after(rotation_fd, "compose_dotenv_quarantined")
+    quarantined_descriptor = -1
+    try:
+        quarantined_descriptor, quarantined = open_compose_file(
+            rotation_fd,
+            quarantine,
+            compose_env,
+        )
+        opened = os.fstat(descriptor)
+        if (opened.st_dev, opened.st_ino) != (
+            quarantined.st_dev,
+            quarantined.st_ino,
+        ) or (expected.st_dev, expected.st_ino) != (
+            quarantined.st_dev,
+            quarantined.st_ino,
+        ):
+            reject()
+    except BaseException:
+        if quarantined_descriptor >= 0:
+            os.close(quarantined_descriptor)
+        try:
+            rename_noreplace(rotation_fd, quarantine, source)
+            fsync_directory(rotation_fd, rotation_fd)
+        except BaseException:
+            pass
+        raise
+    fsync_directory(rotation_fd, rotation_fd)
+    interrupt_after(rotation_fd, "compose_dotenv_quarantine_parent_fsynced")
+    return quarantined_descriptor
+
+
+def cleanup_receipt(
+    rotation_fd: int,
+    journal: dict[str, object],
+) -> None:
+    expected = compose_receipt(journal)
+    temporary_name, quarantine_name = receipt_names(journal)
+    fixed_exists = entry_exists(rotation_fd, DOTENV_RECEIPT_NAME)
+    temporary_exists = entry_exists(rotation_fd, temporary_name)
+    quarantine_exists = entry_exists(rotation_fd, quarantine_name)
+    if quarantine_exists and (fixed_exists or temporary_exists):
+        reject()
+    if fixed_exists and temporary_exists:
+        fixed_stat = load_receipt(
+            rotation_fd,
+            DOTENV_RECEIPT_NAME,
+            expected,
+            expected_nlink=2,
+        )
+        temporary_stat = load_receipt(
+            rotation_fd,
+            temporary_name,
+            expected,
+            expected_nlink=2,
+        )
+        if (fixed_stat.st_dev, fixed_stat.st_ino) != (
+            temporary_stat.st_dev,
+            temporary_stat.st_ino,
+        ):
+            reject()
+        os.unlink(temporary_name, dir_fd=rotation_fd)
+        fsync_directory(rotation_fd, rotation_fd)
+        load_receipt(rotation_fd, DOTENV_RECEIPT_NAME, expected)
+        temporary_exists = False
+    source = ""
+    if fixed_exists:
+        source = DOTENV_RECEIPT_NAME
+    elif temporary_exists:
+        source = temporary_name
+    if source:
+        incomplete = source == temporary_name
+        before = load_receipt(
+            rotation_fd,
+            source,
+            expected,
+            allow_incomplete=incomplete,
+        )
+        rename_noreplace(rotation_fd, source, quarantine_name)
+        after = load_receipt(
+            rotation_fd,
+            quarantine_name,
+            expected,
+            allow_incomplete=incomplete,
+        )
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            try:
+                rename_noreplace(rotation_fd, quarantine_name, source)
+                fsync_directory(rotation_fd, rotation_fd)
+            except BaseException:
+                pass
+            reject()
+        interrupt_after(rotation_fd, "compose_receipt_quarantined")
+        fsync_directory(rotation_fd, rotation_fd)
+        interrupt_after(rotation_fd, "compose_receipt_quarantine_parent_fsynced")
+        quarantine_exists = True
+    if quarantine_exists:
+        load_receipt(
+            rotation_fd,
+            quarantine_name,
+            expected,
+            allow_incomplete=True,
+        )
+        os.unlink(quarantine_name, dir_fd=rotation_fd)
+        interrupt_after(rotation_fd, "compose_receipt_unlinked")
+        fsync_directory(rotation_fd, rotation_fd)
+        interrupt_after(rotation_fd, "compose_receipt_unlink_parent_fsynced")
+
+
+def cleanup_compose_env(
+    rotation_fd: int,
+    journal: dict[str, object],
+    *,
+    expected_token: str | None = None,
+) -> bool:
+    artifacts = compose_env_artifacts(rotation_fd)
+    compose_value = journal["compose_env"]
+    if compose_value is None:
+        if artifacts:
+            reject()
+        return False
+    compose_env = validate_compose_env(compose_value)
+    if journal["phase"] != "published_validated":
+        reject()
+    if expected_token is not None and compose_env["owner_token"] != expected_token:
+        reject()
+    temporary_receipt, quarantine_receipt = receipt_names(journal)
+    active_name = str(compose_env["basename"])
+    quarantine_name = str(compose_env["quarantine_basename"])
+    allowed = {
+        active_name,
+        quarantine_name,
+        DOTENV_RECEIPT_NAME,
+        temporary_receipt,
+        quarantine_receipt,
+    }
+    if artifacts - allowed:
+        reject()
+    validate_receipt_artifacts(rotation_fd, journal)
+    active_exists = entry_exists(rotation_fd, active_name)
+    quarantine_exists = entry_exists(rotation_fd, quarantine_name)
+    if active_exists and quarantine_exists:
+        reject()
+    if compose_env["state"] == "planned" and not active_exists:
+        if quarantine_exists or artifacts:
+            reject()
+        journal["compose_env"] = None
+        write_journal(rotation_fd, journal)
+        interrupt_after(rotation_fd, "compose_env_cleared")
+        return True
+    if not active_exists and not quarantine_exists:
+        if compose_env["state"] != "cleanup":
+            reject()
+        cleanup_receipt(rotation_fd, journal)
+        journal["compose_env"] = None
+        write_journal(rotation_fd, journal)
+        interrupt_after(rotation_fd, "compose_env_cleared")
+        return True
+    source = active_name if active_exists else quarantine_name
+    descriptor, value = open_compose_file(
+        rotation_fd,
+        source,
+        None if compose_env["state"] == "planned" else compose_env,
+        require_empty=compose_env["state"] == "planned",
+    )
+    try:
+        if compose_env["state"] != "cleanup":
+            compose_env = compose_identity(compose_env, value, "cleanup")
+            journal["compose_env"] = compose_env
+            write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "compose_env_cleanup")
+        if source == active_name:
+            swap_dotenv_after_validation(rotation_fd, active_name, value)
+            quarantined_descriptor = quarantine_and_validate(
+                rotation_fd,
+                active_name,
+                quarantine_name,
+                descriptor,
+                value,
+                compose_env,
+            )
+        else:
+            quarantined_descriptor, _ = open_compose_file(
+                rotation_fd,
+                quarantine_name,
+                compose_env,
+            )
+        try:
+            os.unlink(quarantine_name, dir_fd=rotation_fd)
+            interrupt_after(rotation_fd, "compose_dotenv_unlinked")
+            fsync_directory(rotation_fd, rotation_fd)
+            interrupt_after(rotation_fd, "compose_dotenv_unlink_parent_fsynced")
+        finally:
+            os.close(quarantined_descriptor)
+    finally:
+        os.close(descriptor)
+    cleanup_receipt(rotation_fd, journal)
+    journal["compose_env"] = None
+    write_journal(rotation_fd, journal)
+    interrupt_after(rotation_fd, "compose_env_cleared")
+    return True
+
+
+def write_dotenv_receipt(
+    rotation_fd: int,
+    journal: dict[str, object],
+) -> None:
+    receipt = compose_receipt(journal)
+    payload = (
+        json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    if len(payload) > MAX_RECEIPT_BYTES:
+        reject()
+    temporary_name, quarantine_name = receipt_names(journal)
+    if any(
+        entry_exists(rotation_fd, name)
+        for name in (temporary_name, quarantine_name, DOTENV_RECEIPT_NAME)
+    ):
+        reject()
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            temporary_name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+            0o600,
+            dir_fd=rotation_fd,
+        )
+        os.fchmod(descriptor, 0o600)
+        midpoint = max(1, len(payload) // 2)
+        write_all(descriptor, payload[:midpoint])
+        interrupt_after(rotation_fd, "compose_receipt_partial_written")
+        write_all(descriptor, payload[midpoint:])
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = -1
+        interrupt_after(rotation_fd, "compose_receipt_temp_fsynced")
+        os.link(
+            temporary_name,
+            DOTENV_RECEIPT_NAME,
+            src_dir_fd=rotation_fd,
+            dst_dir_fd=rotation_fd,
+            follow_symlinks=False,
+        )
+        interrupt_after(rotation_fd, "compose_receipt_linked")
+        os.unlink(temporary_name, dir_fd=rotation_fd)
+        interrupt_after(rotation_fd, "compose_receipt_temp_unlinked")
+        fsync_directory(rotation_fd, rotation_fd)
+        interrupt_after(rotation_fd, "compose_receipt_link_parent_fsynced")
+        interrupt_after(rotation_fd, "compose_receipt_durable")
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+
+
+def prepare_compose_env(
+    secrets_fd: int,
+    secrets_stat: os.stat_result,
+    rotation_fd: int,
+    journal: dict[str, object],
+) -> tuple[str, str]:
+    if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+        reject()
+    db_password, admin_password = compose_passwords(secrets_fd, secrets_stat)
+    token = secrets.token_hex(32)
+    basename = f"compose-env.{token}.tmp"
+    created_at = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
+    compose_env: dict[str, object] = {
+        "schema_version": 1,
+        "state": "planned",
+        "owner_token": token,
+        "basename": basename,
+        "quarantine_basename": f"compose-env.{token}.quarantine",
+        "device": None,
+        "inode": None,
+        "uid": None,
+        "mode": None,
+        "nlink": None,
+        "created_at": created_at.replace("+00:00", "Z"),
+    }
+    journal["compose_env"] = validate_compose_env(compose_env)
+    write_journal(rotation_fd, journal)
+    interrupt_after(rotation_fd, "compose_env_planned")
+    descriptor = -1
+    created = False
+    try:
+        descriptor = os.open(
+            basename,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW,
+            0o600,
+            dir_fd=rotation_fd,
+        )
+        created = True
+        os.fchmod(descriptor, 0o600)
+        dotenv_stat = os.fstat(descriptor)
+        rotation_stat = os.fstat(rotation_fd)
+        if (
+            not stat.S_ISREG(dotenv_stat.st_mode)
+            or dotenv_stat.st_uid != UID
+            or stat.S_IMODE(dotenv_stat.st_mode) != 0o600
+            or dotenv_stat.st_dev != rotation_stat.st_dev
+            or dotenv_stat.st_nlink != 1
+            or dotenv_stat.st_size != 0
+        ):
+            reject()
+        interrupt_after(rotation_fd, "compose_dotenv_created")
+        compose_env = compose_identity(compose_env, dotenv_stat, "owned")
+        journal["compose_env"] = compose_env
+        write_journal(rotation_fd, journal)
+        interrupt_after(rotation_fd, "compose_env_owned")
+        payload = (
+            b"KC_DB_PASSWORD='"
+            + db_password
+            + b"'\nKC_ADMIN_PASSWORD='"
+            + admin_password
+            + b"'\n"
+        )
+        write_all(descriptor, payload)
+        interrupt_after(rotation_fd, "compose_payload_written")
+        os.fsync(descriptor)
+        interrupt_after(rotation_fd, "compose_dotenv_payload_fsynced")
+        after_write = os.fstat(descriptor)
+        if (
+            (after_write.st_dev, after_write.st_ino)
+            != (dotenv_stat.st_dev, dotenv_stat.st_ino)
+            or after_write.st_nlink != 1
+            or after_write.st_size != len(payload)
+        ):
+            reject()
+        compose_env = compose_identity(compose_env, after_write, "ready")
+        journal["compose_env"] = compose_env
+        write_journal(rotation_fd, journal)
+        interrupt_after(rotation_fd, "compose_env_ready")
+        os.close(descriptor)
+        descriptor = -1
+        write_dotenv_receipt(rotation_fd, journal)
+        return token, os.path.join(ROTATION, basename)
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if created:
+            try:
+                cleanup_compose_env(
+                    rotation_fd,
+                    journal,
+                    expected_token=token,
+                )
+            except BaseException:
+                pass
+        else:
+            try:
+                journal["compose_env"] = None
+                write_journal(rotation_fd, journal)
+            except BaseException:
+                pass
+        raise
+
+
 def copy_entry(
     source_directory: int,
     source_name: str,
@@ -439,7 +1201,7 @@ def generation_name(transaction_id: str, generation: str, kind: str) -> str:
 def validate_journal(value: dict[str, object]) -> dict[str, object]:
     if set(value) != JOURNAL_FIELDS:
         reject()
-    if value["schema_version"] != 1 or isinstance(value["schema_version"], bool):
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
         reject()
     transaction_id = value["transaction_id"]
     if not isinstance(transaction_id, str) or not re.fullmatch(
@@ -472,6 +1234,10 @@ def validate_journal(value: dict[str, object]) -> dict[str, object]:
         reject()
     if type(value["operator_was_running"]) is not bool:
         reject()
+    if value["compose_env"] is not None:
+        validate_compose_env(value["compose_env"])
+        if value["phase"] != "published_validated":
+            reject()
     return value
 
 
@@ -675,8 +1441,9 @@ def prepare_and_publish(
     secrets_fd: int,
     rotation_fd: int,
     stage_fd: int,
+    blackbox_exporter_was_running: bool,
+    operator_was_running: bool,
 ) -> None:
-    marker = load_marker(rotation_fd)
     if journal_exists(rotation_fd):
         reject()
     transaction_id = secrets.token_hex(16)
@@ -718,7 +1485,7 @@ def prepare_and_publish(
     )
     created_at = dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()
     journal: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "transaction_id": transaction_id,
         "created_at": created_at.replace("+00:00", "Z"),
         "phase": "prepared",
@@ -726,10 +1493,9 @@ def prepare_and_publish(
         "old_key_sha256": old_key,
         "new_cert_sha256": new_cert,
         "new_key_sha256": new_key,
-        "blackbox_exporter_was_running": marker[
-            "blackbox_exporter_was_running"
-        ],
-        "operator_was_running": marker["operator_was_running"],
+        "blackbox_exporter_was_running": blackbox_exporter_was_running,
+        "operator_was_running": operator_was_running,
+        "compose_env": None,
     }
     write_journal(
         rotation_fd,
@@ -825,6 +1591,13 @@ def recover(secrets_fd: int, rotation_fd: int) -> None:
     require_reachable(journal, state)
 
 
+def consumer_state(name: str) -> bool:
+    value = os.environ.get(name)
+    if value not in {"true", "false"}:
+        reject()
+    return value == "true"
+
+
 def main() -> None:
     if os.path.basename(CERTIFICATE) != CERTIFICATE_NAME:
         reject()
@@ -839,6 +1612,7 @@ def main() -> None:
             "MCP_CLIENT_ROTATOR_TEST_FAIL_FSYNC",
             "MCP_CLIENT_ROTATOR_TEST_FAIL_VALIDATION",
             "MCP_CLIENT_ROTATOR_TEST_MUTATE_GENERATION_BEFORE_RENAME",
+            "MCP_CLIENT_ROTATOR_TEST_SWAP_DOTENV_AFTER_VALIDATION",
         )
     )
     rotation_present = os.path.lexists(ROTATION)
@@ -864,10 +1638,18 @@ def main() -> None:
             return
         if ACTION == "recover":
             if not journal_exists(rotation_fd):
+                if compose_env_artifacts(rotation_fd):
+                    reject()
                 print("absent")
                 return
+            journal = load_journal(rotation_fd)
+            cleanup_compose_env(rotation_fd, journal)
             recover(secrets_fd, rotation_fd)
             print("restored")
+            return
+        if ACTION == "validate-compose-passwords":
+            load_marker(rotation_fd)
+            compose_passwords(secrets_fd, secrets_stat)
             return
         if ACTION == "publish":
             load_marker(rotation_fd)
@@ -877,7 +1659,15 @@ def main() -> None:
             try:
                 if stage_stat.st_dev != secrets_stat.st_dev:
                     reject()
-                prepare_and_publish(secrets_fd, rotation_fd, stage_fd)
+                prepare_and_publish(
+                    secrets_fd,
+                    rotation_fd,
+                    stage_fd,
+                    consumer_state(
+                        "MCP_CLIENT_ROTATOR_BLACKBOX_EXPORTER_WAS_RUNNING"
+                    ),
+                    consumer_state("MCP_CLIENT_ROTATOR_OPERATOR_WAS_RUNNING"),
+                )
             finally:
                 os.close(stage_fd)
             return
@@ -892,6 +1682,40 @@ def main() -> None:
             journal["phase"] = "published_validated"
             write_journal(rotation_fd, journal)
             return
+        if ACTION == "prepare-compose-env":
+            load_marker(rotation_fd)
+            journal = load_journal(rotation_fd)
+            validate_generations(rotation_fd, journal)
+            if journal["phase"] != "published_validated":
+                reject()
+            if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
+                reject()
+            token, path = prepare_compose_env(
+                secrets_fd,
+                secrets_stat,
+                rotation_fd,
+                journal,
+            )
+            print(f"{token}\t{path}")
+            return
+        if ACTION == "cleanup-compose-env-owner":
+            load_marker(rotation_fd)
+            token = os.environ.get("MCP_CLIENT_ROTATOR_DOTENV_OWNER_TOKEN", "")
+            if re.fullmatch(r"[0-9a-f]{64}", token) is None:
+                reject()
+            journal = load_journal(rotation_fd)
+            validate_generations(rotation_fd, journal)
+            if journal["phase"] != "published_validated":
+                reject()
+            if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
+                reject()
+            if not cleanup_compose_env(
+                rotation_fd,
+                journal,
+                expected_token=token,
+            ):
+                reject()
+            return
         if ACTION == "finish-recovery":
             journal = load_journal(rotation_fd)
             validate_generations(rotation_fd, journal)
@@ -899,6 +1723,8 @@ def main() -> None:
                 reject()
             state = canonical_state(journal, canonical_digests(secrets_fd))
             if state != "old_old":
+                reject()
+            if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
                 reject()
             os.unlink(JOURNAL_NAME, dir_fd=rotation_fd)
             fsync_directory(rotation_fd, rotation_fd)
@@ -1144,10 +1970,168 @@ docker_call() {
     "$DOCKER_BIN" "$@"
 }
 
+compose_call() {
+  env -i \
+    HOME="$SAFE_HOME" \
+    LC_ALL=C \
+    MNEMO_SECRETS_DIR="$SECRETS_DIR" \
+    PATH="$SAFE_PATH" \
+    TMPDIR="$SAFE_TMPDIR" \
+    "$DOCKER_BIN" "$@"
+}
+
+discover_consumer_set() {
+  docker_call \
+    --context colima \
+    ps \
+    --no-trunc \
+    --filter status=running \
+    --filter label=com.docker.compose.project=infra \
+    --filter label=com.docker.compose.service \
+    --format '{{.ID}}\t{{.Label "com.docker.compose.service"}}' 2>/dev/null | \
+    env -i \
+      HOME="$SAFE_HOME" \
+      LC_ALL=C \
+      PATH="$SAFE_PATH" \
+      TMPDIR="$SAFE_TMPDIR" \
+      "$PYTHON" -c '
+import re
+import sys
+
+value = sys.stdin.buffer.read(4097)
+if not value or len(value) > 4096 or not value.endswith(b"\n"):
+    raise SystemExit(1)
+try:
+    rows = value.decode("ascii")[:-1].split("\n")
+except UnicodeDecodeError:
+    raise SystemExit(1)
+if not 1 <= len(rows) <= 64:
+    raise SystemExit(1)
+seen = set()
+targets = {"blackbox-exporter": 0, "operator": 0}
+for row in rows:
+    if row.count("\t") != 1:
+        raise SystemExit(1)
+    identifier, service = row.split("\t")
+    if re.fullmatch(r"[0-9a-f]{64}", identifier) is None or identifier in seen:
+        raise SystemExit(1)
+    seen.add(identifier)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", service) is None:
+        raise SystemExit(1)
+    if service in targets:
+        targets[service] += 1
+if targets["blackbox-exporter"] != 1 or targets["operator"] > 1:
+    raise SystemExit(1)
+print("blackbox-and-operator" if targets["operator"] else "blackbox-only")
+'
+}
+
+fixture_consumer_set_is_stable() {
+  local current_consumer_set
+
+  current_consumer_set=$(discover_consumer_set) || return 1
+  [ "$current_consumer_set" = "$INITIAL_CONSUMER_SET" ]
+}
+
+DOTENV_OWNER_TOKEN=
+PRIVATE_DOTENV=
+DOTENV_CRASH_INJECTED=0
+cleanup_owned_dotenv() {
+  local cleanup_status
+  [ -n "$DOTENV_OWNER_TOKEN" ] || return 0
+  MCP_CLIENT_ROTATOR_DOTENV_OWNER_TOKEN="$DOTENV_OWNER_TOKEN" \
+    transaction_call cleanup-compose-env-owner >/dev/null 2>&1 || {
+    cleanup_status=$?
+    if [ "$cleanup_status" -eq 86 ] && [ "$FIXTURE_TRANSACTION" -eq 1 ] && \
+      [ -n "${MCP_CLIENT_ROTATOR_TEST_INTERRUPT_AFTER_PHASE:-}" ]; then
+      DOTENV_CRASH_INJECTED=1
+    fi
+    return 1
+  }
+  DOTENV_OWNER_TOKEN=
+  PRIVATE_DOTENV=
+}
+
+cleanup_owned_dotenv_on_exit() {
+  # ponytail: fixture crash injection preserves the child crash image; normal
+  # exits still perform best-effort cleanup through the path below.
+  if [ "$DOTENV_CRASH_INJECTED" -eq 1 ]; then
+    return 0
+  fi
+  cleanup_owned_dotenv >/dev/null 2>&1 || :
+}
+
+cleanup_owned_dotenv_on_signal() {
+  trap - EXIT HUP INT TERM
+  cleanup_owned_dotenv >/dev/null 2>&1 || :
+  exit 74
+}
+
+activate_fixture_consumer() {
+  local descriptor
+  local service=$1
+
+  descriptor=$(transaction_call prepare-compose-env) || return 1
+  DOTENV_OWNER_TOKEN=${descriptor%%$'\t'*}
+  PRIVATE_DOTENV=${descriptor#*$'\t'}
+  if [ "$descriptor" = "$DOTENV_OWNER_TOKEN" ] || \
+    [[ ! "$DOTENV_OWNER_TOKEN" =~ ^[0-9a-f]{64}$ ]] || \
+    [ "$PRIVATE_DOTENV" != \
+      "$ROTATION_DIR/compose-env.$DOTENV_OWNER_TOKEN.tmp" ]; then
+    return 1
+  fi
+
+  set -- \
+    --context colima \
+    compose \
+    --project-directory "$REPO_ROOT/infra" \
+    -p infra
+  if [ "$service" = operator ]; then
+    set -- "$@" --profile operator
+  fi
+  set -- "$@" \
+    --env-file "$PRIVATE_DOTENV" \
+    -f "$COMPOSE_FILE" \
+    up \
+    -d \
+    --no-deps \
+    --no-build \
+    --force-recreate \
+    "$service"
+  if ! compose_call "$@" >/dev/null 2>&1; then
+    cleanup_owned_dotenv || return 1
+    return 1
+  fi
+  cleanup_owned_dotenv
+}
+
 if ! active_context=$(docker_call context show 2>/dev/null); then
   runtime_unavailable 'Docker is unavailable'
 fi
 [ "$active_context" = colima ] || preflight_failed 'Docker context must be colima'
+
+BLACKBOX_EXPORTER_WAS_RUNNING=false
+OPERATOR_WAS_RUNNING=false
+INITIAL_CONSUMER_SET=
+if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
+  INITIAL_CONSUMER_SET=$(discover_consumer_set) || \
+    preflight_failed 'consumer set is invalid'
+  case "$INITIAL_CONSUMER_SET" in
+    blackbox-only)
+      BLACKBOX_EXPORTER_WAS_RUNNING=true
+      ;;
+    blackbox-and-operator)
+      BLACKBOX_EXPORTER_WAS_RUNNING=true
+      OPERATOR_WAS_RUNNING=true
+      ;;
+    *)
+      preflight_failed 'consumer set is invalid'
+      ;;
+  esac
+  if ! transaction_call validate-compose-passwords >/dev/null 2>&1; then
+    preflight_failed 'Compose consumer passwords are invalid'
+  fi
+fi
 
 network_json=$(
   docker_call --context colima network inspect infra_internal 2>/dev/null
@@ -1290,7 +2274,9 @@ if ! env \
 fi
 
 if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
-  if transaction_call publish >/dev/null 2>&1; then
+  if MCP_CLIENT_ROTATOR_BLACKBOX_EXPORTER_WAS_RUNNING="$BLACKBOX_EXPORTER_WAS_RUNNING" \
+    MCP_CLIENT_ROTATOR_OPERATOR_WAS_RUNNING="$OPERATOR_WAS_RUNNING" \
+    transaction_call publish >/dev/null 2>&1; then
     :
   else
     transaction_status=$?
@@ -1314,7 +2300,22 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
   fi
   transaction_call mark-published-validated >/dev/null 2>&1 || \
     publication_failed 'published journal validation failed'
-  publication_failed 'consumer activation is unavailable in the R1b fixture seam'
+  trap cleanup_owned_dotenv_on_exit EXIT
+  trap cleanup_owned_dotenv_on_signal HUP INT TERM
+  activate_fixture_consumer blackbox-exporter || \
+    publication_failed 'blackbox exporter activation failed'
+  fixture_consumer_set_is_stable || \
+    publication_failed \
+      'consumer set validation failed after blackbox exporter activation'
+  if [ "$OPERATOR_WAS_RUNNING" = true ]; then
+    activate_fixture_consumer operator || \
+      publication_failed 'operator activation failed'
+    fixture_consumer_set_is_stable || \
+      publication_failed \
+        'consumer set validation failed after operator activation'
+  fi
+  trap - EXIT HUP INT TERM
+  publication_failed 'direct probes are unavailable in the R1c fixture seam'
 fi
 
 result staged_only

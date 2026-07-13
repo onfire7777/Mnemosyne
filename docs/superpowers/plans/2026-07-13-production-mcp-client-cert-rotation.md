@@ -179,9 +179,11 @@ contract is consumer-consistent and crash-recoverable:
 2. Copy the old pair and stage the new pair in unique private generation files
    on the canonical pair's filesystem. Fsync every file.
 3. Write a mode-`0600` transaction journal before the first canonical rename.
-   It records a schema version, unguessable transaction ID, old/new SHA-256
-   digests, phase, UTC time, and the exact pre-rotation consumer-state booleans.
-   It contains no secret values. Fsync the journal and parent directory.
+   It records schema v2, an unguessable transaction ID, old/new certificate and
+   key SHA-256 digests, phase, UTC time, the exact pre-rotation consumer-state
+   booleans, and a nullable secret-free Compose ownership substate. It contains
+   no password value, password-derived verifier, or password-length metadata.
+   Fsync the journal and parent directory.
 4. Rename the staged certificate to the canonical certificate, fsync the parent,
    then rename the staged key to the canonical key and fsync the parent.
 5. Revalidate the published pair before touching a consumer. Advance and fsync
@@ -229,14 +231,24 @@ Accepted values are emitted into a private mode-`0600` temporary dotenv using
 single-quoted literal values. The ambient environment is rebuilt from a fixed
 allowlist so it cannot override the dotenv.
 
-Before password bytes are written, the rotator fsyncs an owner receipt for the
-empty temporary file. The receipt binds an unguessable token, basename, device,
-inode, uid, mode, and creation time. An owner-token-checked trap unlinks the file
-and receipt on every handled exit. Startup recovery removes only a residual file
-whose receipt, containment, type, owner, mode, device, inode, and token all
-match; it never reads the password into output and never deletes an unrecognized
-or foreign file. Tests cover SIGKILL-style recognized residue cleanup and
-foreign-file preservation.
+Before password bytes are written, the schema-v2 transaction journal fsyncs a
+`planned` owner token and then an `owned` device/inode/uid/mode/link-count
+binding for the empty temporary file. After the payload fsync, the journal moves
+to `ready` and a schema-v2 receipt binds the same metadata to the transaction ID;
+neither durable object stores password bytes, their hash, or their length. An
+owner-token-checked trap advances the journal to `cleanup`, moves each owned
+artifact to a deterministic quarantine with a native no-replace rename,
+revalidates the open inode after the rename, fsync-removes it, and clears the
+journal state last. Before fixed-receipt publication, the matching journal may
+recover only missing receipt state or its exact owner-scoped partial temporary/
+quarantine residue. Once the fixed receipt exists, its exact schema-v2
+transaction/token/inode/link binding is mandatory. Legacy or malformed fixed
+receipts, cross-transaction state, extra links, replaced artifacts, and foreign
+artifacts are preserved and fail closed before deletion. The rotation directory
+is mode `0700` and single-writer; POSIX does not isolate a concurrent malicious
+process running as the same uid, and this contract does not claim that stronger
+boundary. Fault tests cover every durable create/ready/quarantine/unlink state,
+a partial receipt, repeated recovery, and replacement preservation.
 
 The exact recreation shape is:
 
@@ -459,15 +471,26 @@ git diff --check
 ### R1c — Consumer activation, probes, and rollback
 
 Status: In progress. The isolated blackbox-query helper slice is
-source-complete on 2026-07-13 with 62 focused tests. It selects exactly one
+source-complete on 2026-07-13 with 63 focused tests. It selects exactly one
 running `infra` Caddy container, uses only the fixed BusyBox transport and
 encoded VictoriaMetrics query, caps and times every child phase, validates one
 fresh exact-label vector with duplicate-key rejection, and emits only fixed
 success or failure summaries. Both the embedded interpreter and Docker child
-environment are fail-closed; no live Docker query, consumer recreation, or
-certificate mutation was run. Consumer discovery, private dotenv custody,
-Compose activation, direct probes, durable commit, and rollback remain the
-next R1c slices.
+environment are fail-closed. The next fixture-only slice is in progress:
+exact pre/post consumer discovery, symmetric password validation, private
+mode-`0600` dotenv/receipt ownership, sanitized Compose execution, prior-state
+preservation, signal/exit cleanup, and recognized startup residue recovery are
+implemented in the working tree, including restrictive-umask recovery and one
+bounded single-call Docker snapshot of the exact consumer set after each recreation.
+Fresh focused verification passes all 18 snapshot-contract cases and the static
+gates. Fresh per-tier targeted admission then passed at 52% free/load1 1.98 for
+162 rotator cases, 49%/3.13 for 225 combined rotator/blackbox cases, and
+47%/2.16 for 41 unchanged TLS/bootstrap/Compose-policy regressions, with zero
+resident models and no skips or failures. The fixture deliberately stops at
+`published_validated`; direct probes, durable commit, and rollback remain the
+next R1c slices. No live Docker query, issuance, consumer recreation,
+certificate mutation, model/index action, or protected attempt was run, and
+the ordinary production path remains staged-only.
 
 Files:
 

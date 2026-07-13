@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c blackbox-query helper is source-complete and green; consumer activation, rollback, and all live/protected work remain deferred to their later hardware/custody-gated slices
-last_updated: "2026-07-13T10:01:58Z"
+stopped_at: Phase 12 production MCP client rotation R1c consumer/private-dotenv slice is in progress; fresh admitted verification is green at 162 rotator, 225 combined rotator/blackbox, and 41 unchanged regression cases, while direct probes, durable commit, rollback, and all live/protected work remain deferred
+last_updated: "2026-07-13T15:55:37Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; the first R1c slice now provides a fixed, bounded, fail-closed blackbox query helper. Publication remains fixture-only and stops before consumer activation; the remaining R1c work and every live/protected action remain subject to their stronger hardware/custody gates
-Last activity: 2026-07-13 — Completed the R1c blackbox-helper slice test-first with 62 focused checks, exact fixed query and child environment, bounded streaming and process cleanup, strict response/freshness validation, OS-controlled interpreter execution, green shell/Python gates, and clean independent closure review; live Docker/CA/secrets/runtime state was not mutated
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; R1c now has a fixed bounded blackbox helper plus fixture-only exact consumer discovery, private-dotenv custody, and prior-state-preserving recreation. The fixture still stops before direct probes, durable commit, and rollback; the live path remains staged-only and every live/protected action remains subject to its stronger hardware/custody gates
+Last activity: 2026-07-13 — Completed fresh per-tier targeted admission and passed the current R1c surfaces at 162/225/41; no live Docker/CA/secrets/runtime, model/index, or protected state was mutated
 
 ## Performance Metrics
 
@@ -447,7 +447,54 @@ captured output is bounded, over-cap and hung children are reaped, child
 stderr is discarded, and only fixed result summaries are emitted. Strict JSON
 validation rejects duplicate keys, non-finite numbers, extra or mistyped
 fields, non-exact labels/value, stale samples, and samples outside the
-activation interval. All 62 focused tests, Bash syntax, ShellCheck, Ruff, and
-the post-fix independent closure review pass. Consumer recreation, private
-dotenv custody, direct probes, durable commit, rollback, and every live action
-remain unimplemented or unrun in their later R1c slices.
+activation interval. All 63 focused tests, Bash syntax, ShellCheck, Ruff, and
+the post-fix independent closure review pass. Direct probes, durable commit,
+rollback, and every live action remain unimplemented or unrun in their later
+R1c slices.
+
+Exact-SHA replacement CI run 29242251462 for blackbox-helper locale-hardening
+commit `ed3fda9` is green. Ruff, Postgres integration, provider conformance,
+Ubuntu and macOS native wheels, and unit/drift all passed; only the explicitly
+non-gating nightly soak was skipped.
+
+Latest checkpoint (2026-07-13): The next R1c fixture slice now takes one bounded
+project-scoped Docker snapshot before issuance and after each fixture Compose
+recreation. It requires exactly one running `infra` blackbox exporter, at most
+one running `infra` operator, exact status/project/service labels, valid full
+container IDs, and the same categorical consumer state after recreation. Both
+external Keycloak passwords must be admin-owned, mode `0600`, 16-512 bytes,
+and match the closed ASCII grammar before issuance and again before use. Each
+active consumer receives a private mode-`0600` dotenv in the external
+mode-`0700` rotation directory through a fixed sanitized child environment;
+no password enters argv, inherited ambient environment, stdout, or stderr. A
+schema-v2 transaction journal is now the ownership root: it fsyncs `planned`
+before file creation and `owned` with the empty dotenv's exact device/inode/uid/
+mode/link count before any password write. After payload fsync it advances to
+`ready`, then publishes a transaction-bound schema-v2 receipt. Cleanup journals
+`cleanup`, uses native no-replace quarantine with post-rename inode validation,
+and clears ownership last. Before fixed-receipt publication, the matching
+journal can recover only missing receipt state or exact owner-scoped partial
+temporary/quarantine residue. Once the fixed receipt exists, exact schema-v2
+transaction/token/inode/link binding is mandatory; legacy or malformed fixed
+receipts, cross-transaction state, extra links, replacements, and foreign
+artifacts are preserved and fail closed. No password bytes, password-derived
+verifier, or password-length metadata enter either durable record. The fixture deliberately
+halts at `published_validated` after recreation because direct probes, durable
+commit, and rollback are the next R1c slices; the ordinary production path still
+returns `staged_only` and cannot recreate a live consumer.
+
+Fresh focused verification passes all 18 single-call consumer-snapshot cases plus
+Bash syntax, ShellCheck, Ruff check/format, and diff hygiene. Fresh independent
+targeted admission preceded every current full tier: 52% free memory/load1 1.98
+for 162 rotator cases, 49%/3.13 for 225 combined rotator/blackbox cases, and
+47%/2.16 for 41 unchanged production TLS/bootstrap/Compose-policy regressions;
+every tier had zero resident models and passed without skips or failures. An
+initial regression invocation named one nonexistent stale test path and exited
+before collection; the canonical command using
+`tests/test_prod_bootstrap_tls_staging.py` then passed 41/41.
+No real Docker command, issuance, certificate publication, secret change,
+consumer recreation, model/index action, exact-scale run, held-out attempt,
+protected attempt, or external claim occurred. GSD graph status is truthfully
+stale at 14,092 nodes/23,865 edges from `5746a0a` (138 commits behind); graph,
+CBM, and gbrain refreshes remain queued behind their stronger three-sample
+hardware admission rather than being run from a targeted-only sample.
