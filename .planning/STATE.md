@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c consumer/private-dotenv slice is in progress; fresh admitted verification is green at 162 rotator, 225 combined rotator/blackbox, and 41 unchanged regression cases, while direct probes, durable commit, rollback, and all live/protected work remain deferred
-last_updated: "2026-07-13T15:55:37Z"
+stopped_at: Phase 12 production MCP client rotation R1c fixture-only direct probes are implemented; fresh targeted verification is green at 21 expanded direct-probe/consumer cases, 162 plan-selector cases, the full 241 pair, and 41 unchanged regressions, while blackbox integration, durable commit, automatic rollback/recovery, and every live/protected action in this slice remain deferred
+last_updated: "2026-07-13T21:57:37Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -24,7 +24,7 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 - captured_at: `2026-07-07T15:53:18Z`
 - Verifier report: `mnemosyne-evidence-out/verify-bc10.json`
 - Evidence capture code: `main@58e722c` (adds the `production-evidence-verify` executable tool-artifact rewrite fix, test-first)
-- Current documentation head: `main@02337fa2f334b7421673585de9d8c60df6c29a7a` plus this cleanup pass.
+- Documentation checkpoint at Tier-B attestation: `main@02337fa2f334b7421673585de9d8c60df6c29a7a` plus that cleanup pass.
 - Gate: real evidence only — no validator weakened; no row flipped without a genuine `production-evidence-verify` `ok:true`.
 
 ## Project Reference
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; R1c now has a fixed bounded blackbox helper plus fixture-only exact consumer discovery, private-dotenv custody, and prior-state-preserving recreation. The fixture still stops before direct probes, durable commit, and rollback; the live path remains staged-only and every live/protected action remains subject to its stronger hardware/custody gates
-Last activity: 2026-07-13 — Completed fresh per-tier targeted admission and passed the current R1c surfaces at 162/225/41; no live Docker/CA/secrets/runtime, model/index, or protected state was mutated
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; R1c now has a fixed bounded blackbox helper plus fixture-only exact consumer discovery, private-dotenv custody, prior-state-preserving recreation, and fixed direct probes for `/health` and `/stream/healthz`. The fixture stops before blackbox integration, durable commit, and automatic rollback/recovery; the live path remains staged-only and every live/protected action remains subject to its stronger hardware/custody gates
+Last activity: 2026-07-13 — Fresh targeted gates passed 21/21 expanded direct-probe/consumer cases, 162/162 plan-selector cases, the full 241/241 rotator/blackbox pair, and 41/41 unchanged regressions; no live Docker/CA/secrets/runtime, model/index, or protected state was mutated
 
 ## Performance Metrics
 
@@ -438,7 +438,7 @@ diff hygiene; post-fix independent operability and security closure reviews
 are clean. No live issuance, publication, consumer recreation, Docker,
 LaunchAgent, model, index, exact-scale, held-out, or protected action ran.
 
-Latest checkpoint (2026-07-13): The isolated R1c blackbox-query helper is
+Earlier R1c blackbox-helper checkpoint (2026-07-13): The isolated R1c blackbox-query helper is
 source-complete. It pins the OS-controlled Python interpreter, constrains the
 Docker executable, selects exactly one running `infra` Caddy container,
 confirms the fixed BusyBox client, and executes only the constant encoded
@@ -448,16 +448,16 @@ stderr is discarded, and only fixed result summaries are emitted. Strict JSON
 validation rejects duplicate keys, non-finite numbers, extra or mistyped
 fields, non-exact labels/value, stale samples, and samples outside the
 activation interval. All 63 focused tests, Bash syntax, ShellCheck, Ruff, and
-the post-fix independent closure review pass. Direct probes, durable commit,
-rollback, and every live action remain unimplemented or unrun in their later
-R1c slices.
+the post-fix independent closure review pass. At that checkpoint, direct
+probes, durable commit, rollback, and every live action remained for later R1c
+slices; the direct-probe status is superseded by the newer checkpoint below.
 
 Exact-SHA replacement CI run 29242251462 for blackbox-helper locale-hardening
 commit `ed3fda9` is green. Ruff, Postgres integration, provider conformance,
 Ubuntu and macOS native wheels, and unit/drift all passed; only the explicitly
 non-gating nightly soak was skipped.
 
-Latest checkpoint (2026-07-13): The next R1c fixture slice now takes one bounded
+Latest checkpoint (2026-07-13): The current R1c fixture slice now takes one bounded
 project-scoped Docker snapshot before issuance and after each fixture Compose
 recreation. It requires exactly one running `infra` blackbox exporter, at most
 one running `infra` operator, exact status/project/service labels, valid full
@@ -478,20 +478,22 @@ temporary/quarantine residue. Once the fixed receipt exists, exact schema-v2
 transaction/token/inode/link binding is mandatory; legacy or malformed fixed
 receipts, cross-transaction state, extra links, replacements, and foreign
 artifacts are preserved and fail closed. No password bytes, password-derived
-verifier, or password-length metadata enter either durable record. The fixture deliberately
-halts at `published_validated` after recreation because direct probes, durable
-commit, and rollback are the next R1c slices; the ordinary production path still
+verifier, or password-length metadata enter either durable record. The fixture
+now uses the newly published pair and exact Caddy root to run fixed `/health`
+and `/stream/healthz` mTLS probes, accepting only a strict single `2xx` status.
+It then halts at `published_validated` before blackbox integration, durable
+commit, or automatic rollback/recovery; the ordinary production path still
 returns `staged_only` and cannot recreate a live consumer.
 
-Fresh focused verification passes all 18 single-call consumer-snapshot cases plus
-Bash syntax, ShellCheck, Ruff check/format, and diff hygiene. Fresh independent
-targeted admission preceded every current full tier: 52% free memory/load1 1.98
-for 162 rotator cases, 49%/3.13 for 225 combined rotator/blackbox cases, and
-47%/2.16 for 41 unchanged production TLS/bootstrap/Compose-policy regressions;
-every tier had zero resident models and passed without skips or failures. An
-initial regression invocation named one nonexistent stale test path and exited
-before collection; the canonical command using
-`tests/test_prod_bootstrap_tls_staging.py` then passed 41/41.
+Fresh targeted gates pass all 21 expanded direct-probe/consumer cases, the
+162-case plan selector, the full 241-test rotator/blackbox pair, and the
+unchanged 41-test production TLS/bootstrap/Compose-policy regression tier for
+this branch slice. Their fresh admission samples were respectively 43% free/
+load1 2.36, 45%/2.22, 43%/2.63, and 43%/2.22, all with zero resident models.
+Exact-SHA CI run 29285863797 remains evidence for prior head `6cae15f` only.
+The current head's authoritative result is the GitHub check attached to that
+exact SHA and must be green before merge; no repository edit self-records its
+own CI result.
 No real Docker command, issuance, certificate publication, secret change,
 consumer recreation, model/index action, exact-scale run, held-out attempt,
 protected attempt, or external claim occurred. GSD graph status is truthfully

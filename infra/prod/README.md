@@ -65,8 +65,9 @@ container by Compose labels, and queries the fixed internal
 It rejects stale, ambiguous, oversized, malformed, or non-exact responses and
 prints only a fixed success or failure summary. The helper is source-complete
 but is not yet wired to live rotation; do not treat its presence as approval
-to recreate consumers or mutate the active certificate pair before the later
-R1c activation, rollback, and hardware-admission gates are complete.
+to recreate consumers or mutate the active certificate pair before R1c
+blackbox integration, durable commit, automatic rollback/recovery, exact-head
+CI, and the live hardware-admission gate are complete.
 
 The rotator's R1c **fixture seam only** now proves the activation custody that
 will surround that helper. Before fixture issuance it takes one bounded,
@@ -89,11 +90,16 @@ quarantine residue. Once the fixed receipt exists, exact schema-v2 transaction/
 token/inode/link binding is mandatory; legacy or malformed fixed receipts,
 cross-transaction state, extra links, replacements, and foreign artifacts are
 preserved and fail closed. After each recreation the fixture takes one equally
-bounded snapshot and requires the same categorical consumer state, then
-deliberately fails before direct probes, durable commit, or
-rollback. The normal production path still returns `staged_only` and cannot
-recreate a live consumer, so this source evidence is not authorization to run a
-live rotation.
+bounded snapshot and requires the same categorical consumer state. The fixture
+then runs fixed mTLS probes for `/health` and `/stream/healthz` with the newly
+published pair and exact Caddy root, accepts only a strict single `2xx` status,
+and deliberately fails before blackbox integration, durable commit, or
+automatic rollback/recovery. Fresh targeted gates passed the 21 expanded
+direct-probe/consumer cases, the 162-case plan selector, the full 241-test
+rotator/blackbox pair, and the unchanged 41-test regression tier for this branch
+slice. The normal production path still returns
+`staged_only` and cannot recreate a live consumer, so this fixture evidence is
+not authorization to run a live rotation.
 
 ## Profile + readiness
 ```bash
