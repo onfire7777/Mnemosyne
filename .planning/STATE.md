@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c fixture-only direct probes are implemented; fresh targeted verification is green at 21 expanded direct-probe/consumer cases, 162 plan-selector cases, the full 241 pair, and 41 unchanged regressions, while blackbox integration, durable commit, automatic rollback/recovery, and every live/protected action in this slice remain deferred
-last_updated: "2026-07-13T21:57:37Z"
+stopped_at: Phase 12 production MCP client rotation R1c fixture-only raw-sample blackbox integration is implemented and green through the full 263-test pair plus section-31/33 rails; durable commit, post-activation rollback, committed-state recovery, consumer runtime stability, VM-clock alignment, bounded live polling, exact-head CI, and every live/protected action remain open
+last_updated: "2026-07-13T22:46:22Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; R1c now has a fixed bounded blackbox helper plus fixture-only exact consumer discovery, private-dotenv custody, prior-state-preserving recreation, and fixed direct probes for `/health` and `/stream/healthz`. The fixture stops before blackbox integration, durable commit, and automatic rollback/recovery; the live path remains staged-only and every live/protected action remains subject to its stronger hardware/custody gates
-Last activity: 2026-07-13 — Fresh targeted gates passed 21/21 expanded direct-probe/consumer cases, 162/162 plan-selector cases, the full 241/241 rotator/blackbox pair, and 41/41 unchanged regressions; no live Docker/CA/secrets/runtime, model/index, or protected state was mutated
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; R1c now has fixture-only categorical consumer recreation, private-dotenv custody, two exact direct probes, and raw-successful-scrape blackbox integration with post-stability ordering. The fixture remains precommit at `published_validated`; durable commit, post-activation rollback, committed-state recovery, consumer runtime stability, VM-clock alignment, bounded live polling, exact-head CI, and every live/protected action remain gated
+Last activity: 2026-07-13 — Fresh targeted gates passed the 62-case integration selector, 80/80 helper tests, 179/179 plan-selector cases, the full 263/263 rotator/blackbox pair, 41/41 unchanged regressions, 39/39 section-31 rails, and 7/7 section-33 harness tests; no live Docker/CA/secrets/runtime, model/index, or protected state was mutated
 
 ## Performance Metrics
 
@@ -457,46 +457,49 @@ commit `ed3fda9` is green. Ruff, Postgres integration, provider conformance,
 Ubuntu and macOS native wheels, and unit/drift all passed; only the explicitly
 non-gating nightly soak was skipped.
 
-Latest checkpoint (2026-07-13): The current R1c fixture slice now takes one bounded
+Latest checkpoint (2026-07-13): The current R1c fixture slice takes one bounded
 project-scoped Docker snapshot before issuance and after each fixture Compose
 recreation. It requires exactly one running `infra` blackbox exporter, at most
 one running `infra` operator, exact status/project/service labels, valid full
 container IDs, and the same categorical consumer state after recreation. Both
 external Keycloak passwords must be admin-owned, mode `0600`, 16-512 bytes,
-and match the closed ASCII grammar before issuance and again before use. Each
-active consumer receives a private mode-`0600` dotenv in the external
-mode-`0700` rotation directory through a fixed sanitized child environment;
-no password enters argv, inherited ambient environment, stdout, or stderr. A
-schema-v2 transaction journal is now the ownership root: it fsyncs `planned`
-before file creation and `owned` with the empty dotenv's exact device/inode/uid/
-mode/link count before any password write. After payload fsync it advances to
-`ready`, then publishes a transaction-bound schema-v2 receipt. Cleanup journals
-`cleanup`, uses native no-replace quarantine with post-rename inode validation,
-and clears ownership last. Before fixed-receipt publication, the matching
-journal can recover only missing receipt state or exact owner-scoped partial
-temporary/quarantine residue. Once the fixed receipt exists, exact schema-v2
-transaction/token/inode/link binding is mandatory; legacy or malformed fixed
-receipts, cross-transaction state, extra links, replacements, and foreign
-artifacts are preserved and fail closed. No password bytes, password-derived
-verifier, or password-length metadata enter either durable record. The fixture
-now uses the newly published pair and exact Caddy root to run fixed `/health`
-and `/stream/healthz` mTLS probes, accepting only a strict single `2xx` status.
-It then halts at `published_validated` before blackbox integration, durable
-commit, or automatic rollback/recovery; the ordinary production path still
-returns `staged_only` and cannot recreate a live consumer.
+and match the closed ASCII grammar before issuance and again before use. The
+schema-v2 transaction journal and receipt remain the ownership root for the
+private Compose dotenv; no password bytes, password-derived verifier, or
+password-length metadata enter either durable record.
 
-Fresh targeted gates pass all 21 expanded direct-probe/consumer cases, the
-162-case plan selector, the full 241-test rotator/blackbox pair, and the
-unchanged 41-test production TLS/bootstrap/Compose-policy regression tier for
-this branch slice. Their fresh admission samples were respectively 43% free/
-load1 2.36, 45%/2.22, 43%/2.63, and 43%/2.22, all with zero resident models.
-Exact-SHA CI run 29285863797 remains evidence for prior head `6cae15f` only.
-The current head's authoritative result is the GitHub check attached to that
-exact SHA and must be green before merge; no repository edit self-records its
-own CI result.
+After the final categorical snapshot, including the optional operator path,
+the fixture captures a nanosecond boundary, uses the newly published pair and
+exact Caddy root for fixed `/health` and `/stream/healthz` mTLS probes, accepts
+only a strict single `2xx` status, and invokes the blackbox helper exactly once.
+The helper now uses fixed MetricsQL `timestamp(...) if
+(last_over_time(...) == 1)` semantics and validates the raw successful scrape
+timestamp rather than the instant-query evaluation timestamp. Strict decimal
+ordering requires `boundary < raw sample <= query time <= receipt time` and a
+raw sample no older than 120 seconds. Synthetic integration tests pin the
+boundary after the final blackbox-only/operator snapshot and before the first
+direct probe. The fixture still halts at `published_validated` after successful
+blackbox evidence; durable commit, post-activation rollback, and committed-state
+recovery are not implemented. The ordinary production path remains
+`staged_only` and cannot recreate a live consumer.
+
+Fresh serialized targeted gates pass the 62-case blackbox integration selector
+(47% free/load1 4.24), all 80 blackbox-helper tests (48%/3.06), the 179-case
+plan selector (43%/5.19), the full 263-test rotator/blackbox pair (47%/2.76),
+the unchanged 41-test production TLS/bootstrap/Compose-policy tier (46%/2.91),
+and the 39 section-31 plus 7 section-33 invariant classes (45%/3.42). Every
+sample had zero resident models. Bash syntax, ShellCheck, Ruff, formatting,
+diff whitespace, and independent post-fix reviews are green.
+
 No real Docker command, issuance, certificate publication, secret change,
 consumer recreation, model/index action, exact-scale run, held-out attempt,
-protected attempt, or external claim occurred. GSD graph status is truthfully
-stale at 14,092 nodes/23,865 edges from `5746a0a` (138 commits behind); graph,
-CBM, and gbrain refreshes remain queued behind their stronger three-sample
-hardware admission rather than being run from a targeted-only sample.
+protected attempt, or external claim occurred. Before live activation, R1c
+must align the host boundary with the VM/VictoriaMetrics clock domain or prove
+a conservative skew bound, add fixed-deadline polling across the 60-second
+scrape cadence, prove stable consumer IDs and restart counts, and implement
+durable commit, post-activation rollback, and committed-state recovery. Pushed
+head `515d2cc` has green exact-SHA CI run 29288363680; the current working
+slice requires its own green exact-SHA check after commit. Graph, CBM, and
+gbrain refreshes remain
+queued behind their stronger three-sample hardware admission rather than being
+run from targeted-only samples.

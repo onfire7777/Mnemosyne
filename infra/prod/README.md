@@ -59,15 +59,20 @@ provisioner password in argv, environment snapshots, logs, evidence bundles,
 or the repository.
 
 The R1c blackbox query helper is intentionally non-configurable: it accepts
-only the activation start epoch, selects exactly one running `infra` Caddy
-container by Compose labels, and queries the fixed internal
-`probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}` vector.
-It rejects stale, ambiguous, oversized, malformed, or non-exact responses and
-prints only a fixed success or failure summary. The helper is source-complete
-but is not yet wired to live rotation; do not treat its presence as approval
-to recreate consumers or mutate the active certificate pair before R1c
-blackbox integration, durable commit, automatic rollback/recovery, exact-head
-CI, and the live hardware-admission gate are complete.
+only a positive activation boundary with at most nanosecond precision, selects
+exactly one running `infra` Caddy container by Compose labels, and executes the
+fixed internal MetricsQL expression:
+
+```promql
+timestamp(probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}[2m])
+  if (last_over_time(probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}[2m]) == 1)
+```
+
+The expression returns the last raw scrape timestamp only when the latest raw
+probe value is successful. Strict decimal validation requires one exact-label
+series with `boundary < raw sample <= query time <= receipt time` and a raw
+sample no older than 120 seconds. Ambiguous, oversized, malformed, non-finite,
+or non-exact responses fail closed; output is always a fixed summary.
 
 The rotator's R1c **fixture seam only** now proves the activation custody that
 will surround that helper. Before fixture issuance it takes one bounded,
@@ -90,14 +95,27 @@ quarantine residue. Once the fixed receipt exists, exact schema-v2 transaction/
 token/inode/link binding is mandatory; legacy or malformed fixed receipts,
 cross-transaction state, extra links, replacements, and foreign artifacts are
 preserved and fail closed. After each recreation the fixture takes one equally
-bounded snapshot and requires the same categorical consumer state. The fixture
-then runs fixed mTLS probes for `/health` and `/stream/healthz` with the newly
-published pair and exact Caddy root, accepts only a strict single `2xx` status,
-and deliberately fails before blackbox integration, durable commit, or
-automatic rollback/recovery. Fresh targeted gates passed the 21 expanded
-direct-probe/consumer cases, the 162-case plan selector, the full 241-test
-rotator/blackbox pair, and the unchanged 41-test regression tier for this branch
-slice. The normal production path still returns
+bounded snapshot and requires the same categorical consumer state. After the
+final snapshot it captures a nanosecond boundary, runs fixed mTLS probes for
+`/health` and `/stream/healthz` with the newly published pair and exact Caddy
+root, accepts only a strict single `2xx` status, and invokes the blackbox helper
+exactly once. Synthetic ordering tests bind the boundary after the final
+snapshot, including the optional operator path, and before the first direct
+probe. The fixture deliberately remains at `published_validated` after a
+successful blackbox result because durable commit, post-activation rollback,
+and committed-state recovery are not implemented.
+
+Fresh targeted gates pass the 62-case blackbox integration selector, all 80
+blackbox-helper tests, the 179-case R1c regression selector, the full 263-test
+rotator/blackbox pair, the unchanged 41-test production regression tier, all
+39 section-31 invariant rails, and all 7 section-33 harness tests. No live
+Docker query, issuance, certificate publication, or consumer recreation was
+run. Before any live activation, R1c must additionally align the host-captured
+boundary with the VM/VictoriaMetrics clock domain (or prove a conservative
+skew bound), poll across the 60-second scrape cadence with a fixed deadline,
+prove stable consumer IDs and restart counts, implement durable commit,
+post-activation rollback, and committed-state recovery, pass exact-head CI,
+and pass the live hardware gate. The normal production path still returns
 `staged_only` and cannot recreate a live consumer, so this fixture evidence is
 not authorization to run a live rotation.
 

@@ -8,6 +8,7 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 VALIDATOR=$REPO_ROOT/infra/validate/validate-production-mcp-client-tls.sh
 DIAGNOSTIC=$REPO_ROOT/infra/validate/diagnose-production-mcp-client-tls-for-rotation.sh
+BLACKBOX_PROBE=$SCRIPT_DIR/query-production-blackbox-probe.sh
 STEP_IMAGE='smallstep/step-ca:0.28.4@sha256:0f88382ac5af5c6b7bbba0c6e8fcefef52aee6f22ea364df8e02a09ffd0d22f3'
 
 result() {
@@ -2116,6 +2117,27 @@ direct_probe() {
   esac
 }
 
+fixture_blackbox_probe() {
+  local output
+
+  if ! output=$(
+    set +e
+    probe_status=0
+    command /usr/bin/env -i \
+      LC_ALL=C \
+      PATH="$SAFE_PATH" \
+      TMPDIR="$SAFE_TMPDIR" \
+      MCP_CLIENT_BLACKBOX_PROBE_DOCKER_BIN="$DOCKER_BIN" \
+      "$BLACKBOX_PROBE" "$1" 2>/dev/null || probe_status=$?
+    printf '%s' ':mnemo-blackbox-end:'
+    exit "$probe_status"
+  ); then
+    return 1
+  fi
+
+  [ "$output" = $'production-blackbox-probe result=success\n:mnemo-blackbox-end:' ]
+}
+
 DOTENV_OWNER_TOKEN=
 PRIVATE_DOTENV=
 DOTENV_CRASH_INJECTED=0
@@ -2397,10 +2419,20 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
       publication_failed \
         'consumer set validation failed after operator activation'
   fi
+  consumer_stable_epoch=$(
+    command /usr/bin/env -i \
+      LC_ALL=C \
+      PATH="$SAFE_PATH" \
+      TMPDIR="$SAFE_TMPDIR" \
+      "$PYTHON" -c 'import time; value = time.time_ns(); print(f"{value // 1000000000}.{value % 1000000000:09d}")'
+  ) || publication_failed 'consumer stable time is unavailable'
   direct_probe /health || publication_failed 'direct probe failed'
   direct_probe /stream/healthz || publication_failed 'direct probe failed'
+  fixture_blackbox_probe "$consumer_stable_epoch" || \
+    publication_failed 'blackbox probe failed'
   trap - EXIT HUP INT TERM
-  publication_failed 'blackbox probe is unavailable in the R1c fixture seam'
+  publication_failed \
+    'durable commit and automatic rollback are unavailable in the R1c fixture seam'
 fi
 
 result staged_only

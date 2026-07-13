@@ -284,17 +284,24 @@ The same probe runs for `/stream/healthz`; only `2xx` is accepted. The checked-i
 `infra/scripts/query-production-blackbox-probe.sh` helper selects exactly one
 running `caddy` container by Compose project/service labels, verifies its fixed
 internal HTTP client capability, and issues one constant, URL-encoded instant
-query to `http://victoriametrics:8428/api/v1/query` for
-`probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}`. It never
-accepts caller-supplied URL, host, or query text.
+query to `http://victoriametrics:8428/api/v1/query` for:
+
+```promql
+timestamp(probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}[2m])
+  if (last_over_time(probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}[2m]) == 1)
+```
+
+It never accepts caller-supplied URL, host, or query text.
 
 The helper caps transport time, retries, and response bytes; parses JSON with a
 checked-in bounded parser; requires HTTP success, top-level `status=success`,
 `resultType=vector`, exactly one series with the exact labels, finite numeric
-timestamp, and value `1`; and requires the sample timestamp to be both later
-than the recorded consumer-recreation start and no older than two scrape
-intervals. It emits only a fixed success/failure summary. No monitoring port is
-newly published and no ad-hoc inline HTTP program is used.
+query time, and a finite decimal raw-sample timestamp string. The fixed `if`
+expression admits a series only when the latest raw probe value is `1`. The
+helper requires the raw sample to be later than the post-stability activation
+boundary, no later than query or receipt time, and no older than two scrape
+intervals. It emits only a fixed success/failure summary. No monitoring port
+is newly published and no ad-hoc inline HTTP program is used.
 
 Any publication, recreation, direct-probe, blackbox-probe, or consumer-state
 failure restores the old pair and recreates exactly the old consumer set.
@@ -470,34 +477,49 @@ git diff --check
 
 ### R1c — Consumer activation, probes, and rollback
 
-Status: In progress. The isolated blackbox-query helper slice is
-source-complete on 2026-07-13 with 63 focused tests. It selects exactly one
-running `infra` Caddy container, uses only the fixed BusyBox transport and
-encoded VictoriaMetrics query, caps and times every child phase, validates one
-fresh exact-label vector with duplicate-key rejection, and emits only fixed
-success or failure summaries. Both the embedded interpreter and Docker child
-environment are fail-closed. R1c fixture work remains in progress:
+Status: In progress. The isolated blackbox-query helper and its fixture-only
+integration are source-complete for this precommit slice on 2026-07-13. The
+helper selects exactly one running `infra` Caddy container, uses only the fixed
+BusyBox transport and encoded MetricsQL
+`timestamp(probe_success[2m]) if (last_over_time(probe_success[2m]) == 1)`
+expression with the exact fixed labels, and validates the raw scrape timestamp
+rather than the instant-query evaluation timestamp. Duplicate keys,
+non-finite or non-exact values, extra labels, stale samples, and samples outside
+`boundary < raw sample <= query time <= receipt time` fail closed. Every child
+phase is bounded and only fixed success or failure summaries are emitted. Both
+the embedded interpreter and Docker child environment are fail-closed. R1c
+fixture work remains in progress:
 exact pre/post consumer discovery, symmetric password validation, private
 mode-`0600` dotenv/receipt ownership, sanitized Compose execution, prior-state
 preservation, signal/exit cleanup, and recognized startup residue recovery are
 implemented on the current branch, including restrictive-umask recovery and one
 bounded single-call Docker snapshot of the exact consumer set after each
-recreation. The fixture-only direct-probe sub-slice is also implemented: it
-uses the newly published pair and exact Caddy root for fixed `/health` and
-`/stream/healthz` requests and accepts only a strict single `2xx` status.
-Fresh targeted gates passed all 21 expanded direct-probe/consumer cases, the
-162-case plan selector, the full 241-test rotator/blackbox pair, and the
-unchanged 41-test TLS/bootstrap/Compose-policy regression tier for this branch
-slice. Their fresh admission samples were respectively 43% free/load1 2.36,
-45%/2.22, 43%/2.63, and 43%/2.22, all with zero resident models. The fixture
-deliberately stops at `published_validated` after both direct probes; blackbox
-integration, durable commit, and automatic
-rollback/recovery remain open. No live Docker query, issuance, consumer
-recreation, certificate mutation, model/index action, or protected attempt was
-run, and the ordinary production path remains staged-only. Exact-SHA CI run
-29285863797 remains evidence for prior head `6cae15f` only. The current head's
-authoritative result is the GitHub check attached to that exact SHA and must be
-green before merge; no repository edit self-records its own CI result.
+recreation. The fixture captures a nanosecond boundary after the final
+categorical consumer snapshot, then uses the newly published pair and exact
+Caddy root for fixed `/health` and `/stream/healthz` requests, accepts only a
+strict single `2xx` status, and invokes the fixed blackbox helper exactly once.
+Synthetic tests pin the boundary after the final blackbox-only or optional
+operator snapshot and before the first direct probe. Recovery after every
+direct- or blackbox-probe failure restores the old pair and clears the retained
+precommit journal on the next fixture run.
+
+Fresh targeted gates pass the 62-case blackbox integration selector, all 80
+blackbox-helper tests, the 179-case plan selector, the full 263-test
+rotator/blackbox pair, the unchanged 41-test TLS/bootstrap/Compose-policy tier,
+all 39 section-31 invariant rails, and all 7 section-33 harness tests. The
+fixture deliberately stops at `published_validated` after successful blackbox
+evidence; durable commit, post-activation rollback, and committed-state
+recovery remain open.
+
+Live activation additionally requires a boundary in the VM/VictoriaMetrics
+clock domain or a conservative audited skew bound, bounded polling across the
+60-second scrape cadence, and stable consumer IDs/restart counts. No live
+Docker query, issuance, consumer recreation, certificate mutation,
+model/index action, protected attempt, or external claim was run, and the
+ordinary production path remains staged-only. Pushed head `515d2cc` has green
+exact-SHA CI run 29288363680; this newer working slice requires its own green
+exact-SHA check after commit. No repository edit self-records its own CI
+result.
 
 Files:
 
