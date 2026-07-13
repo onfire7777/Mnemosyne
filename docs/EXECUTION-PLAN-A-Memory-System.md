@@ -1,12 +1,12 @@
 # Mnemosyne — Execution Plan A: The Memory System
 ## Goal: the world's best-performing AI memory system
 
-**Version:** 1.2 · **Date:** 2026-07-12 · **Status:** In Progress (approved)
+**Version:** 1.3 · **Date:** 2026-07-13 · **Status:** In Progress (approved)
 **Scope:** the Mnemosyne engine and its capabilities (`src/mnemosyne/`, plus engine-side `eval/` regression suites).
 **Companion doc:** *Execution Plan B — Benchmarking & the Leaderboard* owns measurement, publication, and the public leaderboard. This plan builds the capabilities; Plan B proves and publishes them. Where this plan says "measured/published," the authority is Plan B.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for gated evidence capture.
 
-**Live execution status (2026-07-12):** Approval is recorded. Phase 12 owns S1
+**Live execution status (2026-07-13):** Approval is recorded. Phase 12 owns S1
 and is executing Plan 12-04; S2, S3, S4, and the non-gating S5 research track
 are scheduled in Phase 15. `.planning/STATE.md`, `.planning/ROADMAP.md`, and
 `.planning/REQUIREMENTS.md` are the authoritative live trackers. The aggregate
@@ -28,7 +28,7 @@ Execution spec, not prose. Work top-to-bottom within a phase; respect the depend
 5. **Model-agnostic core.** Keep the minimal-dependency philosophy (core requires only `cryptography`); new heavy deps go behind optional extras or the sidecar/`services/` layer, never into core.
 
 **Ground-truth references (source of truth over this doc if they conflict):**
-`docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`, `docs/blueprint/Mnemosyne-Performance-and-Refactoring-Blueprint.md` (Waves A–E, §9.2.7, §11), `.planning/STATE.md`, `.planning/codebase/{ARCHITECTURE,STACK,STRUCTURE}.md`, `eval/README.md`.
+`docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`, `docs/blueprint/Mnemosyne-Performance-and-Refactoring-Blueprint.md` (Waves A–E, §9.2.7, §11), `docs/superpowers/specs/2026-07-13-8gb-full-capability-unblock-design.md`, `.planning/STATE.md`, `.planning/codebase/{ARCHITECTURE,STACK,STRUCTURE}.md`, `eval/README.md`.
 
 **DoD template:** *Code merged + all existing gates green + new regression cell added + artifacts written to the named path + one-paragraph result note in `eval/reports/`.*
 
@@ -42,7 +42,7 @@ The system is "best-performing" when it hits these **capability** targets. Their
 |---|---|---|---|
 | S-i | Elite retrieval | Deterministic Recall@k / nDCG on public suites | Top-tier (≥ best published no-LLM score) |
 | S-ii | Multi-hop associative recall | Deterministic R@2/@5 + EM/F1 on multi-hop sets | Meet/beat HippoRAG 2 baselines |
-| S-iii | **Multi-hop answer synthesis (the gap)** | LLM-judged QA (disclosed reader) | Private `qa_hard_v2` ≈ 0.62 → **≥ 0.85** |
+| S-iii | **Multi-hop answer synthesis (the gap)** | LLM-judged QA (disclosed reader) | Current protected `qa_hard_v2` EM/F1 = 0.0833 → **≥ 0.85** |
 | S-iv | Security under attack | Attack-success-under-defense on MINJA/AgentPoison/PoisonedRAG | Best-in-field; publishable |
 | S-v | Calibration | ECE + abstention vs public labels | Best-in-field; publishable |
 | S-vi | Credible at scale | Warm **and** concurrent P95; 100k-item cells | Measured distributions |
@@ -60,7 +60,7 @@ Mnemosyne already implements a large share of the field's best ideas. This table
 | Two-tier episodic↔semantic | Complementary Learning Systems | McClelland/Kumaran/Hassabis | Evidence ledger (episodic) + typed projections (semantic) — already CLS-shaped | **Keep**; frame explicitly | — |
 | Associative recall | Graph index + Personalized PageRank | HippoRAG / HippoRAG 2 | **Have it** (`algorithms.ppr_power_iteration`, `graph_ppr_cache`) | **Extend** (HippoRAG2 deeper passage integration) | High |
 | Hierarchical sensemaking | Community summaries | Microsoft GraphRAG | RAPTOR gist tree in `summarizer` | **Keep**; add global map-reduce query mode | Med |
-| Multi-hop answer synthesis | Iterative retrieve→read; reader model | HippoRAG2, LongMemEval readers | **Weak spot** (`qa_hard_v2` ≈ 0.62) | **Build** — the #1 lever (§3, S1) | **Top** |
+| Multi-hop answer synthesis | Iterative retrieve→read; reader model | HippoRAG2, LongMemEval readers | **Weak spot** (v17/v18 protected `qa_hard_v2` EM/F1 = 0.0833) | **Build** — the #1 lever (§3, S1) | **Top** |
 | Consolidation loop | Offline replay + distillation ("sleep/dreaming") | Google "Sleep", OpenAI Dreaming | 11-role warm loop (`replayer…user_model_updater`) | **Keep**; add async batch "sleep" job | Med |
 | Multi-timescale memory | Continuum Memory System (freq-staggered modules) | Google Nested Learning / Hope | Single warm-loop cadence | **Extend** — spectrum of update rates → anti-forgetting | High |
 | Write gating | Surprise (gradient magnitude) | Titans; EM-LLM (Bayesian surprise) | Promotion gate + mutation budget | **Extend** — surprise signal into `promotion_gate` | Med |
@@ -78,7 +78,12 @@ Mnemosyne already implements a large share of the field's best ideas. This table
 ## 3. Phased build
 
 ### S1 — Close the multi-hop answer-synthesis gap (**top priority, critical path**)
-Retrieval is already strong; synthesis (~0.62) is the ceiling on every QA benchmark. This is the single highest-ROI capability.
+Retrieval is already strong, but the latest protected v17/v18 reader runs
+answered only 2/24 and scored EM/F1 0.0833. The older ≈0.62 figure came from a
+different pre-custody evaluator and is not the current Phase 12 baseline.
+Grounded synthesis remains the single highest-ROI capability, while the
+independent LongMemEval-QA, graph/PPR, retrieval, §31, and §33 gates remain
+separate exit conditions.
 
 - **S1.1 Iterative retrieve→read loop.** Query decomposition → PPR spreading-activation hops over the existing graph → evidence assembly, reusing the hybrid retriever (dense + BM25 + PPR + RRF/MMR). Borrow HippoRAG 2's deeper passage integration.
 - **S1.2 Grounded reader/synthesis step.** A disclosed self-hosted reader answers *only* from retrieved, provenance-tagged evidence; fail-closed, retrieved text handled as data (§31 R6). The default implementation is an extractive span/no-answer reader whose output is reconstructed and revalidated by the host. A generative role-LLM is permitted only as a separately disclosed comparison track and may not replace the extractive rail. Every claim must trace to an evidence CID.
@@ -103,7 +108,7 @@ Clear the §11 measurement-gap register so capability claims are credible at sca
 - **S4.2** Null-embedding production backfill evidence.
 - **S4.3** halfvec / pgvectorscale DiskANN; 100k-item benchmark cells.
 - **S4.4** **Concurrent** P95 (not just warm-serial 149.5 ms) — resolve the known CPU-embed bottleneck.
-- **S4.5** **Physical 8 GiB compact grounded-QA path.** Shadow-bake off the pinned extractive reader/reranker pairs and, only if needed, a purpose-built non-generative student behind the optional Rust/ONNX sidecar boundary. DoD: `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md` passes on physical 8 GiB x86-64 AVX2 Windows and Linux systems without lowering CAP-003, retrieval, §31, or §33 gates; no ML dependency enters Python core. Stronger profiles may add capacity, never weaker quality or custody.
+- **S4.5** **Physical 8 GiB compact grounded-QA path.** Shadow-bake off the pinned extractive reader/reranker pairs behind the optional Rust/ONNX sidecar boundary. The extractive span/no-answer reader remains the mandatory default rail; only if preregistered evidence requires it may an additive compact synthesis rung be evaluated under the same quality, custody, and physical-resource gates. `qwen3:0.6b` is a hypothesis, not a selected component. DoD: `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md` passes on physical 8 GiB x86-64 AVX2 Windows and Linux systems without lowering CAP-003, retrieval, §31, or §33 gates; no ML dependency enters Python core. Stronger profiles may add capacity, never weaker quality or custody.
 - **DoD:** measured distributions in `eval/latency*` and `eval/provider_bakeoff/`; §11 register and S4.5 physical-floor acceptance closed. Targets S-vi.
 
 ### S5 — Research track: activation-space memory & introspection (off critical path)

@@ -2,7 +2,7 @@
 
 > Paste everything below the line into Codex as the task brief. It is written to be self-contained, but it points Codex at the authoritative in-repo docs as source of truth.
 
-> **Live-status warning (2026-07-12):** This document initiated the program;
+> **Live-status warning (2026-07-13):** This document initiated the program;
 > its original queue is historical. Resume from `.planning/STATE.md`,
 > `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`. Do not restart M4,
 > M1.1, or the archived Phase 8/9 queue.
@@ -16,8 +16,10 @@ You are an autonomous engineering agent working in the **Mnemosyne** repository 
 2. `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` — the benchmarking + leaderboard plan (task IDs `M#`, `L#`).
 3. `docs/research/AI-Memory-Systems-Market-Research-2026.md` — competitive/benchmark landscape and why LoCoMo is contested.
 4. `docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`, `eval/README.md`, `.planning/STATE.md`, and the benchmark-posture/honesty rule in `docs/blueprint/Mnemosyne-Performance-and-Refactoring-Blueprint.md` (benchmarking section, ~§9.2.7) + `eval/provider_bakeoff/README.md`.
+5. `docs/superpowers/specs/2026-07-13-8gb-full-capability-unblock-design.md` — approved problem register, hardware-class matrix, quality-parity principle, and human/agent boundary.
 
-Do not restate these plans back to me. Read them, then execute the task queue in §6.
+Do not restate these plans back to me. Read them, then resume the live task in
+§6 from the authoritative trackers.
 
 ## 1. What Mnemosyne is (grounded context)
 A local-first "memory compiler." An append-only, content-addressed **evidence ledger** (`evidence.cid` = SHA-256 over canonical JSON) is the single source of truth; everything else is a **rebuildable typed projection** (bitemporal subject–predicate–object beliefs, entities, relations, preferences, procedures, lessons; `as_of()` time travel + contradiction/supersession).
@@ -34,7 +36,7 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
 - The public harness, LongMemEval retrieval, and deterministic HippoRAG retrieval tracks are wired under PBPP custody. No result is externally headline-eligible. Historical private-suite numbers remain internal QA only, and current public/protected claims still require PBPP plus independent reproduction.
 
 ## 3. Strategic decisions you must honor
-- **Honesty pivot → PBPP.** The repo currently forbids headlining public benchmarks. Replace that blanket ban with the **Public-Benchmark Publication Protocol**: a public number may be published only if (a) produced by the pinned `eval/public/` harness, (b) shipped with the full artifact bundle, (c) reporting **retrieval-recall and LLM-judged-QA in SEPARATE columns** with judge model+prompt disclosed, (d) never conflated with the private suite, (e) independently reproducible from the bundle. Private-suite numbers stay internal QA forever.
+- **PBPP is in force.** A public number may be published only if (a) produced by the pinned `eval/public/` harness, (b) shipped with the full artifact bundle, (c) reporting **retrieval-recall and LLM-judged-QA in SEPARATE columns** with judge model+prompt disclosed, (d) never conflated with the private suite, and (e) genuinely reproduced by an independent third party through the human-owned M3 process. Private-suite numbers stay internal QA forever.
 - **Neutrality is structural.** The leaderboard runs under independent governance with a hard firewall; the operator runs **every** system under **one identical harness**; Mnemosyne is entered under the same rules as everyone else; all raw artifacts are public. We win on reproducibility, not by controlling the scoreboard.
 - **Deterministic-first.** Lead with LongMemEval retrieval-recall + the HippoRAG multi-hop suite (MuSiQue/2Wiki/HotpotQA). Treat BEAM/QA as LLM-judged with a disclosed reader. Do **not** headline LoCoMo or DMR/MSC.
 
@@ -54,25 +56,52 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
 - LMArena "Leaderboard Illusion": operator/unequal-access advantage.
 - LoCoMo: contested (6.4% wrong answer key; LLM judge accepts ~63% of wrong answers) — never headline it.
 
-## 6. Task queue (execute in order; each task's full DoD is in the plan docs)
-**Critical path first.** Open a branch + PR per task. For each: implement → add a regression cell → keep all gates/tests green → write the artifact + a one-paragraph result note (`eval/reports/` or `leaderboard/reports/`).
+## 6. Live continuation queue
 
-1. **[Plan B · M4] Charter → PBPP.** Edit the benchmark-posture/honesty rule in the perf blueprint (benchmarking section) and `eval/provider_bakeoff/README.md` to reference PBPP instead of a blanket prohibition. DoD: docs updated; contributor lint points at PBPP.
-2. **[Plan B · M1.1] Scaffold `eval/public/`.** New isolated tree that drives **only the public `mneme` CLI** (same discipline as `eval/run_eval.py`), pins each benchmark to a commit, and emits the reproducibility bundle (pinned commit, per-question traces of {stored, retrieved, answer}, disclosed judge/config, build fingerprint, Wilson/bootstrap CIs, one-command reproduce). DoD: `mneme eval-public --suite X` runs end-to-end and writes traces.
-3. **[Plan B · M1.2] LongMemEval — retrieval-recall track.** Deterministic Recall@k / nDCG on the dataset's session/turn gold labels; **no LLM in scoring**. DoD: R@5 + Wilson CI + per-question retrieval traces.
-4. **[Plan B · M1.3] HippoRAG multi-hop suite.** MuSiQue / 2WikiMultiHopQA / HotpotQA; deterministic Recall@2/@5 + EM/F1; exercises the graph+PPR channel. DoD: results table vs published HippoRAG 2 baselines.
-5. **[Plan A · S1] Close the multi-hop answer-synthesis gap (top capability lever).** Add an iterative retrieve→read loop (query decomposition → PPR hops → evidence assembly) + a disclosed grounded reader that answers ONLY from retrieved, provenance-tagged evidence (every claim traces to an evidence CID) + EM-LLM-style episode-aware recall. The default is an extractive span/no-answer reader; a generative role-LLM is a separately disclosed comparison track. DoD: `qa_hard_v2` and the held-out LongMemEval-QA public-dataset/internal-only track ≥ 0.85 with grounded per-hop traces; no deterministic-recall regression.
-6. **[Plan B · M1.4 / M1.5] MemoryAgentBench adapter (upstream PR) + BEAM** (disclosed reader). DoD per plan.
-7. **[Plan B · M2/M3] Reproducibility bundle standard + commission independent third-party reproduction** of headline numbers before any external claim.
-8. **[Plan A · S2–S5] Capability, security/calibration, perf/scale, physical 8 GiB, and research close-out** (multi-timescale/sleep consolidation; map-reduce/surprise paths; MINJA/AgentPoison/PoisonedRAG attack-success-under-defense; calibration vs public labels; concurrent+warm P95; 100k-item cells; provider default; compact grounded-QA acceptance on physical 8 GiB Windows/Linux; activation-memory go/no-go). These fill columns no competitor fills without weakening shared quality or custody gates.
+This section is a routing summary, not an independent tracker. The exact next
+task, branch, evidence state, and blockers come from `.planning/STATE.md`,
+`.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`.
 
-The neutral leaderboard build (Plan B · L0–L4: governance charter, methodology harness, `web/` site, launch) is the second phase — begin its governance/charter (L0) in parallel once M1 is underway, but do not build the public site until Part I results and PBPP are in force.
+1. **Resume Phase 12 Plan 12-04 at its recorded checkpoint.** Finish the active
+   production-admission hardening slice under its correct hardware class, land
+   it with exact-head CI, and preserve the staged-only/live-mutation boundary.
+2. **Complete candidate-v19 prerequisites in order.** Hardware-admitted full
+   project suite → immutable external manifest/runtime custody → digest-bound
+   24/24 `qa_scale_dev_v1` receipt → at most one protected `qa_hard_v2`
+   attempt. Never use protected results to patch the same candidate.
+3. **Use v19 only as Decision Point 1.** Its protected aggregate measures
+   whether the synthetic/dev hop-0 gain transfers and bounds the remaining
+   reader work; it does not by itself close Phase 12.
+4. **Advance the compact physical-8-GiB product path under its separate
+   protocol.** TRAIN-only corpus preparation and preregistration may proceed
+   when admitted. Model selection/training/export/promotion and physical
+   Windows/Linux acceptance must satisfy the compact design and acceptance
+   contracts without weakening quality or custody.
+5. **Close every independent Phase 12 bar.** Both ≥0.85 QA tracks,
+   deterministic retrieval non-regression, positive provenance-linked
+   graph/PPR effect, exact grounding/parity, §31, §33, manifests, and exact-SHA
+   CI must all pass before Phases 13–16 advance.
+6. **Prepare, but do not perform, the human-only work.** Agents may produce the
+   L0/GOV-001 charter, COI/outreach packet, M3 reproduction bundle and rubric,
+   and publication decision packet. Only the human operator may recruit or
+   seat the board, commission the external reproducer, ratify policy, approve
+   public wording, or publish a number.
+7. **Continue Plan A S2–S5 and Plan B M/L work from their live phase owners**
+   after the Phase 12 dependency gates clear. Do not restart completed M4,
+   M1.1, LongMemEval-retrieval, or deterministic Hippo retrieval work.
+
+For every source-owned slice: implement → add a regression cell → run the
+admitted gates → write the named artifact/result note → commit/push → require
+exact-head CI. Keep external/human gates explicit rather than marking the
+engagement complete around them.
 
 ## 7. Working conventions
 - Small, reviewable PRs, one task each; conventional commits.
 - Run the existing test + eval gates before every merge; never merge red.
 - Prefer deterministic grading; when an LLM judge is unavoidable, disclose model + prompt and report its acceptance rate on intentionally-wrong-but-topical answers.
 - If a plan doc and this prompt disagree, the plan doc wins; if reality (the code) and the plan disagree, surface it and propose an update rather than forcing the plan.
-- Ask before: changing any §31 rail, adding a core dependency, or publishing any external-facing number.
+- Stop and escalate before changing any §31 rail or adding a core dependency.
+  Agents never publish an external-facing number; prepare the complete decision
+  packet for human approval and action.
 
 **Definition of done for the engagement:** LongMemEval-recall + HippoRAG-multihop wired and passing in `eval/public/` with bundles; multi-hop QA ≥ 0.85; Plan A S2–S5 closed, including physical 8 GiB compact grounded-QA acceptance; security/calibration columns publishable; PBPP in force; ≥1 headline number independently reproduced; all §31/§33 gates green. Then proceed to the leaderboard build (Plan B Part II).

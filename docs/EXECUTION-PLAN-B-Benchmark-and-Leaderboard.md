@@ -1,16 +1,19 @@
 # Mnemosyne — Execution Plan B: Benchmarking & the Leaderboard
 ## Goal: prove Mnemosyne's results credibly, and build the field's neutral memory-benchmark leaderboard
 
-**Version:** 1.1 · **Date:** 2026-07-12 · **Status:** In Progress (approved)
+**Version:** 1.2 · **Date:** 2026-07-13 · **Status:** In Progress (approved)
 **Scope:** the public benchmark harness (`eval/public/`), the publication protocol, and the greenfield `leaderboard/` + `web/` products.
 **Companion doc:** *Execution Plan A — The Memory System* builds the capabilities this plan measures. This plan owns measurement, publication, and the leaderboard. Where Plan A says "measured/published," the authority is here.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for governance and third-party reproduction.
 
-**Live execution status (2026-07-12):** M4/PBPP and BENCH-001 through
+**Live execution status (2026-07-13):** M4/PBPP and BENCH-001 through
 BENCH-004 are complete. M1.3 remains partial behind Phase 12's grounded-reader
 and positive graph/PPR gates; Phases 13 through 16 own the remaining benchmark,
 reproduction, capability-column, and leaderboard work. External board seating,
 third-party reproduction, and approval of any public number remain human-only.
+The physical-8-GiB full-capability and hardware-invariant product-quality path
+is governed by
+`docs/superpowers/specs/2026-07-13-8gb-full-capability-unblock-design.md`.
 `.planning/STATE.md`, `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`
 are the authoritative live trackers.
 
@@ -63,11 +66,18 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 
 ## 2. Strategic framing — the two hard problems, resolved
 
-**Problem 1 — the honesty-charter tension.** The perf blueprint §9.2.7 and `eval/provider_bakeoff/README.md` currently forbid citing public benchmarks in headline claims — correct *while none had been run under our discipline.* Resolution: upgrade the prohibition into a **Public-Benchmark Publication Protocol (PBPP)**, stricter than any competitor's practice:
+**Problem 1 — the honesty-charter tension.** The perf blueprint §9.2.7 and
+`eval/provider_bakeoff/README.md` originally forbade citing public benchmarks
+in headline claims while none had been run under our discipline. M4 replaced
+that blanket prohibition on 2026-07-10 with the stricter **Public-Benchmark
+Publication Protocol (PBPP)**:
 
 > **PBPP.** A public number may be published only if (a) produced by the pinned public harness in `eval/public/`, (b) the full artifact bundle (§M2) is released simultaneously, (c) retrieval-recall and LLM-judged-QA are reported in separate columns with judge model + prompt disclosed, (d) the private golden suite is never conflated with it, and (e) an independent third party reproduces it from the bundle. Private-suite numbers remain internal QA and are never headline public claims.
 
-This turns honesty into the moat: our published numbers become the most reproducible in a field full of contested vendor claims. **Task M4:** update `docs/blueprint/…§9.2.7` and `eval/provider_bakeoff/README.md` to reference PBPP.
+This turns honesty into the moat: any future published number must be among the
+most reproducible in a field full of contested vendor claims. M4's two policy
+surfaces and contributor regression gate are complete; no publication is
+authorized by that source-owned completion alone.
 
 **Problem 2 — the neutrality paradox.** We cannot be referee and champion on trust alone; vendor-run-where-they-win boards get dismissed (OmniMemEval, omegamax, the LMArena "Illusion"). Resolution (§L0): the leaderboard runs under **independent governance with a hard firewall**; the operator **runs every system itself under one identical harness** (killing the "you misconfigured us" defense that defined the mem0↔Zep dispute); Mnemosyne is entered and scored **by the same rules as everyone else**; all raw artifacts are public. We win by having the best *reproducible* numbers on neutral turf — not by controlling the scoreboard.
 
@@ -80,16 +90,22 @@ Blueprint §9.2.7 slates this. Build as a new isolated tree so the private suite
 
 - **M1.1 Harness scaffold.** `eval/public/` runner: pins each benchmark to a commit, emits the §M2 bundle. DoD: `mneme eval-public --suite X` runs end-to-end and writes traces.
 - **M1.2 LongMemEval — retrieval-recall track first.** Deterministic Recall@k / nDCG using the dataset's session/turn gold labels; **no LLM in scoring.** DoD: R@5 with Wilson CI + per-question retrieval traces. (Targets Plan A S-i.)
-- **M1.3 HippoRAG multi-hop suite.** MuSiQue / 2WikiMultiHopQA / HotpotQA — recall@2/@5 + EM/F1, fully deterministic; exercises the graph+PPR channel. DoD: table vs published HippoRAG 2 baselines. (Plan A S-ii.)
+- **M1.3 HippoRAG multi-hop suite.** MuSiQue / 2WikiMultiHopQA / HotpotQA — deterministic retrieval Recall@2/@5 and scoring, plus separately disclosed-reader EM/F1 columns once Phase 12 supplies predictions. The current retrieval adapter measures the graph/PPR channel, but positive provenance-linked PPR effect remains an explicit gate. DoD: retrieval table vs published HippoRAG 2 baselines, reader columns, and positive-PPR evidence. (Plan A S-ii.)
 - **M1.4 MemoryAgentBench adapter (upstream PR).** Mostly deterministic (SubEM/exact-match); contribute a Mnemosyne adapter upstream — the closest thing to an "official submission." DoD: PR open + local results. (Exercises conflict-resolution / belief-revision.)
 - **M1.5 BEAM (prestige, LLM-judged).** Disclosed reader model; publish as "Mnemosyne + <reader>." DoD: BEAM-1M result + full config disclosure. (Plan A S-iii.)
 - **M1.6 Scheduled CI job.** Runs deterministic public suites on a cadence; regression alerts only; never tune-to-test.
 
 ### M2 — Reproducibility artifact bundle (the PBPP standard)
-Every public result ships: pinned harness commit + `uv`/`pip` runner; per-question traces (**what was stored, what was retrieved, final answer**); disclosed judge model + prompt + all configs; system build fingerprint (we already emit `sha256:…` release fingerprints); Wilson/bootstrap CIs; one-command reproduce script. **DoD:** an independent *agent* reproduces the number from the bundle alone.
+Every public result ships: pinned harness commit + `uv`/`pip` runner; per-question traces (**what was stored, what was retrieved, final answer**); disclosed judge model + prompt + all configs; system build fingerprint (we already emit `sha256:…` release fingerprints); Wilson/bootstrap CIs; one-command reproduce script. **DoD:** a clean-room agent run reproduces the number from the bundle alone as an internal bundle-readiness check. This does not satisfy M3's external independence requirement.
 
 ### M3 — Third-party reproduction
-Commission a genuine external party to reproduce every headline public number from the bundle before any public claim. **DoD:** signed reproduction note in `leaderboard/reports/`.
+**Agent scope:** prepare the immutable bundle, reproduction instructions,
+acceptance rubric, intake checklist, and report template. **Human scope:** select
+and commission a genuinely independent external party, receive its result, and
+decide whether it satisfies PBPP. **DoD:** a signed external reproduction note
+supplied through the human-owned process is recorded in `leaderboard/reports/`
+before any public claim. An agent may not commission, impersonate, or approve
+the reproducer.
 
 ### M4 — Charter → PBPP
 Update blueprint `§9.2.7` and the provider-bakeoff README to reference PBPP (§2). **DoD:** docs updated; CI lint points contributors to PBPP.
@@ -100,7 +116,7 @@ Update blueprint `§9.2.7` and the provider-bakeoff README to reference PBPP (§
 | Tier | Benchmark | Track | Scoring | Why |
 |---|---|---|---|---|
 | Primary | **LongMemEval** (retrieval-recall) | conversational | Deterministic | Publishable recall@k; the flag everyone plants |
-| Primary | **HippoRAG suite** (MuSiQue/2Wiki/HotpotQA) | multi-hop | Deterministic (R@k, EM/F1) | Cleanest deterministic; exercises our PPR channel |
+| Primary | **HippoRAG suite** (MuSiQue/2Wiki/HotpotQA) | multi-hop | Deterministic retrieval R@k; disclosed-reader EM/F1 separate | Measures the PPR channel; positive PPR effect remains gated |
 | Strong | **MemoryAgentBench** | agentic/conflict | Mostly deterministic | Upstream adapter = closest to an "official" submission |
 | Prestige | **BEAM** (1M/10M tok) | long-horizon | LLM-judged (disclosed reader) | Un-saturated; differentiating at scale |
 | Utility | **STATE-Bench** (Microsoft) | enterprise task success | Deterministic task-completion | Shows memory improves real tasks |
