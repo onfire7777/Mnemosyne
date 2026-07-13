@@ -10,11 +10,15 @@ Status: mandatory for hardware-intensive local work
 
 These thresholds protect this development host; they are not Mnemosyne's
 minimum product requirements. Runtime behavior continues to use the existing
-`floor`, `standard`, `accelerated`, and explicit `frontier` capability tiers:
-lower-end machines retain dependency-light deterministic and pure/ONNX paths,
-while stronger systems may opt into wider batches, parallel channels,
-GPU/Metal providers, larger readers, and hosted rungs without changing the
-floor-tier contract or any security rail.
+`floor`, `standard`, `accelerated`, and explicit `frontier` capability tiers.
+For the product quality path, every tier uses the same admitted
+quality-critical artifacts, policy, budgets, and decoded decisions on the same
+corpus and requests. Stronger systems may use wider batches, parallel channels,
+larger corpus capacity, and GPU/Metal execution providers to improve latency,
+throughput, capacity, and concurrency; they may not silently substitute a
+higher-scoring reader. Larger or hosted readers belong only to separately
+disclosed research, teacher, or comparison tracks and cannot establish the
+physical-floor product claim or replace any security/custody rail.
 Physical 8 GiB compact-model claims are governed separately by
 `COMPACT-MODEL-8GB-ACCEPTANCE.md`.
 
@@ -29,6 +33,13 @@ local embedding model. A small knowledge write can load Ollama and invalidate
 an otherwise idle sample.
 
 ## Admission check
+
+`infra/scripts/eval-window-admission.sh` is a reclamation-only compatibility
+helper despite its historical filename. With explicit confirmation it may quit
+only the fixed Brave Browser/Discord allowlist, then exits nonzero with
+`ADMISSION PENDING`. It never stops services, validates certificates, samples
+hardware, or grants admission. Do not wrap its exit status as a workload gate;
+perform every check below separately after reclamation.
 
 Take three samples 15 seconds apart. Every sample must pass:
 
