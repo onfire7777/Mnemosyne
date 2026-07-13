@@ -110,6 +110,34 @@ def _consumer_snapshot_bytes(*rows: tuple[str, str]) -> bytes:
     )
 
 
+def _direct_probe_call(fixture: TlsFixture, route: str) -> list[str]:
+    return [
+        "--disable",
+        "--silent",
+        "--show-error",
+        "--output",
+        "/dev/null",
+        "--connect-timeout",
+        "5",
+        "--max-time",
+        "15",
+        "--tlsv1.3",
+        "--tls-max",
+        "1.3",
+        "--resolve",
+        "mcp.mnemo.local:443:127.0.0.1",
+        "--cacert",
+        str(fixture.root),
+        "--cert",
+        str(fixture.bundle),
+        "--key",
+        str(fixture.key),
+        "--write-out",
+        "%{http_code}",
+        f"https://mcp.mnemo.local{route}",
+    ]
+
+
 @dataclass(frozen=True)
 class TlsFixture:
     secrets: Path
@@ -495,6 +523,75 @@ shutil.copyfile({str(staged.key)!r}, stage_path / "mcp-client.key")
     return docker, record
 
 
+def _write_fake_curl(
+    tmp_path: Path,
+    expected: TlsFixture,
+    *,
+    responses: tuple[str, ...] = ("200", "200"),
+    returncodes: tuple[int, ...] = (0, 0),
+    child_canary: str = "",
+) -> tuple[Path, Path]:
+    record = tmp_path / "curl-calls.jsonl"
+    curl = tmp_path / "fake-curl"
+    curl.write_text(
+        f"""#!{sys.executable}
+import json
+import os
+import sys
+from pathlib import Path
+
+record = Path({str(record)!r})
+calls = record.read_text(encoding="utf-8").splitlines() if record.exists() else []
+index = len(calls)
+# macOS injects this after exec into Python processes; curl does not.
+os.environ.pop("__CF_USER_TEXT_ENCODING", None)
+args = sys.argv[1:]
+
+
+def argument_after(flag: str) -> str:
+    index = args.index(flag)
+    return args[index + 1]
+
+
+materials = {{
+    "root": Path(argument_after("--cacert")).read_bytes()
+    == Path({str(expected.root)!r}).read_bytes(),
+    "cert": Path(argument_after("--cert")).read_bytes()
+    == Path({str(expected.bundle)!r}).read_bytes(),
+    "key": Path(argument_after("--key")).read_bytes()
+    == Path({str(expected.key)!r}).read_bytes(),
+}}
+snapshot = record.with_name("snapshot-observations.jsonl")
+snapshot_count = (
+    len(snapshot.read_text(encoding="utf-8").splitlines()) if snapshot.exists() else 0
+)
+with record.open("a", encoding="utf-8") as handle:
+    handle.write(
+        json.dumps(
+            {{
+                "argv": args,
+                "env": dict(os.environ),
+                "materials": materials,
+                "snapshot_count": snapshot_count,
+            }}
+        )
+        + "\\n"
+    )
+responses = {responses!r}
+returncodes = {returncodes!r}
+if snapshot_count == 0 or index >= len(responses) or index >= len(returncodes):
+    raise SystemExit(98)
+if {child_canary!r}:
+    print({child_canary!r}, file=sys.stderr)
+sys.stdout.write(responses[index])
+raise SystemExit(returncodes[index])
+""",
+        encoding="utf-8",
+    )
+    curl.chmod(0o700)
+    return curl, record
+
+
 def _rotator_env(fixture: TlsFixture, docker: Path, stage: Path) -> dict[str, str]:
     return {
         **os.environ,
@@ -585,6 +682,7 @@ class RotationTransactionFixture:
     staged: TlsFixture
     env: dict[str, str]
     record: Path
+    probe_record: Path
     old_cert: bytes
     old_key: bytes
 
@@ -639,6 +737,7 @@ def _transaction_fixture(
     tmp_path: Path,
     *,
     docker_options: dict[str, object] | None = None,
+    curl_options: dict[str, object] | None = None,
     operator_running: bool = False,
 ) -> RotationTransactionFixture:
     current = _tls_fixture(tmp_path, remaining=dt.timedelta(hours=8), stem="current")
@@ -650,12 +749,17 @@ def _transaction_fixture(
         issuer=current,
     )
     docker, record = _write_fake_docker(tmp_path, staged, **(docker_options or {}))
+    curl, probe_record = _write_fake_curl(tmp_path, staged, **(curl_options or {}))
     _enable_transaction_fixture(current, operator_running=operator_running)
     return RotationTransactionFixture(
         current=current,
         staged=staged,
-        env=_rotator_env(current, docker, _stage_path(current, "transaction-stage")),
+        env={
+            **_rotator_env(current, docker, _stage_path(current, "transaction-stage")),
+            "MCP_CLIENT_ROTATOR_TEST_CURL_BIN": str(curl.resolve(strict=True)),
+        },
         record=record,
+        probe_record=probe_record,
         old_cert=current.bundle.read_bytes(),
         old_key=current.key.read_bytes(),
     )
@@ -752,6 +856,14 @@ def _docker_calls(record: Path) -> list[list[str]]:
     if not audit.exists():
         return []
     return [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+
+
+def _curl_calls(record: Path) -> list[dict[str, object]]:
+    if not record.exists():
+        return []
+    return [
+        json.loads(line) for line in record.read_text(encoding="utf-8").splitlines()
+    ]
 
 
 def _dotenv_observations(record: Path) -> list[dict[str, object]]:
@@ -1977,6 +2089,7 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
                 ),
             )
         },
+        curl_options={"responses": ("204", "299")},
     )
 
     stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
@@ -1984,7 +2097,7 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
     assert stopped.returncode == 74
     assert stopped.stdout == "mcp-client-rotation result=publication_failed\n"
     assert (
-        stopped.stderr == "mcp-client-rotation failed: direct probes are unavailable "
+        stopped.stderr == "mcp-client-rotation failed: blackbox probe is unavailable "
         "in the R1c fixture seam\n"
     )
     journal_path = _journal_path(transaction)
@@ -2015,6 +2128,30 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
             "receipt_path": str(receipt),
         }
     ]
+    assert _curl_calls(transaction.probe_record) == [
+        {
+            "argv": _direct_probe_call(transaction.current, "/health"),
+            "env": {
+                "HOME": pwd.getpwuid(os.getuid()).pw_dir,
+                "LC_ALL": "C",
+                "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+                "TMPDIR": "/tmp",
+            },
+            "materials": {"cert": True, "key": True, "root": True},
+            "snapshot_count": 1,
+        },
+        {
+            "argv": _direct_probe_call(transaction.current, "/stream/healthz"),
+            "env": {
+                "HOME": pwd.getpwuid(os.getuid()).pw_dir,
+                "LC_ALL": "C",
+                "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
+                "TMPDIR": "/tmp",
+            },
+            "materials": {"cert": True, "key": True, "root": True},
+            "snapshot_count": 1,
+        },
+    ]
 
     recovery_env, _ = _recovery_env(tmp_path, transaction, "validated-recovery")
     recovered = _run_rotator(recovery_env)
@@ -2024,6 +2161,136 @@ def test_publish_validated_fixture_activates_consumers_but_stays_precommitted(
     assert transaction.current.bundle.read_bytes() == transaction.old_cert
     assert transaction.current.key.read_bytes() == transaction.old_key
     assert not journal_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("responses", "returncodes", "expected_routes"),
+    [
+        (("199", "200"), (0, 0), ("/health",)),
+        (("300", "200"), (0, 0), ("/health",)),
+        (("200\n", "200"), (0, 0), ("/health",)),
+        (("200junk", "200"), (0, 0), ("/health",)),
+        (("200", "200"), (7, 0), ("/health",)),
+        (("200", "500"), (0, 0), ("/health", "/stream/healthz")),
+    ],
+)
+def test_direct_probe_rejects_transport_or_non_2xx_and_short_circuits(
+    tmp_path: Path,
+    responses: tuple[str, ...],
+    returncodes: tuple[int, ...],
+    expected_routes: tuple[str, ...],
+) -> None:
+    child_canary = "direct-probe-child-canary-must-not-leak"
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            )
+        },
+        curl_options={
+            "responses": responses,
+            "returncodes": returncodes,
+            "child_canary": child_canary,
+        },
+    )
+
+    failed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert failed.returncode == 74
+    assert failed.stdout == "mcp-client-rotation result=publication_failed\n"
+    assert failed.stderr == "mcp-client-rotation failed: direct probe failed\n"
+    assert child_canary not in failed.stdout
+    assert child_canary not in failed.stderr
+    calls = _curl_calls(transaction.probe_record)
+    assert [call["argv"] for call in calls] == [
+        _direct_probe_call(transaction.current, route) for route in expected_routes
+    ]
+    assert all(
+        call["materials"] == {"cert": True, "key": True, "root": True} for call in calls
+    )
+    assert all(call["snapshot_count"] == 1 for call in calls)
+    journal_path = _journal_path(transaction)
+    assert _strict_json(journal_path)["phase"] == "published_validated"
+    assert "committed" not in journal_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "unsafe_kind",
+    [
+        "missing-override",
+        "missing",
+        "relative",
+        "directory",
+        "non-executable",
+        "symlink",
+        "symlink-parent",
+        "writable",
+        "writable-parent",
+    ],
+)
+def test_direct_probe_fixture_override_rejects_unsafe_executable(
+    tmp_path: Path,
+    unsafe_kind: str,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+    safe_curl = Path(transaction.env["MCP_CLIENT_ROTATOR_TEST_CURL_BIN"])
+    unsafe_curl = safe_curl
+    if unsafe_kind == "missing-override":
+        unsafe_curl = Path("")
+    elif unsafe_kind == "missing":
+        unsafe_curl = tmp_path / "missing-curl"
+    elif unsafe_kind == "relative":
+        unsafe_curl = Path("fake-curl")
+    elif unsafe_kind == "directory":
+        unsafe_curl = tmp_path
+    elif unsafe_kind == "non-executable":
+        safe_curl.chmod(0o600)
+    elif unsafe_kind == "symlink":
+        unsafe_curl = tmp_path / "curl-symlink"
+        unsafe_curl.symlink_to(safe_curl)
+    elif unsafe_kind == "symlink-parent":
+        linked_parent = tmp_path / "linked-parent"
+        linked_parent.symlink_to(tmp_path, target_is_directory=True)
+        unsafe_curl = linked_parent / safe_curl.name
+    elif unsafe_kind == "writable-parent":
+        safe_curl.parent.chmod(0o770)
+    else:
+        safe_curl.chmod(0o720)
+    env = dict(transaction.env)
+    if unsafe_kind == "missing-override":
+        env.pop("MCP_CLIENT_ROTATOR_TEST_CURL_BIN")
+    else:
+        env["MCP_CLIENT_ROTATOR_TEST_CURL_BIN"] = str(unsafe_curl)
+
+    rejected = _run_rotator(env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 65
+    assert rejected.stdout == "mcp-client-rotation result=preflight_failed\n"
+    assert (
+        rejected.stderr
+        == "mcp-client-rotation failed: fixture direct-probe executable is unsafe\n"
+    )
+    assert _curl_calls(transaction.probe_record) == []
+    assert _docker_calls(transaction.record) == []
+    assert not _journal_path(transaction).exists()
+
+
+def test_staged_only_path_never_executes_direct_probes(tmp_path: Path) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    staged = _run_rotator(transaction.env)
+
+    assert staged.returncode == 0
+    assert staged.stdout == "mcp-client-rotation result=staged_only\n"
+    assert staged.stderr == ""
+    assert _curl_calls(transaction.probe_record) == []
+    assert not _journal_path(transaction).exists()
 
 
 def test_recovery_validation_failure_retains_journal_and_generations(
@@ -2119,6 +2386,12 @@ def test_consumer_discovery_and_private_dotenv_preserve_operator_absence(
     if operator_was_running:
         operator_compose_index = calls.index(list(observations[1]["argv"]))
         assert snapshot_indices[1] < operator_compose_index < snapshot_indices[2]
+        assert [
+            call["snapshot_count"] for call in _curl_calls(transaction.probe_record)
+        ] == [
+            2,
+            2,
+        ]
     assert all(not dotenv.exists() for dotenv, _ in artifacts)
     assert all(not receipt.exists() for _, receipt in artifacts)
     assert VALID_DB_PASSWORD.decode() not in proc.stdout + proc.stderr

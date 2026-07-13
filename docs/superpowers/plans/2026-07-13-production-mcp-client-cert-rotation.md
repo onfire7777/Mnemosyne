@@ -476,21 +476,28 @@ running `infra` Caddy container, uses only the fixed BusyBox transport and
 encoded VictoriaMetrics query, caps and times every child phase, validates one
 fresh exact-label vector with duplicate-key rejection, and emits only fixed
 success or failure summaries. Both the embedded interpreter and Docker child
-environment are fail-closed. The next fixture-only slice is in progress:
+environment are fail-closed. R1c fixture work remains in progress:
 exact pre/post consumer discovery, symmetric password validation, private
 mode-`0600` dotenv/receipt ownership, sanitized Compose execution, prior-state
 preservation, signal/exit cleanup, and recognized startup residue recovery are
-implemented in the working tree, including restrictive-umask recovery and one
-bounded single-call Docker snapshot of the exact consumer set after each recreation.
-Fresh focused verification passes all 18 snapshot-contract cases and the static
-gates. Fresh per-tier targeted admission then passed at 52% free/load1 1.98 for
-162 rotator cases, 49%/3.13 for 225 combined rotator/blackbox cases, and
-47%/2.16 for 41 unchanged TLS/bootstrap/Compose-policy regressions, with zero
-resident models and no skips or failures. The fixture deliberately stops at
-`published_validated`; direct probes, durable commit, and rollback remain the
-next R1c slices. No live Docker query, issuance, consumer recreation,
-certificate mutation, model/index action, or protected attempt was run, and
-the ordinary production path remains staged-only.
+implemented on the current branch, including restrictive-umask recovery and one
+bounded single-call Docker snapshot of the exact consumer set after each
+recreation. The fixture-only direct-probe sub-slice is also implemented: it
+uses the newly published pair and exact Caddy root for fixed `/health` and
+`/stream/healthz` requests and accepts only a strict single `2xx` status.
+Fresh targeted gates passed all 21 expanded direct-probe/consumer cases, the
+162-case plan selector, the full 241-test rotator/blackbox pair, and the
+unchanged 41-test TLS/bootstrap/Compose-policy regression tier for this branch
+slice. Their fresh admission samples were respectively 43% free/load1 2.36,
+45%/2.22, 43%/2.63, and 43%/2.22, all with zero resident models. The fixture
+deliberately stops at `published_validated` after both direct probes; blackbox
+integration, durable commit, and automatic
+rollback/recovery remain open. No live Docker query, issuance, consumer
+recreation, certificate mutation, model/index action, or protected attempt was
+run, and the ordinary production path remains staged-only. Exact-SHA CI run
+29285863797 remains evidence for prior head `6cae15f` only. The current head's
+authoritative result is the GitHub check attached to that exact SHA and must be
+green before merge; no repository edit self-records its own CI result.
 
 Files:
 

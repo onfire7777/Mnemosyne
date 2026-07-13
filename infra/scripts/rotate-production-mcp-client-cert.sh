@@ -1961,6 +1961,44 @@ SAFE_HOME=$(
   "$PYTHON" -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)' 2>/dev/null
 ) || preflight_failed 'current user home could not be resolved'
 SAFE_TMPDIR=/tmp
+CURL_BIN=/usr/bin/curl
+if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
+  CURL_BIN=${MCP_CLIENT_ROTATOR_TEST_CURL_BIN:-}
+  if ! "$PYTHON" - "$CURL_BIN" >/dev/null 2>&1 <<'PY'
+import os
+import stat
+import sys
+
+
+path = sys.argv[1]
+if not path or not os.path.isabs(path) or path != os.path.abspath(path):
+    raise SystemExit(1)
+current = os.path.sep
+for component in path.split(os.path.sep)[1:]:
+    current = os.path.join(current, component)
+    try:
+        component_stat = os.lstat(current)
+    except OSError:
+        raise SystemExit(1)
+    if stat.S_ISLNK(component_stat.st_mode):
+        raise SystemExit(1)
+executable_stat = os.lstat(path)
+parent_stat = os.lstat(os.path.dirname(path))
+if not stat.S_ISREG(executable_stat.st_mode):
+    raise SystemExit(1)
+if executable_stat.st_uid != os.getuid() or parent_stat.st_uid != os.getuid():
+    raise SystemExit(1)
+if stat.S_IMODE(executable_stat.st_mode) & 0o022:
+    raise SystemExit(1)
+if not executable_stat.st_mode & stat.S_IXUSR:
+    raise SystemExit(1)
+if not stat.S_ISDIR(parent_stat.st_mode) or stat.S_IMODE(parent_stat.st_mode) & 0o022:
+    raise SystemExit(1)
+PY
+  then
+    preflight_failed 'fixture direct-probe executable is unsafe'
+  fi
+fi
 docker_call() {
   env -i \
     HOME="$SAFE_HOME" \
@@ -2031,6 +2069,51 @@ fixture_consumer_set_is_stable() {
 
   current_consumer_set=$(discover_consumer_set) || return 1
   [ "$current_consumer_set" = "$INITIAL_CONSUMER_SET" ]
+}
+
+direct_probe() {
+  local output
+  local route=$1
+
+  case "$route" in
+    /health | /stream/healthz) ;;
+    *) return 1 ;;
+  esac
+
+  if ! output=$(
+    set +e
+    probe_status=0
+    command /usr/bin/env -i \
+      HOME="$SAFE_HOME" \
+      LC_ALL=C \
+      PATH="$SAFE_PATH" \
+      TMPDIR="$SAFE_TMPDIR" \
+      "$CURL_BIN" \
+      --disable \
+      --silent \
+      --show-error \
+      --output /dev/null \
+      --connect-timeout 5 \
+      --max-time 15 \
+      --tlsv1.3 \
+      --tls-max 1.3 \
+      --resolve mcp.mnemo.local:443:127.0.0.1 \
+      --cacert "$ROOT_CA" \
+      --cert "$CERT_BUNDLE" \
+      --key "$PRIVATE_KEY" \
+      --write-out '%{http_code}' \
+      "https://mcp.mnemo.local$route" \
+      2>/dev/null || probe_status=$?
+    printf '%s' ':mnemo-probe-end:'
+    exit "$probe_status"
+  ); then
+    return 1
+  fi
+
+  case "$output" in
+    2[0123456789][0123456789]:mnemo-probe-end:) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 DOTENV_OWNER_TOKEN=
@@ -2314,8 +2397,10 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
       publication_failed \
         'consumer set validation failed after operator activation'
   fi
+  direct_probe /health || publication_failed 'direct probe failed'
+  direct_probe /stream/healthz || publication_failed 'direct probe failed'
   trap - EXIT HUP INT TERM
-  publication_failed 'direct probes are unavailable in the R1c fixture seam'
+  publication_failed 'blackbox probe is unavailable in the R1c fixture seam'
 fi
 
 result staged_only
