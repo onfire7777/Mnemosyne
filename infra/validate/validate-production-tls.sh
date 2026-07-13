@@ -63,6 +63,12 @@ import sys
 raise SystemExit(bool(os.stat(sys.argv[1], follow_symlinks=False).st_mode & 0o077))
 PY
 
+if LC_ALL=C grep -Eq \
+  '^(-----BEGIN ENCRYPTED PRIVATE KEY-----[[:space:]]*|Proc-Type:[[:space:]]*4,ENCRYPTED[[:space:]]*)$' \
+  "$PRIVATE_KEY"; then
+  fail 'private key must not be encrypted'
+fi
+
 certificate_count=$(awk '/-----BEGIN CERTIFICATE-----/{count++} END{print count+0}' "$CERT_BUNDLE")
 [ "$certificate_count" -ge 2 ] || fail 'certificate file must contain the leaf and issuing intermediate'
 

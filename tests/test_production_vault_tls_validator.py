@@ -303,11 +303,90 @@ def test_production_tls_validator_rejects_encrypted_private_key_without_prompt(
     assert proc.stdout == ""
     assert (
         proc.stderr
-        == "production Vault TLS validation failed: private key could not be read\n"
+        == "production Vault TLS validation failed: private key must not be encrypted\n"
     )
     assert passphrase.decode() not in output
     for fragment in encrypted_key.decode().splitlines()[1:-1]:
         assert fragment not in output
+
+
+def test_production_tls_validator_rejects_empty_password_encrypted_private_key(
+    tmp_path: Path,
+) -> None:
+    root, bundle, key = _fixture(tmp_path)
+    openssl = shutil.which("openssl")
+    assert openssl is not None
+    encrypted_key = tmp_path / "empty-password-encrypted.key"
+    subprocess.run(
+        [
+            openssl,
+            "pkcs8",
+            "-topk8",
+            "-in",
+            str(key),
+            "-out",
+            str(encrypted_key),
+            "-v2",
+            "aes-256-cbc",
+            "-passout",
+            "pass:",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    key.write_bytes(encrypted_key.read_bytes())
+    key.chmod(0o600)
+    assert key.read_bytes().startswith(b"-----BEGIN ENCRYPTED PRIVATE KEY-----\n")
+
+    proc = _run(root, bundle, key, timeout=3)
+
+    assert proc.returncode == 65
+    assert proc.stdout == ""
+    assert (
+        proc.stderr
+        == "production Vault TLS validation failed: private key must not be encrypted\n"
+    )
+
+
+def test_production_tls_validator_rejects_legacy_encrypted_private_key(
+    tmp_path: Path,
+) -> None:
+    root, bundle, key = _fixture(tmp_path)
+    openssl = shutil.which("openssl")
+    assert openssl is not None
+    passphrase = "legacy-fixture-passphrase-must-not-leak"
+    encrypted_key = tmp_path / "legacy-encrypted.key"
+    subprocess.run(
+        [
+            openssl,
+            "ec",
+            "-in",
+            str(key),
+            "-out",
+            str(encrypted_key),
+            "-aes256",
+            "-passout",
+            f"pass:{passphrase}",
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    key.write_bytes(encrypted_key.read_bytes())
+    key.chmod(0o600)
+    assert b"Proc-Type: 4,ENCRYPTED" in key.read_bytes()
+
+    proc = _run(root, bundle, key, stdin=f"{passphrase}\n", timeout=3)
+
+    output = proc.stdout + proc.stderr
+    assert proc.returncode == 65
+    assert proc.stdout == ""
+    assert (
+        proc.stderr
+        == "production Vault TLS validation failed: private key must not be encrypted\n"
+    )
+    assert passphrase not in output
 
 
 def test_production_mcp_client_tls_validator_accepts_matching_bundle(
