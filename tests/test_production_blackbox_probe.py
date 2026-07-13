@@ -233,6 +233,12 @@ def test_wrapper_pins_os_controlled_python_interpreter() -> None:
     assert "command -v python3" not in wrapper
 
 
+def test_wrapper_sanitizes_locale_before_bash_initialization() -> None:
+    first_line = PROBE.read_text().splitlines()[0]
+
+    assert first_line == "#!/usr/bin/env -S LC_ALL=C /bin/bash"
+
+
 @pytest.mark.parametrize(
     "args",
     [
