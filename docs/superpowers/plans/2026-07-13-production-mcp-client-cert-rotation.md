@@ -388,6 +388,11 @@ hardware sample, and no live side effect occurs before Slice R4.
 
 ### R1a — Preflight, renewal decision, and staged issuance
 
+Status: Source-complete on 2026-07-13. The exact focused suite passes 43 tests,
+the unchanged production TLS validator regression passes 21 tests, and the
+post-fix independent closure review is clean. All Docker/`step` boundaries were
+faked; no live issuance, publication, or runtime mutation occurred.
+
 Files:
 
 - `infra/scripts/rotate-production-mcp-client-cert.sh`

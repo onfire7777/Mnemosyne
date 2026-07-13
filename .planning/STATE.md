@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 heavy work is paused at the 55% hardware-admission floor after canonical runtime recovery; Vault, API/stream, Caddy, and mTLS are healthy and no suite, merge, or protected attempt started
-last_updated: "2026-07-13T06:34:43Z"
+stopped_at: Phase 12 production MCP client rotation R1a is source-complete and green; live issuance, publication, and protected work remain deferred to their later hardware/custody-gated slices
+last_updated: "2026-07-13T08:11:44Z"
 last_activity: 2026-07-12
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody is wired on draft PR #11, whose exact-head CI is green. The duplicate Docker Desktop runtime is frozen and backed up; the canonical Colima runtime is healthy, but the formal 50%/47%/48% memory samples failed the 55% heavy-work admission floor before local full/synthetic verification, merge to `main`, external manifest, or exact-scale evidence
-Last activity: 2026-07-12 — Recovered the original mode-0600 Vault material outside the repository, unsealed Vault without exposing the key, restored API/stream/Caddy, replaced the expired MCP client pair, verified both mTLS health routes, and kept all heavy/protected work paused after the hardware gate failed
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1a now provides a fail-closed current-pair diagnostic and offline-only staged issuance path with exact Docker confinement; no live issuance, publication, protected attempt, or claim was performed. Later rotation slices and heavy Phase 12 work remain subject to their 55% hardware/custody gates
+Last activity: 2026-07-12 — Completed rotation R1a test-first with 43 focused rotator checks, 21 unchanged-validator regressions, and independent closure review; live Docker/CA/secrets/runtime state was not mutated
 
 ## Performance Metrics
 
@@ -71,6 +71,8 @@ Last activity: 2026-07-12 — Recovered the original mode-0600 Vault material ou
 
 ### Decisions
 
+- [Phase 12]: Production MCP client rotation preserves the unchanged six-hour validator. Its separate diagnostic is restricted to the exact canonical current pair, admits only the validator's leaf-expiry-window failure with at most six hours remaining, requires live leaves to have a chain valid now, and permits historical chain probing only for an already-expired leaf.
+- [Phase 12]: Rotation R1a is staged-only and offline-tested: Docker context/network/image/CLI identity, fixed container confinement, secret-free child environment/output, canonical private staging containment, staged ownership/modes/device, and normal post-issuance validation all fail closed before any later publication work.
 - [Phase 12]: Candidate protocol v2 was preregistered before any held-out attempt so manifests bind both complete role prompts/rendering, the concrete serializer, and the full generation envelope; Phase 11 custody/baselines remain unchanged.
 - [Phase 12]: Local Ollama model identity is verified, but absent installed `/opt` role commands and a timed-out direct decomposer smoke keep runtime readiness open; Plan 12-04 may not consume a frozen/held-out attempt until that gate is real.
 - [Phase 12]: Answer orchestration reuses shared deep retrieval/PPR and a typed `record_access=False` control; no alternate ranking/graph stack or new dependency was introduced.
