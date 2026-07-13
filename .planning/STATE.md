@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1b is source-complete and green; R1c consumer activation and all live/protected work remain deferred to their later hardware/custody-gated slices
-last_updated: "2026-07-13T09:23:36Z"
+stopped_at: Phase 12 production MCP client rotation R1c blackbox-query helper is source-complete and green; consumer activation, rollback, and all live/protected work remain deferred to their later hardware/custody-gated slices
+last_updated: "2026-07-13T10:01:58Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b now adds a strict mode-0600 transaction journal, fsynced same-filesystem old/new generations, canonical certificate-then-key publication, exact crash-state reachability, and startup restoration before ordinary validation. Publication remains fixture-only and stops before consumer activation; R1c and every live/protected action remain subject to their stronger hardware/custody gates
-Last activity: 2026-07-13 — Completed rotation R1b test-first with 38 exact-selector checks, all 81 rotator checks, 22 unchanged TLS/bootstrap regressions, green shell/Python/diff gates, and clean independent operability/security closure reviews; live Docker/CA/secrets/runtime state was not mutated
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; the first R1c slice now provides a fixed, bounded, fail-closed blackbox query helper. Publication remains fixture-only and stops before consumer activation; the remaining R1c work and every live/protected action remain subject to their stronger hardware/custody gates
+Last activity: 2026-07-13 — Completed the R1c blackbox-helper slice test-first with 62 focused checks, exact fixed query and child environment, bounded streaming and process cleanup, strict response/freshness validation, OS-controlled interpreter execution, green shell/Python gates, and clean independent closure review; live Docker/CA/secrets/runtime state was not mutated
 
 ## Performance Metrics
 
@@ -74,6 +74,7 @@ Last activity: 2026-07-13 — Completed rotation R1b test-first with 38 exact-se
 - [Phase 12]: Production MCP client rotation preserves the unchanged six-hour validator. Its separate diagnostic is restricted to the exact canonical current pair, admits only the validator's leaf-expiry-window failure with at most six hours remaining, requires live leaves to have a chain valid now, and permits historical chain probing only for an already-expired leaf.
 - [Phase 12]: Rotation R1a is staged-only and offline-tested: Docker context/network/image/CLI identity, fixed container confinement, secret-free child environment/output, canonical private staging containment, staged ownership/modes/device, and normal post-issuance validation all fail closed before any later publication work.
 - [Phase 12]: Rotation R1b uses a strict bounded secret-free journal and retained mode-0600 generations on the canonical filesystem. File and parent fsyncs bracket each journal/rename transition; startup accepts only phase-reachable old/new pair states, restores and normally validates the old pair before removing a pre-commit journal, and otherwise retains all evidence while failing closed. The publication path remains fixture-only until R1c wires exact consumer activation, probes, commit, and rollback.
+- [Phase 12]: Rotation R1c uses one fixed blackbox-query helper: an OS-controlled interpreter orchestrates an exact label-selected Caddy/BusyBox request with a sanitized four-variable child environment, bounded output and monotonic deadlines, strict duplicate-free JSON/vector/freshness checks, and fixed non-leaking summaries. Caller-supplied URLs, queries, Docker context, labels, and metric identities are not accepted.
 - [Phase 12]: Candidate protocol v2 was preregistered before any held-out attempt so manifests bind both complete role prompts/rendering, the concrete serializer, and the full generation envelope; Phase 11 custody/baselines remain unchanged.
 - [Phase 12]: Local Ollama model identity is verified, but absent installed `/opt` role commands and a timed-out direct decomposer smoke keep runtime readiness open; Plan 12-04 may not consume a frozen/held-out attempt until that gate is real.
 - [Phase 12]: Answer orchestration reuses shared deep retrieval/PPR and a typed `record_access=False` control; no alternate ranking/graph stack or new dependency was introduced.
@@ -436,3 +437,17 @@ unchanged TLS/bootstrap regressions, plus Bash syntax, ShellCheck, Ruff, and
 diff hygiene; post-fix independent operability and security closure reviews
 are clean. No live issuance, publication, consumer recreation, Docker,
 LaunchAgent, model, index, exact-scale, held-out, or protected action ran.
+
+Latest checkpoint (2026-07-13): The isolated R1c blackbox-query helper is
+source-complete. It pins the OS-controlled Python interpreter, constrains the
+Docker executable, selects exactly one running `infra` Caddy container,
+confirms the fixed BusyBox client, and executes only the constant encoded
+VictoriaMetrics query. Every child phase has an outer monotonic deadline;
+captured output is bounded, over-cap and hung children are reaped, child
+stderr is discarded, and only fixed result summaries are emitted. Strict JSON
+validation rejects duplicate keys, non-finite numbers, extra or mistyped
+fields, non-exact labels/value, stale samples, and samples outside the
+activation interval. All 62 focused tests, Bash syntax, ShellCheck, Ruff, and
+the post-fix independent closure review pass. Consumer recreation, private
+dotenv custody, direct probes, durable commit, rollback, and every live action
+remain unimplemented or unrun in their later R1c slices.
