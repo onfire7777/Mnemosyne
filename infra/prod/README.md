@@ -68,6 +68,33 @@ but is not yet wired to live rotation; do not treat its presence as approval
 to recreate consumers or mutate the active certificate pair before the later
 R1c activation, rollback, and hardware-admission gates are complete.
 
+The rotator's R1c **fixture seam only** now proves the activation custody that
+will surround that helper. Before fixture issuance it takes one bounded,
+project-scoped Docker snapshot and requires exactly one running `infra` blackbox
+exporter plus at most one running `infra` operator by Compose labels. It
+validates both external Keycloak password files against the closed mode/length/
+ASCII contract and records only prior running-state booleans. Each recreated
+fixture consumer receives a short-lived mode-`0600`
+dotenv under the external mode-`0700` rotation directory. Before any password
+byte is written, the schema-v2 transaction journal durably binds a planned token
+and then the exact single-link dotenv inode; a transaction-bound schema-v2
+receipt is published only after the payload and `ready` state are durable.
+Neither durable record stores password bytes, a password-derived verifier, or
+password-length metadata. Sanitized Compose children
+receive no ambient environment or password in argv. Cleanup durably enters
+`cleanup`, uses no-replace quarantine plus post-rename inode validation, and
+clears ownership last. Before fixed-receipt publication, the matching journal
+may recover only missing receipt state or exact owner-scoped partial temporary/
+quarantine residue. Once the fixed receipt exists, exact schema-v2 transaction/
+token/inode/link binding is mandatory; legacy or malformed fixed receipts,
+cross-transaction state, extra links, replacements, and foreign artifacts are
+preserved and fail closed. After each recreation the fixture takes one equally
+bounded snapshot and requires the same categorical consumer state, then
+deliberately fails before direct probes, durable commit, or
+rollback. The normal production path still returns `staged_only` and cannot
+recreate a live consumer, so this source evidence is not authorization to run a
+live rotation.
+
 ## Profile + readiness
 ```bash
 cp infra/profiles/self-hosted.env /secure/outside/repo/production-render.env
