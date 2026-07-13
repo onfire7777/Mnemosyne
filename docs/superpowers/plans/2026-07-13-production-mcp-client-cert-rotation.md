@@ -426,6 +426,15 @@ boundary; argv/env/output redaction and exact command shape are asserted.
 
 ### R1b — Journal, publication, and startup recovery
 
+Status: Source-complete on 2026-07-13. The exact R1b selector passes 38 tests,
+the complete rotator file passes 81 tests, and the unchanged production TLS
+validator plus bootstrap regressions pass 22 tests (21 validator and 1
+bootstrap). Bash syntax, ShellCheck, Ruff, and diff hygiene are green, and the
+post-fix independent operability and security closure reviews are clean. The
+fixture-only publication seam stops before consumer activation and leaves its
+durable journal for startup recovery; no live issuance, publication, consumer
+recreation, runtime mutation, protected attempt, or external claim occurred.
+
 Files remain the R1a pair.
 
 RED (expected: missing durable transaction/recovery behavior):
