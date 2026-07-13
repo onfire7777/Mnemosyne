@@ -58,6 +58,16 @@ permissions. Never place the private key or the step-ca
 provisioner password in argv, environment snapshots, logs, evidence bundles,
 or the repository.
 
+The R1c blackbox query helper is intentionally non-configurable: it accepts
+only the activation start epoch, selects exactly one running `infra` Caddy
+container by Compose labels, and queries the fixed internal
+`probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}` vector.
+It rejects stale, ambiguous, oversized, malformed, or non-exact responses and
+prints only a fixed success or failure summary. The helper is source-complete
+but is not yet wired to live rotation; do not treat its presence as approval
+to recreate consumers or mutate the active certificate pair before the later
+R1c activation, rollback, and hardware-admission gates are complete.
+
 ## Profile + readiness
 ```bash
 cp infra/profiles/self-hosted.env /secure/outside/repo/production-render.env

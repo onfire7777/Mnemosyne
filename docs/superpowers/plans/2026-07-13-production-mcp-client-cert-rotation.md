@@ -458,6 +458,17 @@ git diff --check
 
 ### R1c — Consumer activation, probes, and rollback
 
+Status: In progress. The isolated blackbox-query helper slice is
+source-complete on 2026-07-13 with 62 focused tests. It selects exactly one
+running `infra` Caddy container, uses only the fixed BusyBox transport and
+encoded VictoriaMetrics query, caps and times every child phase, validates one
+fresh exact-label vector with duplicate-key rejection, and emits only fixed
+success or failure summaries. Both the embedded interpreter and Docker child
+environment are fail-closed; no live Docker query, consumer recreation, or
+certificate mutation was run. Consumer discovery, private dotenv custody,
+Compose activation, direct probes, durable commit, and rollback remain the
+next R1c slices.
+
 Files:
 
 - `infra/scripts/rotate-production-mcp-client-cert.sh`
