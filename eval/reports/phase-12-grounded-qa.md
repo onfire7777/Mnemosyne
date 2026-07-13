@@ -271,10 +271,11 @@ load bounds, no resident model, one active Colima `infra` project, no
 restarting/unhealthy service, Vault unsealed, and stable API/stream restart
 counts. The pre-hardening live Vault/MCP validation remains preserved as
 recovery evidence. Under the separate lightweight >=35% rule, post-hardening
-Bash syntax, ShellCheck, Ruff, and 20 focused TLS/bootstrap cases pass; live
-Vault/MCP validation was not rerun after the validator hardening. This recovery
-consumed no candidate, held-out, or protected attempt and changes no benchmark
-threshold.
+Bash syntax, ShellCheck, Ruff, and 22 focused TLS/bootstrap cases pass. The
+focused regressions categorically reject a real empty-password encrypted PKCS#8
+key and legacy `Proc-Type: 4,ENCRYPTED`; live Vault/MCP validation was not rerun
+after the validator hardening. This recovery consumed no candidate, held-out,
+or protected attempt and changes no benchmark threshold.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI
