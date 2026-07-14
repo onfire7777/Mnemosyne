@@ -74,8 +74,9 @@ series with `boundary < raw sample <= query time <= receipt time` and a raw
 sample no older than 120 seconds. Ambiguous, oversized, malformed, non-finite,
 or non-exact responses fail closed; output is always a fixed summary.
 
-The rotator's R1c **fixture seam only** now proves the activation custody that
-will surround that helper. Before fixture issuance it takes one bounded,
+The rotator's R1c **fixture seam only** now proves the activation, recovery, and
+success-completion custody that surrounds that helper. Before fixture issuance
+it takes one bounded,
 project-scoped Docker snapshot and requires exactly one running `infra` blackbox
 exporter plus at most one running `infra` operator by Compose labels. It
 validates both external Keycloak password files against the closed mode/length/
@@ -101,38 +102,74 @@ final snapshot it captures a nanosecond boundary, runs fixed mTLS probes for
 root, accepts only a strict single `2xx` status, and invokes the blackbox helper
 exactly once. Synthetic ordering tests bind the boundary after the final
 snapshot, including the optional operator path, and before the first direct
-probe. Immediately before the first fixture consumer touch, the current working
-slice fsyncs `activation_started`. The fake-only path fsyncs and retains
-`committed` only after both direct probes plus fresh blackbox evidence succeed.
-Same-process failures before `committed` remain `publication_failed`. A later
-startup encountering residual schema-v2 `published_validated`,
-`activation_started`, or `committed` fails closed as `recovery_failed` before
-ordinary validation, lifetime, or healthy-noop work and preserves the new pair,
-journal, and generations. `pair_published` and earlier are the last
-unambiguous auto-restorable phases because the prior schema-v2 fixture used
-`published_validated` across consumer activation. Only `activation_started` may
-clean exact transaction-owned dotenv residue; that cleanup neither restores
-nor finalizes the transaction. The fixture does not emit `activated` or
-`committed_recovered`, unlink the journal, reprove/finalize committed state, or
-perform post-activation rollback.
+probe. Immediately before the first fixture consumer touch, the working slice
+fsyncs `activation_started`. The fake-only path fsyncs `committed` only after
+both direct probes plus fresh blackbox evidence succeed, then enters authorized
+completion finalization. A failure
+after durable activation enters fsynced rollback phases, restores and normally
+validates the old pair, recreates exactly the recorded prior consumer set,
+proves stable recreation, repeats both direct probes with the old pair, and
+requires a fresh rollback blackbox success. It ends only as `rolled_back` or
+`rollback_failed`.
 
-The current activation/commit working slice passes the full 278-test
-rotator/blackbox pair, the unchanged 41-test production regression tier, all 39
-section-31 invariant rails, all 7 section-33 harness tests, and both planning
-traceability tests. Every tier ran serialized after a fresh targeted admission
-sample with at least 35% free memory, load1 at most 10, and zero resident
-models. Independent final review found no P0/P1/P2 issue. No live Docker query,
-issuance, certificate publication, or consumer recreation was run by this
-fixture/test slice. Before any live activation, R1c must additionally align the
-host-captured boundary with the VM/VictoriaMetrics clock domain (or prove a
-conservative skew bound), poll across the 60-second scrape cadence with a fixed
-deadline,
-prove stable consumer IDs and restart counts, implement post-activation
-rollback plus committed-state reproof/finalization and journal unlink, pass
-exact-head CI, and pass the strong hardware gate. No protected attempt or
-public claim is authorized by this fixture state. The normal production path
-still returns `staged_only` and cannot recreate a live consumer, so this fixture
-evidence is not authorization to run a live rotation.
+Fixture startup resumes recognized `activation_started`,
+`rollback_restoring_certificate`, `rollback_restoring_key`, and
+`rollback_pair_restored` state without reissuing. Phase/pair corruption,
+Compose path/digest substitution, foreign residue, and consumer-set expansion
+fail closed while preserving evidence. Residual schema-v2
+`published_validated` remains compatibility-ambiguous and is preserved.
+Residual `committed` is re-proved through retained-generation/canonical pair
+identity, the unchanged six-hour validator, exact consumer cardinality and
+stability, both direct probes, and fresh blackbox evidence.
+
+Only `activated` and `committed_recovered` authorize a success completion
+receipt. Before journal unlink, the fixture durably creates or resumes a
+transaction-keyed pending receipt, revalidates and fsyncs its parent, then
+unlinks and parent-fsyncs the journal. It emits
+`mcp-client-rotation result=<result> transaction_id=<id>` once for that
+invocation and durably renames pending to `emitted`. If the emitted-parent fsync
+fails, the receipt returns to pending and the process exits 74 without a second
+result line. A later invocation may replay the same key; receivers must
+deduplicate `(transaction_id,result)`. `emitted` is producer state, not receiver
+acknowledgement. Rollback terminal receipts are not implemented.
+
+The mode-`0600` `.mcp-client-rotation.lock` is a cooperative, whole-invocation
+local rotator lock whose nofollow/device/inode/uid/mode/link identity is checked
+and whose descriptor remains held through the final durable receipt mark.
+Contention returns exactly `lock_deferred`/75. It is not the still-open R2
+cross-workflow `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract and does
+not claim protection from a malicious same-UID process.
+
+Pre-commit working-tree verification based on `82bc5d5e` passes the full
+369-test rotator/blackbox
+pair, the unchanged 41-test production regression tier, all 39 section-31
+invariant rails, all 7 section-33 harness tests, and both planning traceability
+tests. The §33 artifact remains separate because the configured default suite
+collects `tests/`, not `eval/tests`. A fresh strong gate passed at 64%/64%/64%
+free memory, load1 3.23/3.69/3.35, load5 3.37/3.46/3.40, zero models or
+competing work, one reachable canonical 20-service `infra` project,
+initialized/unsealed Vault, stable API/stream identities and zero restart
+counts, and a valid production MCP client chain. The locked configured suite
+collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0 errors
+in 702.564 seconds. These are pre-commit working-tree artifacts based on
+`82bc5d5e`; the tested source/test bytes were committed unchanged as `8e97442`,
+with evidence documentation at `6afd3b3`. Exact-head CI for the final status
+reconciliation remains pending; older pre-completion evidence is historical
+only. A fresh independent read-only security/correctness
+audit found no actionable issue and retained the documented same-UID,
+no-receiver-ack, local-lock-not-R2, and live-rehearsal limits. The gate and
+postflight used
+only read-only Docker/Vault/restart/certificate queries and performed no
+issuance, certificate publication, secret change, or consumer recreation.
+Before any live activation, R1c must additionally align the host-captured
+boundary with the VM/VictoriaMetrics clock domain (or prove a conservative skew
+bound), poll across the 60-second scrape cadence with a fixed deadline, prove
+stable consumer IDs and restart counts, land R2 cross-workflow locking, pass
+exact-head CI, and pass a new strong hardware gate. R3/R4 and live rotation plus
+subsequent no-op proof remain open. No protected attempt or public claim is
+authorized by this fixture state. The normal production path still returns
+`staged_only` and cannot recreate a live consumer, so this fixture evidence is
+not authorization to run a live rotation.
 
 ## Profile + readiness
 ```bash
