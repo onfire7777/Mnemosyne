@@ -153,9 +153,10 @@ counts, and a valid production MCP client chain. The locked configured suite
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0 errors
 in 702.564 seconds. These are pre-commit working-tree artifacts based on
 `82bc5d5e`; the tested source/test bytes were committed unchanged as `8e97442`,
-with evidence documentation at `6afd3b3`. Exact-head CI for the final status
-reconciliation remains pending; older pre-completion evidence is historical
-only. A fresh independent read-only security/correctness
+with evidence documentation at `6afd3b3`. Exact-head CI `29313243324` passed on
+final PR head `88067bc`; PR #12 merged as `97f3c66`, and post-merge CI
+`29314015888` passed all six gating jobs. Older pre-completion evidence is
+historical only. A fresh independent read-only security/correctness
 audit found no actionable issue and retained the documented same-UID,
 no-receiver-ack, local-lock-not-R2, and live-rehearsal limits. The gate and
 postflight used

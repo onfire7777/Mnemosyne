@@ -18,9 +18,9 @@
 
 | ID | Requirement | Authority | Status |
 |---|---|---|---|
-| [ ] CAP-001 | Iterative query decomposition, multi-hop retrieval/PPR, evidence assembly, and grounded reading answer only from provenance-tagged evidence. | Plan A S1 | Planned |
-| [ ] CAP-002 | Every synthesized claim traces to evidence CIDs and the reader abstains when retrieved evidence cannot ground the answer. | Plan A S1 / §31 | Planned |
-| [ ] CAP-003 | `qa_hard_v2` and the held-out LongMemEval-QA public-dataset/internal-only QA track reach at least 0.85 under disclosed-reader evaluation without deterministic-recall regression. | Plan A S1 / Plan B | Planned |
+| [ ] CAP-001 | Iterative query decomposition, multi-hop retrieval/PPR, evidence assembly, and grounded reading answer only from provenance-tagged evidence. | Plan A S1 | Partial — source path implemented; measured quality and graph-effect closure pending |
+| [ ] CAP-002 | Every synthesized claim traces to evidence CIDs and the reader abstains when retrieved evidence cannot ground the answer. | Plan A S1 / §31 | Partial — grounding/abstention source path implemented; frozen and held-out closure pending |
+| [ ] CAP-003 | `qa_hard_v2` and the held-out LongMemEval-QA public-dataset/internal-only QA track reach at least 0.85 under disclosed-reader evaluation without deterministic-recall regression. | Plan A S1 / Plan B | Partial — deterministic retrieval is non-regressed; both QA thresholds remain open |
 | [ ] CAP-004 | Public security columns measure attack success under defense across MINJA, AgentPoison, and PoisonedRAG-style cases. | Plan A S3 / Plan B | Planned |
 | [ ] CAP-005 | Public-label calibration emits reliability diagrams, ECE, abstention quality, and judge diagnostics consumable by the bundle. | Plan A S3 | Planned |
 | [ ] CAP-006 | Performance/scale cells provide measured warm and concurrent P95, 100k-item behavior, and provider-default evidence without asserted-only numbers. | Plan A S4 | Planned |

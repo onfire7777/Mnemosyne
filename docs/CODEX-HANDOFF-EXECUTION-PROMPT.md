@@ -2,7 +2,7 @@
 
 > Paste everything below the line into Codex as the task brief. It is written to be self-contained, but it points Codex at the authoritative in-repo docs as source of truth.
 
-> **Live-status warning (2026-07-13):** This document initiated the program;
+> **Live-status warning (2026-07-14):** This document initiated the program;
 > its original queue is historical. Resume from `.planning/STATE.md`,
 > `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`. Do not restart M4,
 > M1.1, or the archived Phase 8/9 queue.
@@ -32,7 +32,7 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
 - **Stack:** Python ≥3.12 core (only required dep: `cryptography`; optional extras for psycopg/mcp/sqlite-vec) + **Rust** (PyO3 kernels for MMR/PPR; axum embed/rerank sidecar). Embedding service in `services/embedding/` (FastAPI+torch, 1024-dim; deterministic hashing fallback). Self-hosted Docker Compose infra (Postgres, Keycloak, Vault, SeaweedFS, Caddy, step-ca, VictoriaMetrics/Grafana, Ollama role-LLM, c2patool). Surfaces: `mneme` CLI (91 subcommands), `mneme-mcp` (48 MCP tools).
 
 ## 2. Current state
-- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11. Its source-owned prerequisite is green in pre-commit artifacts whose tested source/test bytes were committed unchanged as `8e97442`, while immutable external manifest/runtime custody, the exact-scale development receipt, and protected evidence remain pending. R1c implementation and evidence documentation are pushed on ready PR #12 as `8e97442` and `6afd3b3`; final-status exact-head CI and merge remain open.
+- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11. Its source-owned prerequisite is green in pre-commit artifacts whose tested source/test bytes were committed unchanged as `8e97442`, while immutable external manifest/runtime custody, the exact-scale development receipt, and protected evidence remain pending. R1c merged through PR #12 as `97f3c66`; exact-head CI `29313243324` and post-merge CI `29314015888` are green. Graphify, CBM, and gbrain `mnemosyne-code` were refreshed at that merge. R2a cross-workflow runtime locking is the next source slice; R2b-R2d, R3/R4, live proof, and the external Vault trust-file maintenance defect remain open.
 - The public harness, LongMemEval retrieval, and deterministic HippoRAG retrieval tracks are wired under PBPP custody. No result is externally headline-eligible. Historical private-suite numbers remain internal QA only, and current public/protected claims still require PBPP plus independent reproduction.
 
 ## 3. Strategic decisions you must honor
@@ -62,11 +62,12 @@ This section is a routing summary, not an independent tracker. The exact next
 task, branch, evidence state, and blockers come from `.planning/STATE.md`,
 `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`.
 
-1. **Resume Phase 12 Plan 12-04 at its recorded checkpoint.** Finish the active
-   R1c completion-protocol slice through exact-head CI → merge → post-merge
-   Graphify/CBM/gbrain refresh. Preserve the
-   staged-only/live-mutation boundary; R2/R3/R4 and live rotation/no-op proof
-   remain separate open work.
+1. **Resume Phase 12 Plan 12-04 at its recorded checkpoint.** R1c is merged and
+   its post-merge CI/index closure is recorded. Implement R2a's fail-closed
+   `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` helper next, then continue
+   R2b-R2d without conflating the existing local rotator lock with the shared
+   cross-workflow contract. Preserve the staged-only/live-mutation boundary;
+   R3/R4 and live rotation/no-op proof remain separate open work.
 2. **Complete candidate-v19 prerequisites in order.** Immutable external
    manifest/runtime custody → digest-bound 24/24 `qa_scale_dev_v1` receipt → at
    most one protected `qa_hard_v2`

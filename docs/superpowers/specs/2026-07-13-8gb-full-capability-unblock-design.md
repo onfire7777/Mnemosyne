@@ -12,6 +12,28 @@ rule, publication gate, or human-only governance boundary is changed here.
 Approval authorizes implementation, not an 8 GiB compatibility result or a
 benchmark/public claim.
 
+## 0. Execution delta — 2026-07-14
+
+This dated delta supersedes only the mutable operational status in P5, P9,
+A2, and A3 below; their 2026-07-13 evidence remains historical. R1c merged
+through PR #12 as `97f3c66`. Exact-head CI `29313243324` and post-merge CI
+`29314015888` are green. Graphify (16,202 nodes / 27,648 edges / 1,174
+communities), CBM (17,685 nodes / 70,259 edges), and gbrain
+`mnemosyne-code` (full merge SHA, 100% embedding coverage, zero
+unacknowledged failures) were refreshed at that merge. R2a runtime-exclusive
+locking is now the active source slice. R2b-R2d, R3/R4, live rotation/no-op
+proof, candidate-v19 external custody and exact-scale evidence, every
+protected/public action, and physical 8 GiB acceptance remain open.
+
+Two maintenance facts remain explicit rather than being hidden by a green
+source sync: gbrain Doctor retains a historical 24-hour worker warning from an
+earlier unavailable localhost Postgres window plus an unscoped global
+cycle-freshness failure, and the external Vault `vault-tls/ca.crt` contains the
+wrong trust root while `step-ca-root.crt` validates the live Vault chain.
+The CA repair is ordered after R2a so it can run under the shared
+cross-workflow lock with a retained hash-bound rollback file. Neither issue
+authorizes audit deletion, an undocumented global model job, or TLS weakening.
+
 ## 1. Governing principles
 
 1. **Full capability at physical 8 GiB.** Every product capability and every
