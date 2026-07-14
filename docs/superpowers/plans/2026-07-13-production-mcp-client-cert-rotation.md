@@ -509,8 +509,10 @@ git diff --check
 ### R1c — Consumer activation, probes, and rollback
 
 Status: The current success-completion/committed-finalization source-and-fixture
-slice is complete on the working tree; remaining R1c live-readiness work, the
-evidence commit, exact-head CI, merge, and live proof remain open. The isolated
+slice is committed and pushed as `8e97442`, with evidence documentation at
+`6afd3b3`; pushed head `6afd3b3` matched upstream/remote with a clean tree before
+this status reconciliation. Final-head exact-head CI, merge, remaining R1c
+live-readiness work, and live proof remain open. The isolated
 blackbox-query helper selects exactly one running `infra` Caddy container,
 uses only the fixed BusyBox transport and encoded MetricsQL
 `timestamp(probe_success[2m]) if (last_over_time(probe_success[2m]) == 1)`
@@ -561,7 +563,8 @@ same key on a later invocation; receivers must deduplicate it. No receiver ack
 exists, historical emitted receipts are retained, and rollback terminal
 receipts remain open.
 
-Current working-tree verification passes the full 369-test rotator/blackbox
+Pre-commit working-tree verification based on `82bc5d5e` passes the full
+369-test rotator/blackbox
 pair, the unchanged 41-test TLS/bootstrap/Compose-policy tier, all 39
 section-31 invariant rails, all 7 section-33 harness tests, and both planning
 traceability tests. The §33 artifact is separate because the configured default
@@ -571,11 +574,13 @@ models or competing work, one reachable canonical 20-service `infra` project,
 initialized/unsealed Vault, stable API/stream identities and restart counts,
 and a valid production MCP client chain. The locked configured suite then
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0
-errors in 702.564 seconds. These artifacts exercise the dirty working tree
-based on `82bc5d5e`; exact-head CI for the eventual evidence commit remains
-pending. Older pre-completion evidence is historical only.
+errors in 702.564 seconds. These artifacts exercise the pre-commit working tree
+based on `82bc5d5e`; the tested source/test bytes were committed unchanged as
+`8e97442`, with evidence documentation at `6afd3b3`. Exact-head CI for the final
+status reconciliation remains pending. Older pre-completion evidence is
+historical only.
 A fresh independent read-only security/correctness audit found no actionable
-issue in the current diff. Its residual limits match this contract: same-UID
+issue in the committed R1c diff. Its residual limits match this contract: same-UID
 execution is trusted, producer output has no receiver ack, the local lock is not
 R2, injected crash tests are not physical APFS power-loss proof, and R4 live
 rehearsal remains required.

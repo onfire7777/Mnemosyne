@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c now has fixture-proven committed reproof/finalization, transaction-keyed success receipts, and whole-invocation cooperative rotator locking; current working-tree evidence is green through a hardware-admitted 2,636-test full suite. The evidence commit, exact-head CI, R2/R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, and every protected/public or human-owned action remain open. Mutable external-index freshness must be verified after the evidence commit in PR #12 rather than self-attested here
-last_updated: "2026-07-14T06:39:09Z"
+stopped_at: Phase 12 production MCP client rotation R1c now has fixture-proven committed reproof/finalization, transaction-keyed success receipts, and whole-invocation cooperative rotator locking; the implementation and evidence documentation are pushed as 8e97442 and 6afd3b3, and pushed head 6afd3b3 matched upstream/remote with a clean tree before this status reconciliation. Final-status exact-head CI, merge, R2/R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, and every protected/public or human-owned action remain open. Mutable external-index freshness must be verified after the final merge head rather than self-attested here
+last_updated: "2026-07-14T06:58:25Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -39,7 +39,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
 Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and pre-activation startup recovery. The current R1c fixture seam adds crash-resumable activation rollback plus committed-state reproof/finalization for `activated` and `committed_recovered`. It first revalidates the canonical pair against the retained `generation.<transaction>.new.{crt,key}` files with the unchanged six-hour validator, then durably creates or resynchronizes a transaction-bound pending completion receipt before journal unlink and parent fsync, and finally reports `mcp-client-rotation result=<result> transaction_id=<id>` before marking the receipt `emitted`. A crash may replay that same keyed producer event until the receipt is durably marked `emitted`; receivers must deduplicate `(transaction_id,result)`, and `emitted` is not receiver acknowledgement. A whole-invocation `.mcp-client-rotation.lock` serializes cooperative rotator processes only; it is not the still-open R2 cross-workflow custody lock, and same-UID malicious isolation is not claimed. Rollback terminal receipts remain open. The ordinary production path remains `staged_only`; live runtime proofs and every live/protected/public action remain gated
-Last activity: 2026-07-13 — Current working-tree evidence passes the full 369/369 rotator/blackbox pair, 41/41 unchanged production regressions, 39/39 section-31 rails, 7/7 section-33 harness tests, and 2/2 planning traceability tests. A complete three-sample strong gate passed at 64%/64%/64% free memory with load1 3.23/3.69/3.35, load5 3.37/3.46/3.40, zero models or competing work, one reachable canonical 20-service `infra` project, valid production MCP mTLS, initialized/unsealed Vault, and stable API/stream identity and restart counts. It admitted the locked full working-tree suite: 2,636 total, 2,496 passed, 140 expected skips, 0 failures, 0 errors, 702.564 seconds. Postflight remained clean at 67% free memory with zero active test/eval/model processes, 20 healthy services, zero API/stream restarts, valid mTLS, and unsealed Vault. Exact-head CI for the uncommitted R1c changes remains pending; prior base-head CI is historical, not evidence for this working tree. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred
+Last activity: 2026-07-13 — Pre-commit working-tree evidence passes the full 369/369 rotator/blackbox pair, 41/41 unchanged production regressions, 39/39 section-31 rails, 7/7 section-33 harness tests, and 2/2 planning traceability tests. A complete three-sample strong gate passed at 64%/64%/64% free memory with load1 3.23/3.69/3.35, load5 3.37/3.46/3.40, zero models or competing work, one reachable canonical 20-service `infra` project, valid production MCP mTLS, initialized/unsealed Vault, and stable API/stream identity and restart counts. It admitted the locked full working-tree suite: 2,636 total, 2,496 passed, 140 expected skips, 0 failures, 0 errors, 702.564 seconds. Postflight remained clean at 67% free memory with zero active test/eval/model processes, 20 healthy services, zero API/stream restarts, valid mTLS, and unsealed Vault. The tested source/test bytes were committed unchanged in `8e97442`, the evidence documentation was pushed in `6afd3b3`, and pushed head `6afd3b3` matched upstream/remote with a clean tree before this status reconciliation; exact-head CI for the final PR head remains required before merge. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred
 
 ## Performance Metrics
 
@@ -225,8 +225,8 @@ Latest checkpoint (2026-06-28): T-SEC protected registry breadth is reconciled w
 
 ## Session Continuity
 
-Current continuation: 2026-07-14T06:39:09Z
-Stopped at: R1c completion-receipt/committed-finalization evidence is green on the working tree and draft PR #12 is open; finish independent review and documentation, commit/push, require exact-head CI, then synchronize Graphify/CBM/gbrain against that exact head without consuming protected evidence
+Current continuation: 2026-07-14T06:58:25Z
+Stopped at: R1c implementation `8e97442` and evidence documentation `6afd3b3` are pushed on ready PR #12, which is in final exact-head CI and merge closure; require green exact-head CI, merge, then synchronize Graphify/CBM/gbrain against the final merge head without consuming protected evidence
 
 Historical source-hardening checkpoint (2026-06-30): The exact-parity lane closed the Phase 8 MFA elevation defect: elevated OIDC authz rules require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This checkpoint predates and is superseded by the Tier-B attestation above.
 
@@ -459,7 +459,9 @@ Ubuntu and macOS native wheels, and unit/drift all passed; only the explicitly
 non-gating nightly soak was skipped.
 
 Latest checkpoint (2026-07-13): R1c committed recovery/finalization and its
-success-completion protocol are fixture-proven on the current working tree.
+success-completion protocol are fixture-proven in source committed as
+`8e97442`; the cited runtime artifacts were captured from the pre-commit
+working tree based on `82bc5d5e`.
 Only `activated` and `committed_recovered` may authorize a schema-v1 completion
 receipt. The rotator first binds the canonical certificate/key bytes to the
 retained transaction `new` generations and re-runs the unchanged six-hour
@@ -478,7 +480,7 @@ fixed `lock_deferred`/75 outcome on cooperative contention. It does not replace
 the still-open R2 `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract and
 does not claim isolation from a malicious process running as the same uid.
 
-Current working-tree verification records 369 rotator/blackbox tests, 41
+Pre-commit working-tree verification based on `82bc5d5e` records 369 rotator/blackbox tests, 41
 production TLS/bootstrap/Compose-policy regressions, all 39 section-31 rails,
 all 7 section-33 harness tests, and both planning traceability tests, all green.
 After bounded orphan-agent reclamation, a fresh strong gate admitted the full
@@ -487,8 +489,10 @@ competing work, one canonical 20-service stack, valid MCP mTLS, unsealed Vault,
 and stable API/stream identities. JUnit artifact
 `/tmp/mnemosyne-r1c-full-workingtree-82bc5d5e-20260713T2324.xml` records 2,636
 total, 2,496 passed, 140 expected skips, 0 failures, 0 errors, and 702.564
-seconds; wrapper status is 0. Postflight remained clean. This is working-tree evidence based on
-`82bc5d5e`, not exact-head CI for the uncommitted changes. Exact-head CI,
-merge/main verification, R2/R3/R4, live rotation/no-op proof, and post-commit
+seconds; wrapper status is 0. Postflight remained clean. This is pre-commit
+working-tree evidence based on `82bc5d5e`; the tested source/test bytes were
+committed unchanged as `8e97442`, with evidence documentation at `6afd3b3`.
+Exact-head CI for the final status reconciliation, merge/main verification,
+R2/R3/R4, live rotation/no-op proof, and post-merge
 Graphify/CBM/gbrain freshness remain open. No exact-scale, protected, held-out,
 public, governance-seating, or external-reproduction action occurred.

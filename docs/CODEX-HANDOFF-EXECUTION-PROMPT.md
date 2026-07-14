@@ -32,7 +32,7 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
 - **Stack:** Python ≥3.12 core (only required dep: `cryptography`; optional extras for psycopg/mcp/sqlite-vec) + **Rust** (PyO3 kernels for MMR/PPR; axum embed/rerank sidecar). Embedding service in `services/embedding/` (FastAPI+torch, 1024-dim; deterministic hashing fallback). Self-hosted Docker Compose infra (Postgres, Keycloak, Vault, SeaweedFS, Caddy, step-ca, VictoriaMetrics/Grafana, Ollama role-LLM, c2patool). Surfaces: `mneme` CLI (91 subcommands), `mneme-mcp` (48 MCP tools).
 
 ## 2. Current state
-- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11. Its source-owned full-suite prerequisite is green on the current R1c working tree, while immutable external manifest/runtime custody, the exact-scale development receipt, and protected evidence remain pending. R1c completion-protocol work is on draft PR #12; its evidence commit and exact-head CI remain open.
+- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11. Its source-owned prerequisite is green in pre-commit artifacts whose tested source/test bytes were committed unchanged as `8e97442`, while immutable external manifest/runtime custody, the exact-scale development receipt, and protected evidence remain pending. R1c implementation and evidence documentation are pushed on ready PR #12 as `8e97442` and `6afd3b3`; final-status exact-head CI and merge remain open.
 - The public harness, LongMemEval retrieval, and deterministic HippoRAG retrieval tracks are wired under PBPP custody. No result is externally headline-eligible. Historical private-suite numbers remain internal QA only, and current public/protected claims still require PBPP plus independent reproduction.
 
 ## 3. Strategic decisions you must honor
@@ -63,10 +63,10 @@ task, branch, evidence state, and blockers come from `.planning/STATE.md`,
 `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`.
 
 1. **Resume Phase 12 Plan 12-04 at its recorded checkpoint.** Finish the active
-   R1c completion-protocol slice: independent review and documentation →
-   evidence commit/push → exact-head CI → post-commit Graphify/CBM/gbrain
-   refresh. Preserve the staged-only/live-mutation boundary; R2/R3/R4 and live
-   rotation/no-op proof remain separate open work.
+   R1c completion-protocol slice through exact-head CI → merge → post-merge
+   Graphify/CBM/gbrain refresh. Preserve the
+   staged-only/live-mutation boundary; R2/R3/R4 and live rotation/no-op proof
+   remain separate open work.
 2. **Complete candidate-v19 prerequisites in order.** Immutable external
    manifest/runtime custody → digest-bound 24/24 `qa_scale_dev_v1` receipt → at
    most one protected `qa_hard_v2`
