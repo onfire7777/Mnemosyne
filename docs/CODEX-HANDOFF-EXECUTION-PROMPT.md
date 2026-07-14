@@ -32,8 +32,9 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
 - **Stack:** Python ≥3.12 core (only required dep: `cryptography`; optional extras for psycopg/mcp/sqlite-vec) + **Rust** (PyO3 kernels for MMR/PPR; axum embed/rerank sidecar). Embedding service in `services/embedding/` (FastAPI+torch, 1024-dim; deterministic hashing fallback). Self-hosted Docker Compose infra (Postgres, Keycloak, Vault, SeaweedFS, Caddy, step-ca, VictoriaMetrics/Grafana, Ollama role-LLM, c2patool). Surfaces: `mneme` CLI (91 subcommands), `mneme-mcp` (48 MCP tools).
 
 ## 2. Current state
-- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11. Its source-owned prerequisite is green in pre-commit artifacts whose tested source/test bytes were committed unchanged as `8e97442`, while immutable external manifest/runtime custody, the exact-scale development receipt, and protected evidence remain pending. R1c merged through PR #12 as `97f3c66`; exact-head CI `29313243324`, post-merge CI `29314015888`, and ordinary scheduled-main CI `29318113932` are green. R2a's fail-closed cross-workflow coordinator and 39-test focused suite are implemented, independently reviewed, and pushed as `a91da2e`; its stacked PR, exact-head CI, merge, and final Graphify/CBM/gbrain refresh remain open. R2b-R2d, R3/R4, live proof, and the external Vault trust-file maintenance defect also remain open.
+- **v1.0 is attested** (2026-07-07). In v2.0, Phases 10 and 11 are complete and Phase 12 Plan 12-04 is the active critical path. Candidate v19 is committed on draft PR #11. Its source-owned prerequisite is green in pre-commit artifacts whose tested source/test bytes were committed unchanged as `8e97442`, while immutable external manifest/runtime custody, the exact-scale development receipt, and protected evidence remain pending. R1c merged through PR #12 as `97f3c66`; exact-head CI `29313243324`, post-merge CI `29314015888`, and ordinary scheduled-main CI `29318113932` are green. R2a baseline commits `a91da2e`/`48be88a` are pushed and stacked PR #13 is open, non-draft, and mergeable. Exact-head CI `29354723518` is green for old PR head `48be88a`; it does not cover the current locally green 55/55 focused, 39/39 §31, 7/7 §33, and 2/2 planning review fixes. GitHub CodeRabbit skipped the stacked-base review; the final terminal review completed with its sole Plan B wording request already satisfied, and independent final reviews are merge-clean. Commit/push, new exact-head PR #13 CI, PR13-to-PR11 merge, exact-head PR #11 CI, PR11-to-main merge, post-merge main CI, and exact-main Graphify/CBM/gbrain refresh remain open. R2b-R2d, R3/R4, live proof, and the external Vault trust-file maintenance defect also remain open.
 - The public harness, LongMemEval retrieval, and deterministic HippoRAG retrieval tracks are wired under PBPP custody. No result is externally headline-eligible. Historical private-suite numbers remain internal QA only, and current public/protected claims still require PBPP plus independent reproduction.
+- Full/index/model/live work is not admitted by a single good host sample. Run the complete three-sample hardware, TLS, Vault, service, and topology preflight first. The latest read-only gbrain Doctor result has one non-OK check (`cycle_freshness`); supervisor crashes are zero, historical failures are acknowledged, and no source sync has yet been admitted for this slice.
 
 ## 3. Strategic decisions you must honor
 - **PBPP is in force.** A public number may be published only if (a) produced by the pinned `eval/public/` harness, (b) shipped with the full artifact bundle, (c) reporting **retrieval-recall and LLM-judged-QA in SEPARATE columns** with judge model+prompt disclosed, (d) never conflated with the private suite, and (e) genuinely reproduced by an independent third party through the human-owned M3 process. Private-suite numbers stay internal QA forever.
@@ -62,13 +63,16 @@ This section is a routing summary, not an independent tracker. The exact next
 task, branch, evidence state, and blockers come from `.planning/STATE.md`,
 `.planning/ROADMAP.md`, and `.planning/REQUIREMENTS.md`.
 
-1. **Resume Phase 12 Plan 12-04 at its recorded checkpoint.** R2a implementation
-   commit `a91da2e` is pushed and reviewed. Open its stacked PR, obtain exact-head
-   CI, merge the match-head commit, and refresh Graphify, CBM, and gbrain. Only
-   after merged acceptance, run the separately rollback-safe Vault CA repair
-   under the shared lock and continue R2b-R2d without conflating the local
-   rotator lock with the shared contract. Preserve the staged-only/live-mutation
-   boundary; R3/R4 and live rotation/no-op proof remain separate open work.
+1. **Resume Phase 12 Plan 12-04 at its recorded checkpoint.** PR #13 is already
+   open. Finish and commit the current R2a review fixes, rerun terminal
+   CodeRabbit, obtain new exact-head CI for the pushed head, and merge only that
+   exact head into PR #11. Promote PR #11 only after its new exact-head CI,
+   merge it to `main`, verify post-merge main CI, then refresh Graphify, CBM,
+   and gbrain against the exact main SHA. Only after merged acceptance, run the
+   separately rollback-safe Vault CA repair under the shared lock and continue
+   R2b-R2d without conflating the local rotator lock with the shared contract.
+   Preserve the staged-only/live-mutation boundary; R3/R4 and live
+   rotation/no-op proof remain separate open work.
 2. **Complete candidate-v19 prerequisites in order.** Immutable external
    manifest/runtime custody → digest-bound 24/24 `qa_scale_dev_v1` receipt → at
    most one protected `qa_hard_v2`
@@ -100,12 +104,54 @@ exact-head CI. Keep external/human gates explicit rather than marking the
 engagement complete around them.
 
 ## 7. Working conventions
-- Small, reviewable PRs, one task each; conventional commits.
-- Run the existing test + eval gates before every merge; never merge red.
+- Load `project-orchestration` for the persistent lifecycle and keep GSD as the
+  single durable phase/roadmap owner. Use `gsd-autonomous` and `gsd-graphify`
+  only at their named execution and graph-refresh checkpoints.
+- Keep multiple bounded subagents active for independent implementation,
+  research, and review lanes when they do not conflict. Give every subagent the
+  same hard stops and workflow rules, serialize shared-file/stateful work, and
+  explicitly close each lane after collecting its evidence.
+- Apply Ponytail to every code, refactor, debug, review, and dependency choice;
+  prefer no change, reuse, standard library, platform support, and installed
+  dependencies before minimal new code. Use test-driven development for every
+  behavior change and systematic debugging for every failure.
+- Use context-mode/Think-in-Code for large output and session recall; use
+  Context7 for current library/SDK/API/CLI documentation. Use CBM first for
+  repository architecture/search/trace/impact and `cbm-holistic` for broad
+  changes. Use gbrain-system for durable project knowledge, never as a CBM
+  substitute, and do not duplicate ownership across memory systems.
+- Small, reviewable PRs, one task each; conventional commits. Before staging,
+  inspect the complete diff and run the secret/risky-file sweep. Never discard
+  user changes, bypass hooks, rewrite shared history, or force-push.
+- Run the admitted targeted/full test and eval gates, verification-before-
+  completion, independent review, and terminal CodeRabbit before every merge;
+  never merge red or reuse stale-head CI. Commit/push incrementally, require
+  exact-head checks, verify the merged SHA, and keep local, GitHub, docs, CBM,
+  Graphify, and gbrain reconciled to that same accepted SHA.
 - Prefer deterministic grading; when an LLM judge is unavoidable, disclose model + prompt and report its acceptance rate on intentionally-wrong-but-topical answers.
 - If a plan doc and this prompt disagree, the plan doc wins; if reality (the code) and the plan disagree, surface it and propose an update rather than forcing the plan.
 - Stop and escalate before changing any §31 rail or adding a core dependency.
   Agents never publish an external-facing number; prepare the complete decision
   packet for human approval and action.
 
-**Definition of done for the engagement:** LongMemEval-recall + HippoRAG-multihop wired and passing in `eval/public/` with bundles; multi-hop QA ≥ 0.85; Plan A S2–S5 closed, including physical 8 GiB compact grounded-QA acceptance; security/calibration columns publishable; PBPP in force; ≥1 headline number independently reproduced; all §31/§33 gates green. Then proceed to the leaderboard build (Plan B Part II).
+## 8. Definition of done
+
+**Current R2a delivery slice:** PR #13 and PR #11 land on `main` at exact green
+heads; post-merge main CI is green; the worktree and remote are clean; canonical
+docs name the main SHA; and Graphify, CBM, and gbrain are refreshed only after a
+complete admitted hardware window. R2b-R2d, R3/R4, Vault CA repair, live proof,
+and candidate-v19 evidence remain explicitly open rather than being implied done.
+
+**Agent-owned program:** execute all remaining Plan A and Plan B source-owned
+work through Plan B L4 preparation: public harness and bundles; both ≥0.85 QA
+tracks; retrieval non-regression; positive graph/PPR contribution; physical
+Windows/Linux 8 GiB full-capability acceptance; security/calibration/scale
+evidence; reproducibility materials; governance and publication packets;
+leaderboard repository/site/explainers/methods/raw-data launch artifacts; and
+all §31/§33/custody/exact-SHA gates. Do not stop at Plan B Part I.
+
+**Human-only overall gates:** the engagement is not externally launch-complete
+until the human operator seats/ratifies the independent board, commissions and
+receives genuine third-party reproduction, approves public wording, and
+publishes. Agents prepare complete packets but never impersonate those acts or
+publish a number.

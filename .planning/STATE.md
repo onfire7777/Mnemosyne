@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: R2a's fail-closed runtime-exclusive coordinator and 39-test focused suite are implemented, independently reviewed, committed, and pushed as a91da2e on codex/r2a-runtime-exclusive-lock. Its stacked PR, exact-head CI, merge, and final Graphify/CBM/gbrain refresh remain open. R2b-R2d, R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, every protected/public or human-owned action, and the separate Vault trust-file maintenance defect also remain open
-last_updated: "2026-07-14T17:33:29Z"
+stopped_at: R2a PR #13 is open on codex/r2a-runtime-exclusive-lock. Its old remote head 48be88a passed exact-head CI 29354723518; the current terminal-CodeRabbit/independent-review fixes are review-clean and locally green at 55/55 focused, 39/39 section-31, 7/7 section-33, and 2/2 planning tests but remain dirty and unpushed pending commit, new exact-head CI, PR13-to-PR11 merge, PR11-to-main delivery, post-merge main CI, and exact-main Graphify/CBM/gbrain refresh. R2b-R2d, R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, every protected/public or human-owned action, and the separate Vault trust-file maintenance defect also remain open
+last_updated: "2026-07-14T23:44:50Z"
 last_activity: 2026-07-14
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. R1c's tested source, completion protocol, and evidence are merged into that branch through PR #12 at `97f3c66`; the ordinary production path remains `staged_only`, rollback terminal receipts remain open, and no live/protected/public authorization follows from fixture evidence. R2a's `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` coordinator and focused tests are pushed as `a91da2e` after independent correctness and security review. R2a is not accepted until its stacked PR, exact-head CI, merge, and final mutable-index refresh close. R2b-R2d integrations remain open. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation after merged R2a acceptance, not deletion or TLS weakening.
-Last activity: 2026-07-14 — R2a commit `a91da2e` is pushed with green `bash -n`, ShellCheck, Ruff check/format, `git diff --check`, 39/39 focused lock tests, 39/39 section-31 rails, and 7/7 section-33 tests. Independent review found and closed an acquisition publication race and child-signal-status defect; the final security review found no P0-P2 blocker. R2a has no PR or exact-head CI yet. The immutable R1c evidence remains 369/369 rotator/blackbox, 41/41 production regressions, 2/2 planning tests, and a hardware-admitted 2,636-test configured suite with 2,496 passed, 140 expected skips, and no failures/errors. PR #12 merged as `97f3c66` after exact-head CI `29313243324`; post-merge CI `29314015888` and ordinary scheduled-main CI `29318113932` are green. Graphify (16,202 nodes / 27,648 edges / 1,174 communities), CBM (17,685 nodes / 70,259 edges), and gbrain `mnemosyne-code` remain the last accepted merge-bound receipt at PR #12; R2a source changes reopen final-head freshness until its merge. Gbrain Doctor still carries the bounded historical worker-crash warning and separate global cycle-freshness failure; neither is misreported as globally clean. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. R1c's tested source, completion protocol, and evidence are merged into that branch through PR #12 at `97f3c66`; the ordinary production path remains `staged_only`, rollback terminal receipts remain open, and no live/protected/public authorization follows from fixture evidence. R2a baseline implementation `a91da2e` and status reconciliation `48be88a` are pushed on `codex/r2a-runtime-exclusive-lock`; stacked PR #13 is open, non-draft, and mergeable against PR #11. Exact-head CI run `29354723518` is green for old remote head `48be88a`, not for the current dirty review-fix surface. GitHub CodeRabbit skipped the stacked-base review. The final authenticated terminal review completed with one Plan B publication-wording request already satisfied in the current diff, and the final independent production/test reviews are merge-clean on exact file hashes. R2a is not accepted until commit/push, a new exact-head run, PR #13 merges into PR #11, PR #11 is promoted with exact-head CI and merges to `main`, post-merge main CI passes, and the final mutable-index refresh is bound to that exact main SHA. R2b-R2d integrations remain open. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation after merged R2a acceptance, not deletion or TLS weakening.
+Last activity: 2026-07-14 — The current uncommitted R2a review-fix surface passes `bash -n`, ShellCheck, Ruff check/format, `git diff --check`, 55/55 focused lock tests, 39/39 section-31 rails, 7/7 section-33 tests, and 2/2 planning tests. It adds descriptor-relative ancestry validation, bounded held-partial owner publication, pre-launch cleanup versus post-launch evidence retention, inherited-signal restoration, an unreaped exited leader as the non-reusable PGID anchor, bounded descendant drain with post-exit signal forwarding, atomic final scan/unpublication/reap plus a no-signal post-reap group-existence proof, release-driven test cleanup without unsafe PID/PGID signalling, and explicit non-execution coverage. Final independent review is merge-clean and the terminal CodeRabbit rerun completed; commit/push and new exact-head CI remain pending. The immutable R1c evidence remains 369/369 rotator/blackbox, 41/41 production regressions, and a hardware-admitted 2,636-test configured suite with 2,496 passed, 140 expected skips, and no failures/errors. PR #12 merged as `97f3c66` after exact-head CI `29313243324`; post-merge CI `29314015888` and ordinary scheduled-main CI `29318113932` are green. Graphify (16,202 nodes / 27,648 edges / 1,174 communities), CBM (17,685 nodes / 70,259 edges), and gbrain `mnemosyne-code` remain the last accepted merge-bound receipt at PR #12; mutable CBM counts observed during this dirty slice are not final-SHA proof. A 34% free-memory sample rejected targeted work; approved Brave/Discord reclamation later produced admitted 59% through 75% samples. The final serialized gates above ran at 58%–63% free memory, load within the targeted threshold, and zero resident models. Full/index/model/live work remains unadmitted until the complete three-sample runbook and service/TLS/topology checks pass. The latest read-only gbrain Doctor probe reports one non-OK check, `cycle_freshness`; supervisor health is clean with zero 24-hour crashes, all nine historical sync failures are acknowledged, and embeddings are complete. No gbrain write/source sync was admitted, and the probe's transient embedding model was stopped before the fresh targeted samples. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
 
 ## Performance Metrics
 
@@ -86,7 +86,7 @@ Last activity: 2026-07-14 — R2a commit `a91da2e` is pushed with green `bash -n
 - [Phase 12]: Reuse shared retrieval/PPR and the existing Ollama role-provider boundary; add a narrow orchestration layer with external CID validation, complete caller-context propagation, and ephemeral answers.
 - [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
 - [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
-- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. R1c exact-head run `29313243324`, post-merge run `29314015888`, and ordinary scheduled-main run `29318113932` are green. R2a commit `a91da2e` is pushed but still requires its own exact-head run.
+- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. R1c exact-head run `29313243324`, post-merge run `29314015888`, and ordinary scheduled-main run `29318113932` are green. R2a old remote head `48be88a` passed exact-head run `29354723518`; the current review fixes require a new exact-head run after they are committed and pushed.
 
 - [Phase 0]: V2 blueprint is controlling; v1 is lineage only.
 - [Phase 0]: Build originally moved to `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` was write-blocked; the current canonical checkout is `/Users/admin/Mnemosyne`.
@@ -241,8 +241,11 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   reinitialize the retained Vault volume.
 - Validate the MCP client pair against Caddy's exact trust pool before heavy
   work and rotate it before the six-hour short-lived-certificate floor.
-- Open the stacked R2a PR, obtain exact-head CI, merge the match-head commit,
-  and refresh Graphify, CBM, and gbrain before integrating callers in R2b-R2d.
+- Commit and push the review-clean R2a fixes to PR #13 and obtain new exact-head
+  CI. Merge
+  that exact head into PR #11, promote PR #11 only after its new exact-head CI,
+  merge PR #11 into `main`, verify post-merge main CI, then refresh Graphify,
+  CBM, and gbrain against the exact main SHA before integrating R2b-R2d.
 - After R2a is merged and accepted, repair the stale external `vault-tls/ca.crt` under that
   cross-workflow lock through a distinct, rollback-safe CA-maintenance
   operation; `step-ca-root.crt` remains the validated Vault trust root and no
@@ -250,18 +253,23 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
 - Begin external governance-board recruitment without delegating seating or
   ratification to an agent.
 
-Latest checkpoint (2026-07-14): R2a's fail-closed runtime-exclusive helper and
-39-test focused suite are implemented, independently reviewed, committed, and
-pushed as `a91da2e` on `codex/r2a-runtime-exclusive-lock`. Static checks,
-39/39 section-31 rails, and 7/7 section-33 tests are green. No R2a PR or
-exact-head CI exists yet, so merge and acceptance remain open. The last
-accepted Graphify, CBM, and gbrain `mnemosyne-code` receipt remains PR #12 at
-`97f3c66`; R2a source changes reopen final-head freshness until their own
-merge. R2b-R2d, R3/R4, live rotation/no-op proof, the
-candidate-v19 external manifest/runtime and exact-scale receipts, every
-protected attempt, and all human-owned governance/publication actions remain
-open. The external Vault `ca.crt` trust-file mismatch is tracked separately and
-must be repaired atomically without weakening TLS.
+Latest checkpoint (2026-07-14): R2a baseline implementation `a91da2e` and
+status reconciliation `48be88a` are pushed on
+`codex/r2a-runtime-exclusive-lock`; PR #13 is open, non-draft, mergeable, and
+stacked on draft PR #11. Exact-head CI `29354723518` is green only for old head
+`48be88a`. GitHub CodeRabbit skipped the non-default stacked base; the terminal
+review ran and its valid findings, plus independent review findings, are fixed
+in the current dirty worktree. Static checks, 55/55 focused lock tests, 39/39
+section-31 rails, 7/7 section-33 tests, and 2/2 planning tests are green under
+admitted targeted hardware. Final review and terminal CodeRabbit are complete;
+commit/push, new exact-head PR #13 CI, PR13-to-PR11 merge, exact-head PR #11 CI,
+PR11-to-main merge, post-merge main CI, and exact-main Graphify/CBM/gbrain
+refresh remain open.
+Full/index/model/live work remains hardware-gated. R2b-R2d, R3/R4, live
+rotation/no-op proof, candidate-v19 external manifest/runtime and exact-scale
+receipts, every protected attempt, and all human-owned governance/publication
+actions remain open. The external Vault `ca.crt` trust-file mismatch is tracked
+separately and must be repaired atomically without weakening TLS.
 
 Historical checkpoint (2026-07-11): Phase 12 remains the active Plan B critical
 path. At the v18 checkpoint, candidate v18 was committed and consumed; it

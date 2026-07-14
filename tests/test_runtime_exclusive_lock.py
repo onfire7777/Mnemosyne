@@ -11,6 +11,7 @@ import socket
 import subprocess
 import sys
 import time
+from typing import Any
 
 import pytest
 
@@ -24,6 +25,7 @@ HELPER = (
 LOCK_NAME = "runtime-exclusive"
 OWNER_NAME = "owner.json"
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]\n"
+SUBPROCESS_TIMEOUT = 15
 
 
 def _custody(tmp_path: Path, *, mode: int = 0o700) -> tuple[Path, Path]:
@@ -54,7 +56,20 @@ def _run(
         capture_output=True,
         env=_environment(custody_dir),
         text=True,
+        timeout=SUBPROCESS_TIMEOUT,
     )
+
+
+def _coordinator_namespace() -> dict[str, Any]:
+    shell_source = HELPER.read_text()
+    prefix = "IFS= read -r -d '' PYTHON_CODE <<'PY' || true\n"
+    suffix = "\nPY\nexec env "
+    _, found_prefix, embedded = shell_source.partition(prefix)
+    source, found_suffix, _ = embedded.partition(suffix)
+    assert found_prefix and found_suffix and source.endswith("\nmain()")
+    namespace: dict[str, Any] = {}
+    exec(compile(source.removesuffix("\nmain()"), str(HELPER), "exec"), namespace)
+    return namespace
 
 
 def _assert_fixed_failure(
@@ -79,6 +94,22 @@ def _wait_for(path: Path, *, timeout: float = 5.0) -> None:
     raise AssertionError(f"timed out waiting for {path.name}")
 
 
+def _wait_for_zombie(pid: int, *, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        completed = subprocess.run(
+            ["ps", "-o", "stat=", "-p", str(pid)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        )
+        if completed.returncode == 0 and completed.stdout.strip().startswith("Z"):
+            return
+        time.sleep(0.01)
+    raise AssertionError("timed out waiting for group leader exit")
+
+
 def _start_owner(
     custody_dir: Path,
     tmp_path: Path,
@@ -92,7 +123,10 @@ def _start_owner(
         "import os, pathlib, sys, time; "
         "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
         "release = pathlib.Path(sys.argv[2]); "
-        "\nwhile not release.exists(): time.sleep(0.01)"
+        f"deadline = time.monotonic() + {SUBPROCESS_TIMEOUT}; "
+        "\nwhile not release.exists() and time.monotonic() < deadline: "
+        "time.sleep(0.01)"
+        "\nif not release.exists(): raise SystemExit(98)"
         "\nraise SystemExit(int(sys.argv[3]))"
     )
     process = subprocess.Popen(
@@ -128,14 +162,28 @@ def _spawn_owner(
         operation=operation,
         exit_code=exit_code,
     )
-    _wait_for(ready)
-    _wait_for(custody_dir / "locks" / LOCK_NAME / OWNER_NAME)
+    try:
+        _wait_for(ready)
+        _wait_for(custody_dir / "locks" / LOCK_NAME / OWNER_NAME)
+    except BaseException:
+        release.touch(exist_ok=True)
+        try:
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        raise
     return process, ready, release
 
 
 def _finish_owner(process: subprocess.Popen[str], release: Path) -> tuple[str, str]:
     release.touch()
-    return process.communicate(timeout=5)
+    try:
+        return process.communicate(timeout=SUBPROCESS_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        raise
 
 
 def _process_fingerprint(pid: int) -> str:
@@ -151,6 +199,7 @@ def _process_fingerprint(pid: int) -> str:
             capture_output=True,
             env={"LC_ALL": "C", "PATH": "/usr/bin:/bin"},
             text=True,
+            timeout=SUBPROCESS_TIMEOUT,
         )
         return f"darwin:{completed.stdout.strip()}"
     raise AssertionError(f"unsupported test platform: {sys.platform}")
@@ -203,11 +252,26 @@ def test_successful_child_releases_runtime_lock(tmp_path: Path) -> None:
         capture_output=True,
         env={**os.environ, "MNEMO_CUSTODY_DIR": str(custody_dir)},
         text=True,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == "child-ran\n"
     assert not (locks_dir / "runtime-exclusive").exists()
+
+
+def test_child_launch_failure_releases_runtime_lock(tmp_path: Path) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    invalid_executable = tmp_path / "invalid-executable"
+    invalid_executable.write_text("not an executable image\n")
+    invalid_executable.chmod(0o700)
+
+    completed = _run(custody_dir, str(invalid_executable))
+
+    _assert_fixed_failure(
+        completed, code=65, result="lock_failed", custody_dir=custody_dir
+    )
+    assert not (locks_dir / LOCK_NAME).exists()
 
 
 def test_coordinator_imports_are_isolated_before_lock_acquisition(
@@ -239,6 +303,7 @@ def test_coordinator_imports_are_isolated_before_lock_acquisition(
         cwd=shadow_dir,
         env=environment,
         text=True,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -264,6 +329,7 @@ def test_child_receives_callers_standard_input(tmp_path: Path) -> None:
         env=_environment(custody_dir),
         input="trusted-input\n",
         text=True,
+        timeout=SUBPROCESS_TIMEOUT,
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -353,7 +419,7 @@ while time.monotonic() < deadline:
                 result.write_text("blocked")
             else:
                 result.write_text("acquired")
-                time.sleep(0.25)
+                time.sleep(0.05)
         raise SystemExit(0)
     except (FileNotFoundError, json.JSONDecodeError, ValueError):
         time.sleep(0.001)
@@ -369,8 +435,8 @@ raise SystemExit(2)
         _wait_for(ready)
     finally:
         release.touch(exist_ok=True)
-        stdout, stderr = process.communicate(timeout=5)
-        probe.wait(timeout=5)
+        stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        probe.wait(timeout=SUBPROCESS_TIMEOUT)
 
     assert process.returncode == 0
     assert probe.returncode == 0
@@ -415,6 +481,30 @@ def test_unsafe_locks_parent_fails_before_child(tmp_path: Path, mode: int) -> No
         "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
         str(sentinel),
     )
+    _assert_fixed_failure(
+        completed, code=65, result="lock_failed", custody_dir=custody_dir
+    )
+    assert not sentinel.exists()
+
+
+def test_writable_custody_ancestor_fails_before_child(tmp_path: Path) -> None:
+    unsafe_ancestor = tmp_path / "unsafe"
+    unsafe_ancestor.mkdir(mode=0o777)
+    unsafe_ancestor.chmod(0o777)
+    custody_dir = unsafe_ancestor / "custody"
+    locks_dir = custody_dir / "locks"
+    locks_dir.mkdir(parents=True, mode=0o700)
+    locks_dir.chmod(0o700)
+    sentinel = tmp_path / "must-not-run"
+
+    completed = _run(
+        custody_dir,
+        sys.executable,
+        "-c",
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
+        str(sentinel),
+    )
+
     _assert_fixed_failure(
         completed, code=65, result="lock_failed", custody_dir=custody_dir
     )
@@ -513,6 +603,34 @@ def test_malformed_metadata_fails_closed_without_rewrite(
     assert owner.stat().st_ino == before.st_ino
 
 
+@pytest.mark.parametrize("raw", [b"", b"{"], ids=["empty", "partial-json"])
+def test_held_incomplete_owner_publication_is_deferred(
+    tmp_path: Path, raw: bytes
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    lock_dir, owner = _foreign_lock(locks_dir, raw)
+    before = owner.stat()
+    sentinel = tmp_path / "must-not-run"
+
+    with owner.open("r+b") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        completed = _run(
+            custody_dir,
+            sys.executable,
+            "-c",
+            "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
+            str(sentinel),
+        )
+
+    _assert_fixed_failure(
+        completed, code=75, result="lock_deferred", custody_dir=custody_dir
+    )
+    assert not sentinel.exists()
+    assert lock_dir.is_dir()
+    assert owner.read_bytes() == raw
+    assert owner.stat().st_ino == before.st_ino
+
+
 def test_dead_owner_is_never_stolen(tmp_path: Path) -> None:
     custody_dir, locks_dir = _custody(tmp_path)
     metadata = _valid_metadata(pid=2_147_483_647)
@@ -598,18 +716,274 @@ def test_child_signal_status_is_preserved_after_cleanup(tmp_path: Path) -> None:
     assert not (locks_dir / LOCK_NAME).exists()
 
 
+def test_group_leader_stays_published_until_post_exit_group_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    child_holder = [None]
+    received_signal = [None]
+
+    class CompletedChild:
+        pid = 4242
+
+        @staticmethod
+        def wait() -> int:
+            assert child_holder[0] is None
+            return 0
+
+    monkeypatch.setattr(
+        namespace["subprocess"], "Popen", lambda *_args, **_kwargs: CompletedChild()
+    )
+
+    def group_snapshot(group_id: int) -> dict[int, str]:
+        assert group_id == CompletedChild.pid
+        assert child_holder[0] is not None
+        return {CompletedChild.pid: "Z"}
+
+    namespace["process_group_snapshot"] = group_snapshot
+    namespace["process_group_exists"] = lambda _group_id: False
+
+    assert namespace["run_child"](
+        ["/unused"], child_holder, received_signal, lambda *_args: None
+    ) == (0, None)
+    assert child_holder[0] is None
+
+
+def test_process_group_snapshot_uses_fixed_ps_and_locale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    captured: dict[str, object] = {}
+
+    class CompletedProbe:
+        returncode = 0
+        stdout = " 4242 4242 Z\n 5252 4242 S\n"
+
+    def run(command: list[str], **kwargs: object) -> CompletedProbe:
+        captured["command"] = command
+        captured.update(kwargs)
+        return CompletedProbe()
+
+    monkeypatch.setattr(namespace["subprocess"], "run", run)
+
+    assert namespace["process_group_snapshot"](4242) == {4242: "Z", 5252: "S"}
+    assert captured["command"] == ["/bin/ps", "-axo", "pid=,pgid=,stat="]
+    assert captured["env"] == {"LANG": "C", "LC_ALL": "C"}
+
+
+def test_signal_after_leader_exit_is_forwarded_while_group_drains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    child_holder = [None]
+    received_signal = [None]
+    forwarded: list[tuple[int, int]] = []
+    group_states = iter(
+        [
+            {4242: "Z"},
+            {4242: "Z", 5252: "S"},
+            {4242: "Z"},
+            {4242: "Z"},
+        ]
+    )
+
+    class CompletedChild:
+        pid = 4242
+
+        @staticmethod
+        def wait() -> int:
+            assert child_holder[0] is None
+            return 0
+
+    monkeypatch.setattr(
+        namespace["subprocess"], "Popen", lambda *_args, **_kwargs: CompletedChild()
+    )
+
+    def forward(signum: int, _frame: object) -> None:
+        if received_signal[0] is None:
+            received_signal[0] = signum
+        child = child_holder[0]
+        if child is not None:
+            forwarded.append((child.pid, signum))
+
+    snapshot_calls = 0
+
+    def group_snapshot(_group_id: int) -> dict[int, str]:
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        if snapshot_calls == 2:
+            forward(signal.SIGTERM, None)
+        return next(group_states)
+
+    namespace["process_group_snapshot"] = group_snapshot
+    namespace["process_group_exists"] = lambda _group_id: False
+
+    assert namespace["run_child"](
+        ["/unused"], child_holder, received_signal, forward
+    ) == (0, signal.SIGTERM)
+    assert forwarded == [(CompletedChild.pid, signal.SIGTERM)]
+
+
+def test_post_exit_group_drain_is_bounded_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    uncertain = namespace["ChildStateUncertain"]
+    child_holder = [None]
+    received_signal = [None]
+    group_states = iter([{4242: "Z"}, {4242: "Z", 5252: "S"}])
+
+    class CompletedChild:
+        pid = 4242
+
+        @staticmethod
+        def wait() -> int:
+            return 0
+
+    monkeypatch.setattr(
+        namespace["subprocess"], "Popen", lambda *_args, **_kwargs: CompletedChild()
+    )
+    namespace["GROUP_DRAIN_WAIT_SECONDS"] = 0
+    namespace["process_group_snapshot"] = lambda _group_id: next(group_states)
+
+    with pytest.raises(uncertain):
+        namespace["run_child"](
+            ["/unused"], child_holder, received_signal, lambda *_args: None
+        )
+    assert child_holder[0] is not None
+
+
+def test_post_reap_probe_rejects_a_residual_group_missed_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    uncertain = namespace["ChildStateUncertain"]
+    child_holder = [None]
+    received_signal = [None]
+
+    class CompletedChild:
+        pid = 4242
+
+        @staticmethod
+        def wait() -> int:
+            return 0
+
+    monkeypatch.setattr(
+        namespace["subprocess"], "Popen", lambda *_args, **_kwargs: CompletedChild()
+    )
+    namespace["process_group_snapshot"] = lambda _group_id: {4242: "Z"}
+    namespace["process_group_exists"] = lambda _group_id: True
+
+    with pytest.raises(uncertain):
+        namespace["run_child"](
+            ["/unused"], child_holder, received_signal, lambda *_args: None
+        )
+    assert child_holder[0] is None
+
+
+def test_signal_forward_permission_failure_is_uncertain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    uncertain = namespace["ChildStateUncertain"]
+    child_holder, received_signal, forward, previous = namespace[
+        "install_signal_handlers"
+    ]()
+
+    class RunningChild:
+        pid = 4242
+
+    child_holder[0] = RunningChild()
+
+    def deny_signal(_group_id: int, _signum: int) -> None:
+        raise PermissionError(1, "denied")
+
+    monkeypatch.setattr(namespace["os"], "killpg", deny_signal)
+    try:
+        with pytest.raises(uncertain):
+            forward(signal.SIGTERM, None)
+    finally:
+        namespace["restore_signal_handlers"](previous)
+
+    assert received_signal[0] == signal.SIGTERM
+
+
+def test_indeterminate_post_launch_state_retains_lock_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    namespace = _coordinator_namespace()
+    uncertain = namespace.get("ChildStateUncertain")
+    assert uncertain is not None
+    sentinel = tmp_path / "child-ran"
+    monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
+    monkeypatch.setattr(
+        namespace["sys"],
+        "argv",
+        [
+            str(HELPER),
+            "uncertain-child-state",
+            "--",
+            sys.executable,
+            "-c",
+            "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
+            str(sentinel),
+        ],
+    )
+
+    def fail_after_launch(_group_id: int) -> None:
+        _wait_for(sentinel)
+        raise uncertain
+
+    namespace["process_group_snapshot"] = fail_after_launch
+
+    with pytest.raises(SystemExit) as stopped:
+        namespace["main"]()
+
+    assert stopped.value.code == 65
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "runtime-exclusive-lock result=lock_failed\n"
+    assert sentinel.exists()
+    owner = locks_dir / LOCK_NAME / OWNER_NAME
+    assert owner.is_file()
+    with owner.open("rb") as retained:
+        fcntl.flock(retained, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
 def test_lock_is_held_until_same_process_group_descendants_exit(tmp_path: Path) -> None:
     custody_dir, locks_dir = _custody(tmp_path)
     sentinel = tmp_path / "grandchild-finished"
-    grandchild = (
-        "import pathlib,sys,time; time.sleep(0.25); "
-        "pathlib.Path(sys.argv[1]).write_text("
-        "'lock-held' if pathlib.Path(sys.argv[2]).exists() else 'lock-missing')"
-    )
+    grandchild = f"""
+import fcntl
+import os
+from pathlib import Path
+import sys
+import time
+
+expected_parent = int(sys.argv[3])
+deadline = time.monotonic() + {SUBPROCESS_TIMEOUT}
+while os.getppid() == expected_parent and time.monotonic() < deadline:
+    time.sleep(0.01)
+if os.getppid() == expected_parent:
+    Path(sys.argv[1]).write_text("parent-still-alive")
+    raise SystemExit(2)
+owner = Path(sys.argv[2])
+result = "lock-missing"
+if owner.exists():
+    with owner.open("rb") as stream:
+        try:
+            fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            result = "lock-held"
+        else:
+            result = "lock-released"
+Path(sys.argv[1]).write_text(result)
+"""
     child = (
-        "import subprocess,sys; "
+        "import os,subprocess,sys; "
         "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], "
-        "sys.argv[3]], "
+        "sys.argv[3], str(os.getpid())], "
         "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
         "stderr=subprocess.DEVNULL)"
     )
@@ -626,6 +1000,82 @@ def test_lock_is_held_until_same_process_group_descendants_exit(tmp_path: Path) 
 
     assert completed.returncode == 0, completed.stderr
     assert sentinel.read_text() == "lock-held"
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
+def test_signal_after_leader_exit_reaches_same_group_descendant(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    leader_pid_file = tmp_path / "leader-pid"
+    descendant_ready = tmp_path / "descendant-ready"
+    descendant_forwarded = tmp_path / "descendant-forwarded"
+    release = tmp_path / "release-descendant"
+    descendant = f"""
+from pathlib import Path
+import signal
+import sys
+import time
+
+ready = Path(sys.argv[1])
+forwarded = Path(sys.argv[2])
+release = Path(sys.argv[3])
+
+def stop(_signum, _frame):
+    forwarded.touch()
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, stop)
+ready.touch()
+deadline = time.monotonic() + {SUBPROCESS_TIMEOUT}
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+raise SystemExit(98 if not release.exists() else 0)
+"""
+    leader = (
+        "import os,pathlib,subprocess,sys; "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[2], sys.argv[3], "
+        "sys.argv[4], sys.argv[5]], stdin=subprocess.DEVNULL, "
+        "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)"
+    )
+    process = subprocess.Popen(
+        [
+            str(HELPER),
+            "post-exit-signal",
+            "--",
+            sys.executable,
+            "-c",
+            leader,
+            str(leader_pid_file),
+            descendant,
+            str(descendant_ready),
+            str(descendant_forwarded),
+            str(release),
+        ],
+        env=_environment(custody_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for(descendant_ready)
+        _wait_for_zombie(int(leader_pid_file.read_text()))
+        process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+    except BaseException:
+        release.touch(exist_ok=True)
+        try:
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        raise
+
+    assert process.returncode == -signal.SIGTERM
+    assert stdout == ""
+    assert stderr == ""
+    assert descendant_forwarded.exists()
     assert not (locks_dir / LOCK_NAME).exists()
 
 
@@ -779,7 +1229,7 @@ def test_handled_signal_forwards_cleans_and_preserves_signal_status(
     process, _, _ = _spawn_owner(custody_dir, tmp_path)
 
     process.send_signal(handled_signal)
-    stdout, stderr = process.communicate(timeout=5)
+    stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
 
     assert process.returncode == -handled_signal
     assert stdout == ""
@@ -788,12 +1238,89 @@ def test_handled_signal_forwards_cleans_and_preserves_signal_status(
     assert not (locks_dir / LOCK_NAME).exists()
 
 
+def test_inherited_blocked_signal_is_unblocked_for_lock_lifetime(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    ready = tmp_path / "blocked-ready"
+    forwarded = tmp_path / "blocked-forwarded"
+    release = tmp_path / "blocked-release"
+    child = f"""
+import os
+from pathlib import Path
+import signal
+import sys
+import time
+
+ready = Path(sys.argv[1])
+forwarded = Path(sys.argv[2])
+release = Path(sys.argv[3])
+
+def handle(signum, _frame):
+    forwarded.write_text(str(signum))
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, handle)
+ready.write_text(str(os.getpid()))
+deadline = time.monotonic() + {SUBPROCESS_TIMEOUT}
+while not release.exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+raise SystemExit(98)
+"""
+    launcher = (
+        "import os,signal,sys; "
+        "signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM}); "
+        "os.execve(sys.argv[1], sys.argv[1:], os.environ)"
+    )
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            launcher,
+            str(HELPER),
+            "blocked-signal",
+            "--",
+            sys.executable,
+            "-c",
+            child,
+            str(ready),
+            str(forwarded),
+            str(release),
+        ],
+        env=_environment(custody_dir),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for(ready)
+        _wait_for(locks_dir / LOCK_NAME / OWNER_NAME)
+        process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+    finally:
+        cleanup_required = process.poll() is None or not forwarded.exists()
+        if cleanup_required:
+            release.touch(exist_ok=True)
+            try:
+                process.communicate(timeout=SUBPROCESS_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=SUBPROCESS_TIMEOUT)
+
+    assert process.returncode == -signal.SIGTERM
+    assert stdout == ""
+    assert stderr == ""
+    assert forwarded.read_text() == str(signal.SIGTERM)
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
 def test_sigkill_residue_fails_closed_and_is_not_stolen(tmp_path: Path) -> None:
     custody_dir, locks_dir = _custody(tmp_path)
-    process, ready, _ = _spawn_owner(custody_dir, tmp_path)
+    process, ready, release = _spawn_owner(custody_dir, tmp_path)
     child_pid = int(ready.read_text())
+    child_fingerprint = _process_fingerprint(child_pid)
     process.kill()
-    process.wait(timeout=5)
+    process.wait(timeout=SUBPROCESS_TIMEOUT)
     try:
         completed = _run(custody_dir, sys.executable, "-c", "raise SystemExit(0)")
         _assert_fixed_failure(
@@ -804,35 +1331,91 @@ def test_sigkill_residue_fails_closed_and_is_not_stolen(tmp_path: Path) -> None:
         )
         assert (locks_dir / LOCK_NAME / OWNER_NAME).exists()
     finally:
-        try:
-            os.kill(child_pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
+        release.touch(exist_ok=True)
+        deadline = time.monotonic() + SUBPROCESS_TIMEOUT
+        while time.monotonic() < deadline:
+            try:
+                current_fingerprint = _process_fingerprint(child_pid)
+            except (OSError, subprocess.SubprocessError):
+                break
+            if current_fingerprint != child_fingerprint:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("timed out waiting for held child to exit")
+        process.communicate(timeout=SUBPROCESS_TIMEOUT)
 
 
 @pytest.mark.parametrize("operation", ["", "../bad", "bad\nname", "x" * 65])
 def test_invalid_operation_is_usage_error(tmp_path: Path, operation: str) -> None:
-    custody_dir, _ = _custody(tmp_path)
+    custody_dir, locks_dir = _custody(tmp_path)
+    sentinel = tmp_path / "must-not-run"
     completed = _run(
         custody_dir,
         sys.executable,
         "-c",
-        "raise SystemExit(0)",
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
+        str(sentinel),
         operation=operation,
     )
+    assert not sentinel.exists()
     assert completed.returncode == 64
     assert completed.stdout == ""
     assert completed.stderr == USAGE
+    assert not (locks_dir / LOCK_NAME).exists()
 
 
 def test_missing_custody_and_relative_command_are_usage_errors(tmp_path: Path) -> None:
-    missing = _run(None, sys.executable, "-c", "raise SystemExit(0)")
+    missing_sentinel = tmp_path / "missing-must-not-run"
+    child = "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()"
+    missing = _run(None, sys.executable, "-c", child, str(missing_sentinel))
+    assert not missing_sentinel.exists()
     assert missing.returncode == 64
     assert missing.stdout == ""
     assert missing.stderr == USAGE
 
-    custody_dir, _ = _custody(tmp_path)
-    relative = _run(custody_dir, "python3", "-c", "raise SystemExit(0)")
+    custody_dir, locks_dir = _custody(tmp_path)
+    relative_sentinel = tmp_path / "relative-must-not-run"
+    relative = _run(custody_dir, "python3", "-c", child, str(relative_sentinel))
+    assert not relative_sentinel.exists()
     assert relative.returncode == 64
     assert relative.stdout == ""
     assert relative.stderr == USAGE
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
+@pytest.mark.parametrize(
+    "shape",
+    ["missing-separator", "misplaced-separator", "missing-command"],
+)
+def test_malformed_raw_arguments_fail_before_lock_or_child(
+    tmp_path: Path, shape: str
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    sentinel = tmp_path / "raw-argv-must-not-run"
+    child = [
+        sys.executable,
+        "-c",
+        "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
+        str(sentinel),
+    ]
+    arguments = {
+        "missing-separator": ["raw-argv", *child],
+        "misplaced-separator": ["raw-argv", *child, "--"],
+        "missing-command": ["raw-argv", "--"],
+    }[shape]
+
+    completed = subprocess.run(
+        [str(HELPER), *arguments],
+        check=False,
+        capture_output=True,
+        env=_environment(custody_dir),
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+
+    assert completed.returncode == 64
+    assert completed.stdout == ""
+    assert completed.stderr == USAGE
+    assert not sentinel.exists()
+    assert not (locks_dir / LOCK_NAME).exists()

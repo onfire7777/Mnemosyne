@@ -37,6 +37,9 @@ import time
 LOCK_NAME = "runtime-exclusive"
 OWNER_NAME = "owner.json"
 MAX_METADATA_BYTES = 2048
+PUBLICATION_WAIT_SECONDS = 0.25
+GROUP_DRAIN_WAIT_SECONDS = 5.0
+GROUP_PROBE_TIMEOUT_SECONDS = 2.0
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]"
 OPERATION = re.compile(r"[a-z][a-z0-9-]{0,63}")
 TOKEN = re.compile(r"[0-9a-f]{64}")
@@ -65,6 +68,10 @@ class LockFailure(Exception):
 
 
 class LockDeferred(Exception):
+    pass
+
+
+class ChildStateUncertain(Exception):
     pass
 
 
@@ -210,45 +217,75 @@ def validate_directory(value, mode, device=None):
         raise LockFailure
 
 
-def validate_owner(value, device):
+def validate_owner_file(value, device):
     if (
         not stat.S_ISREG(value.st_mode)
         or value.st_uid != UID
         or stat.S_IMODE(value.st_mode) != 0o600
         or value.st_nlink != 1
         or value.st_dev != device
-        or value.st_size <= 0
         or value.st_size > MAX_METADATA_BYTES
     ):
         raise LockFailure
 
 
-def verify_real_path(path):
-    if not os.path.isabs(path) or os.path.normpath(path) != path:
-        raise UsageFailure
-    current = os.path.sep
-    try:
-        for component in path.split(os.path.sep)[1:]:
-            current = os.path.join(current, component)
-            value = os.lstat(current)
-            if stat.S_ISLNK(value.st_mode):
-                raise LockFailure
-    except OSError:
+def validate_owner(value, device):
+    validate_owner_file(value, device)
+    if value.st_size <= 0:
         raise LockFailure
 
 
-def open_parent(custody):
-    locks_path = os.path.join(custody, "locks")
-    verify_real_path(locks_path)
+def validate_ancestor_directory(value):
+    mode = stat.S_IMODE(value.st_mode)
+    root_sticky = value.st_uid == 0 and bool(mode & stat.S_ISVTX)
+    if (
+        not stat.S_ISDIR(value.st_mode)
+        or value.st_uid not in (0, UID)
+        or (mode & 0o022 and not root_sticky)
+    ):
+        raise LockFailure
+
+
+def open_secure_directory_path(path):
+    if not os.path.isabs(path) or os.path.normpath(path) != path:
+        raise UsageFailure
     descriptor = None
     try:
-        before = os.lstat(locks_path)
-        validate_directory(before, 0o700)
-        descriptor = os.open(locks_path, os.O_RDONLY | DIRECTORY | NOFOLLOW)
-        after = os.fstat(descriptor)
-        validate_directory(after, 0o700)
-        if not same_identity(before, after):
-            raise LockFailure
+        descriptor = os.open(os.path.sep, os.O_RDONLY | DIRECTORY | NOFOLLOW)
+        root_stat = os.fstat(descriptor)
+        validate_ancestor_directory(root_stat)
+        descriptor_stat = root_stat
+        components = path.split(os.path.sep)[1:]
+        for index, component in enumerate(components):
+            path_stat = os.stat(component, dir_fd=descriptor, follow_symlinks=False)
+            if index == len(components) - 1:
+                validate_directory(path_stat, 0o700)
+            else:
+                validate_ancestor_directory(path_stat)
+            child = None
+            try:
+                child = os.open(
+                    component,
+                    os.O_RDONLY | DIRECTORY | NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+                descriptor_stat = os.fstat(child)
+                if index == len(components) - 1:
+                    validate_directory(descriptor_stat, 0o700)
+                else:
+                    validate_ancestor_directory(descriptor_stat)
+                if not same_identity(path_stat, descriptor_stat):
+                    raise LockFailure
+            except (OSError, LockFailure):
+                if child is not None:
+                    try:
+                        os.close(child)
+                    except OSError:
+                        pass
+                raise LockFailure
+            os.close(descriptor)
+            descriptor = child
+        return descriptor, descriptor_stat
     except (OSError, LockFailure):
         if descriptor is not None:
             try:
@@ -256,7 +293,12 @@ def open_parent(custody):
             except OSError:
                 pass
         raise LockFailure
-    return descriptor, after, locks_path
+
+
+def open_parent(custody):
+    locks_path = os.path.join(custody, "locks")
+    descriptor, descriptor_stat = open_secure_directory_path(locks_path)
+    return descriptor, descriptor_stat, locks_path
 
 
 def stat_at(descriptor, name):
@@ -300,28 +342,64 @@ def read_owner(descriptor, owner_stat):
     return raw
 
 
+def owner_lock_is_held(descriptor):
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as error:
+        if error.errno in (errno.EACCES, errno.EAGAIN):
+            return True
+        raise LockFailure
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
+    return False
+
+
 def inspect_existing(parent, parent_stat):
     lock_descriptor = None
     owner_descriptor = None
     try:
         lock_descriptor, lock_stat = open_lock_directory(parent, parent_stat)
-        owner_path_stat = stat_at(lock_descriptor, OWNER_NAME)
-        validate_owner(owner_path_stat, lock_stat.st_dev)
+        deadline = time.monotonic() + PUBLICATION_WAIT_SECONDS
+        while True:
+            try:
+                owner_path_stat = os.stat(
+                    OWNER_NAME, dir_fd=lock_descriptor, follow_symlinks=False
+                )
+            except FileNotFoundError:
+                if time.monotonic() >= deadline:
+                    raise LockFailure
+                time.sleep(0.01)
+                continue
+            except OSError:
+                raise LockFailure
+            break
+        validate_owner_file(owner_path_stat, lock_stat.st_dev)
         owner_descriptor = os.open(
             OWNER_NAME, os.O_RDWR | NOFOLLOW, dir_fd=lock_descriptor
         )
         owner_stat = os.fstat(owner_descriptor)
-        validate_owner(owner_stat, lock_stat.st_dev)
+        validate_owner_file(owner_stat, lock_stat.st_dev)
         if not same_identity(owner_path_stat, owner_stat):
             raise LockFailure
-        metadata = parse_metadata(read_owner(owner_descriptor, owner_stat))
-        try:
-            fcntl.flock(owner_descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as error:
-            if error.errno not in (errno.EACCES, errno.EAGAIN):
+        while True:
+            current_stat = os.fstat(owner_descriptor)
+            current_path_stat = stat_at(lock_descriptor, OWNER_NAME)
+            validate_owner_file(current_stat, lock_stat.st_dev)
+            validate_owner_file(current_path_stat, lock_stat.st_dev)
+            if not same_identity(owner_stat, current_stat) or not same_identity(
+                owner_stat, current_path_stat
+            ):
                 raise LockFailure
-        else:
-            fcntl.flock(owner_descriptor, fcntl.LOCK_UN)
+            try:
+                metadata = parse_metadata(read_owner(owner_descriptor, current_stat))
+            except LockFailure:
+                if time.monotonic() >= deadline:
+                    if owner_lock_is_held(owner_descriptor):
+                        raise LockDeferred
+                    raise LockFailure
+                time.sleep(0.01)
+                continue
+            break
+        if not owner_lock_is_held(owner_descriptor):
             raise LockFailure
         try:
             os.kill(metadata["pid"], 0)
@@ -418,17 +496,23 @@ def acquire(parent, parent_stat, locks_path, operation):
 
 
 def current_parent_matches(state):
+    path_descriptor = None
     try:
-        path_stat = os.lstat(state["locks_path"])
+        path_descriptor, path_stat = open_secure_directory_path(state["locks_path"])
         descriptor_stat = os.fstat(state["parent"])
-        validate_directory(path_stat, 0o700)
         validate_directory(descriptor_stat, 0o700)
-    except (OSError, LockFailure):
+        if not same_identity(path_stat, state["parent_stat"]) or not same_identity(
+            descriptor_stat, state["parent_stat"]
+        ):
+            raise ReleaseFailure
+    except (OSError, UsageFailure, LockFailure, ReleaseFailure):
         raise ReleaseFailure
-    if not same_identity(path_stat, state["parent_stat"]) or not same_identity(
-        descriptor_stat, state["parent_stat"]
-    ):
-        raise ReleaseFailure
+    finally:
+        if path_descriptor is not None:
+            try:
+                os.close(path_descriptor)
+            except OSError:
+                pass
 
 
 def release(state):
@@ -519,8 +603,10 @@ def install_signal_handlers():
         if child is not None:
             try:
                 os.killpg(child.pid, signum)
-            except OSError:
+            except ProcessLookupError:
                 pass
+            except OSError:
+                raise ChildStateUncertain
 
     previous = {}
     for signum in HANDLED_SIGNALS:
@@ -533,13 +619,43 @@ def restore_signal_handlers(previous):
         signal.signal(signum, handler)
 
 
+def process_group_snapshot(group_id):
+    try:
+        completed = subprocess.run(
+            ["/bin/ps", "-axo", "pid=,pgid=,stat="],
+            check=False,
+            capture_output=True,
+            env={"LANG": "C", "LC_ALL": "C"},
+            text=True,
+            timeout=GROUP_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise ChildStateUncertain
+    if completed.returncode != 0:
+        raise ChildStateUncertain
+    members = {}
+    for line in completed.stdout.splitlines():
+        if not line.strip():
+            continue
+        fields = line.split()
+        if len(fields) != 3:
+            raise ChildStateUncertain
+        try:
+            pid, pgid = (int(field) for field in fields[:2])
+        except ValueError:
+            raise ChildStateUncertain
+        if pgid == group_id:
+            members[pid] = fields[2]
+    return members
+
+
 def process_group_exists(group_id):
     try:
         os.killpg(group_id, 0)
     except ProcessLookupError:
         return False
     except OSError:
-        raise LockFailure
+        raise ChildStateUncertain
     return True
 
 
@@ -550,15 +666,47 @@ def run_child(command, child_holder, received_signal, forward):
             env=dict(os.environ),
             start_new_session=True,
         )
-        child_holder[0] = child
-        if received_signal[0] is not None:
-            forward(received_signal[0], None)
-        return_code = child.wait()
-        while process_group_exists(child.pid):
-            time.sleep(0.05)
-        child_holder[0] = None
     except OSError:
         raise LockFailure
+    child_holder[0] = child
+    try:
+        if received_signal[0] is not None:
+            forward(received_signal[0], None)
+        while True:
+            members = process_group_snapshot(child.pid)
+            leader_state = members.get(child.pid)
+            if leader_state is None:
+                raise ChildStateUncertain
+            if leader_state.startswith("Z"):
+                break
+            time.sleep(0.05)
+        drain_deadline = time.monotonic() + GROUP_DRAIN_WAIT_SECONDS
+        while True:
+            members = process_group_snapshot(child.pid)
+            if any(pid != child.pid for pid in members):
+                if time.monotonic() >= drain_deadline:
+                    raise ChildStateUncertain
+                time.sleep(0.05)
+                continue
+            previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, HANDLED_SIGNALS)
+            try:
+                members = process_group_snapshot(child.pid)
+                retry_drain = any(pid != child.pid for pid in members)
+                if not members.get(child.pid, "").startswith("Z"):
+                    raise ChildStateUncertain
+                if not retry_drain:
+                    child_holder[0] = None
+                    return_code = child.wait()
+                    if process_group_exists(child.pid):
+                        raise ChildStateUncertain
+            finally:
+                signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+            if not retry_drain:
+                break
+            if time.monotonic() >= drain_deadline:
+                raise ChildStateUncertain
+    except OSError:
+        raise ChildStateUncertain
     return return_code, received_signal[0]
 
 
@@ -574,14 +722,12 @@ def main():
     state = None
     previous_handlers = {}
     previous_mask = None
-    mask_restored = True
     received_signal = [None]
     try:
         operation, command, custody = parse_arguments()
         if not NOFOLLOW or not DIRECTORY:
             raise LockFailure
         previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, HANDLED_SIGNALS)
-        mask_restored = False
         child_holder, received_signal, forward, previous_handlers = (
             install_signal_handlers()
         )
@@ -591,8 +737,8 @@ def main():
         except (LockFailure, LockDeferred):
             os.close(parent)
             raise
-        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
-        mask_restored = True
+        runtime_mask = set(previous_mask).difference(HANDLED_SIGNALS)
+        signal.pthread_sigmask(signal.SIG_SETMASK, runtime_mask)
         if received_signal[0] is None:
             return_code, _ = run_child(
                 command, child_holder, received_signal, forward
@@ -615,6 +761,11 @@ def main():
         raise SystemExit(64)
     except LockDeferred:
         fixed_failure("lock_deferred", 75)
+    except ChildStateUncertain:
+        if state is not None:
+            close_state(state)
+            state = None
+        fixed_failure("lock_failed", 65)
     except (LockFailure, OSError):
         if state is not None:
             try:
@@ -626,7 +777,7 @@ def main():
     finally:
         if previous_handlers:
             restore_signal_handlers(previous_handlers)
-        if previous_mask is not None and not mask_restored:
+        if previous_mask is not None:
             signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
