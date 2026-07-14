@@ -339,7 +339,7 @@ begins.
 
 ## Shared runtime lock contract
 
-**R2 status: R2a implemented and pushed; R2b-R2d open.** The current
+**R2 status: R2a review fixes locally green on open PR #13; R2b-R2d open.** The current
 `.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
 and is deliberately held for the whole process, but it does not serialize
 capture, evaluation, runtime flip, or rollback workflows. R2a provides the
@@ -349,15 +349,34 @@ the same uid; same-uid execution is inside the trusted operator boundary.
 
 The smallest shared helper is `infra/scripts/runtime-exclusive-lock.sh`. It:
 
-- validates a non-symlink mode-`0700` parent and atomically creates the lock
-  directory;
+- walks the complete custody ancestry descriptor-relative with `O_NOFOLLOW`,
+  permits only root/current-uid safe ancestors (including root-owned sticky
+  temporary roots), validates the exact mode-`0700` locks parent, and atomically
+  creates the lock directory;
 - creates an unguessable ownership token and records operation, PID, process
   start fingerprint, host, and UTC start in mode-`0600` metadata;
+- waits for a bounded in-progress owner publication and classifies held partial
+  metadata as contention without rewriting it;
 - releases only when the caller presents the same token and every ownership
   field still matches;
 - removes its own lock on handled signals through an owner-checked trap; and
 - fails closed on stale locks, dead PIDs, PID reuse, forged/malformed metadata,
   symlink substitution, unsafe modes, or owner mismatch. It never steals.
+
+The coordinator creates one dedicated child session/process group whose leader
+is the primary command. Signal forwarding remains enabled only while that
+leader is unreaped; handled signals are blocked across the poll/reap and holder
+clear so a recycled numeric PGID can never be signalled. After leader exit, the
+coordinator performs only a bounded drain for short-lived residual members; a
+drain timeout or any indeterminate group state retains the lock evidence.
+This is a trusted synchronous-caller boundary, not daemon supervision: the
+primary command must not return while long-running descendants remain, and an
+integrated caller or descendant must not call `setsid`/`setpgid`,
+detach/daemonize, or transition uid while ownership is active. A pre-launch
+`Popen` failure permits owner-checked cleanup; every post-launch uncertainty
+retains evidence instead of unlinking it. Every R2b-R2d caller integration must
+prove the synchronous completion, no-detach, no-session-change, and
+no-uid-transition contract in its focused tests before acceptance.
 
 R2b-R2d must integrate the helper before any side effect in:
 
@@ -636,12 +655,18 @@ git diff --check
 
 ### R2a — Runtime lock helper
 
-Status: Implementation and focused verification are pushed as `a91da2e` on
-`codex/r2a-runtime-exclusive-lock`. The committed RED baselines are `199b898`
-and `93e0dc6`. After independent correctness and security review, the final
-surface passes static gates, 39/39 focused tests, 39/39 section-31 rails, and
-7/7 section-33 tests. Stacked PR, exact-head CI, merge, and post-merge mutable
-index refresh remain acceptance gates.
+Status: Baseline implementation `a91da2e` and status commit `48be88a` are pushed
+on `codex/r2a-runtime-exclusive-lock`; PR #13 is open, non-draft, mergeable, and
+stacked on draft PR #11. The committed RED baselines are `199b898` and
+`93e0dc6`. Old head `48be88a` passed exact-head CI `29354723518`. GitHub
+CodeRabbit skipped the non-default stacked base; an authenticated terminal
+review and independent reviews drove the current dirty fixes. That surface
+passes static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
+section-33 tests, and 2/2 planning tests. Final independent review is
+merge-clean and terminal CodeRabbit is complete. Commit/push, new exact-head PR
+#13 CI, PR13-to-PR11 merge,
+exact-head PR #11 CI, PR11-to-main merge, post-merge main CI, and exact-main
+mutable-index refresh remain acceptance gates.
 
 Files:
 
@@ -665,10 +690,17 @@ uv run --locked pytest -q tests/test_runtime_exclusive_lock.py
 git diff --check
 ```
 
-Tests cover normal ownership, acquisition ordering, contention, stale/dead/PID-
-reused owners, forged or malformed metadata, unsafe/symlink paths, descendant
-lifetime, child/wrapper signal fidelity, release tampering, and owner-token,
-inode, mode, hardlink, parent, and directory mismatch.
+Tests cover normal ownership, acquisition ordering, contention, bounded held
+partial publication, stale/dead/PID-reused owners, forged or malformed
+metadata, descriptor-relative unsafe/symlink ancestry, pre-launch cleanup,
+post-launch uncertainty evidence retention, descendant lifetime with a real
+flock probe, an unreaped exited leader as a non-reusable PGID anchor, fixed-path
+process-group enumeration, post-exit descendant signal forwarding, bounded
+drain, atomic final scan/unpublication/reap, a no-signal post-reap existence
+proof, inherited and ordinary child/wrapper signal fidelity, release-driven
+bounded cleanup without raw PID/PGID signalling, invalid-usage non-execution,
+release tampering, and owner-token, inode, mode, hardlink, parent, and directory
+mismatch.
 
 ### R2b — Capture and rotator integration
 
