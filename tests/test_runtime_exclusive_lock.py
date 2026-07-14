@@ -79,11 +79,12 @@ def _wait_for(path: Path, *, timeout: float = 5.0) -> None:
     raise AssertionError(f"timed out waiting for {path.name}")
 
 
-def _spawn_owner(
+def _start_owner(
     custody_dir: Path,
     tmp_path: Path,
     *,
     operation: str = "held-operation",
+    exit_code: int = 0,
 ) -> tuple[subprocess.Popen[str], Path, Path]:
     ready = tmp_path / f"ready-{time.monotonic_ns()}"
     release = tmp_path / f"release-{time.monotonic_ns()}"
@@ -92,6 +93,7 @@ def _spawn_owner(
         "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); "
         "release = pathlib.Path(sys.argv[2]); "
         "\nwhile not release.exists(): time.sleep(0.01)"
+        "\nraise SystemExit(int(sys.argv[3]))"
     )
     process = subprocess.Popen(
         [
@@ -103,11 +105,28 @@ def _spawn_owner(
             child,
             str(ready),
             str(release),
+            str(exit_code),
         ],
         env=_environment(custody_dir),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+    )
+    return process, ready, release
+
+
+def _spawn_owner(
+    custody_dir: Path,
+    tmp_path: Path,
+    *,
+    operation: str = "held-operation",
+    exit_code: int = 0,
+) -> tuple[subprocess.Popen[str], Path, Path]:
+    process, ready, release = _start_owner(
+        custody_dir,
+        tmp_path,
+        operation=operation,
+        exit_code=exit_code,
     )
     _wait_for(ready)
     _wait_for(custody_dir / "locks" / LOCK_NAME / OWNER_NAME)
@@ -191,6 +210,68 @@ def test_successful_child_releases_runtime_lock(tmp_path: Path) -> None:
     assert not (locks_dir / "runtime-exclusive").exists()
 
 
+def test_coordinator_imports_are_isolated_before_lock_acquisition(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    shadow_dir = tmp_path / "shadow"
+    shadow_dir.mkdir()
+    sentinel = tmp_path / "shadow-import-ran"
+    (shadow_dir / "secrets.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(sentinel)!r}).touch()\n"
+        "raise RuntimeError('shadow import executed')\n"
+    )
+    environment = _environment(custody_dir)
+    environment["PYTHONPATH"] = str(shadow_dir)
+
+    completed = subprocess.run(
+        [
+            str(HELPER),
+            "isolated-imports",
+            "--",
+            sys.executable,
+            "-c",
+            "raise SystemExit(0)",
+        ],
+        check=False,
+        capture_output=True,
+        cwd=shadow_dir,
+        env=environment,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert not sentinel.exists()
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
+def test_child_receives_callers_standard_input(tmp_path: Path) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    completed = subprocess.run(
+        [
+            str(HELPER),
+            "stdin-passthrough",
+            "--",
+            sys.executable,
+            "-c",
+            "import sys; sys.stdout.write(sys.stdin.read())",
+        ],
+        check=False,
+        capture_output=True,
+        env=_environment(custody_dir),
+        input="trusted-input\n",
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "trusted-input\n"
+    assert completed.stderr == ""
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
 def test_owner_metadata_is_private_canonical_and_locked(tmp_path: Path) -> None:
     custody_dir, locks_dir = _custody(tmp_path)
     process, _, release = _spawn_owner(custody_dir, tmp_path)
@@ -242,6 +323,60 @@ def test_owner_metadata_is_private_canonical_and_locked(tmp_path: Path) -> None:
     assert process.returncode == 0
     assert stdout == ""
     assert stderr == ""
+
+
+def test_owner_lock_precedes_published_canonical_metadata(tmp_path: Path) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    owner = locks_dir / LOCK_NAME / OWNER_NAME
+    probe_result = tmp_path / "probe-result"
+    probe_code = """
+import fcntl
+import json
+from pathlib import Path
+import sys
+import time
+
+owner = Path(sys.argv[1])
+result = Path(sys.argv[2])
+deadline = time.monotonic() + 5
+while time.monotonic() < deadline:
+    try:
+        raw = owner.read_bytes()
+        metadata = json.loads(raw)
+        canonical = (json.dumps(metadata, sort_keys=True, separators=(",", ":")) + "\\n").encode()
+        if raw != canonical:
+            raise ValueError
+        with owner.open("rb") as candidate:
+            try:
+                fcntl.flock(candidate, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                result.write_text("blocked")
+            else:
+                result.write_text("acquired")
+                time.sleep(0.25)
+        raise SystemExit(0)
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        time.sleep(0.001)
+raise SystemExit(2)
+"""
+    probe = subprocess.Popen(
+        [sys.executable, "-c", probe_code, str(owner), str(probe_result)]
+    )
+    process, ready, release = _start_owner(custody_dir, tmp_path)
+    try:
+        _wait_for(probe_result)
+        assert probe_result.read_text() == "blocked"
+        _wait_for(ready)
+    finally:
+        release.touch(exist_ok=True)
+        stdout, stderr = process.communicate(timeout=5)
+        probe.wait(timeout=5)
+
+    assert process.returncode == 0
+    assert probe.returncode == 0
+    assert stdout == ""
+    assert stderr == ""
+    assert not (locks_dir / LOCK_NAME).exists()
 
 
 def test_active_owner_defers_without_running_child(tmp_path: Path) -> None:
@@ -308,6 +443,18 @@ def test_symlinked_locks_parent_fails_before_child(tmp_path: Path) -> None:
     assert not sentinel.exists()
 
 
+def test_regular_file_in_custody_path_has_fixed_failure_output(tmp_path: Path) -> None:
+    regular = tmp_path / "regular"
+    regular.write_text("not a directory")
+    custody_dir = regular / "custody"
+
+    completed = _run(custody_dir, sys.executable, "-c", "raise SystemExit(0)")
+
+    _assert_fixed_failure(
+        completed, code=65, result="lock_failed", custody_dir=custody_dir
+    )
+
+
 def test_symlinked_lock_entry_fails_before_child(tmp_path: Path) -> None:
     custody_dir, locks_dir = _custody(tmp_path)
     foreign = tmp_path / "foreign"
@@ -372,13 +519,15 @@ def test_dead_owner_is_never_stolen(tmp_path: Path) -> None:
     lock_dir, owner = _foreign_lock(locks_dir, _canonical(metadata))
     sentinel = tmp_path / "must-not-run"
 
-    completed = _run(
-        custody_dir,
-        sys.executable,
-        "-c",
-        "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
-        str(sentinel),
-    )
+    with owner.open("r+b") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        completed = _run(
+            custody_dir,
+            sys.executable,
+            "-c",
+            "import pathlib,sys; pathlib.Path(sys.argv[1]).touch()",
+            str(sentinel),
+        )
 
     _assert_fixed_failure(
         completed, code=65, result="lock_failed", custody_dir=custody_dir
@@ -433,6 +582,53 @@ def test_child_exit_and_output_are_preserved_after_cleanup(tmp_path: Path) -> No
     assert not (locks_dir / LOCK_NAME).exists()
 
 
+def test_child_signal_status_is_preserved_after_cleanup(tmp_path: Path) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+
+    completed = _run(
+        custody_dir,
+        sys.executable,
+        "-c",
+        "import os,signal; os.kill(os.getpid(), signal.SIGTERM)",
+    )
+
+    assert completed.returncode == -signal.SIGTERM
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
+def test_lock_is_held_until_same_process_group_descendants_exit(tmp_path: Path) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    sentinel = tmp_path / "grandchild-finished"
+    grandchild = (
+        "import pathlib,sys,time; time.sleep(0.25); "
+        "pathlib.Path(sys.argv[1]).write_text("
+        "'lock-held' if pathlib.Path(sys.argv[2]).exists() else 'lock-missing')"
+    )
+    child = (
+        "import subprocess,sys; "
+        "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], "
+        "sys.argv[3]], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL)"
+    )
+
+    completed = _run(
+        custody_dir,
+        sys.executable,
+        "-c",
+        child,
+        grandchild,
+        str(sentinel),
+        str(locks_dir / LOCK_NAME / OWNER_NAME),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert sentinel.read_text() == "lock-held"
+    assert not (locks_dir / LOCK_NAME).exists()
+
+
 def test_owner_token_mutation_causes_release_failure_and_retains_evidence(
     tmp_path: Path,
 ) -> None:
@@ -457,6 +653,102 @@ def test_owner_token_mutation_causes_release_failure_and_retains_evidence(
     assert stderr == "runtime-exclusive-lock result=release_failed\n"
     assert owner.exists()
     assert json.loads(owner.read_bytes())["owner_token"] == metadata["owner_token"]
+
+
+def test_owner_mode_mutation_release_failure_overrides_child_result(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    process, _, release = _spawn_owner(custody_dir, tmp_path, exit_code=9)
+    owner = locks_dir / LOCK_NAME / OWNER_NAME
+    owner.chmod(0o640)
+
+    stdout, stderr = _finish_owner(process, release)
+
+    assert process.returncode == 74
+    assert stdout == ""
+    assert stderr == "runtime-exclusive-lock result=release_failed\n"
+    assert owner.exists()
+    assert owner.stat().st_mode & 0o777 == 0o640
+
+
+def test_owner_hardlink_causes_release_failure_and_retains_evidence(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    process, _, release = _spawn_owner(custody_dir, tmp_path)
+    owner = locks_dir / LOCK_NAME / OWNER_NAME
+    linked = tmp_path / "linked-owner-evidence"
+    os.link(owner, linked)
+
+    stdout, stderr = _finish_owner(process, release)
+
+    assert process.returncode == 74
+    assert stdout == ""
+    assert stderr == "runtime-exclusive-lock result=release_failed\n"
+    assert owner.exists()
+    assert linked.exists()
+    assert owner.stat().st_ino == linked.stat().st_ino
+    assert owner.stat().st_nlink == 2
+
+
+def test_owner_inode_substitution_causes_release_failure_and_retains_evidence(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    process, _, release = _spawn_owner(custody_dir, tmp_path)
+    owner = locks_dir / LOCK_NAME / OWNER_NAME
+    original = tmp_path / "original-owner-evidence"
+    raw = owner.read_bytes()
+    owner.rename(original)
+    owner.write_bytes(raw)
+    owner.chmod(0o600)
+
+    stdout, stderr = _finish_owner(process, release)
+
+    assert process.returncode == 74
+    assert stdout == ""
+    assert stderr == "runtime-exclusive-lock result=release_failed\n"
+    assert original.read_bytes() == raw
+    assert owner.read_bytes() == raw
+    assert original.stat().st_ino != owner.stat().st_ino
+
+
+def test_locks_parent_substitution_causes_release_failure_and_retains_evidence(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    process, _, release = _spawn_owner(custody_dir, tmp_path)
+    displaced = tmp_path / "displaced-locks"
+    locks_dir.rename(displaced)
+    locks_dir.mkdir(mode=0o700)
+
+    stdout, stderr = _finish_owner(process, release)
+
+    assert process.returncode == 74
+    assert stdout == ""
+    assert stderr == "runtime-exclusive-lock result=release_failed\n"
+    assert (displaced / LOCK_NAME / OWNER_NAME).exists()
+    assert locks_dir.is_dir()
+
+
+def test_lock_directory_substitution_causes_release_failure_and_retains_evidence(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    process, _, release = _spawn_owner(custody_dir, tmp_path)
+    lock_dir = locks_dir / LOCK_NAME
+    displaced = tmp_path / "displaced-runtime-lock"
+    lock_dir.rename(displaced)
+    lock_dir.mkdir(mode=0o700)
+
+    stdout, stderr = _finish_owner(process, release)
+
+    assert process.returncode == 74
+    assert stdout == ""
+    assert stderr == "runtime-exclusive-lock result=release_failed\n"
+    assert (displaced / OWNER_NAME).exists()
+    assert lock_dir.is_dir()
 
 
 def test_extra_lock_entry_causes_release_failure_without_recursive_cleanup(
