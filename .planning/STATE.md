@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c fixture-only raw-sample blackbox integration is implemented and green through the full 263-test pair plus section-31/33 rails; durable commit, post-activation rollback, committed-state recovery, consumer runtime stability, VM-clock alignment, bounded live polling, exact-head CI, and every live/protected action remain open
-last_updated: "2026-07-13T22:46:22Z"
+stopped_at: Phase 12 production MCP client rotation R1c fixture-only working slice durably enters activation_started before the first consumer touch and retains committed after both direct probes plus fresh blackbox evidence; the listed targeted verification tiers are green, while an exact-current-worktree full-suite rerun, exact-head CI, post-activation rollback, committed reproof/finalization, live runtime proofs, and every protected/public action remain open
+last_updated: "2026-07-14T00:20:10Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; R1c now has fixture-only categorical consumer recreation, private-dotenv custody, two exact direct probes, and raw-successful-scrape blackbox integration with post-stability ordering. The fixture remains precommit at `published_validated`; durable commit, post-activation rollback, committed-state recovery, consumer runtime stability, VM-clock alignment, bounded live polling, exact-head CI, and every live/protected action remain gated
-Last activity: 2026-07-13 — Fresh targeted gates passed the 62-case integration selector, 80/80 helper tests, 179/179 plan-selector cases, the full 263/263 rotator/blackbox pair, 41/41 unchanged regressions, 39/39 section-31 rails, and 7/7 section-33 harness tests; no live Docker/CA/secrets/runtime, model/index, or protected state was mutated
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and startup recovery; the current R1c fixture-only working slice fsyncs `activation_started` immediately before the first consumer touch and fsyncs and retains `committed` only after both direct probes plus fresh blackbox evidence. Same-process failures before `committed` remain `publication_failed`; residual schema-v2 `published_validated`, `activation_started`, or `committed` fails closed as `recovery_failed` before ordinary work while preserving the new pair, journal, and generations, except that `activation_started` may clean only exact transaction-owned dotenv residue. `pair_published` and earlier are the last unambiguous auto-restorable phases because the prior schema-v2 fixture used `published_validated` across consumer activation. Terminal activation, recovery finalization, live runtime proofs, and every live/protected/public action remain gated
+Last activity: 2026-07-13 — The current activation/commit slice passes the full 278/278 rotator/blackbox pair, 41/41 unchanged production regressions, 39/39 section-31 rails, 7/7 section-33 harness tests, and 2/2 planning traceability tests under serialized zero-model targeted gates; an exact-current-worktree full-suite rerun and exact-head CI remain pending, and this fixture/test slice performed no live Docker/CA/secret/runtime, model/index, or protected mutation
 
 ## Performance Metrics
 
@@ -73,7 +73,8 @@ Last activity: 2026-07-13 — Fresh targeted gates passed the 62-case integratio
 
 - [Phase 12]: Production MCP client rotation preserves the unchanged six-hour validator. Its separate diagnostic is restricted to the exact canonical current pair, admits only the validator's leaf-expiry-window failure with at most six hours remaining, requires live leaves to have a chain valid now, and permits historical chain probing only for an already-expired leaf.
 - [Phase 12]: Rotation R1a is staged-only and offline-tested: Docker context/network/image/CLI identity, fixed container confinement, secret-free child environment/output, canonical private staging containment, staged ownership/modes/device, and normal post-issuance validation all fail closed before any later publication work.
-- [Phase 12]: Rotation R1b uses a strict bounded secret-free journal and retained mode-0600 generations on the canonical filesystem. File and parent fsyncs bracket each journal/rename transition; startup accepts only phase-reachable old/new pair states, restores and normally validates the old pair before removing a pre-commit journal, and otherwise retains all evidence while failing closed. The publication path remains fixture-only until R1c wires exact consumer activation, probes, commit, and rollback.
+- [Phase 12]: Rotation R1b uses a strict bounded secret-free journal and retained mode-0600 generations on the canonical filesystem. File and parent fsyncs bracket each journal/rename transition; startup accepts only phase-reachable old/new pair states. The interim R1c compatibility boundary auto-restores only `pair_published` and earlier; residual schema-v2 `published_validated` is activation-ambiguous because the prior fixture used that phase across consumer recreation, so it is preserved and fails closed with later activation phases. R1c owns runtime-aware recovery, probes, commit, and rollback.
+- [Phase 12]: The interim R1c fixture-only activation/commit boundary durably records `activation_started` before any consumer touch and retains `committed` after both direct probes plus fresh blackbox evidence. It deliberately emits neither `activated` nor `committed_recovered` and performs no journal unlink, committed reproof/finalization, or post-activation rollback until those paths are implemented and verified.
 - [Phase 12]: Rotation R1c uses one fixed blackbox-query helper: an OS-controlled interpreter orchestrates an exact label-selected Caddy/BusyBox request with a sanitized four-variable child environment, bounded output and monotonic deadlines, strict duplicate-free JSON/vector/freshness checks, and fixed non-leaking summaries. Caller-supplied URLs, queries, Docker context, labels, and metric identities are not accepted.
 - [Phase 12]: Candidate protocol v2 was preregistered before any held-out attempt so manifests bind both complete role prompts/rendering, the concrete serializer, and the full generation envelope; Phase 11 custody/baselines remain unchanged.
 - [Phase 12]: Local Ollama model identity is verified, but absent installed `/opt` role commands and a timed-out direct decomposer smoke keep runtime readiness open; Plan 12-04 may not consume a frozen/held-out attempt until that gate is real.
@@ -478,28 +479,50 @@ timestamp rather than the instant-query evaluation timestamp. Strict decimal
 ordering requires `boundary < raw sample <= query time <= receipt time` and a
 raw sample no older than 120 seconds. Synthetic integration tests pin the
 boundary after the final blackbox-only/operator snapshot and before the first
-direct probe. The fixture still halts at `published_validated` after successful
-blackbox evidence; durable commit, post-activation rollback, and committed-state
-recovery are not implemented. The ordinary production path remains
-`staged_only` and cannot recreate a live consumer.
+direct probe. Immediately before the first fixture consumer touch, the current
+working slice fsyncs `activation_started`. After both direct probes and fresh
+blackbox evidence succeed, the fake-only path fsyncs and retains `committed`;
+it does not unlink the journal or emit `activated` or `committed_recovered`.
+Same-process failures before `committed` remain `publication_failed`. A later
+startup encountering schema-v2 `published_validated`, `activation_started`, or
+`committed` returns `recovery_failed` before ordinary validation, lifetime, or
+healthy-noop work and preserves the new pair, journal, and generations. Only
+`activation_started` may clean exact
+transaction-owned dotenv residue; that cleanup does not finalize or restore the
+transaction. The ordinary production path remains `staged_only` and cannot
+recreate a live consumer.
 
-Fresh serialized targeted gates pass the 62-case blackbox integration selector
-(47% free/load1 4.24), all 80 blackbox-helper tests (48%/3.06), the 179-case
-plan selector (43%/5.19), the full 263-test rotator/blackbox pair (47%/2.76),
-the unchanged 41-test production TLS/bootstrap/Compose-policy tier (46%/2.91),
-and the 39 section-31 plus 7 section-33 invariant classes (45%/3.42). Every
-sample had zero resident models. Bash syntax, ShellCheck, Ruff, formatting,
-diff whitespace, and independent post-fix reviews are green.
+The current activation/commit slice passes the full 278-test rotator/blackbox
+pair, the unchanged 41-test production TLS/bootstrap/Compose-policy tier, all
+39 section-31 invariant rails, all 7 section-33 harness tests, and both planning
+traceability tests. Each tier ran serialized after a fresh targeted admission
+sample with at least 35% free memory, load1 at most 10, and zero resident
+models. Independent final review found no P0/P1/P2 issue. Exact-head CI remains
+pending until this working slice is committed.
 
-No real Docker command, issuance, certificate publication, secret change,
-consumer recreation, model/index action, exact-scale run, held-out attempt,
-protected attempt, or external claim occurred. Before live activation, R1c
+A separate concurrent operator session changed external runtime state without
+editing these five R1c files. Read-only verification at 2026-07-14T00:20Z
+confirmed that the canonical mode-`0600` MCP client leaf/key now form a valid
+client-auth pair issued for `mcp-client.mnemo.local`, valid from
+2026-07-13T23:51:36Z through 2026-07-14T23:52:36Z. This session did not repeat
+the live endpoint probes. Its saved hardware-admitted full-suite artifact
+records 2,545 tests with one governance-document registration failure, not a
+green full-suite run. Commit `0a06d0e` fixes that exact registration gap, and
+the governance policy file passes 6/6 on the current worktree; the full suite
+has not been rerun after that fix and is not represented as exact-head green.
+
+This fixture/test slice ran no real Docker command, issuance, certificate
+publication, secret change, consumer recreation, model/index action,
+exact-scale run, held-out attempt, protected attempt, or external claim. Before
+live activation, R1c
 must align the host boundary with the VM/VictoriaMetrics clock domain or prove
 a conservative skew bound, add fixed-deadline polling across the 60-second
 scrape cadence, prove stable consumer IDs and restart counts, and implement
-durable commit, post-activation rollback, and committed-state recovery. Pushed
-head `515d2cc` has green exact-SHA CI run 29288363680; the current working
-slice requires its own green exact-SHA check after commit. Graph, CBM, and
-gbrain refreshes remain
+post-activation rollback plus committed-state reproof, finalization, journal
+unlink, and terminal results. It must also pass the strong hardware gate before
+any live action. Pushed head `d6a7ef3` has green exact-SHA CI run 29291321621;
+the current working slice requires its own green exact-SHA check after commit.
+No protected attempt or public claim is authorized by this fixture state.
+Graph, CBM, and gbrain refreshes remain
 queued behind their stronger three-sample hardware admission rather than being
 run from targeted-only samples.
