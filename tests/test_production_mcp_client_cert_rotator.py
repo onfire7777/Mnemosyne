@@ -7,8 +7,10 @@ import os
 import pwd
 import re
 import shutil
+import stat
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 REPO = Path(__file__).resolve().parents[1]
 ROTATOR = REPO / "infra" / "scripts" / "rotate-production-mcp-client-cert.sh"
+VALIDATOR = REPO / "infra" / "validate" / "validate-production-mcp-client-tls.sh"
 DIAGNOSTIC = (
     REPO / "infra" / "validate" / "diagnose-production-mcp-client-tls-for-rotation.sh"
 )
@@ -32,6 +35,12 @@ IMAGE = (
 TRANSACTION_ACTION = "--test-fixture-transaction"
 TRANSACTION_JOURNAL = "transaction.json"
 TRANSACTION_MARKER = "fixture-transaction.json"
+COMPLETION_RECEIPT_FIELDS = {
+    "schema_version",
+    "transaction_id",
+    "result",
+    "completed_at",
+}
 BLACKBOX_CONTAINER_ID = "a" * 64
 OPERATOR_CONTAINER_ID = "b" * 64
 RECREATED_BLACKBOX_CONTAINER_ID = "c" * 64
@@ -821,6 +830,51 @@ raise SystemExit(returncodes[index])
     return curl, record
 
 
+def _write_blocking_python_after_completion_mark(
+    tmp_path: Path,
+    entered: Path,
+    release: Path,
+) -> Path:
+    real_python = shutil.which("python3")
+    assert real_python
+    fake_bin = tmp_path / "blocking-python-bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        f"""#!{sys.executable}
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+arguments = sys.argv[1:]
+if arguments[:2] == ["-", "mark-completion-emitted"]:
+    completed = subprocess.run(
+        [{real_python!r}, *arguments],
+        input=sys.stdin.buffer.read(),
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+    entered = Path({str(entered)!r})
+    release = Path({str(release)!r})
+    descriptor = os.open(entered, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.close(descriptor)
+    deadline = time.monotonic() + 15
+    while not release.exists():
+        if time.monotonic() >= deadline:
+            raise SystemExit(96)
+        time.sleep(0.02)
+    raise SystemExit(0)
+os.execv({real_python!r}, [{real_python!r}, *arguments])
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o700)
+    return fake_bin
+
+
 def _rotator_env(fixture: TlsFixture, docker: Path, stage: Path) -> dict[str, str]:
     return {
         **os.environ,
@@ -830,6 +884,33 @@ def _rotator_env(fixture: TlsFixture, docker: Path, stage: Path) -> dict[str, st
         "MCP_CLIENT_ROTATOR_DOCKER_BIN": str(docker),
         "MCP_CLIENT_ROTATOR_STAGE_DIR": str(stage),
     }
+
+
+def _write_six_hour_floor_bypass_openssl(tmp_path: Path) -> Path:
+    real_openssl = shutil.which("openssl")
+    assert real_openssl
+    fake_bin = tmp_path / "six-hour-floor-bypass-bin"
+    fake_bin.mkdir()
+    fake_openssl = fake_bin / "openssl"
+    fake_openssl.write_text(
+        f"""#!{sys.executable}
+import os
+import sys
+
+arguments = sys.argv[1:]
+if arguments[:1] == ["x509"] and "-checkend" in arguments:
+    index = arguments.index("-checkend")
+    if arguments[index + 1 : index + 2] == ["21600"]:
+        raise SystemExit(0)
+if arguments[:1] == ["verify"] and "-attime" in arguments:
+    index = arguments.index("-attime")
+    arguments = arguments[:index] + arguments[index + 2 :]
+os.execv({real_openssl!r}, [{real_openssl!r}, *arguments])
+""",
+        encoding="utf-8",
+    )
+    fake_openssl.chmod(0o700)
+    return fake_bin
 
 
 def _write_compose_passwords(
@@ -970,12 +1051,13 @@ def _transaction_fixture(
     docker_options: dict[str, object] | None = None,
     curl_options: dict[str, object] | None = None,
     operator_running: bool = False,
+    staged_remaining: dt.timedelta = dt.timedelta(hours=24),
 ) -> RotationTransactionFixture:
     current = _tls_fixture(tmp_path, remaining=dt.timedelta(hours=8), stem="current")
     _write_compose_passwords(current)
     staged = _tls_fixture(
         tmp_path,
-        remaining=dt.timedelta(hours=24),
+        remaining=staged_remaining,
         stem="staged",
         issuer=current,
     )
@@ -1055,6 +1137,25 @@ def _journal_path(transaction: RotationTransactionFixture) -> Path:
     return transaction.current.secrets / ".mcp-client-rotation" / TRANSACTION_JOURNAL
 
 
+def _completion_receipt_path(
+    transaction: RotationTransactionFixture,
+    transaction_id: str,
+    state: str,
+) -> Path:
+    assert state in {"pending", "emitted"}
+    return (
+        transaction.current.secrets
+        / ".mcp-client-rotation"
+        / f"completion.{transaction_id}.{state}.json"
+    )
+
+
+def _completion_result_line(result: str, transaction_id: str) -> str:
+    assert result in {"activated", "committed_recovered"}
+    assert re.fullmatch(r"[0-9a-f]{32,64}", transaction_id)
+    return f"mcp-client-rotation result={result} transaction_id={transaction_id}\n"
+
+
 def _compose_env_artifact_paths(rotation: Path) -> list[Path]:
     return sorted(
         (
@@ -1079,6 +1180,11 @@ def _generation_paths(
         if path.is_file()
         and not path.is_symlink()
         and path.name not in {TRANSACTION_JOURNAL, TRANSACTION_MARKER}
+        and re.fullmatch(
+            r"completion[.][0-9a-f]{32,64}[.](?:pending|emitted)[.]json",
+            path.name,
+        )
+        is None
     ]
     result: dict[str, Path] = {}
     for field in (
@@ -1396,6 +1502,52 @@ def _run_diagnostic(
     )
 
 
+def _run_validator(fixture: TlsFixture) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(VALIDATOR), str(fixture.root), str(fixture.bundle), str(fixture.key)],
+        cwd=REPO,
+        env={
+            **os.environ,
+            "MCP_CLIENT_TLS_HOSTNAME": "mcp-client.mnemo.local",
+            "MCP_CLIENT_TLS_MIN_VALIDITY_SECONDS": "21600",
+            "MNEMO_SECRETS_DIR": str(fixture.secrets),
+        },
+        text=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=10,
+        check=False,
+    )
+
+
+def _file_snapshot(path: Path) -> tuple[int, int, int, int, int, bytes]:
+    path_stat = os.lstat(path)
+    return (
+        path_stat.st_dev,
+        path_stat.st_ino,
+        path_stat.st_uid,
+        stat.S_IMODE(path_stat.st_mode),
+        path_stat.st_nlink,
+        path.read_bytes(),
+    )
+
+
+def _assert_canonical_matches_transaction_new_pair(
+    transaction: RotationTransactionFixture,
+    journal: dict[str, object],
+) -> None:
+    generations = _generation_paths(transaction, journal)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == generations["new_cert_sha256"].read_bytes()
+    )
+    assert (
+        transaction.current.key.read_bytes()
+        == generations["new_key_sha256"].read_bytes()
+    )
+    assert _run_validator(transaction.current).returncode == 0
+
+
 @pytest.mark.parametrize(
     ("seconds", "expected"),
     [
@@ -1429,6 +1581,41 @@ def test_renewal_above_twelve_hours_is_noop_without_docker(tmp_path: Path) -> No
     assert proc.stdout == "mcp-client-rotation result=healthy_noop\n"
     assert proc.stderr == ""
     assert not stage.exists()
+
+
+def test_healthy_noop_accepts_more_than_128_emitted_completion_receipts(
+    tmp_path: Path,
+) -> None:
+    current = _tls_fixture(tmp_path, remaining=dt.timedelta(hours=13))
+    rotation = _stage_path(current).parent
+    expected: dict[Path, bytes] = {}
+    for index in range(129):
+        transaction_id = f"{index:032x}"
+        receipt = rotation / f"completion.{transaction_id}.emitted.json"
+        payload = (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "transaction_id": transaction_id,
+                    "result": "activated",
+                    "completed_at": "2026-07-14T04:00:00Z",
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode()
+        receipt.write_bytes(payload)
+        receipt.chmod(0o600)
+        expected[receipt] = payload
+    env = _rotator_env(current, tmp_path / "missing-docker", tmp_path / "unused-stage")
+
+    proc = _run_rotator(env)
+
+    assert proc.returncode == 0
+    assert proc.stdout == "mcp-client-rotation result=healthy_noop\n"
+    assert proc.stderr == ""
+    assert all(path.read_bytes() == payload for path, payload in expected.items())
 
 
 @pytest.mark.parametrize(
@@ -2075,11 +2262,19 @@ def test_publish_fixture_seam_accepts_bounded_context_mode_pytest_root(
     try:
         transaction = _transaction_fixture(fixture_root)
 
-        stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
+        completed = _run_rotator(transaction.env, TRANSACTION_ACTION)
 
-        assert stopped.returncode == 74
-        assert stopped.stdout == "mcp-client-rotation result=recovery_failed\n"
-        assert _strict_json(_journal_path(transaction))["phase"] == "committed"
+        assert completed.returncode == 0
+        assert not _journal_path(transaction).exists()
+        journal = _dotenv_observations(transaction.record)[0]["journal"]
+        assert isinstance(journal, dict)
+        transaction_id = journal["transaction_id"]
+        assert isinstance(transaction_id, str)
+        assert completed.stdout == _completion_result_line("activated", transaction_id)
+        receipt = _strict_json(
+            _completion_receipt_path(transaction, transaction_id, "emitted")
+        )
+        assert receipt["result"] == "activated"
     finally:
         shutil.rmtree(context_root, ignore_errors=True)
 
@@ -2582,7 +2777,6 @@ def test_transition_signal_style_status_propagates_without_terminal_result(
     transaction = _transaction_fixture(
         tmp_path,
         docker_options={
-            "blackbox_sample_at_first_direct_probe": True,
             "post_compose_containers": (
                 (
                     RECREATED_BLACKBOX_CONTAINER_ID,
@@ -2728,7 +2922,7 @@ def test_activation_transition_parent_fsync_failure_recovers_by_visible_phase(
     )
 
 
-def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_retains_commit(
+def test_fixture_finalizes_activation_with_private_emitted_receipt(
     tmp_path: Path,
 ) -> None:
     transaction = _transaction_fixture(
@@ -2747,26 +2941,47 @@ def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_retains_commi
         curl_options={"responses": ("204", "299")},
     )
 
-    stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
+    completed = _run_rotator(transaction.env, TRANSACTION_ACTION)
 
-    assert stopped.returncode == 74
-    assert stopped.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert completed.returncode == 0
+    assert completed.stdout.count("mcp-client-rotation result=") == 1
+    assert completed.stderr == ""
     journal_path = _journal_path(transaction)
-    journal = _strict_json(journal_path)
-    assert journal["phase"] == "committed"
-    assert journal["compose_env"] is None
+    assert not journal_path.exists()
     assert (
         transaction.current.bundle.read_bytes()
         == transaction.staged.bundle.read_bytes()
     )
     assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
-    generations = _generation_paths(transaction, journal)
-    journal_bytes = journal_path.read_bytes()
-    generation_bytes = {path: path.read_bytes() for path in generations.values()}
     observations = _dotenv_observations(transaction.record)
     assert [str(observation["argv"][-1]) for observation in observations] == [
         "blackbox-exporter"
     ]
+    journal = observations[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    assert completed.stdout == _completion_result_line("activated", transaction_id)
+    generations = _generation_paths(transaction, journal)
+    assert len(generations) == 4
+    assert all(path.exists() for path in generations.values())
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    assert emitted_receipt.is_file()
+    assert not emitted_receipt.is_symlink()
+    receipt_stat = os.lstat(emitted_receipt)
+    assert receipt_stat.st_uid == os.getuid()
+    assert receipt_stat.st_mode & 0o777 == 0o600
+    assert receipt_stat.st_nlink == 1
+    receipt = _strict_json(emitted_receipt)
+    assert set(receipt) == COMPLETION_RECEIPT_FIELDS
+    assert receipt["schema_version"] == 1
+    assert receipt["transaction_id"] == transaction_id
+    assert receipt["result"] == "activated"
+    completed_at = receipt["completed_at"]
+    assert isinstance(completed_at, str) and completed_at.endswith("Z")
+    dt.datetime.fromisoformat(completed_at[:-1] + "+00:00")
+    assert not pending_receipt.exists()
     dotenv, receipt = _assert_private_dotenv_observation(
         observations[0], "blackbox-exporter"
     )
@@ -2809,40 +3024,13 @@ def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_retains_commi
     assert docker_calls[-3:] == _blackbox_probe_calls()
     assert all(docker_calls.count(call) == 1 for call in _blackbox_probe_calls())
 
-    probe_calls = _curl_calls(transaction.probe_record)
-    recovery_env, recovery_record = _recovery_env(
-        tmp_path,
-        transaction,
-        "committed-recovery",
-    )
-    recovery_stage = Path(recovery_env["MCP_CLIENT_ROTATOR_STAGE_DIR"])
-    recovered = _run_rotator(recovery_env)
 
-    assert recovered.returncode == 74
-    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
-    assert recovered.stderr == (
-        "mcp-client-rotation failed: committed transaction requires verified "
-        "runtime recovery\n"
-    )
-    assert journal_path.read_bytes() == journal_bytes
-    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
-    assert (
-        transaction.current.bundle.read_bytes()
-        == transaction.staged.bundle.read_bytes()
-    )
-    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
-    assert _docker_calls(recovery_record) == []
-    assert _curl_calls(transaction.probe_record) == probe_calls
-    assert not recovery_stage.exists()
-
-
-def test_committed_is_durable_after_all_probes_and_resume_fails_closed(
+def test_committed_resume_reproves_runtime_and_finalizes_without_reactivation(
     tmp_path: Path,
 ) -> None:
     transaction = _transaction_fixture(
         tmp_path,
         docker_options={
-            "blackbox_sample_at_first_direct_probe": True,
             "post_compose_containers": (
                 (
                     RECREATED_BLACKBOX_CONTAINER_ID,
@@ -2852,7 +3040,10 @@ def test_committed_is_durable_after_all_probes_and_resume_fails_closed(
                 ),
             ),
         },
-        curl_options={"responses": ("204", "299")},
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
     )
 
     interrupted = _run_rotator(
@@ -2867,36 +3058,1485 @@ def test_committed_is_durable_after_all_probes_and_resume_fails_closed(
     journal = _strict_json(journal_path)
     assert journal["phase"] == "committed"
     assert journal["compose_env"] is None
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
     assert _compose_env_artifact_paths(journal_path.parent) == []
     assert len(_curl_calls(transaction.probe_record)) == 2
     assert all(
         call in _docker_calls(transaction.record) for call in _blackbox_probe_calls()
     )
     generations = _generation_paths(transaction, journal)
-    journal_bytes = journal_path.read_bytes()
     generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    compose_observations = _dotenv_observations(transaction.record)
+    issuance_calls = [
+        call
+        for call in _docker_calls(transaction.record)
+        if "ca" in call and "certificate" in call
+    ]
 
-    recovery_env, recovery_record = _recovery_env(
-        tmp_path,
-        transaction,
-        "committed-interrupt-recovery",
+    recovery_env = dict(transaction.env)
+    recovery_stage = _stage_path(
+        transaction.current, "committed-interrupt-recovery-stage"
     )
-    recovered = _run_rotator(recovery_env)
+    recovery_env["MCP_CLIENT_ROTATOR_STAGE_DIR"] = str(recovery_stage)
+    recovered = _run_rotator(recovery_env, TRANSACTION_ACTION)
 
-    assert recovered.returncode == 74
-    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
-    assert recovered.stderr == (
-        "mcp-client-rotation failed: committed transaction requires verified "
-        "runtime recovery\n"
+    assert recovered.returncode == 0
+    assert recovered.stdout == _completion_result_line(
+        "committed_recovered", transaction_id
     )
-    assert journal_path.read_bytes() == journal_bytes
+    assert recovered.stdout.count("mcp-client-rotation result=") == 1
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    assert not _completion_receipt_path(transaction, transaction_id, "pending").exists()
+    receipt = _strict_json(emitted_receipt)
+    assert set(receipt) == COMPLETION_RECEIPT_FIELDS
+    assert receipt["transaction_id"] == transaction_id
+    assert receipt["result"] == "committed_recovered"
     assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
     assert (
         transaction.current.bundle.read_bytes()
         == transaction.staged.bundle.read_bytes()
     )
     assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
-    assert _docker_calls(recovery_record) == []
+    assert _dotenv_observations(transaction.record) == compose_observations
+    assert [
+        call
+        for call in _docker_calls(transaction.record)
+        if "ca" in call and "certificate" in call
+    ] == issuance_calls
+    probe_calls = _curl_calls(transaction.probe_record)
+    assert len(probe_calls) == 4
+    assert [call["snapshot_count"] for call in probe_calls] == [1, 1, 3, 3]
+    assert all(
+        call["materials"] == {"root": True, "cert": True, "key": True}
+        for call in probe_calls
+    )
+    assert _blackbox_observations(transaction.record) == [
+        _expected_blackbox_observation(
+            "activation_started",
+            0,
+            direct_probe_count=2,
+            snapshot_count=1,
+        ),
+        _expected_blackbox_observation(
+            "committed",
+            1,
+            direct_probe_count=4,
+            snapshot_count=3,
+        ),
+    ]
+    assert (interrupted.stdout + recovered.stdout).count(
+        "mcp-client-rotation result="
+    ) == 1
+    assert not recovery_stage.exists()
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "validation",
+        "consumer-expansion",
+        "direct-probe",
+        "blackbox",
+    ],
+)
+def test_trusted_committed_reproof_failure_restores_and_reproves_old_pair(
+    tmp_path: Path,
+    failure: str,
+) -> None:
+    blackbox_only = (
+        (
+            RECREATED_BLACKBOX_CONTAINER_ID,
+            "infra",
+            "blackbox-exporter",
+            "running",
+        ),
+    )
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={"post_compose_containers": blackbox_only},
+        curl_options={"responses": ("204", "299")},
+    )
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="committed"),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    rollback_expected = TlsFixture(
+        secrets=transaction.current.secrets,
+        root=transaction.current.root,
+        bundle=generations["old_cert_sha256"],
+        key=generations["old_key_sha256"],
+        password=transaction.current.password,
+        root_key=transaction.current.root_key,
+        root_cert=transaction.current.root_cert,
+        intermediate_key=transaction.current.intermediate_key,
+        intermediate_cert=transaction.current.intermediate_cert,
+    )
+    issuance_calls = [
+        call
+        for call in _docker_calls(transaction.record)
+        if "ca" in call and "certificate" in call
+    ]
+
+    expanded = blackbox_only + (
+        (OPERATOR_CONTAINER_ID, "infra", "operator", "running"),
+    )
+    post_compose = expanded if failure == "consumer-expansion" else blackbox_only
+    if failure in {"validation", "consumer-expansion"}:
+        pair_sequence = ("new", "new", "old", "old")
+        responses = ("204", "299", "204", "299")
+        expected_probe_count = 4
+        expected_blackbox_count = 2
+        expected_direct_counts = (2, 4)
+    elif failure == "direct-probe":
+        pair_sequence = ("new", "new", "new", "old", "old")
+        responses = ("204", "299", "500", "204", "299")
+        expected_probe_count = 5
+        expected_blackbox_count = 2
+        expected_direct_counts = (2, 5)
+    else:
+        pair_sequence = ("new", "new", "new", "new", "old", "old")
+        responses = ("204", "299", "204", "299", "204", "299")
+        expected_probe_count = 6
+        expected_blackbox_count = 3
+        expected_direct_counts = (2, 4, 6)
+    _write_fake_curl(
+        tmp_path,
+        transaction.staged,
+        rollback_expected=rollback_expected,
+        expected_pair_sequence=pair_sequence,
+        responses=responses,
+        returncodes=(0,) * len(responses),
+    )
+    _write_fake_docker(
+        tmp_path,
+        transaction.staged,
+        direct_probe_record=transaction.probe_record,
+        post_compose_containers=post_compose,
+        post_second_compose_containers=blackbox_only,
+        blackbox_query_returncodes=(0, 42) if failure == "blackbox" else (),
+        blackbox_expected_direct_probe_counts=expected_direct_counts,
+    )
+    recovery_env = (
+        _fault_env(transaction.env, fail_validation="committed")
+        if failure == "validation"
+        else transaction.env
+    )
+
+    recovered = _run_rotator(recovery_env, TRANSACTION_ACTION)
+
+    assert recovered.returncode == 75
+    assert recovered.stdout == "mcp-client-rotation result=rolled_back\n"
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    assert transaction.current.bundle.read_bytes() == transaction.old_cert
+    assert transaction.current.key.read_bytes() == transaction.old_key
+    assert all(
+        path.read_bytes() == generation_bytes[path] for path in generations.values()
+    )
+    assert [
+        call
+        for call in _docker_calls(transaction.record)
+        if "ca" in call and "certificate" in call
+    ] == issuance_calls
+    assert len(_dotenv_observations(transaction.record)) == 2
+    assert len(_curl_calls(transaction.probe_record)) == expected_probe_count
+    assert len(_blackbox_observations(transaction.record)) == expected_blackbox_count
+    assert "result=committed_recovered" not in recovered.stdout
+
+
+@pytest.mark.parametrize(
+    ("interrupt_after", "temporary_remains"),
+    [
+        ("completion_receipt_temp_created", True),
+        ("completion_receipt_partial_written", True),
+        ("completion_receipt_temp_written", True),
+        ("completion_receipt_temp_fsynced", True),
+        ("completion_receipt_pending_renamed", False),
+    ],
+)
+@pytest.mark.parametrize("completion_result", ["activated", "committed_recovered"])
+def test_completion_receipt_resumes_each_pre_pending_durability_window(
+    tmp_path: Path,
+    interrupt_after: str,
+    temporary_remains: bool,
+    completion_result: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    if completion_result == "committed_recovered":
+        committed = _run_rotator(
+            _fault_env(transaction.env, interrupt_after="committed"),
+            TRANSACTION_ACTION,
+        )
+        assert committed.returncode == 86
+
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after=interrupt_after),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode == 86
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == f"completion_authorized_{completion_result}"
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    rotation = journal_path.parent
+    temporary_receipts = sorted(rotation.glob(".completion.*.tmp"))
+    assert len(temporary_receipts) == (1 if temporary_remains else 0)
+    if temporary_receipts:
+        temporary = temporary_receipts[0]
+        assert re.fullmatch(
+            rf"[.]completion[.]{transaction_id}[.]{completion_result}[.]"
+            r"[0-9]{8}T[0-9]{6}Z[.]tmp",
+            temporary.name,
+        )
+        temporary_stat = os.lstat(temporary)
+        assert temporary_stat.st_uid == os.getuid()
+        assert temporary_stat.st_mode & 0o777 == 0o600
+        assert temporary_stat.st_nlink == 1
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    assert pending_receipt.exists() is (not temporary_remains)
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    assert not emitted_receipt.exists()
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    recovered = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == _completion_result_line(
+        completion_result,
+        transaction_id,
+    )
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    assert list(rotation.glob(".completion.*.tmp")) == []
+    assert not pending_receipt.exists()
+    assert emitted_receipt.is_file()
+    assert _strict_json(emitted_receipt)["result"] == completion_result
+    assert all(
+        path.read_bytes() == generation_bytes[path] for path in generations.values()
+    )
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    _assert_canonical_matches_transaction_new_pair(transaction, journal)
+
+    replayed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert replayed.returncode == 0
+    assert replayed.stdout == "mcp-client-rotation result=healthy_noop\n"
+    assert replayed.stderr == ""
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+
+@pytest.mark.parametrize("completion_result", ["activated", "committed_recovered"])
+def test_recovered_pending_receipt_is_resynced_before_journal_unlink(
+    tmp_path: Path,
+    completion_result: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    if completion_result == "committed_recovered":
+        committed = _run_rotator(
+            _fault_env(transaction.env, interrupt_after="committed"),
+            TRANSACTION_ACTION,
+        )
+        assert committed.returncode == 86
+    renamed = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_receipt_pending_renamed",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert renamed.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    pending = _completion_receipt_path(transaction, transaction_id, "pending")
+    assert pending.is_file()
+    pending_bytes = pending.read_bytes()
+    journal_bytes = journal_path.read_bytes()
+    generations = _generation_paths(transaction, journal)
+    protected_paths = (
+        transaction.current.bundle,
+        transaction.current.key,
+        *generations.values(),
+    )
+    protected_snapshots = {path: _file_snapshot(path) for path in protected_paths}
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    resynced = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_receipt_revalidated_parent_fsynced",
+        ),
+        TRANSACTION_ACTION,
+    )
+
+    assert resynced.returncode == 86
+    assert resynced.stdout == ""
+    assert resynced.stderr == ""
+    assert journal_path.read_bytes() == journal_bytes
+    assert pending.read_bytes() == pending_bytes
+    assert {
+        path: _file_snapshot(path) for path in protected_paths
+    } == protected_snapshots
+    assert not _completion_receipt_path(transaction, transaction_id, "emitted").exists()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+    recovered = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == _completion_result_line(
+        completion_result,
+        transaction_id,
+    )
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    assert not pending.exists()
+    assert _completion_receipt_path(transaction, transaction_id, "emitted").is_file()
+    _assert_canonical_matches_transaction_new_pair(transaction, journal)
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "wrong-transaction",
+        "wrong-result",
+        "non-prefix",
+        "oversized",
+        "wrong-mode",
+        "symlink",
+        "hardlink",
+        "directory",
+        "multiple",
+        "pending-collision",
+        "emitted-collision",
+        "legacy-random-name",
+        "without-journal",
+    ],
+)
+def test_untrusted_completion_temp_fails_closed_and_preserves_evidence(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_authorized_activated",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    rotation = journal_path.parent
+    completed_at = "2026-07-14T04:00:00Z"
+    compact_time = "20260714T040000Z"
+
+    def payload(identifier: str, result: str = "activated") -> bytes:
+        return (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "transaction_id": identifier,
+                    "result": result,
+                    "completed_at": completed_at,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode()
+
+    foreign_transaction = "f" * 32
+    if foreign_transaction == transaction_id:
+        foreign_transaction = "e" * 32
+    temp_transaction = (
+        foreign_transaction if corruption == "wrong-transaction" else transaction_id
+    )
+    temp_result = "committed_recovered" if corruption == "wrong-result" else "activated"
+    temp_name = f".completion.{temp_transaction}.{temp_result}.{compact_time}.tmp"
+    if corruption == "legacy-random-name":
+        temp_name = f".completion.{transaction_id}.deadbeef.tmp"
+    temporary = rotation / temp_name
+    expected_payload = payload(temp_transaction, temp_result)
+    foreign = tmp_path / "foreign-completion-temp"
+    if corruption == "symlink":
+        foreign.write_bytes(expected_payload)
+        foreign.chmod(0o600)
+        temporary.symlink_to(foreign)
+    elif corruption == "hardlink":
+        foreign.write_bytes(expected_payload)
+        foreign.chmod(0o600)
+        os.link(foreign, temporary)
+    elif corruption == "directory":
+        temporary.mkdir()
+    else:
+        contents = expected_payload
+        if corruption in {"multiple", "pending-collision", "emitted-collision"}:
+            contents = b""
+        elif corruption == "non-prefix":
+            contents = b"not-a-canonical-prefix"
+        elif corruption == "oversized":
+            contents = b"x" * (512 + 1)
+        temporary.write_bytes(contents)
+        temporary.chmod(0o644 if corruption == "wrong-mode" else 0o600)
+    if corruption == "multiple":
+        second = rotation / (
+            f".completion.{transaction_id}.activated.20260714T040001Z.tmp"
+        )
+        second.write_bytes(b"")
+        second.chmod(0o600)
+    if corruption in {"pending-collision", "emitted-collision"}:
+        state = "pending" if corruption == "pending-collision" else "emitted"
+        collision = _completion_receipt_path(transaction, transaction_id, state)
+        collision.write_bytes(payload(transaction_id))
+        collision.chmod(0o600)
+    if corruption == "without-journal":
+        journal_path.unlink()
+
+    def artifact_snapshot() -> dict[str, tuple[int, int, int, bytes | str]]:
+        snapshot: dict[str, tuple[int, int, int, bytes | str]] = {}
+        for path in sorted(rotation.iterdir(), key=lambda item: item.name):
+            if not path.name.startswith(("completion.", ".completion.")):
+                continue
+            path_stat = os.lstat(path)
+            if path.is_symlink():
+                contents: bytes | str = os.readlink(path)
+            elif path.is_file():
+                contents = path.read_bytes()
+            else:
+                contents = b""
+            snapshot[path.name] = (
+                path_stat.st_mode,
+                path_stat.st_nlink,
+                path_stat.st_ino,
+                contents,
+            )
+        return snapshot
+
+    artifacts = artifact_snapshot()
+    journal_bytes = journal_path.read_bytes() if journal_path.exists() else None
+    generations = _generation_paths(transaction, journal)
+    protected_paths = (
+        transaction.current.bundle,
+        transaction.current.key,
+        *generations.values(),
+    )
+    protected_snapshots = {path: _file_snapshot(path) for path in protected_paths}
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    rejected = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert rejected.stderr == (
+        "mcp-client-rotation failed: "
+        + (
+            "pending completion finalization failed\n"
+            if corruption == "non-prefix"
+            else "transaction recovery failed\n"
+        )
+    )
+    assert artifact_snapshot() == artifacts
+    assert {
+        path: _file_snapshot(path) for path in protected_paths
+    } == protected_snapshots
+    assert journal_path.exists() is (journal_bytes is not None)
+    if journal_bytes is not None:
+        assert journal_path.read_bytes() == journal_bytes
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    assert _run_validator(transaction.current).returncode == 0
+    assert "result=activated" not in rejected.stdout
+
+
+@pytest.mark.parametrize(
+    ("interrupt_after", "journal_remains"),
+    [
+        ("completion_receipt_parent_fsynced", True),
+        ("completion_journal_unlinked", False),
+        ("completion_journal_parent_fsynced", False),
+    ],
+)
+@pytest.mark.parametrize("completion_result", ["activated", "committed_recovered"])
+def test_completion_receipt_recovers_each_pre_output_unlink_window_once(
+    tmp_path: Path,
+    interrupt_after: str,
+    journal_remains: bool,
+    completion_result: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    if completion_result == "committed_recovered":
+        committed = _run_rotator(
+            _fault_env(transaction.env, interrupt_after="committed"),
+            TRANSACTION_ACTION,
+        )
+        assert committed.returncode == 86
+
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after=interrupt_after),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode == 86
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    journal_path = _journal_path(transaction)
+    assert journal_path.exists() is journal_remains
+    observations = _dotenv_observations(transaction.record)
+    assert len(observations) == 1
+    journal = observations[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    assert pending_receipt.is_file()
+    assert not emitted_receipt.exists()
+    pending_payload = _strict_json(pending_receipt)
+    assert set(pending_payload) == COMPLETION_RECEIPT_FIELDS
+    assert pending_payload["transaction_id"] == transaction_id
+    assert pending_payload["result"] == completion_result
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    recovered = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == _completion_result_line(
+        completion_result,
+        transaction_id,
+    )
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    assert not pending_receipt.exists()
+    assert emitted_receipt.is_file()
+    assert _strict_json(emitted_receipt) == pending_payload
+    assert all(
+        path.read_bytes() == generation_bytes[path] for path in generations.values()
+    )
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    _assert_canonical_matches_transaction_new_pair(transaction, journal)
+    assert (interrupted.stdout + recovered.stdout).count(
+        "mcp-client-rotation result="
+    ) == 1
+
+    replayed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert replayed.returncode == 0
+    assert replayed.stdout == "mcp-client-rotation result=healthy_noop\n"
+    assert replayed.stderr == ""
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+
+def test_activated_authorization_phase_resumes_without_repeating_runtime_proof(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_authorized_activated",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "completion_authorized_activated"
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    assert not _completion_receipt_path(transaction, transaction_id, "pending").exists()
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    recovered = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == _completion_result_line("activated", transaction_id)
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    assert _completion_receipt_path(transaction, transaction_id, "emitted").is_file()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+
+def test_committed_recovery_authorization_resumes_without_repeating_reproof(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    committed = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="committed"),
+        TRANSACTION_ACTION,
+    )
+    assert committed.returncode == 86
+    authorized = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_authorized_committed_recovered",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert authorized.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "completion_authorized_committed_recovered"
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    assert not _completion_receipt_path(transaction, transaction_id, "pending").exists()
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    recovered = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert recovered.returncode == 0
+    assert recovered.stdout == _completion_result_line(
+        "committed_recovered", transaction_id
+    )
+    assert recovered.stderr == ""
+    assert not journal_path.exists()
+    assert _completion_receipt_path(transaction, transaction_id, "emitted").is_file()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+
+@pytest.mark.parametrize("authorized_result", ["activated", "committed_recovered"])
+def test_completion_authorization_rejects_mismatched_receipt_result(
+    tmp_path: Path,
+    authorized_result: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    if authorized_result == "committed_recovered":
+        committed = _run_rotator(
+            _fault_env(transaction.env, interrupt_after="committed"),
+            TRANSACTION_ACTION,
+        )
+        assert committed.returncode == 86
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after=f"completion_authorized_{authorized_result}",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    wrong_result = (
+        "committed_recovered" if authorized_result == "activated" else "activated"
+    )
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    pending_receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "transaction_id": transaction_id,
+                "result": wrong_result,
+                "completed_at": "2026-07-14T04:00:00Z",
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    pending_receipt.chmod(0o600)
+    journal_bytes = journal_path.read_bytes()
+    receipt_bytes = pending_receipt.read_bytes()
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    rejected = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert rejected.stderr == (
+        "mcp-client-rotation failed: transaction recovery failed\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert pending_receipt.read_bytes() == receipt_bytes
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+
+@pytest.mark.parametrize(
+    "interrupt_after",
+    [
+        "completion_authorized_activated",
+        "completion_receipt_parent_fsynced",
+    ],
+)
+def test_completion_recovery_enforces_the_six_hour_floor_before_success(
+    tmp_path: Path,
+    interrupt_after: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        staged_remaining=dt.timedelta(hours=5),
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    initial_env = dict(transaction.env)
+    fake_bin = _write_six_hour_floor_bypass_openssl(tmp_path)
+    initial_env["PATH"] = f"{fake_bin}:{initial_env['PATH']}"
+    interrupted = _run_rotator(
+        _fault_env(initial_env, interrupt_after=interrupt_after),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    assert _run_diagnostic(transaction.current).returncode == 0
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "completion_authorized_activated"
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    generations = _generation_paths(transaction, journal)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == generations["new_cert_sha256"].read_bytes()
+    )
+    assert (
+        transaction.current.key.read_bytes()
+        == generations["new_key_sha256"].read_bytes()
+    )
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    assert pending_receipt.exists() is (
+        interrupt_after == "completion_receipt_parent_fsynced"
+    )
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    assert not emitted_receipt.exists()
+    journal_bytes = journal_path.read_bytes()
+    pending_bytes = pending_receipt.read_bytes() if pending_receipt.exists() else None
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    canonical_bytes = (
+        transaction.current.bundle.read_bytes(),
+        transaction.current.key.read_bytes(),
+    )
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    rejected = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert rejected.stderr == (
+        "mcp-client-rotation failed: completed certificate validation failed\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert pending_receipt.exists() is (pending_bytes is not None)
+    if pending_bytes is not None:
+        assert pending_receipt.read_bytes() == pending_bytes
+    assert not emitted_receipt.exists()
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
+    assert (
+        transaction.current.bundle.read_bytes(),
+        transaction.current.key.read_bytes(),
+    ) == canonical_bytes
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    assert "result=activated" not in rejected.stdout
+
+
+def test_receipt_only_recovery_revalidates_canonical_pair_before_success(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_journal_parent_fsynced",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    assert not _journal_path(transaction).exists()
+    journal = _dotenv_observations(transaction.record)[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    assert pending_receipt.is_file()
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+    transaction.current.key.write_bytes(transaction.old_key)
+    transaction.current.key.chmod(0o600)
+
+    rejected = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert rejected.stderr == (
+        "mcp-client-rotation failed: transaction recovery failed\n"
+    )
+    assert pending_receipt.is_file()
+    assert not _completion_receipt_path(transaction, transaction_id, "emitted").exists()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    assert "result=activated" not in rejected.stdout
+
+
+def test_receipt_only_recovery_rejects_a_different_valid_canonical_pair(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_journal_parent_fsynced",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    assert not _journal_path(transaction).exists()
+    journal = _dotenv_observations(transaction.record)[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    assert pending_receipt.is_file()
+    replacement = _tls_fixture(
+        tmp_path,
+        remaining=dt.timedelta(hours=24),
+        stem="valid-replacement",
+        issuer=transaction.current,
+    )
+    transaction.current.bundle.write_bytes(replacement.bundle.read_bytes())
+    transaction.current.key.write_bytes(replacement.key.read_bytes())
+    transaction.current.key.chmod(0o600)
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    rejected = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert rejected.stderr == (
+        "mcp-client-rotation failed: transaction recovery failed\n"
+    )
+    assert pending_receipt.is_file()
+    assert not _completion_receipt_path(transaction, transaction_id, "emitted").exists()
+    assert transaction.current.bundle.read_bytes() == replacement.bundle.read_bytes()
+    assert transaction.current.key.read_bytes() == replacement.key.read_bytes()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    assert "result=activated" not in rejected.stdout
+
+
+def test_rotator_holds_process_lock_for_entire_invocation(tmp_path: Path) -> None:
+    entered = tmp_path / "completion-mark-entered"
+    release = tmp_path / "completion-mark-release"
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    fake_bin = _write_blocking_python_after_completion_mark(
+        tmp_path,
+        entered,
+        release,
+    )
+    env = dict(transaction.env)
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    first = subprocess.Popen(
+        [str(ROTATOR), TRANSACTION_ACTION],
+        cwd=REPO,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+    )
+    first_stdout = ""
+    first_stderr = ""
+    try:
+        deadline = time.monotonic() + 10
+        while not entered.exists() and first.poll() is None:
+            if time.monotonic() >= deadline:
+                pytest.fail("first rotator did not durably mark completion")
+            time.sleep(0.02)
+        assert entered.is_file()
+        assert first.poll() is None
+        journal_at_mark = _dotenv_observations(transaction.record)[0]["journal"]
+        assert isinstance(journal_at_mark, dict)
+        transaction_id_at_mark = journal_at_mark["transaction_id"]
+        assert isinstance(transaction_id_at_mark, str)
+        assert not _completion_receipt_path(
+            transaction,
+            transaction_id_at_mark,
+            "pending",
+        ).exists()
+        assert _completion_receipt_path(
+            transaction,
+            transaction_id_at_mark,
+            "emitted",
+        ).is_file()
+
+        deferred = _run_rotator(env, TRANSACTION_ACTION)
+
+        assert deferred.returncode == 75
+        assert deferred.stdout == "mcp-client-rotation result=lock_deferred\n"
+        assert deferred.stderr == ""
+        assert first.poll() is None
+        release.write_bytes(b"")
+        first_stdout, first_stderr = first.communicate(timeout=15)
+    finally:
+        release.touch(exist_ok=True)
+        if first.poll() is None:
+            first.terminate()
+            try:
+                first.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                first.kill()
+                first.wait(timeout=10)
+
+    assert first.returncode == 0
+    assert first_stderr == ""
+    observations = _dotenv_observations(transaction.record)
+    assert len(observations) == 1
+    journal = observations[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    assert first_stdout == _completion_result_line("activated", transaction_id)
+    lock_path = transaction.current.secrets / ".mcp-client-rotation.lock"
+    lock_stat = os.lstat(lock_path)
+    assert lock_stat.st_uid == os.getuid()
+    assert lock_stat.st_mode & 0o777 == 0o600
+    assert lock_stat.st_nlink == 1
+    _assert_canonical_matches_transaction_new_pair(transaction, journal)
+
+
+@pytest.mark.parametrize("completion_result", ["activated", "committed_recovered"])
+def test_completion_replay_reuses_durable_transaction_id(
+    tmp_path: Path,
+    completion_result: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    if completion_result == "committed_recovered":
+        committed = _run_rotator(
+            _fault_env(transaction.env, interrupt_after="committed"),
+            TRANSACTION_ACTION,
+        )
+        assert committed.returncode == 86
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_journal_parent_fsynced",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    journal = _dotenv_observations(transaction.record)[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    emitted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_result_emitted",
+        ),
+        TRANSACTION_ACTION,
+    )
+
+    expected_line = _completion_result_line(completion_result, transaction_id)
+    assert emitted.returncode == 86
+    assert emitted.stdout == expected_line
+    assert emitted.stderr == ""
+    assert pending_receipt.is_file()
+    assert not emitted_receipt.exists()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+    replayed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert replayed.returncode == 0
+    assert replayed.stdout == expected_line
+    assert replayed.stderr == ""
+    assert not pending_receipt.exists()
+    assert emitted_receipt.is_file()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    _assert_canonical_matches_transaction_new_pair(transaction, journal)
+
+
+@pytest.mark.parametrize("completion_result", ["activated", "committed_recovered"])
+def test_completion_emission_state_failure_is_nonzero_and_replayable(
+    tmp_path: Path,
+    completion_result: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={
+            "responses": ("204", "299", "204", "299"),
+            "returncodes": (0, 0, 0, 0),
+        },
+    )
+    if completion_result == "committed_recovered":
+        committed = _run_rotator(
+            _fault_env(transaction.env, interrupt_after="committed"),
+            TRANSACTION_ACTION,
+        )
+        assert committed.returncode == 86
+    pending = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after="completion_journal_parent_fsynced",
+        ),
+        TRANSACTION_ACTION,
+    )
+    assert pending.returncode == 86
+    journal = _dotenv_observations(transaction.record)[0]["journal"]
+    assert isinstance(journal, dict)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    pending_receipt = _completion_receipt_path(transaction, transaction_id, "pending")
+    emitted_receipt = _completion_receipt_path(transaction, transaction_id, "emitted")
+    assert pending_receipt.is_file()
+    assert not emitted_receipt.exists()
+    pending_snapshot = _file_snapshot(pending_receipt)
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    degraded = _run_rotator(
+        _fault_env(transaction.env, fail_fsync="completion-emitted-parent"),
+        TRANSACTION_ACTION,
+    )
+
+    expected_line = _completion_result_line(completion_result, transaction_id)
+    assert degraded.returncode == 74
+    assert degraded.stdout == expected_line
+    assert degraded.stderr == (
+        "mcp-client-rotation failed: completion emission state could not be recorded\n"
+    )
+    assert pending_receipt.is_file()
+    assert not emitted_receipt.exists()
+    assert _file_snapshot(pending_receipt) == pending_snapshot
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+
+    replayed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert replayed.returncode == 0
+    assert replayed.stdout == expected_line
+    assert replayed.stderr == ""
+    assert not pending_receipt.exists()
+    assert emitted_receipt.is_file()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    _assert_canonical_matches_transaction_new_pair(transaction, journal)
+
+
+@pytest.mark.parametrize(
+    "artifact",
+    ["symlink", "hardlink", "wrong-mode", "directory"],
+)
+def test_unsafe_rotation_process_lock_fails_before_transaction_mutation(
+    tmp_path: Path,
+    artifact: str,
+) -> None:
+    current = _tls_fixture(tmp_path, remaining=dt.timedelta(hours=13))
+    lock_path = current.secrets / ".mcp-client-rotation.lock"
+    foreign = tmp_path / "foreign-lock"
+    if artifact == "symlink":
+        foreign.write_bytes(b"")
+        foreign.chmod(0o600)
+        lock_path.symlink_to(foreign)
+    elif artifact == "hardlink":
+        foreign.write_bytes(b"")
+        foreign.chmod(0o600)
+        os.link(foreign, lock_path)
+    elif artifact == "wrong-mode":
+        lock_path.write_bytes(b"")
+        lock_path.chmod(0o644)
+    else:
+        lock_path.mkdir()
+    before = os.lstat(lock_path)
+    certificate = current.bundle.read_bytes()
+    private_key = current.key.read_bytes()
+    stage = tmp_path / "unused-stage"
+    env = _rotator_env(current, tmp_path / "missing-docker", stage)
+
+    rejected = _run_rotator(env)
+
+    assert rejected.returncode == 65
+    assert rejected.stdout == "mcp-client-rotation result=preflight_failed\n"
+    assert rejected.stderr.startswith(
+        "mcp-client-rotation failed: rotation process lock"
+    )
+    after = os.lstat(lock_path)
+    assert (after.st_dev, after.st_ino, after.st_mode, after.st_nlink) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_nlink,
+    )
+    assert current.bundle.read_bytes() == certificate
+    assert current.key.read_bytes() == private_key
+    assert not stage.exists()
+
+
+def test_writable_secret_root_is_rejected_before_process_lock_creation(
+    tmp_path: Path,
+) -> None:
+    current = _tls_fixture(tmp_path, remaining=dt.timedelta(hours=13))
+    current.secrets.chmod(0o777)
+    lock_path = current.secrets / ".mcp-client-rotation.lock"
+    certificate = current.bundle.read_bytes()
+    private_key = current.key.read_bytes()
+    stage = tmp_path / "unused-stage"
+    env = _rotator_env(current, tmp_path / "missing-docker", stage)
+
+    rejected = _run_rotator(env)
+
+    assert rejected.returncode == 65
+    assert rejected.stdout == "mcp-client-rotation result=preflight_failed\n"
+    assert rejected.stderr == (
+        "mcp-client-rotation failed: external secret root must not be "
+        "group/world writable\n"
+    )
+    assert not lock_path.exists()
+    assert current.bundle.read_bytes() == certificate
+    assert current.key.read_bytes() == private_key
+    assert not stage.exists()
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "premature-activated",
+        "premature-committed-recovered",
+        "foreign-transaction",
+        "payload-transaction-mismatch",
+        "unknown-result",
+        "duplicate-key",
+        "oversized",
+        "unsafe-mode",
+        "symlink",
+        "hardlink",
+        "pending-emitted-collision",
+    ],
+)
+def test_untrusted_completion_receipt_fails_closed_and_preserves_evidence(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="committed"),
+        TRANSACTION_ACTION,
+    )
+    assert interrupted.returncode == 86
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    transaction_id = journal["transaction_id"]
+    assert isinstance(transaction_id, str)
+    foreign_transaction_id = "e" * 32
+    if foreign_transaction_id == transaction_id:
+        foreign_transaction_id = "d" * 32
+    receipt_transaction_id = (
+        foreign_transaction_id
+        if corruption == "foreign-transaction"
+        else transaction_id
+    )
+    pending_receipt = _completion_receipt_path(
+        transaction, receipt_transaction_id, "pending"
+    )
+    receipt_payload: dict[str, object] = {
+        "schema_version": 1,
+        "transaction_id": (
+            foreign_transaction_id
+            if corruption == "payload-transaction-mismatch"
+            else receipt_transaction_id
+        ),
+        "result": (
+            "unknown"
+            if corruption == "unknown-result"
+            else "committed_recovered"
+            if corruption == "premature-committed-recovered"
+            else "activated"
+        ),
+        "completed_at": "2026-07-14T04:00:00Z",
+    }
+    encoded = (
+        json.dumps(receipt_payload, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    if corruption == "duplicate-key":
+        encoded = encoded.replace(
+            b'"schema_version":1', b'"schema_version":1,"schema_version":1'
+        )
+    elif corruption == "oversized":
+        encoded += b" " * 513
+
+    foreign_path = tmp_path / "foreign-completion-receipt.json"
+    if corruption == "symlink":
+        foreign_path.write_bytes(encoded)
+        foreign_path.chmod(0o600)
+        pending_receipt.symlink_to(foreign_path)
+    elif corruption == "hardlink":
+        foreign_path.write_bytes(encoded)
+        foreign_path.chmod(0o600)
+        os.link(foreign_path, pending_receipt)
+    else:
+        pending_receipt.write_bytes(encoded)
+        pending_receipt.chmod(0o644 if corruption == "unsafe-mode" else 0o600)
+    if corruption == "pending-emitted-collision":
+        emitted_receipt = _completion_receipt_path(
+            transaction, receipt_transaction_id, "emitted"
+        )
+        emitted_receipt.write_bytes(encoded)
+        emitted_receipt.chmod(0o600)
+
+    journal_bytes = journal_path.read_bytes()
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    docker_calls = _docker_calls(transaction.record)
+    curl_calls = _curl_calls(transaction.probe_record)
+
+    rejected = _run_rotator(transaction.env, TRANSACTION_ACTION)
+
+    assert rejected.returncode == 74
+    assert rejected.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert (
+        rejected.stderr == "mcp-client-rotation failed: transaction recovery failed\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert os.path.lexists(pending_receipt)
+    assert all(
+        path.read_bytes() == generation_bytes[path] for path in generations.values()
+    )
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert _docker_calls(transaction.record) == docker_calls
+    assert _curl_calls(transaction.probe_record) == curl_calls
+    assert "result=rolled_back" not in rejected.stdout
+    assert "result=committed_recovered" not in rejected.stdout
 
 
 @pytest.mark.parametrize("journal_has_compose_state", [False, True])
@@ -2919,8 +4559,13 @@ def test_committed_residue_is_rejected_and_preserved_without_cleanup(
         },
         curl_options={"responses": ("204", "299")},
     )
-    committed = _run_rotator(transaction.env, TRANSACTION_ACTION)
-    assert committed.returncode == 74
+    committed = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="committed"),
+        TRANSACTION_ACTION,
+    )
+    assert committed.returncode == 86
+    assert committed.stdout == ""
+    assert committed.stderr == ""
     journal_path = _journal_path(transaction)
     journal = _strict_json(journal_path)
     assert journal["phase"] == "committed"
