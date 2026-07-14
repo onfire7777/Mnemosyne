@@ -18,6 +18,7 @@ but it does not establish independent governance by itself.
 - [METHODS-PAPER-OUTLINE](METHODS-PAPER-OUTLINE.md)
 - [BOARD-STATUS](BOARD-STATUS.md)
 - [COI-REGISTER](COI-REGISTER.md)
+- [RECRUITMENT-PACKET](RECRUITMENT-PACKET.md)
 
 Phase 10 establishes L0 source readiness. Phase 16 owns launch readiness;
 external ratification owns institutional activation.
