@@ -877,6 +877,7 @@ def _fault_env(
     env: dict[str, str],
     *,
     interrupt_after: str | None = None,
+    interrupt_status: int | None = None,
     fail_fsync: str | None = None,
     fail_validation: str | None = None,
     mutate_generation: str | None = None,
@@ -885,6 +886,8 @@ def _fault_env(
     result = dict(env)
     if interrupt_after is not None:
         result["MCP_CLIENT_ROTATOR_TEST_INTERRUPT_AFTER_PHASE"] = interrupt_after
+    if interrupt_status is not None:
+        result["MCP_CLIENT_ROTATOR_TEST_INTERRUPT_EXIT_STATUS"] = str(interrupt_status)
     if fail_fsync is not None:
         result["MCP_CLIENT_ROTATOR_TEST_FAIL_FSYNC"] = fail_fsync
     if fail_validation is not None:
@@ -1032,7 +1035,7 @@ def _assert_private_dotenv_observation(
     assert isinstance(journal, dict)
     assert set(journal) == TRANSACTION_FIELDS
     assert journal["schema_version"] == 2
-    assert journal["phase"] == "published_validated"
+    assert journal["phase"] == "activation_started"
     compose_env = journal["compose_env"]
     assert isinstance(compose_env, dict)
     assert set(compose_env) == COMPOSE_ENV_FIELDS
@@ -1801,10 +1804,8 @@ def test_publish_fixture_seam_accepts_bounded_context_mode_pytest_root(
         stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
 
         assert stopped.returncode == 74
-        assert stopped.stdout == "mcp-client-rotation result=publication_failed\n"
-        assert _strict_json(_journal_path(transaction))["phase"] == (
-            "published_validated"
-        )
+        assert stopped.stdout == "mcp-client-rotation result=recovery_failed\n"
+        assert _strict_json(_journal_path(transaction))["phase"] == "committed"
     finally:
         shutil.rmtree(context_root, ignore_errors=True)
 
@@ -2021,6 +2022,12 @@ def test_recovery_interrupt_after_certificate_restore_is_resumable(
         "canonical_mismatch",
         "prepared_old_new",
         "pair_published_new_old",
+        "activation_started_old_old",
+        "activation_started_new_old",
+        "activation_started_old_new",
+        "committed_old_old",
+        "committed_new_old",
+        "committed_old_new",
         "old_pair_restored_old_new",
     ],
 )
@@ -2073,6 +2080,32 @@ def test_recovery_rejects_malformed_unsafe_or_digest_mismatched_evidence(
             encoding="utf-8",
         )
         transaction.current.bundle.write_bytes(transaction.staged.bundle.read_bytes())
+    elif corruption in {"activation_started_old_old", "committed_old_old"}:
+        journal_path.write_text(
+            json.dumps(
+                {**journal, "phase": corruption.removesuffix("_old_old")},
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+    elif corruption in {"activation_started_new_old", "committed_new_old"}:
+        journal_path.write_text(
+            json.dumps(
+                {**journal, "phase": corruption.removesuffix("_new_old")},
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        transaction.current.bundle.write_bytes(transaction.staged.bundle.read_bytes())
+    elif corruption in {"activation_started_old_new", "committed_old_new"}:
+        journal_path.write_text(
+            json.dumps(
+                {**journal, "phase": corruption.removesuffix("_old_new")},
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        transaction.current.key.write_bytes(transaction.staged.key.read_bytes())
     elif corruption == "old_pair_restored_old_new":
         journal_path.write_text(
             json.dumps(
@@ -2182,7 +2215,162 @@ def test_publish_rebinds_every_generation_digest_before_canonical_rename(
     )
 
 
-def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_stays_precommitted(
+def test_ambiguous_published_validated_resume_fails_closed_without_consumer_work(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="published_validated"),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode == 86
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "published_validated"
+    assert journal["compose_env"] is None
+    generations = _generation_paths(transaction, journal)
+    journal_bytes = journal_path.read_bytes()
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    assert _dotenv_observations(transaction.record) == []
+    assert _curl_calls(transaction.probe_record) == []
+    assert not any(
+        call[:3] == ["--context", "colima", "compose"] and "up" in call
+        for call in _docker_calls(transaction.record)
+    )
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "published-validated-recovery",
+    )
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: published transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert _docker_calls(recovery_record) == []
+
+
+@pytest.mark.parametrize(
+    "phase",
+    ["pair_published", "published_validated", "activation_started", "committed"],
+)
+def test_transition_signal_style_status_propagates_without_terminal_result(
+    tmp_path: Path,
+    phase: str,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "blackbox_sample_at_first_direct_probe": True,
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+
+    interrupted = _run_rotator(
+        _fault_env(
+            transaction.env,
+            interrupt_after=phase,
+            interrupt_status=143,
+        ),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode == 143
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    journal = _strict_json(_journal_path(transaction))
+    assert journal["phase"] == phase
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+
+
+def test_activation_started_is_durable_before_first_consumer_and_resume_fails_closed(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(tmp_path)
+
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="activation_started"),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode == 86
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "activation_started"
+    assert journal["compose_env"] is None
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    generations = _generation_paths(transaction, journal)
+    journal_bytes = journal_path.read_bytes()
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    assert _dotenv_observations(transaction.record) == []
+    assert _curl_calls(transaction.probe_record) == []
+    assert not any(
+        call[:3] == ["--context", "colima", "compose"] and "up" in call
+        for call in _docker_calls(transaction.record)
+    )
+    assert not any(
+        call in _blackbox_probe_calls() for call in _docker_calls(transaction.record)
+    )
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "activation-started-recovery",
+    )
+    recovery_stage = Path(recovery_env["MCP_CLIENT_ROTATOR_STAGE_DIR"])
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: activation transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert _docker_calls(recovery_record) == []
+    assert not recovery_stage.exists()
+
+
+def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_retains_commit(
     tmp_path: Path,
 ) -> None:
     transaction = _transaction_fixture(
@@ -2204,22 +2392,19 @@ def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_stays_precomm
     stopped = _run_rotator(transaction.env, TRANSACTION_ACTION)
 
     assert stopped.returncode == 74
-    assert stopped.stdout == "mcp-client-rotation result=publication_failed\n"
-    assert (
-        stopped.stderr
-        == "mcp-client-rotation failed: durable commit and automatic rollback are "
-        "unavailable in the R1c fixture seam\n"
-    )
+    assert stopped.stdout == "mcp-client-rotation result=recovery_failed\n"
     journal_path = _journal_path(transaction)
     journal = _strict_json(journal_path)
-    assert journal["phase"] == "published_validated"
+    assert journal["phase"] == "committed"
     assert journal["compose_env"] is None
     assert (
         transaction.current.bundle.read_bytes()
         == transaction.staged.bundle.read_bytes()
     )
     assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
-    assert "committed" not in journal_path.read_text(encoding="utf-8")
+    generations = _generation_paths(transaction, journal)
+    journal_bytes = journal_path.read_bytes()
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
     observations = _dotenv_observations(transaction.record)
     assert [str(observation["argv"][-1]) for observation in observations] == [
         "blackbox-exporter"
@@ -2266,14 +2451,160 @@ def test_fixture_runs_fresh_blackbox_probe_after_direct_probes_and_stays_precomm
     assert docker_calls[-3:] == _blackbox_probe_calls()
     assert all(docker_calls.count(call) == 1 for call in _blackbox_probe_calls())
 
-    recovery_env, _ = _recovery_env(tmp_path, transaction, "validated-recovery")
+    probe_calls = _curl_calls(transaction.probe_record)
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "committed-recovery",
+    )
+    recovery_stage = Path(recovery_env["MCP_CLIENT_ROTATOR_STAGE_DIR"])
     recovered = _run_rotator(recovery_env)
 
-    assert recovered.returncode == 0
-    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
-    assert transaction.current.bundle.read_bytes() == transaction.old_cert
-    assert transaction.current.key.read_bytes() == transaction.old_key
-    assert not journal_path.exists()
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: committed transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert _docker_calls(recovery_record) == []
+    assert _curl_calls(transaction.probe_record) == probe_calls
+    assert not recovery_stage.exists()
+
+
+def test_committed_is_durable_after_all_probes_and_resume_fails_closed(
+    tmp_path: Path,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "blackbox_sample_at_first_direct_probe": True,
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+
+    interrupted = _run_rotator(
+        _fault_env(transaction.env, interrupt_after="committed"),
+        TRANSACTION_ACTION,
+    )
+
+    assert interrupted.returncode == 86
+    assert interrupted.stdout == ""
+    assert interrupted.stderr == ""
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "committed"
+    assert journal["compose_env"] is None
+    assert _compose_env_artifact_paths(journal_path.parent) == []
+    assert len(_curl_calls(transaction.probe_record)) == 2
+    assert all(
+        call in _docker_calls(transaction.record) for call in _blackbox_probe_calls()
+    )
+    generations = _generation_paths(transaction, journal)
+    journal_bytes = journal_path.read_bytes()
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "committed-interrupt-recovery",
+    )
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: committed transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert _docker_calls(recovery_record) == []
+
+
+@pytest.mark.parametrize("journal_has_compose_state", [False, True])
+def test_committed_residue_is_rejected_and_preserved_without_cleanup(
+    tmp_path: Path,
+    journal_has_compose_state: bool,
+) -> None:
+    transaction = _transaction_fixture(
+        tmp_path,
+        docker_options={
+            "blackbox_sample_at_first_direct_probe": True,
+            "post_compose_containers": (
+                (
+                    RECREATED_BLACKBOX_CONTAINER_ID,
+                    "infra",
+                    "blackbox-exporter",
+                    "running",
+                ),
+            ),
+        },
+        curl_options={"responses": ("204", "299")},
+    )
+    committed = _run_rotator(transaction.env, TRANSACTION_ACTION)
+    assert committed.returncode == 74
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
+    assert journal["phase"] == "committed"
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    _, receipt = _write_dotenv_residue(transaction.current)
+    if journal_has_compose_state:
+        journal["compose_env"] = _strict_json(receipt)["compose_env"]
+        journal_path.write_text(
+            json.dumps(journal, separators=(",", ":")) + "\n",
+            encoding="utf-8",
+        )
+        journal_path.chmod(0o600)
+    journal_bytes = journal_path.read_bytes()
+    artifact_bytes = {
+        path: path.read_bytes()
+        for path in _compose_env_artifact_paths(journal_path.parent)
+    }
+    probe_calls = _curl_calls(transaction.probe_record)
+
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        f"committed-residue-{journal_has_compose_state}",
+    )
+    recovered = _run_rotator(recovery_env)
+
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert (
+        recovered.stderr == "mcp-client-rotation failed: transaction recovery failed\n"
+    )
+    assert journal_path.read_bytes() == journal_bytes
+    assert all(path.read_bytes() == artifact_bytes[path] for path in artifact_bytes)
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert _docker_calls(recovery_record) == []
+    assert _curl_calls(transaction.probe_record) == probe_calls
 
 
 @pytest.mark.parametrize(
@@ -2355,7 +2686,7 @@ def test_fixture_blackbox_failure_retains_precommit_recovery_evidence(
     assert failed.stderr == "mcp-client-rotation failed: blackbox probe failed\n"
     journal_path = _journal_path(transaction)
     journal = _strict_json(journal_path)
-    assert journal["phase"] == "published_validated"
+    assert journal["phase"] == "activation_started"
     assert journal["compose_env"] is None
     assert "committed" not in journal_path.read_text(encoding="utf-8")
     assert len(_curl_calls(transaction.probe_record)) == 2
@@ -2363,14 +2694,26 @@ def test_fixture_blackbox_failure_retains_precommit_recovery_evidence(
     assert docker_calls[-3:] == _blackbox_probe_calls()
     assert all(docker_calls.count(call) == 1 for call in _blackbox_probe_calls())
 
-    recovery_env, _ = _recovery_env(tmp_path, transaction, "blackbox-failure-recovery")
+    recovery_env, recovery_record = _recovery_env(
+        tmp_path,
+        transaction,
+        "blackbox-failure-recovery",
+    )
     recovered = _run_rotator(recovery_env)
 
-    assert recovered.returncode == 0
-    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
-    assert transaction.current.bundle.read_bytes() == transaction.old_cert
-    assert transaction.current.key.read_bytes() == transaction.old_key
-    assert not journal_path.exists()
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: activation transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert journal_path.exists()
+    assert _docker_calls(recovery_record) == []
 
 
 @pytest.mark.parametrize(
@@ -2426,24 +2769,32 @@ def test_direct_probe_rejects_transport_or_non_2xx_and_short_circuits(
     )
     assert all(call["snapshot_count"] == 1 for call in calls)
     journal_path = _journal_path(transaction)
-    assert _strict_json(journal_path)["phase"] == "published_validated"
+    assert _strict_json(journal_path)["phase"] == "activation_started"
     assert "committed" not in journal_path.read_text(encoding="utf-8")
     assert not any(
         call in _blackbox_probe_calls() for call in _docker_calls(transaction.record)
     )
 
-    recovery_env, _ = _recovery_env(
+    recovery_env, recovery_record = _recovery_env(
         tmp_path,
         transaction,
         "direct-probe-failure-recovery",
     )
     recovered = _run_rotator(recovery_env)
 
-    assert recovered.returncode == 0
-    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
-    assert transaction.current.bundle.read_bytes() == transaction.old_cert
-    assert transaction.current.key.read_bytes() == transaction.old_key
-    assert not journal_path.exists()
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: activation transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert journal_path.exists()
+    assert _docker_calls(recovery_record) == []
 
 
 @pytest.mark.parametrize(
@@ -2728,7 +3079,9 @@ def test_post_compose_rediscovery_rejects_changed_consumer_cardinality(
     assert snapshot_indices[0] < compose_index < snapshot_indices[1]
     assert not dotenv.exists()
     assert not receipt.exists()
-    assert _strict_json(_journal_path(transaction))["phase"] == "published_validated"
+    journal_path = _journal_path(transaction)
+    assert _strict_json(journal_path)["phase"] == "activation_started"
+    assert "committed" not in journal_path.read_text(encoding="utf-8")
     assert VALID_DB_PASSWORD.decode() not in proc.stdout + proc.stderr
     assert VALID_ADMIN_PASSWORD.decode() not in proc.stdout + proc.stderr
 
@@ -3236,7 +3589,7 @@ def test_startup_preserves_valid_receipt_without_matching_journal(
     } == artifact_bytes
 
 
-def test_private_dotenv_recovery_rejects_compose_state_outside_validated_phase(
+def test_private_dotenv_recovery_rejects_compose_state_outside_activation_phase(
     tmp_path: Path,
 ) -> None:
     transaction = _transaction_fixture(tmp_path)
@@ -3378,9 +3731,10 @@ def test_private_dotenv_crash_windows_recover_only_from_transaction_journal(
 
     assert interrupted.returncode == 74
     assert interrupted.stdout == "mcp-client-rotation result=publication_failed\n"
-    journal = _strict_json(_journal_path(transaction))
+    journal_path = _journal_path(transaction)
+    journal = _strict_json(journal_path)
     assert journal["schema_version"] == 2
-    assert journal["phase"] == "published_validated"
+    assert journal["phase"] == "activation_started"
     compose_env = journal["compose_env"]
     if expected_state is None:
         assert compose_env is None
@@ -3405,23 +3759,35 @@ def test_private_dotenv_crash_windows_recover_only_from_transaction_journal(
             assert compose_env["uid"] == os.getuid()
             assert compose_env["mode"] == 0o600
             assert compose_env["nlink"] == 1
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
     assert foreign.read_bytes() == b"foreign-data-must-survive"
 
-    recovery_env, _ = _recovery_env(
+    recovery_env, recovery_record = _recovery_env(
         tmp_path,
         transaction,
         f"dotenv-crash-recovery-{interrupt_after}",
     )
     recovered = _run_rotator(recovery_env)
 
-    assert recovered.returncode == 0
-    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
-    assert recovered.stderr == ""
-    assert transaction.current.bundle.read_bytes() == transaction.old_cert
-    assert transaction.current.key.read_bytes() == transaction.old_key
-    assert not _journal_path(transaction).exists()
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: activation transaction requires verified "
+        "runtime recovery\n"
+    )
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    recovered_journal = _strict_json(journal_path)
+    assert recovered_journal["phase"] == "activation_started"
+    assert recovered_journal["compose_env"] is None
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
     assert _compose_env_artifact_paths(rotation) == []
     assert foreign.read_bytes() == b"foreign-data-must-survive"
+    assert _docker_calls(recovery_record) == []
     combined_output = (
         interrupted.stdout + interrupted.stderr + recovered.stdout + recovered.stderr
     )
@@ -3455,18 +3821,32 @@ def test_private_dotenv_partial_receipt_recovery_survives_restrictive_umask(
     assert partial_receipt.exists()
     assert os.lstat(partial_receipt).st_mode & 0o777 == 0o600
 
-    recovery_env, _ = _recovery_env(
+    generations = _generation_paths(transaction, journal)
+    generation_bytes = {path: path.read_bytes() for path in generations.values()}
+    recovery_env, recovery_record = _recovery_env(
         tmp_path,
         transaction,
         "restrictive-umask-recovery",
     )
     recovered = _run_rotator(recovery_env)
 
-    assert recovered.returncode == 0
-    assert recovered.stdout == "mcp-client-rotation result=staged_only\n"
-    assert recovered.stderr == ""
-    assert not _journal_path(transaction).exists()
+    assert recovered.returncode == 74
+    assert recovered.stdout == "mcp-client-rotation result=recovery_failed\n"
+    assert recovered.stderr == (
+        "mcp-client-rotation failed: activation transaction requires verified "
+        "runtime recovery\n"
+    )
+    recovered_journal = _strict_json(_journal_path(transaction))
+    assert recovered_journal["phase"] == "activation_started"
+    assert recovered_journal["compose_env"] is None
+    assert (
+        transaction.current.bundle.read_bytes()
+        == transaction.staged.bundle.read_bytes()
+    )
+    assert transaction.current.key.read_bytes() == transaction.staged.key.read_bytes()
+    assert all(path.read_bytes() == generation_bytes[path] for path in generation_bytes)
     assert _compose_env_artifact_paths(rotation) == []
+    assert _docker_calls(recovery_record) == []
 
 
 def test_private_dotenv_recovery_rejects_receipt_from_another_transaction(
@@ -3599,7 +3979,7 @@ def test_private_dotenv_cleanup_quarantines_then_preserves_same_uid_replacement_
     assert receipt_compose["device"] == observation["dotenv_device"]
     assert receipt_compose["inode"] == observation["dotenv_inode"]
     assert receipt_payload["transaction_id"] == journal["transaction_id"]
-    assert journal["phase"] == "published_validated"
+    assert journal["phase"] == "activation_started"
     assert compose_env["state"] == "cleanup"
     assert compose_env["device"] == observation["dotenv_device"]
     assert compose_env["inode"] == observation["dotenv_inode"]

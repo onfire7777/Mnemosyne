@@ -477,10 +477,10 @@ git diff --check
 
 ### R1c — Consumer activation, probes, and rollback
 
-Status: In progress. The isolated blackbox-query helper and its fixture-only
-integration are source-complete for this precommit slice on 2026-07-13. The
-helper selects exactly one running `infra` Caddy container, uses only the fixed
-BusyBox transport and encoded MetricsQL
+Status: In progress. The isolated blackbox-query helper is source-complete, and
+its fixture-only activation/commit custody is the current working slice on
+2026-07-13. The helper selects exactly one running `infra` Caddy container,
+uses only the fixed BusyBox transport and encoded MetricsQL
 `timestamp(probe_success[2m]) if (last_over_time(probe_success[2m]) == 1)`
 expression with the exact fixed labels, and validates the raw scrape timestamp
 rather than the instant-query evaluation timestamp. Duplicate keys,
@@ -499,27 +499,40 @@ categorical consumer snapshot, then uses the newly published pair and exact
 Caddy root for fixed `/health` and `/stream/healthz` requests, accepts only a
 strict single `2xx` status, and invokes the fixed blackbox helper exactly once.
 Synthetic tests pin the boundary after the final blackbox-only or optional
-operator snapshot and before the first direct probe. Recovery after every
-direct- or blackbox-probe failure restores the old pair and clears the retained
-precommit journal on the next fixture run.
+operator snapshot and before the first direct probe. The working slice fsyncs
+`activation_started` immediately before the first consumer touch. The fake-only
+path fsyncs and retains `committed` only after both direct probes plus fresh
+blackbox evidence.
+Same-process failures before `committed` remain `publication_failed`. On a later
+startup, residual schema-v2 `published_validated`, `activation_started`, or
+`committed` fails closed as `recovery_failed` before ordinary validator,
+lifetime, or healthy-noop work, preserving the new pair, journal, and
+generations. `pair_published` and earlier are the last unambiguous
+auto-restorable phases: the prior schema-v2 fixture used `published_validated`
+across consumer activation. Only `activation_started` may clean exact
+transaction-owned dotenv residue, without finalizing or restoring the
+transaction.
 
-Fresh targeted gates pass the 62-case blackbox integration selector, all 80
-blackbox-helper tests, the 179-case plan selector, the full 263-test
+The current activation/commit working slice passes the full 278-test
 rotator/blackbox pair, the unchanged 41-test TLS/bootstrap/Compose-policy tier,
-all 39 section-31 invariant rails, and all 7 section-33 harness tests. The
-fixture deliberately stops at `published_validated` after successful blackbox
-evidence; durable commit, post-activation rollback, and committed-state
-recovery remain open.
+all 39 section-31 invariant rails, all 7 section-33 harness tests, and both
+planning traceability tests. Every tier ran serialized after a fresh targeted
+admission sample with at least 35% free memory, load1 at most 10, and zero
+resident models. Independent final review found no P0/P1/P2 issue.
+It deliberately emits neither `activated` nor `committed_recovered` and performs
+no journal unlink, post-activation rollback, or committed-state reproof and
+finalization.
 
 Live activation additionally requires a boundary in the VM/VictoriaMetrics
 clock domain or a conservative audited skew bound, bounded polling across the
-60-second scrape cadence, and stable consumer IDs/restart counts. No live
+60-second scrape cadence, stable consumer IDs/restart counts, the missing
+rollback/reproof/finalization paths, and a strong-gate admission. No live
 Docker query, issuance, consumer recreation, certificate mutation,
-model/index action, protected attempt, or external claim was run, and the
-ordinary production path remains staged-only. Pushed head `515d2cc` has green
-exact-SHA CI run 29288363680; this newer working slice requires its own green
-exact-SHA check after commit. No repository edit self-records its own CI
-result.
+model/index action, protected attempt, or external claim was run by this
+fixture/test slice, and the ordinary production path remains staged-only.
+Pushed baseline `d6a7ef3` has green exact-SHA CI run 29291321621. This newer
+working slice requires its own green exact-SHA check after commit. No repository
+edit self-records its own CI result.
 
 Files:
 

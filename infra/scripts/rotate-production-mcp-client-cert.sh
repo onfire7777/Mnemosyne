@@ -170,11 +170,13 @@ PHASES = {
     "certificate_published",
     "pair_published",
     "published_validated",
+    "activation_started",
+    "committed",
     "restoring_certificate",
     "restoring_key",
     "old_pair_restored",
 }
-INTERRUPT_POINTS = (PHASES - {"published_validated"}) | {
+INTERRUPT_POINTS = PHASES | {
     "compose_env_planned",
     "compose_dotenv_created",
     "compose_env_owned",
@@ -386,14 +388,21 @@ def load_marker(rotation_fd: int) -> dict[str, object]:
     return marker
 
 
-def test_controls(rotation_fd: int | None) -> tuple[str, str, str, str]:
+def test_controls(rotation_fd: int | None) -> tuple[str, str, str, str, int]:
     interrupt = os.environ.get("MCP_CLIENT_ROTATOR_TEST_INTERRUPT_AFTER_PHASE", "")
+    interrupt_status = os.environ.get(
+        "MCP_CLIENT_ROTATOR_TEST_INTERRUPT_EXIT_STATUS", ""
+    )
     fsync_failure = os.environ.get("MCP_CLIENT_ROTATOR_TEST_FAIL_FSYNC", "")
     validation_failure = os.environ.get("MCP_CLIENT_ROTATOR_TEST_FAIL_VALIDATION", "")
     generation_mutation = os.environ.get(
         "MCP_CLIENT_ROTATOR_TEST_MUTATE_GENERATION_BEFORE_RENAME", ""
     )
     if interrupt and interrupt not in INTERRUPT_POINTS:
+        reject()
+    if interrupt_status not in {"", "86", "143"} or (
+        interrupt_status and not interrupt
+    ):
         reject()
     if fsync_failure and fsync_failure not in FSYNC_FAILURES:
         reject()
@@ -406,21 +415,33 @@ def test_controls(rotation_fd: int | None) -> tuple[str, str, str, str]:
         "new_key",
     }:
         reject()
-    if interrupt or fsync_failure or validation_failure or generation_mutation:
+    if (
+        interrupt
+        or interrupt_status
+        or fsync_failure
+        or validation_failure
+        or generation_mutation
+    ):
         if rotation_fd is None:
             reject()
         load_marker(rotation_fd)
-    return interrupt, fsync_failure, validation_failure, generation_mutation
+    return (
+        interrupt,
+        fsync_failure,
+        validation_failure,
+        generation_mutation,
+        int(interrupt_status or "86"),
+    )
 
 
 def interrupt_after(rotation_fd: int, phase: str) -> None:
-    interrupt, _, _, _ = test_controls(rotation_fd)
+    interrupt, _, _, _, interrupt_status = test_controls(rotation_fd)
     if interrupt == phase:
-        os._exit(86)
+        os._exit(interrupt_status)
 
 
 def fsync_directory(directory: int, rotation_fd: int, label: str = "") -> None:
-    _, failure, _, _ = test_controls(rotation_fd)
+    _, failure, _, _, _ = test_controls(rotation_fd)
     if label and failure == label:
         reject()
     os.fsync(directory)
@@ -912,7 +933,7 @@ def cleanup_compose_env(
             reject()
         return False
     compose_env = validate_compose_env(compose_value)
-    if journal["phase"] != "published_validated":
+    if journal["phase"] != "activation_started":
         reject()
     if expected_token is not None and compose_env["owner_token"] != expected_token:
         reject()
@@ -1237,7 +1258,7 @@ def validate_journal(value: dict[str, object]) -> dict[str, object]:
         reject()
     if value["compose_env"] is not None:
         validate_compose_env(value["compose_env"])
-        if value["phase"] != "published_validated":
+        if value["phase"] != "activation_started":
             reject()
     return value
 
@@ -1347,6 +1368,8 @@ def require_reachable(journal: dict[str, object], state: str) -> None:
         "certificate_published": {"new_old", "new_new"},
         "pair_published": {"new_new"},
         "published_validated": {"new_new"},
+        "activation_started": {"new_new"},
+        "committed": {"new_new"},
         "restoring_certificate": {"old_old", "new_old", "new_new", "old_new"},
         "restoring_key": {"old_new", "old_old"},
         "old_pair_restored": {"old_old"},
@@ -1410,7 +1433,7 @@ def mutate_generation_before_rename(
     rotation_fd: int,
     journal: dict[str, object],
 ) -> None:
-    _, _, _, requested = test_controls(rotation_fd)
+    _, _, _, requested, _ = test_controls(rotation_fd)
     if not requested:
         return
     generation, kind = {
@@ -1540,11 +1563,24 @@ def prepare_and_publish(
     interrupt_after(rotation_fd, "pair_published")
 
 
-def recover(secrets_fd: int, rotation_fd: int) -> None:
+def recover(secrets_fd: int, rotation_fd: int) -> str:
     journal = load_journal(rotation_fd)
     validate_generations(rotation_fd, journal)
     state = canonical_state(journal, canonical_digests(secrets_fd))
     require_reachable(journal, state)
+    phase = str(journal["phase"])
+    if phase == "activation_started":
+        cleanup_compose_env(rotation_fd, journal)
+        if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+            reject()
+        validate_generations(rotation_fd, journal)
+        state = canonical_state(journal, canonical_digests(secrets_fd))
+        require_reachable(journal, state)
+        return phase
+    if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+        reject()
+    if phase in {"published_validated", "committed"}:
+        return phase
     transaction_id = str(journal["transaction_id"])
     if journal["phase"] not in {
         "restoring_certificate",
@@ -1590,6 +1626,7 @@ def recover(secrets_fd: int, rotation_fd: int) -> None:
         interrupt_after(rotation_fd, "old_pair_restored")
     state = canonical_state(journal, canonical_digests(secrets_fd))
     require_reachable(journal, state)
+    return "restored"
 
 
 def consumer_state(name: str) -> bool:
@@ -1610,6 +1647,7 @@ def main() -> None:
         os.environ.get(name)
         for name in (
             "MCP_CLIENT_ROTATOR_TEST_INTERRUPT_AFTER_PHASE",
+            "MCP_CLIENT_ROTATOR_TEST_INTERRUPT_EXIT_STATUS",
             "MCP_CLIENT_ROTATOR_TEST_FAIL_FSYNC",
             "MCP_CLIENT_ROTATOR_TEST_FAIL_VALIDATION",
             "MCP_CLIENT_ROTATOR_TEST_MUTATE_GENERATION_BEFORE_RENAME",
@@ -1643,10 +1681,7 @@ def main() -> None:
                     reject()
                 print("absent")
                 return
-            journal = load_journal(rotation_fd)
-            cleanup_compose_env(rotation_fd, journal)
-            recover(secrets_fd, rotation_fd)
-            print("restored")
+            print(recover(secrets_fd, rotation_fd))
             return
         if ACTION == "validate-compose-passwords":
             load_marker(rotation_fd)
@@ -1682,12 +1717,26 @@ def main() -> None:
                 reject()
             journal["phase"] = "published_validated"
             write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "published_validated")
+            return
+        if ACTION == "mark-activation-started":
+            journal = load_journal(rotation_fd)
+            validate_generations(rotation_fd, journal)
+            if journal["phase"] != "published_validated":
+                reject()
+            if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
+                reject()
+            if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+                reject()
+            journal["phase"] = "activation_started"
+            write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "activation_started")
             return
         if ACTION == "prepare-compose-env":
             load_marker(rotation_fd)
             journal = load_journal(rotation_fd)
             validate_generations(rotation_fd, journal)
-            if journal["phase"] != "published_validated":
+            if journal["phase"] != "activation_started":
                 reject()
             if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
                 reject()
@@ -1706,7 +1755,7 @@ def main() -> None:
                 reject()
             journal = load_journal(rotation_fd)
             validate_generations(rotation_fd, journal)
-            if journal["phase"] != "published_validated":
+            if journal["phase"] != "activation_started":
                 reject()
             if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
                 reject()
@@ -1716,6 +1765,19 @@ def main() -> None:
                 expected_token=token,
             ):
                 reject()
+            return
+        if ACTION == "mark-committed":
+            journal = load_journal(rotation_fd)
+            validate_generations(rotation_fd, journal)
+            if journal["phase"] != "activation_started":
+                reject()
+            if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
+                reject()
+            if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+                reject()
+            journal["phase"] = "committed"
+            write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "committed")
             return
         if ACTION == "finish-recovery":
             journal = load_journal(rotation_fd)
@@ -1763,6 +1825,15 @@ if recovery_state=$(transaction_call recover); then
       if ! transaction_call finish-recovery >/dev/null 2>&1; then
         recovery_failed 'recovery finalization failed'
       fi
+      ;;
+    activation_started)
+      recovery_failed 'activation transaction requires verified runtime recovery'
+      ;;
+    published_validated)
+      recovery_failed 'published transaction requires verified runtime recovery'
+      ;;
+    committed)
+      recovery_failed 'committed transaction requires verified runtime recovery'
       ;;
     *) recovery_failed 'transaction recovery returned an invalid state' ;;
   esac
@@ -2386,6 +2457,7 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
   else
     transaction_status=$?
     [ "$transaction_status" -ne 86 ] || exit 86
+    [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
     publication_failed 'fixture publication failed'
   fi
   if [ "${MCP_CLIENT_ROTATOR_TEST_FAIL_VALIDATION:-}" = published ]; then
@@ -2403,8 +2475,22 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
     >/dev/null 2>&1; then
     publication_failed 'published certificate validation failed'
   fi
-  transaction_call mark-published-validated >/dev/null 2>&1 || \
+  if transaction_call mark-published-validated >/dev/null 2>&1; then
+    :
+  else
+    transaction_status=$?
+    [ "$transaction_status" -ne 86 ] || exit 86
+    [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
     publication_failed 'published journal validation failed'
+  fi
+  if transaction_call mark-activation-started >/dev/null 2>&1; then
+    :
+  else
+    transaction_status=$?
+    [ "$transaction_status" -ne 86 ] || exit 86
+    [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
+    publication_failed 'activation journal transition failed'
+  fi
   trap cleanup_owned_dotenv_on_exit EXIT
   trap cleanup_owned_dotenv_on_signal HUP INT TERM
   activate_fixture_consumer blackbox-exporter || \
@@ -2430,9 +2516,16 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
   direct_probe /stream/healthz || publication_failed 'direct probe failed'
   fixture_blackbox_probe "$consumer_stable_epoch" || \
     publication_failed 'blackbox probe failed'
+  if transaction_call mark-committed >/dev/null 2>&1; then
+    :
+  else
+    transaction_status=$?
+    [ "$transaction_status" -ne 86 ] || exit 86
+    [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
+    publication_failed 'transaction commit failed'
+  fi
   trap - EXIT HUP INT TERM
-  publication_failed \
-    'durable commit and automatic rollback are unavailable in the R1c fixture seam'
+  recovery_failed 'committed transaction requires verified finalization'
 fi
 
 result staged_only
