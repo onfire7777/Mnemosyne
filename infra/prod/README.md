@@ -101,35 +101,38 @@ final snapshot it captures a nanosecond boundary, runs fixed mTLS probes for
 root, accepts only a strict single `2xx` status, and invokes the blackbox helper
 exactly once. Synthetic ordering tests bind the boundary after the final
 snapshot, including the optional operator path, and before the first direct
-probe. Immediately before the first fixture consumer touch, the current working
-slice fsyncs `activation_started`. The fake-only path fsyncs and retains
-`committed` only after both direct probes plus fresh blackbox evidence succeed.
-Same-process failures before `committed` remain `publication_failed`. A later
-startup encountering residual schema-v2 `published_validated`,
-`activation_started`, or `committed` fails closed as `recovery_failed` before
-ordinary validation, lifetime, or healthy-noop work and preserves the new pair,
-journal, and generations. `pair_published` and earlier are the last
-unambiguous auto-restorable phases because the prior schema-v2 fixture used
-`published_validated` across consumer activation. Only `activation_started` may
-clean exact transaction-owned dotenv residue; that cleanup neither restores
-nor finalizes the transaction. The fixture does not emit `activated` or
-`committed_recovered`, unlink the journal, reprove/finalize committed state, or
-perform post-activation rollback.
+probe. Immediately before the first fixture consumer touch, the working slice
+fsyncs `activation_started`. The fake-only path fsyncs and retains `committed`
+only after both direct probes plus fresh blackbox evidence succeed. A failure
+after durable activation enters fsynced rollback phases, restores and normally
+validates the old pair, recreates exactly the recorded prior consumer set,
+proves stable recreation, repeats both direct probes with the old pair, and
+requires a fresh rollback blackbox success. It ends only as `rolled_back` or
+`rollback_failed`.
 
-The current activation/commit working slice passes the full 278-test
-rotator/blackbox pair, the unchanged 41-test production regression tier, all 39
-section-31 invariant rails, all 7 section-33 harness tests, and both planning
-traceability tests. Every tier ran serialized after a fresh targeted admission
-sample with at least 35% free memory, load1 at most 10, and zero resident
-models. Independent final review found no P0/P1/P2 issue. No live Docker query,
-issuance, certificate publication, or consumer recreation was run by this
-fixture/test slice. Before any live activation, R1c must additionally align the
-host-captured boundary with the VM/VictoriaMetrics clock domain (or prove a
-conservative skew bound), poll across the 60-second scrape cadence with a fixed
-deadline,
-prove stable consumer IDs and restart counts, implement post-activation
-rollback plus committed-state reproof/finalization and journal unlink, pass
-exact-head CI, and pass the strong hardware gate. No protected attempt or
+Fixture startup resumes recognized `activation_started`,
+`rollback_restoring_certificate`, `rollback_restoring_key`, and
+`rollback_pair_restored` state without reissuing. Phase/pair corruption,
+Compose path/digest substitution, foreign residue, and consumer-set expansion
+fail closed while preserving evidence. Residual schema-v2
+`published_validated` remains compatibility-ambiguous and is preserved;
+residual `committed` still requires committed-state reproof/finalization. The
+fixture does not emit `activated` or `committed_recovered`.
+
+The current rollback slice passes the full 304-test rotator/blackbox pair and
+the unchanged 41-test production regression tier under separate fresh
+serialized targeted-admission samples with at least 35% free memory, load1 at
+most 10, and zero resident models. Exact section-31, section-33, and planning
+selectors are identified but their current-worktree reruns remain pending a
+fresh admitted sample. Independent final review found no actionable P0/P1
+issue. No live Docker query, issuance, certificate publication, or consumer
+recreation was run by this fixture/test slice. Before any live activation, R1c
+must additionally align the host-captured boundary with the
+VM/VictoriaMetrics clock domain (or prove a conservative skew bound), poll
+across the 60-second scrape cadence with a fixed deadline, prove stable
+consumer IDs and restart counts, implement committed-state
+reproof/finalization and journal unlink with exactly-once terminal reporting,
+pass exact-head CI, and pass the strong hardware gate. No protected attempt or
 public claim is authorized by this fixture state. The normal production path
 still returns `staged_only` and cannot recreate a live consumer, so this fixture
 evidence is not authorization to run a live rotation.

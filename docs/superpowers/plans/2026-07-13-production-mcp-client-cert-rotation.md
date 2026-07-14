@@ -502,35 +502,38 @@ Synthetic tests pin the boundary after the final blackbox-only or optional
 operator snapshot and before the first direct probe. The working slice fsyncs
 `activation_started` immediately before the first consumer touch. The fake-only
 path fsyncs and retains `committed` only after both direct probes plus fresh
-blackbox evidence.
-Same-process failures before `committed` remain `publication_failed`. On a later
-startup, residual schema-v2 `published_validated`, `activation_started`, or
-`committed` fails closed as `recovery_failed` before ordinary validator,
-lifetime, or healthy-noop work, preserving the new pair, journal, and
-generations. `pair_published` and earlier are the last unambiguous
-auto-restorable phases: the prior schema-v2 fixture used `published_validated`
-across consumer activation. Only `activation_started` may clean exact
-transaction-owned dotenv residue, without finalizing or restoring the
-transaction.
+blackbox evidence. A same-process failure after durable activation enters
+explicit rollback phases, restores and normally validates the old pair,
+recreates exactly the recorded prior consumer set, proves stable recreation,
+repeats both restored-pair direct probes, and requires a fresh rollback
+blackbox sample. It ends only as `rolled_back` or `rollback_failed`.
 
-The current activation/commit working slice passes the full 278-test
-rotator/blackbox pair, the unchanged 41-test TLS/bootstrap/Compose-policy tier,
-all 39 section-31 invariant rails, all 7 section-33 harness tests, and both
-planning traceability tests. Every tier ran serialized after a fresh targeted
-admission sample with at least 35% free memory, load1 at most 10, and zero
-resident models. Independent final review found no P0/P1/P2 issue.
-It deliberately emits neither `activated` nor `committed_recovered` and performs
-no journal unlink, post-activation rollback, or committed-state reproof and
-finalization.
+Fixture startup resumes recognized `activation_started`,
+`rollback_restoring_certificate`, `rollback_restoring_key`, and
+`rollback_pair_restored` state without reissuing. Phase/pair corruption,
+Compose path/digest substitution, foreign residue, and consumer-set expansion
+fail closed while retaining evidence. Residual schema-v2
+`published_validated` remains compatibility-ambiguous and is preserved;
+residual `committed` still requires committed-state reproof/finalization.
+
+The current rollback slice passes the full 304-test rotator/blackbox pair and
+the unchanged 41-test TLS/bootstrap/Compose-policy tier under separate fresh
+serialized targeted-admission samples with at least 35% free memory, load1 at
+most 10, and zero resident models. Exact section-31, section-33, and planning
+selectors are identified but their current-worktree reruns remain pending a
+fresh admitted sample. Independent final review found no actionable P0/P1
+issue. The fixture does not emit `activated` or `committed_recovered`; committed
+reproof/finalization, journal unlink, and exactly-once terminal reporting
+across that unlink remain open.
 
 Live activation additionally requires a boundary in the VM/VictoriaMetrics
 clock domain or a conservative audited skew bound, bounded polling across the
-60-second scrape cadence, stable consumer IDs/restart counts, the missing
-rollback/reproof/finalization paths, and a strong-gate admission. No live
+60-second scrape cadence, stable consumer IDs/restart counts, committed-state
+reproof/finalization, and a strong-gate admission. No live
 Docker query, issuance, consumer recreation, certificate mutation,
 model/index action, protected attempt, or external claim was run by this
 fixture/test slice, and the ordinary production path remains staged-only.
-Pushed baseline `d6a7ef3` has green exact-SHA CI run 29291321621. This newer
+Parent baseline `58198ff` has green exact-SHA CI run 29295832763. This newer
 working slice requires its own green exact-SHA check after commit. No repository
 edit self-records its own CI result.
 
