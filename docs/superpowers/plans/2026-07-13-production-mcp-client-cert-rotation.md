@@ -655,16 +655,17 @@ git diff --check
 
 ### R2a — Runtime lock helper
 
-Status: Baseline implementation `a91da2e` and status commit `48be88a` are pushed
+Status: Baseline implementation `a91da2e`, status commit `48be88a`, and review
+hardening `fb713d4` are pushed
 on `codex/r2a-runtime-exclusive-lock`; PR #13 is open, non-draft, mergeable, and
 stacked on draft PR #11. The committed RED baselines are `199b898` and
 `93e0dc6`. Old head `48be88a` passed exact-head CI `29354723518`. GitHub
 CodeRabbit skipped the non-default stacked base; an authenticated terminal
-review and independent reviews drove the current dirty fixes. That surface
+review and independent reviews drove the pushed hardening surface. That surface
 passes static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
 section-33 tests, and 2/2 planning tests. Final independent review is
-merge-clean and terminal CodeRabbit is complete. Commit/push, new exact-head PR
-#13 CI, PR13-to-PR11 merge,
+merge-clean and terminal CodeRabbit is complete. The final documentation-
+reconciliation head requires exact-head PR #13 CI, then PR13-to-PR11 merge,
 exact-head PR #11 CI, PR11-to-main merge, post-merge main CI, and exact-main
 mutable-index refresh remain acceptance gates.
 
