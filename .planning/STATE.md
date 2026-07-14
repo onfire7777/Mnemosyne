@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c fixture-only working slice now durably rolls back post-activation failures and crash-resumes rollback through restored-pair consumer/probe/blackbox verification; all targeted tiers including section-31, section-33, and planning traceability are green, while an exact-current-worktree full-suite rerun, exact-head CI, committed reproof/finalization, live runtime proofs, and every protected/public action remain open
-last_updated: "2026-07-14T02:50:43Z"
+stopped_at: Phase 12 production MCP client rotation R1c fixture-only rollback slice is green across targeted tiers, a hardware-admitted 2,571-test full local suite, and exact-SHA CI on evidence head 7541635; committed reproof/finalization, live runtime proofs, exact-scale development evidence, and every protected/public action remain open. Mutable external-index freshness must be verified after the evidence commit in PR #12 rather than self-attested here
+last_updated: "2026-07-14T03:33:00Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -39,7 +39,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
 Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and pre-activation startup recovery. The current R1c fixture-only working slice durably records `activation_started` before the first consumer touch; failures after that boundary restore the old pair through explicit rollback phases, recreate exactly the recorded consumer set, validate the restored pair, repeat both direct probes with the old pair, require a fresh blackbox success, and end only as `rolled_back` or `rollback_failed`. Fixture startup resumes recognized `activation_started` and rollback phases without reissuing. Residual `published_validated` remains compatibility-ambiguous and fails closed, while residual `committed` still requires the separate committed-state reproof/finalization path. The ordinary production path remains `staged_only`; committed recovery, live runtime proofs, and every live/protected/public action remain gated
-Last activity: 2026-07-13 — The current rollback slice passes the full 304/304 rotator/blackbox pair, 41/41 unchanged production regressions, 39/39 section-31 rails, 7/7 section-33 harness tests, and 2/2 planning traceability tests under separate serialized zero-model targeted gates. An exact-current-worktree full-suite rerun and exact-head CI remain pending. This fixture/test slice performed no live Docker/CA/secret/runtime, model/index, exact-scale, held-out, protected, or public mutation
+Last activity: 2026-07-13 — The current rollback slice passes the full 304/304 rotator/blackbox pair, 41/41 unchanged production regressions, 39/39 section-31 rails, 7/7 section-33 harness tests, and 2/2 planning traceability tests under separate serialized zero-model targeted gates. A later complete three-sample strong gate admitted the evidence-head full local suite: 2,571 tests, 0 failures/errors, and 140 expected skips in 568.893 seconds. Exact-SHA CI run 29302353176 is green on evidence head 7541635. A later strong gate admitted a deterministic Graphify rebuild and a ready 15,578-node/64,541-edge CBM index; CBM's local embedding model was stopped after indexing, and neither action changed the production runtime. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred
 
 ## Performance Metrics
 
@@ -225,8 +225,8 @@ Latest checkpoint (2026-06-28): T-SEC protected registry breadth is reconciled w
 
 ## Session Continuity
 
-Last session: 2026-07-10T20:18:37.893Z
-Stopped at: Completed 09.2-01-PLAN.md
+Current continuation: 2026-07-14T03:33:00Z
+Stopped at: R1c rollback evidence is green and draft PR #12 is open; finalize the evidence commit, synchronize mutable external indexes against that exact head, and continue committed-state reproof/finalization without consuming protected evidence
 
 Latest active checkpoint (2026-06-30): Continuing the unpaused exact-parity goal from the canonical checkout `/Users/admin/Mnemosyne`, with focus on Tier-B production/control gaps rather than redundant gates. The current source-hardening lane is closing the Phase 8 MFA elevation defect: elevated OIDC authz rules now require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This is source/control progress only; live Keycloak/MFA rollout evidence remains operator-run and required before Tier-B production parity can be claimed.
 
@@ -504,31 +504,40 @@ section-31 invariant rails, all 7 section-33 harness tests, and both planning
 traceability tests. Every tier ran serialized after its own fresh targeted
 admission sample with at least 35% free memory, load1 at most 10, and zero
 resident models. Independent final review found no actionable P0/P1 issue.
-Exact-head CI remains pending on the final documentation SHA.
+A complete strong gate then passed at 56%/56%/57% free memory, load1
+2.75/2.21/3.04, load5 5.33/5.08/5.09, zero models, one reachable 20-service
+`infra` project, an initialized/unsealed Vault, stable zero API/stream restart
+counts, and a valid production MCP client chain. The resulting locked full
+local suite artifact `/tmp/mnemosyne-r1c-full-7541635.xml` records 2,571 tests,
+0 failures, 0 errors, and 140 expected skips in 568.893 seconds. Exact-SHA CI
+run 29302353176 is green on evidence head `7541635`.
 
 A separate concurrent operator session changed external runtime state without
-editing these five R1c files. Read-only verification at 2026-07-14T00:20Z
-confirmed that the canonical mode-`0600` MCP client leaf/key now form a valid
-client-auth pair issued for `mcp-client.mnemo.local`, valid from
-2026-07-13T23:51:36Z through 2026-07-14T23:52:36Z. This session did not repeat
-the live endpoint probes. Its saved hardware-admitted full-suite artifact
-records 2,545 tests with one governance-document registration failure, not a
-green full-suite run. Commit `0a06d0e` fixes that exact registration gap, and
-the governance policy file passes 6/6 on the current worktree; the full suite
-has not been rerun after that fix and is not represented as exact-head green.
+editing the R1c files. Read-only verification at 2026-07-14T00:20Z confirmed
+that the canonical mode-`0600` MCP client leaf/key form a valid client-auth pair
+issued for `mcp-client.mnemo.local`, valid from 2026-07-13T23:51:36Z through
+2026-07-14T23:52:36Z. Its earlier 2,545-test artifact exposed one
+governance-document registration failure; commit `0a06d0e` fixed that gap, and
+the later 2,571-test evidence-head run above closes the stale failure evidence.
 
-This fixture/test slice ran no real Docker command, issuance, certificate
-publication, secret change, consumer recreation, model/index action,
-exact-scale run, held-out attempt, protected attempt, or external claim. Before
-live activation, R1c must align the host boundary with the
+The strong gate used only read-only Docker topology/status, Vault status,
+restart-count, and certificate-validation queries. It performed no issuance,
+certificate publication, secret change, consumer recreation, model/index
+action, exact-scale run, held-out attempt, protected attempt, or external claim.
+Before live activation, R1c must align the host boundary with the
 VM/VictoriaMetrics clock domain or prove a conservative skew bound, add
 fixed-deadline polling across the 60-second scrape cadence, prove stable
 consumer IDs and restart counts, and implement committed-state reproof,
 finalization, journal unlink, and exactly-once terminal reporting across that
-unlink. It must also pass the strong hardware gate before any live action.
-Parent baseline `58198ff` has green exact-SHA CI run 29295832763; the current
-working slice requires its own green exact-SHA check after commit. No protected
-attempt or public claim is authorized by this fixture state.
-Graph, CBM, and gbrain refreshes remain
-queued behind their stronger three-sample hardware admission rather than being
-run from targeted-only samples.
+unlink. Every future live-action or merge head must pass its own live
+strong-admission and exact-head CI checks; no repository edit self-records its
+own future CI result. No protected attempt or public claim is authorized by
+this fixture state.
+The generated Graphify snapshot is current at `7541635` (16,171 nodes, 27,405
+edges, 1,171 communities, zero commits behind) and produced no tracked artifact
+churn. A separate strong gate admitted a ready Mnemosyne CBM index with 15,578
+nodes and 64,541 edges; architecture, rollback-test discovery, snippet lookup,
+and change-impact surfaces were verified. CBM and gbrain remain mutable external
+indexes, so their final exact-head refresh must be performed after the
+evidence commit and recorded in PR #12. Any later source edit reopens that
+freshness check.

@@ -124,9 +124,16 @@ unchanged 41-test production regression tier, all 39 section-31 invariant
 rails, all 7 section-33 harness tests, and both planning traceability tests.
 Every tier ran serialized after its own fresh targeted-admission sample with at
 least 35% free memory, load1 at most 10, and zero resident models. Independent
-final review found no actionable P0/P1 issue. No live Docker query, issuance,
-certificate publication, or consumer recreation was run by this fixture/test
-slice. Before any live activation, R1c
+final review found no actionable P0/P1 issue. A later complete strong gate
+passed at 56%/56%/57% free memory, load1 2.75/2.21/3.04, load5
+5.33/5.08/5.09, zero models, one reachable 20-service `infra` project,
+initialized/unsealed Vault, stable zero API/stream restart counts, and a valid
+production MCP client chain. The locked full local suite on evidence head
+`7541635` passes 2,571 tests with 0 failures/errors and 140 expected skips in
+568.893 seconds; exact-SHA CI run 29302353176 is green on the same head. The
+gate used only read-only Docker/Vault/restart/certificate queries and performed
+no issuance, certificate publication, secret change, or consumer recreation.
+Before any live activation, R1c
 must additionally align the host-captured boundary with the
 VM/VictoriaMetrics clock domain (or prove a conservative skew bound), poll
 across the 60-second scrape cadence with a fixed deadline, prove stable
