@@ -516,15 +516,14 @@ fail closed while retaining evidence. Residual schema-v2
 `published_validated` remains compatibility-ambiguous and is preserved;
 residual `committed` still requires committed-state reproof/finalization.
 
-The current rollback slice passes the full 304-test rotator/blackbox pair and
-the unchanged 41-test TLS/bootstrap/Compose-policy tier under separate fresh
-serialized targeted-admission samples with at least 35% free memory, load1 at
-most 10, and zero resident models. Exact section-31, section-33, and planning
-selectors are identified but their current-worktree reruns remain pending a
-fresh admitted sample. Independent final review found no actionable P0/P1
-issue. The fixture does not emit `activated` or `committed_recovered`; committed
-reproof/finalization, journal unlink, and exactly-once terminal reporting
-across that unlink remain open.
+The current rollback slice passes the full 304-test rotator/blackbox pair, the
+unchanged 41-test TLS/bootstrap/Compose-policy tier, all 39 section-31 invariant
+rails, all 7 section-33 harness tests, and both planning traceability tests.
+Every tier ran serialized after its own fresh targeted-admission sample with at
+least 35% free memory, load1 at most 10, and zero resident models. Independent
+final review found no actionable P0/P1 issue. The fixture does not emit
+`activated` or `committed_recovered`; committed reproof/finalization, journal
+unlink, and exactly-once terminal reporting across that unlink remain open.
 
 Live activation additionally requires a boundary in the VM/VictoriaMetrics
 clock domain or a conservative audited skew bound, bounded polling across the

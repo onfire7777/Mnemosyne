@@ -119,14 +119,14 @@ fail closed while preserving evidence. Residual schema-v2
 residual `committed` still requires committed-state reproof/finalization. The
 fixture does not emit `activated` or `committed_recovered`.
 
-The current rollback slice passes the full 304-test rotator/blackbox pair and
-the unchanged 41-test production regression tier under separate fresh
-serialized targeted-admission samples with at least 35% free memory, load1 at
-most 10, and zero resident models. Exact section-31, section-33, and planning
-selectors are identified but their current-worktree reruns remain pending a
-fresh admitted sample. Independent final review found no actionable P0/P1
-issue. No live Docker query, issuance, certificate publication, or consumer
-recreation was run by this fixture/test slice. Before any live activation, R1c
+The current rollback slice passes the full 304-test rotator/blackbox pair, the
+unchanged 41-test production regression tier, all 39 section-31 invariant
+rails, all 7 section-33 harness tests, and both planning traceability tests.
+Every tier ran serialized after its own fresh targeted-admission sample with at
+least 35% free memory, load1 at most 10, and zero resident models. Independent
+final review found no actionable P0/P1 issue. No live Docker query, issuance,
+certificate publication, or consumer recreation was run by this fixture/test
+slice. Before any live activation, R1c
 must additionally align the host-captured boundary with the
 VM/VictoriaMetrics clock domain (or prove a conservative skew bound), poll
 across the 60-second scrape cadence with a fixed deadline, prove stable
