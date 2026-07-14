@@ -508,11 +508,11 @@ git diff --check
 
 ### R1c — Consumer activation, probes, and rollback
 
-Status: The current success-completion/committed-finalization source-and-fixture
-slice is committed and pushed as `8e97442`, with evidence documentation at
-`6afd3b3`; pushed head `6afd3b3` matched upstream/remote with a clean tree before
-this status reconciliation. Final-head exact-head CI, merge, remaining R1c
-live-readiness work, and live proof remain open. The isolated
+Status: The success-completion/committed-finalization source-and-fixture slice
+was committed as `8e97442`, with evidence documentation at `6afd3b3`, and
+merged through PR #12 as `97f3c66`. Exact-head CI `29313243324` and post-merge
+CI `29314015888` are green. Remaining R1c live-readiness work and live proof
+remain open. The isolated
 blackbox-query helper selects exactly one running `infra` Caddy container,
 uses only the fixed BusyBox transport and encoded MetricsQL
 `timestamp(probe_success[2m]) if (last_over_time(probe_success[2m]) == 1)`
@@ -576,9 +576,10 @@ and a valid production MCP client chain. The locked configured suite then
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0
 errors in 702.564 seconds. These artifacts exercise the pre-commit working tree
 based on `82bc5d5e`; the tested source/test bytes were committed unchanged as
-`8e97442`, with evidence documentation at `6afd3b3`. Exact-head CI for the final
-status reconciliation remains pending. Older pre-completion evidence is
-historical only.
+`8e97442`, with evidence documentation at `6afd3b3`. Exact-head CI
+`29313243324` passed on final PR head `88067bc`; PR #12 then merged as
+`97f3c66`, whose post-merge CI `29314015888` passed all six gating jobs. Older
+pre-completion evidence is historical only.
 A fresh independent read-only security/correctness audit found no actionable
 issue in the committed R1c diff. Its residual limits match this contract: same-UID
 execution is trusted, producer output has no receiver ack, the local lock is not
@@ -632,6 +633,11 @@ git diff --check
 ```
 
 ### R2a — Runtime lock helper
+
+Status: In progress on `codex/r2a-runtime-exclusive-lock` after R1c merge and
+post-merge index reconciliation. No R2a implementation or acceptance evidence
+exists until the RED test below is committed and observed failing for the
+missing helper.
 
 Files:
 
