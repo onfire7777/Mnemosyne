@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c fixture-only working slice now durably rolls back post-activation failures and crash-resumes rollback through restored-pair consumer/probe/blackbox verification; 304/304 rotator/blackbox and 41/41 production regressions are green, while section-31/section-33/planning reruns, an exact-current-worktree full-suite rerun, exact-head CI, committed reproof/finalization, live runtime proofs, and every protected/public action remain open
-last_updated: "2026-07-14T02:23:02Z"
+stopped_at: Phase 12 production MCP client rotation R1c fixture-only working slice now durably rolls back post-activation failures and crash-resumes rollback through restored-pair consumer/probe/blackbox verification; all targeted tiers including section-31, section-33, and planning traceability are green, while an exact-current-worktree full-suite rerun, exact-head CI, committed reproof/finalization, live runtime proofs, and every protected/public action remain open
+last_updated: "2026-07-14T02:50:43Z"
 last_activity: 2026-07-13
 progress:
   total_phases: 7
@@ -39,7 +39,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 3 of 4
 Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. Rotation R1b provides crash-safe publication and pre-activation startup recovery. The current R1c fixture-only working slice durably records `activation_started` before the first consumer touch; failures after that boundary restore the old pair through explicit rollback phases, recreate exactly the recorded consumer set, validate the restored pair, repeat both direct probes with the old pair, require a fresh blackbox success, and end only as `rolled_back` or `rollback_failed`. Fixture startup resumes recognized `activation_started` and rollback phases without reissuing. Residual `published_validated` remains compatibility-ambiguous and fails closed, while residual `committed` still requires the separate committed-state reproof/finalization path. The ordinary production path remains `staged_only`; committed recovery, live runtime proofs, and every live/protected/public action remain gated
-Last activity: 2026-07-13 — The current rollback slice passes the full 304/304 rotator/blackbox pair and 41/41 unchanged production regressions under separate serialized zero-model targeted gates. Exact section-31, section-33, and planning-traceability selectors are identified but their current-worktree reruns are waiting for a fresh admitted host sample; an exact-current-worktree full-suite rerun and exact-head CI also remain pending. This fixture/test slice performed no live Docker/CA/secret/runtime, model/index, exact-scale, held-out, protected, or public mutation
+Last activity: 2026-07-13 — The current rollback slice passes the full 304/304 rotator/blackbox pair, 41/41 unchanged production regressions, 39/39 section-31 rails, 7/7 section-33 harness tests, and 2/2 planning traceability tests under separate serialized zero-model targeted gates. An exact-current-worktree full-suite rerun and exact-head CI remain pending. This fixture/test slice performed no live Docker/CA/secret/runtime, model/index, exact-scale, held-out, protected, or public mutation
 
 ## Performance Metrics
 
@@ -498,14 +498,13 @@ compatibility-ambiguous and is preserved; residual `committed` still requires
 committed-state reproof/finalization. The ordinary production path remains
 `staged_only` and cannot recreate a live consumer.
 
-The current rollback slice passes the full 304-test rotator/blackbox pair and
-the unchanged 41-test production TLS/bootstrap/Compose-policy tier. Both ran
-serialized after separate fresh targeted-admission samples with at least 35%
-free memory, load1 at most 10, and zero resident models. Exact section-31,
-section-33, and planning-traceability selectors are identified but their
-current-worktree reruns are waiting for a new admitted sample. Independent
-final review found no actionable P0/P1 issue. Exact-head CI remains pending
-until this working slice is committed.
+The current rollback slice passes the full 304-test rotator/blackbox pair, the
+unchanged 41-test production TLS/bootstrap/Compose-policy tier, all 39
+section-31 invariant rails, all 7 section-33 harness tests, and both planning
+traceability tests. Every tier ran serialized after its own fresh targeted
+admission sample with at least 35% free memory, load1 at most 10, and zero
+resident models. Independent final review found no actionable P0/P1 issue.
+Exact-head CI remains pending on the final documentation SHA.
 
 A separate concurrent operator session changed external runtime state without
 editing these five R1c files. Read-only verification at 2026-07-14T00:20Z
