@@ -1,7 +1,7 @@
 # Production MCP Client Certificate Rotation
 
 Status: In Progress
-Updated: 2026-07-13
+Updated: 2026-07-14
 
 ## Objective
 
@@ -118,9 +118,10 @@ without inventing additional terminal results.
    mode/link identity is checked before and after nonblocking `flock`; the
    inherited descriptor is held through the final completion-receipt transition.
    This serializes cooperative rotator invocations only.
-4. The planned R2 shared runtime lock remains under
+4. The R2a shared runtime-lock coordinator is implemented at
    `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive`; its parent is a mode-`0700`,
-   non-symlink directory. R2 is not implemented by the local process lock.
+   non-symlink directory. The local process lock remains separate, and R2b-R2d
+   caller integrations remain open.
 5. A separate status-only directory is mounted read-only into `mnemo-metrics`.
    It contains only a schema-validated `status.json`; it contains no
    certificate, key, password, digest, backup, staging, journal, lock, secret
@@ -338,11 +339,12 @@ begins.
 
 ## Shared runtime lock contract
 
-**R2 status: not implemented.** The current `.mcp-client-rotation.lock`
-prevents overlapping cooperative rotator invocations and is deliberately held
-for the whole process, but it does not serialize capture, evaluation, runtime
-flip, or rollback workflows. The following is the cross-workflow target and
-remains open. Neither lock claims protection against a malicious process with
+**R2 status: R2a implemented and pushed; R2b-R2d open.** The current
+`.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
+and is deliberately held for the whole process, but it does not serialize
+capture, evaluation, runtime flip, or rollback workflows. R2a provides the
+shared fail-closed coordinator; each caller still must be integrated and proven
+under R2b-R2d. Neither lock claims protection against a malicious process with
 the same uid; same-uid execution is inside the trusted operator boundary.
 
 The smallest shared helper is `infra/scripts/runtime-exclusive-lock.sh`. It:
@@ -357,7 +359,7 @@ The smallest shared helper is `infra/scripts/runtime-exclusive-lock.sh`. It:
 - fails closed on stale locks, dead PIDs, PID reuse, forged/malformed metadata,
   symlink substitution, unsafe modes, or owner mismatch. It never steals.
 
-The helper is acquired before any side effect by:
+R2b-R2d must integrate the helper before any side effect in:
 
 - `infra/scripts/rotate-production-mcp-client-cert.sh`;
 - `infra/scripts/capture-production-evidence.sh`;
@@ -634,17 +636,19 @@ git diff --check
 
 ### R2a — Runtime lock helper
 
-Status: In progress on `codex/r2a-runtime-exclusive-lock` after R1c merge and
-post-merge index reconciliation. No R2a implementation or acceptance evidence
-exists until the RED test below is committed and observed failing for the
-missing helper.
+Status: Implementation and focused verification are pushed as `a91da2e` on
+`codex/r2a-runtime-exclusive-lock`. The committed RED baselines are `199b898`
+and `93e0dc6`. After independent correctness and security review, the final
+surface passes static gates, 39/39 focused tests, 39/39 section-31 rails, and
+7/7 section-33 tests. Stacked PR, exact-head CI, merge, and post-merge mutable
+index refresh remain acceptance gates.
 
 Files:
 
 - `infra/scripts/runtime-exclusive-lock.sh`
 - `tests/test_runtime_exclusive_lock.py`
 
-RED (expected: missing helper and owner-token semantics):
+RED (historical baseline: missing helper and owner-token semantics):
 
 ```sh
 uv run --locked pytest -q tests/test_runtime_exclusive_lock.py
@@ -661,8 +665,10 @@ uv run --locked pytest -q tests/test_runtime_exclusive_lock.py
 git diff --check
 ```
 
-Tests cover normal ownership, contention, stale lock, PID reuse, forged metadata,
-unsafe/symlink parent, signal cleanup, and owner-token mismatch.
+Tests cover normal ownership, acquisition ordering, contention, stale/dead/PID-
+reused owners, forged or malformed metadata, unsafe/symlink paths, descendant
+lifetime, child/wrapper signal fidelity, release tampering, and owner-token,
+inode, mode, hardlink, parent, and directory mismatch.
 
 ### R2b — Capture and rotator integration
 

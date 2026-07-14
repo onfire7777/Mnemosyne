@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: Phase 12 production MCP client rotation R1c is merged through PR #12 at 97f3c6600627e0be155892dc9d8c8294e94334ec. Exact-head CI run 29313243324 and post-merge CI run 29314015888 are green; Graphify, CBM, and the gbrain mnemosyne-code source were refreshed against that merge. R2a runtime-exclusive locking is the next source slice. R2b-R2d, R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, every protected/public or human-owned action, and the separate Vault trust-file maintenance defect remain open
-last_updated: "2026-07-14T07:51:59Z"
+stopped_at: R2a's fail-closed runtime-exclusive coordinator and 39-test focused suite are implemented, independently reviewed, committed, and pushed as a91da2e on codex/r2a-runtime-exclusive-lock. Its stacked PR, exact-head CI, merge, and final Graphify/CBM/gbrain refresh remain open. R2b-R2d, R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, every protected/public or human-owned action, and the separate Vault trust-file maintenance defect also remain open
+last_updated: "2026-07-14T17:33:29Z"
 last_activity: 2026-07-14
 progress:
   total_phases: 7
@@ -37,9 +37,9 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
-Plan: 3 of 4
-Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. R1c's tested source, completion protocol, and evidence are merged into that branch through PR #12 at `97f3c66`; the ordinary production path remains `staged_only`, the local rotator lock is not the still-open R2 cross-workflow lock, rollback terminal receipts remain open, and no live/protected/public authorization follows from fixture evidence. R2a's `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` helper is the next source slice. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair requires a distinct atomic CA-maintenance operation, not deletion or TLS weakening.
-Last activity: 2026-07-14 — The immutable pre-commit evidence remains 369/369 rotator/blackbox, 41/41 production regressions, 39/39 section-31 rails, 7/7 section-33 tests, 2/2 planning tests, and a 2,636-test configured suite with 2,496 passed, 140 expected skips, and no failures/errors. PR #12 merged as `97f3c66` after exact-head CI `29313243324`; post-merge CI `29314015888` passed all six gating jobs. Graphify is fresh at that merge with 16,202 nodes, 27,648 edges, and 1,174 communities. CBM is ready at 17,685 nodes and 70,259 edges and resolves the R1c recovery call graph. Gbrain `mnemosyne-code` is synced to the full merge SHA with 100% embedding coverage and zero unacknowledged failures. Its doctor retains a historical 24-hour worker-crash warning localized to an earlier unavailable localhost Postgres window and a separate global cycle-freshness failure whose installed CLI does not document safe source scoping; neither is misreported as a clean global Doctor result. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
+Plan: 4 of 4
+Status: Candidate v19 source/runtime/bundle custody remains wired on draft PR #11. R1c's tested source, completion protocol, and evidence are merged into that branch through PR #12 at `97f3c66`; the ordinary production path remains `staged_only`, rollback terminal receipts remain open, and no live/protected/public authorization follows from fixture evidence. R2a's `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` coordinator and focused tests are pushed as `a91da2e` after independent correctness and security review. R2a is not accepted until its stacked PR, exact-head CI, merge, and final mutable-index refresh close. R2b-R2d integrations remain open. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation after merged R2a acceptance, not deletion or TLS weakening.
+Last activity: 2026-07-14 — R2a commit `a91da2e` is pushed with green `bash -n`, ShellCheck, Ruff check/format, `git diff --check`, 39/39 focused lock tests, 39/39 section-31 rails, and 7/7 section-33 tests. Independent review found and closed an acquisition publication race and child-signal-status defect; the final security review found no P0-P2 blocker. R2a has no PR or exact-head CI yet. The immutable R1c evidence remains 369/369 rotator/blackbox, 41/41 production regressions, 2/2 planning tests, and a hardware-admitted 2,636-test configured suite with 2,496 passed, 140 expected skips, and no failures/errors. PR #12 merged as `97f3c66` after exact-head CI `29313243324`; post-merge CI `29314015888` and ordinary scheduled-main CI `29318113932` are green. Graphify (16,202 nodes / 27,648 edges / 1,174 communities), CBM (17,685 nodes / 70,259 edges), and gbrain `mnemosyne-code` remain the last accepted merge-bound receipt at PR #12; R2a source changes reopen final-head freshness until its merge. Gbrain Doctor still carries the bounded historical worker-crash warning and separate global cycle-freshness failure; neither is misreported as globally clean. No live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
 
 ## Performance Metrics
 
@@ -86,7 +86,7 @@ Last activity: 2026-07-14 — The immutable pre-commit evidence remains 369/369 
 - [Phase 12]: Reuse shared retrieval/PPR and the existing Ollama role-provider boundary; add a narrow orchestration layer with external CID validation, complete caller-context propagation, and ephemeral answers.
 - [Phase 11]: BENCH-004 is complete; BENCH-005 remains partial because all three Hippo tracks measured zero positive graph/PPR participation and Phase 12 still owns real reader-produced EM/F1.
 - [Phase 11]: HippoRAG retrieval is deterministic, but EM/F1 needs real reader-produced predictions; the scorer lands in Phase 11 and Phase 12 owns prediction closure.
-- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. Exact-SHA CI is restored and remained green through run 29234683178 for pushed head `9c217b99e428bc1b8c6dfa56d3b560809dfb54f5`; each later merge candidate still requires its own exact-head run.
+- [CI]: The GitHub Actions billing block was resolved on 2026-07-12. R1c exact-head run `29313243324`, post-merge run `29314015888`, and ordinary scheduled-main run `29318113932` are green. R2a commit `a91da2e` is pushed but still requires its own exact-head run.
 
 - [Phase 0]: V2 blueprint is controlling; v1 is lineage only.
 - [Phase 0]: Build originally moved to `/Users/admin/Projects/Mnemosyne` because `/Users/admin/Desktop/Mnemosyne` was write-blocked; the current canonical checkout is `/Users/admin/Mnemosyne`.
@@ -225,8 +225,7 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 ## Session Continuity
 
-Current continuation: 2026-07-14T07:51:59Z
-Stopped at: R1c is merged through PR #12 at `97f3c66`; exact-head and post-merge CI are green, and Graphify, CBM, and gbrain `mnemosyne-code` are refreshed at that merge. Continue on `codex/r2a-runtime-exclusive-lock` with the RED test for the missing runtime-exclusive helper. Do not consume exact-scale or protected evidence.
+Current continuation: see **Latest checkpoint** below (2026-07-14T17:33:29Z).
 
 Historical source-hardening checkpoint (2026-06-30): The exact-parity lane closed the Phase 8 MFA elevation defect: elevated OIDC authz rules require non-tenant claim evidence, configured `required_acr`/`required_amr`, positive `max_auth_age_seconds`, and fresh token `auth_time` before minting operator/consolidator or trust-tier≤1 sessions. This checkpoint predates and is superseded by the Tier-B attestation above.
 
@@ -242,21 +241,23 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   reinitialize the retained Vault volume.
 - Validate the MCP client pair against Caddy's exact trust pool before heavy
   work and rotate it before the six-hour short-lived-certificate floor.
-- Implement and verify R2a's fail-closed cross-workflow runtime lock before
-  integrating capture or rotator callers in R2b-R2d.
-- After R2a exists, repair the stale external `vault-tls/ca.crt` under that
+- Open the stacked R2a PR, obtain exact-head CI, merge the match-head commit,
+  and refresh Graphify, CBM, and gbrain before integrating callers in R2b-R2d.
+- After R2a is merged and accepted, repair the stale external `vault-tls/ca.crt` under that
   cross-workflow lock through a distinct, rollback-safe CA-maintenance
   operation; `step-ca-root.crt` remains the validated Vault trust root and no
   validator may be weakened.
 - Begin external governance-board recruitment without delegating seating or
   ratification to an agent.
 
-Latest checkpoint (2026-07-14): R1c PR #12 merged into the Phase 12 custody
-branch at `97f3c66`. Exact-head CI `29313243324` and post-merge CI
-`29314015888` are green. Graphify, CBM, and gbrain `mnemosyne-code` were
-refreshed and verified against that merge; the next code-bearing edit will
-reopen those mutable-index freshness checks until its own final merge. R2a is
-the active source slice. R2b-R2d, R3/R4, live rotation/no-op proof, the
+Latest checkpoint (2026-07-14): R2a's fail-closed runtime-exclusive helper and
+39-test focused suite are implemented, independently reviewed, committed, and
+pushed as `a91da2e` on `codex/r2a-runtime-exclusive-lock`. Static checks,
+39/39 section-31 rails, and 7/7 section-33 tests are green. No R2a PR or
+exact-head CI exists yet, so merge and acceptance remain open. The last
+accepted Graphify, CBM, and gbrain `mnemosyne-code` receipt remains PR #12 at
+`97f3c66`; R2a source changes reopen final-head freshness until their own
+merge. R2b-R2d, R3/R4, live rotation/no-op proof, the
 candidate-v19 external manifest/runtime and exact-scale receipts, every
 protected attempt, and all human-owned governance/publication actions remain
 open. The external Vault `ca.crt` trust-file mismatch is tracked separately and
@@ -493,9 +494,10 @@ terminal receipts remain a separate open slice.
 The persistent mode-`0600` `.mcp-client-rotation.lock` is held for the whole
 invocation, including the final durable receipt transition. It validates the
 secret-root path plus lock device/inode/uid/mode/link identity and returns the
-fixed `lock_deferred`/75 outcome on cooperative contention. It does not replace
-the still-open R2 `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract and
-does not claim isolation from a malicious process running as the same uid.
+  fixed `lock_deferred`/75 outcome on cooperative contention. It does not replace
+  the R2 `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract: the R2a
+  coordinator is pushed as `a91da2e`, while caller integrations R2b-R2d remain
+  open. Neither lock claims isolation from a malicious same-uid process.
 
 Pre-commit working-tree verification based on `82bc5d5e` records 369 rotator/blackbox tests, 41
 production TLS/bootstrap/Compose-policy regressions, all 39 section-31 rails,
