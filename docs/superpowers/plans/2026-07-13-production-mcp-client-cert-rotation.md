@@ -525,16 +525,23 @@ final review found no actionable P0/P1 issue. The fixture does not emit
 `activated` or `committed_recovered`; committed reproof/finalization, journal
 unlink, and exactly-once terminal reporting across that unlink remain open.
 
+A later complete strong gate passed at 56%/56%/57% free memory, load1
+2.75/2.21/3.04, load5 5.33/5.08/5.09, zero models, one reachable 20-service
+`infra` project, initialized/unsealed Vault, stable zero API/stream restart
+counts, and a valid production MCP client chain. The locked full local suite on
+evidence head `7541635` passes 2,571 tests with 0 failures/errors and 140
+expected skips in 568.893 seconds. Exact-SHA CI run 29302353176 is green on the
+same evidence head.
+
 Live activation additionally requires a boundary in the VM/VictoriaMetrics
 clock domain or a conservative audited skew bound, bounded polling across the
 60-second scrape cadence, stable consumer IDs/restart counts, committed-state
-reproof/finalization, and a strong-gate admission. No live
-Docker query, issuance, consumer recreation, certificate mutation,
-model/index action, protected attempt, or external claim was run by this
-fixture/test slice, and the ordinary production path remains staged-only.
-Parent baseline `58198ff` has green exact-SHA CI run 29295832763. This newer
-working slice requires its own green exact-SHA check after commit. No repository
-edit self-records its own CI result.
+reproof/finalization, and a fresh strong-gate admission. The completed strong
+gate used only read-only Docker/Vault/restart/certificate queries; it performed
+no issuance, consumer recreation, certificate mutation, model/index action,
+protected attempt, or external claim, and the ordinary production path remains
+staged-only. Every future merge or live-action head requires its own live
+exact-head CI check; no repository edit self-records its own future CI result.
 
 Files:
 

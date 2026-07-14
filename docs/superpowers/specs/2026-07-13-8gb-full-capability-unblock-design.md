@@ -48,20 +48,20 @@ agent may prepare materials but may not perform the decision or external act.
 
 | # | Problem | Evidence | Severity |
 |---|---|---|---|
-| P1 | Hardware admission is the strong-workload meta-blocker | The last recorded full-gate retry was 50%/47%/48% free memory against a 55% floor. It blocks model work, the hardware-admitted full project suite, indexes, live runtime mutation, and the current path to protected work. It does **not** block serialized targeted unit tiers that pass the separate ≥35%/load≤10/no-model gate. | Critical |
+| P1 | Hardware admission is a recurring capacity constraint, not the current full-suite blocker | After bounded reclamation and serialized waiting, the complete gate passed at 56%/56%/57% free memory, load1 2.75/2.21/3.04, load5 5.33/5.08/5.09, and zero models; the 2,571-test full suite then passed. Duplicate installers, security scans, Brave relaunches, and VM-origin model loads showed why every later model/index/live/protected window must re-gate independently. | High, operational |
 | P2 | Protected QA remains 0.0833 vs ≥0.85 | v17 and v18 each answered 2/24 and abstained at hop 0 on 22/24, with EM/F1 0.083333. v19's deterministic planner passes synthetic/dev gates but its protected effect and remaining reader residual are unmeasured. Both `qa_hard_v2` and held-out LongMemEval-QA must reach ≥0.85 without retrieval regression. | Critical |
 | P3 | One-shot evidence economics | Five protected attempts are recorded: v3, v12, v13, v17, and v18. v12 produced no result because the 120-second outer wrapper expired. A digest-bound 24/24 exact-scale development receipt is now mandatory before another protected attempt. | High |
 | P4 | No physical-8-GiB product path is proven | The compact reader/reranker work is design and preregistration only: no model has been selected, trained, downloaded, or accepted. Four probed local generative substitutes were rejected; that evidence does not exclude every possible model. Physical Windows and Linux x86-64 acceptance remains mandatory, with ARM64 additional rather than substitutive. | High |
-| P5 | Production admission rails remain unfinished | MCP rotation R1c now has fixture-proven crash-resumable post-activation rollback and current section-31/section-33/planning evidence, but committed reproof/finalization, exact-head CI, and later live-window proof remain open. Vault recovery, dual-root trust debt, short-lived certificate renewal, and restart stability remain operational prerequisites. | High |
+| P5 | Production admission rails remain unfinished | MCP rotation R1c now has fixture-proven crash-resumable post-activation rollback, current section-31/section-33/planning evidence, a green 2,571-test full suite, and green exact-SHA CI on evidence head `7541635`. Committed reproof/finalization and the later live-window proof remain open. Vault recovery, dual-root trust debt, short-lived certificate renewal, and restart stability remain operational prerequisites. | High |
 | P6 | Passing frozen QA alone cannot close Phase 12 | LongMemEval-QA ≥0.85, deterministic retrieval non-regression, positive provenance-linked graph/PPR effect, §31 rails, §33 classes, custody, and held-out controls are independent exit bars. Current Hippo evidence has zero positive graph/PPR participation. | High |
 | P7 | CI is restored, but current-head and cost controls remain open | Billing was restored on 2026-07-12 and exact-SHA CI is available. Every later merge candidate still needs its own exact-head run. Hosted macOS wheel cadence should be optimized from measured billing artifacts; no unverified multiplier or push-rate estimate is treated as fact. | Medium |
 | P8 | Governance and reproduction are human-owned long leads | Agents may prepare charters, recruitment packets, evidence bundles, and reproduction instructions. They may not recruit or seat the board, ratify policy on its behalf, commission the independent reproducer, approve public wording, or publish a number. | High, external |
-| P9 | Execution and knowledge state are not fully synchronized | PR #11 is draft, the R1c worktree is in flight, GSD's committed graph is stale, and gbrain/graph refresh work remains behind the applicable hardware gate. CBM is available, but its reported ready state does not by itself prove the indexed commit matches HEAD. | Medium |
+| P9 | Knowledge freshness has one bounded post-commit closure step | The generated Graphify snapshot is current at `7541635` with 16,171 nodes, 27,405 edges, 1,171 communities, and zero commits behind, and a strong-gated Mnemosyne CBM index is ready with 15,578 nodes and 64,541 edges. Because CBM and gbrain are mutable external indexes, their final refresh must run after the evidence commit and be recorded in PR #12; availability alone is not freshness, and any later source edit reopens the check. | Medium, controlled |
 
-**System diagnosis:** P1 blocks the strong local execution window but no longer
-justifies parking lightweight or targeted work. P2 is the central science gap,
-not the sole Phase 12 exit condition; P3, P5, P6, and the human-owned gates must
-also close without weakening custody.
+**System diagnosis:** the admitted full-suite window closes P1 for this slice,
+but not for later model/index/live/protected workloads, which must re-gate.
+P2 is the central science gap, not the sole Phase 12 exit condition; P3, P5,
+P6, and the human-owned gates must also close without weakening custody.
 
 ## 3. Hardware-class execution matrix
 
@@ -92,8 +92,8 @@ also close without weakening custody.
 ### A — Immediate unblock (resolves P1, P3)
 
 - **A1. Eval-window preparation:** use the guarded reclamation helper only for a planned strong-workload window and only through its explicit opt-in confirmation. It may quit only the fixed Brave/Discord allowlist; it never stops services, inspects secrets, runs admission checks, or returns success as an admission signal. Its dedicated `ADMISSION PENDING` exit is followed by the complete three-sample runbook; only that separate read-only gate can admit work.
-- **A2. Run the queues under their real gates:** retain R1c's now-green targeted evidence; separately obtain strong admission for candidate v19's full project suite and remaining prerequisites; then produce the 24/24 `qa_scale_dev_v1` receipt under the exact-scale procedure; only then may v19 consume its protected attempt.
-- **A3. Hygiene:** land in-flight slices promptly; take PR #11 out of draft; one canonical work stream per machine during eval windows.
+- **A2. Run the queues under their real gates:** retain R1c's now-green targeted/full-suite/CI evidence; obtain a new strong admission for the remaining immutable candidate-v19 prerequisites; then produce the 24/24 `qa_scale_dev_v1` receipt under the exact-scale procedure; only then may v19 consume its protected attempt.
+- **A3. Hygiene:** land the clean stacked PR #12 only after its remaining R1c boundaries are explicit and its final merge head is green; keep one canonical work stream per machine during eval windows.
 - **Alternatives considered:** shrinking the VM below 6 CPU/12 GiB — rejected (runbook-pinned custody topology); scheduled overnight eval windows — adopt as a complement after A1 proves out.
 
 ### B — Close the quality gap with the compact stack (resolves P2, P4)
@@ -128,7 +128,7 @@ also close without weakening custody.
 ## 6. Sequence
 
 - **Immediately:** land the now-green R1c rollback slice; prepare the human governance packet; complete compact-corpus planning and immutable-manifest preparation; establish a strong eval window without disrupting in-flight evidence.
-- **Strong window:** candidate-v19 full suite and immutable prerequisites → 24/24 exact-scale receipt → protected v19 attempt. A failed gate returns to development under a new candidate; it does not authorize another attempt or a weaker threshold.
+- **Strong window:** remaining immutable candidate-v19 prerequisites → 24/24 exact-scale receipt → protected v19 attempt. A failed gate returns to development under a new candidate; it does not authorize another attempt or a weaker threshold.
 - **After Decision Point 1:** execute the custody-approved compact bakeoff and R1c live-window work in separately admitted windows; complete D1–D4 with exact-head CI.
 - **Next:** v20 (and v21 only if preregistered evidence requires it) → both ≥0.85 QA gates → retrieval and positive graph/PPR gates → §31/§33/custody close → physical 8 GiB acceptance → Phases 13–16. Human governance and reproduction work proceeds in parallel but is never impersonated by an agent.
 
