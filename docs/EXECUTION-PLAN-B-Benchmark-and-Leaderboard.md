@@ -95,6 +95,12 @@ Blueprint §9.2.7 slates this. Build as a new isolated tree so the private suite
 - **M1.5 BEAM (prestige, LLM-judged).** Disclosed reader model; publish as "Mnemosyne + <reader>." DoD: BEAM-1M result + full config disclosure. (Plan A S-iii.)
 - **M1.6 Scheduled CI job.** Runs deterministic public suites on a cadence; regression alerts only; never tune-to-test.
 
+**Status (2026-07-13):** M1.1 and M1.2 source-owned DoDs are complete. M1.3's
+deterministic retrieval adapters are wired, while disclosed-reader columns and
+positive provenance-linked graph/PPR effect remain open behind Phase 12. The
+aggregate M1 checkbox stays open, and none of this source-owned progress
+authorizes publication without M2 plus genuine human-owned M3 reproduction.
+
 ### M2 — Reproducibility artifact bundle (the PBPP standard)
 Every public result ships: pinned harness commit + `uv`/`pip` runner; per-question traces (**what was stored, what was retrieved, final answer**); disclosed judge model + prompt + all configs; system build fingerprint (we already emit `sha256:…` release fingerprints); Wilson/bootstrap CIs; one-command reproduce script. **DoD:** a clean-room agent run reproduces the number from the bundle alone as an internal bundle-readiness check. This does not satisfy M3's external independence requirement.
 
@@ -195,7 +201,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 4. L3 explainers ∥ finalize Part I results — weeks 4–10.
 5. **L4 launch** (seed ≥8 systems, methods paper) — weeks 8–14.
 
-**Dependencies:** M4 blocks any publication; M1's harness **is** L1's engine (shared eval core — serialize writes); L0 blocks L4; Part I depends on **Plan A** capabilities for the QA numbers (deterministic numbers can publish independently first).
+**Dependencies:** M4 blocks any publication; M1's harness **is** L1's engine (shared eval core — serialize writes); L0 blocks L4; Part I depends on **Plan A** capabilities for the QA numbers. Deterministic tracks may be benchmarked before reader tracks, but publication still requires the complete PBPP bundle and genuine independent reproduction.
 
 **Roles:** *eval-eng agent* (M1–M2), *web agent* (L2–L3), *governance/human operator* (L0 board, M3 third-party repro), *research/writing* (L0.4 methods paper). Independent workstreams run as parallel sub-agents; serialize shared-eval-core writes.
 

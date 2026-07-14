@@ -16,9 +16,12 @@ of current truth. Every invocation must derive the active pair's lifetime from
 the certificate itself.
 
 The permanent design is a host-only, one-shot rotator scheduled hourly by a
-macOS LaunchAgent. Each invocation is idempotent and emits exactly one status
-from the fixed status/exit contract below. There is no success state after any
-rollback path.
+macOS LaunchAgent. Each invocation is idempotent and emits at most one terminal
+line from the fixed status/exit contract below. Successful completion lines are
+keyed by transaction ID and are producer-side at-least-once across invocations:
+a crash after stdout but before the durable `emitted` transition may replay the
+same key, so receivers must deduplicate `(transaction_id,result)`. There is no
+success state after any rollback path.
 
 ## Non-negotiable rails
 
@@ -85,7 +88,7 @@ The rotator writes one terminal `result` enum and exits with the fixed code:
 | `staged_only` | 0 | Forced rehearsal issued and validated without publication. |
 | `activated` | 0 | New pair, consumers, and every probe are validated. |
 | `committed_recovered` | 0 | A committed journal was validated and finalized. |
-| `lock_deferred` | 75 | Another recognized runtime-lock owner is active. |
+| `lock_deferred` | 75 | Another cooperative rotator owns the local invocation lock; R2 may later extend this to a recognized shared-runtime owner. |
 | `runtime_unavailable` | 69 | Docker/Colima is unavailable; no mutation occurred. |
 | `preflight_failed` | 65 | Configuration, trust, input, or validation failed closed. |
 | `issuance_failed` | 70 | Staged issuance failed before publication. |
@@ -109,15 +112,21 @@ without inventing additional terminal results.
    live in a mode-`0700`, non-symlink private rotation directory on the same
    filesystem as the canonical pair. Device identity is checked before any
    publication operation.
-3. The shared runtime lock remains under
+3. The persistent local process-lock file
+   `${MNEMO_SECRETS_DIR}/.mcp-client-rotation.lock` is a mode-`0600`,
+   single-link regular file on the secret-root device. Its device/inode/uid/
+   mode/link identity is checked before and after nonblocking `flock`; the
+   inherited descriptor is held through the final completion-receipt transition.
+   This serializes cooperative rotator invocations only.
+4. The planned R2 shared runtime lock remains under
    `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive`; its parent is a mode-`0700`,
-   non-symlink directory.
-4. A separate status-only directory is mounted read-only into `mnemo-metrics`.
+   non-symlink directory. R2 is not implemented by the local process lock.
+5. A separate status-only directory is mounted read-only into `mnemo-metrics`.
    It contains only a schema-validated `status.json`; it contains no
    certificate, key, password, digest, backup, staging, journal, lock, secret
    path, or path to secret material. Status publication uses a sibling temporary,
    file fsync, rename, and parent-directory fsync.
-5. The installer copies the existing JWK provisioner password once into the
+6. The installer copies the existing JWK provisioner password once into the
    external secret root as a regular non-symlink mode-`0600` file without
    output. It refuses to overwrite an existing file or import from an unsafe
    source.
@@ -188,9 +197,20 @@ contract is consumer-consistent and crash-recoverable:
    then rename the staged key to the canonical key and fsync the parent.
 5. Revalidate the published pair before touching a consumer. Advance and fsync
    the journal after each phase.
-6. Force-recreate the required consumers, run direct and blackbox probes, mark
-   the transaction committed, fsync it, then remove the journal and fsync the
-   parent. Retained generations are never pruned automatically.
+6. Force-recreate the required consumers, run direct and blackbox probes, and
+   mark the transaction committed. Re-prove the canonical pair against the
+   retained `generation.<transaction>.new.{crt,key}` files and the unchanged
+   six-hour validator before authorizing either `activated` or
+   `committed_recovered`.
+7. Durably create or resume a transaction-bound mode-`0600` pending completion
+   receipt, including file fsync, no-replace rename, identity revalidation, and
+   parent-directory fsync. Only then unlink the transaction journal and fsync
+   its parent. Retained generations are never pruned automatically.
+8. Emit `mcp-client-rotation result=<result> transaction_id=<id>` once for that
+   invocation, then rename pending to `emitted` and fsync the parent. If the
+   emitted-parent fsync fails, rename the receipt back to pending, fsync again,
+   emit no second result line, and exit 74. `emitted` records producer progress,
+   not receiver acknowledgement.
 
 On startup, a valid residual journal is recovered before ordinary current-pair
 validation. Recovery depends on the fsynced phase:
@@ -200,7 +220,8 @@ validation. Recovery depends on the fsynced phase:
   consumer set and run every rollback check.
 - At `committed`, require matching new digests, normal replacement validation,
   exact expected consumer cardinality, stable restart state, both direct probes,
-  and a fresh blackbox sample. If all pass, emit `committed_recovered` and
+  and a fresh blackbox sample. If all pass, authorize
+  `committed_recovered`, durably publish its pending receipt, and only then
   finalize/remove the journal without restoring an older or expired pair.
 - If committed-state validation fails, attempt the full old-generation rollback.
   End as `rolled_back` only if every rollback check passes; otherwise end as
@@ -210,10 +231,13 @@ A missing, malformed, forged, or digest-inconsistent journal never authorizes
 recovery. A mixed/corrupt canonical pair without a recognized journal fails
 closed for human review.
 
-Tests interrupt after each canonical rename, each consumer transition, and
-immediately after committed-journal fsync but before unlink. They prove the
-phase-specific behavior above. Owner-token mismatch, unrelated corruption, and
-rollback-probe failure are separate critical outcomes.
+Tests interrupt after each canonical rename, each consumer transition, every
+receipt create/write/fsync/rename/revalidation window, journal unlink and parent
+fsync, keyed stdout, and the emitted-parent fsync. They prove phase-specific
+recovery, unchanged canonical/generation identity, no repeated Docker/probe
+side effects after success authorization, deterministic replay, and lock
+retention through the final durable mark. Owner-token mismatch, unrelated
+corruption, and rollback-probe failure are separate critical outcomes.
 
 ## Compose and consumer contract
 
@@ -313,6 +337,13 @@ exclusive terminal states. Rotation success is impossible after rollback
 begins.
 
 ## Shared runtime lock contract
+
+**R2 status: not implemented.** The current `.mcp-client-rotation.lock`
+prevents overlapping cooperative rotator invocations and is deliberately held
+for the whole process, but it does not serialize capture, evaluation, runtime
+flip, or rollback workflows. The following is the cross-workflow target and
+remains open. Neither lock claims protection against a malicious process with
+the same uid; same-uid execution is inside the trusted operator boundary.
 
 The smallest shared helper is `infra/scripts/runtime-exclusive-lock.sh`. It:
 
@@ -477,9 +508,10 @@ git diff --check
 
 ### R1c — Consumer activation, probes, and rollback
 
-Status: In progress. The isolated blackbox-query helper is source-complete, and
-its fixture-only activation/commit custody is the current working slice on
-2026-07-13. The helper selects exactly one running `infra` Caddy container,
+Status: The current success-completion/committed-finalization source-and-fixture
+slice is complete on the working tree; remaining R1c live-readiness work, the
+evidence commit, exact-head CI, merge, and live proof remain open. The isolated
+blackbox-query helper selects exactly one running `infra` Caddy container,
 uses only the fixed BusyBox transport and encoded MetricsQL
 `timestamp(probe_success[2m]) if (last_over_time(probe_success[2m]) == 1)`
 expression with the exact fixed labels, and validates the raw scrape timestamp
@@ -487,12 +519,12 @@ rather than the instant-query evaluation timestamp. Duplicate keys,
 non-finite or non-exact values, extra labels, stale samples, and samples outside
 `boundary < raw sample <= query time <= receipt time` fail closed. Every child
 phase is bounded and only fixed success or failure summaries are emitted. Both
-the embedded interpreter and Docker child environment are fail-closed. R1c
-fixture work remains in progress:
-exact pre/post consumer discovery, symmetric password validation, private
+the embedded interpreter and Docker child environment are fail-closed. The R1c
+fixture scope implements exact pre/post consumer discovery, symmetric password
+validation, private
 mode-`0600` dotenv/receipt ownership, sanitized Compose execution, prior-state
-preservation, signal/exit cleanup, and recognized startup residue recovery are
-implemented on the current branch, including restrictive-umask recovery and one
+preservation, signal/exit cleanup, and recognized startup residue recovery,
+including restrictive-umask recovery and one
 bounded single-call Docker snapshot of the exact consumer set after each
 recreation. The fixture captures a nanosecond boundary after the final
 categorical consumer snapshot, then uses the newly published pair and exact
@@ -501,8 +533,9 @@ strict single `2xx` status, and invokes the fixed blackbox helper exactly once.
 Synthetic tests pin the boundary after the final blackbox-only or optional
 operator snapshot and before the first direct probe. The working slice fsyncs
 `activation_started` immediately before the first consumer touch. The fake-only
-path fsyncs and retains `committed` only after both direct probes plus fresh
-blackbox evidence. A same-process failure after durable activation enters
+path fsyncs `committed` only after both direct probes plus fresh blackbox
+evidence, then enters the authorized completion-receipt/finalization protocol.
+A same-process failure after durable activation enters
 explicit rollback phases, restores and normally validates the old pair,
 recreates exactly the recorded prior consumer set, proves stable recreation,
 repeats both restored-pair direct probes, and requires a fresh rollback
@@ -513,30 +546,44 @@ Fixture startup resumes recognized `activation_started`,
 `rollback_pair_restored` state without reissuing. Phase/pair corruption,
 Compose path/digest substitution, foreign residue, and consumer-set expansion
 fail closed while retaining evidence. Residual schema-v2
-`published_validated` remains compatibility-ambiguous and is preserved;
-residual `committed` still requires committed-state reproof/finalization.
+`published_validated` remains compatibility-ambiguous and is preserved.
+Residual `committed` is re-proved through canonical/retained-generation
+identity, normal validation, exact consumer cardinality and stability, both
+direct probes, and fresh blackbox evidence before `committed_recovered` may be
+authorized.
 
-The current rollback slice passes the full 304-test rotator/blackbox pair, the
-unchanged 41-test TLS/bootstrap/Compose-policy tier, all 39 section-31 invariant
-rails, all 7 section-33 harness tests, and both planning traceability tests.
-Every tier ran serialized after its own fresh targeted-admission sample with at
-least 35% free memory, load1 at most 10, and zero resident models. Independent
-final review found no actionable P0/P1 issue. The fixture does not emit
-`activated` or `committed_recovered`; committed reproof/finalization, journal
-unlink, and exactly-once terminal reporting across that unlink remain open.
+For `activated` and `committed_recovered`, the fixture writes a recoverable
+transaction-keyed pending receipt before journal unlink, fsyncs every durable
+boundary, and emits the keyed result only after the journal is durably absent.
+It then records producer progress with the rollback-safe pending-to-`emitted`
+transition. A post-output crash or emitted-parent fsync failure may replay the
+same key on a later invocation; receivers must deduplicate it. No receiver ack
+exists, historical emitted receipts are retained, and rollback terminal
+receipts remain open.
 
-A later complete strong gate passed at 56%/56%/57% free memory, load1
-2.75/2.21/3.04, load5 5.33/5.08/5.09, zero models, one reachable 20-service
-`infra` project, initialized/unsealed Vault, stable zero API/stream restart
-counts, and a valid production MCP client chain. The locked full local suite on
-evidence head `7541635` passes 2,571 tests with 0 failures/errors and 140
-expected skips in 568.893 seconds. Exact-SHA CI run 29302353176 is green on the
-same evidence head.
+Current working-tree verification passes the full 369-test rotator/blackbox
+pair, the unchanged 41-test TLS/bootstrap/Compose-policy tier, all 39
+section-31 invariant rails, all 7 section-33 harness tests, and both planning
+traceability tests. The §33 artifact is separate because the configured default
+suite collects `tests/`, not `eval/tests`. A fresh complete strong gate passed
+at 64%/64%/64% free memory, load1 3.23/3.69/3.35, load5 3.37/3.46/3.40, zero
+models or competing work, one reachable canonical 20-service `infra` project,
+initialized/unsealed Vault, stable API/stream identities and restart counts,
+and a valid production MCP client chain. The locked configured suite then
+collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0
+errors in 702.564 seconds. These artifacts exercise the dirty working tree
+based on `82bc5d5e`; exact-head CI for the eventual evidence commit remains
+pending. Older pre-completion evidence is historical only.
+A fresh independent read-only security/correctness audit found no actionable
+issue in the current diff. Its residual limits match this contract: same-UID
+execution is trusted, producer output has no receiver ack, the local lock is not
+R2, injected crash tests are not physical APFS power-loss proof, and R4 live
+rehearsal remains required.
 
 Live activation additionally requires a boundary in the VM/VictoriaMetrics
 clock domain or a conservative audited skew bound, bounded polling across the
-60-second scrape cadence, stable consumer IDs/restart counts, committed-state
-reproof/finalization, and a fresh strong-gate admission. The completed strong
+60-second scrape cadence, stable consumer IDs/restart counts, R2 cross-workflow
+serialization, and a fresh strong-gate admission. The completed strong
 gate used only read-only Docker/Vault/restart/certificate queries; it performed
 no issuance, consumer recreation, certificate mutation, model/index action,
 protected attempt, or external claim, and the ordinary production path remains
