@@ -140,7 +140,8 @@ Contention returns exactly `lock_deferred`/75. It is not the still-open R2
 cross-workflow `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract and does
 not claim protection from a malicious same-UID process.
 
-Current working-tree verification passes the full 369-test rotator/blackbox
+Pre-commit working-tree verification based on `82bc5d5e` passes the full
+369-test rotator/blackbox
 pair, the unchanged 41-test production regression tier, all 39 section-31
 invariant rails, all 7 section-33 harness tests, and both planning traceability
 tests. The §33 artifact remains separate because the configured default suite
@@ -150,9 +151,11 @@ competing work, one reachable canonical 20-service `infra` project,
 initialized/unsealed Vault, stable API/stream identities and zero restart
 counts, and a valid production MCP client chain. The locked configured suite
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0 errors
-in 702.564 seconds. These are dirty-working-tree artifacts based on `82bc5d5e`,
-not exact-head evidence for the uncommitted changes; older pre-completion
-evidence is historical only. A fresh independent read-only security/correctness
+in 702.564 seconds. These are pre-commit working-tree artifacts based on
+`82bc5d5e`; the tested source/test bytes were committed unchanged as `8e97442`,
+with evidence documentation at `6afd3b3`. Exact-head CI for the final status
+reconciliation remains pending; older pre-completion evidence is historical
+only. A fresh independent read-only security/correctness
 audit found no actionable issue and retained the documented same-UID,
 no-receiver-ack, local-lock-not-R2, and live-rehearsal limits. The gate and
 postflight used
