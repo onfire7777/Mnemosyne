@@ -10,18 +10,25 @@ VALIDATOR=$REPO_ROOT/infra/validate/validate-production-mcp-client-tls.sh
 DIAGNOSTIC=$REPO_ROOT/infra/validate/diagnose-production-mcp-client-tls-for-rotation.sh
 BLACKBOX_PROBE=$SCRIPT_DIR/query-production-blackbox-probe.sh
 STEP_IMAGE='smallstep/step-ca:0.28.4@sha256:0f88382ac5af5c6b7bbba0c6e8fcefef52aee6f22ea364df8e02a09ffd0d22f3'
+ROLLBACK_PENDING=
 
 result() {
   printf 'mcp-client-rotation result=%s\n' "$1"
 }
 
 preflight_failed() {
+  if [ -n "$ROLLBACK_PENDING" ]; then
+    rollback_failed "$1"
+  fi
   result preflight_failed
   printf 'mcp-client-rotation failed: %s\n' "$1" >&2
   exit 65
 }
 
 runtime_unavailable() {
+  if [ -n "$ROLLBACK_PENDING" ]; then
+    rollback_failed "$1"
+  fi
   result runtime_unavailable
   printf 'mcp-client-rotation failed: %s\n' "$1" >&2
   exit 69
@@ -43,6 +50,17 @@ recovery_failed() {
   result recovery_failed
   printf 'mcp-client-rotation failed: %s\n' "$1" >&2
   exit 74
+}
+
+rollback_failed() {
+  result rollback_failed
+  printf 'mcp-client-rotation failed: %s\n' "$1" >&2
+  exit 74
+}
+
+rolled_back() {
+  result rolled_back
+  exit 75
 }
 
 classify_remaining() {
@@ -108,6 +126,16 @@ COMPOSE_FILE=${MCP_CLIENT_ROTATOR_COMPOSE_FILE:-$REPO_ROOT/infra/docker-compose.
 ROTATION_DIR=$SECRETS_DIR/.mcp-client-rotation
 STAGE_DIR=${MCP_CLIENT_ROTATOR_STAGE_DIR:-$ROTATION_DIR/stage.$$.new}
 
+normal_pair_is_valid() {
+  env \
+    LC_ALL=C \
+    MCP_CLIENT_TLS_HOSTNAME=mcp-client.mnemo.local \
+    MCP_CLIENT_TLS_MIN_VALIDITY_SECONDS=21600 \
+    MNEMO_SECRETS_DIR="$SECRETS_DIR" \
+    "$VALIDATOR" "$ROOT_CA" "$CERT_BUNDLE" "$PRIVATE_KEY" \
+    >/dev/null 2>&1
+}
+
 transaction_call() {
   "$PYTHON" - \
     "$1" \
@@ -115,7 +143,8 @@ transaction_call() {
     "$ROTATION_DIR" \
     "$CERT_BUNDLE" \
     "$PRIVATE_KEY" \
-    "$STAGE_DIR" <<'PY'
+    "$STAGE_DIR" \
+    "$COMPOSE_FILE" <<'PY'
 import ctypes
 import datetime as dt
 import errno
@@ -136,7 +165,7 @@ def reject() -> None:
     raise TransactionError
 
 
-ACTION, SECRETS, ROTATION, CERTIFICATE, PRIVATE_KEY, STAGE = sys.argv[1:]
+ACTION, SECRETS, ROTATION, CERTIFICATE, PRIVATE_KEY, STAGE, COMPOSE = sys.argv[1:]
 UID = os.getuid()
 CERTIFICATE_NAME = "mcp-client.crt"
 PRIVATE_KEY_NAME = "mcp-client.key"
@@ -172,6 +201,9 @@ PHASES = {
     "published_validated",
     "activation_started",
     "committed",
+    "rollback_restoring_certificate",
+    "rollback_restoring_key",
+    "rollback_pair_restored",
     "restoring_certificate",
     "restoring_key",
     "old_pair_restored",
@@ -207,9 +239,20 @@ INTERRUPT_POINTS = PHASES | {
     "old_certificate_parent_fsynced",
     "old_key_restored",
     "old_key_parent_fsynced",
+    "rollback_certificate_restored",
+    "rollback_certificate_parent_fsynced",
+    "rollback_key_restored",
+    "rollback_key_parent_fsynced",
 }
-FSYNC_FAILURES = {"journal-parent", "certificate-parent", "key-parent"}
-VALIDATION_FAILURES = {"published", "restored"}
+FSYNC_FAILURES = {
+    "journal-parent",
+    "activation-journal-parent",
+    "certificate-parent",
+    "key-parent",
+    "rollback-certificate-parent",
+    "rollback-key-parent",
+}
+VALIDATION_FAILURES = {"published", "restored", "rollback-finalization"}
 DOTENV_RECEIPT_FIELDS = {
     "schema_version",
     "transaction_id",
@@ -368,13 +411,59 @@ def load_marker(rotation_fd: int) -> dict[str, object]:
         "schema_version",
         "blackbox_exporter_was_running",
         "operator_was_running",
+        "compose_file_path",
+        "compose_file_sha256",
     }:
         reject()
-    if marker["schema_version"] != 1 or isinstance(marker["schema_version"], bool):
+    if marker["schema_version"] != 2 or isinstance(marker["schema_version"], bool):
         reject()
     if type(marker["blackbox_exporter_was_running"]) is not bool:
         reject()
     if type(marker["operator_was_running"]) is not bool:
+        reject()
+    compose_path = marker["compose_file_path"]
+    compose_digest = marker["compose_file_sha256"]
+    if (
+        not isinstance(compose_path, str)
+        or compose_path != COMPOSE
+        or not os.path.isabs(compose_path)
+        or compose_path != os.path.abspath(compose_path)
+        or any(character in compose_path for character in (",", "\n", "\r"))
+        or not isinstance(compose_digest, str)
+        or re.fullmatch(r"[0-9a-f]{64}", compose_digest) is None
+    ):
+        reject()
+    current = os.path.sep
+    for component in compose_path.split(os.path.sep)[1:]:
+        current = os.path.join(current, component)
+        value = os.lstat(current)
+        if stat.S_ISLNK(value.st_mode):
+            reject()
+    before = os.lstat(compose_path)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != UID
+        or stat.S_IMODE(before.st_mode) & 0o022
+    ):
+        reject()
+    descriptor = os.open(compose_path, os.O_RDONLY | NOFOLLOW)
+    try:
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            reject()
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, 65536)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > 1048576:
+                reject()
+            digest.update(chunk)
+    finally:
+        os.close(descriptor)
+    if total == 0 or digest.hexdigest() != compose_digest:
         reject()
     secret_root = os.path.realpath(SECRETS)
     trusted_fixture_patterns = (
@@ -933,7 +1022,7 @@ def cleanup_compose_env(
             reject()
         return False
     compose_env = validate_compose_env(compose_value)
-    if journal["phase"] != "activation_started":
+    if journal["phase"] not in {"activation_started", "rollback_pair_restored"}:
         reject()
     if expected_token is not None and compose_env["owner_token"] != expected_token:
         reject()
@@ -1258,7 +1347,7 @@ def validate_journal(value: dict[str, object]) -> dict[str, object]:
         reject()
     if value["compose_env"] is not None:
         validate_compose_env(value["compose_env"])
-        if value["phase"] != "activation_started":
+        if value["phase"] not in {"activation_started", "rollback_pair_restored"}:
             reject()
     return value
 
@@ -1370,6 +1459,9 @@ def require_reachable(journal: dict[str, object], state: str) -> None:
         "published_validated": {"new_new"},
         "activation_started": {"new_new"},
         "committed": {"new_new"},
+        "rollback_restoring_certificate": {"new_new", "old_new"},
+        "rollback_restoring_key": {"old_new", "old_old"},
+        "rollback_pair_restored": {"old_old"},
         "restoring_certificate": {"old_old", "new_old", "new_new", "old_new"},
         "restoring_key": {"old_new", "old_old"},
         "old_pair_restored": {"old_old"},
@@ -1569,14 +1661,71 @@ def recover(secrets_fd: int, rotation_fd: int) -> str:
     state = canonical_state(journal, canonical_digests(secrets_fd))
     require_reachable(journal, state)
     phase = str(journal["phase"])
-    if phase == "activation_started":
-        cleanup_compose_env(rotation_fd, journal)
-        if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+    rollback_phases = {
+        "activation_started",
+        "rollback_restoring_certificate",
+        "rollback_restoring_key",
+        "rollback_pair_restored",
+    }
+    if phase in rollback_phases:
+        if phase in {"activation_started", "rollback_pair_restored"}:
+            cleanup_compose_env(rotation_fd, journal)
+            if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+                reject()
+            validate_generations(rotation_fd, journal)
+            state = canonical_state(journal, canonical_digests(secrets_fd))
+            require_reachable(journal, state)
+        elif journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
             reject()
-        validate_generations(rotation_fd, journal)
+        if phase == "activation_started":
+            journal["phase"] = "rollback_restoring_certificate"
+            write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "rollback_restoring_certificate")
+        transaction_id = str(journal["transaction_id"])
+        if journal["phase"] == "rollback_restoring_certificate":
+            state = canonical_state(journal, canonical_digests(secrets_fd))
+            require_reachable(journal, state)
+            publish_generation(
+                rotation_fd,
+                secrets_fd,
+                "old",
+                "crt",
+                transaction_id,
+                expected_digest=str(journal["old_cert_sha256"]),
+                parent_failure_label="rollback-certificate-parent",
+                pre_fsync_interrupt="rollback_certificate_restored",
+                post_fsync_interrupt="rollback_certificate_parent_fsynced",
+            )
+            journal["phase"] = "rollback_restoring_key"
+            write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "rollback_restoring_key")
+        if journal["phase"] == "rollback_restoring_key":
+            state = canonical_state(journal, canonical_digests(secrets_fd))
+            require_reachable(journal, state)
+            publish_generation(
+                rotation_fd,
+                secrets_fd,
+                "old",
+                "key",
+                transaction_id,
+                expected_digest=str(journal["old_key_sha256"]),
+                parent_failure_label="rollback-key-parent",
+                pre_fsync_interrupt="rollback_key_restored",
+                post_fsync_interrupt="rollback_key_parent_fsynced",
+            )
+            journal["phase"] = "rollback_pair_restored"
+            write_journal(rotation_fd, journal)
+            interrupt_after(rotation_fd, "rollback_pair_restored")
         state = canonical_state(journal, canonical_digests(secrets_fd))
         require_reachable(journal, state)
-        return phase
+        if journal["blackbox_exporter_was_running"] is not True:
+            reject()
+        consumer_set = (
+            "blackbox-and-operator"
+            if journal["operator_was_running"] is True
+            else "blackbox-only"
+        )
+        return f"rollback_pair_restored:{consumer_set}"
     if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
         reject()
     if phase in {"published_validated", "committed"}:
@@ -1729,16 +1878,24 @@ def main() -> None:
             if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
                 reject()
             journal["phase"] = "activation_started"
-            write_journal(rotation_fd, journal)
+            write_journal(
+                rotation_fd,
+                journal,
+                parent_failure_label="activation-journal-parent",
+            )
             interrupt_after(rotation_fd, "activation_started")
             return
         if ACTION == "prepare-compose-env":
             load_marker(rotation_fd)
             journal = load_journal(rotation_fd)
             validate_generations(rotation_fd, journal)
-            if journal["phase"] != "activation_started":
+            expected_state = {
+                "activation_started": "new_new",
+                "rollback_pair_restored": "old_old",
+            }.get(str(journal["phase"]))
+            if expected_state is None:
                 reject()
-            if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
+            if canonical_state(journal, canonical_digests(secrets_fd)) != expected_state:
                 reject()
             token, path = prepare_compose_env(
                 secrets_fd,
@@ -1755,9 +1912,13 @@ def main() -> None:
                 reject()
             journal = load_journal(rotation_fd)
             validate_generations(rotation_fd, journal)
-            if journal["phase"] != "activation_started":
+            expected_state = {
+                "activation_started": "new_new",
+                "rollback_pair_restored": "old_old",
+            }.get(str(journal["phase"]))
+            if expected_state is None:
                 reject()
-            if canonical_state(journal, canonical_digests(secrets_fd)) != "new_new":
+            if canonical_state(journal, canonical_digests(secrets_fd)) != expected_state:
                 reject()
             if not cleanup_compose_env(
                 rotation_fd,
@@ -1792,6 +1953,24 @@ def main() -> None:
             os.unlink(JOURNAL_NAME, dir_fd=rotation_fd)
             fsync_directory(rotation_fd, rotation_fd)
             return
+        if ACTION == "finish-rollback":
+            _, _, validation_failure, _, _ = test_controls(rotation_fd)
+            if validation_failure == "rollback-finalization":
+                reject()
+            journal = load_journal(rotation_fd)
+            validate_generations(rotation_fd, journal)
+            if journal["phase"] != "rollback_pair_restored":
+                reject()
+            state = canonical_state(journal, canonical_digests(secrets_fd))
+            if state != "old_old":
+                reject()
+            if journal["compose_env"] is not None or compose_env_artifacts(rotation_fd):
+                reject()
+            # ponytail: certificate safety is durable here; exactly-once terminal
+            # reporting needs the later committed-finalization receipt slice.
+            os.unlink(JOURNAL_NAME, dir_fd=rotation_fd)
+            fsync_directory(rotation_fd, rotation_fd)
+            return
         reject()
     finally:
         if rotation_fd >= 0:
@@ -1816,7 +1995,7 @@ if recovery_state=$(transaction_call recover); then
           recovery_failed 'fixture recovery control is invalid'
         fi
         recovery_validation_failed=1
-      elif ! env LC_ALL=C MCP_CLIENT_TLS_HOSTNAME=mcp-client.mnemo.local MCP_CLIENT_TLS_MIN_VALIDITY_SECONDS=21600 MNEMO_SECRETS_DIR="$SECRETS_DIR" "$VALIDATOR" "$ROOT_CA" "$CERT_BUNDLE" "$PRIVATE_KEY" >/dev/null 2>&1; then
+      elif ! normal_pair_is_valid; then
         recovery_validation_failed=1
       fi
       if [ "$recovery_validation_failed" -ne 0 ]; then
@@ -1826,8 +2005,11 @@ if recovery_state=$(transaction_call recover); then
         recovery_failed 'recovery finalization failed'
       fi
       ;;
-    activation_started)
-      recovery_failed 'activation transaction requires verified runtime recovery'
+    rollback_pair_restored:blackbox-only | rollback_pair_restored:blackbox-and-operator)
+      if [ "$FIXTURE_TRANSACTION" -ne 1 ]; then
+        recovery_failed 'activation rollback requires the fixture runtime recovery path'
+      fi
+      ROLLBACK_PENDING=${recovery_state#rollback_pair_restored:}
       ;;
     published_validated)
       recovery_failed 'published transaction requires verified runtime recovery'
@@ -1889,14 +2071,10 @@ for raw_path, kind in zip(arguments[::2], arguments[1::2]):
 PY
 ) || preflight_failed "$source_path_error"
 
-if env \
-  LC_ALL=C \
-  MCP_CLIENT_TLS_HOSTNAME=mcp-client.mnemo.local \
-  MCP_CLIENT_TLS_MIN_VALIDITY_SECONDS=21600 \
-  MNEMO_SECRETS_DIR="$SECRETS_DIR" \
-  "$VALIDATOR" "$ROOT_CA" "$CERT_BUNDLE" "$PRIVATE_KEY" \
-  >/dev/null 2>&1; then
+if normal_pair_is_valid; then
   :
+elif [ -n "$ROLLBACK_PENDING" ]; then
+  rollback_failed 'restored certificate validation failed'
 elif env \
   LC_ALL=C \
   MCP_CLIENT_TLS_HOSTNAME=mcp-client.mnemo.local \
@@ -1909,10 +2087,11 @@ else
   preflight_failed 'source certificate validation failed'
 fi
 
-DECISION_EPOCH=$(date +%s) || preflight_failed 'renewal decision time is unavailable'
-end_date=$("$OPENSSL" x509 -in "$CERT_BUNDLE" -noout -enddate 2>/dev/null) || \
-  preflight_failed 'source certificate expiry could not be read'
-end_epoch=$(
+if [ -z "$ROLLBACK_PENDING" ]; then
+  DECISION_EPOCH=$(date +%s) || preflight_failed 'renewal decision time is unavailable'
+  end_date=$("$OPENSSL" x509 -in "$CERT_BUNDLE" -noout -enddate 2>/dev/null) || \
+    preflight_failed 'source certificate expiry could not be read'
+  end_epoch=$(
   "$PYTHON" - "$end_date" 2>/dev/null <<'PY'
 from email.utils import parsedate_to_datetime
 import sys
@@ -1925,14 +2104,14 @@ except (TypeError, ValueError, OverflowError):
     raise SystemExit(1)
 PY
 ) || preflight_failed 'source certificate expiry could not be parsed'
-remaining_seconds=$((end_epoch - DECISION_EPOCH))
-renewal_state=$(classify_remaining "$remaining_seconds") || \
-  preflight_failed 'source certificate lifetime could not be classified'
+  remaining_seconds=$((end_epoch - DECISION_EPOCH))
+  renewal_state=$(classify_remaining "$remaining_seconds") || \
+    preflight_failed 'source certificate lifetime could not be classified'
 
-if [ "$renewal_state" = healthy ]; then
-  result healthy_noop
-  exit 0
-fi
+  if [ "$renewal_state" = healthy ]; then
+    result healthy_noop
+    exit 0
+  fi
 
 for configuration_path in "$COMPOSE_FILE" "$STAGE_DIR"; do
   case "$configuration_path" in
@@ -2018,8 +2197,9 @@ PY
 compose_image=$(
   awk '$1 == "image:" && $2 ~ /^smallstep\/step-ca:/ {print $2}' "$COMPOSE_FILE"
 ) || preflight_failed 'Compose step-ca image could not be read'
-[ "$compose_image" = "$STEP_IMAGE" ] || \
-  preflight_failed 'Compose step-ca image is not the required digest pin'
+  [ "$compose_image" = "$STEP_IMAGE" ] || \
+    preflight_failed 'Compose step-ca image is not the required digest pin'
+fi
 
 DOCKER_BIN=${MCP_CLIENT_ROTATOR_DOCKER_BIN:-}
 if [ -z "$DOCKER_BIN" ]; then
@@ -2247,6 +2427,10 @@ activate_fixture_consumer() {
   local descriptor
   local service=$1
 
+  case "$service" in
+    blackbox-exporter | operator) ;;
+    *) return 1 ;;
+  esac
   descriptor=$(transaction_call prepare-compose-env) || return 1
   DOTENV_OWNER_TOKEN=${descriptor%%$'\t'*}
   PRIVATE_DOTENV=${descriptor#*$'\t'}
@@ -2281,6 +2465,86 @@ activate_fixture_consumer() {
   cleanup_owned_dotenv
 }
 
+complete_activation_rollback() {
+  local consumer_stable_epoch
+  local current_consumer_set
+  local expected_consumer_set=$1
+  local transaction_status
+
+  case "$expected_consumer_set" in
+    blackbox-only | blackbox-and-operator) ;;
+    *) rollback_failed 'recorded rollback consumer set is invalid' ;;
+  esac
+  INITIAL_CONSUMER_SET=$expected_consumer_set
+  normal_pair_is_valid || rollback_failed 'restored certificate validation failed'
+  trap cleanup_owned_dotenv_on_exit EXIT
+  trap cleanup_owned_dotenv_on_signal HUP INT TERM
+  activate_fixture_consumer blackbox-exporter || \
+    rollback_failed 'blackbox exporter rollback recreation failed'
+  current_consumer_set=$(discover_consumer_set) || \
+    rollback_failed 'consumer set validation failed after blackbox rollback recreation'
+  case "$expected_consumer_set:$current_consumer_set" in
+    blackbox-only:blackbox-only | \
+      blackbox-and-operator:blackbox-only | \
+      blackbox-and-operator:blackbox-and-operator) ;;
+    *) rollback_failed 'consumer set validation failed after blackbox rollback recreation' ;;
+  esac
+  if [ "$expected_consumer_set" = blackbox-and-operator ]; then
+    activate_fixture_consumer operator || \
+      rollback_failed 'operator rollback recreation failed'
+    fixture_consumer_set_is_stable || \
+      rollback_failed 'consumer set validation failed after operator rollback recreation'
+  fi
+  consumer_stable_epoch=$(
+    command /usr/bin/env -i \
+      LC_ALL=C \
+      PATH="$SAFE_PATH" \
+      TMPDIR="$SAFE_TMPDIR" \
+      "$PYTHON" -c 'import time; value = time.time_ns(); print(f"{value // 1000000000}.{value % 1000000000:09d}")'
+  ) || rollback_failed 'rollback consumer stable time is unavailable'
+  direct_probe /health || rollback_failed 'rollback direct probe failed'
+  direct_probe /stream/healthz || rollback_failed 'rollback direct probe failed'
+  fixture_blackbox_probe "$consumer_stable_epoch" || \
+    rollback_failed 'rollback blackbox probe failed'
+  if transaction_call finish-rollback >/dev/null 2>&1; then
+    :
+  else
+    transaction_status=$?
+    [ "$transaction_status" -ne 86 ] || exit 86
+    [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
+    rollback_failed 'rollback finalization failed'
+  fi
+  trap - EXIT HUP INT TERM
+  rolled_back
+}
+
+activation_failed() {
+  local original_failure=$1
+  local recovery_state
+  local recovery_status
+
+  if recovery_state=$(transaction_call recover); then
+    case "$recovery_state" in
+      rollback_pair_restored:blackbox-only | rollback_pair_restored:blackbox-and-operator)
+        complete_activation_rollback \
+          "${recovery_state#rollback_pair_restored:}"
+        ;;
+      committed)
+        recovery_failed 'committed transaction requires verified runtime recovery'
+        ;;
+      published_validated)
+        publication_failed "$original_failure"
+        ;;
+      *) rollback_failed "activation rollback state is invalid after $original_failure" ;;
+    esac
+  else
+    recovery_status=$?
+    [ "$recovery_status" -ne 86 ] || exit 86
+    [ "$recovery_status" -lt 128 ] || exit "$recovery_status"
+    rollback_failed "activation rollback state recovery failed after $original_failure"
+  fi
+}
+
 if ! active_context=$(docker_call context show 2>/dev/null); then
   runtime_unavailable 'Docker is unavailable'
 fi
@@ -2290,22 +2554,29 @@ BLACKBOX_EXPORTER_WAS_RUNNING=false
 OPERATOR_WAS_RUNNING=false
 INITIAL_CONSUMER_SET=
 if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
-  INITIAL_CONSUMER_SET=$(discover_consumer_set) || \
-    preflight_failed 'consumer set is invalid'
-  case "$INITIAL_CONSUMER_SET" in
-    blackbox-only)
-      BLACKBOX_EXPORTER_WAS_RUNNING=true
-      ;;
-    blackbox-and-operator)
-      BLACKBOX_EXPORTER_WAS_RUNNING=true
-      OPERATOR_WAS_RUNNING=true
-      ;;
-    *)
+  if [ -n "$ROLLBACK_PENDING" ]; then
+    INITIAL_CONSUMER_SET=$ROLLBACK_PENDING
+  else
+    INITIAL_CONSUMER_SET=$(discover_consumer_set) || \
       preflight_failed 'consumer set is invalid'
-      ;;
-  esac
+    case "$INITIAL_CONSUMER_SET" in
+      blackbox-only)
+        BLACKBOX_EXPORTER_WAS_RUNNING=true
+        ;;
+      blackbox-and-operator)
+        BLACKBOX_EXPORTER_WAS_RUNNING=true
+        OPERATOR_WAS_RUNNING=true
+        ;;
+      *)
+        preflight_failed 'consumer set is invalid'
+        ;;
+    esac
+  fi
   if ! transaction_call validate-compose-passwords >/dev/null 2>&1; then
     preflight_failed 'Compose consumer passwords are invalid'
+  fi
+  if [ -n "$ROLLBACK_PENDING" ]; then
+    complete_activation_rollback "$ROLLBACK_PENDING"
   fi
 fi
 
@@ -2489,20 +2760,20 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
     transaction_status=$?
     [ "$transaction_status" -ne 86 ] || exit 86
     [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
-    publication_failed 'activation journal transition failed'
+    activation_failed 'activation journal transition failed'
   fi
   trap cleanup_owned_dotenv_on_exit EXIT
   trap cleanup_owned_dotenv_on_signal HUP INT TERM
   activate_fixture_consumer blackbox-exporter || \
-    publication_failed 'blackbox exporter activation failed'
+    activation_failed 'blackbox exporter activation failed'
   fixture_consumer_set_is_stable || \
-    publication_failed \
+    activation_failed \
       'consumer set validation failed after blackbox exporter activation'
   if [ "$OPERATOR_WAS_RUNNING" = true ]; then
     activate_fixture_consumer operator || \
-      publication_failed 'operator activation failed'
+      activation_failed 'operator activation failed'
     fixture_consumer_set_is_stable || \
-      publication_failed \
+      activation_failed \
         'consumer set validation failed after operator activation'
   fi
   consumer_stable_epoch=$(
@@ -2511,18 +2782,18 @@ if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
       PATH="$SAFE_PATH" \
       TMPDIR="$SAFE_TMPDIR" \
       "$PYTHON" -c 'import time; value = time.time_ns(); print(f"{value // 1000000000}.{value % 1000000000:09d}")'
-  ) || publication_failed 'consumer stable time is unavailable'
-  direct_probe /health || publication_failed 'direct probe failed'
-  direct_probe /stream/healthz || publication_failed 'direct probe failed'
+  ) || activation_failed 'consumer stable time is unavailable'
+  direct_probe /health || activation_failed 'direct probe failed'
+  direct_probe /stream/healthz || activation_failed 'direct probe failed'
   fixture_blackbox_probe "$consumer_stable_epoch" || \
-    publication_failed 'blackbox probe failed'
+    activation_failed 'blackbox probe failed'
   if transaction_call mark-committed >/dev/null 2>&1; then
     :
   else
     transaction_status=$?
     [ "$transaction_status" -ne 86 ] || exit 86
     [ "$transaction_status" -lt 128 ] || exit "$transaction_status"
-    publication_failed 'transaction commit failed'
+    activation_failed 'transaction commit failed'
   fi
   trap - EXIT HUP INT TERM
   recovery_failed 'committed transaction requires verified finalization'
