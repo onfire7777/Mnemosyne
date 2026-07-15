@@ -47,8 +47,11 @@ add dependencies behind the required optional-extra/sidecar boundaries, run
 admitted suites and evaluations, commit and push, open and merge PRs to
 `main`, update documentation and knowledge indexes, and iterate until the
 applicable definitions of done are met. The four hard stops below are the only
-approval pauses; every other failure is a constraint to satisfy or a blocker to
-work around and record.
+approval pauses. A failed mandatory hardware-admission, custody, exact-scale,
+quality, CI, or publication gate stops that gated operation: never bypass it or
+advance through it. Record and diagnose the failure, iterate only on permitted
+development inputs, or move to genuinely unblocked work while the gate remains
+explicitly open.
 
 ## 4. The only four hard stops
 1. **Invariant safety:** never break or weaken the §31 invariant rails or §33
