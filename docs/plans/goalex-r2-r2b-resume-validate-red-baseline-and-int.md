@@ -101,8 +101,18 @@ ShellCheck, Ruff check/format, diff hygiene, and all 34 planning/config tests
 passed.
 
 ### Task 3: GREEN — rotator acquires the shared lock and revalidates after acquisition
-- [ ] Wire `infra/scripts/rotate-production-mcp-client-cert.sh` the same way (distinct operation name), keeping the local `.mcp-client-rotation.lock`, and make it revalidate the current certificate pair and recompute its renewal decision AFTER shared-lock acquisition.
-- [ ] Under the retry-gated admission, run the focused selection and confirm the rotator RED test flips green; `bash -n` and `shellcheck` must pass.
+- [x] Wire `infra/scripts/rotate-production-mcp-client-cert.sh` the same way (distinct operation name), keeping the local `.mcp-client-rotation.lock`, and make it revalidate the current certificate pair and recompute its renewal decision AFTER shared-lock acquisition.
+- [x] Under the retry-gated admission, run the focused selection and confirm the rotator RED test flips green; `bash -n` and `shellcheck` must pass.
+
+Task 3 evidence (2026-07-15): the rotator re-executes under operation
+`rotate-production-mcp-client-cert` before its local lock, pair validation, and
+renewal calculation; the shared-lock sentinel remains set through the local-lock
+re-exec and is cleared afterward. Samples at 16:30:44Z, 16:32:29Z, 16:33:02Z,
+16:33:31Z, and 16:34:47Z recorded 42%, 42%, 41%, 40%, and 42% free memory,
+load1 5.54, 5.43, 6.12, 6.06, and 6.48, no resident Ollama model, and the
+unchanged 20-container `infra` stack. The complete focused selection exited 0,
+including the formerly RED rotator test. Bash syntax, ShellCheck, Ruff, diff
+hygiene, and all 34 planning/config tests passed.
 
 ### Task 4: Contention, release, and no-detach contract tests
 - [ ] Extend the focused tests to prove, for both callers: acquisition precedes every side effect; contention with a concurrent shared-lock holder fails closed without any sandbox mutation; release occurs on success and on handled signals; and the synchronous-completion / no-`setsid`-`setpgid`-daemonize / no-session-change / no-uid-transition contract holds (mirror the existing R2a test patterns).
