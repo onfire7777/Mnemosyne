@@ -341,9 +341,11 @@ begins.
 
 ## Shared runtime lock contract
 
-**R2 status: R2a and R2b are merged and source-accepted; R2b landed through PR
-#15 on `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`; R2c-R2d and live proof
-remain open.** The current
+**R2 status: R2a and R2b are merged and source-accepted; R2b integration landed
+through PR #15 on `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`, and
+post-merge review hardening landed through PR #17 on
+`main@5a6ce1921c1537b6090cf40600581f9fe956fe1f`; R2c-R2d and live proof remain
+open.** The current
 `.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
 and is deliberately held for the whole process, but it does not serialize
 capture, evaluation, runtime flip, or rollback workflows. R2a provides the
@@ -731,12 +733,17 @@ uv run --locked pytest -q tests/test_runtime_exclusive_lock.py \
 The RED failure must prove at least one entrypoint can mutate before locking;
 GREEN must prove acquisition precedes every side effect.
 
-R2b is merged and source-accepted through PR #15 on
-`main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`. The validated RED baseline and
-green focused regression cell prove both callers acquire the shared lock before
-side effects, fail closed under contention, retain their existing local
-controls, release only on the owner path, and obey the synchronous/no-detach
-contract. R2c/R2d and live rotation/no-op proof remain explicitly open.
+R2b integration is merged and source-accepted through PR #15 on
+`main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`. Post-merge review hardening is
+merged through PR #17 on
+`main@5a6ce1921c1537b6090cf40600581f9fe956fe1f`: the forgeable environment
+sentinel was replaced by `--verify-child` coordinator-ownership re-validation,
+and inherited-owner reads are position-independent. The validated RED baseline
+and green focused regression cell prove both callers acquire the shared lock
+before side effects, fail closed under contention or forged/copied environment
+proof, retain their existing local controls, release only on the owner path,
+and obey the synchronous/no-detach contract. No validator or gate command was
+changed. R2c/R2d and live rotation/no-op proof remain explicitly open.
 
 ### R2c — Protected runner integration
 
