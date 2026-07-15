@@ -22,10 +22,30 @@ HELPER = (
     / "scripts"
     / "runtime-exclusive-lock.sh"
 )
+CAPTURE_SCRIPT = HELPER.with_name("capture-production-evidence.sh")
+ROTATOR_SCRIPT = HELPER.with_name("rotate-production-mcp-client-cert.sh")
 LOCK_NAME = "runtime-exclusive"
 OWNER_NAME = "owner.json"
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]\n"
 SUBPROCESS_TIMEOUT = 15
+
+
+def _write_python_lock_probe(tmp_path: Path) -> tuple[Path, Path]:
+    probe_log = tmp_path / "runtime-lock-probe.log"
+    probe = tmp_path / "bin" / "python3"
+    probe.parent.mkdir()
+    probe.write_text(
+        "#!/bin/sh\n"
+        'if [ -f "$RUNTIME_LOCK_OWNER" ]; then\n'
+        '  printf "locked\\n" >>"$RUNTIME_LOCK_PROBE_LOG"\n'
+        "else\n"
+        '  printf "unlocked\\n" >>"$RUNTIME_LOCK_PROBE_LOG"\n'
+        "fi\n"
+        'exec "$REAL_PYTHON" "$@"\n',
+        encoding="utf-8",
+    )
+    probe.chmod(0o755)
+    return probe, probe_log
 
 
 def _custody(tmp_path: Path, *, mode: int = 0o700) -> tuple[Path, Path]:
@@ -92,6 +112,71 @@ def _wait_for(path: Path, *, timeout: float = 5.0) -> None:
             return
         time.sleep(0.01)
     raise AssertionError(f"timed out waiting for {path.name}")
+
+
+def test_capture_acquires_runtime_lock_before_first_side_effect(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    probe, probe_log = _write_python_lock_probe(tmp_path)
+    manifest = tmp_path / "production-soak.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    environment = _environment(custody_dir)
+    environment.update(
+        {
+            "MNEMOSYNE_PYTHON": str(probe),
+            "REAL_PYTHON": sys.executable,
+            "RUNTIME_LOCK_OWNER": str(locks_dir / LOCK_NAME / OWNER_NAME),
+            "RUNTIME_LOCK_PROBE_LOG": str(probe_log),
+        }
+    )
+
+    subprocess.run(
+        [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(tmp_path / "capture"),
+        ],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+
+    assert probe_log.read_text(encoding="utf-8").splitlines()[0] == "locked"
+
+
+def test_rotator_acquires_runtime_lock_before_first_side_effect(
+    tmp_path: Path,
+) -> None:
+    custody_dir, locks_dir = _custody(tmp_path)
+    probe, probe_log = _write_python_lock_probe(tmp_path)
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir(mode=0o700)
+    environment = _environment(custody_dir)
+    environment.update(
+        {
+            "MNEMO_SECRETS_DIR": str(secrets_dir),
+            "PATH": f"{probe.parent}:/usr/bin:/bin",
+            "REAL_PYTHON": sys.executable,
+            "RUNTIME_LOCK_OWNER": str(locks_dir / LOCK_NAME / OWNER_NAME),
+            "RUNTIME_LOCK_PROBE_LOG": str(probe_log),
+        }
+    )
+
+    subprocess.run(
+        ["/bin/bash", str(ROTATOR_SCRIPT)],
+        check=False,
+        capture_output=True,
+        env=environment,
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+
+    assert probe_log.read_text(encoding="utf-8").splitlines()[0] == "locked"
 
 
 def _wait_for_zombie(pid: int, *, timeout: float = 5.0) -> None:
