@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: R2b capture and rotator shared-lock integration is merged to main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b via PR #15; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted Graphify/CBM/gbrain refresh remain open
-last_updated: "2026-07-15T18:21:35Z"
+stopped_at: R2b review hardening is merged to main@5a6ce1921c1537b6090cf40600581f9fe956fe1f via PR #17; the production MCP client certificate expired 2026-07-14T23:52:36Z and blocks full-suite/index/model/live/protected admission until operator rotation under the live-mutation runbook; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted Graphify/CBM/gbrain refresh remain open
+last_updated: "2026-07-15T22:11:48Z"
 last_activity: 2026-07-15
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration is MERGED to `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b` via PR #15. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
-Last activity: 2026-07-15 — R2b passed exact-head CI run `29437230000` on `43e6cb4b86ae89146cd3bd553bdd4e83676db695`, merged through PR #15 as `13d15138a431ecbd4ca2a919cbf05b87a7a9004b`, and passed post-merge main CI run `29439142225`. The last accepted merge-bound knowledge receipt remains PR #12 until a complete full-workload hardware/TLS/Vault/service/topology preflight admits Graphify, CBM, and gbrain refresh against the exact final main SHA. No gbrain write/source sync, live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
+Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15, and the post-merge review hardening that replaced the forgeable environment sentinel with `--verify-child` coordinator-ownership re-validation is MERGED to `main@5a6ce1921c1537b6090cf40600581f9fe956fe1f` via PR #17. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The production MCP client certificate expired `2026-07-14T23:52:36Z`; the fail-closed TLS preflight blocks full-suite/index/model/live/protected admission until operator rotation under the live-mutation runbook. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
+Last activity: 2026-07-15 — R2b review hardening passed exact-head CI run `29452661004` on `e5ffa1c76bc392660731a02f9831405299fe385b`, merged through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`, and passed post-merge main CI run `29453529951`. Review accepted three hardening findings (position-independent inherited-owner reads, bounded caller-source assertions, and behavior-regression-aware CI guidance); the published-branch rewrite request was dispositioned against the no-history-rewrite boundary. The last accepted merge-bound knowledge receipt remains PR #12 until a complete full-workload hardware/TLS/Vault/service/topology preflight admits Graphify, CBM, and gbrain refresh against the exact final main SHA. No certificate rotation, gbrain write/source sync, live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
 
 ## Performance Metrics
 
@@ -241,6 +241,12 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   reinitialize the retained Vault volume.
 - Validate the MCP client pair against Caddy's exact trust pool before heavy
   work and rotate it before the six-hour short-lived-certificate floor.
+- The production MCP client certificate expired `2026-07-14T23:52:36Z` and
+  now fails the fail-closed TLS preflight. Do not run full-suite, index, model,
+  live, or protected work (including Graphify/CBM/gbrain refresh,
+  candidate-v19, or live rotation/no-op proof) until the operator rotates the
+  pair under the live-mutation admission runbook; this reconciliation did not
+  rotate the certificate.
 - Require exact-head and post-merge CI for this final documentation
   reconciliation, then use its merged PR body as the live exact-main delivery
   and mutable-index receipt.
@@ -255,15 +261,32 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest checkpoint (2026-07-15): R2b capture and rotator shared-lock integration
-is merged to `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b` through PR #15.
-Exact-head CI run `29437230000` passed on
-`43e6cb4b86ae89146cd3bd553bdd4e83676db695`; post-merge main CI run
-`29439142225` passed on the merge commit. Explicitly open are R2c/R2d, R3/R4,
-live rotation/no-op proof, the separate atomic `vault-tls/ca.crt` repair,
-candidate-v19 external custody chain, and the hardware-admitted
+Latest checkpoint (2026-07-15): R2b review hardening is merged to
+`main@5a6ce1921c1537b6090cf40600581f9fe956fe1f` through PR #17. Exact-head CI
+run `29452661004` passed on
+`e5ffa1c76bc392660731a02f9831405299fe385b`; post-merge main CI run
+`29453529951` passed on the merge commit. Review accepted position-independent
+inherited-owner reads, bounded caller-source assertions, and
+behavior-regression-aware CI guidance; the published-branch rewrite request
+was dispositioned against the no-history-rewrite boundary. The forgeable
+environment sentinel is replaced by `--verify-child` coordinator-ownership
+re-validation without changing validators or the ordinary `staged_only`
+boundary. The production MCP client certificate expired
+`2026-07-14T23:52:36Z`, so the fail-closed TLS preflight blocks full-suite,
+index, model, live, and protected admission (including Graphify/CBM/gbrain
+refresh, candidate-v19, and live rotation/no-op proof) until operator rotation
+under the live-mutation admission runbook; no certificate rotation occurred.
+Explicitly open are R2c/R2d, R3/R4, rollback terminal receipts, live
+rotation/no-op proof, the separate atomic `vault-tls/ca.crt` repair,
+candidate-v19 custody/exact-scale/protected closure, and the
 Graphify/CBM/gbrain refresh. The last accepted merge-bound knowledge receipt
 remains PR #12. No live/protected/public/Vault/CA action occurred.
+
+Historical checkpoint (2026-07-15): R2b capture and rotator shared-lock
+integration merged to `main@13d15138a431ecbd4ca2a919cbf05b87a7a9004b`
+through PR #15 after exact-head CI run `29437230000` passed on
+`43e6cb4b86ae89146cd3bd553bdd4e83676db695` and post-merge main CI run
+`29439142225` passed on the merge commit.
 
 Historical checkpoint (2026-07-14): R2a baseline `a91da2e`, review hardening
 `fb713d4`, and final documentation successor `5bfd53d` passed static checks,
