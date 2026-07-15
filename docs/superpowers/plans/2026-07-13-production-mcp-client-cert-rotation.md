@@ -664,10 +664,10 @@ CodeRabbit skipped the non-default stacked base; an authenticated terminal
 review and independent reviews drove the pushed hardening surface. That surface
 passes static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
 section-33 tests, and 2/2 planning tests. Final independent review is
-merge-clean and terminal CodeRabbit is complete. The final documentation-
-reconciliation head requires exact-head PR #13 CI, then PR13-to-PR11 merge,
-exact-head PR #11 CI, PR11-to-main merge, post-merge main CI, and exact-main
-mutable-index refresh remain acceptance gates.
+merge-clean and terminal CodeRabbit is complete. The remaining acceptance
+gates are exact-head PR #13 CI, PR13-to-PR11 merge, exact-head PR #11 CI,
+PR11-to-main merge, post-merge main CI, and an exact-main mutable-index
+refresh.
 
 Files:
 
