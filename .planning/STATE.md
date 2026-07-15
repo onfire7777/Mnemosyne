@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: R2b review hardening is merged to main@5a6ce1921c1537b6090cf40600581f9fe956fe1f via PR #17; the production MCP client certificate expired 2026-07-14T23:52:36Z and blocks full-suite/index/model/live/protected admission until operator rotation under the live-mutation runbook; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted Graphify/CBM/gbrain refresh remain open
-last_updated: "2026-07-15T22:11:48Z"
+stopped_at: R2b review hardening and tracker reconciliation are merged through main@f50cec0ddc65e81c0f819376bcb3224eb6328618 via PRs #17/#18; the 2026-07-15T22:59:07Z..22:59:40Z full-workload preflight was rejected because its first memory sample was 53% free against the 55% floor, so full-suite/Graphify/CBM/gbrain operations did not run; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted knowledge refresh remain open
+last_updated: "2026-07-15T23:01:27Z"
 last_activity: 2026-07-15
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15, and the post-merge review hardening that replaced the forgeable environment sentinel with `--verify-child` coordinator-ownership re-validation is MERGED to `main@5a6ce1921c1537b6090cf40600581f9fe956fe1f` via PR #17. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The production MCP client certificate expired `2026-07-14T23:52:36Z`; the fail-closed TLS preflight blocks full-suite/index/model/live/protected admission until operator rotation under the live-mutation runbook. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
-Last activity: 2026-07-15 — R2b review hardening passed exact-head CI run `29452661004` on `e5ffa1c76bc392660731a02f9831405299fe385b`, merged through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`, and passed post-merge main CI run `29453529951`. Review accepted three hardening findings (position-independent inherited-owner reads, bounded caller-source assertions, and behavior-regression-aware CI guidance); the published-branch rewrite request was dispositioned against the no-history-rewrite boundary. The last accepted merge-bound knowledge receipt remains PR #12 until a complete full-workload hardware/TLS/Vault/service/topology preflight admits Graphify, CBM, and gbrain refresh against the exact final main SHA. No certificate rotation, gbrain write/source sync, live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
+Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; and tracker reconciliation landed through PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The current production MCP client pair passed the unchanged validator on 2026-07-15 and its externally refreshed leaf expires `2026-07-16T21:18:25Z`, superseding the prior expired-leaf runtime state. Full-workload admission still failed because the first of three memory samples was 53% free against the 55% floor. The external `vault-tls/ca.crt` still fails the Vault server validator while the authoritative `step-ca-root.crt` passes; repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
+Last activity: 2026-07-15 — On exact final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, the complete read-only preflight sampled 53%/55%/55% free memory at `2026-07-15T22:59:07Z`, `22:59:24Z`, and `22:59:40Z`; load1/load5 were 1.66/1.97, 1.85/2.00, and 1.82/1.99; and no Ollama model was resident. Colima remained 6 CPU/12 GiB, exactly one reachable `infra` compose project ran 20 healthy services, API/stream identities and zero restart counts were stable, Vault was initialized/unsealed, and the corrected canonical TLS validation passed. Because every sample must reach 55% free, admission was rejected and no full suite, Graphify, CBM change-detection/reindex, gbrain write/sync/doctor, certificate rotation, live Docker/CA/secret/runtime mutation, model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred. The last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
 
 ## Performance Metrics
 
@@ -241,12 +241,18 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   reinitialize the retained Vault volume.
 - Validate the MCP client pair against Caddy's exact trust pool before heavy
   work and rotate it before the six-hour short-lived-certificate floor.
-- The production MCP client certificate expired `2026-07-14T23:52:36Z` and
-  now fails the fail-closed TLS preflight. Do not run full-suite, index, model,
-  live, or protected work (including Graphify/CBM/gbrain refresh,
-  candidate-v19, or live rotation/no-op proof) until the operator rotates the
-  pair under the live-mutation admission runbook; this reconciliation did not
-  rotate the certificate.
+- The prior production MCP client leaf expired `2026-07-14T23:52:36Z`. A
+  read-only check on 2026-07-15 found an externally refreshed client-auth leaf
+  expiring `2026-07-16T21:18:25Z`; the unchanged canonical validator passed.
+  This task did not rotate or modify it. Keep the operator-owned rotation
+  runbook ready before the six-hour floor and never weaken the validator.
+- The 2026-07-15 full-workload admission attempt failed because sample 1 had
+  53% free memory against the 55% floor; samples 2 and 3 were exactly 55%.
+  Owner: host operator. Required remediation: wait for or safely reclaim host
+  memory without mutating Colima/Vault/services, then rerun the complete
+  three-sample hardware/TLS/Vault/service/topology preflight. Next safe action:
+  perform only lightweight planning work until all three fresh samples pass.
+  Full-suite/Graphify/CBM/gbrain freshness rows remain explicitly open.
 - Require exact-head and post-merge CI for this final documentation
   reconciliation, then use its merged PR body as the live exact-main delivery
   and mutable-index receipt.
@@ -261,7 +267,27 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest checkpoint (2026-07-15): R2b review hardening is merged to
+Latest checkpoint (2026-07-15): R2b tracker reconciliation is merged through
+PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, with exact-head
+CI run `29454727897` and post-merge main CI run `29455686269` green. The
+complete read-only preflight on that SHA recorded 53% free memory with
+load1/load5 1.66/1.97 at `2026-07-15T22:59:07Z`, 55% with 1.85/2.00 at
+`22:59:24Z`, and 55% with 1.82/1.99 at `22:59:40Z`. All samples had zero
+resident models; Colima was 6 CPU/12 GiB; exactly one reachable `infra` compose
+project had 20 healthy services; API/stream identities and zero restart counts
+were stable; Vault was initialized and unsealed; and the canonical production
+MCP client TLS validator passed. The leaf observed read-only expires
+`2026-07-16T21:18:25Z`, superseding the prior expired runtime state; no rotation
+or external-secret mutation occurred in this task. Admission was rejected
+because sample 1 missed the 55% memory floor, so the full suite, Graphify, CBM
+change-detection/reindex, and gbrain sync/doctor did not run. Owner: host
+operator. Required remediation and next safe action: wait for or safely reclaim
+host memory without service mutation, then rerun the entire preflight and
+require all three samples to pass. The last accepted merge-bound knowledge
+receipt remains PR #12; Graphify/CBM/gbrain freshness remains explicitly open.
+No live/protected/public/Vault/CA/`ca.crt` action occurred.
+
+Historical checkpoint (2026-07-15): R2b review hardening is merged to
 `main@5a6ce1921c1537b6090cf40600581f9fe956fe1f` through PR #17. Exact-head CI
 run `29452661004` passed on
 `e5ffa1c76bc392660731a02f9831405299fe385b`; post-merge main CI run
