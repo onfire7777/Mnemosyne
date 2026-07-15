@@ -18,20 +18,16 @@ This dated delta supersedes only the mutable operational status in P5, P7, and
 P9 below; their 2026-07-13 evidence remains historical. R1c merged
 through PR #12 as `97f3c66`. Exact-head CI `29313243324` and post-merge CI
 `29314015888` are green; ordinary scheduled-main CI `29318113932` is also
-green but is not R2a exact-head evidence. Graphify (16,202 nodes / 27,648
-edges / 1,174 communities), CBM (17,685 nodes / 70,259 edges), and gbrain
-`mnemosyne-code` (full merge SHA, 100% embedding coverage, zero
-unacknowledged failures) are the last accepted merge-bound receipt at PR #12.
-R2a baseline commits `a91da2e`/`48be88a` and review hardening `fb713d4` are pushed and stacked PR #13 is open,
-non-draft, and mergeable. Old head `48be88a` passed exact-head CI
-`29354723518`. GitHub CodeRabbit skipped the stacked-base review; terminal
-CodeRabbit and independent reviews drove the pushed review-hardening surface
-that passes static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
-section-33 tests, and 2/2 planning tests. Final independent review is
-merge-clean and terminal CodeRabbit is complete. The final documentation-
-reconciliation head requires exact-head PR #13 CI, then PR13-to-PR11 merge and exact-head
-PR #11 CI, PR11-to-main merge, post-merge main CI, and exact-main mutable-index
-refresh remain open.
+green. Graphify (16,202 nodes / 27,648 edges / 1,174 communities), CBM (17,685
+nodes / 70,259 edges), and gbrain `mnemosyne-code` remain the last accepted
+merge-bound receipt at PR #12 until the final-main refresh below. R2a exact
+head `5bfd53d` passed static gates, 55/55 focused tests, 39/39 section-31 rails,
+7/7 section-33 tests, 2/2 planning tests, terminal CodeRabbit, independent
+review, and exact-head CI `29377793617`. It merged through PR #13 as `33967b1`;
+that stacked head passed PR #11 CI `29378482152` and merged to `main` as
+`79f6b58`. Post-merge main CI `29379113689` passed all six gating jobs; this
+documentation reconciliation's exact-head/final-main CI and exact-final-main
+mutable-index refresh complete the delivery receipt.
 R2b-R2d, R3/R4, live
 rotation/no-op
 proof, candidate-v19 external custody and exact-scale evidence, every
@@ -87,11 +83,11 @@ agent may prepare materials but may not perform the decision or external act.
 | P2 | Protected QA remains 0.0833 vs ≥0.85 | v17 and v18 each answered 2/24 and abstained at hop 0 on 22/24, with EM/F1 0.083333. v19's deterministic planner passes synthetic/dev gates but its protected effect and remaining reader residual are unmeasured. Both `qa_hard_v2` and held-out LongMemEval-QA must reach ≥0.85 without retrieval regression. | Critical |
 | P3 | One-shot evidence economics | Five protected attempts are recorded: v3, v12, v13, v17, and v18. v12 produced no result because the 120-second outer wrapper expired. A digest-bound 24/24 exact-scale development receipt is now mandatory before another protected attempt. | High |
 | P4 | No physical-8-GiB product path is proven | The compact reader/reranker work is design and preregistration only: no model has been selected, trained, downloaded, or accepted. Four probed local generative substitutes were rejected; that evidence does not exclude every possible model. Physical Windows and Linux x86-64 acceptance remains mandatory, with ARM64 additional rather than substitutive. | High |
-| P5 | Production admission rails remain unfinished | MCP rotation R1c is merged through PR #12 with exact-head and post-merge CI. R2a review hardening is pushed through `fb713d4` and PR #13 is open. The terminal-CodeRabbit/independent-review fixes are review-clean and pass static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7 section-33 tests, and 2/2 planning tests. The final documentation-reconciliation head still requires exact-head PR #13 CI, PR13-to-PR11 merge, exact-head PR #11 CI, PR11-to-main merge, and post-merge main CI. R2b-R2d integrations; R3/R4; live rotation/no-op proof; Vault/trust/renewal operations; and restart-stability evidence remain open. | High |
+| P5 | Production admission rails remain unfinished | MCP rotation R1c is merged through PR #12 with exact-head and post-merge CI. R2a passed static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7 section-33 tests, 2/2 planning tests, terminal CodeRabbit, independent review, exact-head CI `29377793617`, stacked CI `29378482152`, and post-merge main CI `29379113689`; it merged to `main` as `79f6b58`. Final-reconciliation CI and the exact-final-main index receipt close its delivery record. R2b-R2d integrations; R3/R4; live rotation/no-op proof; Vault/trust/renewal operations; and restart-stability evidence remain open. | High |
 | P6 | Passing frozen QA alone cannot close Phase 12 | LongMemEval-QA ≥0.85, deterministic retrieval non-regression, positive provenance-linked graph/PPR effect, §31 rails, §33 classes, custody, and held-out controls are independent exit bars. Current Hippo evidence has zero positive graph/PPR participation. | High |
-| P7 | CI is restored, but current-head and cost controls remain open | Billing was restored on 2026-07-12. R1c exact-head `29313243324`, post-merge `29314015888`, and ordinary scheduled-main `29318113932` are green. No predecessor run authorizes PR #13's final documentation-reconciliation head; exact-head evidence is mandatory. Hosted macOS wheel cadence should be optimized only from measured billing artifacts. | Medium |
+| P7 | CI is restored, but final-reconciliation and cost controls remain open | Billing was restored on 2026-07-12. R1c exact-head `29313243324`, post-merge `29314015888`, and ordinary scheduled-main `29318113932` are green. R2a exact-head `29377793617`, stacked `29378482152`, and post-merge main `29379113689` are green; the final documentation reconciliation retains the same exact-head rule. Hosted macOS wheel cadence should be optimized only from measured billing artifacts. | Medium |
 | P8 | Governance and reproduction are human-owned long leads | Agents may prepare charters, recruitment packets, evidence bundles, and reproduction instructions. They may not recruit or seat the board, ratify policy on its behalf, commission the independent reproducer, approve public wording, or publish a number. | High, external |
-| P9 | Knowledge freshness has one bounded post-merge closure step | Graphify, CBM, and gbrain were refreshed and recorded at PR #12's merge `97f3c66`. Open PR #13 reopens that check. A ready mutable index is not final-head proof; all three must refresh after the complete PR13-to-PR11-to-main delivery and be recorded against that exact main SHA. | Medium, controlled |
+| P9 | Knowledge freshness has one bounded post-merge closure step | Graphify, CBM, and gbrain were refreshed and recorded at PR #12's merge `97f3c66`. R2a is now on `main`, so a ready mutable index is not final-head proof; all three must refresh after this reconciliation lands and be recorded against that exact final main SHA in the merged PR's live receipt. | Medium, controlled |
 
 **System diagnosis:** the admitted full-suite window closes P1 for this slice,
 but not for later model/index/live/protected workloads, which must re-gate.
@@ -127,8 +123,8 @@ P6, and the human-owned gates must also close without weakening custody.
 ### A — Immediate unblock (resolves P1, P3)
 
 - **A1. Eval-window preparation:** use the guarded reclamation helper only for a planned strong-workload window and only through its explicit opt-in confirmation. It may quit only the fixed Brave/Discord allowlist; it never stops services, inspects secrets, runs admission checks, or returns success as an admission signal. Its dedicated `ADMISSION PENDING` exit is followed by the complete three-sample runbook; only that separate read-only gate can admit work.
-- **A2. Run the queues under their real gates:** R1c's targeted/full-suite, exact-head, merge, and post-merge gates are closed. Require review, exact-head CI at both stacked heads, PR13-to-PR11-to-main delivery, post-merge main CI, and exact-main final-index gates for R2a; then obtain a new strong admission for candidate-v19's remaining immutable external manifest/runtime custody and the 24/24 `qa_scale_dev_v1` receipt. Only then may v19 consume its protected attempt.
-- **A3. Hygiene:** PR #12 is merged and its Graphify/CBM/gbrain receipt is recorded. Land the stacked R2a PR only after independent review, explicit residual boundaries, and green exact-head CI; refresh mutable indexes only against its final merge head and keep one canonical work stream per machine during eval windows.
+- **A2. Run the queues under their real gates:** R1c's and R2a's targeted/full-suite, review, exact-head, stacked merge, and post-merge main gates are closed. Complete final-reconciliation CI and the exact-final-main index receipt; then obtain a new strong admission for candidate-v19's remaining immutable external manifest/runtime custody and the 24/24 `qa_scale_dev_v1` receipt. Only then may v19 consume its protected attempt.
+- **A3. Hygiene:** PRs #12, #13, and #11 are merged with their exact-head receipts. Refresh mutable indexes only against the final reconciliation merge head, record them in that merged PR's live receipt, and keep one canonical work stream per machine during eval windows.
 - **Alternatives considered:** shrinking the VM below 6 CPU/12 GiB — rejected (runbook-pinned custody topology); scheduled overnight eval windows — adopt as a complement after A1 proves out.
 
 ### B — Close the quality gap with the compact stack (resolves P2, P4)
@@ -162,11 +158,12 @@ P6, and the human-owned gates must also close without weakening custody.
 
 ## 6. Sequence
 
-- **Immediately:** land R2a through exact-head PR #13, merge it into PR #11,
-  require exact-head PR #11 CI, merge PR #11 to `main`, verify post-merge main
-  CI, and refresh indexes against that exact main SHA; prepare the human governance packet; complete
-  compact-corpus planning and immutable-manifest preparation; establish a
-  strong eval window without disrupting in-flight evidence.
+- **Immediately:** close R2a's final-reconciliation CI and refresh
+  indexes against the exact final main SHA; perform the rollback-safe Vault CA
+  repair and continue R2b-R2d under separately reviewed slices; prepare the
+  human governance packet; complete compact-corpus planning and
+  immutable-manifest preparation; establish a strong eval window without
+  disrupting in-flight evidence.
 - **Strong window:** remaining immutable candidate-v19 prerequisites → 24/24 exact-scale receipt → protected v19 attempt. A failed gate returns to development under a new candidate; it does not authorize another attempt or a weaker threshold.
 - **After Decision Point 1:** execute the custody-approved compact bakeoff and R1c live-window work in separately admitted windows; complete D1–D4 with exact-head CI.
 - **Next:** v20 (and v21 only if preregistered evidence requires it) → both ≥0.85 QA gates → retrieval and positive graph/PPR gates → §31/§33/custody close → physical 8 GiB acceptance → Phases 13–16. Human governance and reproduction work proceeds in parallel but is never impersonated by an agent.

@@ -6,7 +6,7 @@
 **Companion doc:** *Execution Plan B — Benchmarking & the Leaderboard* owns measurement, publication, and the public leaderboard. This plan builds the capabilities; Plan B proves and publishes them. Where this plan says "measured/published," the authority is Plan B.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for gated evidence capture.
 
-**Live execution status (2026-07-13):** Approval is recorded. Phase 12 owns S1
+**Live execution routing:** Approval is recorded. Phase 12 owns S1
 and is executing Plan 12-04; S2, S3, S4, and the non-gating S5 research track
 are scheduled in Phase 15. `.planning/STATE.md`, `.planning/ROADMAP.md`, and
 `.planning/REQUIREMENTS.md` are the authoritative live trackers. The aggregate

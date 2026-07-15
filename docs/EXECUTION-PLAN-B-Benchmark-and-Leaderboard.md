@@ -6,7 +6,7 @@
 **Companion doc:** *Execution Plan A — The Memory System* builds the capabilities this plan measures. This plan owns measurement, publication, and the leaderboard. Where Plan A says "measured/published," the authority is here.
 **Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for governance and third-party reproduction.
 
-**Live execution status (2026-07-13):** M4/PBPP and BENCH-001 through
+**Live execution routing:** M4/PBPP and BENCH-001 through
 BENCH-004 are complete. M1.3 remains partial behind Phase 12's grounded-reader
 and positive graph/PPR gates; Phases 13 through 16 own the remaining benchmark,
 reproduction, capability-column, and leaderboard work. External board seating,
