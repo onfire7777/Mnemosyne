@@ -48,6 +48,64 @@ def _write_python_lock_probe(tmp_path: Path) -> tuple[Path, Path]:
     return probe, probe_log
 
 
+def _caller_case(
+    tmp_path: Path, caller: str
+) -> tuple[Path, list[str], dict[str, str], Path]:
+    custody_dir, _ = _custody(tmp_path)
+    probe, probe_log = _write_python_lock_probe(tmp_path)
+    environment = _environment(custody_dir)
+    environment.update(
+        {
+            "MNEMOSYNE_PYTHON": str(probe),
+            "REAL_PYTHON": sys.executable,
+            "RUNTIME_LOCK_OWNER": str(custody_dir / "locks" / LOCK_NAME / OWNER_NAME),
+            "RUNTIME_LOCK_PROBE_LOG": str(probe_log),
+        }
+    )
+    if caller == "capture":
+        manifest = tmp_path / "production-soak.json"
+        manifest.write_text("{}\n", encoding="utf-8")
+        mutation_root = tmp_path / "capture"
+        command = [
+            "/bin/bash",
+            str(CAPTURE_SCRIPT),
+            "--preflight-only",
+            str(manifest),
+            str(mutation_root),
+        ]
+    else:
+        mutation_root = tmp_path / "secrets"
+        mutation_root.mkdir(mode=0o700)
+        environment["MNEMO_SECRETS_DIR"] = str(mutation_root)
+        command = ["/bin/bash", str(ROTATOR_SCRIPT)]
+    return custody_dir, command, environment, mutation_root
+
+
+def _write_blocking_python_probe(tmp_path: Path) -> tuple[Path, Path, Path]:
+    state = tmp_path / "caller-state.json"
+    release = tmp_path / "release-caller"
+    probe = tmp_path / "blocking-bin" / "python3"
+    probe.parent.mkdir()
+    probe.write_text(
+        "#!/bin/sh\n"
+        '"$REAL_PYTHON" - "$CALLER_STATE" <<\'PY\'\n'
+        "import json, os, pathlib\n"
+        "path = pathlib.Path(os.sys.argv[1])\n"
+        "path.write_text(json.dumps({\n"
+        "    'pid': os.getpid(),\n"
+        "    'pgrp': os.getpgrp(),\n"
+        "    'sid': os.getsid(0),\n"
+        "    'uid': os.getuid(),\n"
+        "}))\n"
+        "PY\n"
+        'while [ ! -e "$CALLER_RELEASE" ]; do sleep 0.01; done\n'
+        "exit 97\n",
+        encoding="utf-8",
+    )
+    probe.chmod(0o755)
+    return probe, state, release
+
+
 def _custody(tmp_path: Path, *, mode: int = 0o700) -> tuple[Path, Path]:
     custody_dir = tmp_path / "custody"
     locks_dir = custody_dir / "locks"
@@ -176,8 +234,153 @@ def test_rotator_acquires_runtime_lock_before_first_side_effect(
         timeout=SUBPROCESS_TIMEOUT,
     )
 
-    assert probe_log.exists(), (completed.returncode, completed.stdout, completed.stderr)
+    assert probe_log.exists(), (
+        completed.returncode,
+        completed.stdout,
+        completed.stderr,
+    )
     assert probe_log.read_text(encoding="utf-8").splitlines()[0] == "locked"
+
+
+@pytest.mark.parametrize("caller", ["capture", "rotator"])
+def test_caller_contention_fails_before_sandbox_mutation(
+    tmp_path: Path, caller: str
+) -> None:
+    custody_dir, command, environment, mutation_root = _caller_case(tmp_path, caller)
+    process, _, release = _spawn_owner(custody_dir, tmp_path)
+    probe_log = Path(environment["RUNTIME_LOCK_PROBE_LOG"])
+    before = set(mutation_root.iterdir()) if mutation_root.exists() else set()
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            env=environment,
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+    finally:
+        _finish_owner(process, release)
+
+    assert completed.returncode == 75
+    assert completed.stdout == ""
+    assert completed.stderr == "runtime-exclusive-lock result=lock_deferred\n"
+    assert not probe_log.exists()
+    after = set(mutation_root.iterdir()) if mutation_root.exists() else set()
+    assert after == before
+
+
+@pytest.mark.parametrize("caller", ["capture", "rotator"])
+def test_caller_stays_synchronous_without_session_or_uid_transition(
+    tmp_path: Path, caller: str
+) -> None:
+    custody_dir, command, environment, _ = _caller_case(tmp_path, caller)
+    probe, state, release = _write_blocking_python_probe(tmp_path)
+    environment.update(
+        {
+            "MNEMOSYNE_PYTHON": str(probe),
+            "REAL_PYTHON": sys.executable,
+            "CALLER_STATE": str(state),
+            "CALLER_RELEASE": str(release),
+        }
+    )
+    process = subprocess.Popen(
+        command,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        _wait_for(state)
+        owner = custody_dir / "locks" / LOCK_NAME / OWNER_NAME
+        _wait_for(owner)
+        observed = json.loads(state.read_text(encoding="utf-8"))
+        assert process.poll() is None
+        assert observed["uid"] == os.getuid()
+        assert observed["sid"] == observed["pgrp"]
+        release.touch()
+        process.communicate(timeout=SUBPROCESS_TIMEOUT)
+    except BaseException:
+        release.touch(exist_ok=True)
+        try:
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+        raise
+
+    assert process.returncode != 0
+    assert not owner.exists()
+
+
+@pytest.mark.parametrize("caller", ["capture", "rotator"])
+@pytest.mark.parametrize(
+    "handled_signal", [signal.SIGHUP, signal.SIGINT, signal.SIGTERM]
+)
+def test_caller_handled_signal_releases_shared_lock(
+    tmp_path: Path, caller: str, handled_signal: signal.Signals
+) -> None:
+    custody_dir, command, environment, _ = _caller_case(tmp_path, caller)
+    probe, state, release = _write_blocking_python_probe(tmp_path)
+    environment.update(
+        {
+            "MNEMOSYNE_PYTHON": str(probe),
+            "REAL_PYTHON": sys.executable,
+            "CALLER_STATE": str(state),
+            "CALLER_RELEASE": str(release),
+        }
+    )
+    process = subprocess.Popen(
+        command,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    owner = custody_dir / "locks" / LOCK_NAME / OWNER_NAME
+    try:
+        _wait_for(state)
+        _wait_for(owner)
+        process.send_signal(handled_signal)
+        stdout, stderr = process.communicate(timeout=SUBPROCESS_TIMEOUT)
+    finally:
+        if process.poll() is None:
+            release.touch(exist_ok=True)
+            process.kill()
+            process.communicate(timeout=SUBPROCESS_TIMEOUT)
+
+    assert process.returncode == -handled_signal
+    assert stdout == ""
+    assert stderr == ""
+    assert not owner.exists()
+
+
+@pytest.mark.parametrize(
+    ("script", "sentinel", "operation"),
+    [
+        (
+            CAPTURE_SCRIPT,
+            "MNEMO_CAPTURE_RUNTIME_LOCK_ACTIVE",
+            "capture-production-evidence",
+        ),
+        (
+            ROTATOR_SCRIPT,
+            "MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE",
+            "rotate-production-mcp-client-cert",
+        ),
+    ],
+)
+def test_caller_source_keeps_lock_boundary_first_and_forbids_detach(
+    script: Path, sentinel: str, operation: str
+) -> None:
+    source = script.read_text(encoding="utf-8")
+    boundary = source.index(f'if [ "${{{sentinel}:-0}}" != "1" ]')
+    invocation = source.index(f'runtime-exclusive-lock.sh" {operation} --', boundary)
+    assert invocation > boundary
+    assert source.index("unset " + sentinel, invocation) > invocation
+    forbidden = ("setsid", "setpgid", "daemonize")
+    assert all(token not in source for token in forbidden)
 
 
 def _wait_for_zombie(pid: int, *, timeout: float = 5.0) -> None:
