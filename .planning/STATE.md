@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: R2b capture and rotator shared-lock integration is implemented and proven on codex/r2b-capture-rotator-lock; this branch's PR body owns its exact-head and post-merge CI receipts. R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted Graphify/CBM/gbrain refresh remain open
-last_updated: "2026-07-15T17:09:13Z"
+last_updated: "2026-07-15T18:01:22Z"
 last_activity: 2026-07-15
 progress:
   total_phases: 7
@@ -273,6 +273,17 @@ PR body owns the exact-head and post-merge CI receipts. Explicitly open are
 R2c/R2d, R3/R4, live rotation/no-op proof, the separate atomic
 `vault-tls/ca.crt` repair, candidate-v19 external custody chain, and the
 hardware-admitted Graphify/CBM/gbrain refresh.
+
+Named blocker (2026-07-15, local validation admission): PR #15 remains open,
+mergeable, and pinned to exact head
+`43e6cb4b86ae89146cd3bd553bdd4e83676db695`; CI run `29437230000` completed
+successfully with every gating job green and only the expected non-gating
+DST/chaos soak skipped. The plan's local planning/config pytest validation was
+not admitted because all three fresh hardware samples failed the >=35% free
+memory floor: `2026-07-15T17:51:07Z` 21.5%/6.03,
+`2026-07-15T17:56:15Z` 21.8%/5.33, and `2026-07-15T18:01:22Z` 19.5%/5.67.
+Every sample had zero resident Ollama models and the unchanged 20-container
+Docker stack. No pytest, Docker mutation, model run, or live operation occurred.
 
 Historical checkpoint (2026-07-14): R2a baseline `a91da2e`, review hardening
 `fb713d4`, and final documentation successor `5bfd53d` passed static checks,
