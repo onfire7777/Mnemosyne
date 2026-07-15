@@ -84,8 +84,21 @@ Both new tests failed at the intended first-side-effect assertion with probe
 value `unlocked`; the dedicated lock-file run reported 2 failed, 55 passed.
 
 ### Task 2: GREEN — capture entrypoint acquires the shared lock before any side effect
-- [ ] Following the plan doc's R2b section, wire `infra/scripts/capture-production-evidence.sh` to acquire the shared runtime-exclusive lock via `runtime-exclusive-lock.sh` with a distinct operation name before ANY side effect, hold it through completion, and release only on the owner path; keep the existing capture output-root lock unchanged.
-- [ ] Under the retry-gated admission, run the focused selection and confirm the capture RED test flips green with no existing test weakened; `bash -n` and `shellcheck` on the script must pass.
+- [x] Following the plan doc's R2b section, wire `infra/scripts/capture-production-evidence.sh` to acquire the shared runtime-exclusive lock via `runtime-exclusive-lock.sh` with a distinct operation name before ANY side effect, hold it through completion, and release only on the owner path; keep the existing capture output-root lock unchanged.
+- [x] Under the retry-gated admission, run the focused selection and confirm the capture RED test flips green with no existing test weakened; `bash -n` and `shellcheck` on the script must pass.
+
+Task 2 result (2026-07-15): `capture-production-evidence.sh` now re-executes
+under operation `capture-production-evidence` before argument validation or its
+first Python invocation. The existing output-root lock remains unchanged. The
+production-evidence tests now provision a private mode-`0700` custody/locks
+tree so the shared coordinator remains fail-closed outside its production
+contract. Admission samples passed at `2026-07-15T16:22:49Z` (46% free,
+load1 8.01), `2026-07-15T16:24:13Z` (44% free, load1 5.43), and
+`2026-07-15T16:25:29Z` (43% free, load1 5.12); every sample had zero resident
+Ollama models and the unchanged 20-container `infra` stack. The Task 2 focused
+selection passed 80 tests with the still-RED rotator test excluded. Bash syntax,
+ShellCheck, Ruff check/format, diff hygiene, and all 34 planning/config tests
+passed.
 
 ### Task 3: GREEN — rotator acquires the shared lock and revalidates after acquisition
 - [ ] Wire `infra/scripts/rotate-production-mcp-client-cert.sh` the same way (distinct operation name), keeping the local `.mcp-client-rotation.lock`, and make it revalidate the current certificate pair and recompute its renewal decision AFTER shared-lock acquisition.
