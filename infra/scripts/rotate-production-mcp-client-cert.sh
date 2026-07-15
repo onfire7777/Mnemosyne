@@ -117,8 +117,20 @@ fi
   exit 64
 }
 
+if [ "${MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE:-0}" != "1" ]; then
+  if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
+    set -- --test-fixture-transaction
+  fi
+  exec env MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE=1 \
+    "$SCRIPT_DIR/runtime-exclusive-lock.sh" rotate-production-mcp-client-cert -- \
+    /bin/bash "$SCRIPT_DIR/rotate-production-mcp-client-cert.sh" "$@"
+fi
+
 OPENSSL=$(command -v openssl) || preflight_failed 'openssl is required'
-PYTHON=$(command -v python3) || preflight_failed 'python3 is required'
+PYTHON=${MNEMOSYNE_PYTHON:-}
+if [ -z "$PYTHON" ]; then
+  PYTHON=$(command -v python3) || preflight_failed 'python3 is required'
+fi
 SECRETS_DIR=${MNEMO_SECRETS_DIR:-/secure/outside/repo}
 case "$SECRETS_DIR" in
   /*) ;;
@@ -264,6 +276,7 @@ then
   preflight_failed 'rotation process lock is invalid'
 fi
 unset "$LOCK_FD_ENV"
+unset MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE
 
 normal_pair_is_valid() {
   env \

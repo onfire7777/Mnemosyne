@@ -120,8 +120,9 @@ without inventing additional terminal results.
    This serializes cooperative rotator invocations only.
 4. The R2a shared runtime-lock coordinator is implemented at
    `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive`; its parent is a mode-`0700`,
-   non-symlink directory. The local process lock remains separate, and R2b-R2d
-   caller integrations remain open.
+   non-symlink directory. The local process lock remains separate. R2b capture
+   and rotator callers are integrated and proven on the delivery branch; R2c
+   and R2d caller integrations remain open.
 5. A separate status-only directory is mounted read-only into `mnemo-metrics`.
    It contains only a schema-validated `status.json`; it contains no
    certificate, key, password, digest, backup, staging, journal, lock, secret
@@ -339,12 +340,15 @@ begins.
 
 ## Shared runtime lock contract
 
-**R2 status: R2a is merged and source-accepted; R2b-R2d are open.** The current
+**R2 status: R2a is merged and source-accepted; R2b is integrated and proven on
+its delivery branch and is merging through its delivery PR; R2c-R2d remain
+open.** The current
 `.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
 and is deliberately held for the whole process, but it does not serialize
 capture, evaluation, runtime flip, or rollback workflows. R2a provides the
-shared fail-closed coordinator; each caller still must be integrated and proven
-under R2b-R2d. Neither lock claims protection against a malicious process with
+shared fail-closed coordinator; the capture and rotator callers are integrated
+and proven under R2b, while the R2c/R2d callers still must be integrated and
+proven. Neither lock claims protection against a malicious process with
 the same uid; same-uid execution is inside the trusted operator boundary.
 
 The smallest shared helper is `infra/scripts/runtime-exclusive-lock.sh`. It:
@@ -725,6 +729,13 @@ uv run --locked pytest -q tests/test_runtime_exclusive_lock.py \
 
 The RED failure must prove at least one entrypoint can mutate before locking;
 GREEN must prove acquisition precedes every side effect.
+
+R2b is integrated and proven on `codex/r2b-capture-rotator-lock` and is merging
+through its delivery PR. The validated RED baseline and green focused regression
+cell prove both callers acquire the shared lock before side effects, fail closed
+under contention, retain their existing local controls, release only on the
+owner path, and obey the synchronous/no-detach contract. R2c/R2d and live
+rotation/no-op proof remain explicitly open.
 
 ### R2c — Protected runner integration
 

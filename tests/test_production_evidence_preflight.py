@@ -24,6 +24,14 @@ REPO = Path(__file__).resolve().parents[1]
 CAPTURE_SCRIPT = REPO / "infra" / "scripts" / "capture-production-evidence.sh"
 
 
+@pytest.fixture(autouse=True)
+def _runtime_lock_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    custody_dir = tmp_path / "runtime-lock-custody"
+    custody_dir.mkdir(mode=0o700)
+    (custody_dir / "locks").mkdir(mode=0o700)
+    monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
+
+
 def _preflight_rows_by_lane(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
     rows = payload["parity_row_readiness"]
     assert isinstance(rows, list)
@@ -341,10 +349,7 @@ def test_capture_production_evidence_full_capture_requires_fingerprint_record_ou
     )
 
     assert proc.returncode == 64
-    assert (
-        "full production capture requires --fingerprint-record-output"
-        in proc.stderr
-    )
+    assert "full production capture requires --fingerprint-record-output" in proc.stderr
     assert proc.stdout == ""
     assert not out_root.exists()
 
@@ -399,7 +404,10 @@ def test_capture_production_evidence_rejects_preflight_fingerprint_record_output
     )
 
     assert proc.returncode == 64
-    assert "--fingerprint-record-output is only valid for full production capture" in proc.stderr
+    assert (
+        "--fingerprint-record-output is only valid for full production capture"
+        in proc.stderr
+    )
     assert not fingerprint_record.exists()
 
 
@@ -426,7 +434,9 @@ def test_capture_production_evidence_rejects_bundle_local_fingerprint_record(
     )
 
     assert proc.returncode == 65
-    assert "fingerprint record output must be outside the evidence bundle" in proc.stderr
+    assert (
+        "fingerprint record output must be outside the evidence bundle" in proc.stderr
+    )
     assert not out_root.exists()
 
 
@@ -893,9 +903,13 @@ def test_capture_production_evidence_preflight_records_input_artifacts(
             "runbook": ".planning/runbooks/row-10-live-parity-suite.md",
         }
     ]
-    assert artifact_record["snapshot_path"].startswith(str(out_root / "input-artifacts"))
+    assert artifact_record["snapshot_path"].startswith(
+        str(out_root / "input-artifacts")
+    )
     assert artifact_record["files"][0]["source_path"] == str(artifact)
-    assert artifact_record["files"][0]["snapshot_path"] == artifact_record["snapshot_path"]
+    assert (
+        artifact_record["files"][0]["snapshot_path"] == artifact_record["snapshot_path"]
+    )
     assert artifact_record["files"][0]["sha256"].startswith("sha256:")
     assert artifact_record["files"][0]["size_bytes"] == artifact.stat().st_size
     copied_manifest = json.loads(
@@ -1251,7 +1265,10 @@ def test_capture_production_evidence_preflight_snapshots_and_rewrites_tool_execu
     assert retained_tool.is_relative_to(out_root / "tool-artifacts")
     assert retained_tool.read_bytes() == tool_payload
     assert retained_tool.stat().st_mode & 0o777 == 0o500
-    assert reference["snapshot_relative_path"] == retained_tool.relative_to(out_root).as_posix()
+    assert (
+        reference["snapshot_relative_path"]
+        == retained_tool.relative_to(out_root).as_posix()
+    )
     assert reference["snapshot_size_bytes"] == len(tool_payload)
     assert reference["snapshot_sha256"] == reference["sha256"]
     assert (
@@ -1336,15 +1353,17 @@ def test_capture_production_evidence_records_provider_command_executable_digest(
     retained_tool = Path(reference["snapshot_path"])
     assert retained_tool.is_relative_to(out_root / "tool-artifacts")
     assert retained_tool.read_bytes() == tool_payload
-    assert reference["snapshot_relative_path"] == retained_tool.relative_to(out_root).as_posix()
+    assert (
+        reference["snapshot_relative_path"]
+        == retained_tool.relative_to(out_root).as_posix()
+    )
     assert reference["snapshot_size_bytes"] == len(tool_payload)
     assert reference["snapshot_sha256"] == reference["sha256"]
     retained_provider_manifest = json.loads(
         Path(str(input_artifact["snapshot_path"])).read_text(encoding="utf-8")
     )
-    assert (
-        retained_provider_manifest["providers"]["session_secret"]["command"]
-        == str(retained_tool)
+    assert retained_provider_manifest["providers"]["session_secret"]["command"] == str(
+        retained_tool
     )
 
 
@@ -1507,7 +1526,9 @@ def test_capture_production_evidence_rewrites_env_c2pa_tool_to_retained_snapshot
     reference = stdout["executable_tool_references"][0]
     retained_tool = Path(reference["snapshot_path"])
     tool_env = out_root / "tool-env.sh"
-    redaction_scan = json.loads((out_root / "redaction-scan.json").read_text(encoding="utf-8"))
+    redaction_scan = json.loads(
+        (out_root / "redaction-scan.json").read_text(encoding="utf-8")
+    )
 
     assert reference["option"] == "MNEMOSYNE_C2PA_TOOL"
     assert reference["path"] == str(tool)
@@ -1602,7 +1623,9 @@ def test_capture_production_evidence_rejects_provider_command_argument(
     )
 
     assert proc.returncode == 65
-    assert "provider-manifest.command must be a single external executable" in proc.stderr
+    assert (
+        "provider-manifest.command must be a single external executable" in proc.stderr
+    )
     assert "unretained_provider" not in proc.stderr
 
 
@@ -1986,7 +2009,10 @@ def test_capture_production_evidence_preflight_snapshots_provenance_suite_assets
     assert reference["labels"] == ["checks[9].args tool"]
     retained_tool = Path(reference["snapshot_path"])
     assert retained_tool.is_relative_to(out_root / "tool-artifacts")
-    assert reference["snapshot_relative_path"] == retained_tool.relative_to(out_root).as_posix()
+    assert (
+        reference["snapshot_relative_path"]
+        == retained_tool.relative_to(out_root).as_posix()
+    )
     assert reference["snapshot_size_bytes"] == len(tool_payload.encode("utf-8"))
     assert reference["snapshot_sha256"] == reference["sha256"]
     assert suite_snapshot.is_relative_to(out_root / "input-artifacts")
@@ -3897,7 +3923,9 @@ def test_capture_production_evidence_binary_provenance_asset_is_binary_custody(
     input_root = tmp_path / "production-inputs"
     input_root.mkdir(parents=True, exist_ok=True)
     binary_asset = input_root / "asset.c2pa"
-    binary_asset_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rc2pa\xff\xfe\xfd signed-manifest"
+    binary_asset_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rc2pa\xff\xfe\xfd signed-manifest"
+    )
     binary_asset.write_bytes(binary_asset_bytes)
     with pytest.raises(UnicodeDecodeError):
         binary_asset.read_text(encoding="utf-8")
@@ -4212,7 +4240,9 @@ def test_cli_production_evidence_verify_accepts_binary_provenance_asset(
     input_root = tmp_path / "production-inputs"
     input_root.mkdir(parents=True, exist_ok=True)
     binary_asset = input_root / "asset.c2pa"
-    binary_asset_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rc2pa\xff\xfe\xfd signed-manifest"
+    binary_asset_bytes = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rc2pa\xff\xfe\xfd signed-manifest"
+    )
     binary_asset.write_bytes(binary_asset_bytes)
     with pytest.raises(UnicodeDecodeError):
         binary_asset.read_text(encoding="utf-8")
@@ -4246,7 +4276,9 @@ def test_cli_production_evidence_verify_accepts_binary_provenance_asset(
         for path in (out_root / "input-artifacts").rglob("*")
         if path.is_file() and _is_non_utf8_file(path)
     ]
-    assert retained_binary, "expected a retained non-utf-8 provenance asset in the bundle"
+    assert retained_binary, (
+        "expected a retained non-utf-8 provenance asset in the bundle"
+    )
     recorded_custody = {
         Path(item).resolve() for item in redaction_scan.get("binary_custody_files", [])
     }
@@ -4319,8 +4351,16 @@ def test_production_evidence_path_rewrites_fold_in_executable_tool_references(
         # "--c2pa-tool" first and "suite.tool" last, so last-wins picks 0008 -- the
         # exact snapshot the operator manifest arg references.
         "executable_tool_references": [
-            {"option": "--c2pa-tool", "path": custody_tool, "snapshot_path": str(tool_snapshot_first.resolve())},
-            {"option": "suite.tool", "path": custody_tool, "snapshot_path": str(tool_snapshot_last.resolve())},
+            {
+                "option": "--c2pa-tool",
+                "path": custody_tool,
+                "snapshot_path": str(tool_snapshot_first.resolve()),
+            },
+            {
+                "option": "suite.tool",
+                "path": custody_tool,
+                "snapshot_path": str(tool_snapshot_last.resolve()),
+            },
         ],
     }
 
@@ -4379,7 +4419,10 @@ def test_production_evidence_path_rewrites_fold_in_executable_tool_references(
         finding
         for finding in findings
         if finding.get("code")
-        in {"source_manifest_command_profile_mismatch", "source_manifest_payload_mismatch"}
+        in {
+            "source_manifest_command_profile_mismatch",
+            "source_manifest_payload_mismatch",
+        }
     ]
     assert profile_mismatch == [], profile_mismatch
     assert isinstance(ok, bool)
