@@ -159,15 +159,15 @@ def test_rotator_acquires_runtime_lock_before_first_side_effect(
     environment = _environment(custody_dir)
     environment.update(
         {
+            "MNEMOSYNE_PYTHON": str(probe),
             "MNEMO_SECRETS_DIR": str(secrets_dir),
-            "PATH": f"{probe.parent}:/usr/bin:/bin",
             "REAL_PYTHON": sys.executable,
             "RUNTIME_LOCK_OWNER": str(locks_dir / LOCK_NAME / OWNER_NAME),
             "RUNTIME_LOCK_PROBE_LOG": str(probe_log),
         }
     )
 
-    subprocess.run(
+    completed = subprocess.run(
         ["/bin/bash", str(ROTATOR_SCRIPT)],
         check=False,
         capture_output=True,
@@ -176,6 +176,7 @@ def test_rotator_acquires_runtime_lock_before_first_side_effect(
         timeout=SUBPROCESS_TIMEOUT,
     )
 
+    assert probe_log.exists(), (completed.returncode, completed.stdout, completed.stderr)
     assert probe_log.read_text(encoding="utf-8").splitlines()[0] == "locked"
 
 
