@@ -260,10 +260,9 @@ review ran and its valid findings, plus independent review findings, are fixed
 in pushed review hardening `fb713d4`. Static checks, 55/55 focused lock tests, 39/39
 section-31 rails, 7/7 section-33 tests, and 2/2 planning tests are green under
 admitted targeted hardware. Final review and terminal CodeRabbit are complete.
-The final documentation-reconciliation head requires exact-head PR #13 CI,
-followed by PR13-to-PR11 merge, exact-head PR #11 CI,
-PR11-to-main merge, post-merge main CI, and exact-main Graphify/CBM/gbrain
-refresh remain open.
+The remaining acceptance gates are exact-head PR #13 CI,
+PR13-to-PR11 merge, exact-head PR #11 CI, PR11-to-main merge,
+post-merge main CI, and an exact-main Graphify/CBM/gbrain refresh.
 Full/index/model/live work remains hardware-gated. R2b-R2d, R3/R4, live
 rotation/no-op proof, candidate-v19 external manifest/runtime and exact-scale
 receipts, every protected attempt, and all human-owned governance/publication
