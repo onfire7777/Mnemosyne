@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import os
 import pwd
 import re
+import secrets
 import shutil
+import socket
 import stat
 import subprocess
 import sys
@@ -26,10 +29,89 @@ ROTATOR = REPO / "infra" / "scripts" / "rotate-production-mcp-client-cert.sh"
 
 
 @pytest.fixture(autouse=True)
-def _runtime_lock_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The shared-lock wrapper has its own integration suite. These tests isolate
-    # the rotator body, including deliberate PATH substitutions for child tools.
-    monkeypatch.setenv("MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE", "1")
+def _runtime_lock_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    custody_dir = tmp_path.parent / f".{tmp_path.name}-runtime-lock-custody"
+    locks_dir = custody_dir / "locks"
+    locks_dir.mkdir(parents=True, mode=0o700)
+    lock_dir = locks_dir / "runtime-exclusive"
+    lock_dir.mkdir(mode=0o700)
+    owner = lock_dir / "owner.json"
+    owner_fd = os.open(owner, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    fcntl.flock(owner_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    owner_token = secrets.token_hex(32)
+    metadata = {
+        "host": socket.gethostname(),
+        "operation": "rotate-production-mcp-client-cert",
+        "owner_token": owner_token,
+        "pid": os.getpid(),
+        "process_start_fingerprint": _process_start_fingerprint(os.getpid()),
+        "schema_version": 1,
+        "started_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "uid": os.getuid(),
+    }
+    payload = (
+        json.dumps(metadata, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+        + "\n"
+    ).encode("ascii")
+    os.write(owner_fd, payload)
+    os.fsync(owner_fd)
+    os.set_inheritable(owner_fd, True)
+    monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
+    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_ACTIVE", "1")
+    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_OWNER_FD", str(owner_fd))
+    monkeypatch.setenv(
+        "MNEMO_RUNTIME_LOCK_OPERATION", "rotate-production-mcp-client-cert"
+    )
+    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_OWNER_PID", str(os.getpid()))
+    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_OWNER_TOKEN", owner_token)
+    yield
+    assert owner.read_bytes() == payload
+    os.close(owner_fd)
+    owner.unlink()
+    lock_dir.rmdir()
+    locks_dir.rmdir()
+    custody_dir.rmdir()
+
+
+def _process_start_fingerprint(pid: int) -> str:
+    if sys.platform.startswith("linux"):
+        boot_id = (
+            Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+        )
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        closing = raw.rfind(")")
+        return f"linux:{boot_id.lower()}:{raw[closing + 2 :].split()[19]}"
+    completed = subprocess.run(
+        ["/bin/ps", "-o", "lstart=", "-p", str(pid)],
+        check=True,
+        capture_output=True,
+        env={"LC_ALL": "C", "LANG": "C", "PATH": "/usr/bin:/bin"},
+        text=True,
+        timeout=2,
+    )
+    return f"darwin:{completed.stdout.strip()}"
+
+
+def _runtime_lock_pass_fds(env: dict[str, str]) -> tuple[int, ...]:
+    if env.get("MNEMO_RUNTIME_LOCK_ACTIVE") != "1":
+        return ()
+    return (int(env["MNEMO_RUNTIME_LOCK_OWNER_FD"]),)
+
+
+def _real_runtime_lock_env(env: dict[str, str], tmp_path: Path) -> dict[str, str]:
+    result = dict(env)
+    for name in (
+        "MNEMO_RUNTIME_LOCK_ACTIVE",
+        "MNEMO_RUNTIME_LOCK_OWNER_FD",
+        "MNEMO_RUNTIME_LOCK_OPERATION",
+        "MNEMO_RUNTIME_LOCK_OWNER_PID",
+        "MNEMO_RUNTIME_LOCK_OWNER_TOKEN",
+    ):
+        result.pop(name, None)
+    custody_dir = tmp_path / "real-runtime-lock-custody"
+    (custody_dir / "locks").mkdir(parents=True, mode=0o700)
+    result["MNEMO_CUSTODY_DIR"] = str(custody_dir)
+    return result
 
 
 VALIDATOR = REPO / "infra" / "validate" / "validate-production-mcp-client-tls.sh"
@@ -1475,7 +1557,7 @@ def _run_rotator(
     *args: str,
     child_umask: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    completed = subprocess.run(
         [str(ROTATOR), *args],
         cwd=REPO,
         env=env,
@@ -1484,8 +1566,10 @@ def _run_rotator(
         stdin=subprocess.DEVNULL,
         timeout=15,
         check=False,
+        pass_fds=_runtime_lock_pass_fds(env),
         umask=-1 if child_umask is None else child_umask,
     )
+    return completed
 
 
 def _run_diagnostic(
@@ -1653,9 +1737,16 @@ def test_renewal_stages_valid_replacement_with_hardened_exact_argv(
     docker, record = _write_fake_docker(tmp_path, staged)
     stage = _stage_path(current, "issued-stage")
 
-    proc = _run_rotator(_rotator_env(current, docker, stage))
+    env = _real_runtime_lock_env(_rotator_env(current, docker, stage), tmp_path)
+
+    proc = _run_rotator(env)
+
+    owner = (
+        Path(env["MNEMO_CUSTODY_DIR"]) / "locks" / "runtime-exclusive" / "owner.json"
+    )
 
     assert proc.returncode == 0, proc.stderr
+    assert not owner.exists()
     assert proc.stdout == "mcp-client-rotation result=staged_only\n"
     assert proc.stderr == ""
     payload = json.loads(record.read_text(encoding="utf-8"))
@@ -4130,6 +4221,7 @@ def test_rotator_holds_process_lock_for_entire_invocation(tmp_path: Path) -> Non
         [str(ROTATOR), TRANSACTION_ACTION],
         cwd=REPO,
         env=env,
+        pass_fds=_runtime_lock_pass_fds(env),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

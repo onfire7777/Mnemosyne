@@ -43,6 +43,11 @@ GROUP_PROBE_TIMEOUT_SECONDS = 2.0
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]"
 OPERATION = re.compile(r"[a-z][a-z0-9-]{0,63}")
 TOKEN = re.compile(r"[0-9a-f]{64}")
+CHILD_ACTIVE_ENV = "MNEMO_RUNTIME_LOCK_ACTIVE"
+CHILD_FD_ENV = "MNEMO_RUNTIME_LOCK_OWNER_FD"
+CHILD_OPERATION_ENV = "MNEMO_RUNTIME_LOCK_OPERATION"
+CHILD_PID_ENV = "MNEMO_RUNTIME_LOCK_OWNER_PID"
+CHILD_TOKEN_ENV = "MNEMO_RUNTIME_LOCK_OWNER_TOKEN"
 EXPECTED_FIELDS = {
     "host",
     "operation",
@@ -592,6 +597,73 @@ def parse_arguments():
     return operation, command, custody
 
 
+def verify_child(expected_operation, expected_parent):
+    if OPERATION.fullmatch(expected_operation) is None:
+        return False
+    try:
+        parent_pid = int(expected_parent)
+        owner_fd_text = os.environ.get(CHILD_FD_ENV, "")
+        owner_pid_text = os.environ.get(CHILD_PID_ENV, "")
+        owner_fd = int(owner_fd_text)
+        owner_pid = int(owner_pid_text)
+    except ValueError:
+        return False
+    if (
+        str(owner_fd) != owner_fd_text
+        or owner_fd < 3
+        or str(owner_pid) != owner_pid_text
+        or owner_pid <= 0
+        or owner_pid != parent_pid
+        or os.environ.get(CHILD_ACTIVE_ENV) != "1"
+        or os.environ.get(CHILD_OPERATION_ENV) != expected_operation
+    ):
+        return False
+    owner_token = os.environ.get(CHILD_TOKEN_ENV, "")
+    custody = os.environ.get("MNEMO_CUSTODY_DIR", "")
+    if TOKEN.fullmatch(owner_token) is None:
+        return False
+
+    parent = None
+    lock = None
+    independent_owner = None
+    try:
+        inherited_stat = os.fstat(owner_fd)
+        metadata = parse_metadata(read_owner(owner_fd, inherited_stat))
+        parent, parent_stat, _ = open_parent(custody)
+        lock, lock_stat = open_lock_directory(parent, parent_stat)
+        owner_path_stat = stat_at(lock, OWNER_NAME)
+        validate_owner(inherited_stat, lock_stat.st_dev)
+        validate_owner(owner_path_stat, lock_stat.st_dev)
+        if not same_identity(inherited_stat, owner_path_stat):
+            return False
+        independent_owner = os.open(OWNER_NAME, os.O_RDWR | NOFOLLOW, dir_fd=lock)
+        independent_stat = os.fstat(independent_owner)
+        validate_owner(independent_stat, lock_stat.st_dev)
+        if not same_identity(inherited_stat, independent_stat):
+            return False
+        if not owner_lock_is_held(independent_owner):
+            return False
+        if (
+            metadata["operation"] != expected_operation
+            or metadata["owner_token"] != owner_token
+            or metadata["pid"] != owner_pid
+            or metadata["uid"] != UID
+            or process_fingerprint(owner_pid)
+            != metadata["process_start_fingerprint"]
+        ):
+            return False
+        return True
+    except (OSError, UsageFailure, LockFailure):
+        return False
+    finally:
+        for descriptor in (independent_owner, lock, parent):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+
 def install_signal_handlers():
     child_holder = [None]
     received_signal = [None]
@@ -659,11 +731,25 @@ def process_group_exists(group_id):
     return True
 
 
-def run_child(command, child_holder, received_signal, forward):
+def run_child(command, child_holder, received_signal, forward, state=None):
+    child_environment = dict(os.environ)
+    pass_fds = ()
+    if state is not None:
+        child_environment.update(
+            {
+                CHILD_ACTIVE_ENV: "1",
+                CHILD_FD_ENV: str(state["owner"]),
+                CHILD_OPERATION_ENV: state["metadata"]["operation"],
+                CHILD_PID_ENV: str(os.getpid()),
+                CHILD_TOKEN_ENV: state["metadata"]["owner_token"],
+            }
+        )
+        pass_fds = (state["owner"],)
     try:
         child = subprocess.Popen(
             command,
-            env=dict(os.environ),
+            env=child_environment,
+            pass_fds=pass_fds,
             start_new_session=True,
         )
     except OSError:
@@ -719,6 +805,11 @@ def terminate_with_signal(signum):
 
 
 def main():
+    if sys.argv[1:2] == ["--verify-child"]:
+        if len(sys.argv) == 4 and verify_child(sys.argv[2], sys.argv[3]):
+            raise SystemExit(0)
+        raise SystemExit(1)
+
     state = None
     previous_handlers = {}
     previous_mask = None
@@ -741,7 +832,7 @@ def main():
         signal.pthread_sigmask(signal.SIG_SETMASK, runtime_mask)
         if received_signal[0] is None:
             return_code, _ = run_child(
-                command, child_holder, received_signal, forward
+                command, child_holder, received_signal, forward, state
             )
         else:
             return_code = 0

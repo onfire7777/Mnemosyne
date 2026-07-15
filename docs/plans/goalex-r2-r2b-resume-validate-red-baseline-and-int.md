@@ -115,12 +115,12 @@ including the formerly RED rotator test. Bash syntax, ShellCheck, Ruff, diff
 hygiene, and all 34 planning/config tests passed.
 
 ### Task 4: Contention, release, and no-detach contract tests
-- [x] Extend the focused tests to prove, for both callers: acquisition precedes every side effect; contention with a concurrent shared-lock holder fails closed without any sandbox mutation; release occurs on success and on handled signals; and the synchronous-completion / no-`setsid`-`setpgid`-daemonize / no-session-change / no-uid-transition contract holds (mirror the existing R2a test patterns).
+- [x] Extend the focused tests to prove, for both callers: acquisition precedes every side effect; contention with a concurrent shared-lock holder fails closed without any sandbox mutation; release occurs on success and on handled signals; and the synchronous-completion / no-caller-`setsid`-`setpgid`-daemonize / coordinator-owned-child-session / no-uid-transition contract holds (mirror the existing R2a test patterns).
 - [x] Under the retry-gated admission, run the full focused selection plus `ruff format --check` on touched test files; commit the GREEN work as small conventional commits.
 
 Task 4 evidence (2026-07-15): both integrations now have focused contention,
-synchronous-lifetime, handled-signal cleanup, process-session/uid, and static
-no-detach/source-boundary coverage. Admission samples passed at 16:38:08Z
+synchronous-lifetime, handled-signal cleanup, coordinator-child-session/uid, and
+static no-detach/source-boundary coverage. Admission samples passed at 16:38:08Z
 (39% free after correcting the macOS metric, load1 6.53), 16:39Z (42%, 7.31),
 16:39Z (41%, 6.57), and 16:40Z (39%, 7.89); every valid sample had zero
 resident Ollama models and the unchanged 20-container `infra` stack. The

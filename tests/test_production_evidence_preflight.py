@@ -30,6 +30,8 @@ def _runtime_lock_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     custody_dir.mkdir(mode=0o700)
     (custody_dir / "locks").mkdir(mode=0o700)
     monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
+    yield
+    assert not (custody_dir / "locks" / "runtime-exclusive" / "owner.json").exists()
 
 
 def _preflight_rows_by_lane(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
