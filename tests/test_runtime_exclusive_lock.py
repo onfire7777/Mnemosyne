@@ -150,6 +150,23 @@ def _coordinator_namespace() -> dict[str, Any]:
     return namespace
 
 
+def test_read_owner_is_position_independent(tmp_path: Path) -> None:
+    namespace = _coordinator_namespace()
+    owner = tmp_path / OWNER_NAME
+    raw = b'{"operation":"capture-production-evidence"}\n'
+    owner.write_bytes(raw)
+    descriptor = os.open(owner, os.O_RDONLY)
+    try:
+        os.lseek(descriptor, 1, os.SEEK_SET)
+        owner_stat = os.fstat(descriptor)
+        assert namespace["read_owner"](descriptor, owner_stat) == raw
+        assert os.lseek(descriptor, 0, os.SEEK_CUR) == 1
+        assert namespace["read_owner"](descriptor, owner_stat) == raw
+        assert os.lseek(descriptor, 0, os.SEEK_CUR) == 1
+    finally:
+        os.close(descriptor)
+
+
 def _assert_fixed_failure(
     completed: subprocess.CompletedProcess[str],
     *,
@@ -419,24 +436,32 @@ def test_caller_handled_signal_releases_shared_lock(
 
 
 @pytest.mark.parametrize(
-    ("script", "operation"),
+    ("script", "operation", "cleanup_boundary"),
     [
-        (CAPTURE_SCRIPT, "capture-production-evidence"),
-        (ROTATOR_SCRIPT, "rotate-production-mcp-client-cert"),
+        (CAPTURE_SCRIPT, "capture-production-evidence", "PREFLIGHT_ONLY=0"),
+        (
+            ROTATOR_SCRIPT,
+            "rotate-production-mcp-client-cert",
+            "normal_pair_is_valid() {",
+        ),
     ],
 )
 def test_caller_source_keeps_lock_boundary_first_and_forbids_detach(
-    script: Path, operation: str
+    script: Path, operation: str, cleanup_boundary: str
 ) -> None:
     source = script.read_text(encoding="utf-8")
+    assignment = source.index(f"RUNTIME_LOCK_OPERATION={operation}")
     boundary = source.index('if [ "${MNEMO_RUNTIME_LOCK_ACTIVE:-0}" != "1" ]')
     verification = source.index('runtime-exclusive-lock.sh" --verify-child', boundary)
     invocation = source.index(
         'runtime-exclusive-lock.sh" "$RUNTIME_LOCK_OPERATION" --', boundary
     )
-    assert boundary < verification < invocation
-    assert source.index("unset MNEMO_RUNTIME_LOCK_ACTIVE", invocation) > invocation
-    assert f"RUNTIME_LOCK_OPERATION={operation}" in source
+    cleanup = source.index("unset MNEMO_RUNTIME_LOCK_ACTIVE", invocation)
+    block_end = source.index(cleanup_boundary, cleanup)
+    lock_entry_block = source[assignment:block_end]
+    assert assignment < boundary < verification < invocation < cleanup < block_end
+    assert "unset MNEMO_RUNTIME_LOCK_ACTIVE" in lock_entry_block
+    assert f"RUNTIME_LOCK_OPERATION={operation}" in lock_entry_block
     forbidden = ("setsid", "setpgid", "daemonize")
     assert all(token not in source for token in forbidden)
 

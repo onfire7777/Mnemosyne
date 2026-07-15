@@ -337,8 +337,7 @@ def open_lock_directory(parent, parent_stat):
 
 def read_owner(descriptor, owner_stat):
     try:
-        os.lseek(descriptor, 0, os.SEEK_SET)
-        raw = os.read(descriptor, MAX_METADATA_BYTES + 1)
+        raw = os.pread(descriptor, MAX_METADATA_BYTES + 1, 0)
         after = os.fstat(descriptor)
     except OSError:
         raise LockFailure
