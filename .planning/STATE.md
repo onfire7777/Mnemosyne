@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: R2b review hardening and tracker reconciliation are merged through main@f50cec0ddc65e81c0f819376bcb3224eb6328618 via PRs #17/#18; the 2026-07-15T22:59:07Z..22:59:40Z full-workload preflight was rejected because its first memory sample was 53% free against the 55% floor, so full-suite/Graphify/CBM/gbrain operations did not run; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted knowledge refresh remain open
-last_updated: "2026-07-15T23:01:27Z"
+last_updated: "2026-07-15T23:35:56Z"
 last_activity: 2026-07-15
 progress:
   total_phases: 7
@@ -286,6 +286,16 @@ host memory without service mutation, then rerun the entire preflight and
 require all three samples to pass. The last accepted merge-bound knowledge
 receipt remains PR #12; Graphify/CBM/gbrain freshness remains explicitly open.
 No live/protected/public/Vault/CA/`ca.crt` action occurred.
+
+Branch-hygiene note (2026-07-15): local branch
+`codex/r2b-capture-rotator-lock` is intentionally preserved at `0826154`.
+Its unpushed receipt commit records three failed hardware-admission samples
+(`2026-07-15T17:51:07Z` 21.5% free/load1 6.03,
+`2026-07-15T17:56:15Z` 21.8%/5.33, and `2026-07-15T18:01:22Z`
+19.5%/5.67) that are not recorded on merged `main`; every sample had zero
+resident Ollama models and the unchanged 20-container stack, and no pytest or
+live mutation ran. The fully merged remote branch was deleted, along with the
+listed superseded local and remote reconciliation/review branches.
 
 Historical checkpoint (2026-07-15): R2b review hardening is merged to
 `main@5a6ce1921c1537b6090cf40600581f9fe956fe1f` through PR #17. Exact-head CI
