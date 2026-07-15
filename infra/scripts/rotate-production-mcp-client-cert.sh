@@ -117,12 +117,14 @@ fi
   exit 64
 }
 
-if [ "${MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE:-0}" != "1" ]; then
+RUNTIME_LOCK_OPERATION=rotate-production-mcp-client-cert
+if [ "${MNEMO_RUNTIME_LOCK_ACTIVE:-0}" != "1" ] || \
+  ! "$SCRIPT_DIR/runtime-exclusive-lock.sh" --verify-child \
+    "$RUNTIME_LOCK_OPERATION" "$PPID"; then
   if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
     set -- --test-fixture-transaction
   fi
-  exec env MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE=1 \
-    "$SCRIPT_DIR/runtime-exclusive-lock.sh" rotate-production-mcp-client-cert -- \
+  exec "$SCRIPT_DIR/runtime-exclusive-lock.sh" "$RUNTIME_LOCK_OPERATION" -- \
     /bin/bash "$SCRIPT_DIR/rotate-production-mcp-client-cert.sh" "$@"
 fi
 
@@ -276,7 +278,9 @@ then
   preflight_failed 'rotation process lock is invalid'
 fi
 unset "$LOCK_FD_ENV"
-unset MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE
+unset MNEMO_RUNTIME_LOCK_ACTIVE MNEMO_RUNTIME_LOCK_OWNER_FD \
+  MNEMO_RUNTIME_LOCK_OPERATION MNEMO_RUNTIME_LOCK_OWNER_PID \
+  MNEMO_RUNTIME_LOCK_OWNER_TOKEN
 
 normal_pair_is_valid() {
   env \

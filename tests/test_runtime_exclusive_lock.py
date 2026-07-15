@@ -150,6 +150,23 @@ def _coordinator_namespace() -> dict[str, Any]:
     return namespace
 
 
+def test_read_owner_is_position_independent(tmp_path: Path) -> None:
+    namespace = _coordinator_namespace()
+    owner = tmp_path / OWNER_NAME
+    raw = b'{"operation":"capture-production-evidence"}\n'
+    owner.write_bytes(raw)
+    descriptor = os.open(owner, os.O_RDONLY)
+    try:
+        os.lseek(descriptor, 1, os.SEEK_SET)
+        owner_stat = os.fstat(descriptor)
+        assert namespace["read_owner"](descriptor, owner_stat) == raw
+        assert os.lseek(descriptor, 0, os.SEEK_CUR) == 1
+        assert namespace["read_owner"](descriptor, owner_stat) == raw
+        assert os.lseek(descriptor, 0, os.SEEK_CUR) == 1
+    finally:
+        os.close(descriptor)
+
+
 def _assert_fixed_failure(
     completed: subprocess.CompletedProcess[str],
     *,
@@ -243,10 +260,21 @@ def test_rotator_acquires_runtime_lock_before_first_side_effect(
 
 
 @pytest.mark.parametrize("caller", ["capture", "rotator"])
+@pytest.mark.parametrize("spoof_reentry", [False, True])
 def test_caller_contention_fails_before_sandbox_mutation(
-    tmp_path: Path, caller: str
+    tmp_path: Path, caller: str, spoof_reentry: bool
 ) -> None:
     custody_dir, command, environment, mutation_root = _caller_case(tmp_path, caller)
+    if spoof_reentry:
+        environment.update(
+            {
+                "MNEMO_RUNTIME_LOCK_ACTIVE": "1",
+                "MNEMO_RUNTIME_LOCK_OWNER_FD": "999999",
+                "MNEMO_RUNTIME_LOCK_OPERATION": f"{caller}-forged",
+                "MNEMO_RUNTIME_LOCK_OWNER_PID": str(os.getpid()),
+                "MNEMO_RUNTIME_LOCK_OWNER_TOKEN": "f" * 64,
+            }
+        )
     process, _, release = _spawn_owner(custody_dir, tmp_path)
     probe_log = Path(environment["RUNTIME_LOCK_PROBE_LOG"])
     before = set(mutation_root.iterdir()) if mutation_root.exists() else set()
@@ -271,7 +299,56 @@ def test_caller_contention_fails_before_sandbox_mutation(
 
 
 @pytest.mark.parametrize("caller", ["capture", "rotator"])
-def test_caller_stays_synchronous_without_session_or_uid_transition(
+def test_caller_rejects_copied_owner_proof_from_unrelated_process(
+    tmp_path: Path, caller: str
+) -> None:
+    custody_dir, command, environment, mutation_root = _caller_case(tmp_path, caller)
+    operation = (
+        "capture-production-evidence"
+        if caller == "capture"
+        else "rotate-production-mcp-client-cert"
+    )
+    process, _, release = _spawn_owner(
+        custody_dir,
+        tmp_path,
+        operation=operation,
+    )
+    owner = custody_dir / "locks" / LOCK_NAME / OWNER_NAME
+    owner_fd = os.open(owner, os.O_RDONLY)
+    metadata = json.loads(owner.read_text(encoding="utf-8"))
+    environment.update(
+        {
+            "MNEMO_RUNTIME_LOCK_ACTIVE": "1",
+            "MNEMO_RUNTIME_LOCK_OWNER_FD": str(owner_fd),
+            "MNEMO_RUNTIME_LOCK_OPERATION": operation,
+            "MNEMO_RUNTIME_LOCK_OWNER_PID": str(metadata["pid"]),
+            "MNEMO_RUNTIME_LOCK_OWNER_TOKEN": str(metadata["owner_token"]),
+        }
+    )
+    before = set(mutation_root.iterdir()) if mutation_root.exists() else set()
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            env=environment,
+            pass_fds=(owner_fd,),
+            text=True,
+            timeout=SUBPROCESS_TIMEOUT,
+        )
+    finally:
+        os.close(owner_fd)
+        _finish_owner(process, release)
+
+    assert completed.returncode == 75
+    assert completed.stdout == ""
+    assert completed.stderr == "runtime-exclusive-lock result=lock_deferred\n"
+    after = set(mutation_root.iterdir()) if mutation_root.exists() else set()
+    assert after == before
+
+
+@pytest.mark.parametrize("caller", ["capture", "rotator"])
+def test_caller_remains_synchronous_in_coordinator_session_without_uid_transition(
     tmp_path: Path, caller: str
 ) -> None:
     custody_dir, command, environment, _ = _caller_case(tmp_path, caller)
@@ -299,6 +376,8 @@ def test_caller_stays_synchronous_without_session_or_uid_transition(
         assert process.poll() is None
         assert observed["uid"] == os.getuid()
         assert observed["sid"] == observed["pgrp"]
+        assert observed["sid"] != os.getsid(0)
+        assert observed["pid"] != observed["sid"]
         release.touch()
         process.communicate(timeout=SUBPROCESS_TIMEOUT)
     except BaseException:
@@ -310,7 +389,7 @@ def test_caller_stays_synchronous_without_session_or_uid_transition(
             process.communicate(timeout=SUBPROCESS_TIMEOUT)
         raise
 
-    assert process.returncode != 0
+    assert process.returncode == 97
     assert not owner.exists()
 
 
@@ -357,28 +436,32 @@ def test_caller_handled_signal_releases_shared_lock(
 
 
 @pytest.mark.parametrize(
-    ("script", "sentinel", "operation"),
+    ("script", "operation", "cleanup_boundary"),
     [
-        (
-            CAPTURE_SCRIPT,
-            "MNEMO_CAPTURE_RUNTIME_LOCK_ACTIVE",
-            "capture-production-evidence",
-        ),
+        (CAPTURE_SCRIPT, "capture-production-evidence", "PREFLIGHT_ONLY=0"),
         (
             ROTATOR_SCRIPT,
-            "MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE",
             "rotate-production-mcp-client-cert",
+            "normal_pair_is_valid() {",
         ),
     ],
 )
 def test_caller_source_keeps_lock_boundary_first_and_forbids_detach(
-    script: Path, sentinel: str, operation: str
+    script: Path, operation: str, cleanup_boundary: str
 ) -> None:
     source = script.read_text(encoding="utf-8")
-    boundary = source.index(f'if [ "${{{sentinel}:-0}}" != "1" ]')
-    invocation = source.index(f'runtime-exclusive-lock.sh" {operation} --', boundary)
-    assert invocation > boundary
-    assert source.index("unset " + sentinel, invocation) > invocation
+    assignment = source.index(f"RUNTIME_LOCK_OPERATION={operation}")
+    boundary = source.index('if [ "${MNEMO_RUNTIME_LOCK_ACTIVE:-0}" != "1" ]')
+    verification = source.index('runtime-exclusive-lock.sh" --verify-child', boundary)
+    invocation = source.index(
+        'runtime-exclusive-lock.sh" "$RUNTIME_LOCK_OPERATION" --', boundary
+    )
+    cleanup = source.index("unset MNEMO_RUNTIME_LOCK_ACTIVE", invocation)
+    block_end = source.index(cleanup_boundary, cleanup)
+    lock_entry_block = source[assignment:block_end]
+    assert assignment < boundary < verification < invocation < cleanup < block_end
+    assert "unset MNEMO_RUNTIME_LOCK_ACTIVE" in lock_entry_block
+    assert f"RUNTIME_LOCK_OPERATION={operation}" in lock_entry_block
     forbidden = ("setsid", "setpgid", "daemonize")
     assert all(token not in source for token in forbidden)
 
