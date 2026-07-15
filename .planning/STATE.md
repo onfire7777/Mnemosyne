@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: R2a is merged to main through PR #13 and PR #11 at 79f6b58 after exact-head CI runs 29377793617 and 29378482152; post-merge main CI 29379113689 is green. This documentation reconciliation's exact-head/final-main CI and the hardware-admitted exact-final-main Graphify/CBM/gbrain refresh complete the delivery receipt. R2b-R2d, R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, every protected/public or human-owned action, and the separate Vault trust-file maintenance defect remain open
-last_updated: "2026-07-15T00:42:46Z"
+last_updated: "2026-07-15T00:45:53Z"
 last_activity: 2026-07-14
 progress:
   total_phases: 7
