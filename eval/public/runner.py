@@ -35,6 +35,11 @@ from mnemosyne.providers.grounded_protocol import (
     canonical as grounded_canonical,
     role_digests,
 )
+from mnemosyne.providers.extractive_decomposer import (
+    CONTENT_SHA256 as EXTRACTIVE_DECOMPOSER_CONTENT_SHA256,
+    SPEC as EXTRACTIVE_DECOMPOSER_SPEC,
+    SPEC_SHA256 as EXTRACTIVE_DECOMPOSER_SPEC_SHA256,
+)
 
 ROOT = Path(__file__).parent
 _HEX = set("0123456789abcdef")
@@ -126,7 +131,7 @@ def load_qa_protocol() -> dict[str, Any]:
 
 
 def validate_qa_protocol(protocol: Any) -> None:
-    expected_keys = {"abstention", "anchor_normalizer", "reader_schema", "candidate_manifest_schema", "decoding", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
+    expected_keys = {"abstention", "anchor_normalizer", "reader_schema", "candidate_manifest_schema", "decoding", "decomposer", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
     if not isinstance(protocol, dict) or set(protocol) != expected_keys or protocol.get("version") != GROUNDED_PROTOCOL_VERSION:
         raise ValueError("frozen QA protocol is missing or has the wrong version")
     if protocol.get("retrieval_baselines") != _FROZEN_RETRIEVAL_BASELINES:
@@ -137,6 +142,7 @@ def validate_qa_protocol(protocol: Any) -> None:
         raise ValueError("held-out split may not be used as development data")
     expected = {
         "model": {"provider": "ollama", "selector": MODEL_SELECTOR, "content_sha256": MODEL_CONTENT_SHA256, "resolved_content_sha256_required": True},
+        "decomposer": EXTRACTIVE_DECOMPOSER_SPEC,
         "prompt": {"roles": PROMPT_BUNDLES, "serializer": SERIALIZER_SPEC, "complete_role_custody_sha256_required": True},
         "decoding": GENERATION_SPEC,
         "evidence_budget": {"max_records": 20, "max_characters": 24000, "max_hops": 3},
@@ -145,7 +151,7 @@ def validate_qa_protocol(protocol: Any) -> None:
         "reader_schema": READER_SCHEMA_SPEC,
         "split_roles": {"synthetic": "development", "qa_hard_v2": "frozen-internal", "longmemeval-cleaned": "held-out-test", "hipporag-validation": "held-out-validation"},
         "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"},
-        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "anchor_normalizer_sha256", "reader_schema_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "evidence_budget", "abstention", "transport_retries"]},
+        "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "decomposer_spec_sha256", "decomposer_implementation_sha256", "anchor_normalizer_sha256", "reader_schema_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "evidence_budget", "abstention", "transport_retries"]},
     }
     if any(protocol.get(key) != value for key, value in expected.items()) or protocol.get("phase11_custody") != _FROZEN_PHASE11_CUSTODY:
         raise ValueError("frozen QA protocol custody is not the exact canonical contract")
@@ -157,7 +163,7 @@ def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None =
     required = set(protocol["candidate_manifest_schema"]["required"])
     if not isinstance(manifest, dict) or set(manifest) != required:
         raise ValueError("candidate manifest schema mismatch")
-    for key in ("git_sha", "model_content_sha256", "anchor_normalizer_sha256", "reader_schema_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256"):
+    for key in ("git_sha", "model_content_sha256", "decomposer_spec_sha256", "decomposer_implementation_sha256", "anchor_normalizer_sha256", "reader_schema_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256"):
         value = manifest.get(key)
         length = 40 if key == "git_sha" else 64
         if not isinstance(value, str) or len(value) != length or set(value) - _HEX:
@@ -186,6 +192,8 @@ def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str
     validate_qa_protocol(protocol)
     return {
         "anchor_normalizer_sha256": hashlib.sha256(grounded_canonical(protocol["anchor_normalizer"])).hexdigest(),
+        "decomposer_spec_sha256": EXTRACTIVE_DECOMPOSER_SPEC_SHA256,
+        "decomposer_implementation_sha256": EXTRACTIVE_DECOMPOSER_CONTENT_SHA256,
         "reader_schema_sha256": hashlib.sha256(grounded_canonical(protocol["reader_schema"])).hexdigest(),
         "decoding_sha256": hashlib.sha256(grounded_canonical(protocol["decoding"])).hexdigest(),
         "prompt_sha256": hashlib.sha256(grounded_canonical(protocol["prompt"]["roles"])).hexdigest(),
@@ -375,6 +383,7 @@ def run_public_suite(
             "candidate_git_sha": candidate["git_sha"],
             "candidate_manifest_sha256": hashlib.sha256(_canonical(candidate)).hexdigest(),
             "decoding": protocol["decoding"],
+            "decomposer": protocol["decomposer"],
             "evidence_budget": protocol["evidence_budget"],
             "prompt": {
                 "aggregate_sha256": digests["prompt_sha256"],

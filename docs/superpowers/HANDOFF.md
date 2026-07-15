@@ -1,5 +1,9 @@
 # Native Acceleration Program — Agent Handoff
 
+> **Historical handoff (2026-07-12):** This branch-era program record is not
+> the active project queue. Its completed work is retained for provenance;
+> resume current work from `.planning/STATE.md` and `.planning/ROADMAP.md`.
+
 **As of:** 2026-07-03 · branch `phase3/providers-consolidation` · Phases 0, 1, 2, and 3 complete; Phase 4 remains evidence-gated.
 
 You are taking over an in-progress, multi-phase engineering program on the Mnemosyne codebase.

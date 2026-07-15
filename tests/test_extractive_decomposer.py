@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from mnemosyne.answering import _source_bound_anchors, AnswerLimits
 from mnemosyne.providers.extractive_decomposer import (
     ExtractiveQueryDecomposer,
     extract_hop_zero_anchor,
@@ -22,6 +23,7 @@ def test_extractive_decomposition_anchor_matrix() -> None:
         result = extract_hop_zero_anchor(case["question"])
         assert result == tuple(case["expected"]), case["id"]
         assert not result or result[0] in case["question"]
+        assert _source_bound_anchors(list(result), (case["question"],), AnswerLimits()) == result
 
 
 def test_provider_defers_authorized_evidence_traversal_to_orchestrator() -> None:
@@ -41,6 +43,13 @@ def test_provider_defers_authorized_evidence_traversal_to_orchestrator() -> None
         {"question": "cobalt", "evidence": [], "extra": True},
         {"question": 7, "evidence": []},
         {"question": "cobalt", "evidence": "not-a-sequence-of-records"},
+        {"question": "cobalt", "evidence": ()},
+        {"question": "cobalt", "evidence": [{}]},
+        {"question": "cobalt", "evidence": [{"cid": "c1", "content": ""}]},
+        {
+            "question": "cobalt",
+            "evidence": [{"cid": "c1", "content": "ok", "extra": True}],
+        },
     ],
 )
 def test_provider_rejects_invalid_payloads(payload: dict[str, object]) -> None:

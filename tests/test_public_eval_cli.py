@@ -14,6 +14,13 @@ import pytest
 from eval.harness.cli_driver import CLIError, MnemoCLI
 from eval.public.bundle import BundleError, verify_report, write_report
 from eval.public.runner import run_public_suite
+from mnemosyne.providers.extractive_decomposer import CONTENT_SHA256, SELECTOR
+
+
+_QUERY_CUSTODY_ENV = {
+    "MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256": CONTENT_SHA256,
+    "MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR": SELECTOR,
+}
 
 
 def test_evaluation_read_only_disables_http_cache_and_command_retrievers(
@@ -376,10 +383,12 @@ def test_public_answer_and_batch_are_ordered_grounded_and_store_immutable(
         """#!/usr/bin/env python3
 import json, sys
 from mnemosyne.providers.grounded_protocol import GENERATION_SPEC, role_digests
+from mnemosyne.providers.extractive_decomposer import disclosure
 request = json.load(sys.stdin)
 role = request["prompt_boundary"]["role"]
-metadata = {"role": role, "model": "qwen3:8b", "model_content_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
-            **role_digests(role), "decoding_options": GENERATION_SPEC}
+metadata = (disclosure() if role == "query_decomposer" else
+            {"role": role, "model": "qwen3:8b", "model_content_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+             **role_digests(role), "decoding_options": GENERATION_SPEC})
 if role == "query_decomposer":
     evidence = request.get("evidence") or []
     response = {"queries": ([] if evidence else [request["question"]]), "metadata": metadata}
@@ -394,6 +403,7 @@ json.dump(response, sys.stdout)
     )
     provider.chmod(0o700)
     env = {
+        **_QUERY_CUSTODY_ENV,
         "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
@@ -459,10 +469,12 @@ def test_capture_batch_paraphrase_uses_initial_decomposition_and_reaches_reader(
     provider.write_text(
         """import json, sys
 from mnemosyne.providers.grounded_protocol import GENERATION_SPEC, role_digests
+from mnemosyne.providers.extractive_decomposer import disclosure
 request = json.load(sys.stdin)
 role = request["prompt_boundary"]["role"]
-metadata = {"role": role, "model": "qwen3:8b", "model_content_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
-            **role_digests(role), "decoding_options": GENERATION_SPEC}
+metadata = (disclosure() if role == "query_decomposer" else
+            {"role": role, "model": "qwen3:8b", "model_content_digest": "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
+             **role_digests(role), "decoding_options": GENERATION_SPEC})
 evidence = request.get("evidence") or []
 if role == "query_decomposer":
     queries = (["Mara"] if not evidence else
@@ -476,6 +488,7 @@ json.dump(response, sys.stdout)
 """
     )
     env = {
+        **_QUERY_CUSTODY_ENV,
         "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",
@@ -513,6 +526,7 @@ def test_answer_batch_prevalidates_and_provider_failures_leave_no_state(
         f"import pathlib,time\npathlib.Path({str(marker)!r}).write_text('called')\ntime.sleep(1)\n"
     )
     env = {
+        **_QUERY_CUSTODY_ENV,
         "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
         "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": f"{sys.executable} {provider}",
         "MNEMOSYNE_GROUNDED_READER_PROVIDER": "command",

@@ -11,7 +11,7 @@
 - [ ] **Phase 12: Grounded Multi-Hop Answer Synthesis** - Close Plan A S1 under public and private regression gates.
 - [ ] **Phase 13: External Benchmark Adapters and Scheduled CI** - MemoryAgentBench, BEAM, and regression-only cadence.
 - [ ] **Phase 14: Reproducibility Standard and Independent Reproduction** - M2/M3 publication eligibility.
-- [ ] **Phase 15: Security, Calibration, Performance, and Scale Columns** - Plan A S3/S4 measured evidence.
+- [ ] **Phase 15: Memory Capability and Evidence Closure** - Plan A S2-S5 capability, security, calibration, performance, scale, and research closure.
 - [ ] **Phase 16: Neutral Leaderboard Build and Launch** - L1-L4 after PBPP and Part I gates.
 
 ### Phase 10: Public Harness and Neutral Governance Foundation
@@ -85,13 +85,21 @@ third-party reproduction for at least one headline-eligible result.
 **Depends on:** Phases 11-13
 **Plans:** Not planned
 
-### Phase 15: Security, Calibration, Performance, and Scale Columns
+### Phase 15: Memory Capability and Evidence Closure
 
-**Goal:** Produce publishable attack-under-defense, public-label calibration,
-warm/concurrent latency, 100k-item, and provider-default evidence.
-**Requirements:** CAP-004, CAP-005, CAP-006, RAIL-001..004
+**Goal:** Execute Plan A in dependency order after S1: multi-timescale and
+sleep consolidation, freshness/expiry, global map-reduce sensemaking,
+surprise-gated writes, security/calibration evidence, performance/scale
+closure, the cartridge A/B, and the activation-memory go/no-go research note.
+It also closes the physical 8 GiB compact grounded-QA path without weakening
+the shared quality or custody gates.
+**Requirements:** CAP-004..011, RAIL-001..004
 **Depends on:** Phases 10-14
 **Plans:** Not planned
+
+**Required plan order:** S2 capability upgrades; S3 security/calibration; S4
+performance/scale; S5 research closure. S5 remains non-gating for public launch
+except that its promised research artifact must exist before Plan A is complete.
 
 ### Phase 16: Neutral Leaderboard Build and Launch
 
