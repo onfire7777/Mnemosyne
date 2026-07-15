@@ -61,6 +61,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
+if [ "${MNEMO_CAPTURE_RUNTIME_LOCK_ACTIVE:-0}" != "1" ]; then
+  exec env MNEMO_CAPTURE_RUNTIME_LOCK_ACTIVE=1 \
+    "${HERE}/runtime-exclusive-lock.sh" capture-production-evidence -- \
+    /bin/bash "${HERE}/capture-production-evidence.sh" "$@"
+fi
+unset MNEMO_CAPTURE_RUNTIME_LOCK_ACTIVE
+
 PREFLIGHT_ONLY=0
 ENV_FILE=""
 FINGERPRINT_RECORD_OUTPUT=""

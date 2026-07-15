@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: R2a is merged to main through PR #13 and PR #11 at 79f6b58 after exact-head CI runs 29377793617 and 29378482152; post-merge main CI 29379113689 is green. This documentation reconciliation's exact-head/final-main CI and the hardware-admitted exact-final-main Graphify/CBM/gbrain refresh complete the delivery receipt. R2b-R2d, R3/R4, live rotation/no-op proof, candidate-v19 external custody and exact-scale receipt, every protected/public or human-owned action, and the separate Vault trust-file maintenance defect remain open
-last_updated: "2026-07-15T00:45:53Z"
-last_activity: 2026-07-14
+stopped_at: R2b capture and rotator shared-lock integration is implemented and proven on codex/r2b-capture-rotator-lock; this branch's PR body owns its exact-head and post-merge CI receipts. R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted Graphify/CBM/gbrain refresh remain open
+last_updated: "2026-07-15T17:09:13Z"
+last_activity: 2026-07-15
 progress:
   total_phases: 7
   completed_phases: 2
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R1c landed through PR #12 as `97f3c66`. R2a exact head `5bfd53d` passed CI `29377793617`, merged through PR #13 as `33967b1`, then passed PR #11 exact-head CI `29378482152` and merged to `main` through PR #11 as `79f6b58`. This accepts the R2a coordinator source; it does not activate the ordinary `staged_only` production path, complete R2b-R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
-Last activity: 2026-07-14 — R2a passed green `bash -n`, ShellCheck, Ruff check/format, `git diff --check`, 55/55 focused lock tests, 39/39 section-31 rails, 7/7 section-33 tests, and 2/2 planning tests; independent review and terminal CodeRabbit completed before its exact-head and stacked-to-main CI/merge chain. Post-merge main CI `29379113689` passed all six gating jobs. The merged PR body for this reconciliation is the live owner for its own exact-head/final-main CI and the later mutable-index receipt, avoiding a commit that would instantly stale those indexes. The last accepted merge-bound knowledge receipt remains PR #12 until a complete full-workload hardware/TLS/Vault/service/topology preflight admits Graphify, CBM, and gbrain refresh against the exact final main SHA. The latest read-only gbrain Doctor probe reports one non-OK check, `cycle_freshness`; supervisor health is clean with zero 24-hour crashes, all nine historical sync failures are acknowledged, and embeddings are complete. No gbrain write/source sync, live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
+Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration is implemented and proven on `codex/r2b-capture-rotator-lock`; merging is owned by this branch's delivery PR. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The external `vault-tls/ca.crt` still contains the Caddy client-auth root and fails the Vault server validator; the authoritative `step-ca-root.crt` passes. Repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
+Last activity: 2026-07-15 — R2b passed its validated RED baseline, 93-test focused selection, 39/39 section-31 rails, 7/7 section-33 tests, 34/34 planning/config tests, ShellCheck, `bash -n`, Ruff check/format, and `git diff --check`. The delivery PR body owns the exact-head and post-merge CI receipts. The last accepted merge-bound knowledge receipt remains PR #12 until a complete full-workload hardware/TLS/Vault/service/topology preflight admits Graphify, CBM, and gbrain refresh against the exact final main SHA. No gbrain write/source sync, live Docker/CA/secret/runtime mutation, product-model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred.
 
 ## Performance Metrics
 
@@ -255,7 +255,26 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest checkpoint (2026-07-14): R2a baseline `a91da2e`, review hardening
+Latest checkpoint (2026-07-15): R2b capture and rotator shared-lock integration
+is implemented and proven on `codex/r2b-capture-rotator-lock`. The evidence is
+the validated RED baseline, the green 93-test focused selection, 39/39 section-31
+rails, 7/7 section-33 tests, 34/34 planning/config tests, and green ShellCheck,
+`bash -n`, Ruff check/format, and diff hygiene. Hardware-admission samples were:
+16:17:55Z 36%/4.92, 16:18:48Z 41%/3.58, 16:19:00Z 41%/3.97,
+16:19:07Z 42%/3.74, 16:19:13Z 42%/3.60; 16:22:49Z 46%/8.01,
+16:24:13Z 44%/5.43, 16:25:29Z 43%/5.12; 16:30:44Z 42%/5.54,
+16:32:29Z 42%/5.43, 16:33:02Z 41%/6.12, 16:33:31Z 40%/6.06,
+16:34:47Z 42%/6.48; 16:38:08Z 39%/6.53, two 16:39Z samples at
+42%/7.31 and 41%/6.57, and 16:40Z 39%/7.89 (free memory/load1).
+Every sample had zero resident Ollama models and the unchanged 20-container
+`infra` stack. The per-task record is
+`docs/plans/goalex-r2-r2b-resume-validate-red-baseline-and-int.md`. The delivery
+PR body owns the exact-head and post-merge CI receipts. Explicitly open are
+R2c/R2d, R3/R4, live rotation/no-op proof, the separate atomic
+`vault-tls/ca.crt` repair, candidate-v19 external custody chain, and the
+hardware-admitted Graphify/CBM/gbrain refresh.
+
+Historical checkpoint (2026-07-14): R2a baseline `a91da2e`, review hardening
 `fb713d4`, and final documentation successor `5bfd53d` passed static checks,
 55/55 focused lock tests, 39/39 section-31 rails, 7/7 section-33 tests, 2/2
 planning tests, independent review, and terminal CodeRabbit. Exact head
