@@ -339,7 +339,7 @@ begins.
 
 ## Shared runtime lock contract
 
-**R2 status: R2a review fixes locally green on open PR #13; R2b-R2d open.** The current
+**R2 status: R2a is merged and source-accepted; R2b-R2d are open.** The current
 `.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
 and is deliberately held for the whole process, but it does not serialize
 capture, evaluation, runtime flip, or rollback workflows. R2a provides the
@@ -655,19 +655,18 @@ git diff --check
 
 ### R2a — Runtime lock helper
 
-Status: Baseline implementation `a91da2e`, status commit `48be88a`, and review
-hardening `fb713d4` are pushed
-on `codex/r2a-runtime-exclusive-lock`; PR #13 is open, non-draft, mergeable, and
-stacked on draft PR #11. The committed RED baselines are `199b898` and
-`93e0dc6`. Old head `48be88a` passed exact-head CI `29354723518`. GitHub
-CodeRabbit skipped the non-default stacked base; an authenticated terminal
-review and independent reviews drove the pushed hardening surface. That surface
-passes static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
-section-33 tests, and 2/2 planning tests. Final independent review is
-merge-clean and terminal CodeRabbit is complete. The remaining acceptance
-gates are exact-head PR #13 CI, PR13-to-PR11 merge, exact-head PR #11 CI,
-PR11-to-main merge, post-merge main CI, and an exact-main mutable-index
-refresh.
+Status: Baseline `a91da2e`, review hardening `fb713d4`, and final reviewed head
+`5bfd53d` are delivered. The committed RED baselines are `199b898` and
+`93e0dc6`. Static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
+section-33 tests, 2/2 planning tests, terminal CodeRabbit, and independent
+review are green. Exact head `5bfd53d` passed CI `29377793617` and merged
+through PR #13 as `33967b1`; that stacked head passed PR #11 CI `29378482152`
+and merged to `main` through PR #11 as `79f6b58`. Post-merge main CI
+`29379113689` passed all six gating jobs; this reconciliation's
+exact-head/final-main CI and an exact-final-main mutable-index refresh complete
+the delivery receipt. The live
+receipt is owned by the merged reconciliation PR body so a later repository
+commit cannot instantly stale the index SHA.
 
 Files:
 
