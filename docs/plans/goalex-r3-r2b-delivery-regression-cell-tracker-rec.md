@@ -57,10 +57,28 @@ stay green and unweakened.
 - `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests/test_runtime_exclusive_lock.py tests/test_production_evidence_preflight.py -k 'capture or rotator or runtime_lock'`
 
 ### Task 1: Head confirmation and full regression cell
-- [ ] Confirm a clean tree and head `61f1e1b`; `git fetch origin` and confirm `origin/main` is still `c5cfe03`. If main moved, rebase this never-pushed branch onto the new `origin/main` (this is not a shared-history rewrite), resolve conflicts minimally, and treat the rebased head as the delivery head for everything below.
-- [ ] Under the retry-gated admission (fresh sample per pytest run, all samples recorded), run every Validation Command above and confirm exit 0, including the full focused selection (expect ~93 passed).
-- [ ] In the same admitted window, re-run the §31 invariant-rail and §33 test-class selections exactly as the R2a delivery ran them (the invocations are recorded in the R2a checkpoint material in `.planning/STATE.md` and the gate-command blocks of `docs/superpowers/plans/2026-07-13-production-mcp-client-cert-rotation.md`; rails live in files such as `tests/test_parity_learning.py` and `tests/test_learning_and_attack_suite.py`, the §33 harness in `tests/test_g0_harness.py`). Require 39/39 and 7/7 green with no assertion weakened.
-- [ ] Inspect the complete `git diff main...HEAD` and run a secret/risky-file sweep over every changed file (no keys, tokens, DSNs, external secret paths, or unexpected binary/dotfiles). Record the results; do not push if anything fails.
+- [x] Confirm a clean tree and head `61f1e1b`; `git fetch origin` and confirm `origin/main` is still `c5cfe03`. If main moved, rebase this never-pushed branch onto the new `origin/main` (this is not a shared-history rewrite), resolve conflicts minimally, and treat the rebased head as the delivery head for everything below.
+- [x] Under the retry-gated admission (fresh sample per pytest run, all samples recorded), run every Validation Command above and confirm exit 0, including the full focused selection (expect ~93 passed).
+- [x] In the same admitted window, re-run the §31 invariant-rail and §33 test-class selections exactly as the R2a delivery ran them (the invocations are recorded in the R2a checkpoint material in `.planning/STATE.md` and the gate-command blocks of `docs/superpowers/plans/2026-07-13-production-mcp-client-cert-rotation.md`; rails live in files such as `tests/test_parity_learning.py` and `tests/test_learning_and_attack_suite.py`, the §33 harness in `tests/test_g0_harness.py`). Require 39/39 and 7/7 green with no assertion weakened.
+- [x] Inspect the complete `git diff main...HEAD` and run a secret/risky-file sweep over every changed file (no keys, tokens, DSNs, external secret paths, or unexpected binary/dotfiles). Record the results; do not push if anything fails.
+
+Task 1 evidence (2026-07-15): the clean live delivery head was `677b579`
+because the round-3 plan commit follows the accepted four delivery commits;
+`origin/main` remained `c5cfe03`, so no rebase was needed. Static validation
+passed: `git diff --check`, Ruff check/format, `bash -n`, and ShellCheck. Fresh
+admission samples passed at `17:03:49Z` (44% free, load1 6.17), `17:03:50Z`
+(44%, 6.17), `17:04:58Z` (43%, 4.38), and `17:05:00Z` (44%, 4.27), each
+with zero resident Ollama models and the unchanged 20-container `infra` stack.
+Planning/config passed 34 tests, §31 passed 39/39, and §33 passed 7/7. The
+first 93-test focused run had one isolated rotator SIGINT cleanup timeout; the
+exact node passed after a fresh `17:05:15Z` admission (43%, 3.69), and the
+complete 93-test selection passed after a fresh `17:05:16Z` admission (44%,
+3.69), again with zero models and the same stack. Full `main...HEAD` review
+found only the intended two scripts, two test files, and two plan records.
+Changed-file type/name scans found no binary, dotfile, credential file, key,
+token, credential-bearing DSN, or external secret content; the only
+`vault-tls/ca.crt` additions are explicit non-action boundary notes. Gitleaks
+scanned all five branch commits and reported no leaks.
 
 ### Task 2: Tracker reconciliation committed on the branch
 - [ ] Update `.planning/STATE.md`: refresh the frontmatter `stopped_at`/`last_updated`, update the "Current Position" status line, and add a new "Latest checkpoint (2026-07-15)" stating R2b capture+rotator shared-lock integration is implemented and proven on this branch (name the evidence: validated RED baseline, 93-test focused selection, §31 39/39, §33 7/7, planning/config 34/34, ShellCheck/`bash -n`/Ruff green, all hardware-admission samples with values, and the plan file `docs/plans/goalex-r2-r2b-resume-validate-red-baseline-and-int.md` as the per-task record). Follow the R2a pattern: state that the PR body owns the exact-head and post-merge CI receipt, and list explicitly open items — R2c/R2d, R3/R4, live rotation/no-op proof, the separate `vault-tls/ca.crt` atomic repair, candidate-v19 external custody chain, and the hardware-admitted Graphify/CBM/gbrain refresh.
