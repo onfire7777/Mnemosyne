@@ -23,6 +23,15 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 REPO = Path(__file__).resolve().parents[1]
 ROTATOR = REPO / "infra" / "scripts" / "rotate-production-mcp-client-cert.sh"
+
+
+@pytest.fixture(autouse=True)
+def _runtime_lock_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shared-lock wrapper has its own integration suite. These tests isolate
+    # the rotator body, including deliberate PATH substitutions for child tools.
+    monkeypatch.setenv("MCP_CLIENT_ROTATOR_RUNTIME_LOCK_ACTIVE", "1")
+
+
 VALIDATOR = REPO / "infra" / "validate" / "validate-production-mcp-client-tls.sh"
 DIAGNOSTIC = (
     REPO / "infra" / "validate" / "diagnose-production-mcp-client-tls-for-rotation.sh"
