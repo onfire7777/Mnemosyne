@@ -1,7 +1,7 @@
 # Production MCP Client Certificate Rotation
 
 Status: In Progress
-Updated: 2026-07-13
+Updated: 2026-07-14
 
 ## Objective
 
@@ -118,9 +118,10 @@ without inventing additional terminal results.
    mode/link identity is checked before and after nonblocking `flock`; the
    inherited descriptor is held through the final completion-receipt transition.
    This serializes cooperative rotator invocations only.
-4. The planned R2 shared runtime lock remains under
+4. The R2a shared runtime-lock coordinator is implemented at
    `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive`; its parent is a mode-`0700`,
-   non-symlink directory. R2 is not implemented by the local process lock.
+   non-symlink directory. The local process lock remains separate, and R2b-R2d
+   caller integrations remain open.
 5. A separate status-only directory is mounted read-only into `mnemo-metrics`.
    It contains only a schema-validated `status.json`; it contains no
    certificate, key, password, digest, backup, staging, journal, lock, secret
@@ -338,26 +339,46 @@ begins.
 
 ## Shared runtime lock contract
 
-**R2 status: not implemented.** The current `.mcp-client-rotation.lock`
-prevents overlapping cooperative rotator invocations and is deliberately held
-for the whole process, but it does not serialize capture, evaluation, runtime
-flip, or rollback workflows. The following is the cross-workflow target and
-remains open. Neither lock claims protection against a malicious process with
+**R2 status: R2a review fixes locally green on open PR #13; R2b-R2d open.** The current
+`.mcp-client-rotation.lock` prevents overlapping cooperative rotator invocations
+and is deliberately held for the whole process, but it does not serialize
+capture, evaluation, runtime flip, or rollback workflows. R2a provides the
+shared fail-closed coordinator; each caller still must be integrated and proven
+under R2b-R2d. Neither lock claims protection against a malicious process with
 the same uid; same-uid execution is inside the trusted operator boundary.
 
 The smallest shared helper is `infra/scripts/runtime-exclusive-lock.sh`. It:
 
-- validates a non-symlink mode-`0700` parent and atomically creates the lock
-  directory;
+- walks the complete custody ancestry descriptor-relative with `O_NOFOLLOW`,
+  permits only root/current-uid safe ancestors (including root-owned sticky
+  temporary roots), validates the exact mode-`0700` locks parent, and atomically
+  creates the lock directory;
 - creates an unguessable ownership token and records operation, PID, process
   start fingerprint, host, and UTC start in mode-`0600` metadata;
+- waits for a bounded in-progress owner publication and classifies held partial
+  metadata as contention without rewriting it;
 - releases only when the caller presents the same token and every ownership
   field still matches;
 - removes its own lock on handled signals through an owner-checked trap; and
 - fails closed on stale locks, dead PIDs, PID reuse, forged/malformed metadata,
   symlink substitution, unsafe modes, or owner mismatch. It never steals.
 
-The helper is acquired before any side effect by:
+The coordinator creates one dedicated child session/process group whose leader
+is the primary command. Signal forwarding remains enabled only while that
+leader is unreaped; handled signals are blocked across the poll/reap and holder
+clear so a recycled numeric PGID can never be signalled. After leader exit, the
+coordinator performs only a bounded drain for short-lived residual members; a
+drain timeout or any indeterminate group state retains the lock evidence.
+This is a trusted synchronous-caller boundary, not daemon supervision: the
+primary command must not return while long-running descendants remain, and an
+integrated caller or descendant must not call `setsid`/`setpgid`,
+detach/daemonize, or transition uid while ownership is active. A pre-launch
+`Popen` failure permits owner-checked cleanup; every post-launch uncertainty
+retains evidence instead of unlinking it. Every R2b-R2d caller integration must
+prove the synchronous completion, no-detach, no-session-change, and
+no-uid-transition contract in its focused tests before acceptance.
+
+R2b-R2d must integrate the helper before any side effect in:
 
 - `infra/scripts/rotate-production-mcp-client-cert.sh`;
 - `infra/scripts/capture-production-evidence.sh`;
@@ -508,11 +529,11 @@ git diff --check
 
 ### R1c — Consumer activation, probes, and rollback
 
-Status: The current success-completion/committed-finalization source-and-fixture
-slice is committed and pushed as `8e97442`, with evidence documentation at
-`6afd3b3`; pushed head `6afd3b3` matched upstream/remote with a clean tree before
-this status reconciliation. Final-head exact-head CI, merge, remaining R1c
-live-readiness work, and live proof remain open. The isolated
+Status: The success-completion/committed-finalization source-and-fixture slice
+was committed as `8e97442`, with evidence documentation at `6afd3b3`, and
+merged through PR #12 as `97f3c66`. Exact-head CI `29313243324` and post-merge
+CI `29314015888` are green. Remaining R1c live-readiness work and live proof
+remain open. The isolated
 blackbox-query helper selects exactly one running `infra` Caddy container,
 uses only the fixed BusyBox transport and encoded MetricsQL
 `timestamp(probe_success[2m]) if (last_over_time(probe_success[2m]) == 1)`
@@ -576,9 +597,10 @@ and a valid production MCP client chain. The locked configured suite then
 collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0
 errors in 702.564 seconds. These artifacts exercise the pre-commit working tree
 based on `82bc5d5e`; the tested source/test bytes were committed unchanged as
-`8e97442`, with evidence documentation at `6afd3b3`. Exact-head CI for the final
-status reconciliation remains pending. Older pre-completion evidence is
-historical only.
+`8e97442`, with evidence documentation at `6afd3b3`. Exact-head CI
+`29313243324` passed on final PR head `88067bc`; PR #12 then merged as
+`97f3c66`, whose post-merge CI `29314015888` passed all six gating jobs. Older
+pre-completion evidence is historical only.
 A fresh independent read-only security/correctness audit found no actionable
 issue in the committed R1c diff. Its residual limits match this contract: same-UID
 execution is trusted, producer output has no receiver ack, the local lock is not
@@ -633,12 +655,26 @@ git diff --check
 
 ### R2a — Runtime lock helper
 
+Status: Baseline implementation `a91da2e`, status commit `48be88a`, and review
+hardening `fb713d4` are pushed
+on `codex/r2a-runtime-exclusive-lock`; PR #13 is open, non-draft, mergeable, and
+stacked on draft PR #11. The committed RED baselines are `199b898` and
+`93e0dc6`. Old head `48be88a` passed exact-head CI `29354723518`. GitHub
+CodeRabbit skipped the non-default stacked base; an authenticated terminal
+review and independent reviews drove the pushed hardening surface. That surface
+passes static gates, 55/55 focused tests, 39/39 section-31 rails, 7/7
+section-33 tests, and 2/2 planning tests. Final independent review is
+merge-clean and terminal CodeRabbit is complete. The remaining acceptance
+gates are exact-head PR #13 CI, PR13-to-PR11 merge, exact-head PR #11 CI,
+PR11-to-main merge, post-merge main CI, and an exact-main mutable-index
+refresh.
+
 Files:
 
 - `infra/scripts/runtime-exclusive-lock.sh`
 - `tests/test_runtime_exclusive_lock.py`
 
-RED (expected: missing helper and owner-token semantics):
+RED (historical baseline: missing helper and owner-token semantics):
 
 ```sh
 uv run --locked pytest -q tests/test_runtime_exclusive_lock.py
@@ -655,8 +691,17 @@ uv run --locked pytest -q tests/test_runtime_exclusive_lock.py
 git diff --check
 ```
 
-Tests cover normal ownership, contention, stale lock, PID reuse, forged metadata,
-unsafe/symlink parent, signal cleanup, and owner-token mismatch.
+Tests cover normal ownership, acquisition ordering, contention, bounded held
+partial publication, stale/dead/PID-reused owners, forged or malformed
+metadata, descriptor-relative unsafe/symlink ancestry, pre-launch cleanup,
+post-launch uncertainty evidence retention, descendant lifetime with a real
+flock probe, an unreaped exited leader as a non-reusable PGID anchor, fixed-path
+process-group enumeration, post-exit descendant signal forwarding, bounded
+drain, atomic final scan/unpublication/reap, a no-signal post-reap existence
+proof, inherited and ordinary child/wrapper signal fidelity, release-driven
+bounded cleanup without raw PID/PGID signalling, invalid-usage non-execution,
+release tampering, and owner-token, inode, mode, hardlink, parent, and directory
+mismatch.
 
 ### R2b — Capture and rotator integration
 

@@ -220,7 +220,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 ---
 
 ## Appendix A — Dependency on Plan A
-Plan A (*The Memory System*) produces the capabilities this plan measures: elite retrieval, multi-hop synthesis (S1, the QA-number driver), security-under-attack and calibration (S3), and scale numbers (S4). Deterministic-retrieval results can be benchmarked and published on today's system; QA numbers improve as Plan A S1 lands.
+Plan A (*The Memory System*) produces the capabilities this plan measures: elite retrieval, multi-hop synthesis (S1, the QA-number driver), security-under-attack and calibration (S3), and scale numbers (S4). Deterministic-retrieval results can be benchmarked on today's system, but publication remains blocked on M2/M3, the complete PBPP bundle, genuine independent reproduction, and human approval; QA numbers improve as Plan A S1 lands.
 
 ## Appendix B — Leaderboard-credibility source map
 MTEB (arXiv 2506.21182; docs.mteb.org), HELM (2211.09110; crfm.stanford.edu), Chatbot Arena / LMArena (2403.04132) + Leaderboard Illusion (2504.20879) + Arena response (arena.ai/blog/our-response), GLUE/SuperGLUE (1804.07461 / 1905.00537), SWE-bench Verified (openai.com/index/introducing-swe-bench-verified) + SWE-bench Illusion (2506.12286), ARC-AGI (arcprize.org), Kaggle (kaggle.com/docs/competitions), Papers-with-Code shutdown (github.com/paperswithcode/paperswithcode-data/issues/116), memory-leaderboard call (2603.07670), in-repo landscape (`docs/research/AI-Memory-Systems-Market-Research-2026.md`).
