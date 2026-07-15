@@ -8,12 +8,38 @@ Status: mandatory for hardware-intensive local work
 - Colima: 6 CPUs, 12 GiB memory, production compose stack.
 - Host Ollama: one model at a time; no in-VM Ollama during host-model work.
 
+These thresholds protect this development host; they are not Mnemosyne's
+minimum product requirements. Runtime behavior continues to use the existing
+`floor`, `standard`, `accelerated`, and explicit `frontier` capability tiers.
+For the product quality path, every tier uses the same admitted
+quality-critical artifacts, policy, budgets, and decoded decisions on the same
+corpus and requests. Stronger systems may use wider batches, parallel channels,
+larger corpus capacity, and GPU/Metal execution providers to improve latency,
+throughput, capacity, and concurrency; they may not silently substitute a
+higher-scoring reader. Larger or hosted readers belong only to separately
+disclosed research, teacher, or comparison tracks and cannot establish the
+physical-floor product claim or replace any security/custody rail.
+Physical 8 GiB compact-model claims are governed separately by
+`COMPACT-MODEL-8GB-ACCEPTANCE.md`.
+
 This runbook applies before model pulls/loads, full test suites, benchmarks,
 index rebuilds, exact-scale evals, protected captures, and VM resizing. A failed
 gate means wait and recheck; it is not permission to raise a timeout or run in
 parallel.
 
+Treat CBM refreshes and gbrain capture/page-write/source-sync operations as
+index/model work unless their configured provider is proven not to invoke a
+local embedding model. A small knowledge write can load Ollama and invalidate
+an otherwise idle sample.
+
 ## Admission check
+
+`infra/scripts/eval-window-admission.sh` is a reclamation-only compatibility
+helper despite its historical filename. With explicit confirmation it may quit
+only the fixed Brave Browser/Discord allowlist, then exits nonzero with
+`ADMISSION PENDING`. It never stops services, validates certificates, samples
+hardware, or grants admission. Do not wrap its exit status as a workload gate;
+perform every check below separately after reclamation.
 
 Take three samples 15 seconds apart. Every sample must pass:
 
@@ -23,6 +49,18 @@ uptime
 ollama ps
 colima list
 docker ps --format '{{.Names}} {{.Status}}'
+docker context ls
+```
+
+Before the first sample, validate the production mTLS client pair without
+printing its contents:
+
+```sh
+SECRETS_DIR=${MNEMO_SECRETS_DIR:-/secure/outside/repo}
+infra/validate/validate-production-mcp-client-tls.sh \
+  "$SECRETS_DIR/stepca-acme-root.crt" \
+  "$SECRETS_DIR/mcp-client.crt" \
+  "$SECRETS_DIR/mcp-client.key"
 ```
 
 - Host memory-free percentage: at least 55% before model or protected work.
@@ -34,6 +72,21 @@ docker ps --format '{{.Names}} {{.Status}}'
   capture.
 - Colima must remain at 6 CPU / 12 GiB. Protected work additionally requires
   the expected service count with no restarting or unhealthy service.
+- Production Vault must be initialized and unsealed through the approved
+  operator health surface, and API/stream restart counts must remain stable.
+  Never print or persist unseal material while checking this condition.
+- The production MCP client certificate must validate for client-auth use and
+  remain outside its six-hour expiry floor against Caddy's exact client-auth
+  trust pool. A near-expiry or expired leaf or issuing chain rejects heavy-work
+  admission even when the public endpoint still answers.
+- Exactly one Mnemosyne `infra` compose project may be active across all Docker
+  contexts. Enumerate each reachable context with `docker --context CONTEXT
+  compose ls` and reject admission if the same working directory is live in
+  more than one VM. Do not stop a duplicate until its published ports, data
+  volumes, image/config identity, capture activity, and canonical ownership are
+  established; a second live stack is not disposable merely because it is old.
+  A stopped rollback VM may retain containers and volumes, but it must remain
+  stopped while the canonical stack is admitted.
 
 Targeted unit tests may run below the model/protected thresholds only when
 memory-free is at least 35%, host one-minute load is at most 10, no model is

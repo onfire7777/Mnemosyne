@@ -12,13 +12,21 @@ intervals. Families are never aggregated.
 
 ## Frozen Phase 12 QA protocol
 
-The `_qa_protocol` registry entry preregisters the static `qwen3:8b` Ollama
-selector, exact decoding options, evidence and hop budgets, canonical empty
-answer abstention, `qa-em-f1-v1`, frozen split roles, zero transport retries,
+The `_qa_protocol` registry entry preregisters the deterministic
+`mnemosyne-extractive-hop0-v1` decomposer separately from the static
+`qwen3:8b` Ollama reader selector, exact reader decoding options, evidence and
+hop budgets, canonical empty-answer abstention, `qa-em-f1-v1`, frozen split
+roles, zero transport retries,
 and a single held-out attempt. A post-commit candidate manifest is external,
-no-overwrite, and must bind the exact git SHA plus resolved model-content,
-prompt-template, evidence-serializer, decoding, and protocol digests before a
-frozen run. The registry deliberately contains no self-referential git SHA.
+no-overwrite, and must bind the exact git SHA plus decomposer, resolved reader
+model-content, decomposer-spec, decomposer-implementation, prompt-template,
+evidence-serializer, decoding, and protocol digests before a frozen run. The
+registry deliberately contains no self-referential git SHA or implementation
+digest; those are bound in the external post-commit manifest.
+
+`qa-smoke` is only a redistributable schema-and-custody self-test. It constructs
+a fixed prediction and exact disclosures without executing the grounded role
+runtime, so it is not runtime or answer-quality evidence.
 
 Phase 11 point metrics and generated report/manifest digests are frozen in that
 entry. QA bundles are separate from retrieval bundles, disclose reader custody

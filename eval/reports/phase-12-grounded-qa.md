@@ -4,8 +4,12 @@ Status: in progress — consumed v3, v13, v17, and v18 frozen runs remain below 
 
 ## Preregistered Candidate
 
-- Protocol: no next candidate preregistered; v18 is consumed and below threshold
-- Reader/decomposer: local Ollama `qwen3:8b`, exact content digest
+- Protocol source: candidate v19; external post-commit manifest pending
+- Decomposer: deterministic `mnemosyne-extractive-hop0-v1`, exact policy-spec digest
+  `623c47250430e7f3a00ce0f11053b9c5397d2efcddd89428b556c507fb50805d`
+- Decomposer implementation SHA-256:
+  `1f00f376e79385a52fabd6fd2013d993b4f6eae84cda1e4d0065d462f97e9c6b`
+- Reader: local Ollama `qwen3:8b`, exact content digest
   `500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41`
 - Transport retries: zero; maximum attempts per protected split: one
 - Evidence: at most 20 records, 24,000 characters, and 3 hops
@@ -28,8 +32,8 @@ The v3 `qa_hard_v2` one-shot was consumed and returned 24/24 empty
 abstentions with zero retrieval hops. Aggregate-only diagnosis identified the
 systemic pre-provider query-support gate; no protected question, trace, or
 content was inspected. LongMemEval-QA and Hippo reader evaluation remain not
-run. A new committed v9 candidate is required before any further protected
-action.
+run. At that checkpoint, a new committed v9 candidate was required before any
+further protected action.
 
 Candidate v4 was rejected at the synthetic live-model gate because its initial
 query used inferred intent terms rather than an independently retrievable
@@ -150,9 +154,9 @@ No protected content or per-ID result was inspected. Result SHA-256:
 `9c3fbb85704afceeff9a23d30fc6cabcc1f8e8aa80db9f1fb7d9ff2f300e303d`;
 ledger SHA-256:
 `5d68a738b3e3f7270e0f802a31c07e3425bf94516956df4027a2efb9a5781c41`.
-Because v18 made no aggregate improvement, no v19 candidate is preregistered;
-the next action is synthetic-only redesign, not another speculative protected
-attempt. Phase 12 evaluation already uses host Ollama 0.24.0 directly at
+Because v18 made no aggregate improvement, no v19 candidate was preregistered
+at that checkpoint; the next action was synthetic-only redesign, not another
+speculative protected attempt. Phase 12 evaluation already uses host Ollama 0.24.0 directly at
 `127.0.0.1:11434` with `qwen3:8b` on 100% GPU, so the production Colima
 performance apply would not accelerate this evaluator and remains deferred.
 
@@ -182,21 +186,96 @@ hop 0; after authorized evidence exposed Team Juniper, it generated two more
 Project Cobalt questions instead of selecting the new bridge. Neither model
 reached answer-minimality, scale preflight, preregistration, or protected
 evaluation. These results close model substitution as the immediate strategy.
-The next protocol must disclose decomposition separately from the reader and
-pass a broader synthetic matrix before it can become candidate v19.
+At that checkpoint, the next protocol had to disclose decomposition separately
+from the reader and pass a broader synthetic matrix before becoming candidate
+v19.
 
-The first pre-v19 redesign artifact is now an unwired provider-shaped
-extractive hop-0 planner. It emits at most one exact substring of the question,
-fails closed on custody/control terms, and deliberately emits no proposal once
-authorized evidence exists; the already-tested orchestrator remains the sole
-owner of later-hop authorized-evidence traversal and seen-query filtering. A
+Candidate v19 now wires a separately disclosed extractive hop-0 planner. It
+emits at most one exact substring of the question, fails closed on
+custody/control terms, and deliberately emits no proposal once authorized
+evidence exists; the already-tested orchestrator remains the sole owner of
+later-hop authorized-evidence traversal and seen-query filtering. A
 versioned 16-case development matrix covers proper and multiword names,
 acronyms, mixed alphanumerics, lowercase project/archive identifiers,
 hyphenation, generic marker use, marker-plus-intent cases, missing identifiers,
-deny terms, and Unicode-confusable control labels. The primitive is not wired
-into runtime custody and is not candidate v19; wiring requires separate
-disclosure, runtime/bundle custody, repeated synthetic validation, and the
+deny terms, and Unicode-confusable control labels. Runtime, environment,
+candidate-manifest, registry, public-bundle, and verifier custody bind the
+decomposer policy spec and exact implementation bytes independently from the
+reader. Candidate v19 still requires its
+external post-commit manifest, repeated synthetic validation, and the
 24-question exact-wrapper receipt before any protected attempt.
+
+The 2026-07-12 formal local admission retry failed before any suite or model
+work: the three memory-free samples were 24%, 25%, and 22% against the required
+55% floor. A follow-up audit found both the current Colima stack and an older
+Docker Desktop stack live from the same compose project, with Desktop owning
+host port 443 and retaining divergent persistent data.
+
+The authorized cutover selected Colima as canonical. Desktop writers were
+stopped before logical export; password-free globals plus `mnemosyne`,
+`keycloak`, and `mnemosyne_row10` custom dumps were stored outside the
+repository at
+`/Users/admin/mnemosyne-runtime-backups/20260712T220109Z-desktop-linux-pre-cutover/`.
+All three custom dumps passed `pg_restore --list`, all four files are mode
+`0600`, and their SHA-256 values are respectively
+`43499bd8a4699678a362a19b1ead3d32c8eb15eda51452f405dcef53d3c48142`,
+`308cd408b319fbb613a7f43bd0a29e22e4b3d0aea4d0daf5da1d901eb84d203f`,
+`351595b7d88feab24628a8951f54731383883a49b55fcb869d3c3ee8db1360a1`,
+and `011d04b4b15b621f959dd3df5559a300d6d1f4aa92ac925530980d820a5c3293`.
+The Desktop VM and all of its containers are stopped; its engine-local volumes
+remain intact as a rollback source. Divergent databases were not blindly
+overwritten or merged.
+
+Independent live verification corrected the earlier restart-loop diagnosis:
+TLS succeeds through the exact dual-root bundle mounted by API/stream and
+reaches Vault, which returns HTTP 503 because it is sealed. The initialized
+Vault is Shamir 1-of-1, not the documented 5-of-3 intent. API/stream therefore
+fail closed while loading the Vault-backed session keyring and were stopped
+after more than 1,300 retries each. Recovery requires the sole operator-held
+unseal key through an interactive non-logged surface. Separate maintenance is
+required to rotate the still-valid Vault leaf from its retained older Step CA
+generation to the current root. No admission threshold changed, and no
+candidate, exact-scale, held-out, or protected attempt was consumed.
+
+Earlier cutover checkpoint (superseded below): after closing Cotypist at
+roughly 3.36 GiB RSS, one lightweight sample reached
+56% free memory with acceptable host load and no resident model. The four
+runbook-authorized planning/status truth checks passed serialized. This is not
+a formal three-sample full-workload admission: Vault remains sealed and the
+canonical API/stream services remain intentionally stopped. A source-only
+bootstrap fix also stages changed Step CA roots and refuses automatic trust-
+bundle replacement; its red-green regression plus `bash -n`, ShellCheck, Ruff,
+and the three existing synthetic Vault TLS validator cases pass. No candidate,
+model, exact-scale, or protected work ran.
+
+The original one-share recovery file was subsequently found outside the
+repository at `/Users/admin/mnemosyne-prod-secrets/vault-init.json`. File type,
+owner, mode `0600`, one-key schema, and decoded key length matched the live
+initialized Shamir 1-of-1 Vault. The key was supplied only over hidden PTY
+input and never entered argv, environment, output, logs, history, or source.
+Vault now reports `sealed:false`; API and stream restarted with stable zero
+restart growth, Caddy reclaimed port 443, and the obsolete interactive prompt
+was closed.
+
+An authenticated ingress check then found that the independent short-lived MCP
+client certificate had expired. A fresh pair was issued under the unchanged
+JWK duration policy, staged and validated against the exact client-auth chain,
+published with the old pair retained externally, and the mounted blackbox and
+operator consumers were recreated. Both `/health` and `/stream/healthz` return
+HTTP 200 over TLS 1.3 with required client authentication.
+
+The post-recovery formal admission samples were 50%, 47%, and 48% free memory,
+so the unchanged 55% full-workload floor still rejects suites, models, indexes,
+exact-scale evaluation, and protected capture. All other sampled rails passed:
+load bounds, no resident model, one active Colima `infra` project, no
+restarting/unhealthy service, Vault unsealed, and stable API/stream restart
+counts. The pre-hardening live Vault/MCP validation remains preserved as
+recovery evidence. Under the separate lightweight >=35% rule, post-hardening
+Bash syntax, ShellCheck, Ruff, and 22 focused TLS/bootstrap cases pass. The
+focused regressions categorically reject a real empty-password encrypted PKCS#8
+key and legacy `Proc-Type: 4,ENCRYPTED`; live Vault/MCP validation was not rerun
+after the validator hardening. This recovery consumed no candidate, held-out,
+or protected attempt and changes no benchmark threshold.
 
 Future protected attempts now require a no-overwrite, candidate/runtime-bound
 receipt from the canonical 24-question `qa_scale_dev_v1` dataset. The exact CLI

@@ -71,8 +71,10 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
   frozen QA items; 22 abstained before hop 0. Candidate v18 added a longest
   shared literal-token fallback and reproduced the same aggregate exactly.
   No protected question, answer, trace content, or per-ID failure was inspected.
-  No v19 candidate is preregistered; synthetic-only hop-0 redesign is required
-  before another protected action.
+  At that checkpoint no v19 candidate existed, so synthetic-only hop-0 redesign
+  was required. Candidate v19 source custody now exists, but its external
+  post-commit manifest and exact-scale receipt remain required before another
+  protected action.
 - Phase 12 already invokes host Ollama 0.24.0 directly at `127.0.0.1:11434`
   with `qwen3:8b` on 100% GPU. The production Colima performance apply does not
   accelerate this evaluator and remains outside this capture lane.
@@ -80,7 +82,8 @@ evidence, cites active evidence CIDs for every claim, and abstains fail-closed.
 ## Completion Boundary
 
 Phase 12 completes CAP-001/CAP-002 only with structural trace and grounding
-proof. CAP-003 requires both frozen `qa_hard_v2` and all-500 public
-LongMemEval-QA point EM and token F1 at least 0.85, with no Phase 11 retrieval
-regression. BENCH-005 also requires reader-produced Hippo EM/F1 and positive,
-provenance-linked graph/PPR participation; otherwise it remains partial.
+proof. CAP-003 requires both frozen `qa_hard_v2` and all-500 held-out
+LongMemEval-QA public-dataset/internal-only point EM and token F1 at least 0.85,
+with no Phase 11 retrieval regression. BENCH-005 also requires reader-produced
+Hippo EM/F1 and positive, provenance-linked graph/PPR participation; otherwise
+it remains partial.

@@ -603,6 +603,9 @@ def _verify_qa_custody(
     build: dict[str, Any],
 ) -> None:
     from eval.public.runner import load_qa_protocol, qa_protocol_digests, require_clean_candidate_checkout, validate_candidate_manifest
+    from mnemosyne.providers.extractive_decomposer import (
+        disclosure as decomposer_disclosure,
+    )
     from mnemosyne.providers.grounded_protocol import PROMPT_BUNDLES, role_digests
 
     protocol = load_qa_protocol()
@@ -611,6 +614,8 @@ def _verify_qa_custody(
         raise BundleError("QA reader custody mismatch")
     if custody.get("protocol_version") != protocol["version"]:
         raise BundleError("QA protocol version mismatch")
+    if custody.get("decomposer") != protocol["decomposer"]:
+        raise BundleError("QA decomposer custody does not match preregistration")
     reader = custody.get("reader")
     if not isinstance(reader, dict) or set(reader) != {"model_content_sha256", "model_revision", "name", "provider", "selector"}:
         raise BundleError("QA reader model custody is incomplete")
@@ -663,6 +668,16 @@ def _verify_qa_custody(
         raise BundleError("embedded candidate manifest digest mismatch")
     if candidate.get("model_content_sha256") != reader["model_content_sha256"]:
         raise BundleError("candidate manifest model digest mismatch")
+    expected_trace_reader = {
+        "query_decomposer": decomposer_disclosure(),
+        "grounded_reader": {
+            "role": "grounded_reader",
+            "model": protocol["model"]["selector"],
+            "model_content_digest": reader["model_content_sha256"],
+            **role_digests("grounded_reader"),
+            "decoding_options": protocol["decoding"],
+        },
+    }
     if metadata.get("interval_methods") != protocol["interval_methods"]:
         raise BundleError("QA mixed interval declaration mismatch")
     intervals = measured.get("intervals", {})
@@ -675,6 +690,17 @@ def _verify_qa_custody(
     for trace in traces:
         if any(key in trace for key in ("score", "exact_match", "token_f1")):
             raise BundleError("reader traces may not self-score")
+        trace_reader = trace.get("reader")
+        if (
+            not isinstance(trace_reader, dict)
+            or set(trace_reader)
+            not in ({"query_decomposer"}, {"query_decomposer", "grounded_reader"})
+            or any(
+                trace_reader.get(role) != expected_trace_reader[role]
+                for role in trace_reader
+            )
+        ):
+            raise BundleError("QA trace reader disclosure does not match preregistration")
         answer, claims, abstained = trace.get("answer"), trace.get("claims"), trace.get("abstained")
         if "authorized_evidence_cids" in trace:
             raise BundleError("QA trace may not self-attest an authorized CID list")
@@ -683,6 +709,8 @@ def _verify_qa_custody(
             benchmark,
             protocol["evidence_budget"],
         )
+        if authorized and "grounded_reader" not in trace_reader:
+            raise BundleError("QA trace reader disclosure is incomplete for authorized evidence")
         expected_fingerprint = hashlib.sha256(_canonical(sorted(authorized))).hexdigest()
         if trace.get("authorized_evidence_fingerprint") != expected_fingerprint:
             raise BundleError("QA authorized evidence fingerprint mismatch")
@@ -692,6 +720,8 @@ def _verify_qa_custody(
             continue
         if abstained is not False or not isinstance(answer, str) or not answer or not isinstance(claims, list) or not claims:
             raise BundleError("non-abstained QA output requires answer and claims")
+        if set(trace_reader) != {"query_decomposer", "grounded_reader"}:
+            raise BundleError("non-abstained QA output requires complete reader disclosure")
         for claim in claims:
             if not isinstance(claim, dict) or set(claim) != {"evidence_cids", "spans", "text"}:
                 raise BundleError("QA claim schema is invalid")

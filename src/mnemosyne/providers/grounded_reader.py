@@ -15,6 +15,11 @@ from mnemosyne.providers.grounded_protocol import (
     MODEL_SELECTOR,
     role_digests,
 )
+from mnemosyne.providers.extractive_decomposer import (
+    CONTENT_SHA256 as EXTRACTIVE_DECOMPOSER_CONTENT_SHA256,
+    SELECTOR as EXTRACTIVE_DECOMPOSER_SELECTOR,
+    disclosure as extractive_decomposer_disclosure,
+)
 from mnemosyne.providers.bounded_command import (
     CommandOutputLimitError,
     run_bounded_command,
@@ -61,6 +66,8 @@ class CommandGroundedProvider:
     max_output_bytes: int = 256 * 1024
     expected_model: str = MODEL_SELECTOR
     expected_model_content_sha256: str | None = None
+    expected_query_model: str = EXTRACTIVE_DECOMPOSER_SELECTOR
+    expected_query_model_content_sha256: str = EXTRACTIVE_DECOMPOSER_CONTENT_SHA256
     _disclosures: dict[str, dict[str, object]] = field(default_factory=dict, init=False)
 
     def __post_init__(self) -> None:
@@ -87,18 +94,27 @@ class CommandGroundedProvider:
             raise ValueError("grounded answer role providers must use command transport")
         model_digest = os.environ.get("MNEMOSYNE_GROUNDED_MODEL_CONTENT_SHA256", "")
         model = os.environ.get("MNEMOSYNE_GROUNDED_MODEL_SELECTOR", "")
+        query_digest = os.environ.get("MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256", "")
+        query_model = os.environ.get("MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR", "")
         if model != MODEL_SELECTOR:
             raise ValueError("grounded reader model selector does not match preregistration")
         if not _MODEL_DIGEST.fullmatch(model_digest):
             raise ValueError("grounded reader expected model content digest is not configured")
         if model_digest != MODEL_CONTENT_SHA256:
             raise ValueError("grounded reader model content digest does not match preregistration")
+        if (
+            query_model != EXTRACTIVE_DECOMPOSER_SELECTOR
+            or query_digest != EXTRACTIVE_DECOMPOSER_CONTENT_SHA256
+        ):
+            raise ValueError("query decomposer disclosure does not match preregistration")
         return cls(
             query,
             reader,
             timeout_seconds=float(os.environ.get("MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT", "320")),
             expected_model=model,
             expected_model_content_sha256=model_digest,
+            expected_query_model=query_model,
+            expected_query_model_content_sha256=query_digest,
         )
 
     @property
@@ -153,10 +169,18 @@ class CommandGroundedProvider:
             raise ValueError(f"{role} provider disclosure is incomplete")
         disclosure = {key: value[key] for key in _DISCLOSURE_KEYS}
         options = disclosure["decoding_options"]
+        expected_model = (
+            self.expected_query_model if role == "query_decomposer" else self.expected_model
+        )
+        expected_content_digest = (
+            self.expected_query_model_content_sha256
+            if role == "query_decomposer"
+            else self.expected_model_content_sha256
+        )
         if (
             disclosure["role"] != role
             or not isinstance(disclosure["model"], str)
-            or disclosure["model"] != self.expected_model
+            or disclosure["model"] != expected_model
             or not isinstance(disclosure["model_content_digest"], str)
             or not _MODEL_DIGEST.fullmatch(disclosure["model_content_digest"])
             or any(
@@ -173,9 +197,16 @@ class CommandGroundedProvider:
         ).hexdigest()
         if actual != disclosure["decoding_sha256"]:
             raise ValueError(f"{role} decoding disclosure does not match")
-        if disclosure["model_content_digest"] != self.expected_model_content_sha256:
+        if disclosure["model_content_digest"] != expected_content_digest:
             raise ValueError(f"{role} model content disclosure does not match preflight")
-        frozen = role_digests(role)
+        frozen = (
+            {
+                key: extractive_decomposer_disclosure()[key]
+                for key in ("prompt_sha256", "serializer_sha256", "decoding_sha256")
+            }
+            if role == "query_decomposer"
+            else role_digests(role)
+        )
         if any(disclosure[key] != expected for key, expected in frozen.items()):
             raise ValueError(f"{role} disclosure does not match frozen protocol")
         return disclosure

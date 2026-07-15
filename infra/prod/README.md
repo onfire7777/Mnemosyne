@@ -30,6 +30,148 @@ docker compose -f infra/docker-compose.prod.yml up -d
 # trust the step-ca root on the host so chains validate (no tls_insecure_skip_verify anywhere)
 ```
 
+On a rerun, bootstrap exports the live Step CA root to
+`step-ca-root.crt.next` first. If it differs from the active trust bundle,
+bootstrap exits `78` and leaves the active file unchanged. Treat that as a CA
+migration checkpoint: validate and rotate every dependent leaf/client
+certificate in a maintenance window before publishing the staged root. Never
+collapse a compatibility bundle merely because one leaf validates.
+
+The MCP ingress uses a short-lived step-ca client certificate. Before any
+capture or hardware-intensive run, validate the full client-auth chain and its
+six-hour renewal floor:
+
+```bash
+SECRETS_DIR=${MNEMO_SECRETS_DIR:-/secure/outside/repo}
+infra/validate/validate-production-mcp-client-tls.sh \
+  "$SECRETS_DIR/stepca-acme-root.crt" \
+  "$SECRETS_DIR/mcp-client.crt" \
+  "$SECRETS_DIR/mcp-client.key"
+```
+
+`stepca-acme-root.crt` is the exact trust pool Caddy mounts for client-auth;
+the broader compatibility bundle is not an admissible substitute. The
+validator is fail-closed for exact trust-pool identity, required OpenSSL
+features, leaf or chain expiry at the renewal horizon, hostname, client-auth
+purpose, chain, key mismatch, symlinks, encrypted keys, and unsafe private-key
+permissions. Never place the private key or the step-ca
+provisioner password in argv, environment snapshots, logs, evidence bundles,
+or the repository.
+
+The R1c blackbox query helper is intentionally non-configurable: it accepts
+only a positive activation boundary with at most nanosecond precision, selects
+exactly one running `infra` Caddy container by Compose labels, and executes the
+fixed internal MetricsQL expression:
+
+```promql
+timestamp(probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}[2m])
+  if (last_over_time(probe_success{job="blackbox-tls",instance="https://mcp.mnemo.local"}[2m]) == 1)
+```
+
+The expression returns the last raw scrape timestamp only when the latest raw
+probe value is successful. Strict decimal validation requires one exact-label
+series with `boundary < raw sample <= query time <= receipt time` and a raw
+sample no older than 120 seconds. Ambiguous, oversized, malformed, non-finite,
+or non-exact responses fail closed; output is always a fixed summary.
+
+The rotator's R1c **fixture seam only** now proves the activation, recovery, and
+success-completion custody that surrounds that helper. Before fixture issuance
+it takes one bounded,
+project-scoped Docker snapshot and requires exactly one running `infra` blackbox
+exporter plus at most one running `infra` operator by Compose labels. It
+validates both external Keycloak password files against the closed mode/length/
+ASCII contract and records only prior running-state booleans. Each recreated
+fixture consumer receives a short-lived mode-`0600`
+dotenv under the external mode-`0700` rotation directory. Before any password
+byte is written, the schema-v2 transaction journal durably binds a planned token
+and then the exact single-link dotenv inode; a transaction-bound schema-v2
+receipt is published only after the payload and `ready` state are durable.
+Neither durable record stores password bytes, a password-derived verifier, or
+password-length metadata. Sanitized Compose children
+receive no ambient environment or password in argv. Cleanup durably enters
+`cleanup`, uses no-replace quarantine plus post-rename inode validation, and
+clears ownership last. Before fixed-receipt publication, the matching journal
+may recover only missing receipt state or exact owner-scoped partial temporary/
+quarantine residue. Once the fixed receipt exists, exact schema-v2 transaction/
+token/inode/link binding is mandatory; legacy or malformed fixed receipts,
+cross-transaction state, extra links, replacements, and foreign artifacts are
+preserved and fail closed. After each recreation the fixture takes one equally
+bounded snapshot and requires the same categorical consumer state. After the
+final snapshot it captures a nanosecond boundary, runs fixed mTLS probes for
+`/health` and `/stream/healthz` with the newly published pair and exact Caddy
+root, accepts only a strict single `2xx` status, and invokes the blackbox helper
+exactly once. Synthetic ordering tests bind the boundary after the final
+snapshot, including the optional operator path, and before the first direct
+probe. Immediately before the first fixture consumer touch, the working slice
+fsyncs `activation_started`. The fake-only path fsyncs `committed` only after
+both direct probes plus fresh blackbox evidence succeed, then enters authorized
+completion finalization. A failure
+after durable activation enters fsynced rollback phases, restores and normally
+validates the old pair, recreates exactly the recorded prior consumer set,
+proves stable recreation, repeats both direct probes with the old pair, and
+requires a fresh rollback blackbox success. It ends only as `rolled_back` or
+`rollback_failed`.
+
+Fixture startup resumes recognized `activation_started`,
+`rollback_restoring_certificate`, `rollback_restoring_key`, and
+`rollback_pair_restored` state without reissuing. Phase/pair corruption,
+Compose path/digest substitution, foreign residue, and consumer-set expansion
+fail closed while preserving evidence. Residual schema-v2
+`published_validated` remains compatibility-ambiguous and is preserved.
+Residual `committed` is re-proved through retained-generation/canonical pair
+identity, the unchanged six-hour validator, exact consumer cardinality and
+stability, both direct probes, and fresh blackbox evidence.
+
+Only `activated` and `committed_recovered` authorize a success completion
+receipt. Before journal unlink, the fixture durably creates or resumes a
+transaction-keyed pending receipt, revalidates and fsyncs its parent, then
+unlinks and parent-fsyncs the journal. It emits
+`mcp-client-rotation result=<result> transaction_id=<id>` once for that
+invocation and durably renames pending to `emitted`. If the emitted-parent fsync
+fails, the receipt returns to pending and the process exits 74 without a second
+result line. A later invocation may replay the same key; receivers must
+deduplicate `(transaction_id,result)`. `emitted` is producer state, not receiver
+acknowledgement. Rollback terminal receipts are not implemented.
+
+The mode-`0600` `.mcp-client-rotation.lock` is a cooperative, whole-invocation
+local rotator lock whose nofollow/device/inode/uid/mode/link identity is checked
+and whose descriptor remains held through the final durable receipt mark.
+Contention returns exactly `lock_deferred`/75. It is not the still-open R2
+cross-workflow `${MNEMO_CUSTODY_DIR}/locks/runtime-exclusive` contract and does
+not claim protection from a malicious same-UID process.
+
+Pre-commit working-tree verification based on `82bc5d5e` passes the full
+369-test rotator/blackbox
+pair, the unchanged 41-test production regression tier, all 39 section-31
+invariant rails, all 7 section-33 harness tests, and both planning traceability
+tests. The §33 artifact remains separate because the configured default suite
+collects `tests/`, not `eval/tests`. A fresh strong gate passed at 64%/64%/64%
+free memory, load1 3.23/3.69/3.35, load5 3.37/3.46/3.40, zero models or
+competing work, one reachable canonical 20-service `infra` project,
+initialized/unsealed Vault, stable API/stream identities and zero restart
+counts, and a valid production MCP client chain. The locked configured suite
+collected 2,636 tests: 2,496 passed, 140 expected skips, 0 failures, and 0 errors
+in 702.564 seconds. These are pre-commit working-tree artifacts based on
+`82bc5d5e`; the tested source/test bytes were committed unchanged as `8e97442`,
+with evidence documentation at `6afd3b3`. Exact-head CI `29313243324` passed on
+final PR head `88067bc`; PR #12 merged as `97f3c66`, and post-merge CI
+`29314015888` passed all six gating jobs. Older pre-completion evidence is
+historical only. A fresh independent read-only security/correctness
+audit found no actionable issue and retained the documented same-UID,
+no-receiver-ack, local-lock-not-R2, and live-rehearsal limits. The gate and
+postflight used
+only read-only Docker/Vault/restart/certificate queries and performed no
+issuance, certificate publication, secret change, or consumer recreation.
+Before any live activation, R1c must additionally align the host-captured
+boundary with the VM/VictoriaMetrics clock domain (or prove a conservative skew
+bound), poll across the 60-second scrape cadence with a fixed deadline, prove
+stable consumer IDs and restart counts, land R2 cross-workflow locking, pass
+exact-head CI, and pass a new strong hardware gate. R3/R4 and live rotation plus
+subsequent no-op proof remain open. No protected attempt or public claim is
+authorized by this fixture state. The normal production path still returns
+`staged_only` and cannot recreate a live consumer, so this fixture evidence is
+not authorization to run a live rotation.
+
 ## Profile + readiness
 ```bash
 cp infra/profiles/self-hosted.env /secure/outside/repo/production-render.env
@@ -45,8 +187,9 @@ offline `production-evidence-verify` with the independently retained fingerprint
 Rows flip Partial->Done only from that real evidence path; `capture-bc10` is the current attested bundle.
 
 ## Security gates that MUST hold before capture (see architecture §4)
-Fail-closed defaults (MCP `require_session=1`, object encryption `aesgcm`, sealed Vault, MFA-gated
-elevation, fail-closed provenance); Postgres least-privilege roles (`roles.sql`) with a live
+Fail-closed defaults (MCP `require_session=1`, object encryption `aesgcm`, Vault starts sealed and
+serving remains unavailable until operator unseal, MFA-gated elevation, fail-closed provenance);
+Postgres least-privilege roles (`roles.sql`) with a live
 `rolsuper`/`rolbypassrls` probe; single egress chokepoint; one published port (Caddy); digest-pinned
 images + policy-as-code CI; tamper-evident audit log.
 

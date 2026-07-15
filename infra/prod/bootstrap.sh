@@ -6,10 +6,12 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 SECRETS_DIR="${MNEMO_SECRETS_DIR:-/secure/outside/repo}"   # external, outside the repo
-HOST="${MNEMO_HOST:-mnemo.local}"
 
 echo "==> 0. Preconditions"
 command -v docker >/dev/null || { echo "docker required"; exit 1; }
+command -v openssl >/dev/null || { echo "openssl required"; exit 1; }
+command -v step >/dev/null || { echo "step CLI required"; exit 1; }
+command -v cmp >/dev/null || { echo "cmp required"; exit 1; }
 mkdir -p "$SECRETS_DIR"
 umask 077
 
@@ -42,18 +44,64 @@ SEAWEED
 fi
 
 echo "==> 2. step-ca: bring up, export the ROOT cert so Caddy chains to a real (non-self-signed) CA"
+STEP_CA_ROOT="$SECRETS_DIR/step-ca-root.crt"
+STEP_CA_ROOT_NEXT="${STEP_CA_ROOT}.next"
+[ ! -L "$STEP_CA_ROOT" ] || { echo "active step-ca trust bundle must not be a symlink" >&2; exit 65; }
+[ ! -L "$STEP_CA_ROOT_NEXT" ] || { echo "staged step-ca root must not be a symlink" >&2; exit 65; }
+if [ -e "$STEP_CA_ROOT" ] && [ ! -f "$STEP_CA_ROOT" ]; then
+  echo "active step-ca trust bundle must be a regular file" >&2
+  exit 65
+fi
+if [ -e "$STEP_CA_ROOT_NEXT" ] && [ ! -f "$STEP_CA_ROOT_NEXT" ]; then
+  echo "staged step-ca root must be a regular file" >&2
+  exit 65
+fi
+rm -f "$STEP_CA_ROOT_NEXT"
 docker compose -f "$REPO_ROOT/infra/docker-compose.prod.yml" up -d step-ca
 sleep 5
+STEP_CA_ROOT_TMP=$(mktemp "$SECRETS_DIR/.step-ca-root.crt.XXXXXX")
+trap 'rm -f "$STEP_CA_ROOT_TMP"' EXIT
 docker compose -f "$REPO_ROOT/infra/docker-compose.prod.yml" exec -T step-ca \
-  cat /home/step/certs/root_ca.crt > "$SECRETS_DIR/step-ca-root.crt"
+  cat /home/step/certs/root_ca.crt > "$STEP_CA_ROOT_TMP"
+chmod 0600 "$STEP_CA_ROOT_TMP"
+if [ ! -s "$STEP_CA_ROOT_TMP" ] || \
+  ! openssl x509 -in "$STEP_CA_ROOT_TMP" -noout >/dev/null 2>&1; then
+  echo "step-ca did not export a valid root certificate" >&2
+  exit 65
+fi
+mv "$STEP_CA_ROOT_TMP" "$STEP_CA_ROOT_NEXT"
+trap - EXIT
+if [ ! -f "$STEP_CA_ROOT" ]; then
+  mv "$STEP_CA_ROOT_NEXT" "$STEP_CA_ROOT"
+elif cmp -s "$STEP_CA_ROOT" "$STEP_CA_ROOT_NEXT"; then
+  rm -f "$STEP_CA_ROOT_NEXT"
+else
+  echo "    Current step-ca root differs from the active trust bundle." >&2
+  echo "    The active trust bundle was not replaced; the new root remains staged at:" >&2
+  echo "      $STEP_CA_ROOT_NEXT" >&2
+  echo "    Rotate and validate every dependent certificate in a maintenance window before publishing it." >&2
+  exit 78
+fi
 echo "    ACME provisioner + 90-day (2160h) TLS leaf duration are applied AUTOMATICALLY"
 echo "    by the step-ca CMD wrapper (infra/step-ca/mnemo-entrypoint.sh) at container start —"
 echo "    no manual 'step ca provisioner add acme' needed; it is idempotent on every boot."
 echo "    Trust the root on the host so backends validate the chain (security/no-skip-verify)."
-echo "    Issue the Vault leaf (infra/vault/vault.hcl expects it under \$MNEMO_SECRETS_DIR/vault-tls/):"
-echo "      mkdir -p $SECRETS_DIR/vault-tls"
-echo "      step ca certificate vault.mnemo.local $SECRETS_DIR/vault-tls/vault.crt \\"
-echo "        $SECRETS_DIR/vault-tls/vault.key --ca-url https://ca.mnemo.local --root $SECRETS_DIR/step-ca-root.crt"
+VAULT_TLS_DIR="$SECRETS_DIR/vault-tls"
+VAULT_CERT="$VAULT_TLS_DIR/vault.crt"
+VAULT_KEY="$VAULT_TLS_DIR/vault.key"
+if [ ! -f "$VAULT_CERT" ] || [ ! -f "$VAULT_KEY" ]; then
+  echo "    Vault TLS material is missing. Issue it from the current step-ca generation, then rerun bootstrap:"
+  echo "      mkdir -p $VAULT_TLS_DIR"
+  echo "      step ca certificate vault.mnemo.local $VAULT_CERT.next \\"
+  echo "        $VAULT_KEY.next --ca-url https://ca.mnemo.local --root $STEP_CA_ROOT"
+  echo "      chmod 0600 $VAULT_KEY.next"
+  echo "      infra/validate/validate-production-vault-tls.sh \\"
+  echo "        $STEP_CA_ROOT $VAULT_CERT.next $VAULT_KEY.next"
+  echo "      mv $VAULT_CERT.next $VAULT_CERT && mv $VAULT_KEY.next $VAULT_KEY"
+  exit 78
+fi
+"$REPO_ROOT/infra/validate/validate-production-vault-tls.sh" \
+  "$STEP_CA_ROOT" "$VAULT_CERT" "$VAULT_KEY"
 
 echo "==> 3. Vault: init + unseal (PRODUCTION = sealed, NO dev mode, NO committed root token)"
 echo "    Run the real flow against the vault service, store unseal/root material in your"
