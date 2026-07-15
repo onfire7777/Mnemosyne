@@ -64,12 +64,12 @@ State you inherit (verified):
 - CI failure history: the "Unit + drift checks" job previously failed on
   lock tests due to test-environment coupling, fixed by isolating rotator
   body tests from the runtime lock wrapper (commit `43e6cb4`). If that job
-  fails on this branch, the cause is almost certainly similar coupling in
-  the new `--verify-child` tests (inherited fds, process start-time
-  fingerprints, HOME/TMPDIR, CI process semantics) — fix ONLY test
-  isolation/environment issues with a small conventional commit after
-  root-cause diagnosis; NEVER weaken an assertion, validator, or shipped
-  script behavior.
+  fails on this branch, diagnose the root cause first. Fix only confirmed
+  test-environment coupling (inherited fds, process start-time fingerprints,
+  HOME/TMPDIR, CI process semantics) as a test-isolation change. If CI instead
+  reveals a behavior defect, follow Task 1's regression-first path and make
+  the smallest production fix. NEVER weaken an assertion, validator, or
+  shipped script behavior.
 - Landing pattern (follow the R2a/R2b precedent exactly): code PR first,
   merged on green exact-head CI; then a separate small `docs(planning)`
   reconciliation PR from fresh main. Never pre-record a future PR number,
@@ -118,7 +118,7 @@ green and unweakened at every commit.
 ### Task 2: Push, open the code PR, exact-head CI green, merge, verify
 - [ ] Push `codex/r2b-code-review-fixes` to origin (no force). Open one PR to `main` titled `fix(r2b-review): harden runtime-lock reentry against forgeable sentinel` whose body carries: the confirmed review finding (forgeable env sentinel), the `--verify-child` ownership-proof mechanism, RED/GREEN and focused test counts from Task 1, static/ShellCheck results, the admission sample(s), the secret-sweep result, explicit confirmation that no validator or staged-only boundary changed, the still-open follow-ups (R2c/R2d, R3/R4, live rotation proof, `vault-tls/ca.crt` repair), and the explicit note that full-suite admission is blocked by the production MCP client certificate expiry `2026-07-14T23:52:36Z` (recorded, not bypassed).
 - [ ] If the repo's review tooling (e.g. CodeRabbit terminal review or a configured security review) is available, run it on the pushed PR head and adjudicate every actionable finding — fix with small commits after root-cause diagnosis; never weaken assertions or bypass hooks.
-- [ ] Wait for exact-head CI on the pushed SHA (`gh pr checks`, `gh run list --commit <sha>`). All gating jobs must be green on that exact SHA — never reuse a stale-head run; the nightly DST/chaos soak skip is expected and acceptable. If "Unit + drift checks" fails, pull `--log-failed`, reproduce locally under a fresh admission sample, fix ONLY test isolation/environment coupling (see Overview precedent `43e6cb4`) with a new small commit, push, and wait for green on the new exact head. Record the root cause.
+- [ ] Wait for exact-head CI on the pushed SHA (`gh pr checks`, `gh run list --commit <sha>`). All gating jobs must be green on that exact SHA — never reuse a stale-head run; the nightly DST/chaos soak skip is expected and acceptable. If "Unit + drift checks" fails, pull `--log-failed`, reproduce locally under a fresh admission sample, and diagnose before editing. Fix confirmed test-environment coupling only as test isolation (see Overview precedent `43e6cb4`); handle a real behavior defect through Task 1's regression-first path. Push any minimal fix and wait for green on the new exact head. Record the root cause.
 - [ ] Only on green exact-head CI: `gh pr merge <n> --merge` (normal merge commit). Record the merge SHA. `git fetch origin`; verify the merge commit is on `origin/main` and that `git diff <branch-head> origin/main -- <the three scripts and three test files>` is empty. Fast-forward local `main`, re-run the static gate plus (after a fresh admission sample) the planning/config pair there, and watch the post-merge main CI run to green. Record both run ids.
 
 ### Task 3: Post-merge tracker reconciliation PR recording the merge and the expired-cert blocker
