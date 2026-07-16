@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: W1 local graph-substrate development is merged through Fix A PR #26 (ee6e0e2) and Fix B PR #28 (28a6d24), with the disclosure audit and tracker reconciliation in progress; CAP-003, BENCH-005, and Plan 12-04 remain partial behind production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt
-last_updated: "2026-07-16T09:39:28Z"
+stopped_at: W1 local graph-substrate development and disclosure reconciliation are merged through audit PR #30 as main@0865271 with exact-head and post-merge CI green; CAP-003, BENCH-005, and Plan 12-04 remain partial behind production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt
+last_updated: "2026-07-16T10:26:48Z"
 last_activity: 2026-07-16
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: W1 Phase 1 baseline landed through PR #23 (`83b2678` -> `4d691e8`, exact-head CI `29470245051`) with its custody fixes subsequently merged in PR #24. Fix A landed through PR #26 (`ac13abe` -> `ee6e0e2`, post-merge CI `29479553530`). Fix B landed through PR #28 (`94e8da5` -> `28a6d24`, exact-head CI `29483754981`, post-merge CI `29484670121`), and its receipt landed through PR #29 as `f040bfd` after post-merge run `29486629298`. The local dev proof has 7 persisted relations, positive graph contribution, Recall@5/nDCG@5 1.0, and byte-identical repeat traces. CAP-003, BENCH-005, and Plan 12-04 remain partial: production parity on `postgres-recursive-ppr`, runtime readiness, grounded-reader development QA, and the single protected attempt are still open.
-Last activity: 2026-07-16 — the audit distinguished the executed local engine from the configured/self-reported `postgres-recursive-ppr` adapter label and corrected the SLO renderer's hard-coded local prose. A fresh unchanged production MCP client TLS validation passed at `2026-07-16T09:39:28Z` without starting the VM or rotating certificates. VM restart plus Vault unseal, runtime-readiness repair (decomposer smoke and `/opt` role commands), R3/R4 live rotation including the saved `~/mnemosyne-tier-b-custody/rotator-version-check-fix.patch` via normal TDD+CI, the full suite, and CBM/gbrain/Graphify refresh at the final merged SHA are explicitly operator/admission-gated, not failures.
+Status: W1 Phase 1 baseline landed through PR #23 (`83b2678` -> `4d691e8`, exact-head CI `29470245051`) with its custody fixes subsequently merged in PR #24. Fix A landed through PR #26 (`ac13abe` -> `ee6e0e2`, post-merge CI `29479553530`). Fix B landed through PR #28 (`94e8da5` -> `28a6d24`, exact-head CI `29483754981`, post-merge CI `29484670121`), and its receipt landed through PR #29 as `f040bfd` after post-merge run `29486629298`. Disclosure audit PR #30 merged exact head `67546bb` as `0865271` after run `29489028437` passed; post-merge run `29489959348` passed on that merge SHA. The local dev proof has 7 persisted relations, positive graph contribution, Recall@5/nDCG@5 1.0, and byte-identical repeat traces. CAP-003, BENCH-005, and Plan 12-04 remain partial: production parity on `postgres-recursive-ppr`, runtime readiness, grounded-reader development QA, and the single protected attempt are still open.
+Last activity: 2026-07-16 — the audit distinguished the executed local engine from the configured/self-reported `postgres-recursive-ppr` adapter label and corrected the SLO renderer's hard-coded local prose. The first exact-head run `29488205019` exposed a cold-runner SQLite expiry-test timing flaw; the test was fixed without changing production behavior, and corrected exact-head/post-merge runs passed. A fresh unchanged production MCP client TLS validation passed at `2026-07-16T09:39:28Z` without starting the VM or rotating certificates. VM restart plus Vault unseal, runtime-readiness repair (decomposer smoke and `/opt` role commands), R3/R4 live rotation including the saved `~/mnemosyne-tier-b-custody/rotator-version-check-fix.patch` via normal TDD+CI, the full suite, and CBM/gbrain/Graphify refresh at the final merged SHA are explicitly operator/admission-gated, not failures.
 
 ## Performance Metrics
 
