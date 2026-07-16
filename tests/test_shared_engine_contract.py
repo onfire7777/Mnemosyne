@@ -3782,6 +3782,106 @@ def test_shared_engine_contract_relation_merge_preserves_disjoint_validity(
     }
 
 
+def test_shared_engine_contract_relation_merge_collapses_bridged_overlap_component(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, _user = engine_bundle
+    branch = f"shared-relation-bridge-{uuid4()}"
+    source = f"shared bridged relation source {uuid4()}"
+    predicate = "connects"
+    target = "shared bridged relation target"
+    first_cid = "e" * 64
+    second_cid = "f" * 64
+    bridge_cid = "1" * 64
+    transitive_cid = "2" * 64
+    first_from = datetime(2026, 1, 1, tzinfo=UTC)
+    first_to = datetime(2026, 3, 1, tzinfo=UTC)
+    second_from = datetime(2026, 4, 1, tzinfo=UTC)
+    second_to = datetime(2026, 6, 1, tzinfo=UTC)
+    transitive_from = datetime(2026, 5, 1, tzinfo=UTC)
+    transitive_to = datetime(2026, 7, 1, tzinfo=UTC)
+
+    _branch(engine, branch, tenant)
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            confidence=0.6,
+            valid_from=first_from,
+            valid_to=first_to,
+            source_evidence_cids=[first_cid],
+            access_policy={"tenant": tenant, "allow_roles": ["reader", "agent"]},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            confidence=0.7,
+            valid_from=second_from,
+            valid_to=second_to,
+            source_evidence_cids=[second_cid],
+            access_policy={"tenant": tenant, "allow_roles": ["reader", "auditor"]},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            confidence=0.8,
+            valid_from=transitive_from,
+            valid_to=transitive_to,
+            source_evidence_cids=[transitive_cid],
+            access_policy={"tenant": tenant, "allow_roles": ["reader"]},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            confidence=0.9,
+            valid_from=datetime(2026, 2, 1, tzinfo=UTC),
+            valid_to=datetime(2026, 5, 1, tzinfo=UTC),
+            source_evidence_cids=[bridge_cid],
+            access_policy={
+                "tenant": tenant,
+                "allow_roles": ["reader", "agent", "auditor"],
+            },
+        ),
+        branch=branch,
+    )
+
+    _merge(engine, branch, tenant)
+    matches = [
+        item
+        for item in engine.export_tenant(tenant)["relations"]
+        if item["branch"] == "main"
+        and item["source"] == source
+        and item["predicate"] == predicate
+        and item["target"] == target
+    ]
+
+    assert len(matches) == 1
+    assert matches[0]["confidence"] == 0.9
+    assert matches[0]["valid_from"] == first_from.isoformat().replace("+00:00", "Z")
+    assert matches[0]["valid_to"] == transitive_to.isoformat().replace("+00:00", "Z")
+    assert matches[0]["source_evidence_cids"] == [
+        bridge_cid,
+        transitive_cid,
+        first_cid,
+        second_cid,
+    ]
+    assert matches[0]["access_policy"] == {"tenant": tenant, "allow_roles": ["reader"]}
+
+
 def test_shared_engine_contract_deep_graph_respects_tenant_and_branch(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     other_tenant = f"{tenant}-other"

@@ -32,12 +32,11 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
-    _merge_relation_state,
+    _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
-    _relation_windows_overlap,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -4718,14 +4717,11 @@ class PostgresEngine:
                         peers = [
                             _row_to_relation(row, tenant_id) for row in cur.fetchall()
                         ]
-                        overlapping = [
-                            item
-                            for item in peers
-                            if _relation_windows_overlap(item, relation)
-                        ]
-                        if overlapping:
-                            target = overlapping[0]
-                            _merge_relation_state(target, relation)
+                        target, redundant = _merge_relation_overlap_component(
+                            relation,
+                            peers,
+                        )
+                        if target is not None:
                             cur.execute(
                                 """
                                 UPDATE relations
@@ -4744,6 +4740,12 @@ class PostgresEngine:
                                     target.id,
                                 ),
                             )
+                            for peer in redundant:
+                                cur.execute(
+                                    "DELETE FROM relations "
+                                    "WHERE tenant_id = %s AND branch = %s AND id = %s",
+                                    (db_tenant_id, into, peer.id),
+                                )
                             continue
                         cur.execute(
                             "UPDATE relations SET branch = %s "
