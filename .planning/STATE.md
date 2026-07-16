@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; tracker reconciliation landed through PR #18 as `f50cec0ddc65e81c0f819376bcb3224eb6328618`; the Task 4 gate record landed through PR #19 as `702ca8643f0953a62dfdebea80c28b442470fdfa`; and the orphaned round-5 review fixes landed through merge-commit PR #20 as `51fa8982cca39b7c765f44d47a64a2937c0c913b`. The HIGH landing-bypass finding is resolved without reset, rebase, force-push, or direct push to `main`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close R3/R4 rollback terminal receipts, or authorize live/protected/public work. The current production MCP client pair passed the unchanged validator on 2026-07-15 and its externally refreshed leaf expires `2026-07-16T21:18:25Z`, superseding the prior expired-leaf runtime state. CAP-003 and BENCH-005 remain partial. Full-workload admission still fails on the 55% free-memory floor. The external `vault-tls/ca.crt` still fails the Vault server validator while the authoritative `step-ca-root.crt` passes; repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
-Last activity: 2026-07-15 — PR #20 exact-head CI run `29465778730` passed on `f4636ee8560b7f17bbf3fe5ad33fdb85d87d818b` from `2026-07-16T02:06:24Z` through `02:20:20Z`; the merge commit `51fa8982cca39b7c765f44d47a64a2937c0c913b` landed at `02:20:36Z`; and post-merge main CI run `29466355604` passed from `02:20:39Z` through `02:34:50Z`. The permitted focused, section-31/33, planning/config, static, and shell gates remain green. The earlier strong full-suite retry sampled 45%/46%/45% free memory at `2026-07-16T00:47:04Z`, `00:53:03Z`, and `00:58:22Z`, so the full suite did not run. No full-suite, Graphify, CBM reindex, gbrain write/sync/doctor, certificate, Vault, Docker, CA, secret, model, protected, or public mutation occurred; the last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
+Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; tracker reconciliation landed through PR #18 as `f50cec0ddc65e81c0f819376bcb3224eb6328618`; the Task 4 gate record landed through PR #19 as `702ca8643f0953a62dfdebea80c28b442470fdfa`; the orphaned round-5 review fixes landed through merge-commit PR #20 as `51fa8982cca39b7c765f44d47a64a2937c0c913b`; and the final tracker reconciliation landed through PR #21 as `69cd2cf50df88b84790bc695f5d5509a4cc6353a`. The HIGH landing-bypass finding is resolved without reset, rebase, force-push, or direct push to `main`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close R3/R4 rollback terminal receipts, or authorize live/protected/public work. CAP-003 and BENCH-005 remain partial. Full-workload admission is rejected because the canonical production stack is stopped and the unchanged client TLS validator currently rejects the canonical root as a symlink. The external `vault-tls/ca.crt` repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
+Last activity: 2026-07-15 — on synchronized `main@69cd2cf50df88b84790bc695f5d5509a4cc6353a`, the complete read-only preflight sampled 70% free memory with load1/load5 2.78/2.35 at `2026-07-16T03:10:32Z`, 70% with 2.50/2.31 at `03:10:48Z`, and 70% with 2.30/2.28 at `03:11:04Z`; all three samples had zero resident models. Admission was rejected because Colima was stopped, no reachable `infra` compose project or 20-service stack existed, Vault and API/stream restart-count checks were therefore unavailable, and the unchanged production MCP client TLS validator rejected `/Users/admin/mnemosyne-prod-secrets/stepca-acme-root.crt` because it is a symlink. The leaf itself reports expiry `2026-07-16T21:18:25Z`. Owner: host operator. Next safe action: restore the canonical Colima/Vault/service topology and a regular-file canonical client-auth root through the approved operator runbooks, without weakening validators or deleting retained state, then rerun all three fresh samples. No full suite, Graphify, CBM change-detection/reindex, gbrain write/sync/doctor, certificate rotation, Vault, Docker, CA, secret, model, protected, or public mutation ran; the last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
 
 ## Performance Metrics
 
@@ -246,13 +246,16 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   expiring `2026-07-16T21:18:25Z`; the unchanged canonical validator passed.
   This task did not rotate or modify it. Keep the operator-owned rotation
   runbook ready before the six-hour floor and never weaken the validator.
-- The 2026-07-15 full-workload admission attempt failed because sample 1 had
-  53% free memory against the 55% floor; samples 2 and 3 were exactly 55%.
-  Owner: host operator. Required remediation: wait for or safely reclaim host
-  memory without mutating Colima/Vault/services, then rerun the complete
-  three-sample hardware/TLS/Vault/service/topology preflight. Next safe action:
-  perform only lightweight planning work until all three fresh samples pass.
-  Full-suite/Graphify/CBM/gbrain freshness rows remain explicitly open.
+- The 2026-07-15 final full-workload admission attempt passed the memory,
+  load, and model-idle checks in all three samples (70% free; load1/load5
+  2.78/2.35, 2.50/2.31, and 2.30/2.28; zero resident models) but was rejected
+  because Colima was stopped. The required 20-service stack, Vault status,
+  API/stream restart counts, and single-project topology were unavailable, and
+  the unchanged client TLS validator rejected the canonical root as a symlink.
+  Owner: host operator. Next safe action: restore the canonical topology and a
+  regular-file canonical root through approved operator runbooks, then rerun
+  all three fresh samples. Full-suite/Graphify/CBM/gbrain freshness rows remain
+  explicitly open.
 - Repair runtime readiness first: root-cause the decomposer smoke timeout and
   restore the absent `/opt` role commands without weakening any readiness gate.
 - Then implement the dev-only graph-PPR consolidation/extractor fix using the
