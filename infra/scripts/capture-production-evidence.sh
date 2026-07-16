@@ -62,15 +62,12 @@ INFRA_DIR="$(cd "${HERE}/.." && pwd)"
 REPO_DIR="$(cd "${INFRA_DIR}/.." && pwd)"
 
 RUNTIME_LOCK_OPERATION=capture-production-evidence
-if [ "${MNEMO_RUNTIME_LOCK_ACTIVE:-0}" != "1" ] || \
-  ! "${HERE}/runtime-exclusive-lock.sh" --verify-child \
-    "$RUNTIME_LOCK_OPERATION" "$PPID"; then
+if ! "${HERE}/runtime-exclusive-lock.sh" --verify-child \
+  "$RUNTIME_LOCK_OPERATION" "$PPID"; then
   exec "${HERE}/runtime-exclusive-lock.sh" "$RUNTIME_LOCK_OPERATION" -- \
     /bin/bash "${HERE}/capture-production-evidence.sh" "$@"
 fi
-unset MNEMO_RUNTIME_LOCK_ACTIVE MNEMO_RUNTIME_LOCK_OWNER_FD \
-  MNEMO_RUNTIME_LOCK_OPERATION MNEMO_RUNTIME_LOCK_OWNER_PID \
-  MNEMO_RUNTIME_LOCK_OWNER_TOKEN
+unset MNEMO_RUNTIME_LOCK_OWNER_FD
 
 PREFLIGHT_ONLY=0
 ENV_FILE=""

@@ -57,13 +57,7 @@ def _runtime_lock_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     os.fsync(owner_fd)
     os.set_inheritable(owner_fd, True)
     monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
-    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_ACTIVE", "1")
     monkeypatch.setenv("MNEMO_RUNTIME_LOCK_OWNER_FD", str(owner_fd))
-    monkeypatch.setenv(
-        "MNEMO_RUNTIME_LOCK_OPERATION", "rotate-production-mcp-client-cert"
-    )
-    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_OWNER_PID", str(os.getpid()))
-    monkeypatch.setenv("MNEMO_RUNTIME_LOCK_OWNER_TOKEN", owner_token)
     yield
     assert owner.read_bytes() == payload
     os.close(owner_fd)
@@ -93,21 +87,14 @@ def _process_start_fingerprint(pid: int) -> str:
 
 
 def _runtime_lock_pass_fds(env: dict[str, str]) -> tuple[int, ...]:
-    if env.get("MNEMO_RUNTIME_LOCK_ACTIVE") != "1":
+    if "MNEMO_RUNTIME_LOCK_OWNER_FD" not in env:
         return ()
     return (int(env["MNEMO_RUNTIME_LOCK_OWNER_FD"]),)
 
 
 def _real_runtime_lock_env(env: dict[str, str], tmp_path: Path) -> dict[str, str]:
     result = dict(env)
-    for name in (
-        "MNEMO_RUNTIME_LOCK_ACTIVE",
-        "MNEMO_RUNTIME_LOCK_OWNER_FD",
-        "MNEMO_RUNTIME_LOCK_OPERATION",
-        "MNEMO_RUNTIME_LOCK_OWNER_PID",
-        "MNEMO_RUNTIME_LOCK_OWNER_TOKEN",
-    ):
-        result.pop(name, None)
+    result.pop("MNEMO_RUNTIME_LOCK_OWNER_FD", None)
     custody_dir = tmp_path / "real-runtime-lock-custody"
     (custody_dir / "locks").mkdir(parents=True, mode=0o700)
     result["MNEMO_CUSTODY_DIR"] = str(custody_dir)

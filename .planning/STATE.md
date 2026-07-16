@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: R2b review hardening and tracker reconciliation are merged through main@f50cec0ddc65e81c0f819376bcb3224eb6328618 via PRs #17/#18; the 2026-07-15T22:59:07Z..22:59:40Z full-workload preflight was rejected because its first memory sample was 53% free against the 55% floor, so full-suite/Graphify/CBM/gbrain operations did not run; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted knowledge refresh remain open
-last_updated: "2026-07-15T23:35:56Z"
+stopped_at: R2b review hardening is merged through PRs #17/#18/#19 and pre-review main@435fb5351e5f8bef85b4fd5b26bc2e1690aa6388; the 2026-07-16T00:47:04Z..00:58:22Z review full-suite admission retry was rejected at 45%/46%/45% free memory against the 55% floor, so the full suite did not run; the permitted focused, section-31/33, planning/config, static, and shell gates are green; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted full suite and knowledge refresh remain open
+last_updated: "2026-07-16T00:58:22Z"
 last_activity: 2026-07-15
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; and tracker reconciliation landed through PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The current production MCP client pair passed the unchanged validator on 2026-07-15 and its externally refreshed leaf expires `2026-07-16T21:18:25Z`, superseding the prior expired-leaf runtime state. Full-workload admission still failed because the first of three memory samples was 53% free against the 55% floor. The external `vault-tls/ca.crt` still fails the Vault server validator while the authoritative `step-ca-root.crt` passes; repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
-Last activity: 2026-07-15 — On exact final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, the complete read-only preflight sampled 53%/55%/55% free memory at `2026-07-15T22:59:07Z`, `22:59:24Z`, and `22:59:40Z`; load1/load5 were 1.66/1.97, 1.85/2.00, and 1.82/1.99; and no Ollama model was resident. Colima remained 6 CPU/12 GiB, exactly one reachable `infra` compose project ran 20 healthy services, API/stream identities and zero restart counts were stable, Vault was initialized/unsealed, and the corrected canonical TLS validation passed. Because every sample must reach 55% free, admission was rejected and no full suite, Graphify, CBM change-detection/reindex, gbrain write/sync/doctor, certificate rotation, live Docker/CA/secret/runtime mutation, model probe, exact-scale run, held-out attempt, protected attempt, or public action occurred. The last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
+Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; tracker reconciliation landed through PR #18 as `f50cec0ddc65e81c0f819376bcb3224eb6328618`; and the Task 4 gate record landed through PR #19 as `702ca8643f0953a62dfdebea80c28b442470fdfa`, before final pre-review base `main@435fb5351e5f8bef85b4fd5b26bc2e1690aa6388`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The current production MCP client pair passed the unchanged validator on 2026-07-15 and its externally refreshed leaf expires `2026-07-16T21:18:25Z`, superseding the prior expired-leaf runtime state. Full-workload admission still fails on the 55% free-memory floor. The external `vault-tls/ca.crt` still fails the Vault server validator while the authoritative `step-ca-root.crt` passes; repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
+Last activity: 2026-07-15 — Review fixes were validated under targeted-test samples at 45% free memory, acceptable load, zero resident Ollama models, and 20 healthy containers: the focused runtime-lock/preflight/rotator suite, 91 section-31/33 tests, 34 planning/config tests, Ruff, formatting, Bash syntax, ShellCheck, whitespace, and secret/risky-file sweeps passed. The strong full-suite retry sampled 45%/46%/45% free memory at `2026-07-16T00:47:04Z`, `00:53:03Z`, and `00:58:22Z`; load1/load5 were 2.14/2.33, 2.18/2.11, and 1.94/1.76, with zero resident models and 20 healthy containers. Because all three samples missed 55%, the full suite did not run. No full-suite, Graphify, CBM reindex, gbrain write/sync/doctor, certificate, Vault, Docker, CA, secret, model, protected, or public mutation occurred; the last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
 
 ## Performance Metrics
 
@@ -267,7 +267,23 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest checkpoint (2026-07-15): R2b tracker reconciliation is merged through
+Latest review checkpoint (2026-07-15): five independent review lanes examined
+the merged R2b hardening range. Confirmed fixes reduce the reentry proof channel
+to the inherited owner descriptor plus authoritative locked metadata, make
+`run_child` require acquired state, add direct `--verify-child` regression cases
+for matching ownership and one-invariant tampering, reconcile the missing PR #19
+receipt, and delete the fully landed PR #19 branch locally and remotely without
+force. The permitted focused, section-31/33, planning/config, static, and shell
+gates are green. The full suite did not run because the strong-admission retry
+sampled 45%/46%/45% free memory at `2026-07-16T00:47:04Z`, `00:53:03Z`, and
+`00:58:22Z` against the all-three-at-55% floor; load, model residency, and the
+20-container health check otherwise passed. Owner: host operator. Required
+remediation and next safe action: wait for or safely reclaim host memory without
+service mutation, then rerun the complete three-sample preflight. No live,
+protected, public, Vault, CA, certificate, Docker, model, Graphify, CBM-reindex,
+or gbrain mutation occurred.
+
+Previous checkpoint (2026-07-15): R2b tracker reconciliation is merged through
 PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, with exact-head
 CI run `29454727897` and post-merge main CI run `29455686269` green. The
 complete read-only preflight on that SHA recorded 53% free memory with
