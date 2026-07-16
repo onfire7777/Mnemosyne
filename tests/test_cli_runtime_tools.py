@@ -5226,6 +5226,7 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
     exported = run_cli(store, "export", "--tenant", TENANT)
     summary = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
     summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
+    fact_relation = next(item for item in exported["relations"] if item["predicate"] == "is")
 
     recompute = run_cli(
         store,
@@ -5245,11 +5246,14 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
     assert details["affected_evidence_cids"] == [ingested["cid"], summary["cid"]]
     assert details["affected_projection_counts"]["assertions"] == 1
     assert details["affected_projection_counts"]["entities"] == 1
-    assert details["affected_projection_counts"]["relations"] == 1
+    assert details["affected_projection_counts"]["relations"] == 2
     assert details["affected_projection_counts"]["preferences"] == 0
     assert len(details["affected_projections"]["assertions"]) == 1
     assert details["affected_projections"]["entities"] == ["runtime-consolidation-target"]
-    assert details["affected_projections"]["relations"] == [summary_relation["id"]]
+    assert set(details["affected_projections"]["relations"]) == {
+        fact_relation["id"],
+        summary_relation["id"],
+    }
     assert len(details["queued_consolidation_jobs"]) == 1
     assert recompute["metrics"]["counters"]["projection_recompute.completed"] == 1
 
