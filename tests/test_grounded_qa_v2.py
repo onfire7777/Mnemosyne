@@ -44,8 +44,12 @@ class RecordingCLI:
     def __init__(self) -> None:
         self.capture_rows: list[dict[str, Any]] = []
         self.answer_rows: list[dict[str, Any]] = []
+        self.consolidated = False
 
-    def capture_batch(self, path: Path) -> dict[str, Any]:
+    def capture_batch(
+        self, path: Path, *, consolidate: bool = False
+    ) -> dict[str, Any]:
+        self.consolidated = consolidate
         self.capture_rows = [json.loads(line) for line in path.read_text().splitlines()]
         return {"results": [{"cid": f"cid-{index}"} for index in range(len(self.capture_rows))]}
 
@@ -74,6 +78,7 @@ def test_synthetic_runner_keeps_gold_at_scorer_boundary() -> None:
     assert result["qa"]["metrics"] == {"exact_match": 1.0, "token_f1": 1.0}
     assert result["retrieval"] == {"recall_at_5": 1.0, "ndcg_at_5": 1.0}
     serialized = json.dumps([cli.capture_rows, cli.answer_rows])
+    assert cli.consolidated is True
     assert all(
         field not in serialized
         for field in ("gold_answer", "gold_aliases", "relevant_doc_ids", "distractor_answer")

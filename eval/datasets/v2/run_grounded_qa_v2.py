@@ -75,7 +75,7 @@ def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="mneme-qa-v2-") as temp:
         capture_path = Path(temp) / "corpus.jsonl"
         capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8")
-        captured = cli.capture_batch(capture_path)
+        captured = cli.capture_batch(capture_path, consolidate=True)
         capture_results = captured.get("results")
         if not isinstance(capture_results, list) or len(capture_results) != len(runtime_rows):
             raise ValueError("grounded QA capture count mismatch")
