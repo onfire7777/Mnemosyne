@@ -60,10 +60,10 @@ leave Protocol registration to Phase 2 — note that decision in the PR body.
 - [x] Run the focused file, confirm it FAILS for the expected reason (missing implementation, not a typo), and commit the tests alone (`test: add RED prospective-memory Phase 1 contract`).
 
 ### Task 3: GREEN — Intention model, deterministic evaluator, Local engine methods
-- [ ] Implement the `Intention` model with the plan-doc fields: `intention_id`, tenant/user/agent ids, `trigger_type`, `trigger_expression`, `action`, `status`, `priority`, `due_at`, `dependencies[]`, `reschedule_history[]`, `cancellation_state`, `evidence_ids[]`.
-- [ ] Implement a deterministic, pure/in-memory evaluator plus Local engine methods `schedule_intention`, `cancel_intention`, `evaluate_due_intentions`, `list_intentions`. Evaluation must be a deterministic function of stored state and an explicitly passed evaluation time (no hidden wall-clock reads inside the evaluator), so replay is idempotent and testable.
-- [ ] Route the new write path through the same capability/TrustTier/tenancy checks and hash-chained audit as existing writes; stored `action`/`trigger_expression` content is data only — nothing retrieved is ever executed.
-- [ ] Run the focused file to green, run `ruff`, inspect the full diff, run the secret/risky-file sweep, and commit (`feat: add prospective-memory Intention model and deterministic evaluator (Local)`).
+- [x] Implement the `Intention` model with the plan-doc fields: `intention_id`, tenant/user/agent ids, `trigger_type`, `trigger_expression`, `action`, `status`, `priority`, `due_at`, `dependencies[]`, `reschedule_history[]`, `cancellation_state`, `evidence_ids[]`.
+- [x] Implement a deterministic, pure/in-memory evaluator plus Local engine methods `schedule_intention`, `cancel_intention`, `evaluate_due_intentions`, `list_intentions`. Evaluation must be a deterministic function of stored state and an explicitly passed evaluation time (no hidden wall-clock reads inside the evaluator), so replay is idempotent and testable.
+- [x] Route the new write path through the same capability/TrustTier/tenancy checks and hash-chained audit as existing writes; stored `action`/`trigger_expression` content is data only — nothing retrieved is ever executed.
+- [x] Run the focused file to green, run `ruff`, inspect the full diff, run the secret/risky-file sweep, and commit (`feat: add prospective-memory Intention model and deterministic evaluator (Local)`).
 
 ### Task 4: Verify and land via PR
 - [ ] Run all Validation Commands; run the full local suite only if the ≥35% tier sample from Task 1 admitted it. Confirm no §31/§33 test is modified or weakened by the diff.
