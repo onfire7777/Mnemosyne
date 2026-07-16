@@ -267,9 +267,14 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest review checkpoint (2026-07-15): five independent review lanes examined
-the merged R2b hardening range. Confirmed fixes reduce the reentry proof channel
-to the inherited owner descriptor plus authoritative locked metadata, make
+Latest review checkpoint (2026-07-15): the round-5 review finding is CONFIRMED.
+The review fixes existed only as unpushed local commits `7b06de5` and
+`2520c14`, so their delivered wording bypassed the required branch/PR landing
+discipline. They are now being landed through the merge-commit PR from
+`codex/r2b-review-fix-landing`; no reset, rebase, force-push, or direct push to
+`main` is permitted. Five independent review lanes examined the R2b hardening
+range. The fixes reduce the reentry proof channel to the inherited owner
+descriptor plus authoritative locked metadata, make
 `run_child` require acquired state, add direct `--verify-child` regression cases
 for matching ownership and one-invariant tampering, reconcile the missing PR #19
 receipt, and delete the fully landed PR #19 branch locally and remotely without
@@ -283,8 +288,8 @@ service mutation, then rerun the complete three-sample preflight. No live,
 protected, public, Vault, CA, certificate, Docker, model, Graphify, CBM-reindex,
 or gbrain mutation occurred.
 
-Round-6 execution precondition receipt (`2026-07-16T01:28:52Z`): stopped
-fail-closed before creating the delivery branch because the live refs did not
+Round-6 execution precondition receipt (`2026-07-16T01:28:52Z`): the first
+attempt stopped fail-closed before creating the delivery branch because the live refs did not
 match the plan contract. The checkout was clean on
 `goalex-r6-land-orphaned-r2b-review-fixes-via-pr-re@c62257d`, local `main` also
 pointed at `c62257d`, and `origin/main` remained `435fb53`; therefore
@@ -293,9 +298,11 @@ commit `c62257d` ahead of the expected `2520c14` and `7b06de5`. Reflog evidence
 shows the plan commit advanced local `main` at `2026-07-15T18:25:20-07:00` and
 the Ralphex execution branch was then created from that head. No
 `codex/r2b-review-fix-landing` branch, PR, push, rebase, reset, or review-fix
-landing was attempted. Required remediation and next safe action: reconcile the
-Ralphex plan-commit/base-ref contract so the executor can prove the documented
-preconditions without moving `main`, then resume Task 1 from a clean checkout.
+landing was attempted in that first attempt. The retry preserved local `main`,
+created `codex/r2b-review-fix-landing` at the required `2520c14`, proved that
+start point, and then advanced only the delivery branch to include the round-6
+plan and this receipt. The exact branch head is the only head permitted for the
+landing PR.
 
 Previous checkpoint (2026-07-15): R2b tracker reconciliation is merged through
 PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, with exact-head
