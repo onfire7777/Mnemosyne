@@ -6,7 +6,9 @@ synthetic data only. It does not use MuSiQue, 2WikiMultiHopQA, HotpotQA,
 
 ## Scope and engine custody
 
-- Source commit: `7bca39e250f6227298cf3f0b1950fdd9d59905b3`
+- Engine-under-test base commit: `7bca39e250f6227298cf3f0b1950fdd9d59905b3`
+- Baseline runner/evidence commit: `833af4fe519af6fbc57bcd2e4eb983c38afe5000`
+  (contains the reviewed runner, regression test, and report used for reproduction)
 - Dataset: `eval/datasets/v2/qa_scale_dev_v1.json` (`24` questions)
 - Decomposition matrix: `eval/datasets/v2/qa_decomposition_dev_v1.json`
 - Capture surface: public `capture-batch` through `MnemoCLI.capture_batch`
@@ -30,15 +32,16 @@ matrix tests decomposition behavior and is reported separately from the
 | Queries | 24 | 24 |
 | Persisted relations | 0 | 0 |
 | `graph_ppr` channel contribution | 0 | 0 |
-| Recall@5 | 0.5 | 0.5 |
-| nDCG@5 | 0.6131471927654584 | 0.6131471927654584 |
+| Direct-query Recall@5 proxy | 0.5 | 0.5 |
+| Direct-query nDCG@5 proxy | 0.6131471927654584 | 0.6131471927654584 |
 | `traces.jsonl` SHA-256 | `1a16bb0d00dc106e59c3eafd3942d4a9eded08a1f56c07a59f02605361925437` | `1a16bb0d00dc106e59c3eafd3942d4a9eded08a1f56c07a59f02605361925437` |
 
-The two `traces.jsonl` files are byte-identical. The current lexical/dense path
-retrieves one of the two relevant documents, producing Recall@5 `0.5`; the
-missing bridge document leaves graph-specific bridge participation at `0`.
-Round 7 must flip this baseline to relations greater than zero, at least one
-positive `graph_ppr` contribution on the bridge query, and Recall@5 `1.0`.
+The two `traces.jsonl` files are byte-identical. The current direct-query
+lexical/dense path retrieves one of the two relevant documents, producing a
+Recall@5 proxy of `0.5`; the missing bridge document leaves graph-specific
+bridge participation at `0`. Round 7 must flip this direct-query baseline to
+relations greater than zero, at least one positive `graph_ppr` contribution on
+the bridge query, and a direct-query Recall@5 proxy of `1.0`.
 
 ## Reproduction
 
@@ -54,9 +57,10 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q \
   tests/test_phase12_graph_baseline.py tests/test_extractive_decomposer.py
 ```
 
-The runner refuses to overwrite an existing output directory. Each run retains
-its local store, capture/query JSONL inputs, `metrics.json`, and `traces.jsonl`;
-the output root also contains `summary.json`.
+The runner requires a new, non-symlink output path outside the repository and
+refuses to overwrite an existing output directory. Each run retains its local
+store, capture/query JSONL inputs, `metrics.json`, and `traces.jsonl`; the output
+root also contains `summary.json`.
 
 ## PBPP honesty item
 
@@ -71,5 +75,7 @@ engine actually selected.
 The full `run_grounded_qa_v2.py` answer stage was attempted once and stopped
 fail-closed because grounded answer role commands are not configured. No role
 command, model, service, or admission-gated resource was substituted. The
-baseline therefore measures the harness's public capture and retrieval path and
-uses its exact retrieval scorer; it makes no QA EM/F1 claim.
+baseline therefore measures the public capture and direct-query path and uses
+the harness's exact retrieval scorer.
+Full answer-harness Recall@5 was not measured, and this artifact makes no QA
+EM/F1 claim.

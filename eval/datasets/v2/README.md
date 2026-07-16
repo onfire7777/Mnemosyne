@@ -32,6 +32,7 @@ v2 fixes both, **deterministically**.
 | `qa_hard_v2.json` | **24 hard QA cases** (12 multi-hop, 8 temporal/as-of, 4 contradiction-resolution). Superset of the retrieval-query schema. |
 | `v2_judge.py` | A **deterministic, distractor-aware judge** (drop-in for `MNEMO_EVAL_JUDGE_CMD`) that breaks the G2 ceiling **without an LLM**. |
 | `run_eval_v2.py` | A **net-new runner** that drives the unmodified `eval/harness` suites against v2. |
+| `run_graph_ppr_baseline.py` | Dev-only local-engine runner for the deterministic Phase 12 dead-graph baseline. Retains two runs plus a summary without using a model or live service. |
 
 Regenerate (idempotent, deterministic):
 
@@ -96,6 +97,23 @@ This makes the +15%-at-≤10%-tokens lift a real, measurable quantity instead of
 ceiling artifact.
 
 ## Running v2
+
+### Phase 12 graph-PPR dead-graph baseline (dev-only)
+
+Run the local engine with a new external output path:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m eval.datasets.v2.run_graph_ppr_baseline \
+  --output /tmp/mnemosyne-phase12-graph-baseline
+```
+
+The output must not exist, must not be a symlink, and must resolve outside the
+repository. The root contains `summary.json`; `run-1/` and `run-2/` each retain
+the local store, capture/query JSONL inputs, `metrics.json`, and `traces.jsonl`.
+This measures a direct-query Recall@5/nDCG@5 proxy with the harness scorer; it
+does not measure full answer-harness Recall@5 or QA EM/F1. See the
+[Phase 12 baseline evidence report](../../reports/phase-12-graph-baseline-2026-07-15.md)
+for the measured values, custody limits, and PBPP disclosure mismatch.
 
 ### A. No-edit path (recommended now) — the net-new runner
 
