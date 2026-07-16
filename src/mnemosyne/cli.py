@@ -1628,6 +1628,8 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
         raise ValueError("capture batch must contain at least one row")
     store = Path(args.store).resolve()
     store.parent.mkdir(parents=True, exist_ok=True)
+    runtime_state = load_runtime_state(args) if getattr(args, "consolidate", False) else None
+    consolidation_gate_cases = runtime_state.load_gate_cases() if runtime_state else []
     descriptor, staged_name = tempfile.mkstemp(prefix=f".{store.name}-batch-", dir=store.parent)
     os.close(descriptor)
     staged = Path(staged_name)
@@ -1641,6 +1643,7 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
         staged_args = argparse.Namespace(**vars(args))
         staged_args.store = str(staged)
         staged_args.disable_runtime_state = True
+        staged_args.consolidation_gate_cases = consolidation_gate_cases
         tools = load_tools(staged_args)
         with tools.engine.defer_persistence():
             results = [
@@ -1726,6 +1729,7 @@ def _consolidate_captured_batch(
         media_extractor=load_media_extractor(args),
         learning=tools.learning,
         user_model=tools.user_model,
+        gate_cases=list(getattr(args, "consolidation_gate_cases", [])),
         entity_resolver=load_entity_resolver(args),
         candidate_extractor=load_candidate_extractor(args),
         summarizer=load_consolidation_summarizer(args),
