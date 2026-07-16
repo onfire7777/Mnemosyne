@@ -283,6 +283,20 @@ service mutation, then rerun the complete three-sample preflight. No live,
 protected, public, Vault, CA, certificate, Docker, model, Graphify, CBM-reindex,
 or gbrain mutation occurred.
 
+Round-6 execution precondition receipt (`2026-07-16T01:28:52Z`): stopped
+fail-closed before creating the delivery branch because the live refs did not
+match the plan contract. The checkout was clean on
+`goalex-r6-land-orphaned-r2b-review-fixes-via-pr-re@c62257d`, local `main` also
+pointed at `c62257d`, and `origin/main` remained `435fb53`; therefore
+`git log --oneline origin/main..main` contained the additional round-6 plan
+commit `c62257d` ahead of the expected `2520c14` and `7b06de5`. Reflog evidence
+shows the plan commit advanced local `main` at `2026-07-15T18:25:20-07:00` and
+the Ralphex execution branch was then created from that head. No
+`codex/r2b-review-fix-landing` branch, PR, push, rebase, reset, or review-fix
+landing was attempted. Required remediation and next safe action: reconcile the
+Ralphex plan-commit/base-ref contract so the executor can prove the documented
+preconditions without moving `main`, then resume Task 1 from a clean checkout.
+
 Previous checkpoint (2026-07-15): R2b tracker reconciliation is merged through
 PR #18 as final `main@f50cec0ddc65e81c0f819376bcb3224eb6328618`, with exact-head
 CI run `29454727897` and post-merge main CI run `29455686269` green. The
