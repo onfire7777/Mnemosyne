@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: R2b review hardening is merged through PRs #17/#18/#19 and pre-review main@435fb5351e5f8bef85b4fd5b26bc2e1690aa6388; the 2026-07-16T00:47:04Z..00:58:22Z review full-suite admission retry was rejected at 45%/46%/45% free memory against the 55% floor, so the full suite did not run; the permitted focused, section-31/33, planning/config, static, and shell gates are green; R2c-R2d, R3/R4, live rotation/no-op proof, the separate vault-tls/ca.crt atomic repair, candidate-v19 external custody, and the hardware-admitted full suite and knowledge refresh remain open
-last_updated: "2026-07-16T00:58:22Z"
+stopped_at: Round-6 R2b review-fix landing is merged through PR #20 as main@51fa8982cca39b7c765f44d47a64a2937c0c913b with exact-head and post-merge CI green; the HIGH landing-bypass finding is resolved without history rewrite; the current production MCP client pair passes the unchanged validator, so the prior expired leaf is historical rather than the active admission blocker; R2c/R2d and R3/R4 remain open; CAP-003 and BENCH-005 remain partial; next is runtime-readiness repair (decomposer smoke timeout and absent /opt role commands), then the dev-only local-engine graph-PPR consolidation/extractor fix with corrected PBPP disclosure
+last_updated: "2026-07-16T02:35:24Z"
 last_activity: 2026-07-15
 progress:
   total_phases: 7
@@ -38,8 +38,8 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; tracker reconciliation landed through PR #18 as `f50cec0ddc65e81c0f819376bcb3224eb6328618`; and the Task 4 gate record landed through PR #19 as `702ca8643f0953a62dfdebea80c28b442470fdfa`, before final pre-review base `main@435fb5351e5f8bef85b4fd5b26bc2e1690aa6388`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close rollback terminal receipts, or authorize live/protected/public work. The current production MCP client pair passed the unchanged validator on 2026-07-15 and its externally refreshed leaf expires `2026-07-16T21:18:25Z`, superseding the prior expired-leaf runtime state. Full-workload admission still fails on the 55% free-memory floor. The external `vault-tls/ca.crt` still fails the Vault server validator while the authoritative `step-ca-root.crt` passes; repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
-Last activity: 2026-07-15 — Review fixes were validated under targeted-test samples at 45% free memory, acceptable load, zero resident Ollama models, and 20 healthy containers: the focused runtime-lock/preflight/rotator suite, 91 section-31/33 tests, 34 planning/config tests, Ruff, formatting, Bash syntax, ShellCheck, whitespace, and secret/risky-file sweeps passed. The strong full-suite retry sampled 45%/46%/45% free memory at `2026-07-16T00:47:04Z`, `00:53:03Z`, and `00:58:22Z`; load1/load5 were 2.14/2.33, 2.18/2.11, and 1.94/1.76, with zero resident models and 20 healthy containers. Because all three samples missed 55%, the full suite did not run. No full-suite, Graphify, CBM reindex, gbrain write/sync/doctor, certificate, Vault, Docker, CA, secret, model, protected, or public mutation occurred; the last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
+Status: Candidate v19 source/runtime/bundle custody and R1c/R2a source hardening are merged on `main@79f6b58`. R2b capture and rotator shared-lock integration landed through PR #15; post-merge review hardening landed through PR #17 as `5a6ce1921c1537b6090cf40600581f9fe956fe1f`; tracker reconciliation landed through PR #18 as `f50cec0ddc65e81c0f819376bcb3224eb6328618`; the Task 4 gate record landed through PR #19 as `702ca8643f0953a62dfdebea80c28b442470fdfa`; and the orphaned round-5 review fixes landed through merge-commit PR #20 as `51fa8982cca39b7c765f44d47a64a2937c0c913b`. The HIGH landing-bypass finding is resolved without reset, rebase, force-push, or direct push to `main`. This does not activate the ordinary `staged_only` production path, complete R2c/R2d caller integrations, close R3/R4 rollback terminal receipts, or authorize live/protected/public work. The current production MCP client pair passed the unchanged validator on 2026-07-15 and its externally refreshed leaf expires `2026-07-16T21:18:25Z`, superseding the prior expired-leaf runtime state. CAP-003 and BENCH-005 remain partial. Full-workload admission still fails on the 55% free-memory floor. The external `vault-tls/ca.crt` still fails the Vault server validator while the authoritative `step-ca-root.crt` passes; repair remains a distinct atomic CA-maintenance operation under the accepted shared lock, not deletion or TLS weakening.
+Last activity: 2026-07-15 — PR #20 exact-head CI run `29465778730` passed on `f4636ee8560b7f17bbf3fe5ad33fdb85d87d818b` from `2026-07-16T02:06:24Z` through `02:20:20Z`; the merge commit `51fa8982cca39b7c765f44d47a64a2937c0c913b` landed at `02:20:36Z`; and post-merge main CI run `29466355604` passed from `02:20:39Z` through `02:34:50Z`. The permitted focused, section-31/33, planning/config, static, and shell gates remain green. The earlier strong full-suite retry sampled 45%/46%/45% free memory at `2026-07-16T00:47:04Z`, `00:53:03Z`, and `00:58:22Z`, so the full suite did not run. No full-suite, Graphify, CBM reindex, gbrain write/sync/doctor, certificate, Vault, Docker, CA, secret, model, protected, or public mutation occurred; the last accepted merge-bound knowledge receipt remains PR #12 and all freshness rows remain open.
 
 ## Performance Metrics
 
@@ -253,12 +253,15 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   three-sample hardware/TLS/Vault/service/topology preflight. Next safe action:
   perform only lightweight planning work until all three fresh samples pass.
   Full-suite/Graphify/CBM/gbrain freshness rows remain explicitly open.
-- Require exact-head and post-merge CI for this final documentation
-  reconciliation, then use its merged PR body as the live exact-main delivery
-  and mutable-index receipt.
-- After a complete hardware/TLS/Vault/service/topology admission, refresh
-  Graphify, CBM, and gbrain against that exact final main SHA before integrating
-  R2b-R2d.
+- Repair runtime readiness first: root-cause the decomposer smoke timeout and
+  restore the absent `/opt` role commands without weakening any readiness gate.
+- Then implement the dev-only graph-PPR consolidation/extractor fix using the
+  local engine that the eval actually runs. Correct the PBPP disclosure because
+  the phase-11 report names `postgres-recursive-ppr` while the eval executes the
+  local engine. Do not use this slice to close CAP-003, BENCH-005, or Plan 12-04.
+- After a complete hardware/TLS/Vault/service/topology admission, run the full
+  suite and refresh Graphify, CBM, and gbrain against the exact admitted main
+  SHA. R2c/R2d and R3/R4 remain open and separate.
 - Repair the stale external `vault-tls/ca.crt` under the accepted R2a
   cross-workflow lock through a distinct, rollback-safe CA-maintenance
   operation; `step-ca-root.crt` remains the validated Vault trust root and no
@@ -267,26 +270,30 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest review checkpoint (2026-07-15): the round-5 review finding is CONFIRMED.
-The review fixes existed only as unpushed local commits `7b06de5` and
-`2520c14`, so their delivered wording bypassed the required branch/PR landing
-discipline. They are now being landed through the merge-commit PR from
-`codex/r2b-review-fix-landing`; no reset, rebase, force-push, or direct push to
-`main` is permitted. Five independent review lanes examined the R2b hardening
-range. The fixes reduce the reentry proof channel to the inherited owner
-descriptor plus authoritative locked metadata, make
+Latest review checkpoint (2026-07-15): the round-5 HIGH finding is CONFIRMED and
+resolved. The orphaned review-fix range landed through merge-commit PR #20 from
+feature head `f4636ee8560b7f17bbf3fe5ad33fdb85d87d818b`; exact-head CI run
+`29465778730` passed from `2026-07-16T02:06:24Z` through `02:20:20Z`, PR #20
+merged at `02:20:36Z` as
+`51fa8982cca39b7c765f44d47a64a2937c0c913b`, and post-merge main CI run
+`29466355604` passed from `02:20:39Z` through `02:34:50Z`. Commits `7b06de5` and
+`2520c14` are now ancestors of `origin/main`; no reset, rebase, force-push, or
+direct push to `main` occurred. The fixes reduce the reentry proof channel to
+the inherited owner descriptor plus authoritative locked metadata, make
 `run_child` require acquired state, add direct `--verify-child` regression cases
 for matching ownership and one-invariant tampering, reconcile the missing PR #19
-receipt, and delete the fully landed PR #19 branch locally and remotely without
-force. The permitted focused, section-31/33, planning/config, static, and shell
-gates are green. The full suite did not run because the strong-admission retry
-sampled 45%/46%/45% free memory at `2026-07-16T00:47:04Z`, `00:53:03Z`, and
-`00:58:22Z` against the all-three-at-55% floor; load, model residency, and the
-20-container health check otherwise passed. Owner: host operator. Required
-remediation and next safe action: wait for or safely reclaim host memory without
-service mutation, then rerun the complete three-sample preflight. No live,
-protected, public, Vault, CA, certificate, Docker, model, Graphify, CBM-reindex,
-or gbrain mutation occurred.
+receipt, and preserve ordinary `staged_only` behavior. The prior expired MCP
+client leaf is historical: the current pair passed the unchanged validator and
+the externally refreshed leaf expires `2026-07-16T21:18:25Z`. R2c/R2d and
+R3/R4 remain open; CAP-003 and BENCH-005 remain partial; Plan 12-04 and every
+unmet REQUIREMENTS row remain unchecked. The next substantive sequence is
+runtime-readiness repair (decomposer smoke timeout and absent `/opt` role
+commands), followed by the dev-only local-engine graph-PPR
+consolidation/extractor fix and its PBPP disclosure correction. The phase-11
+report names `postgres-recursive-ppr`, but the eval runs the local engine. The
+full suite and Graphify/CBM/gbrain refresh remain hardware-admission gated. No
+live, protected, public, Vault, CA, certificate, Docker, model, Graphify,
+CBM-reindex, or gbrain mutation occurred.
 
 Round-6 execution precondition receipt (`2026-07-16T01:28:52Z`): the first
 attempt stopped fail-closed before creating the delivery branch because the live refs did not
