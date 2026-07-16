@@ -486,7 +486,10 @@ class ConsolidationWorker:
                             candidate_subject=str(candidate["candidate_subject"]),
                             candidate_predicate=str(candidate["candidate_predicate"]),
                             candidate_object=str(candidate["candidate_object"]),
-                            source_evidence_cids=source_evidence_cids,
+                            source_evidence_cids=list(
+                                candidate.get("source_evidence_cids")
+                                or source_evidence_cids
+                            ),
                             confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
                             trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
                             sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
@@ -1719,6 +1722,18 @@ class ConsolidationWorker:
                 ),
                 branch=branch,
             )
+            engine.add_relation(
+                Relation(
+                    tenant_id=job.tenant_id,
+                    source=job.candidate_subject,
+                    predicate=job.candidate_predicate,
+                    target=job.candidate_object,
+                    confidence=job.confidence,
+                    source_evidence_cids=job.source_evidence_cids,
+                    access_policy=validated_access_policy,
+                ),
+                branch=branch,
+            )
 
         budget = mutation_budget or self._new_mutation_rail_budget(job.tenant_id, "main")
 
@@ -1739,22 +1754,45 @@ class ConsolidationWorker:
         return result
 
 
-def _extract_simple_fact(text: str) -> tuple[str, str, str] | None:
-    first_sentence = re.split(r"(?<=[.!?])\s+", text.strip(), maxsplit=1)[0]
-    match = re.match(
-        r"^(?:the\s+)?(?P<subject>[A-Za-z][A-Za-z0-9 _'/-]{1,80})\s+"
-        r"(?P<predicate>is|are|was|were)\s+"
-        r"(?P<object>[^.!?]{1,160})[.!?]?$",
-        first_sentence,
-    )
-    if not match:
-        return None
-    subject = match.group("subject").strip()
-    predicate = match.group("predicate").strip()
-    object_value = match.group("object").strip()
-    if not subject or not object_value:
-        return None
-    return subject, predicate, object_value
+_SALIENT_ENTITY = re.compile(
+    r"\b(?:[A-Z][A-Za-z0-9'/-]*|Q[1-4])"
+    r"(?:\s+(?:[A-Z][A-Za-z0-9'/-]*|Q[1-4]|\d{4})){0,5}\b"
+)
+
+
+def _extract_simple_fact(text: str) -> list[tuple[str, str, str]]:
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    if len(lines) > 1 and not re.search(r"[.!?]$", lines[0]):
+        lines = lines[1:]
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(lines))
+    facts: set[tuple[str, str, str]] = set()
+    for sentence in sentences:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        copular = re.match(
+            r"^(?:the\s+)?(?P<subject>[A-Za-z][A-Za-z0-9 _'/-]{1,80})\s+"
+            r"(?P<predicate>is|are|was|were)\s+"
+            r"(?P<object>[^.!?]{1,160})[.!?]?$",
+            sentence,
+            flags=re.IGNORECASE,
+        )
+        if copular:
+            subject = copular.group("subject").strip()
+            object_value = copular.group("object").strip()
+            if subject and object_value:
+                facts.add((subject, copular.group("predicate").lower(), object_value))
+            continue
+
+        entities = list(_SALIENT_ENTITY.finditer(sentence))
+        for left, right in zip(entities, entities[1:], strict=False):
+            connector = sentence[left.end() : right.start()].strip(" ,;:()[]{}")
+            words = re.findall(r"[A-Za-z][A-Za-z'-]*", connector.lower())
+            predicate = " ".join(words)
+            if not predicate or all(word in {"and", "or", "but"} for word in words):
+                predicate = "related_to"
+            facts.add((left.group().strip(), predicate, right.group().strip()))
+    return sorted(facts, key=lambda fact: tuple(part.casefold() for part in fact))
 
 
 def _entity_label(subject: str) -> str:
@@ -2891,27 +2929,31 @@ def _deterministic_candidates(payload: dict[str, Any], evidence: Sequence[Eviden
         return [dict(payload)]
     candidates: list[dict[str, Any]] = []
     for item in evidence:
-        fact = _extract_simple_fact(item.content)
-        if not fact:
-            continue
-        subject, predicate, object_value = fact
-        entity_label = _entity_label(subject)
-        entity_key = _entity_key(entity_label)
-        signature = f"{subject} {predicate} {object_value}".lower()
-        candidates.append(
-            {
-                "signature": signature,
-                "query": entity_label,
-                "candidate_subject": entity_label,
-                "candidate_predicate": predicate,
-                "candidate_object": object_value,
-                "entity_key": entity_key,
-                "trust_tier": item.trust_tier,
-                "sensitivity": item.sensitivity,
-                "access_policy": item.access_policy,
-            }
-        )
-    return candidates
+        for subject, predicate, object_value in _extract_simple_fact(item.content):
+            entity_label = _entity_label(subject)
+            entity_key = _entity_key(entity_label)
+            signature = f"{subject} {predicate} {object_value}".lower()
+            candidates.append(
+                {
+                    "signature": signature,
+                    "query": entity_label,
+                    "candidate_subject": entity_label,
+                    "candidate_predicate": predicate,
+                    "candidate_object": object_value,
+                    "entity_key": entity_key,
+                    "trust_tier": item.trust_tier,
+                    "sensitivity": item.sensitivity,
+                    "access_policy": item.access_policy,
+                    "source_evidence_cids": [item.cid] if item.cid else [],
+                }
+            )
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            str(candidate["signature"]),
+            str(candidate.get("source_evidence_cids") or ""),
+        ),
+    )
 
 
 def _normalize_candidate(row: Any, evidence: Sequence[Evidence], payload: dict[str, Any]) -> dict[str, Any]:
