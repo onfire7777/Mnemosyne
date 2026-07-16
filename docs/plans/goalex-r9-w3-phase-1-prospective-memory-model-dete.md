@@ -55,9 +55,9 @@ leave Protocol registration to Phase 2 — note that decision in the PR body.
 - [x] Create branch `codex/w3-p1-prospective-memory` from `origin/main`.
 
 ### Task 2: RED — failing prospective-memory tests
-- [ ] Read `docs/superpowers/plans/2026-07-15-W3-taxonomy-completion-plan.md` Phase 1 and the existing Local engine surface (`src/mnemosyne/engine.py`, audit + evidence-CID patterns used by other write paths) to match conventions.
-- [ ] Write `tests/test_prospective_memory.py` asserting, against the Local engine: (a) an `Intention` with an `exact_time` trigger in the past fires exactly once and is marked fired; (b) an unsatisfied (future) trigger does not fire; (c) firing is idempotent under replay — re-running `evaluate_due_intentions` never double-fires; (d) a cancelled intention never fires; (e) each intention carries provenance (`evidence_ids[]`) to its originating episode and each firing writes an audit entry.
-- [ ] Run the focused file, confirm it FAILS for the expected reason (missing implementation, not a typo), and commit the tests alone (`test: add RED prospective-memory Phase 1 contract`).
+- [x] Read `docs/superpowers/plans/2026-07-15-W3-taxonomy-completion-plan.md` Phase 1 and the existing Local engine surface (`src/mnemosyne/engine.py`, audit + evidence-CID patterns used by other write paths) to match conventions.
+- [x] Write `tests/test_prospective_memory.py` asserting, against the Local engine: (a) an `Intention` with an `exact_time` trigger in the past fires exactly once and is marked fired; (b) an unsatisfied (future) trigger does not fire; (c) firing is idempotent under replay — re-running `evaluate_due_intentions` never double-fires; (d) a cancelled intention never fires; (e) each intention carries provenance (`evidence_ids[]`) to its originating episode and each firing writes an audit entry.
+- [x] Run the focused file, confirm it FAILS for the expected reason (missing implementation, not a typo), and commit the tests alone (`test: add RED prospective-memory Phase 1 contract`).
 
 ### Task 3: GREEN — Intention model, deterministic evaluator, Local engine methods
 - [ ] Implement the `Intention` model with the plan-doc fields: `intention_id`, tenant/user/agent ids, `trigger_type`, `trigger_expression`, `action`, `status`, `priority`, `due_at`, `dependencies[]`, `reschedule_history[]`, `cancellation_state`, `evidence_ids[]`.
