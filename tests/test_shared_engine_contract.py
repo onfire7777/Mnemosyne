@@ -3739,6 +3739,52 @@ def test_shared_engine_contract_assertion_merge_reinforces_and_preserves_source(
     assert report.assertions_merged >= 1
 
 
+def test_shared_engine_contract_repeated_merge_converges_and_resolves_supersession(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-remerge-{uuid4()}"
+    subject = f"shared remerge subject {uuid4()}"
+    base = datetime(2026, 1, 1, tzinfo=UTC)
+
+    def _assertion(obj: str, valid_from: datetime, cid: str) -> Assertion:
+        return Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="tracks",
+            object=obj,
+            confidence=0.7,
+            valid_from=valid_from,
+            source_evidence_cids=[cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+
+    _branch(engine, branch, tenant)
+    engine.upsert_assertion(_assertion("state v1", base, "5" * 64), branch=branch)
+    engine.upsert_assertion(
+        _assertion("state v2", base + timedelta(days=1), "6" * 64), branch=branch
+    )
+    engine.upsert_assertion(_assertion("state v2", base + timedelta(days=1), "7" * 64))
+
+    _merge(engine, branch, tenant)
+    first = engine.export_tenant(tenant)["assertions"]
+    first_ids = {item["id"] for item in first}
+    for item in first:
+        if item.get("superseded_by"):
+            assert item["superseded_by"] in first_ids
+
+    _merge(engine, branch, tenant)
+    second = engine.export_tenant(tenant)["assertions"]
+    assert len(second) == len(first)
+    assert {item["id"] for item in second} == first_ids
+    for item in second:
+        if item.get("superseded_by"):
+            assert item["superseded_by"] in first_ids
+
+
 def test_shared_engine_contract_relation_merge_reinforces_overlapping_fact(
     engine_bundle: tuple[Any, str, str],
 ) -> None:

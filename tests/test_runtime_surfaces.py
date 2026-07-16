@@ -4083,6 +4083,8 @@ def test_postgres_merge_replays_clones_without_moving_source_rows() -> None:
     assert "_upsert_assertion_with_cursor" in source
     assert "INSERT INTO relations" in source
     assert "gen_random_uuid()" in source
+    assert "_merge_clone_assertion_id" in source
+    assert "actual_assertion_ids" in source
 
 
 def test_postgres_engine_exposes_memory_tools_runtime_surface() -> None:

@@ -44,7 +44,7 @@ from mnemosyne.erasure_ids import (
     erasure_deletion_record_id,
     redact_erased_cids,
 )
-from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
+from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -1815,6 +1815,7 @@ class PostgresEngine:
         _cursor: Any | None = None,
         _db_user_id: Any = _DB_USER_ID_UNSET,
         _branch_ready: bool = False,
+        _schema_ready: bool = False,
     ) -> str:
         access_policy = validate_access_policy(
             assertion.access_policy,
@@ -1837,8 +1838,9 @@ class PostgresEngine:
         connection = self.connect() if _cursor is None else nullcontext(_ExistingCursorConnection(_cursor))
         with connection as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
-                self._ensure_entity_registry_schema(cur)
-                self._ensure_evidence_vector_schema(cur)
+                if not _schema_ready:
+                    self._ensure_entity_registry_schema(cur)
+                    self._ensure_evidence_vector_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 self._apply_projection_reality_monitoring(cur, incoming, db_tenant_id)
                 self._apply_schema_fast_path_projection_status(
@@ -2038,6 +2040,7 @@ class PostgresEngine:
             _cursor=cursor,
             _db_user_id=db_user_id,
             _branch_ready=True,
+            _schema_ready=True,
         )
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
@@ -4693,6 +4696,11 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                # Run the schema-ensure DDL once for the whole merge so the
+                # per-row replay below does not reacquire ACCESS EXCLUSIVE
+                # locks or rerun table-wide backfills inside the transaction.
+                self._ensure_entity_registry_schema(cur)
+                self._ensure_evidence_vector_schema(cur)
                 for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
@@ -4733,8 +4741,10 @@ class PostgresEngine:
                     )
                     source_assertion_rows = list(cur.fetchall())
                     assertion_id_map = {
-                        str(row["id"]): new_id() for row in source_assertion_rows
+                        str(row["id"]): _merge_clone_assertion_id(str(row["id"]), into)
+                        for row in source_assertion_rows
                     }
+                    actual_assertion_ids: dict[str, str] = {}
                     for row in source_assertion_rows:
                         cloned = _row_to_assertion(row)
                         cloned.id = assertion_id_map[str(row["id"])]
@@ -4748,10 +4758,23 @@ class PostgresEngine:
                             cur,
                             db_user_id=row["user_id"],
                         )
+                        actual_assertion_ids[str(row["id"])] = merged_id
                         if merged_id == inserted_id:
                             report.assertions_added += 1
                         else:
                             report.assertions_merged += 1
+                    for source_id, planned_id in assertion_id_map.items():
+                        actual_id = actual_assertion_ids[source_id]
+                        if actual_id == planned_id:
+                            continue
+                        # The planned clone id was absorbed by an existing peer
+                        # and never inserted; repoint supersession references
+                        # that were remapped to it.
+                        cur.execute(
+                            "UPDATE assertions SET superseded_by = %s "
+                            "WHERE tenant_id = %s AND branch = %s AND superseded_by = %s",
+                            (actual_id, db_tenant_id, into, planned_id),
+                        )
                     cur.execute(
                         "SELECT * FROM relations WHERE tenant_id = %s AND branch = %s "
                         "ORDER BY valid_from, id",
@@ -5447,6 +5470,20 @@ def _stable_uuid(kind: str, value: str) -> str:
     if _uuid_or_none(value):
         return value
     return str(uuid5(NAMESPACE_URL, f"mnemosyne:{kind}:{value}"))
+
+
+def _merge_clone_assertion_id(source_assertion_id: str, into_branch: str) -> str:
+    """Deterministic per-(source row, target branch) clone id.
+
+    Replaying the same branch merge must converge on the same clone rows via
+    the assertion upsert's ON CONFLICT (id) path instead of minting duplicates.
+    """
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"mnemosyne:merge-assertion-clone:{source_assertion_id}:{into_branch}",
+        )
+    )
 
 
 def _dedupe_hits(hits: list[Hit]) -> list[Hit]:

@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
+from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import merge_access_policies, validate_access_policy
 from mnemosyne.engine import LocalMemoryEngine
@@ -55,7 +56,10 @@ def _stable_summary_relation_id(
     identity = "\0".join(
         (tenant_id, branch, source_cid, "summary-derived-gist", summary_cid)
     )
-    return f"relation-{sha256(identity.encode('utf-8')).hexdigest()}"
+    # PostgreSQL stores relations.id as a UUID primary key, so the stable id
+    # must be UUID-shaped on every engine.
+    digest = sha256(identity.encode("utf-8")).hexdigest()
+    return str(uuid5(NAMESPACE_URL, f"mnemosyne:summary-relation:{digest}"))
 
 
 def _embed_batch_size() -> int:
