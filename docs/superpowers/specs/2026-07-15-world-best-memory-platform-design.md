@@ -615,6 +615,18 @@ or PBPP.
    measured, distillation, and the byte-parity contract — delivering the 8 GiB
    product profile and the multi-hop QA numbers.
 
+**Mapping to the existing GSD roadmap and requirements (so this is not a parallel
+track).** These workstreams overlay the live `.planning/` roadmap rather than
+replacing it: W1 completes Phase 12 (Plan 12-04; CAP-001/002/003, BENCH-005). W2
+and W3 land in Phase 15 (CAP-007..010 for consolidation/sensemaking/procedural,
+and two additive requirements this design introduces — *prospective memory* and
+*working memory* — to be added to `.planning/REQUIREMENTS.md` as CAP-012/CAP-013
+when their sub-specs are authored). W4 is Phase 13 (BENCH-006/007) plus the new
+adapter families, feeding Phase 14 reproducibility (REPRO-001/002) and Phase 16
+leaderboard (LEAD/GOV). W5 is Plan A S1.2 / S4.5 and CAP-011 (the compact 8 GiB
+path). No new requirement silently changes a frozen threshold; each is added to
+the ledger through the normal GSD flow with its own traceability test.
+
 W1 blocks all measurement. W2 and W3 can proceed in parallel after W1. W4 depends
 on the adapters each capability needs (W2/W3 supply some). W5 delivers the
 answering plane and 8 GiB profile and can proceed in parallel once W1 lands, but
