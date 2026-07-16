@@ -1666,13 +1666,86 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
                 )
                 for row in rows
             ]
+            consolidation = (
+                _consolidate_captured_batch(staged_args, tools, rows, results)
+                if args.consolidate
+                else None
+            )
         if not staged.is_file() or staged.is_symlink():
             raise ValueError("capture batch did not produce a real staged store")
         os.replace(staged, store)
     except BaseException:
         staged.unlink(missing_ok=True)
         raise
-    emit({"count": len(results), "ok": True, "results": results})
+    emit(
+        {
+            "count": len(results),
+            "ok": True,
+            "results": results,
+            **({"consolidation": consolidation} if consolidation is not None else {}),
+        }
+    )
+
+
+def _consolidate_captured_batch(
+    args: argparse.Namespace,
+    tools: MemoryTools,
+    rows: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Run one bounded existing consolidation job per tenant/branch group."""
+    from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
+    from mnemosyne.jobs import RuntimeJobHandlers
+    from mnemosyne.observability import MetricsRegistry
+    from mnemosyne.queue import InProcessQueue, QueueWorker
+
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    for row, result in zip(rows, results, strict=True):
+        key = (row["tenant"], row.get("branch", "main"))
+        group = grouped.setdefault(
+            key,
+            {
+                "tenant_id": key[0],
+                "user_id": row["user"],
+                "branch": key[1],
+                "source_evidence_cids": [],
+                "trigger": "capture_batch",
+                "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+                "trust_tier": row.get("trust_tier", 0),
+            },
+        )
+        group["source_evidence_cids"].append(result["cid"])
+
+    queue = InProcessQueue()
+    metrics = MetricsRegistry()
+    handlers = RuntimeJobHandlers(
+        tools.engine,
+        queue,
+        metrics=metrics,
+        object_store=load_object_store(args),
+        media_extractor=load_media_extractor(args),
+        learning=tools.learning,
+        user_model=tools.user_model,
+        entity_resolver=load_entity_resolver(args),
+        candidate_extractor=load_candidate_extractor(args),
+        summarizer=load_consolidation_summarizer(args),
+        lesson_distiller=load_lesson_distiller(args),
+        procedure_inducer=load_procedure_inducer(args),
+        max_media_bytes=max_ingest_bytes(args),
+    )
+    queued = [queue.enqueue(CONSOLIDATE_EVIDENCE_JOB, payload) for payload in grouped.values()]
+    QueueWorker(queue, handlers.handlers(), metrics=metrics).drain(
+        limit=len(queued), kind=CONSOLIDATE_EVIDENCE_JOB
+    )
+    jobs = queue.jobs
+    failed = [jobs[job.id] for job in queued if jobs[job.id].status != "complete"]
+    if failed:
+        detail = failed[0].last_error or f"job status {failed[0].status}"
+        raise RuntimeError(f"capture-batch consolidation failed: {detail}")
+    return {
+        "jobs": [jobs[job.id].to_dict() for job in queued],
+        "metrics": metrics.snapshot().to_dict(),
+    }
 
 
 def cmd_eval_query_batch(args: argparse.Namespace) -> None:
@@ -18902,6 +18975,11 @@ def build_parser() -> argparse.ArgumentParser:
     capture_batch = sub.add_parser("capture-batch")
     capture_batch.add_argument("--input-jsonl", type=Path, required=True)
     capture_batch.add_argument("--max-records", type=int, default=100_000)
+    capture_batch.add_argument(
+        "--consolidate",
+        action="store_true",
+        help="Consolidate every captured CID before atomically publishing the store",
+    )
     capture_batch.set_defaults(func=cmd_capture_batch)
 
     eval_query_batch = sub.add_parser("eval-query-batch")

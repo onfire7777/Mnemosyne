@@ -162,6 +162,119 @@ def test_capture_batch_matches_capture_and_rejects_schema_before_writes(
     assert before == after
 
 
+def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path) -> None:
+    """Eval rows pass both gates: trust 0 is writable and missing error defaults high."""
+    rows = tmp_path / "facts.jsonl"
+    rows.write_text(
+        "\n".join(
+            json.dumps(
+                {
+                    "tenant": "eval",
+                    "user": "benchmark-corpus",
+                    "actor": "user",
+                    "source_type": "qa-v2-dev",
+                    "source_identity": source_identity,
+                    "content": content,
+                    "trust_tier": 0,
+                }
+            )
+            for source_identity, content in (
+                ("d1", "Mara is the owner of Helios."),
+                ("d2", "Helios is a project shipping in Q3 2026."),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    default_store = tmp_path / "default.json"
+    MnemoCLI(store=str(default_store)).capture_batch(rows)
+    assert json.loads(default_store.read_text(encoding="utf-8"))["relations"] == []
+
+    consolidated_store = tmp_path / "consolidated.json"
+    consolidated = MnemoCLI(store=str(consolidated_store)).capture_batch(
+        rows, consolidate=True
+    )
+    payload = json.loads(consolidated_store.read_text(encoding="utf-8"))
+    captured_cids = {item["cid"] for item in consolidated["results"]}
+    relation_cids = {
+        cid
+        for relation in payload["relations"]
+        for cid in relation["source_evidence_cids"]
+    }
+    job = consolidated["consolidation"]["jobs"][0]
+    pass_statuses = {
+        item["name"]: item["status"] for item in job["result"]["pass_results"]
+    }
+    assert payload["relations"]
+    assert captured_cids <= relation_cids
+    assert set(job["result"]["source_evidence_cids"]) == captured_cids
+    assert pass_statuses["extractor"] == "complete"
+    assert "source_marked_data_only" not in job["result"]["skipped"]
+    assert {
+        (item["tenant_id"], item["source_identity"], item["access_policy"]["tenant"])
+        for item in payload["evidence"]
+        if item["cid"] in captured_cids
+    } == {("eval", "d1", "eval"), ("eval", "d2", "eval")}
+
+
+def test_capture_batch_consolidation_failure_preserves_original_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mnemosyne import cli as cli_module
+
+    store = tmp_path / "store.json"
+    MnemoCLI(store=str(store)).capture("t", "u", "original", source_type="fixture")
+    original = store.read_bytes()
+    rows = tmp_path / "facts.jsonl"
+    rows.write_text(
+        json.dumps(
+            {
+                "tenant": "t",
+                "user": "u",
+                "source_type": "qa-v2-dev",
+                "content": "Mara is the owner of Helios.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class FailingExtractor:
+        def extract(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("injected consolidation failure")
+
+    monkeypatch.setattr(cli_module, "load_candidate_extractor", lambda _args: FailingExtractor())
+    args = cli_module.build_parser().parse_args(
+        ["--store", str(store), "capture-batch", "--input-jsonl", str(rows), "--consolidate"]
+    )
+    with pytest.raises(RuntimeError, match="injected consolidation failure"):
+        cli_module.cmd_capture_batch(args)
+    assert store.read_bytes() == original
+    assert not list(tmp_path.glob(".store.json-batch-*"))
+
+
+def test_capture_batch_driver_forwards_consolidation_option(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed: list[object] = []
+
+    def fake_run(self: MnemoCLI, command: str, *args: str, **_kwargs: object) -> Namespace:
+        observed.extend((command, *args))
+        return Namespace(json={"ok": True})
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    MnemoCLI(store=str(tmp_path / "store.json")).capture_batch(
+        tmp_path / "rows.jsonl", consolidate=True
+    )
+    assert observed == [
+        "capture-batch",
+        "--input-jsonl",
+        str(tmp_path / "rows.jsonl"),
+        "--consolidate",
+    ]
+
+
 def test_capture_batch_rejects_symlink(tmp_path: Path) -> None:
     target = tmp_path / "target.jsonl"
     target.write_text(
