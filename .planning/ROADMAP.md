@@ -67,7 +67,10 @@ Plans:
 
 **Boundary:** Phase 12 does not close from implementation alone. CAP-003 requires
 both measured >=0.85 gates; BENCH-005 additionally requires positive,
-provenance-linked graph/PPR participation and reader-produced Hippo EM/F1.
+provenance-linked graph/PPR participation and reader-produced Hippo EM/F1. W1
+now has a deterministic local development proof (PRs #23, #26, and #28), but
+production parity on `postgres-recursive-ppr`, runtime readiness, grounded-reader
+development QA, and the single protected attempt remain open under 12-04.
 
 ### Phase 13: External Benchmark Adapters and Scheduled CI
 

@@ -14,9 +14,14 @@ reports without changing their bytes or external report digests.
 | HotpotQA | 1000 | 0.319 | 0.374 | n/a | 0/1000 | 0 | absent |
 
 No reader or judge ran on the HippoRAG tracks, every answer field is null, and
-the metric keyset is retrieval-only. The configured graph backend is disclosed
-as `postgres-recursive-ppr`, but positive graph/PPR participation was not
-demonstrated. Zero is a measured limitation, not HippoRAG parity.
+the metric keyset is retrieval-only.
+
+- Executed engine: `local`.
+- Configured/self-reported graph backend: `postgres-recursive-ppr`.
+
+The configured/self-reported graph-backend label is not evidence that PostgreSQL
+executed. Positive graph/PPR participation was not demonstrated. Zero is a
+measured limitation, not HippoRAG parity.
 
 ## Published baseline context
 
@@ -43,3 +48,5 @@ thresholds and are not Mnemosyne results.
 - BENCH-004 is complete. BENCH-005 remains partial: retrieval measurement is
   complete, positive graph/PPR participation was not demonstrated, and Phase
   12 owns real disclosed-reader EM/F1 evidence.
+- The repository-wide disclosure audit is recorded in
+  `eval/reports/disclosure-audit-2026-07-16.md`.
