@@ -30,6 +30,10 @@ TENANT = "t-expiry"
 # even on a slow runner, short enough to keep the test fast.
 EXPIRY_SECONDS = 1.2
 SLEEP_SECONDS = 1.8
+# SQLite initialization can exceed the local-engine window on a cold CI runner.
+# Keep this path pre-expiry without slowing the two in-memory expiry checks.
+SQLITE_EXPIRY_SECONDS = 10.0
+SQLITE_SLEEP_SECONDS = 10.6
 
 
 def _expiring_evidence(expires_in: float = EXPIRY_SECONDS) -> Evidence:
@@ -126,13 +130,13 @@ def test_sqlite_scan_oracle_respects_policy_expiry(
     monkeypatch.setenv("MNEMOSYNE_CANDIDATE_MEMO", "1")
     engine = SqliteEngine(tmp_path / "root")
     try:
-        cid = engine.append_evidence(_expiring_evidence())
+        cid = engine.append_evidence(_expiring_evidence(SQLITE_EXPIRY_SECONDS))
         filt = {"tenant_id": TENANT, "branch": "main"}
 
         oracle1 = engine._scan_oracle(dict(filt))
         assert cid in {hit.id for hit in oracle1._candidate_hits(dict(filt))}
 
-        time.sleep(SLEEP_SECONDS)  # cross expires_at; NO writes in between
+        time.sleep(SQLITE_SLEEP_SECONDS)  # cross expires_at; NO writes in between
 
         oracle2 = engine._scan_oracle(dict(filt))
         # The finding's exact shape: the memo hands back the SAME hydrated
