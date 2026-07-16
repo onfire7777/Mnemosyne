@@ -115,9 +115,12 @@ def test_retrieval_bundle_contract_has_no_qa_columns() -> None:
 
 def test_adapter_uses_public_batch_search_and_explain() -> None:
     class FakeCLI:
-        def capture_batch(self, path: Path) -> dict:
+        consolidated = False
+
+        def capture_batch(self, path: Path, *, consolidate: bool = False) -> dict:
             import json
 
+            self.consolidated = consolidate
             rows = [json.loads(line) for line in path.read_text().splitlines()]
             return {
                 "count": len(rows),
@@ -146,7 +149,9 @@ def test_adapter_uses_public_batch_search_and_explain() -> None:
             ],
         }
     }
-    benchmark, traces, metrics = run(value, FakeCLI())
+    cli = FakeCLI()
+    benchmark, traces, metrics = run(value, cli)
+    assert cli.consolidated is True
     assert benchmark["dataset"] == "hotpot"
     assert traces[0]["graph_evidence"]["observed"] is True
     assert metrics["metrics"] == {"recall_at_2": 1.0, "recall_at_5": 1.0}
@@ -158,7 +163,10 @@ def test_reader_qa_is_additive_gold_isolated_and_graph_provenance_linked() -> No
             self.payloads: list[dict[str, Any]] = []
             self.cid = ""
 
-        def capture_batch(self, path: Path) -> dict[str, Any]:
+        def capture_batch(
+            self, path: Path, *, consolidate: bool = False
+        ) -> dict[str, Any]:
+            assert consolidate is True
             rows = [json.loads(line) for line in path.read_text().splitlines()]
             self.payloads.extend(rows)
             row = rows[0]
@@ -235,7 +243,10 @@ def test_graph_evidence_requires_positive_graph_signal() -> None:
 
 def test_duplicate_capture_cid_is_rejected() -> None:
     class DuplicateCIDCLI:
-        def capture_batch(self, path: Path) -> dict[str, Any]:
+        def capture_batch(
+            self, path: Path, *, consolidate: bool = False
+        ) -> dict[str, Any]:
+            assert consolidate is True
             return {"results": [{"cid": "same"}, {"cid": "same"}]}
 
     value = {

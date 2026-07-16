@@ -183,9 +183,14 @@ class MnemoCLI:
             args += ["--turn-index", str(turn_index)]
         return self.run("capture", *args).json
 
-    def capture_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
+    def capture_batch(
+        self, input_jsonl: Path | str, *, consolidate: bool = False
+    ) -> dict[str, Any]:
         """Capture validated JSONL rows through one public CLI process."""
-        return self.run("capture-batch", "--input-jsonl", str(input_jsonl)).json
+        args = ["--input-jsonl", str(input_jsonl)]
+        if consolidate:
+            args.append("--consolidate")
+        return self.run("capture-batch", *args).json
 
     def eval_query_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
         """Run validated search rows with embedded explanations in one process."""

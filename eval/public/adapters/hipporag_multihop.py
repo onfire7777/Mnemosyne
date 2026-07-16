@@ -64,7 +64,7 @@ def run(
             ),
             encoding="utf-8",
         )
-        captured = capture_cli.capture_batch(batch)
+        captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])
     if len(results) != len(corpus):
         raise HippoRAGSchemaError("capture batch count does not match corpus")
@@ -255,7 +255,7 @@ def run_reader_qa(
             ),
             encoding="utf-8",
         )
-        captured = cli.capture_batch(capture_path).get("results")
+        captured = cli.capture_batch(capture_path, consolidate=True).get("results")
         if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):
             raise HippoRAGSchemaError("reader capture count does not match corpus")
         cid_to_doc: dict[str, str] = {}
