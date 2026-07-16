@@ -20,12 +20,38 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 
 # --------------------------------------------------------------------------- #
 # Retrieval metrics
 # --------------------------------------------------------------------------- #
+def resolve_retrieved_doc_ids(
+    hits: Iterable[Mapping[str, object]], cid_to_doc: Mapping[str, str]
+) -> list[str]:
+    """Map direct and graph-projection hits back to corpus document ids."""
+
+    retrieved: list[str] = []
+    for hit in hits:
+        metadata = hit.get("metadata")
+        source_cids = (
+            metadata.get("source_evidence_cids", [])
+            if isinstance(metadata, Mapping)
+            else []
+        )
+        provenance = hit.get("provenance", [])
+        candidates = [
+            hit.get("id"),
+            *(provenance if isinstance(provenance, list | tuple) else []),
+            *(source_cids if isinstance(source_cids, list | tuple) else []),
+        ]
+        for cid in candidates:
+            doc_id = cid_to_doc.get(cid) if isinstance(cid, str) else None
+            if doc_id is not None and doc_id not in retrieved:
+                retrieved.append(doc_id)
+    return retrieved
+
+
 def recall_at_k(retrieved_ids: Sequence[str], relevant_ids: Iterable[str], k: int) -> float:
     """Fraction of relevant items present in the top-k retrieved list.
 

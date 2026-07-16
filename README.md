@@ -178,6 +178,22 @@ Eleven roles run **in this order**, bounded by the mutation-rail budget and the 
 
 > Tenant-scoped one-shot: `mneme --queue-tenant tenant-a consolidate-once` (the `consolidate-once` subcommand takes no arguments; pass the tenant via the global `--queue-tenant`).
 
+The evaluation-only `capture-batch --consolidate` option is available on the
+atomic local backend and defaults off. It consolidates every captured CID before
+publishing the staged store, requires at least one regression gate case, and
+leaves the original store unchanged if capture, consolidation, or promotion
+fails. The evaluation driver installs a corpus-derived protected smoke case
+without reading benchmark labels; direct CLI callers must install their own:
+
+```sh
+uv run --locked mneme --store /tmp/mneme-eval.json gate-case-add \
+  --signature "evaluation consolidation smoke" \
+  --query "Mara owns Helios" --expected-substring "Mara owns Helios" \
+  --origin curated --protected
+uv run --locked mneme --store /tmp/mneme-eval.json capture-batch \
+  --input-jsonl /tmp/corpus.jsonl --consolidate
+```
+
 ### Invariant rails (§31)
 
 All seven are enforced and regression-tested:

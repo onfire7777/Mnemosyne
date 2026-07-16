@@ -2622,10 +2622,18 @@ class LocalMemoryEngine:
                 for item in self.relations.values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
-                target_key = self._branch_key(rel.tenant_id, into, rel.id)
-                if target_key not in self.relations:
+                duplicate = any(
+                    item.tenant_id == rel.tenant_id
+                    and item.branch == into
+                    and item.source == rel.source
+                    and item.predicate == rel.predicate
+                    and item.target == rel.target
+                    for item in self.relations.values()
+                )
+                if not duplicate:
                     cloned = copy.deepcopy(rel)
                     cloned.branch = into
+                    target_key = self._branch_key(cloned.tenant_id, into, cloned.id)
                     self.relations[target_key] = cloned
                     report.relations_added += 1
             self.merge_log.append(report.to_dict())

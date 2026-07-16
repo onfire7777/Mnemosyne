@@ -29,10 +29,11 @@ evidence CID before scoring.
 
 ## Reproduction
 
-Run outside the repository so generated evidence cannot be mistaken for a
-committed artifact:
+Run from the repository root while writing generated evidence outside the
+repository so it cannot be mistaken for a committed artifact:
 
 ```sh
+cd "$(git rev-parse --show-toplevel)"
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m \
   eval.datasets.v2.run_graph_ppr_postfix --output /tmp/mnemo-fix-b-postfix
 ```

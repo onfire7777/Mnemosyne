@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from eval.harness.cli_driver import MnemoCLI
+from eval.harness.metrics import resolve_retrieved_doc_ids
 from eval.public.scoring import score_profile
 from eval.public.custody import capture_cid, first_hop_rows
 
@@ -64,6 +65,11 @@ def run(
             ),
             encoding="utf-8",
         )
+        if isinstance(capture_cli, MnemoCLI):
+            first = corpus[0]
+            capture_cli.install_consolidation_gate_case(
+                f"{first['title']}\n{first['content']}"
+            )
         captured = capture_cli.capture_batch(batch, consolidate=True)
     results = captured.get("results", [])
     if len(results) != len(corpus):
@@ -83,11 +89,7 @@ def run(
         search: Mapping[str, Any],
         explanation: Mapping[str, Any],
     ) -> dict[str, Any]:
-        ranked = [
-            cid_to_doc[hit["id"]]
-            for hit in search.get("hits", [])
-            if hit.get("id") in cid_to_doc
-        ]
+        ranked = resolve_retrieved_doc_ids(search.get("hits", []), cid_to_doc)
         return {
             "answer": None,
             "gold_references": question["gold_references"],
@@ -255,6 +257,9 @@ def run_reader_qa(
             ),
             encoding="utf-8",
         )
+        if isinstance(cli, MnemoCLI):
+            first = benchmark["corpus"][0]
+            cli.install_consolidation_gate_case(f"{first['title']}\n{first['content']}")
         captured = cli.capture_batch(capture_path, consolidate=True).get("results")
         if not isinstance(captured, list) or len(captured) != len(benchmark["corpus"]):
             raise HippoRAGSchemaError("reader capture count does not match corpus")
