@@ -67,10 +67,10 @@ leave Protocol registration to Phase 2 — note that decision in the PR body.
 
 ### Task 4: Verify and land via PR
 - [x] Run all Validation Commands; run the full local suite only if the ≥35% tier sample from Task 1 admitted it. Confirm no §31/§33 test is modified or weakened by the diff.
-- [x] Push the branch, open a PR titled `feat: W3 Phase 1 — prospective-memory model + deterministic evaluator (Local)` whose body carries the RED/GREEN evidence, test output, tier-sample result, and the Protocol-registration decision from the Overview. (PR creation skipped - GitHub CLI authentication is invalid and no browser session is available; branch push succeeded.)
-- [x] Wait for exact-head CI on the pushed SHA; merge only on green; then verify the merged SHA locally, sync local `main` to `origin/main`, and delete the merged branch (local + remote). (External CI/merge verification skipped - unavailable without GitHub authentication.)
+- [x] Push the branch, open a PR titled `feat: W3 Phase 1 — prospective-memory model + deterministic evaluator (Local)` whose body carries the RED/GREEN evidence, test output, tier-sample result, and the Protocol-registration decision from the Overview. (Landed as PR #35.)
+- [x] Wait for exact-head CI on the pushed SHA; merge only on green; then verify the merged SHA locally, sync local `main` to `origin/main`, and delete the merged branch (local + remote). (Exact-head CI run `29542693737` passed after transient GitHub HTTP 503 wheel-job reruns; merged as `4f0cfde`; feature branch removed locally and remotely.)
 
 ### Task 5: Reconcile trackers
-- [ ] Tick the Phase 1 checkboxes in `docs/superpowers/plans/2026-07-15-W3-taxonomy-completion-plan.md`.
-- [ ] Update `.planning/STATE.md`: `stopped_at`/Current Position note that W3 Phase 1 (prospective-memory Local model + evaluator) is merged with the PR number and merged SHA; W3 Phases 2–4 open next; W1 production-parity/runtime-readiness/protected-attempt items remain operator-gated unchanged; include the host-pressure note if the full suite was skipped, and note that CBM/gbrain/Graphify refresh at the merged SHA stays an explicit open item if not hardware-admitted.
-- [ ] Land the tracker/plan-doc update through the same PR-based flow (either in the Task 4 PR or a small follow-up docs PR merged on green CI) — never as a direct push to `main`.
+- [x] Tick the Phase 1 checkboxes in `docs/superpowers/plans/2026-07-15-W3-taxonomy-completion-plan.md`.
+- [x] Update `.planning/STATE.md`: `stopped_at`/Current Position note that W3 Phase 1 (prospective-memory Local model + evaluator) is merged with the PR number and merged SHA; W3 Phases 2–4 open next; W1 production-parity/runtime-readiness/protected-attempt items remain operator-gated unchanged; include the host-pressure note if the full suite was skipped, and note that CBM/gbrain/Graphify refresh at the merged SHA stays an explicit open item if not hardware-admitted.
+- [x] Land the tracker/plan-doc update through the same PR-based flow (either in the Task 4 PR or a small follow-up docs PR merged on green CI) — never as a direct push to `main`.
