@@ -4,10 +4,11 @@
 **Parent spec:** `docs/superpowers/specs/2026-07-15-world-best-memory-platform-design.md` (§2.3, Workstream W1)
 **Root cause report:** `~/mnemosyne-tier-b-custody/GRAPH-PPR-ROOTCAUSE-2026-07-15.md`
 **Requirements:** CAP-001/002/003, BENCH-005 (Phase 12 / Plan 12-04).
-**Status:** IN FLIGHT — owned and executed by the autonomous goalex loop. This
-document codifies the fix as a durable record and acceptance contract; the loop
-generates its own per-round tactical plans (`docs/plans/goalex-r*.md`). Blocks all
-measurement in W2–W5.
+**Status:** PARTIAL — Phases 1-3 and the local development portions of Phase 4
+are complete through PRs #23, #26, and #28. Production-Postgres parity,
+runtime readiness, grounded-reader QA, and protected evidence remain open. This
+document is the durable acceptance contract; the loop generates tactical plans
+under `docs/plans/goalex-r*.md`.
 
 ## Goal
 
@@ -55,39 +56,39 @@ concrete wiring defect, not a quality gap.
 
 ## Phase 1 — Deterministic dead-graph baseline (RED)
 
-- [ ] Add a regression cell asserting the CURRENT broken state on dev data:
+- [x] Add a regression cell asserting the CURRENT broken state on dev data:
   after `capture_batch`, `len(engine.relations) == 0` and the `graph_ppr` channel
   count == 0 on the bridge query. This reproduces "graph observed 0" synthetically
   and guards the fix.
 
 ## Phase 2 — Fix A: consolidate the corpus before search (GREEN)
 
-- [ ] Add a `--consolidate` path to `capture_batch` (or drive `consolidate-once` /
+- [x] Add a `--consolidate` path to `capture_batch` (or drive `consolidate-once` /
   drain `CONSOLIDATE_EVIDENCE_JOB` on the staged store) so the deterministic
   `ConsolidationOrchestrator` writes `Relation` rows before search. Pure reuse of
   `cmd_consolidate_once`.
-- [ ] Verify the pre-extractor gates admit these captures (`consolidation.py:409`
+- [x] Verify the pre-extractor gates admit these captures (`consolidation.py:409`
   `_prediction_error_gate` → promote; `456` `_contains_no_write_data` false for
   `source_type="hipporag:*"`, `actor="user"`, `trust_tier=0`).
 
 ## Phase 3 — Fix B: extractor emits edges from prose (GREEN)
 
-- [ ] Broaden `_extract_simple_fact` (`consolidation.py:1742`), staying
+- [x] Broaden `_extract_simple_fact` (`consolidation.py:1742`), staying
   pure-Python/deterministic (the local OpenIE stand-in): iterate all sentences,
   strip the `Title\n` prefix, emit edges between co-occurring salient entity spans
   with the connecting verb/preposition as predicate (else `related_to`). Keep it
   deterministic (no set/dict-ordering or hash-seed nondeterminism).
-- [ ] GREEN the Phase-1 baseline: `engine.relations > 0`, positive `graph_ppr` hit,
+- [x] GREEN the Phase-1 baseline: `engine.relations > 0`, positive `graph_ppr` hit,
   Recall@5 0 → 1 on the bridge query.
 
 ## Phase 4 — Recall lift, production parity, disclosure, no-regression
 
-- [ ] Confirm the graph channel lifts absolute Recall@5 materially on the dev/16-case
+- [x] Confirm the graph channel lifts absolute Recall@5 materially on the dev/16-case
   matrix; run the matrix twice and hash `traces.jsonl` for byte-identity.
 - [ ] Prove the fix on the production Postgres graph path (`postgres-recursive-ppr`)
   with parity to local (spec §5a).
-- [ ] Correct the disclosed-vs-actual engine in every `eval/reports/*`.
-- [ ] Confirm dense/lexical single-hop cases do not regress; §31/§33 green.
+- [x] Correct the disclosed-vs-actual engine in every `eval/reports/*`.
+- [x] Confirm dense/lexical single-hop cases do not regress; §31/§33 green.
 
 ## Validation commands
 

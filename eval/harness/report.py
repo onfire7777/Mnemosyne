@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Any
 
 
-def write_reports(result: dict[str, Any], out_dir: Path, stamp: str | None = None) -> dict[str, Path]:
+def write_reports(
+    result: dict[str, Any], out_dir: Path, stamp: str | None = None
+) -> dict[str, Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     json_path = out_dir / f"slo_report_{stamp}.json"
@@ -28,7 +30,12 @@ def write_reports(result: dict[str, Any], out_dir: Path, stamp: str | None = Non
     md = render_markdown(result)
     md_path.write_text(md)
     latest_md.write_text(md)
-    return {"json": json_path, "md": md_path, "latest_json": latest_json, "latest_md": latest_md}
+    return {
+        "json": json_path,
+        "md": md_path,
+        "latest_json": latest_json,
+        "latest_md": latest_md,
+    }
 
 
 def _fmt_ci(ci: dict[str, Any] | None) -> str:
@@ -38,7 +45,7 @@ def _fmt_ci(ci: dict[str, Any] | None) -> str:
     high = ci.get("ci_high")
     if low is None or high is None:
         return "—"
-    return f"[{low:.4f}, {high:.4f}] ({ci.get('ci_method','')})"
+    return f"[{low:.4f}, {high:.4f}] ({ci.get('ci_method', '')})"
 
 
 def _verdict_line(v: dict[str, Any], suite_label: str = "") -> str:
@@ -53,21 +60,31 @@ def _verdict_line(v: dict[str, Any], suite_label: str = "") -> str:
 def render_markdown(result: dict[str, Any]) -> str:
     lines: list[str] = []
     meta = result.get("meta", {})
+    executed_backend = str(meta.get("backend", "local"))
+    embedding_path = str(
+        meta.get("embedding_path", "local deterministic (hashing stand-in)")
+    )
     lines.append("# Mnemosyne §33 Evaluation / SLO Report")
     lines.append("")
-    lines.append(f"- **Generated:** {meta.get('generated_at','')}")
-    lines.append(f"- **Backend:** `{meta.get('backend','local')}`  ")
-    lines.append(f"- **Embedding path:** {meta.get('embedding_path','local deterministic (hashing stand-in)')}")
-    lines.append(f"- **Ignition mode:** **{result.get('ignition',{}).get('mode','?')}** "
-                 f"(suite_size={result.get('ignition',{}).get('suite_size','?')} / N={result.get('ignition',{}).get('ignition_n','?')})")
+    lines.append(f"- **Generated:** {meta.get('generated_at', '')}")
+    lines.append(f"- **Backend:** `{executed_backend}`  ")
+    lines.append(f"- **Embedding path:** {embedding_path}")
+    lines.append(
+        f"- **Ignition mode:** **{result.get('ignition', {}).get('mode', '?')}** "
+        f"(suite_size={result.get('ignition', {}).get('suite_size', '?')} / N={result.get('ignition', {}).get('ignition_n', '?')})"
+    )
     lines.append("")
     overall = result.get("overall", {})
-    lines.append(f"- **Overall:** {overall.get('passed',0)}/{overall.get('total',0)} checks pass "
-                 f"({'ALL GREEN' if overall.get('all_pass') else 'see failures'})")
+    lines.append(
+        f"- **Overall:** {overall.get('passed', 0)}/{overall.get('total', 0)} checks pass "
+        f"({'ALL GREEN' if overall.get('all_pass') else 'see failures'})"
+    )
     if result.get("ignition", {}).get("mode") == "SHADOW":
         lines.append("")
-        lines.append("> **SHADOW MODE** — suite has not reached ignition size N. Verdicts below are "
-                     "**advisory only** and do not gate promotion (blueprint §33 suite-ignition).")
+        lines.append(
+            "> **SHADOW MODE** — suite has not reached ignition size N. Verdicts below are "
+            "**advisory only** and do not gate promotion (blueprint §33 suite-ignition)."
+        )
     lines.append("")
 
     # SLO scorecard
@@ -94,17 +111,19 @@ def render_markdown(result: dict[str, Any]) -> str:
     lines.append("|---|---|---|")
     for cls in result.get("mandatory_classes", []):
         mark = "PASS" if cls.get("passed") else "FAIL"
-        lines.append(f"| {cls['name']} | **{mark}** | {cls.get('detail','')} |")
+        lines.append(f"| {cls['name']} | **{mark}** | {cls.get('detail', '')} |")
     lines.append("")
 
     # Per-suite detail
     lines.append("## Suite detail")
     lines.append("")
     for suite in result.get("slo_suites", []):
-        lines.append(f"### {suite.get('suite','?')}")
+        lines.append(f"### {suite.get('suite', '?')}")
         lines.append("")
         lines.append("```json")
-        compact = {k: v for k, v in suite.items() if k not in ("per_query", "rows", "bins")}
+        compact = {
+            k: v for k, v in suite.items() if k not in ("per_query", "rows", "bins")
+        }
         lines.append(json.dumps(compact, indent=2, default=str))
         lines.append("```")
         lines.append("")
@@ -113,16 +132,25 @@ def render_markdown(result: dict[str, Any]) -> str:
     lines.append("## How this sharpens with real services")
     lines.append("")
     lines.append(
-        "These numbers run against the **local deterministic engine** (hashing pseudo-embeddings + "
-        "local lexical reranker). They are real measurements of the current system, but the retrieval "
-        "and calibration numbers are **floor estimates**. To sharpen (blueprint FR-3 keystone):"
+        f"These numbers ran against the **`{executed_backend}` engine** with the recorded "
+        f"embedding path **{embedding_path}**. No model or provider identity is inferred "
+        "beyond this retained metadata. The measurements are real for that disclosed "
+        "configuration; further production sharpening requires separately retained evidence:"
     )
     lines.append("")
-    lines.append("1. Stand up the real embedding + cross-encoder service (docker-compose, §I).")
-    lines.append("2. Re-run with `--embedding-provider http --embedding-url ... --reranker-provider http ...` "
-                 "passed through `--global-flag`. No harness change is needed — the CLI driver forwards them.")
-    lines.append("3. Re-run against Postgres with `--backend postgres --postgres-dsn ...` to measure true "
-                 "service-side fast-path latency and prove G8 portability (identical suite, both backends).")
-    lines.append("4. Set `MNEMO_EVAL_JUDGE_CMD` to a strict LLM judge to replace the substring judge for G2.")
+    lines.append(
+        "1. Stand up the real embedding + cross-encoder service (docker-compose, §I)."
+    )
+    lines.append(
+        "2. Re-run with `--embedding-provider http --embedding-url ... --reranker-provider http ...` "
+        "passed through `--global-flag`. No harness change is needed — the CLI driver forwards them."
+    )
+    lines.append(
+        "3. Re-run against Postgres with `--backend postgres --postgres-dsn ...` to measure true "
+        "service-side fast-path latency and prove G8 portability (identical suite, both backends)."
+    )
+    lines.append(
+        "4. Set `MNEMO_EVAL_JUDGE_CMD` to a strict LLM judge to replace the substring judge for G2."
+    )
     lines.append("")
     return "\n".join(lines)
