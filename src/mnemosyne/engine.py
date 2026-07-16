@@ -106,6 +106,33 @@ def _int_or_default(value: Any, *, default: int) -> int:
         return default
 
 
+def _relation_windows_overlap(left: Relation, right: Relation) -> bool:
+    """Return whether two half-open relation validity windows overlap."""
+
+    return (left.valid_to is None or right.valid_from < left.valid_to) and (
+        right.valid_to is None or left.valid_from < right.valid_to
+    )
+
+
+def _merge_relation_state(target: Relation, incoming: Relation) -> None:
+    """Reinforce one overlapping semantic relation without widening policy."""
+
+    target.confidence = max(target.confidence, incoming.confidence)
+    target.valid_from = min(target.valid_from, incoming.valid_from)
+    target.valid_to = (
+        None
+        if target.valid_to is None or incoming.valid_to is None
+        else max(target.valid_to, incoming.valid_to)
+    )
+    target.source_evidence_cids = sorted(
+        set(target.source_evidence_cids + incoming.source_evidence_cids)
+    )
+    target.access_policy = merge_access_policies(
+        [target.access_policy, incoming.access_policy],
+        tenant_id=target.tenant_id,
+    )
+
+
 def _privacy_backfill_access_policy(
     access_policy: dict[str, Any],
     *,
@@ -2622,20 +2649,28 @@ class LocalMemoryEngine:
                 for item in self.relations.values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
-                duplicate = any(
-                    item.tenant_id == rel.tenant_id
+                peers = [
+                    item
+                    for item in self.relations.values()
+                    if item.tenant_id == rel.tenant_id
                     and item.branch == into
                     and item.source == rel.source
                     and item.predicate == rel.predicate
                     and item.target == rel.target
-                    for item in self.relations.values()
-                )
-                if not duplicate:
-                    cloned = copy.deepcopy(rel)
-                    cloned.branch = into
+                    and _relation_windows_overlap(item, rel)
+                ]
+                if peers:
+                    winner = min(peers, key=lambda item: (item.valid_from, item.id))
+                    _merge_relation_state(winner, rel)
+                    continue
+                cloned = copy.deepcopy(rel)
+                cloned.branch = into
+                target_key = self._branch_key(cloned.tenant_id, into, cloned.id)
+                if target_key in self.relations:
+                    cloned.id = new_id()
                     target_key = self._branch_key(cloned.tenant_id, into, cloned.id)
-                    self.relations[target_key] = cloned
-                    report.relations_added += 1
+                self.relations[target_key] = cloned
+                report.relations_added += 1
             self.merge_log.append(report.to_dict())
             self._audit(tenant_id or "*", "engine", "merge", frm, report.to_dict())
             self._persist()

@@ -81,10 +81,12 @@ from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
     LocalMemoryEngine,
     _candidate_memo_enabled,
+    _merge_relation_state,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    _relation_windows_overlap,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -2820,8 +2822,10 @@ class SqliteEngine:
         ``into`` and pushed through this engine's OWN :meth:`upsert_assertion`
         (supersede/contest runs) — ``assertions_added`` when the (tenant, into)
         row count grows, else ``assertions_merged`` (the reinforce path).
-        Relations: semantic-identity dedup copy. Returns ``MergeReport(frm, into, evidence_added,
-        assertions_added, assertions_merged, relations_added, conflicts=[])``
+        Relations: overlapping semantic peers reinforce provenance, confidence,
+        validity, and restrictive access policy; disjoint windows stay distinct.
+        Returns ``MergeReport(frm, into, evidence_added, assertions_added,
+        assertions_merged, relations_added, conflicts=[])``
         constructed POSITIONALLY (R1 field order); ``conflicts`` is always ``[]``.
         The report is appended to ``merge_log`` and audited (op ``merge``,
         target ``frm``) so ``export_tenant`` reconstructs the merge_log."""
@@ -2872,15 +2876,34 @@ class SqliteEngine:
             with conn:
                 for row in rel_rows:
                     rel = _relation_from_row(row)
-                    present = conn.execute(
-                        "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? "
-                        "AND source = ? AND predicate = ? AND target = ?",
-                        (tenant_id, into, rel.source, rel.predicate, rel.target),
+                    peers = [
+                        _relation_from_row(item)
+                        for item in conn.execute(
+                            "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? "
+                            "AND source = ? AND predicate = ? AND target = ? "
+                            "ORDER BY valid_from, id",
+                            (tenant_id, into, rel.source, rel.predicate, rel.target),
+                        ).fetchall()
+                    ]
+                    overlapping = [
+                        item for item in peers if _relation_windows_overlap(item, rel)
+                    ]
+                    if overlapping:
+                        _merge_relation_state(overlapping[0], rel)
+                        conn.execute(
+                            _RELATION_UPSERT,
+                            _relation_insert_values(overlapping[0]),
+                        )
+                        continue
+                    rel.branch = into
+                    id_exists = conn.execute(
+                        "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? AND id = ?",
+                        (tenant_id, into, rel.id),
                     ).fetchone()
-                    if present is None:
-                        rel.branch = into
-                        conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
-                        report.relations_added += 1
+                    if id_exists is not None:
+                        rel.id = new_id()
+                    conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
+                    report.relations_added += 1
                 conn.execute(
                     "INSERT INTO merge_log(tenant_id, record) VALUES (?, ?)",
                     (tenant_id, json_text(report.to_dict())),

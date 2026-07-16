@@ -32,10 +32,12 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
+    _merge_relation_state,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    _relation_windows_overlap,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -4693,20 +4695,62 @@ class PostgresEngine:
                     )
                     report.assertions_added += cur.rowcount
                     cur.execute(
-                        """
-                        UPDATE relations src
-                        SET branch = %s
-                        WHERE tenant_id = %s AND branch = %s
-                          AND NOT EXISTS (
-                            SELECT 1 FROM relations dst
-                            WHERE dst.tenant_id = src.tenant_id AND dst.branch = %s
-                              AND dst.source = src.source AND dst.predicate = src.predicate
-                              AND dst.target = src.target
-                          )
-                        """,
-                        (into, db_tenant_id, frm, into),
+                        "SELECT * FROM relations WHERE tenant_id = %s AND branch = %s "
+                        "ORDER BY valid_from, id",
+                        (db_tenant_id, frm),
                     )
-                    report.relations_added += cur.rowcount
+                    source_relations = [
+                        _row_to_relation(row, tenant_id) for row in cur.fetchall()
+                    ]
+                    for relation in source_relations:
+                        cur.execute(
+                            "SELECT * FROM relations WHERE tenant_id = %s AND branch = %s "
+                            "AND source = %s AND predicate = %s AND target = %s "
+                            "ORDER BY valid_from, id",
+                            (
+                                db_tenant_id,
+                                into,
+                                relation.source,
+                                relation.predicate,
+                                relation.target,
+                            ),
+                        )
+                        peers = [
+                            _row_to_relation(row, tenant_id) for row in cur.fetchall()
+                        ]
+                        overlapping = [
+                            item
+                            for item in peers
+                            if _relation_windows_overlap(item, relation)
+                        ]
+                        if overlapping:
+                            target = overlapping[0]
+                            _merge_relation_state(target, relation)
+                            cur.execute(
+                                """
+                                UPDATE relations
+                                SET confidence = %s, valid_from = %s, valid_to = %s,
+                                    source_evidence_cids = %s, access_policy = %s
+                                WHERE tenant_id = %s AND branch = %s AND id = %s
+                                """,
+                                (
+                                    target.confidence,
+                                    target.valid_from,
+                                    target.valid_to,
+                                    _cid_list_to_bytes(target.source_evidence_cids),
+                                    self._jsonb(target.access_policy),
+                                    db_tenant_id,
+                                    into,
+                                    target.id,
+                                ),
+                            )
+                            continue
+                        cur.execute(
+                            "UPDATE relations SET branch = %s "
+                            "WHERE tenant_id = %s AND branch = %s AND id = %s",
+                            (into, db_tenant_id, frm, relation.id),
+                        )
+                        report.relations_added += cur.rowcount
                     cur.execute(
                         """
                         INSERT INTO merges(tenant_id, frm, into_, report)
