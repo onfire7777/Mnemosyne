@@ -1459,7 +1459,19 @@ def test_indeterminate_post_launch_state_retains_lock_evidence(
     owner = locks_dir / LOCK_NAME / OWNER_NAME
     assert owner.is_file()
     with owner.open("rb") as retained:
-        fcntl.flock(retained, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # The uncertain-state child inherits the lock file descriptor and may
+        # still be tearing down its interpreter when main() exits, so poll for
+        # the release instead of a single non-blocking probe (cold CI runners
+        # lost this race twice on 2026-07-16).
+        deadline = time.monotonic() + 30.0
+        while True:
+            try:
+                fcntl.flock(retained, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.05)
 
 
 def test_lock_is_held_until_same_process_group_descendants_exit(tmp_path: Path) -> None:
