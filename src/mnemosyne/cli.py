@@ -1696,25 +1696,30 @@ def _consolidate_captured_batch(
     rows: list[dict[str, Any]],
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Run one bounded existing consolidation job per tenant/branch group."""
+    """Run one bounded consolidation job per custody-equivalent capture group."""
     from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
     from mnemosyne.jobs import RuntimeJobHandlers
     from mnemosyne.observability import MetricsRegistry
     from mnemosyne.queue import InProcessQueue, QueueWorker
 
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str, int], dict[str, Any]] = {}
     for row, result in zip(rows, results, strict=True):
-        key = (row["tenant"], row.get("branch", "main"))
+        key = (
+            row["tenant"],
+            row.get("branch", "main"),
+            row["user"],
+            int(row.get("trust_tier", 0)),
+        )
         group = grouped.setdefault(
             key,
             {
                 "tenant_id": key[0],
-                "user_id": row["user"],
+                "user_id": key[2],
                 "branch": key[1],
                 "source_evidence_cids": [],
                 "trigger": "capture_batch",
                 "passes": list(DEFAULT_CONSOLIDATION_PASSES),
-                "trust_tier": row.get("trust_tier", 0),
+                "trust_tier": key[3],
             },
         )
         group["source_evidence_cids"].append(result["cid"])
@@ -1727,26 +1732,36 @@ def _consolidate_captured_batch(
 
     queue = InProcessQueue()
     metrics = MetricsRegistry()
-    handlers = RuntimeJobHandlers(
-        tools.engine,
-        queue,
-        metrics=metrics,
-        object_store=load_object_store(args),
-        media_extractor=load_media_extractor(args),
-        learning=tools.learning,
-        user_model=tools.user_model,
-        gate_cases=gate_cases,
-        entity_resolver=load_entity_resolver(args),
-        candidate_extractor=load_candidate_extractor(args),
-        summarizer=load_consolidation_summarizer(args),
-        lesson_distiller=load_lesson_distiller(args),
-        procedure_inducer=load_procedure_inducer(args),
-        max_media_bytes=max_ingest_bytes(args),
-    )
-    queued = [queue.enqueue(CONSOLIDATE_EVIDENCE_JOB, payload) for payload in grouped.values()]
-    QueueWorker(queue, handlers.handlers(), metrics=metrics).drain(
-        limit=len(queued), kind=CONSOLIDATE_EVIDENCE_JOB
-    )
+    object_store = load_object_store(args)
+    media_extractor = load_media_extractor(args)
+    entity_resolver = load_entity_resolver(args)
+    candidate_extractor = load_candidate_extractor(args)
+    summarizer = load_consolidation_summarizer(args)
+    lesson_distiller = load_lesson_distiller(args)
+    procedure_inducer = load_procedure_inducer(args)
+    queued = []
+    for payload in grouped.values():
+        queued.append(queue.enqueue(CONSOLIDATE_EVIDENCE_JOB, payload))
+        handlers = RuntimeJobHandlers(
+            tools.engine,
+            queue,
+            metrics=metrics,
+            object_store=object_store,
+            media_extractor=media_extractor,
+            learning=tools.learning,
+            user_model=tools.user_model,
+            gate_cases=gate_cases,
+            entity_resolver=entity_resolver,
+            candidate_extractor=candidate_extractor,
+            summarizer=summarizer,
+            lesson_distiller=lesson_distiller,
+            procedure_inducer=procedure_inducer,
+            max_media_bytes=max_ingest_bytes(args),
+        )
+        QueueWorker(queue, handlers.handlers(), metrics=metrics).drain(
+            limit=1,
+            kind=CONSOLIDATE_EVIDENCE_JOB,
+        )
     jobs = queue.jobs
     failed = [jobs[job.id] for job in queued if jobs[job.id].status != "complete"]
     if failed:

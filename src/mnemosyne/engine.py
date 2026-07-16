@@ -133,6 +133,39 @@ def _merge_relation_state(target: Relation, incoming: Relation) -> None:
     )
 
 
+def _merge_relation_overlap_component(
+    incoming: Relation,
+    peers: list[Relation],
+) -> tuple[Relation | None, list[Relation]]:
+    """Fold every transitively overlapping peer into one deterministic winner."""
+
+    remaining = sorted(peers, key=lambda item: (item.valid_from, item.id))
+    component: list[Relation] = []
+    expanded = copy.deepcopy(incoming)
+    while remaining:
+        pending: list[Relation] = []
+        matched = False
+        for peer in remaining:
+            if _relation_windows_overlap(peer, expanded):
+                _merge_relation_state(expanded, peer)
+                component.append(peer)
+                matched = True
+            else:
+                pending.append(peer)
+        if not matched:
+            break
+        remaining = pending
+    if not component:
+        return None, []
+
+    winner = min(component, key=lambda item: (item.valid_from, item.id))
+    for peer in component:
+        if peer is not winner:
+            _merge_relation_state(winner, peer)
+    _merge_relation_state(winner, incoming)
+    return winner, [peer for peer in component if peer is not winner]
+
+
 def _privacy_backfill_access_policy(
     access_policy: dict[str, Any],
     *,
@@ -2657,11 +2690,14 @@ class LocalMemoryEngine:
                     and item.source == rel.source
                     and item.predicate == rel.predicate
                     and item.target == rel.target
-                    and _relation_windows_overlap(item, rel)
                 ]
-                if peers:
-                    winner = min(peers, key=lambda item: (item.valid_from, item.id))
-                    _merge_relation_state(winner, rel)
+                winner, redundant = _merge_relation_overlap_component(rel, peers)
+                if winner is not None:
+                    for peer in redundant:
+                        self.relations.pop(
+                            self._branch_key(peer.tenant_id, into, peer.id),
+                            None,
+                        )
                     continue
                 cloned = copy.deepcopy(rel)
                 cloned.branch = into

@@ -81,12 +81,11 @@ from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
     LocalMemoryEngine,
     _candidate_memo_enabled,
-    _merge_relation_state,
+    _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
-    _relation_windows_overlap,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -2885,15 +2884,18 @@ class SqliteEngine:
                             (tenant_id, into, rel.source, rel.predicate, rel.target),
                         ).fetchall()
                     ]
-                    overlapping = [
-                        item for item in peers if _relation_windows_overlap(item, rel)
-                    ]
-                    if overlapping:
-                        _merge_relation_state(overlapping[0], rel)
+                    winner, redundant = _merge_relation_overlap_component(rel, peers)
+                    if winner is not None:
                         conn.execute(
                             _RELATION_UPSERT,
-                            _relation_insert_values(overlapping[0]),
+                            _relation_insert_values(winner),
                         )
+                        for peer in redundant:
+                            conn.execute(
+                                "DELETE FROM relations "
+                                "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                                (tenant_id, into, peer.id),
+                            )
                         continue
                     rel.branch = into
                     id_exists = conn.execute(

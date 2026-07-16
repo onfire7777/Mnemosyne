@@ -461,13 +461,14 @@ class ConsolidationWorker:
         )
         candidate_results: list[dict[str, Any]] = []
         candidates: list[dict[str, Any]] = []
+        no_write_data = self._contains_no_write_data(evidence, payload)
 
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             skipped.append("low_prediction_error_metadata_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": prediction_gate["gate"]}))
             pass_results.append(PassResult("resolver", "skipped", {"reason": prediction_gate["gate"]}))
             pass_results.append(PassResult("belief_reviser", "skipped", {"reason": prediction_gate["gate"]}))
-        elif self._contains_no_write_data(evidence, payload):
+        elif no_write_data:
             skipped.append("source_marked_data_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": "source_marked_data_only"}))
         else:
@@ -519,6 +520,12 @@ class ConsolidationWorker:
 
         for pass_name in passes_run:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
+                continue
+            if no_write_data and pass_name in {"summarizer", "user_model_updater"}:
+                skipped.append(f"{pass_name}_source_marked_data_only")
+                pass_results.append(
+                    PassResult(pass_name, "skipped", {"reason": "source_marked_data_only"})
+                )
                 continue
             if pass_name == "summarizer":
                 summary = self._run_summarizer_pass(tenant_id, branch, evidence, payload, mutation_budget)
