@@ -365,7 +365,7 @@
 
 ## How this sharpens with real services
 
-These numbers run against the **local deterministic engine** (hashing pseudo-embeddings + local lexical reranker). They are real measurements of the current system, but the retrieval and calibration numbers are **floor estimates**. To sharpen (blueprint FR-3 keystone):
+These numbers ran against the **`local` engine** with the recorded embedding path **external service (flags forwarded)**. No model or provider identity is inferred beyond this retained metadata. The measurements are real for that disclosed configuration; further production sharpening requires separately retained evidence:
 
 1. Stand up the real embedding + cross-encoder service (docker-compose, §I).
 2. Re-run with `--embedding-provider http --embedding-url ... --reranker-provider http ...` passed through `--global-flag`. No harness change is needed — the CLI driver forwards them.
