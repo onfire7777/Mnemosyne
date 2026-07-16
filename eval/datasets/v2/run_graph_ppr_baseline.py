@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from eval.datasets.v2.run_grounded_qa_v2 import _retrieval_score, load_dataset
+from eval.datasets.v2.run_grounded_qa_v2 import _jsonl, _retrieval_score, load_dataset
 from eval.harness.cli_driver import MnemoCLI
 from mnemosyne.answering import AnswerLimits, _source_bound_anchors
 from mnemosyne.providers.extractive_decomposer import (
@@ -21,10 +21,16 @@ _DATASET = Path(__file__).with_name("qa_scale_dev_v1.json").resolve()
 _MATRIX = Path(__file__).with_name("qa_decomposition_dev_v1.json").resolve()
 
 
-def _jsonl(rows: list[dict[str, Any]]) -> str:
-    return "".join(
-        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in rows
-    )
+def _validate_output_path(output: Path) -> Path:
+    candidate = output.expanduser()
+    if candidate.is_symlink():
+        raise ValueError("baseline output must be a new non-symlink path")
+    if candidate.exists():
+        raise ValueError("baseline output must not already exist")
+    resolved = candidate.resolve()
+    if resolved == _ROOT or _ROOT in resolved.parents:
+        raise ValueError("baseline output must be outside the repository")
+    return resolved
 
 
 def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
@@ -48,10 +54,12 @@ def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
     capture_results = captured.get("results")
     if not isinstance(capture_results, list) or len(capture_results) != len(runtime_rows):
         raise ValueError("grounded QA capture count mismatch")
-    cid_to_doc = {
-        result["cid"]: runtime["source_identity"]
-        for runtime, result in zip(runtime_rows, capture_results, strict=True)
-    }
+    cid_to_doc: dict[str, str] = {}
+    for runtime, result in zip(runtime_rows, capture_results, strict=True):
+        cid = result.get("cid") if isinstance(result, dict) else None
+        if not isinstance(cid, str) or not cid or cid in cid_to_doc:
+            raise ValueError("grounded QA capture CID custody is invalid")
+        cid_to_doc[cid] = runtime["source_identity"]
 
     query_rows = [
         {"question_id": row["qid"], "tenant": tenant, "query": row["query"]}
@@ -67,9 +75,14 @@ def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
     results = queried.get("results")
     if not isinstance(results, list) or len(results) != len(query_rows):
         raise ValueError("grounded QA query count mismatch")
+    if [row.get("question_id") for row in results if isinstance(row, dict)] != [
+        row["question_id"] for row in query_rows
+    ]:
+        raise ValueError("grounded QA query order drift")
 
     traces: list[dict[str, Any]] = []
     scores: list[tuple[float, float]] = []
+    per_query: dict[str, dict[str, float]] = {}
     disclosed_backends: set[str] = set()
     for question, result in zip(dataset["queries"], results, strict=True):
         search = result["search"]
@@ -83,7 +96,14 @@ def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
                 if hit.get("id") in cid_to_doc
             )
         )
-        scores.append(_retrieval_score(retrieved[:5], question["relevant_doc_ids"]))
+        recall_at_5, ndcg_at_5 = _retrieval_score(
+            retrieved[:5], question["relevant_doc_ids"]
+        )
+        scores.append((recall_at_5, ndcg_at_5))
+        per_query[question["qid"]] = {
+            "direct_retrieval_recall_at_5": recall_at_5,
+            "graph_ppr": channels["graph_ppr"],
+        }
         traces.append(
             {
                 "channels": channels,
@@ -97,11 +117,13 @@ def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
     state = json.loads(store.read_text(encoding="utf-8"))
     metrics = {
         "actual_engine": "local",
+        "captured_count": len(capture_results),
+        "direct_retrieval_ndcg_at_5": sum(score[1] for score in scores) / len(scores),
+        "direct_retrieval_recall_at_5": sum(score[0] for score in scores) / len(scores),
         "disclosed_graph_backends": sorted(disclosed_backends),
         "graph_ppr_channel_sum": sum(row["channels"]["graph_ppr"] for row in traces),
-        "ndcg_at_5": sum(score[1] for score in scores) / len(scores),
+        "per_query": per_query,
         "query_count": len(traces),
-        "recall_at_5": sum(score[0] for score in scores) / len(scores),
         "relations": len(state.get("relations", [])),
         "trace_sha256": hashlib.sha256(trace_bytes).hexdigest(),
     }
@@ -134,8 +156,7 @@ def _run_decomposition_matrix() -> dict[str, int]:
 
 
 def run_baseline(output: Path) -> dict[str, Any]:
-    if output.exists():
-        raise ValueError("baseline output must not already exist")
+    output = _validate_output_path(output)
     dataset = load_dataset(_DATASET)
     first = _run_retrieval(dataset, output / "run-1")
     second = _run_retrieval(dataset, output / "run-2")
@@ -156,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
-    summary = run_baseline(args.output.expanduser().resolve())
+    summary = run_baseline(args.output)
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
