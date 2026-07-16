@@ -118,9 +118,8 @@ fi
 }
 
 RUNTIME_LOCK_OPERATION=rotate-production-mcp-client-cert
-if [ "${MNEMO_RUNTIME_LOCK_ACTIVE:-0}" != "1" ] || \
-  ! "$SCRIPT_DIR/runtime-exclusive-lock.sh" --verify-child \
-    "$RUNTIME_LOCK_OPERATION" "$PPID"; then
+if ! "$SCRIPT_DIR/runtime-exclusive-lock.sh" --verify-child \
+  "$RUNTIME_LOCK_OPERATION" "$PPID"; then
   if [ "$FIXTURE_TRANSACTION" -eq 1 ]; then
     set -- --test-fixture-transaction
   fi
@@ -278,9 +277,7 @@ then
   preflight_failed 'rotation process lock is invalid'
 fi
 unset "$LOCK_FD_ENV"
-unset MNEMO_RUNTIME_LOCK_ACTIVE MNEMO_RUNTIME_LOCK_OWNER_FD \
-  MNEMO_RUNTIME_LOCK_OPERATION MNEMO_RUNTIME_LOCK_OWNER_PID \
-  MNEMO_RUNTIME_LOCK_OWNER_TOKEN
+unset MNEMO_RUNTIME_LOCK_OWNER_FD
 
 normal_pair_is_valid() {
   env \

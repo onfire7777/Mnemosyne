@@ -266,15 +266,7 @@ def test_caller_contention_fails_before_sandbox_mutation(
 ) -> None:
     custody_dir, command, environment, mutation_root = _caller_case(tmp_path, caller)
     if spoof_reentry:
-        environment.update(
-            {
-                "MNEMO_RUNTIME_LOCK_ACTIVE": "1",
-                "MNEMO_RUNTIME_LOCK_OWNER_FD": "999999",
-                "MNEMO_RUNTIME_LOCK_OPERATION": f"{caller}-forged",
-                "MNEMO_RUNTIME_LOCK_OWNER_PID": str(os.getpid()),
-                "MNEMO_RUNTIME_LOCK_OWNER_TOKEN": "f" * 64,
-            }
-        )
+        environment["MNEMO_RUNTIME_LOCK_OWNER_FD"] = "999999"
     process, _, release = _spawn_owner(custody_dir, tmp_path)
     probe_log = Path(environment["RUNTIME_LOCK_PROBE_LOG"])
     before = set(mutation_root.iterdir()) if mutation_root.exists() else set()
@@ -315,16 +307,7 @@ def test_caller_rejects_copied_owner_proof_from_unrelated_process(
     )
     owner = custody_dir / "locks" / LOCK_NAME / OWNER_NAME
     owner_fd = os.open(owner, os.O_RDONLY)
-    metadata = json.loads(owner.read_text(encoding="utf-8"))
-    environment.update(
-        {
-            "MNEMO_RUNTIME_LOCK_ACTIVE": "1",
-            "MNEMO_RUNTIME_LOCK_OWNER_FD": str(owner_fd),
-            "MNEMO_RUNTIME_LOCK_OPERATION": operation,
-            "MNEMO_RUNTIME_LOCK_OWNER_PID": str(metadata["pid"]),
-            "MNEMO_RUNTIME_LOCK_OWNER_TOKEN": str(metadata["owner_token"]),
-        }
-    )
+    environment["MNEMO_RUNTIME_LOCK_OWNER_FD"] = str(owner_fd)
     before = set(mutation_root.iterdir()) if mutation_root.exists() else set()
     try:
         completed = subprocess.run(
@@ -451,16 +434,20 @@ def test_caller_source_keeps_lock_boundary_first_and_forbids_detach(
 ) -> None:
     source = script.read_text(encoding="utf-8")
     assignment = source.index(f"RUNTIME_LOCK_OPERATION={operation}")
-    boundary = source.index('if [ "${MNEMO_RUNTIME_LOCK_ACTIVE:-0}" != "1" ]')
-    verification = source.index('runtime-exclusive-lock.sh" --verify-child', boundary)
+    verification = source.index('runtime-exclusive-lock.sh" --verify-child', assignment)
+    boundary = source.rfind("if !", assignment, verification)
     invocation = source.index(
         'runtime-exclusive-lock.sh" "$RUNTIME_LOCK_OPERATION" --', boundary
     )
-    cleanup = source.index("unset MNEMO_RUNTIME_LOCK_ACTIVE", invocation)
+    cleanup = source.index("unset MNEMO_RUNTIME_LOCK_OWNER_FD", invocation)
     block_end = source.index(cleanup_boundary, cleanup)
     lock_entry_block = source[assignment:block_end]
     assert assignment < boundary < verification < invocation < cleanup < block_end
-    assert "unset MNEMO_RUNTIME_LOCK_ACTIVE" in lock_entry_block
+    assert "unset MNEMO_RUNTIME_LOCK_OWNER_FD" in lock_entry_block
+    assert "MNEMO_RUNTIME_LOCK_ACTIVE" not in lock_entry_block
+    assert "MNEMO_RUNTIME_LOCK_OPERATION" not in lock_entry_block
+    assert "MNEMO_RUNTIME_LOCK_OWNER_PID" not in lock_entry_block
+    assert "MNEMO_RUNTIME_LOCK_OWNER_TOKEN" not in lock_entry_block
     assert f"RUNTIME_LOCK_OPERATION={operation}" in lock_entry_block
     forbidden = ("setsid", "setpgid", "daemonize")
     assert all(token not in source for token in forbidden)
@@ -606,6 +593,150 @@ def _foreign_lock(locks_dir: Path, raw: bytes) -> tuple[Path, Path]:
     owner.write_bytes(raw)
     owner.chmod(0o600)
     return lock_dir, owner
+
+
+@pytest.fixture
+def direct_verification_owner(tmp_path: Path) -> Any:
+    operation = "verify-operation"
+    custody_dir, locks_dir = _custody(tmp_path)
+    lock_dir = locks_dir / LOCK_NAME
+    lock_dir.mkdir(mode=0o700)
+    owner = lock_dir / OWNER_NAME
+    owner_fd = os.open(owner, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    fcntl.flock(owner_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    metadata = _valid_metadata()
+    metadata["operation"] = operation
+    _write_owner_metadata(owner_fd, metadata)
+    try:
+        yield custody_dir, owner, owner_fd, metadata, operation
+    finally:
+        try:
+            os.close(owner_fd)
+        except OSError:
+            pass
+        if owner.exists():
+            owner.unlink()
+        if lock_dir.exists():
+            lock_dir.rmdir()
+        if locks_dir.exists():
+            locks_dir.rmdir()
+        if custody_dir.exists():
+            custody_dir.rmdir()
+
+
+def _write_owner_metadata(owner_fd: int, metadata: dict[str, object]) -> None:
+    os.ftruncate(owner_fd, 0)
+    os.pwrite(owner_fd, _canonical(metadata), 0)
+    os.fsync(owner_fd)
+
+
+def _run_verify_child(
+    custody_dir: Path,
+    operation: str,
+    owner_fd: int,
+    *,
+    pass_owner_fd: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    environment = _environment(custody_dir)
+    environment["MNEMO_RUNTIME_LOCK_OWNER_FD"] = str(owner_fd)
+    return subprocess.run(
+        [str(HELPER), "--verify-child", operation, str(os.getpid())],
+        check=False,
+        capture_output=True,
+        env=environment,
+        pass_fds=(owner_fd,) if pass_owner_fd else (),
+        text=True,
+        timeout=SUBPROCESS_TIMEOUT,
+    )
+
+
+def test_verify_child_accepts_locked_matching_owner(
+    direct_verification_owner: tuple[Path, Path, int, dict[str, object], str],
+) -> None:
+    custody_dir, _, owner_fd, _, operation = direct_verification_owner
+
+    completed = _run_verify_child(custody_dir, operation, owner_fd)
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operation", "other-operation"),
+        ("pid", os.getpid() + 1),
+        ("uid", os.getuid() + 1),
+        ("process_start_fingerprint", "wrong-fingerprint"),
+    ],
+)
+def test_verify_child_rejects_mismatched_authoritative_metadata(
+    direct_verification_owner: tuple[Path, Path, int, dict[str, object], str],
+    field: str,
+    value: object,
+) -> None:
+    custody_dir, _, owner_fd, metadata, operation = direct_verification_owner
+    tampered = dict(metadata)
+    tampered[field] = value
+    _write_owner_metadata(owner_fd, tampered)
+
+    completed = _run_verify_child(custody_dir, operation, owner_fd)
+
+    assert completed.returncode == 1
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+
+
+def test_verify_child_rejects_unlocked_owner(
+    direct_verification_owner: tuple[Path, Path, int, dict[str, object], str],
+) -> None:
+    custody_dir, _, owner_fd, _, operation = direct_verification_owner
+    fcntl.flock(owner_fd, fcntl.LOCK_UN)
+
+    completed = _run_verify_child(custody_dir, operation, owner_fd)
+
+    assert completed.returncode == 1
+
+
+def test_verify_child_rejects_replaced_owner_path(
+    direct_verification_owner: tuple[Path, Path, int, dict[str, object], str],
+) -> None:
+    custody_dir, owner, owner_fd, metadata, operation = direct_verification_owner
+    owner.unlink()
+    owner.write_bytes(_canonical(metadata))
+    owner.chmod(0o600)
+
+    completed = _run_verify_child(custody_dir, operation, owner_fd)
+
+    assert completed.returncode == 1
+
+
+def test_verify_child_rejects_unrelated_inherited_descriptor(
+    direct_verification_owner: tuple[Path, Path, int, dict[str, object], str],
+    tmp_path: Path,
+) -> None:
+    custody_dir, _, _, metadata, operation = direct_verification_owner
+    unrelated = tmp_path / "unrelated-owner.json"
+    unrelated.write_bytes(_canonical(metadata))
+    unrelated.chmod(0o600)
+    unrelated_fd = os.open(unrelated, os.O_RDWR)
+    try:
+        completed = _run_verify_child(custody_dir, operation, unrelated_fd)
+    finally:
+        os.close(unrelated_fd)
+
+    assert completed.returncode == 1
+
+
+def test_verify_child_rejects_invalid_descriptor(
+    direct_verification_owner: tuple[Path, Path, int, dict[str, object], str],
+) -> None:
+    custody_dir, _, _, _, operation = direct_verification_owner
+
+    completed = _run_verify_child(custody_dir, operation, 999_999, pass_owner_fd=False)
+
+    assert completed.returncode == 1
 
 
 def test_successful_child_releases_runtime_lock(tmp_path: Path) -> None:
@@ -1116,7 +1247,7 @@ def test_group_leader_stays_published_until_post_exit_group_probe(
     namespace["process_group_exists"] = lambda _group_id: False
 
     assert namespace["run_child"](
-        ["/unused"], child_holder, received_signal, lambda *_args: None
+        ["/unused"], child_holder, received_signal, lambda *_args: None, {"owner": 9}
     ) == (0, None)
     assert child_holder[0] is None
 
@@ -1191,7 +1322,7 @@ def test_signal_after_leader_exit_is_forwarded_while_group_drains(
     namespace["process_group_exists"] = lambda _group_id: False
 
     assert namespace["run_child"](
-        ["/unused"], child_holder, received_signal, forward
+        ["/unused"], child_holder, received_signal, forward, {"owner": 9}
     ) == (0, signal.SIGTERM)
     assert forwarded == [(CompletedChild.pid, signal.SIGTERM)]
 
@@ -1220,7 +1351,11 @@ def test_post_exit_group_drain_is_bounded_fail_closed(
 
     with pytest.raises(uncertain):
         namespace["run_child"](
-            ["/unused"], child_holder, received_signal, lambda *_args: None
+            ["/unused"],
+            child_holder,
+            received_signal,
+            lambda *_args: None,
+            {"owner": 9},
         )
     assert child_holder[0] is not None
 
@@ -1248,7 +1383,11 @@ def test_post_reap_probe_rejects_a_residual_group_missed_by_snapshot(
 
     with pytest.raises(uncertain):
         namespace["run_child"](
-            ["/unused"], child_holder, received_signal, lambda *_args: None
+            ["/unused"],
+            child_holder,
+            received_signal,
+            lambda *_args: None,
+            {"owner": 9},
         )
     assert child_holder[0] is None
 
