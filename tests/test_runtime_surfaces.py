@@ -4075,6 +4075,16 @@ def test_postgres_adapter_sets_rls_tenant_context() -> None:
     assert "PostgresEngine.discard requires tenant_id" in source
 
 
+def test_postgres_merge_replays_clones_without_moving_source_rows() -> None:
+    source = inspect.getsource(PostgresEngine.merge)
+
+    assert "UPDATE assertions src" not in source
+    assert "UPDATE relations SET branch" not in source
+    assert "_upsert_assertion_with_cursor" in source
+    assert "INSERT INTO relations" in source
+    assert "gen_random_uuid()" in source
+
+
 def test_postgres_engine_exposes_memory_tools_runtime_surface() -> None:
     required = {
         "retrieve",

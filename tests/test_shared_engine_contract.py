@@ -3644,8 +3644,28 @@ def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(
     assert report.assertions_added >= 1
     assert report.relations_added >= 1
     assert any(item["cid"] == cid and item["branch"] == "main" for item in exported["evidence"])
-    assert any(item["id"] == assertion_id and item["branch"] == "main" for item in exported["assertions"])
-    assert any(item["id"] == relation_id and item["branch"] == "main" for item in exported["relations"])
+    assert any(
+        item["branch"] == "main"
+        and item["subject"].startswith("shared merge subject ")
+        and item["predicate"] == "moves"
+        and item["object"] == "branch projection"
+        for item in exported["assertions"]
+    )
+    assert any(
+        item["branch"] == "main"
+        and item["source"] == "shared merge source"
+        and item["predicate"] == "moves_to"
+        and item["target"] == "shared merge target"
+        for item in exported["relations"]
+    )
+    assert any(
+        item["id"] == assertion_id and item["branch"] == branch
+        for item in exported["assertions"]
+    )
+    assert any(
+        item["id"] == relation_id and item["branch"] == branch
+        for item in exported["relations"]
+    )
     tenant_merge = exported["merge_log"][-1]
     assert tenant_merge["from_branch"] == branch
     assert tenant_merge["into_branch"] == "main"
@@ -3660,6 +3680,63 @@ def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(
         and item["relations_added"] >= 1
         for item in exported_all["merge_log"]
     )
+
+
+def test_shared_engine_contract_assertion_merge_reinforces_and_preserves_source(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-assertion-reinforce-{uuid4()}"
+    subject = f"shared assertion source {uuid4()}"
+    first_cid = "3" * 64
+    second_cid = "4" * 64
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="reinforces",
+            object="shared assertion target",
+            confidence=0.7,
+            source_evidence_cids=[first_cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    _branch(engine, branch, tenant)
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=tenant,
+            user_id=user,
+            subject=subject,
+            predicate="reinforces",
+            object="shared assertion target",
+            confidence=0.9,
+            source_evidence_cids=[second_cid],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+
+    report = _merge(engine, branch, tenant)
+    matches = [
+        item
+        for item in engine.export_tenant(tenant)["assertions"]
+        if item["subject"] == subject
+        and item["predicate"] == "reinforces"
+        and item["object"] == "shared assertion target"
+    ]
+    main = [item for item in matches if item["branch"] == "main"]
+    source = [item for item in matches if item["branch"] == branch]
+
+    assert len(main) == 1
+    assert main[0]["confidence"] == 0.9
+    assert main[0]["source_evidence_cids"] == [first_cid, second_cid]
+    assert source
+    assert report.assertions_merged >= 1
 
 
 def test_shared_engine_contract_relation_merge_reinforces_overlapping_fact(
@@ -3717,6 +3794,14 @@ def test_shared_engine_contract_relation_merge_reinforces_overlapping_fact(
     assert matches[0]["valid_to"] is None
     assert matches[0]["source_evidence_cids"] == [first_cid, second_cid]
     assert matches[0]["access_policy"] == {"tenant": tenant, "allow_roles": ["reader"]}
+    assert any(
+        item["branch"] == branch
+        and item["source"] == source
+        and item["predicate"] == predicate
+        and item["target"] == target
+        and item["source_evidence_cids"] == [second_cid]
+        for item in engine.export_tenant(tenant)["relations"]
+    )
 
 
 def test_shared_engine_contract_relation_merge_preserves_disjoint_validity(
@@ -3780,6 +3865,14 @@ def test_shared_engine_contract_relation_merge_preserves_disjoint_validity(
         ),
         (fresh_from.isoformat().replace("+00:00", "Z"), None, (fresh_cid,)),
     }
+    assert any(
+        item["branch"] == branch
+        and item["source"] == source
+        and item["predicate"] == predicate
+        and item["target"] == target
+        and item["source_evidence_cids"] == [fresh_cid]
+        for item in engine.export_tenant(tenant)["relations"]
+    )
 
 
 def test_shared_engine_contract_relation_merge_collapses_bridged_overlap_component(
