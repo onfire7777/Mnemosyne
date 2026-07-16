@@ -640,3 +640,17 @@ Graphify/CBM/gbrain freshness were open. R2a later merged through PRs #13 and
 #11; R2b-R2d, R3/R4, live proof, and final-main knowledge freshness remain
 open. No exact-scale, protected, held-out,
 public, governance-seating, or external-reproduction action occurred.
+
+Round-7 Task-1 precondition receipt (`2026-07-16T05:31Z`): execution stopped
+fail-closed before creating or pushing either delivery branch because the live
+refs do not match the plan contract. After `git fetch --prune origin`, the
+working tree was clean and `gh pr list --state open` was empty, but local
+`main` and the execution checkout both pointed at
+`5fbd4a28010157f253236480c691019729b97ce3`, while `origin/main` remained
+`4d691e80c17dc0df0618e309f28b45c854028248`. Therefore local `main` was ahead
+by eight commits rather than the required seven and did not equal the expected
+`ac28f00b2213d1a5559d47aafe0f27e6cd408225`; the extra tip is the round-7 plan
+commit `5fbd4a2`. No delivery branch, push, PR, merge, branch deletion, reset,
+rebase, force-push, or direct push to `main` was attempted. The next executor
+must reconcile the plan-commit custody mismatch explicitly before retrying
+Task 1; it must not silently widen the seven-commit landing range.
