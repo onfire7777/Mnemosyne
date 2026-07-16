@@ -282,6 +282,20 @@ def test_add_relation_export_parity_vs_local(tmp_path: Path):
                 id="rel-1",
             )
         )
+        second_cid = _seed_evidence(engine, tenant, "A second grounded beacon note.")
+        engine.add_relation(
+            Relation(
+                tenant_id=tenant,
+                source="beacon",
+                predicate="emits",
+                target="topaz glow",
+                confidence=0.9,
+                valid_from=T2,
+                source_evidence_cids=[cid, second_cid],
+                access_policy={"tenant": tenant},
+                id="rel-1",
+            )
+        )
 
     seed(sqlite)
     seed(local)

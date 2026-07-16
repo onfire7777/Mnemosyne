@@ -10,6 +10,7 @@ from typing import Any
 
 from eval.datasets.v2.run_grounded_qa_v2 import _jsonl, _retrieval_score, load_dataset
 from eval.harness.cli_driver import MnemoCLI
+from eval.harness.metrics import resolve_retrieved_doc_ids
 from mnemosyne.answering import AnswerLimits, _source_bound_anchors
 from mnemosyne.providers.extractive_decomposer import (
     ExtractiveQueryDecomposer,
@@ -54,20 +55,7 @@ def _run_retrieval(
     capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8")
     capture_cli = MnemoCLI(store=str(store), timeout_s=3600.0)
     if consolidate:
-        capture_cli.run(
-            "gate-case-add",
-            "--id",
-            "w1-bridge-regression",
-            "--signature",
-            "w1 bridge regression",
-            "--query",
-            "Mara Helios",
-            "--expected-substring",
-            "Helios",
-            "--origin",
-            "synthetic",
-            "--protected",
-        )
+        capture_cli.install_consolidation_gate_case(runtime_rows[0]["content"])
     captured = (
         capture_cli.capture_batch(capture_path, consolidate=True)
         if consolidate
@@ -111,18 +99,7 @@ def _run_retrieval(
         explanation = result["explanation"]
         channels = explanation["channels"]
         disclosed_backends.add(explanation["adapters"]["graph_backend"])
-        retrieved: list[str] = []
-        for hit in search["hits"]:
-            metadata = hit.get("metadata") if isinstance(hit, dict) else None
-            source_cids = (
-                metadata.get("source_evidence_cids", [])
-                if isinstance(metadata, dict)
-                else []
-            )
-            for cid in [hit.get("id"), *hit.get("provenance", []), *source_cids]:
-                doc_id = cid_to_doc.get(cid)
-                if doc_id is not None and doc_id not in retrieved:
-                    retrieved.append(doc_id)
+        retrieved = resolve_retrieved_doc_ids(search["hits"], cid_to_doc)
         recall_at_5, ndcg_at_5 = _retrieval_score(
             retrieved[:5], question["relevant_doc_ids"]
         )

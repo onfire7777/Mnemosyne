@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: W1 local graph-substrate development and disclosure reconciliation are merged through audit PR #30 as main@0865271 with exact-head and post-merge CI green; CAP-003, BENCH-005, and Plan 12-04 remain partial behind production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt
-last_updated: "2026-07-16T10:26:48Z"
+stopped_at: W1 local graph-substrate development and disclosure reconciliation are merged through receipt PR #31 as main@5962d3b, and the reboot-orphaned round-8 review fixes (symlinked-store rejection, non-destructive idempotent PostgreSQL merge replay with supersession-reference resolution, UUID-shaped deterministic summary-relation ids) landed through PR #32 after adversarial verification; CAP-003, BENCH-005, and Plan 12-04 remain partial behind production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt
+last_updated: "2026-07-16T20:15:00Z"
 last_activity: 2026-07-16
 progress:
   total_phases: 7
@@ -38,7 +38,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
-Status: W1 Phase 1 baseline landed through PR #23 (`83b2678` -> `4d691e8`, exact-head CI `29470245051`) with its custody fixes subsequently merged in PR #24. Fix A landed through PR #26 (`ac13abe` -> `ee6e0e2`, post-merge CI `29479553530`). Fix B landed through PR #28 (`94e8da5` -> `28a6d24`, exact-head CI `29483754981`, post-merge CI `29484670121`), and its receipt landed through PR #29 as `f040bfd` after post-merge run `29486629298`. Disclosure audit PR #30 merged exact head `67546bb` as `0865271` after run `29489028437` passed; post-merge run `29489959348` passed on that merge SHA. The local dev proof has 7 persisted relations, positive graph contribution, Recall@5/nDCG@5 1.0, and byte-identical repeat traces. CAP-003, BENCH-005, and Plan 12-04 remain partial: production parity on `postgres-recursive-ppr`, runtime readiness, grounded-reader development QA, and the single protected attempt are still open.
+Status: W1 Phase 1 baseline landed through PR #23 (`83b2678` -> `4d691e8`, exact-head CI `29470245051`) with its custody fixes subsequently merged in PR #24. Fix A landed through PR #26 (`ac13abe` -> `ee6e0e2`, post-merge CI `29479553530`). Fix B landed through PR #28 (`94e8da5` -> `28a6d24`, exact-head CI `29483754981`, post-merge CI `29484670121`), and its receipt landed through PR #29 as `f040bfd` after post-merge run `29486629298`. Disclosure audit PR #30 merged exact head `67546bb` as `0865271` after run `29489028437` passed; post-merge run `29489959348` passed on that merge SHA. The local dev proof has 7 persisted relations, positive graph contribution, Recall@5/nDCG@5 1.0, and byte-identical repeat traces. CAP-003, BENCH-005, and Plan 12-04 remain partial: production parity on `postgres-recursive-ppr`, runtime readiness, grounded-reader development QA, and the single protected attempt are still open. The reboot-orphaned round-8 review fixes landed through PR #32 after a 27-agent adversarial verification (see the 2026-07-16 review checkpoint below).
 Last activity: 2026-07-16 — the audit distinguished the executed local engine from the configured/self-reported `postgres-recursive-ppr` adapter label and corrected the SLO renderer's hard-coded local prose. The first exact-head run `29488205019` exposed a cold-runner SQLite expiry-test timing flaw; the test was fixed without changing production behavior, and corrected exact-head/post-merge runs passed. A fresh unchanged production MCP client TLS validation passed at `2026-07-16T09:39:28Z` without starting the VM or rotating certificates. VM restart plus Vault unseal, runtime-readiness repair (decomposer smoke and `/opt` role commands), R3/R4 live rotation including the saved `~/mnemosyne-tier-b-custody/rotator-version-check-fix.patch` via normal TDD+CI, the full suite, and CBM/gbrain/Graphify refresh at the final merged SHA are explicitly operator/admission-gated, not failures.
 
 ## Performance Metrics
@@ -260,10 +260,11 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   explicitly open.
 - Repair runtime readiness first: root-cause the decomposer smoke timeout and
   restore the absent `/opt` role commands without weakening any readiness gate.
-- Then implement the dev-only graph-PPR consolidation/extractor fix using the
-  local engine that the eval actually runs. Correct the PBPP disclosure because
-  the phase-11 report names `postgres-recursive-ppr` while the eval executes the
-  local engine. Do not use this slice to close CAP-003, BENCH-005, or Plan 12-04.
+- DONE 2026-07-16: the dev-only graph-PPR consolidation/extractor fix landed as
+  W1 Fix A/Fix B (PRs #26/#28 with receipts #27/#29) and the PBPP disclosure
+  correction landed through the disclosure audit (PRs #30/#31); the round-8
+  post-review hardening landed through PR #32. CAP-003, BENCH-005, and
+  Plan 12-04 were not closed by this slice, as required.
 - After a complete hardware/TLS/Vault/service/topology admission, run the full
   suite and refresh Graphify, CBM, and gbrain against the exact admitted main
   SHA. R2c/R2d and R3/R4 remain open and separate.
@@ -275,7 +276,31 @@ Historical source-hardening checkpoint (2026-06-30): Phase 8 provenance fail-ope
   packet for the human operator. Only the human operator may begin recruitment,
   seat the board, or ratify policy.
 
-Latest review checkpoint (2026-07-15): the round-5 HIGH finding is CONFIRMED and
+Latest review checkpoint (2026-07-16): a host reboot at `2026-07-16T12:41Z`
+killed the round-8 executor mid-way through its post-landing review-fix gate,
+leaving three review-fix commits (`50106d7`, `4ee5668`, `6f445df`) on local
+`main` (unpushed) and a fourth iteration uncommitted. The work was recovered
+onto `codex/r8-review-fix-recovery` with no reset, rebase, force-push, or
+direct push to `main`, completed as `6ee2900` (symlinked capture-batch store
+rejection; non-destructive PostgresEngine.merge clone replay), adversarially
+verified by a 27-agent multi-lens review, and hardened as `7108f4a`:
+UUID-shaped deterministic summary-relation ids (the prior `relation-<sha256>`
+form would have failed the CI Postgres job against the UUID primary key),
+deterministic merge-clone ids so re-merging the same branch converges instead
+of duplicating rows, a post-replay pass that repoints `superseded_by`
+references absorbed by the reinforce path, per-merge (not per-row)
+schema-ensure DDL, and engine-level symlink rejection for single-row capture.
+Landed via PR #32 with the full local suite green (PG-live cases exercised by
+exact-head CI). Known deferred limitation for a future W1 eval slice:
+`_extract_simple_fact` treats each physical line as a sentence, so facts
+spanning hard-wrapped lines are dropped; that behavior is deliberately
+test-pinned for line-oriented fixtures. Cert status: the externally refreshed
+MCP client leaf expires `2026-07-16T21:18:25Z`, now below the ≥6h admission
+floor, so cert-gated live work is operator-gated again (the known R3/R4
+live-rotation-proof gap, not a new incident). Concluded goalex round plans
+(r2/r3/r4/r6/r7/r8) moved to `docs/plans/completed/` per the r5 convention.
+
+Previous review checkpoint (2026-07-15): the round-5 HIGH finding is CONFIRMED and
 resolved. The orphaned review-fix range landed through merge-commit PR #20 from
 feature head `f4636ee8560b7f17bbf3fe5ad33fdb85d87d818b`; exact-head CI run
 `29465778730` passed from `2026-07-16T02:06:24Z` through `02:20:20Z`, PR #20

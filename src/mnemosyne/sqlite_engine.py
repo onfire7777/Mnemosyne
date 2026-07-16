@@ -81,6 +81,7 @@ from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
     LocalMemoryEngine,
     _candidate_memo_enabled,
+    _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
@@ -271,6 +272,18 @@ INSERT INTO relations (
     tenant_id, branch, id, source, predicate, target, confidence,
     valid_from, valid_to, source_evidence_cids, access_policy
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+_RELATION_UPSERT = _RELATION_INSERT + """
+ON CONFLICT (tenant_id, branch, id) DO UPDATE SET
+    source = excluded.source,
+    predicate = excluded.predicate,
+    target = excluded.target,
+    confidence = excluded.confidence,
+    valid_from = excluded.valid_from,
+    valid_to = excluded.valid_to,
+    source_evidence_cids = excluded.source_evidence_cids,
+    access_policy = excluded.access_policy
 """
 
 
@@ -2378,7 +2391,7 @@ class SqliteEngine:
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         """Single-row relation write mirroring ``LocalMemoryEngine.add_relation``:
         validate policy, require the branch (ValueError before the FK), deepcopy,
-        set access_policy/branch, INSERT + audit atomically, return the id."""
+        set access_policy/branch, UPSERT + audit atomically, return the id."""
         access_policy = validate_access_policy(
             relation.access_policy,
             tenant_id=relation.tenant_id,
@@ -2391,7 +2404,7 @@ class SqliteEngine:
             item.access_policy = access_policy
             item.branch = branch
             with conn:
-                conn.execute(_RELATION_INSERT, _relation_insert_values(item))
+                conn.execute(_RELATION_UPSERT, _relation_insert_values(item))
                 self._audit_row(
                     conn,
                     item.tenant_id,
@@ -2808,8 +2821,10 @@ class SqliteEngine:
         ``into`` and pushed through this engine's OWN :meth:`upsert_assertion`
         (supersede/contest runs) — ``assertions_added`` when the (tenant, into)
         row count grows, else ``assertions_merged`` (the reinforce path).
-        Relations: id-dedup copy. Returns ``MergeReport(frm, into, evidence_added,
-        assertions_added, assertions_merged, relations_added, conflicts=[])``
+        Relations: overlapping semantic peers reinforce provenance, confidence,
+        validity, and restrictive access policy; disjoint windows stay distinct.
+        Returns ``MergeReport(frm, into, evidence_added, assertions_added,
+        assertions_merged, relations_added, conflicts=[])``
         constructed POSITIONALLY (R1 field order); ``conflicts`` is always ``[]``.
         The report is appended to ``merge_log`` and audited (op ``merge``,
         target ``frm``) so ``export_tenant`` reconstructs the merge_log."""
@@ -2860,14 +2875,37 @@ class SqliteEngine:
             with conn:
                 for row in rel_rows:
                     rel = _relation_from_row(row)
-                    present = conn.execute(
+                    peers = [
+                        _relation_from_row(item)
+                        for item in conn.execute(
+                            "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? "
+                            "AND source = ? AND predicate = ? AND target = ? "
+                            "ORDER BY valid_from, id",
+                            (tenant_id, into, rel.source, rel.predicate, rel.target),
+                        ).fetchall()
+                    ]
+                    winner, redundant = _merge_relation_overlap_component(rel, peers)
+                    if winner is not None:
+                        conn.execute(
+                            _RELATION_UPSERT,
+                            _relation_insert_values(winner),
+                        )
+                        for peer in redundant:
+                            conn.execute(
+                                "DELETE FROM relations "
+                                "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                                (tenant_id, into, peer.id),
+                            )
+                        continue
+                    rel.branch = into
+                    id_exists = conn.execute(
                         "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? AND id = ?",
                         (tenant_id, into, rel.id),
                     ).fetchone()
-                    if present is None:
-                        rel.branch = into
-                        conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
-                        report.relations_added += 1
+                    if id_exists is not None:
+                        rel.id = new_id()
+                    conn.execute(_RELATION_INSERT, _relation_insert_values(rel))
+                    report.relations_added += 1
                 conn.execute(
                     "INSERT INTO merge_log(tenant_id, record) VALUES (?, ?)",
                     (tenant_id, json_text(report.to_dict())),

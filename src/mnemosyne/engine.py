@@ -106,6 +106,66 @@ def _int_or_default(value: Any, *, default: int) -> int:
         return default
 
 
+def _relation_windows_overlap(left: Relation, right: Relation) -> bool:
+    """Return whether two half-open relation validity windows overlap."""
+
+    return (left.valid_to is None or right.valid_from < left.valid_to) and (
+        right.valid_to is None or left.valid_from < right.valid_to
+    )
+
+
+def _merge_relation_state(target: Relation, incoming: Relation) -> None:
+    """Reinforce one overlapping semantic relation without widening policy."""
+
+    target.confidence = max(target.confidence, incoming.confidence)
+    target.valid_from = min(target.valid_from, incoming.valid_from)
+    target.valid_to = (
+        None
+        if target.valid_to is None or incoming.valid_to is None
+        else max(target.valid_to, incoming.valid_to)
+    )
+    target.source_evidence_cids = sorted(
+        set(target.source_evidence_cids + incoming.source_evidence_cids)
+    )
+    target.access_policy = merge_access_policies(
+        [target.access_policy, incoming.access_policy],
+        tenant_id=target.tenant_id,
+    )
+
+
+def _merge_relation_overlap_component(
+    incoming: Relation,
+    peers: list[Relation],
+) -> tuple[Relation | None, list[Relation]]:
+    """Fold every transitively overlapping peer into one deterministic winner."""
+
+    remaining = sorted(peers, key=lambda item: (item.valid_from, item.id))
+    component: list[Relation] = []
+    expanded = copy.deepcopy(incoming)
+    while remaining:
+        pending: list[Relation] = []
+        matched = False
+        for peer in remaining:
+            if _relation_windows_overlap(peer, expanded):
+                _merge_relation_state(expanded, peer)
+                component.append(peer)
+                matched = True
+            else:
+                pending.append(peer)
+        if not matched:
+            break
+        remaining = pending
+    if not component:
+        return None, []
+
+    winner = min(component, key=lambda item: (item.valid_from, item.id))
+    for peer in component:
+        if peer is not winner:
+            _merge_relation_state(winner, peer)
+    _merge_relation_state(winner, incoming)
+    return winner, [peer for peer in component if peer is not winner]
+
+
 def _privacy_backfill_access_policy(
     access_policy: dict[str, Any],
     *,
@@ -596,6 +656,8 @@ class LocalMemoryEngine:
             return
         if not self.store_path:
             return
+        if self.store_path.is_symlink():
+            raise ValueError("local memory store must be a real file")
         parent = self.store_path.parent
         parent_created = not parent.exists()
         parent.mkdir(parents=True, exist_ok=True)
@@ -2622,12 +2684,31 @@ class LocalMemoryEngine:
                 for item in self.relations.values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
             ]:
-                target_key = self._branch_key(rel.tenant_id, into, rel.id)
-                if target_key not in self.relations:
-                    cloned = copy.deepcopy(rel)
-                    cloned.branch = into
-                    self.relations[target_key] = cloned
-                    report.relations_added += 1
+                peers = [
+                    item
+                    for item in self.relations.values()
+                    if item.tenant_id == rel.tenant_id
+                    and item.branch == into
+                    and item.source == rel.source
+                    and item.predicate == rel.predicate
+                    and item.target == rel.target
+                ]
+                winner, redundant = _merge_relation_overlap_component(rel, peers)
+                if winner is not None:
+                    for peer in redundant:
+                        self.relations.pop(
+                            self._branch_key(peer.tenant_id, into, peer.id),
+                            None,
+                        )
+                    continue
+                cloned = copy.deepcopy(rel)
+                cloned.branch = into
+                target_key = self._branch_key(cloned.tenant_id, into, cloned.id)
+                if target_key in self.relations:
+                    cloned.id = new_id()
+                    target_key = self._branch_key(cloned.tenant_id, into, cloned.id)
+                self.relations[target_key] = cloned
+                report.relations_added += 1
             self.merge_log.append(report.to_dict())
             self._audit(tenant_id or "*", "engine", "merge", frm, report.to_dict())
             self._persist()

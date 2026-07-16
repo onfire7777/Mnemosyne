@@ -1328,6 +1328,11 @@ def test_postgres_engine_live_shared_contract_parity() -> None:
     branch_result = engine.retrieve("branch-only parity", tenant, branch=branch)
     merge_report = engine.merge(branch, tenant_id=tenant)
     main_after = engine.retrieve("branch-only parity", tenant)
+    merged_clones = [
+        item
+        for item in engine.export_tenant(tenant)["assertions"]
+        if item["branch"] == "main" and item["subject"] == "branch-only parity"
+    ]
     engine.discard(branch, tenant_id=tenant)
 
     assert jan[-1].id == first_id
@@ -1339,7 +1344,11 @@ def test_postgres_engine_live_shared_contract_parity() -> None:
     assert all(hit.id != branch_id for hit in main_before.hits)
     assert any(hit.id == branch_id for hit in branch_result.hits)
     assert merge_report.assertions_added >= 1
-    assert any(hit.id == branch_id for hit in main_after.hits)
+    # Merge replays a clone into main (the source branch keeps its row), so the
+    # merged assertion is retrievable on main under its deterministic clone id.
+    assert len(merged_clones) == 1
+    assert merged_clones[0]["id"] != branch_id
+    assert any(hit.id == merged_clones[0]["id"] for hit in main_after.hits)
 
 
 def test_postgres_cli_backend_live_smoke() -> None:
