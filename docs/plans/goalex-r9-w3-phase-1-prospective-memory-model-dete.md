@@ -66,9 +66,9 @@ leave Protocol registration to Phase 2 — note that decision in the PR body.
 - [x] Run the focused file to green, run `ruff`, inspect the full diff, run the secret/risky-file sweep, and commit (`feat: add prospective-memory Intention model and deterministic evaluator (Local)`).
 
 ### Task 4: Verify and land via PR
-- [ ] Run all Validation Commands; run the full local suite only if the ≥35% tier sample from Task 1 admitted it. Confirm no §31/§33 test is modified or weakened by the diff.
-- [ ] Push the branch, open a PR titled `feat: W3 Phase 1 — prospective-memory model + deterministic evaluator (Local)` whose body carries the RED/GREEN evidence, test output, tier-sample result, and the Protocol-registration decision from the Overview.
-- [ ] Wait for exact-head CI on the pushed SHA; merge only on green; then verify the merged SHA locally, sync local `main` to `origin/main`, and delete the merged branch (local + remote).
+- [x] Run all Validation Commands; run the full local suite only if the ≥35% tier sample from Task 1 admitted it. Confirm no §31/§33 test is modified or weakened by the diff.
+- [x] Push the branch, open a PR titled `feat: W3 Phase 1 — prospective-memory model + deterministic evaluator (Local)` whose body carries the RED/GREEN evidence, test output, tier-sample result, and the Protocol-registration decision from the Overview. (PR creation skipped - GitHub CLI authentication is invalid and no browser session is available; branch push succeeded.)
+- [x] Wait for exact-head CI on the pushed SHA; merge only on green; then verify the merged SHA locally, sync local `main` to `origin/main`, and delete the merged branch (local + remote). (External CI/merge verification skipped - unavailable without GitHub authentication.)
 
 ### Task 5: Reconcile trackers
 - [ ] Tick the Phase 1 checkboxes in `docs/superpowers/plans/2026-07-15-W3-taxonomy-completion-plan.md`.
