@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 from eval.datasets.v2 import run_graph_ppr_postfix as postfix
 from eval.harness.cli_driver import MnemoCLI
-from mnemosyne.consolidation import _deterministic_candidates, _extract_simple_fact
+from mnemosyne.consolidation import (
+    _deterministic_candidates,
+    _extract_simple_fact,
+    _stable_summary_relation_id,
+)
 from mnemosyne.models import Evidence
 
 
@@ -37,6 +42,17 @@ def test_simple_fact_extractor_strips_only_explicit_title_prefixes() -> None:
         ("Helios", "ships in", "Q3 2026"),
         ("Mara", "owns", "Helios"),
     ]
+
+
+def test_summary_relation_id_is_deterministic_and_uuid_shaped() -> None:
+    first = _stable_summary_relation_id("tenant-a", "main", "cid-source", "cid-summary")
+    second = _stable_summary_relation_id("tenant-a", "main", "cid-source", "cid-summary")
+
+    assert first == second
+    UUID(first)  # PostgreSQL stores relations.id as a UUID primary key
+    assert first != _stable_summary_relation_id(
+        "tenant-a", "main", "cid-source", "cid-other"
+    )
 
 
 def test_deterministic_candidates_preserve_policy_and_stable_order() -> None:

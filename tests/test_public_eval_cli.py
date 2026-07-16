@@ -193,6 +193,25 @@ def test_capture_batch_rejects_symlinked_store_without_touching_target(
     assert target.read_bytes() == before
 
 
+def test_capture_rejects_symlinked_store_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target.json"
+    seed = MnemoCLI(store=str(target))
+    seed.capture("t", "u", "existing target content", source_type="benchmark")
+    before = target.read_bytes()
+    linked_store = tmp_path / "linked-store.json"
+    linked_store.symlink_to(target)
+
+    with pytest.raises(CLIError, match="real file"):
+        MnemoCLI(store=str(linked_store)).capture(
+            "t", "u", "must not replace the symlink target", source_type="benchmark"
+        )
+
+    assert linked_store.is_symlink()
+    assert target.read_bytes() == before
+
+
 def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path) -> None:
     """Eval rows pass both gates: trust 0 is writable and missing error defaults high."""
     rows = tmp_path / "facts.jsonl"

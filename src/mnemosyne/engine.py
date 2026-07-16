@@ -656,6 +656,8 @@ class LocalMemoryEngine:
             return
         if not self.store_path:
             return
+        if self.store_path.is_symlink():
+            raise ValueError("local memory store must be a real file")
         parent = self.store_path.parent
         parent_created = not parent.exists()
         parent.mkdir(parents=True, exist_ok=True)
