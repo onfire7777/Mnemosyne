@@ -33,7 +33,9 @@ def _validate_output_path(output: Path) -> Path:
     return resolved
 
 
-def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
+def _run_retrieval(
+    dataset: dict[str, Any], output: Path, *, consolidate: bool = False
+) -> dict[str, Any]:
     output.mkdir(parents=True)
     store = output / "store.json"
     tenant = dataset["tenant"]
@@ -50,7 +52,27 @@ def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
     ]
     capture_path = output / "capture.jsonl"
     capture_path.write_text(_jsonl(runtime_rows), encoding="utf-8")
-    captured = MnemoCLI(store=str(store), timeout_s=3600.0).capture_batch(capture_path)
+    capture_cli = MnemoCLI(store=str(store), timeout_s=3600.0)
+    if consolidate:
+        capture_cli.run(
+            "gate-case-add",
+            "--id",
+            "w1-bridge-regression",
+            "--signature",
+            "w1 bridge regression",
+            "--query",
+            "Mara Helios",
+            "--expected-substring",
+            "Helios",
+            "--origin",
+            "synthetic",
+            "--protected",
+        )
+    captured = (
+        capture_cli.capture_batch(capture_path, consolidate=True)
+        if consolidate
+        else capture_cli.capture_batch(capture_path)
+    )
     capture_results = captured.get("results")
     if not isinstance(capture_results, list) or len(capture_results) != len(runtime_rows):
         raise ValueError("grounded QA capture count mismatch")
@@ -89,13 +111,18 @@ def _run_retrieval(dataset: dict[str, Any], output: Path) -> dict[str, Any]:
         explanation = result["explanation"]
         channels = explanation["channels"]
         disclosed_backends.add(explanation["adapters"]["graph_backend"])
-        retrieved = list(
-            dict.fromkeys(
-                cid_to_doc[hit["id"]]
-                for hit in search["hits"]
-                if hit.get("id") in cid_to_doc
+        retrieved: list[str] = []
+        for hit in search["hits"]:
+            metadata = hit.get("metadata") if isinstance(hit, dict) else None
+            source_cids = (
+                metadata.get("source_evidence_cids", [])
+                if isinstance(metadata, dict)
+                else []
             )
-        )
+            for cid in [hit.get("id"), *hit.get("provenance", []), *source_cids]:
+                doc_id = cid_to_doc.get(cid)
+                if doc_id is not None and doc_id not in retrieved:
+                    retrieved.append(doc_id)
         recall_at_5, ndcg_at_5 = _retrieval_score(
             retrieved[:5], question["relevant_doc_ids"]
         )
