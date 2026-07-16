@@ -1626,8 +1626,14 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
             rows.append(row)
     if not rows:
         raise ValueError("capture batch must contain at least one row")
-    store = Path(args.store).resolve()
-    store.parent.mkdir(parents=True, exist_ok=True)
+    requested_store = Path(args.store).expanduser()
+    requested_store.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve only the parent. Keeping the final directory entry unresolved
+    # lets us reject an existing symlink and ensures os.replace() would replace
+    # a raced symlink itself rather than following it to its target.
+    store = requested_store.parent.resolve() / requested_store.name
+    if store.is_symlink():
+        raise ValueError("local capture-batch store must be a real file")
     runtime_state = load_runtime_state(args) if getattr(args, "consolidate", False) else None
     consolidation_gate_cases = runtime_state.load_gate_cases() if runtime_state else []
     descriptor, staged_name = tempfile.mkstemp(prefix=f".{store.name}-batch-", dir=store.parent)

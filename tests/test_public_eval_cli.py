@@ -163,6 +163,36 @@ def test_capture_batch_matches_capture_and_rejects_schema_before_writes(
     assert before == after
 
 
+def test_capture_batch_rejects_symlinked_store_without_touching_target(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "target.json"
+    seed = MnemoCLI(store=str(target))
+    seed.capture("t", "u", "existing target content", source_type="benchmark")
+    before = target.read_bytes()
+    linked_store = tmp_path / "linked-store.json"
+    linked_store.symlink_to(target)
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text(
+        json.dumps(
+            {
+                "tenant": "t",
+                "user": "u",
+                "source_type": "benchmark",
+                "content": "must not replace the symlink target",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError, match="real file"):
+        MnemoCLI(store=str(linked_store)).capture_batch(rows)
+
+    assert linked_store.is_symlink()
+    assert target.read_bytes() == before
+
+
 def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path) -> None:
     """Eval rows pass both gates: trust 0 is writable and missing error defaults high."""
     rows = tmp_path / "facts.jsonl"
