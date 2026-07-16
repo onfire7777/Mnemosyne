@@ -640,3 +640,41 @@ Graphify/CBM/gbrain freshness were open. R2a later merged through PRs #13 and
 #11; R2b-R2d, R3/R4, live proof, and final-main knowledge freshness remain
 open. No exact-scale, protected, held-out,
 public, governance-seating, or external-reproduction action occurred.
+
+Round-7 Task-1 precondition receipt (`2026-07-16T05:31Z`): execution stopped
+fail-closed before creating or pushing either delivery branch because the live
+refs do not match the plan contract. After `git fetch --prune origin`, the
+working tree was clean and `gh pr list --state open` was empty, but local
+`main` and the execution checkout both pointed at
+`5fbd4a28010157f253236480c691019729b97ce3`, while `origin/main` remained
+`4d691e80c17dc0df0618e309f28b45c854028248`. Therefore local `main` was ahead
+by eight commits rather than the required seven and did not equal the expected
+`ac28f00b2213d1a5559d47aafe0f27e6cd408225`; the extra tip is the round-7 plan
+commit `5fbd4a2`. No delivery branch, push, PR, merge, branch deletion, reset,
+rebase, force-push, or direct push to `main` was attempted. The next executor
+must reconcile the plan-commit custody mismatch explicitly before retrying
+Task 1; it must not silently widen the seven-commit landing range.
+
+Round-8 Task-1 reconciliation (`2026-07-16`): the round-5 R2b review finding is
+resolved. Fix commits `7b06de5` and `2520c14` landed through PR #20 merge
+`51fa898` and PR #21 merge `69cd2cf`; all four commits are verified ancestors
+of `origin/main`. PR #24 merged head `5fbd4a2` as `fbc1857` at `05:35:18Z`,
+before its final required exact-head check became green at `05:46:23Z`. Both
+PR-head run `29474245544` and post-merge run `29474289329` ultimately completed
+successfully, but later green does not cure that merge-before-green delivery
+breach. Every future merge must wait until all required checks on the exact
+pushed head SHA have completed successfully, then verify the post-merge run on
+the merge SHA. Round 7 failed because it gated on the mutable checkout tip and
+ahead-count even though the Goalex harness legitimately appended a plan commit.
+Round 8 closes that failure mode: delivery and ancestry checks are pinned to
+immutable content SHAs with `git merge-base --is-ancestor`; Goalex plan commits
+are expected bookkeeping and never widen a content range implicitly.
+Branch hygiene removed the round-6 precondition-receipt branch only after
+`git cherry` proved its sole commit patch-equivalent to `origin/main` (the
+remote was already absent). The older
+`goalex-r1-r2b-integrate-the-shared-runtime-exclusi` branch is intentionally
+retained: its `GOAL.md` and round-1 plan are not present on `origin/main`, so
+complete content subsumption cannot be proven. The merged and superseding R2b
+implementation/reconciliation evidence remains in PRs #15-#23. The absent
+merged delivery branch required no deletion; `codex/r2b-capture-rotator-lock`
+and the round-7/8 Goalex branch are intentionally untouched.
