@@ -273,6 +273,18 @@ INSERT INTO relations (
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
+_RELATION_UPSERT = _RELATION_INSERT + """
+ON CONFLICT (tenant_id, branch, id) DO UPDATE SET
+    source = excluded.source,
+    predicate = excluded.predicate,
+    target = excluded.target,
+    confidence = excluded.confidence,
+    valid_from = excluded.valid_from,
+    valid_to = excluded.valid_to,
+    source_evidence_cids = excluded.source_evidence_cids,
+    access_policy = excluded.access_policy
+"""
+
 
 def _assertion_insert_values(a: Assertion) -> tuple[Any, ...]:
     """INSERT bind tuple for an ``Assertion`` (dt columns via ``dt_to_json``,
@@ -2378,7 +2390,7 @@ class SqliteEngine:
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         """Single-row relation write mirroring ``LocalMemoryEngine.add_relation``:
         validate policy, require the branch (ValueError before the FK), deepcopy,
-        set access_policy/branch, INSERT + audit atomically, return the id."""
+        set access_policy/branch, UPSERT + audit atomically, return the id."""
         access_policy = validate_access_policy(
             relation.access_policy,
             tenant_id=relation.tenant_id,
@@ -2391,7 +2403,7 @@ class SqliteEngine:
             item.access_policy = access_policy
             item.branch = branch
             with conn:
-                conn.execute(_RELATION_INSERT, _relation_insert_values(item))
+                conn.execute(_RELATION_UPSERT, _relation_insert_values(item))
                 self._audit_row(
                     conn,
                     item.tenant_id,
@@ -2808,7 +2820,7 @@ class SqliteEngine:
         ``into`` and pushed through this engine's OWN :meth:`upsert_assertion`
         (supersede/contest runs) — ``assertions_added`` when the (tenant, into)
         row count grows, else ``assertions_merged`` (the reinforce path).
-        Relations: id-dedup copy. Returns ``MergeReport(frm, into, evidence_added,
+        Relations: semantic-identity dedup copy. Returns ``MergeReport(frm, into, evidence_added,
         assertions_added, assertions_merged, relations_added, conflicts=[])``
         constructed POSITIONALLY (R1 field order); ``conflicts`` is always ``[]``.
         The report is appended to ``merge_log`` and audited (op ``merge``,
@@ -2861,8 +2873,9 @@ class SqliteEngine:
                 for row in rel_rows:
                     rel = _relation_from_row(row)
                     present = conn.execute(
-                        "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? AND id = ?",
-                        (tenant_id, into, rel.id),
+                        "SELECT 1 FROM relations WHERE tenant_id = ? AND branch = ? "
+                        "AND source = ? AND predicate = ? AND target = ?",
+                        (tenant_id, into, rel.source, rel.predicate, rel.target),
                     ).fetchone()
                     if present is None:
                         rel.branch = into

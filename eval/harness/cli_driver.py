@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -191,6 +192,28 @@ class MnemoCLI:
         if consolidate:
             args.append("--consolidate")
         return self.run("capture-batch", *args).json
+
+    def install_consolidation_gate_case(self, content: str) -> dict[str, Any]:
+        """Install a corpus-derived smoke case without using benchmark labels."""
+
+        first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
+        if not first_line:
+            raise ValueError("consolidation gate content must contain visible text")
+        digest = sha256(content.encode("utf-8")).hexdigest()[:12]
+        return self.run(
+            "gate-case-add",
+            "--id",
+            f"eval-consolidation-{digest}",
+            "--signature",
+            f"evaluation consolidation smoke {digest}",
+            "--query",
+            first_line[:160],
+            "--expected-substring",
+            first_line[:80],
+            "--origin",
+            "curated",
+            "--protected",
+        ).json
 
     def eval_query_batch(self, input_jsonl: Path | str) -> dict[str, Any]:
         """Run validated search rows with embedded explanations in one process."""

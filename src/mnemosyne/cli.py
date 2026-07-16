@@ -1719,6 +1719,12 @@ def _consolidate_captured_batch(
         )
         group["source_evidence_cids"].append(result["cid"])
 
+    gate_cases = list(getattr(args, "consolidation_gate_cases", []))
+    if not gate_cases:
+        raise ValueError(
+            "capture-batch --consolidate requires at least one regression gate case"
+        )
+
     queue = InProcessQueue()
     metrics = MetricsRegistry()
     handlers = RuntimeJobHandlers(
@@ -1729,7 +1735,7 @@ def _consolidate_captured_batch(
         media_extractor=load_media_extractor(args),
         learning=tools.learning,
         user_model=tools.user_model,
-        gate_cases=list(getattr(args, "consolidation_gate_cases", [])),
+        gate_cases=gate_cases,
         entity_resolver=load_entity_resolver(args),
         candidate_extractor=load_candidate_extractor(args),
         summarizer=load_consolidation_summarizer(args),
@@ -1746,6 +1752,21 @@ def _consolidate_captured_batch(
     if failed:
         detail = failed[0].last_error or f"job status {failed[0].status}"
         raise RuntimeError(f"capture-batch consolidation failed: {detail}")
+    rejected = [
+        candidate
+        for job in queued
+        for candidate in (
+            jobs[job.id].result.get("candidate_results", [])
+            if isinstance(jobs[job.id].result, dict)
+            else []
+        )
+        if isinstance(candidate, dict) and not candidate.get("promoted")
+    ]
+    if rejected:
+        raise RuntimeError(
+            "capture-batch consolidation rejected semantic candidates: "
+            + ", ".join(str(item.get("candidate_id") or "unknown") for item in rejected[:5])
+        )
     return {
         "jobs": [jobs[job.id].to_dict() for job in queued],
         "metrics": metrics.snapshot().to_dict(),

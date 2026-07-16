@@ -192,9 +192,9 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
     assert json.loads(default_store.read_text(encoding="utf-8"))["relations"] == []
 
     consolidated_store = tmp_path / "consolidated.json"
-    consolidated = MnemoCLI(store=str(consolidated_store)).capture_batch(
-        rows, consolidate=True
-    )
+    consolidated_cli = MnemoCLI(store=str(consolidated_store))
+    consolidated_cli.install_consolidation_gate_case("Mara is the owner of Helios.")
+    consolidated = consolidated_cli.capture_batch(rows, consolidate=True)
     payload = json.loads(consolidated_store.read_text(encoding="utf-8"))
     captured_cids = {item["cid"] for item in consolidated["results"]}
     relation_cids = {
@@ -206,7 +206,14 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
     pass_statuses = {
         item["name"]: item["status"] for item in job["result"]["pass_results"]
     }
-    assert payload["relations"]
+    assert {
+        (row["subject"], row["predicate"], row["object"])
+        for row in payload["assertions"]
+        if row["branch"] == "main"
+    } == {
+        ("Helios", "is", "a project shipping in Q3 2026"),
+        ("Mara", "is", "the owner of Helios"),
+    }
     assert captured_cids <= relation_cids
     assert set(job["result"]["source_evidence_cids"]) == captured_cids
     assert pass_statuses["extractor"] == "complete"
@@ -218,13 +225,36 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
     } == {("eval", "d1", "eval"), ("eval", "d2", "eval")}
 
 
+def test_capture_batch_consolidation_requires_a_regression_gate(tmp_path: Path) -> None:
+    rows = tmp_path / "facts.jsonl"
+    rows.write_text(
+        json.dumps(
+            {
+                "tenant": "eval",
+                "user": "benchmark-corpus",
+                "source_type": "qa-v2-dev",
+                "content": "Mara owns Helios.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError, match="regression gate case"):
+        MnemoCLI(store=str(tmp_path / "store.json")).capture_batch(
+            rows, consolidate=True
+        )
+
+
 def test_capture_batch_consolidation_failure_preserves_original_store(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from mnemosyne import cli as cli_module
 
     store = tmp_path / "store.json"
-    MnemoCLI(store=str(store)).capture("t", "u", "original", source_type="fixture")
+    cli = MnemoCLI(store=str(store))
+    cli.capture("t", "u", "original", source_type="fixture")
+    cli.install_consolidation_gate_case("Mara is the owner of Helios.")
     original = store.read_bytes()
     rows = tmp_path / "facts.jsonl"
     rows.write_text(
