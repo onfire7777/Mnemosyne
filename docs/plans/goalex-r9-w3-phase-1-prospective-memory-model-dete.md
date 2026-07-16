@@ -49,10 +49,10 @@ leave Protocol registration to Phase 2 — note that decision in the PR body.
 - Full local suite before merge (only if the host clears the ≥35% free-memory tier): `PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q tests/`
 
 ### Task 1: Preflight and branch
-- [ ] Confirm clean state: `git status` clean, `main` == `origin/main` (fetch first); confirm no open PRs with `gh pr list --state open`.
-- [ ] Run the hygiene gate (first validation command) and confirm exit 0 before any edit.
-- [ ] Take a free-memory sample for the ≥35% targeted-test tier (e.g. via `memory_pressure` / `vm_stat` percentage-free). If below 35%, proceed with code + focused tests only, skip the full-suite run, and record that explicitly in `.planning/STATE.md` in Task 5 — a host-pressure note, not a failure.
-- [ ] Create branch `codex/w3-p1-prospective-memory` from `origin/main`.
+- [x] Confirm clean state: `git status` clean, `main` == `origin/main` (fetch first); confirm no open PRs with `gh pr list --state open`.
+- [x] Run the hygiene gate (first validation command) and confirm exit 0 before any edit.
+- [x] Take a free-memory sample for the ≥35% targeted-test tier (e.g. via `memory_pressure` / `vm_stat` percentage-free). If below 35%, proceed with code + focused tests only, skip the full-suite run, and record that explicitly in `.planning/STATE.md` in Task 5 — a host-pressure note, not a failure.
+- [x] Create branch `codex/w3-p1-prospective-memory` from `origin/main`.
 
 ### Task 2: RED — failing prospective-memory tests
 - [ ] Read `docs/superpowers/plans/2026-07-15-W3-taxonomy-completion-plan.md` Phase 1 and the existing Local engine surface (`src/mnemosyne/engine.py`, audit + evidence-CID patterns used by other write paths) to match conventions.
