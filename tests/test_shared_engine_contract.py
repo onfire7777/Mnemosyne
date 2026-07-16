@@ -3662,6 +3662,126 @@ def test_shared_engine_contract_merges_branch_evidence_assertions_and_relations(
     )
 
 
+def test_shared_engine_contract_relation_merge_reinforces_overlapping_fact(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, _user = engine_bundle
+    branch = f"shared-relation-reinforce-{uuid4()}"
+    source = f"shared relation source {uuid4()}"
+    predicate = "reinforces"
+    target = "shared relation target"
+    first_cid = "a" * 64
+    second_cid = "b" * 64
+    initial_valid_from = datetime(2026, 1, 1, tzinfo=UTC)
+
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            confidence=0.7,
+            valid_from=initial_valid_from,
+            source_evidence_cids=[first_cid],
+            access_policy={"tenant": tenant, "allow_roles": ["reader", "agent"]},
+        )
+    )
+    _branch(engine, branch, tenant)
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            confidence=0.9,
+            valid_from=datetime(2026, 2, 1, tzinfo=UTC),
+            source_evidence_cids=[second_cid],
+            access_policy={"tenant": tenant, "allow_roles": ["reader"]},
+        ),
+        branch=branch,
+    )
+
+    _merge(engine, branch, tenant)
+    matches = [
+        item
+        for item in engine.export_tenant(tenant)["relations"]
+        if item["branch"] == "main"
+        and item["source"] == source
+        and item["predicate"] == predicate
+        and item["target"] == target
+    ]
+
+    assert len(matches) == 1
+    assert matches[0]["confidence"] == 0.9
+    assert matches[0]["valid_from"] == initial_valid_from.isoformat().replace("+00:00", "Z")
+    assert matches[0]["valid_to"] is None
+    assert matches[0]["source_evidence_cids"] == [first_cid, second_cid]
+    assert matches[0]["access_policy"] == {"tenant": tenant, "allow_roles": ["reader"]}
+
+
+def test_shared_engine_contract_relation_merge_preserves_disjoint_validity(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, _user = engine_bundle
+    branch = f"shared-relation-validity-{uuid4()}"
+    source = f"shared temporal relation source {uuid4()}"
+    predicate = "precedes"
+    target = "shared temporal relation target"
+    expired_cid = "c" * 64
+    fresh_cid = "d" * 64
+    expired_at = datetime(2026, 2, 1, tzinfo=UTC)
+    fresh_from = datetime(2026, 3, 1, tzinfo=UTC)
+
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            valid_from=datetime(2026, 1, 1, tzinfo=UTC),
+            valid_to=expired_at,
+            source_evidence_cids=[expired_cid],
+            access_policy={"tenant": tenant},
+        )
+    )
+    _branch(engine, branch, tenant)
+    engine.add_relation(
+        Relation(
+            tenant_id=tenant,
+            source=source,
+            predicate=predicate,
+            target=target,
+            valid_from=fresh_from,
+            source_evidence_cids=[fresh_cid],
+            access_policy={"tenant": tenant},
+        ),
+        branch=branch,
+    )
+
+    _merge(engine, branch, tenant)
+    matches = [
+        item
+        for item in engine.export_tenant(tenant)["relations"]
+        if item["branch"] == "main"
+        and item["source"] == source
+        and item["predicate"] == predicate
+        and item["target"] == target
+    ]
+
+    assert len(matches) == 2
+    assert {
+        (item["valid_from"], item["valid_to"], tuple(item["source_evidence_cids"]))
+        for item in matches
+    } == {
+        (
+            datetime(2026, 1, 1, tzinfo=UTC).isoformat().replace("+00:00", "Z"),
+            expired_at.isoformat().replace("+00:00", "Z"),
+            (expired_cid,),
+        ),
+        (fresh_from.isoformat().replace("+00:00", "Z"), None, (fresh_cid,)),
+    }
+
+
 def test_shared_engine_contract_deep_graph_respects_tenant_and_branch(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     other_tenant = f"{tenant}-other"
