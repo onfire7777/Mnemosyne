@@ -10,7 +10,7 @@ import secrets
 import threading
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -83,6 +83,53 @@ from mnemosyne.standing import (
 )
 from mnemosyne.text import cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
+
+
+@dataclass(slots=True)
+class Intention:
+    """A data-only prospective-memory record evaluated by an explicit clock."""
+
+    intention_id: str
+    tenant_id: str
+    user_id: str
+    agent_id: str
+    trigger_type: str
+    trigger_expression: dict[str, Any]
+    action: dict[str, Any]
+    status: str = "scheduled"
+    priority: str = "normal"
+    due_at: datetime | None = None
+    dependencies: list[str] = field(default_factory=list)
+    reschedule_history: list[dict[str, Any]] = field(default_factory=list)
+    cancellation_state: dict[str, Any] | None = None
+    evidence_ids: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        for name in ("intention_id", "tenant_id", "user_id", "agent_id"):
+            if not str(getattr(self, name)).strip():
+                raise ValueError(f"{name} is required")
+        if self.trigger_type != "exact_time":
+            raise ValueError("Phase 1 supports only exact_time triggers")
+        if self.status != "scheduled":
+            raise ValueError("new intentions must be scheduled")
+        if self.due_at is None or self.due_at.tzinfo is None:
+            raise ValueError("due_at must be timezone-aware")
+        if not self.evidence_ids:
+            raise ValueError("evidence_ids must contain originating evidence")
+
+
+def evaluate_intention(intention: Intention, *, evaluated_at: datetime) -> bool:
+    """Return whether an intention is due without consulting wall-clock state."""
+
+    if evaluated_at.tzinfo is None:
+        raise ValueError("evaluated_at must be timezone-aware")
+    return (
+        intention.status == "scheduled"
+        and intention.cancellation_state is None
+        and not intention.dependencies
+        and intention.due_at is not None
+        and intention.due_at.astimezone(UTC) <= evaluated_at.astimezone(UTC)
+    )
 
 
 def _bounded_float(value: object, *, default: float) -> float:
@@ -548,6 +595,7 @@ class LocalMemoryEngine:
         self.contradictions: dict[str, Contradiction] = {}
         self.calibrations: dict[tuple[str, str], CalibrationSet] = {}
         self.entities: dict[tuple[str, str], dict[str, Any]] = {}
+        self.intentions: dict[tuple[str, str], Intention] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -642,6 +690,115 @@ class LocalMemoryEngine:
             capability_tags=capability_tags,
         )
         self._persist()
+
+    def _intention_provenance(self, intention: Intention) -> list[Evidence]:
+        evidence: list[Evidence] = []
+        for cid in intention.evidence_ids:
+            matches = [
+                item
+                for item in self.evidence.values()
+                if item.cid == cid and item.tenant_id == intention.tenant_id and not item.erased
+            ]
+            if not matches:
+                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
+            source = matches[0]
+            if source.user_id != intention.user_id:
+                raise ValueError("intention user must match originating evidence")
+            if source.trust_tier > self.policy.max_trust_tier:
+                raise PermissionError("originating evidence exceeds the write trust ceiling")
+            if is_write_tainted(source.capability_tags):
+                raise PermissionError("data-only evidence cannot authorize an intention write")
+            evidence.append(source)
+        return evidence
+
+    def schedule_intention(self, intention: Intention) -> str:
+        """Store an intention after tenant, provenance, trust, and taint checks."""
+
+        with self._lock:
+            provenance = self._intention_provenance(intention)
+            key = (intention.tenant_id, intention.intention_id)
+            if key in self.intentions:
+                raise ValueError(f"intention {intention.intention_id!r} already exists")
+            stored = copy.deepcopy(intention)
+            self.intentions[key] = stored
+            trust_tier = max(item.trust_tier for item in provenance)
+            capability_tags = sorted({tag for item in provenance for tag in item.capability_tags})
+            self._audit(
+                stored.tenant_id,
+                stored.agent_id,
+                "schedule_intention",
+                stored.intention_id,
+                {"evidence_ids": list(stored.evidence_ids), "status": stored.status},
+                source="prospective_memory",
+                trust_tier=trust_tier,
+                capability_tags=capability_tags,
+            )
+            self._persist()
+            return stored.intention_id
+
+    def cancel_intention(self, tenant_id: str, intention_id: str, *, cancelled_by: str) -> None:
+        with self._lock:
+            key = (tenant_id, intention_id)
+            intention = self.intentions.get(key)
+            if intention is None:
+                raise KeyError(intention_id)
+            if intention.status == "fired":
+                raise ValueError("a fired intention cannot be cancelled")
+            if intention.status == "cancelled":
+                return
+            intention.status = "cancelled"
+            intention.cancellation_state = {"cancelled_by": cancelled_by}
+            self._audit(
+                tenant_id,
+                cancelled_by,
+                "cancel_intention",
+                intention_id,
+                {"status": "cancelled", "evidence_ids": list(intention.evidence_ids)},
+                source="prospective_memory",
+            )
+            self._persist()
+
+    def evaluate_due_intentions(
+        self, tenant_id: str, *, evaluated_at: datetime
+    ) -> list[Intention]:
+        """Fire due intentions once, ordered deterministically by due time and id."""
+
+        with self._lock:
+            due = sorted(
+                (
+                    item
+                    for (item_tenant, _), item in self.intentions.items()
+                    if item_tenant == tenant_id and evaluate_intention(item, evaluated_at=evaluated_at)
+                ),
+                key=lambda item: (item.due_at or datetime.max.replace(tzinfo=UTC), item.intention_id),
+            )
+            fired: list[Intention] = []
+            for intention in due:
+                intention.status = "fired"
+                self._audit(
+                    tenant_id,
+                    intention.agent_id,
+                    "fire_intention",
+                    intention.intention_id,
+                    {
+                        "evaluated_at": evaluated_at.astimezone(UTC).isoformat(),
+                        "evidence_ids": list(intention.evidence_ids),
+                        "status": "fired",
+                    },
+                    source="prospective_memory",
+                )
+                fired.append(copy.deepcopy(intention))
+            if fired:
+                self._persist()
+            return fired
+
+    def list_intentions(self, tenant_id: str) -> list[Intention]:
+        with self._lock:
+            return [
+                copy.deepcopy(item)
+                for (item_tenant, _), item in sorted(self.intentions.items())
+                if item_tenant == tenant_id
+            ]
 
     def _persist(self) -> None:
         # Every mutator funnels through here; bump BEFORE the store_path early
