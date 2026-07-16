@@ -1626,8 +1626,14 @@ def cmd_capture_batch(args: argparse.Namespace) -> None:
             rows.append(row)
     if not rows:
         raise ValueError("capture batch must contain at least one row")
-    store = Path(args.store).resolve()
-    store.parent.mkdir(parents=True, exist_ok=True)
+    requested_store = Path(args.store).expanduser()
+    requested_store.parent.mkdir(parents=True, exist_ok=True)
+    # Resolve only the parent. Keeping the final directory entry unresolved
+    # lets us reject an existing symlink and ensures os.replace() would replace
+    # a raced symlink itself rather than following it to its target.
+    store = requested_store.parent.resolve() / requested_store.name
+    if store.is_symlink():
+        raise ValueError("local capture-batch store must be a real file")
     runtime_state = load_runtime_state(args) if getattr(args, "consolidate", False) else None
     consolidation_gate_cases = runtime_state.load_gate_cases() if runtime_state else []
     descriptor, staged_name = tempfile.mkstemp(prefix=f".{store.name}-batch-", dir=store.parent)
@@ -1696,56 +1702,92 @@ def _consolidate_captured_batch(
     rows: list[dict[str, Any]],
     results: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Run one bounded existing consolidation job per tenant/branch group."""
+    """Run one bounded consolidation job per custody-equivalent capture group."""
     from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
     from mnemosyne.jobs import RuntimeJobHandlers
     from mnemosyne.observability import MetricsRegistry
     from mnemosyne.queue import InProcessQueue, QueueWorker
 
-    grouped: dict[tuple[str, str], dict[str, Any]] = {}
+    grouped: dict[tuple[str, str, str, int], dict[str, Any]] = {}
     for row, result in zip(rows, results, strict=True):
-        key = (row["tenant"], row.get("branch", "main"))
+        key = (
+            row["tenant"],
+            row.get("branch", "main"),
+            row["user"],
+            int(row.get("trust_tier", 0)),
+        )
         group = grouped.setdefault(
             key,
             {
                 "tenant_id": key[0],
-                "user_id": row["user"],
+                "user_id": key[2],
                 "branch": key[1],
                 "source_evidence_cids": [],
                 "trigger": "capture_batch",
                 "passes": list(DEFAULT_CONSOLIDATION_PASSES),
-                "trust_tier": row.get("trust_tier", 0),
+                "trust_tier": key[3],
             },
         )
         group["source_evidence_cids"].append(result["cid"])
 
+    gate_cases = list(getattr(args, "consolidation_gate_cases", []))
+    if not gate_cases:
+        raise ValueError(
+            "capture-batch --consolidate requires at least one regression gate case"
+        )
+
     queue = InProcessQueue()
     metrics = MetricsRegistry()
-    handlers = RuntimeJobHandlers(
-        tools.engine,
-        queue,
-        metrics=metrics,
-        object_store=load_object_store(args),
-        media_extractor=load_media_extractor(args),
-        learning=tools.learning,
-        user_model=tools.user_model,
-        gate_cases=list(getattr(args, "consolidation_gate_cases", [])),
-        entity_resolver=load_entity_resolver(args),
-        candidate_extractor=load_candidate_extractor(args),
-        summarizer=load_consolidation_summarizer(args),
-        lesson_distiller=load_lesson_distiller(args),
-        procedure_inducer=load_procedure_inducer(args),
-        max_media_bytes=max_ingest_bytes(args),
-    )
-    queued = [queue.enqueue(CONSOLIDATE_EVIDENCE_JOB, payload) for payload in grouped.values()]
-    QueueWorker(queue, handlers.handlers(), metrics=metrics).drain(
-        limit=len(queued), kind=CONSOLIDATE_EVIDENCE_JOB
-    )
+    object_store = load_object_store(args)
+    media_extractor = load_media_extractor(args)
+    entity_resolver = load_entity_resolver(args)
+    candidate_extractor = load_candidate_extractor(args)
+    summarizer = load_consolidation_summarizer(args)
+    lesson_distiller = load_lesson_distiller(args)
+    procedure_inducer = load_procedure_inducer(args)
+    queued = []
+    for payload in grouped.values():
+        queued.append(queue.enqueue(CONSOLIDATE_EVIDENCE_JOB, payload))
+        handlers = RuntimeJobHandlers(
+            tools.engine,
+            queue,
+            metrics=metrics,
+            object_store=object_store,
+            media_extractor=media_extractor,
+            learning=tools.learning,
+            user_model=tools.user_model,
+            gate_cases=gate_cases,
+            entity_resolver=entity_resolver,
+            candidate_extractor=candidate_extractor,
+            summarizer=summarizer,
+            lesson_distiller=lesson_distiller,
+            procedure_inducer=procedure_inducer,
+            max_media_bytes=max_ingest_bytes(args),
+        )
+        QueueWorker(queue, handlers.handlers(), metrics=metrics).drain(
+            limit=1,
+            kind=CONSOLIDATE_EVIDENCE_JOB,
+        )
     jobs = queue.jobs
     failed = [jobs[job.id] for job in queued if jobs[job.id].status != "complete"]
     if failed:
         detail = failed[0].last_error or f"job status {failed[0].status}"
         raise RuntimeError(f"capture-batch consolidation failed: {detail}")
+    rejected = [
+        candidate
+        for job in queued
+        for candidate in (
+            jobs[job.id].result.get("candidate_results", [])
+            if isinstance(jobs[job.id].result, dict)
+            else []
+        )
+        if isinstance(candidate, dict) and not candidate.get("promoted")
+    ]
+    if rejected:
+        raise RuntimeError(
+            "capture-batch consolidation rejected semantic candidates: "
+            + ", ".join(str(item.get("candidate_id") or "unknown") for item in rejected[:5])
+        )
     return {
         "jobs": [jobs[job.id].to_dict() for job in queued],
         "metrics": metrics.snapshot().to_dict(),

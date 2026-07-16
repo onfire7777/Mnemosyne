@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
+from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import merge_access_policies, validate_access_policy
 from mnemosyne.engine import LocalMemoryEngine
@@ -47,6 +48,18 @@ _PROVIDER_PROPOSAL_VERSION = 1
 _PROVIDER_PROPOSAL_MAX_STRING_CHARS = 1024
 _PROVIDER_PROPOSAL_MAX_ITEMS = 32
 _PROVIDER_PROPOSAL_MAX_DEPTH = 6
+
+
+def _stable_summary_relation_id(
+    tenant_id: str, branch: str, source_cid: str, summary_cid: str
+) -> str:
+    identity = "\0".join(
+        (tenant_id, branch, source_cid, "summary-derived-gist", summary_cid)
+    )
+    # PostgreSQL stores relations.id as a UUID primary key, so the stable id
+    # must be UUID-shaped on every engine.
+    digest = sha256(identity.encode("utf-8")).hexdigest()
+    return str(uuid5(NAMESPACE_URL, f"mnemosyne:summary-relation:{digest}"))
 
 
 def _embed_batch_size() -> int:
@@ -452,13 +465,14 @@ class ConsolidationWorker:
         )
         candidate_results: list[dict[str, Any]] = []
         candidates: list[dict[str, Any]] = []
+        no_write_data = self._contains_no_write_data(evidence, payload)
 
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             skipped.append("low_prediction_error_metadata_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": prediction_gate["gate"]}))
             pass_results.append(PassResult("resolver", "skipped", {"reason": prediction_gate["gate"]}))
             pass_results.append(PassResult("belief_reviser", "skipped", {"reason": prediction_gate["gate"]}))
-        elif self._contains_no_write_data(evidence, payload):
+        elif no_write_data:
             skipped.append("source_marked_data_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": "source_marked_data_only"}))
         else:
@@ -510,6 +524,12 @@ class ConsolidationWorker:
 
         for pass_name in passes_run:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
+                continue
+            if no_write_data and pass_name in {"summarizer", "user_model_updater"}:
+                skipped.append(f"{pass_name}_source_marked_data_only")
+                pass_results.append(
+                    PassResult(pass_name, "skipped", {"reason": "source_marked_data_only"})
+                )
                 continue
             if pass_name == "summarizer":
                 summary = self._run_summarizer_pass(tenant_id, branch, evidence, payload, mutation_budget)
@@ -1332,6 +1352,9 @@ class ConsolidationWorker:
                         confidence=0.92,
                         source_evidence_cids=[source_cid, summary_cid],
                         access_policy=_merged_access_policy(evidence, tenant_id=tenant_id),
+                        id=_stable_summary_relation_id(
+                            tenant_id, branch, source_cid, summary_cid
+                        ),
                     ),
                     branch=branch,
                 )
@@ -1760,11 +1783,17 @@ _SALIENT_ENTITY = re.compile(
 )
 
 
-def _extract_simple_fact(text: str) -> list[tuple[str, str, str]]:
+def _extract_simple_fact(
+    text: str, *, strip_title: bool = False
+) -> list[tuple[str, str, str]]:
     lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
-    if len(lines) > 1 and not re.search(r"[.!?]$", lines[0]):
+    if strip_title and lines:
         lines = lines[1:]
-    sentences = re.split(r"(?<=[.!?])\s+", " ".join(lines))
+    sentences = [
+        sentence
+        for line in lines
+        for sentence in re.split(r"(?<=[.!?])\s+", line)
+    ]
     facts: set[tuple[str, str, str]] = set()
     for sentence in sentences:
         sentence = sentence.strip()
@@ -2929,7 +2958,13 @@ def _deterministic_candidates(payload: dict[str, Any], evidence: Sequence[Eviden
         return [dict(payload)]
     candidates: list[dict[str, Any]] = []
     for item in evidence:
-        for subject, predicate, object_value in _extract_simple_fact(item.content):
+        strip_title = item.source_type.startswith("hipporag:") or (
+            isinstance(item.metadata, dict)
+            and item.metadata.get("content_layout") == "title-newline-body"
+        )
+        for subject, predicate, object_value in _extract_simple_fact(
+            item.content, strip_title=strip_title
+        ):
             entity_label = _entity_label(subject)
             entity_key = _entity_key(entity_label)
             signature = f"{subject} {predicate} {object_value}".lower()

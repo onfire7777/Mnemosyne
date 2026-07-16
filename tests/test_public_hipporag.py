@@ -129,7 +129,13 @@ def test_adapter_uses_public_batch_search_and_explain() -> None:
 
         def search(self, tenant: str, question: str) -> dict:
             return {
-                "hits": [{"id": "cid-0"}],
+                "hits": [
+                    {
+                        "id": "relation-0",
+                        "provenance": ["cid-0"],
+                        "metadata": {"source_evidence_cids": ["cid-0"]},
+                    }
+                ],
                 "metadata": {"channel_scores": {"graph": 1.0}},
             }
 

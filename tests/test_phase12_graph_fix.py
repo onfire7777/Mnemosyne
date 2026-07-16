@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 from eval.datasets.v2 import run_graph_ppr_postfix as postfix
 from eval.harness.cli_driver import MnemoCLI
-from mnemosyne.consolidation import _deterministic_candidates, _extract_simple_fact
+from mnemosyne.consolidation import (
+    _deterministic_candidates,
+    _extract_simple_fact,
+    _stable_summary_relation_id,
+)
 from mnemosyne.models import Evidence
 
 
@@ -16,12 +21,38 @@ def test_simple_fact_extractor_scans_prose_deterministically() -> None:
         "Mara, Helios."
     )
 
-    assert _extract_simple_fact(text) == [
+    assert _extract_simple_fact(text, strip_title=True) == [
         ("Helios", "ships in", "Q3 2026"),
         ("Mara", "owns", "Helios"),
         ("Mara", "related_to", "Helios"),
     ]
-    assert _extract_simple_fact(text) == _extract_simple_fact(text)
+    assert _extract_simple_fact(text, strip_title=True) == _extract_simple_fact(
+        text, strip_title=True
+    )
+
+
+def test_simple_fact_extractor_strips_only_explicit_title_prefixes() -> None:
+    titled = "What is Helios?\nMara owns Helios."
+    untitled = "Mara owns Helios\nHelios ships in Q3 2026."
+
+    assert _extract_simple_fact(titled, strip_title=True) == [
+        ("Mara", "owns", "Helios")
+    ]
+    assert _extract_simple_fact(untitled) == [
+        ("Helios", "ships in", "Q3 2026"),
+        ("Mara", "owns", "Helios"),
+    ]
+
+
+def test_summary_relation_id_is_deterministic_and_uuid_shaped() -> None:
+    first = _stable_summary_relation_id("tenant-a", "main", "cid-source", "cid-summary")
+    second = _stable_summary_relation_id("tenant-a", "main", "cid-source", "cid-summary")
+
+    assert first == second
+    UUID(first)  # PostgreSQL stores relations.id as a UUID primary key
+    assert first != _stable_summary_relation_id(
+        "tenant-a", "main", "cid-source", "cid-other"
+    )
 
 
 def test_deterministic_candidates_preserve_policy_and_stable_order() -> None:
@@ -29,7 +60,7 @@ def test_deterministic_candidates_preserve_policy_and_stable_order() -> None:
         tenant_id="eval",
         user_id="benchmark-corpus",
         actor="user",
-        source_type="qa-v2-dev",
+        source_type="hipporag:dev",
         source_identity="bridge",
         content="Bridge fixture\nMara owns Helios. Helios ships in Q3 2026.",
         trust_tier=2,
@@ -66,7 +97,7 @@ def test_capture_batch_persists_every_extracted_fact_with_provenance(
                 "tenant": "eval",
                 "user": "benchmark-corpus",
                 "actor": "user",
-                "source_type": "qa-v2-dev",
+                "source_type": "hipporag:dev",
                 "source_identity": "bridge",
                 "content": (
                     "Bridge fixture\n"
@@ -80,20 +111,7 @@ def test_capture_batch_persists_every_extracted_fact_with_provenance(
     )
     store = tmp_path / "store.json"
     cli = MnemoCLI(store=str(store))
-    cli.run(
-        "gate-case-add",
-        "--id",
-        "w1-bridge-regression",
-        "--signature",
-        "w1 bridge regression",
-        "--query",
-        "Mara Helios",
-        "--expected-substring",
-        "Helios",
-        "--origin",
-        "synthetic",
-        "--protected",
-    )
+    cli.install_consolidation_gate_case("Mara owns Helios.")
 
     captured = cli.capture_batch(rows, consolidate=True)
     state = json.loads(store.read_text(encoding="utf-8"))
@@ -111,6 +129,50 @@ def test_capture_batch_persists_every_extracted_fact_with_provenance(
     assert all(row["source_evidence_cids"] == [source_cid] for row in assertions.values())
     assert all(row["access_policy"]["tenant"] == "eval" for row in assertions.values())
     assert len(state["relations"]) >= len(assertions)
+
+
+def test_reconsolidating_identical_evidence_keeps_relations_idempotent(
+    tmp_path: Path,
+) -> None:
+    rows = tmp_path / "facts.jsonl"
+    rows.write_text(
+        json.dumps(
+            {
+                "tenant": "eval",
+                "user": "benchmark-corpus",
+                "source_type": "qa-v2-dev",
+                "source_identity": "d1",
+                "content": "Mara owns Helios.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store = tmp_path / "store.json"
+    cli = MnemoCLI(store=str(store))
+    cli.install_consolidation_gate_case("Mara owns Helios.")
+
+    cli.capture_batch(rows, consolidate=True)
+    first = [
+        row
+        for row in json.loads(store.read_text(encoding="utf-8"))["relations"]
+        if row["branch"] == "main"
+    ]
+    cli.capture_batch(rows, consolidate=True)
+    second = [
+        row
+        for row in json.loads(store.read_text(encoding="utf-8"))["relations"]
+        if row["branch"] == "main"
+    ]
+
+    assert len(second) == len(first)
+    assert {
+        (row["source"], row["predicate"], row["target"])
+        for row in second
+    } == {
+        (row["source"], row["predicate"], row["target"])
+        for row in first
+    }
 
 
 def test_local_graph_fix_has_deterministic_bridge_recall(tmp_path: Path) -> None:
@@ -175,20 +237,7 @@ def test_graph_fix_preserves_dense_lexical_single_hop_retrieval(
     for name, consolidate in (("baseline", False), ("postfix", True)):
         cli = MnemoCLI(store=str(tmp_path / f"{name}.json"))
         if consolidate:
-            cli.run(
-                "gate-case-add",
-                "--id",
-                "w1-bridge-regression",
-                "--signature",
-                "w1 bridge regression",
-                "--query",
-                "Mara Helios",
-                "--expected-substring",
-                "Helios",
-                "--origin",
-                "synthetic",
-                "--protected",
-            )
+            cli.install_consolidation_gate_case("Mara owns Helios.")
         captured = cli.capture_batch(rows, consolidate=consolidate)
         d1_cid = captured["results"][0]["cid"]
         read_cli = MnemoCLI(

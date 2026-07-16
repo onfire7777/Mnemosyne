@@ -9,6 +9,7 @@ import os
 import threading
 import weakref
 from collections import defaultdict
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
@@ -32,6 +33,7 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
+    _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
@@ -84,6 +86,19 @@ from mnemosyne.workspace import self_generation_budget_report
 
 class PostgresUnavailableError(RuntimeError):
     """Raised when the optional psycopg dependency is not installed."""
+
+
+_DB_USER_ID_UNSET = object()
+
+
+class _ExistingCursorConnection:
+    """Adapt an outer transaction cursor to the connection/cursor protocol."""
+
+    def __init__(self, cursor: Any) -> None:
+        self._cursor = cursor
+
+    def cursor(self, *_args: Any, **_kwargs: Any) -> Any:
+        return nullcontext(self._cursor)
 
 
 def _require_psycopg() -> tuple[Any, Any]:
@@ -1792,13 +1807,23 @@ class PostgresEngine:
             "reality_class": normalized or "unknown",
         }
 
-    def upsert_assertion(self, assertion: Assertion, branch: str = "main") -> str:
+    def upsert_assertion(
+        self,
+        assertion: Assertion,
+        branch: str = "main",
+        *,
+        _cursor: Any | None = None,
+        _db_user_id: Any = _DB_USER_ID_UNSET,
+        _branch_ready: bool = False,
+        _schema_ready: bool = False,
+    ) -> str:
         access_policy = validate_access_policy(
             assertion.access_policy,
             tenant_id=assertion.tenant_id,
             location="assertion.access_policy",
         )
-        self.ensure_tenant_and_branch(assertion.tenant_id, branch)
+        if not _branch_ready:
+            self.ensure_tenant_and_branch(assertion.tenant_id, branch)
         incoming = Assertion.from_dict(assertion.to_dict())
         incoming.access_policy = access_policy
         incoming.branch = branch
@@ -1806,11 +1831,16 @@ class PostgresEngine:
         incoming.status = "active" if incoming.status == "candidate" else incoming.status
         incoming.transaction_time = utc_now()
         db_tenant_id = _stable_uuid("tenant", incoming.tenant_id)
-        db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
-        with self.connect() as conn:
+        if _db_user_id is _DB_USER_ID_UNSET:
+            db_user_id = _stable_uuid("user", incoming.user_id) if incoming.user_id else None
+        else:
+            db_user_id = _db_user_id
+        connection = self.connect() if _cursor is None else nullcontext(_ExistingCursorConnection(_cursor))
+        with connection as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
-                self._ensure_entity_registry_schema(cur)
-                self._ensure_evidence_vector_schema(cur)
+                if not _schema_ready:
+                    self._ensure_entity_registry_schema(cur)
+                    self._ensure_evidence_vector_schema(cur)
                 self._set_tenant(cur, db_tenant_id)
                 self._apply_projection_reality_monitoring(cur, incoming, db_tenant_id)
                 self._apply_schema_fast_path_projection_status(
@@ -1994,6 +2024,24 @@ class PostgresEngine:
                     trust_tier=incoming.trust_tier,
                 )
         return incoming.id
+
+    def _upsert_assertion_with_cursor(
+        self,
+        assertion: Assertion,
+        branch: str,
+        cursor: Any,
+        *,
+        db_user_id: Any,
+    ) -> str:
+        """Replay one assertion inside an existing merge transaction."""
+        return self.upsert_assertion(
+            assertion,
+            branch=branch,
+            _cursor=cursor,
+            _db_user_id=db_user_id,
+            _branch_ready=True,
+            _schema_ready=True,
+        )
 
     def add_relation(self, relation: Relation, branch: str = "main") -> str:
         access_policy = validate_access_policy(
@@ -4648,6 +4696,11 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                # Run the schema-ensure DDL once for the whole merge so the
+                # per-row replay below does not reacquire ACCESS EXCLUSIVE
+                # locks or rerun table-wide backfills inside the transaction.
+                self._ensure_entity_registry_schema(cur)
+                self._ensure_evidence_vector_schema(cur)
                 for db_tenant_id in [db_tenant_id]:
                     cur.execute(
                         """
@@ -4678,35 +4731,130 @@ class PostgresEngine:
                     report.evidence_added += cur.rowcount
                     cur.execute(
                         """
-                        UPDATE assertions src
-                        SET branch = %s, transaction_time = now()
-                        WHERE tenant_id = %s AND branch = %s
-                          AND NOT EXISTS (
-                            SELECT 1 FROM assertions dst
-                            WHERE dst.tenant_id = src.tenant_id AND dst.branch = %s
-                              AND dst.subject = src.subject AND dst.predicate = src.predicate
-                              AND dst.object = src.object AND dst.scope = src.scope
-                              AND dst.status IN ('active', 'contested')
-                          )
+                        SELECT a.*, t.name AS tenant_name
+                        FROM assertions a
+                        JOIN tenants t ON t.id = a.tenant_id
+                        WHERE a.tenant_id = %s AND a.branch = %s
+                        ORDER BY a.transaction_time, a.id
                         """,
-                        (into, db_tenant_id, frm, into),
+                        (db_tenant_id, frm),
                     )
-                    report.assertions_added += cur.rowcount
+                    source_assertion_rows = list(cur.fetchall())
+                    assertion_id_map = {
+                        str(row["id"]): _merge_clone_assertion_id(str(row["id"]), into)
+                        for row in source_assertion_rows
+                    }
+                    actual_assertion_ids: dict[str, str] = {}
+                    for row in source_assertion_rows:
+                        cloned = _row_to_assertion(row)
+                        cloned.id = assertion_id_map[str(row["id"])]
+                        if cloned.superseded_by in assertion_id_map:
+                            cloned.superseded_by = assertion_id_map[cloned.superseded_by]
+                        cloned.branch = into
+                        inserted_id = cloned.id
+                        merged_id = self._upsert_assertion_with_cursor(
+                            cloned,
+                            into,
+                            cur,
+                            db_user_id=row["user_id"],
+                        )
+                        actual_assertion_ids[str(row["id"])] = merged_id
+                        if merged_id == inserted_id:
+                            report.assertions_added += 1
+                        else:
+                            report.assertions_merged += 1
+                    for source_id, planned_id in assertion_id_map.items():
+                        actual_id = actual_assertion_ids[source_id]
+                        if actual_id == planned_id:
+                            continue
+                        # The planned clone id was absorbed by an existing peer
+                        # and never inserted; repoint supersession references
+                        # that were remapped to it.
+                        cur.execute(
+                            "UPDATE assertions SET superseded_by = %s "
+                            "WHERE tenant_id = %s AND branch = %s AND superseded_by = %s",
+                            (actual_id, db_tenant_id, into, planned_id),
+                        )
                     cur.execute(
-                        """
-                        UPDATE relations src
-                        SET branch = %s
-                        WHERE tenant_id = %s AND branch = %s
-                          AND NOT EXISTS (
-                            SELECT 1 FROM relations dst
-                            WHERE dst.tenant_id = src.tenant_id AND dst.branch = %s
-                              AND dst.source = src.source AND dst.predicate = src.predicate
-                              AND dst.target = src.target
-                          )
-                        """,
-                        (into, db_tenant_id, frm, into),
+                        "SELECT * FROM relations WHERE tenant_id = %s AND branch = %s "
+                        "ORDER BY valid_from, id",
+                        (db_tenant_id, frm),
                     )
-                    report.relations_added += cur.rowcount
+                    source_relations = [
+                        _row_to_relation(row, tenant_id) for row in cur.fetchall()
+                    ]
+                    for relation in source_relations:
+                        cur.execute(
+                            "SELECT * FROM relations WHERE tenant_id = %s AND branch = %s "
+                            "AND source = %s AND predicate = %s AND target = %s "
+                            "ORDER BY valid_from, id",
+                            (
+                                db_tenant_id,
+                                into,
+                                relation.source,
+                                relation.predicate,
+                                relation.target,
+                            ),
+                        )
+                        peers = [
+                            _row_to_relation(row, tenant_id) for row in cur.fetchall()
+                        ]
+                        target, redundant = _merge_relation_overlap_component(
+                            relation,
+                            peers,
+                        )
+                        if target is not None:
+                            cur.execute(
+                                """
+                                UPDATE relations
+                                SET confidence = %s, valid_from = %s, valid_to = %s,
+                                    source_evidence_cids = %s, access_policy = %s
+                                WHERE tenant_id = %s AND branch = %s AND id = %s
+                                """,
+                                (
+                                    target.confidence,
+                                    target.valid_from,
+                                    target.valid_to,
+                                    _cid_list_to_bytes(target.source_evidence_cids),
+                                    self._jsonb(target.access_policy),
+                                    db_tenant_id,
+                                    into,
+                                    target.id,
+                                ),
+                            )
+                            for peer in redundant:
+                                cur.execute(
+                                    "DELETE FROM relations "
+                                    "WHERE tenant_id = %s AND branch = %s AND id = %s",
+                                    (db_tenant_id, into, peer.id),
+                                )
+                            continue
+                        cur.execute(
+                            """
+                            INSERT INTO relations (
+                              id, tenant_id, branch, source, predicate, target,
+                              confidence, valid_from, valid_to,
+                              source_evidence_cids, access_policy
+                            )
+                            VALUES (
+                              gen_random_uuid(), %s, %s, %s, %s, %s,
+                              %s, %s, %s, %s, %s
+                            )
+                            """,
+                            (
+                                db_tenant_id,
+                                into,
+                                relation.source,
+                                relation.predicate,
+                                relation.target,
+                                relation.confidence,
+                                relation.valid_from,
+                                relation.valid_to,
+                                _cid_list_to_bytes(relation.source_evidence_cids),
+                                self._jsonb(relation.access_policy),
+                            ),
+                        )
+                        report.relations_added += cur.rowcount
                     cur.execute(
                         """
                         INSERT INTO merges(tenant_id, frm, into_, report)
@@ -5322,6 +5470,20 @@ def _stable_uuid(kind: str, value: str) -> str:
     if _uuid_or_none(value):
         return value
     return str(uuid5(NAMESPACE_URL, f"mnemosyne:{kind}:{value}"))
+
+
+def _merge_clone_assertion_id(source_assertion_id: str, into_branch: str) -> str:
+    """Deterministic per-(source row, target branch) clone id.
+
+    Replaying the same branch merge must converge on the same clone rows via
+    the assertion upsert's ON CONFLICT (id) path instead of minting duplicates.
+    """
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"mnemosyne:merge-assertion-clone:{source_assertion_id}:{into_branch}",
+        )
+    )
 
 
 def _dedupe_hits(hits: list[Hit]) -> list[Hit]:

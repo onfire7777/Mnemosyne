@@ -5,7 +5,8 @@
 **Root cause report:** `~/mnemosyne-tier-b-custody/GRAPH-PPR-ROOTCAUSE-2026-07-15.md`
 **Requirements:** CAP-001/002/003, BENCH-005 (Phase 12 / Plan 12-04).
 **Status:** PARTIAL — Phases 1-3 and the local development portions of Phase 4
-are complete through PRs #23, #26, and #28. Production-Postgres parity,
+are complete through PRs #23, #26, #28, and disclosure-audit PR #30 (merge
+`0865271`; receipt `eval/reports/disclosure-audit-2026-07-16.md`). Production-Postgres parity,
 runtime readiness, grounded-reader QA, and protected evidence remain open. This
 document is the durable acceptance contract; the loop generates tactical plans
 under `docs/plans/goalex-r*.md`.
@@ -18,17 +19,17 @@ engine mismatch — the keystone that unblocks BENCH-005 and the retrieval half 
 CAP-003. The channel is a *cut wire* (0 hits / 1000 questions, channel sum 0), a
 concrete wiring defect, not a quality gap.
 
-## Root cause (verified, file:line in the report)
+## Root cause (verified at baseline `fbc1857`; symbols below)
 
 - **Cause A (dominant):** the HippoRAG adapter (`eval/public/adapters/hipporag_multihop.py`)
-  and the QA harness (`eval/datasets/v2/run_grounded_qa_v2.py:78`) ingest via
-  `capture_batch` → `engine.append_evidence` (`mcp_tools.py:316`, `engine.py:707`)
+  and the QA harness (`eval/datasets/v2/run_grounded_qa_v2.py`) ingested via
+  `MnemoCLI.capture_batch` → `MemoryTools.capture` → `engine.append_evidence`
   and **never run consolidation**. Relations are created ONLY by the consolidation
-  belief-reviser (`consolidation.py:1324` → `engine.relations`), reachable via
-  `consolidate-once` (`cli.py:8856`), which the eval never calls. So
+  belief-reviser (`ConsolidationWorker.run_job` → `engine.add_relation`), reachable via
+  `cmd_consolidate_once`, which the eval did not call. So
   `engine.relations == {}` at query time → PPR walks an empty adjacency → 0/1000.
-- **Cause B:** even if consolidation ran, `_extract_simple_fact`
-  (`consolidation.py:1742`) matches only whole-first-sentence copular clauses
+- **Cause B:** even if consolidation ran, `_extract_simple_fact` matched only
+  whole-first-sentence copular clauses
   (`SUBJECT is/are/was/were OBJECT`), so it emits no edges from prose or from the
   dev fixture (`Mara owns Helios` / `Helios ships in Q3 2026` — `owns`/`ships`
   not whitelisted).
@@ -67,15 +68,17 @@ concrete wiring defect, not a quality gap.
   drain `CONSOLIDATE_EVIDENCE_JOB` on the staged store) so the deterministic
   `ConsolidationOrchestrator` writes `Relation` rows before search. Pure reuse of
   `cmd_consolidate_once`.
-- [x] Verify the pre-extractor gates admit these captures (`consolidation.py:409`
-  `_prediction_error_gate` → promote; `456` `_contains_no_write_data` false for
+- [x] Verify the pre-extractor gates admit these captures
+  (`ConsolidationWorker._prediction_error_gate` → promote;
+  `ConsolidationWorker._contains_no_write_data` false for
   `source_type="hipporag:*"`, `actor="user"`, `trust_tier=0`).
 
 ## Phase 3 — Fix B: extractor emits edges from prose (GREEN)
 
-- [x] Broaden `_extract_simple_fact` (`consolidation.py:1742`), staying
+- [x] Broaden `_extract_simple_fact`, staying
   pure-Python/deterministic (the local OpenIE stand-in): iterate all sentences,
-  strip the `Title\n` prefix, emit edges between co-occurring salient entity spans
+  strip the `Title\n` prefix only when the source layout explicitly identifies a
+  title-plus-body payload, emit edges between co-occurring salient entity spans
   with the connecting verb/preposition as predicate (else `related_to`). Keep it
   deterministic (no set/dict-ordering or hash-seed nondeterminism).
 - [x] GREEN the Phase-1 baseline: `engine.relations > 0`, positive `graph_ppr` hit,
@@ -98,8 +101,12 @@ cd "$(git rev-parse --show-toplevel)"
 git diff --check
 .venv/bin/ruff check --quiet .
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q \
+  tests/test_phase12_graph_fix.py tests/test_public_eval_cli.py \
   tests/test_public_hipporag.py tests/test_grounded_qa_v2.py \
-  tests/test_shared_engine_contract.py tests/test_planning_traceability.py
+  tests/test_shared_engine_contract.py tests/test_planning_traceability.py \
+  tests/test_cli_runtime_tools.py::test_cli_projection_recompute_tracks_affected_projection_set
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m \
+  eval.datasets.v2.run_graph_ppr_postfix --output /tmp/mnemo-fix-b-postfix
 # Deterministic dev-scale only (≥35% free tier); production-Postgres parity + any
 # headline number under the admitted full preflight on the production stack.
 ```
