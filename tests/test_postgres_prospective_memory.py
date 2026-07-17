@@ -23,8 +23,9 @@ from mnemosyne.engine import (
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
 )
+from mnemosyne.ids import content_cid
 from mnemosyne.models import Evidence
-from mnemosyne.postgres_engine import PostgresEngine
+from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
 from mnemosyne.privacy import ErasureMode
 
 pytest.importorskip("psycopg")
@@ -575,7 +576,73 @@ class TestIdempotency:
         )
         engine.schedule_intention(intention)
         engine.evaluate_due_intentions(tid, evaluated_at=_EVALUATED_AT, trigger_context=_ctx(), operating_point=_OP)
-        assert engine.evaluate_due_intentions(tid, evaluated_at=_EVALUATED_AT, trigger_context=_ctx(), operating_point=_OP) == []
+        assert engine.evaluate_due_intentions(
+            tid,
+            evaluated_at=_EVALUATED_AT + timedelta(hours=1),
+            trigger_context=_ctx(),
+            operating_point=_OP,
+        ) == []
+        db_tenant_id = _stable_uuid("tenant", tid)
+        expected_event_id = content_cid(
+            "fire_intention",
+            {"tenant_id": tid, "intention_id": intention.intention_id, "op": "fire"},
+        )
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT operation, canonical_event_id
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
+                    (db_tenant_id, intention.intention_id),
+                )
+                assert cur.fetchall() == [("fire", expected_event_id)]
+
+    def test_audit_failure_rolls_back_receipt_and_state(
+        self, engine, tenant_user_agent, monkeypatch
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT - timedelta(minutes=1)
+        intention = _make_intention(
+            tenant_id=tid,
+            user_id=uid,
+            agent_id=aid,
+            evidence_id=eid,
+            trigger_type="exact_time",
+            trigger_expression={"at": due.isoformat()},
+            due_at=due,
+        )
+        engine.schedule_intention(intention)
+
+        def fail_audit(*_args, **_kwargs):
+            raise RuntimeError("injected audit failure")
+
+        monkeypatch.setattr(engine, "_audit", fail_audit)
+        with pytest.raises(RuntimeError, match="injected audit failure"):
+            engine.evaluate_due_intentions(
+                tid,
+                evaluated_at=_EVALUATED_AT,
+                trigger_context=_ctx(),
+                operating_point=_OP,
+            )
+
+        assert engine.list_intentions(tid)[0].status == "scheduled"
+        db_tenant_id = _stable_uuid("tenant", tid)
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT count(*)
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
+                    (db_tenant_id, intention.intention_id),
+                )
+                assert cur.fetchone() == (0,)
 
     def test_duplicate_schedule_raises(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
