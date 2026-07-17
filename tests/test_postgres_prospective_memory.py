@@ -12,7 +12,9 @@ directly by these PostgreSQL parity tests.
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
+from threading import Barrier
 from typing import Any
 from uuid import uuid4
 
@@ -28,9 +30,11 @@ from mnemosyne.models import Evidence
 from mnemosyne.postgres_engine import PostgresEngine, _stable_uuid
 from mnemosyne.privacy import ErasureMode
 
-pytest.importorskip("psycopg")
+psycopg = pytest.importorskip("psycopg")
+psycopg_sql = pytest.importorskip("psycopg.sql")
 
 _DSN = os.environ.get("MNEMOSYNE_POSTGRES_DSN", "postgresql://admin@localhost:5432/mnemosyne_pm_test_1784305188")
+_RLS_TEST_ROLE = os.environ.get("MNEMOSYNE_POSTGRES_RLS_TEST_ROLE", "mnemosyne_pm_app")
 _EVALUATED_AT = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
 _OP = ProspectiveOperatingPoint(
     operating_point_id="op-test",
@@ -97,6 +101,13 @@ def _append_evidence(engine: PostgresEngine, *, tenant_id: str, user_id: str, ag
 @pytest.fixture
 def engine():
     eng = PostgresEngine(_DSN, require_safe_role=False)
+    try:
+        with eng.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+    except psycopg.OperationalError as exc:
+        eng.close_connections()
+        pytest.skip(f"live PostgreSQL prerequisite unavailable: {exc}")
     yield eng
     eng.close_connections()
 
@@ -562,8 +573,116 @@ class TestTenantIsolation:
         with pytest.raises(KeyError):
             engine.cancel_intention("other-tenant", intention.intention_id, cancelled_by=uid)
 
+    def test_rls_and_owner_ids_are_isolated(self, engine, tenant_user_agent):
+        tid, uid, aid = tenant_user_agent
+        other_tid = f"tenant-pm-{uuid4().hex[:8]}"
+        other_uid = f"user-pm-{uuid4().hex[:8]}"
+        other_aid = f"agent-pm-{uuid4().hex[:8]}"
+        due = _EVALUATED_AT - timedelta(minutes=1)
+
+        for tenant_id, user_id, agent_id, intention_id in (
+            (tid, uid, aid, "visible-intention"),
+            (other_tid, other_uid, other_aid, "hidden-intention"),
+        ):
+            evidence_id = _append_evidence(
+                engine,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                agent_id=agent_id,
+            )
+            engine.schedule_intention(
+                _make_intention(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                    evidence_id=evidence_id,
+                    trigger_type="exact_time",
+                    trigger_expression={"at": due.isoformat()},
+                    due_at=due,
+                    intention_id=intention_id,
+                )
+            )
+
+        with pytest.raises(PermissionError, match="owning user or agent"):
+            engine.cancel_intention(tid, "visible-intention", cancelled_by=other_uid)
+        with pytest.raises(PermissionError, match="owning user or agent"):
+            engine.cancel_intention(tid, "visible-intention", cancelled_by=other_aid)
+
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    psycopg_sql.SQL("SET LOCAL ROLE {}").format(
+                        psycopg_sql.Identifier(_RLS_TEST_ROLE)
+                    )
+                )
+                engine._set_tenant(cur, _stable_uuid("tenant", tid))
+                cur.execute(
+                    "SELECT intention_id, external_user_id, agent_id FROM intentions"
+                )
+                assert cur.fetchall() == [("visible-intention", uid, aid)]
+
 
 class TestIdempotency:
+    def test_two_connections_race_to_one_durable_firing(
+        self, engine, tenant_user_agent
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT - timedelta(minutes=1)
+        engine.schedule_intention(
+            _make_intention(
+                tenant_id=tid,
+                user_id=uid,
+                agent_id=aid,
+                evidence_id=eid,
+                trigger_type="exact_time",
+                trigger_expression={"at": due.isoformat()},
+                due_at=due,
+                intention_id="two-connection-race",
+            )
+        )
+
+        contenders = [
+            PostgresEngine(_DSN, require_safe_role=False),
+            PostgresEngine(_DSN, require_safe_role=False),
+        ]
+        start = Barrier(2)
+
+        def evaluate(contender: PostgresEngine) -> list[str]:
+            start.wait(timeout=5)
+            return [
+                item.intention_id
+                for item in contender.evaluate_due_intentions(
+                    tid,
+                    evaluated_at=_EVALUATED_AT,
+                    trigger_context=_ctx(),
+                    operating_point=_OP,
+                )
+            ]
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(evaluate, contender) for contender in contenders]
+                results = [future.result(timeout=15) for future in futures]
+        finally:
+            for contender in contenders:
+                contender.close_connections()
+
+        assert sorted(results, key=len) == [[], ["two-connection-race"]]
+        assert engine.list_intentions(tid)[0].status == "fired"
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, _stable_uuid("tenant", tid))
+                cur.execute(
+                    """
+                    SELECT count(*)
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
+                    (_stable_uuid("tenant", tid), "two-connection-race"),
+                )
+                assert cur.fetchone() == (1,)
+
     def test_replay_evaluation_returns_empty(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
         eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
@@ -658,6 +777,62 @@ class TestIdempotency:
         engine.schedule_intention(intention)
         with pytest.raises(ValueError, match="already exists"):
             engine.schedule_intention(intention)
+
+
+class TestHostileDependencyId:
+    def test_dependency_id_is_bound_data_not_sql(self, engine, tenant_user_agent):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        hostile_id = "dep'); DROP TABLE intentions; --"
+        dependency_due = _EVALUATED_AT - timedelta(minutes=2)
+        dependent_due = _EVALUATED_AT - timedelta(minutes=1)
+        engine.schedule_intention(
+            _make_intention(
+                tenant_id=tid,
+                user_id=uid,
+                agent_id=aid,
+                evidence_id=eid,
+                trigger_type="exact_time",
+                trigger_expression={"at": dependency_due.isoformat()},
+                due_at=dependency_due,
+                intention_id=hostile_id,
+            )
+        )
+        assert [
+            item.intention_id
+            for item in engine.evaluate_due_intentions(
+                tid,
+                evaluated_at=_EVALUATED_AT,
+                trigger_context=_ctx(),
+                operating_point=_OP,
+            )
+        ] == [hostile_id]
+
+        engine.schedule_intention(
+            _make_intention(
+                tenant_id=tid,
+                user_id=uid,
+                agent_id=aid,
+                evidence_id=eid,
+                trigger_type="dependency_completion",
+                trigger_expression={"require": "all"},
+                due_at=dependent_due,
+                intention_id="hostile-id-dependent",
+                dependencies=[hostile_id],
+            )
+        )
+        fired = engine.evaluate_due_intentions(
+            tid,
+            evaluated_at=_EVALUATED_AT,
+            trigger_context=_ctx(),
+            operating_point=_OP,
+        )
+
+        assert [item.intention_id for item in fired] == ["hostile-id-dependent"]
+        assert [item.intention_id for item in engine.list_intentions(tid)] == [
+            hostile_id,
+            "hostile-id-dependent",
+        ]
 
 
 class TestInfrastructureGate:
