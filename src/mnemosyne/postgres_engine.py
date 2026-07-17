@@ -5455,8 +5455,8 @@ class PostgresEngine:
 
         Full Phase 2 contract: all five trigger types, infrastructure gate,
         pre-validation of all due candidates' provenance before any transition,
-        atomic status change + fire audit per intention, and idempotent firing
-        enforced by the partial unique index on status='fired'.
+        atomic receipt + status change + fire audit per intention, and
+        clock-independent idempotency enforced by a durable firing receipt.
         """
 
         if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
@@ -5482,6 +5482,7 @@ class PostgresEngine:
                     FROM intentions
                     WHERE tenant_id = %s AND status = 'scheduled' AND due_at <= %s
                     ORDER BY due_at, intention_id
+                    FOR UPDATE
                     """,
                     (db_tenant_id, evaluated_at_utc),
                 )
@@ -5557,24 +5558,35 @@ class PostgresEngine:
                         },
                     )
                     fire_audit_diff["canonical_event_id"] = canonical_event_id
-                    # The partial unique index intentions_fired_unique makes
-                    # this UPDATE fail if a concurrent worker already fired
-                    # this intention, enforcing exactly-one-fire idempotency.
-                    try:
-                        cur.execute(
-                            """
-                            UPDATE intentions
-                            SET status = 'fired'
-                            WHERE tenant_id = %s AND intention_id = %s
-                              AND status = 'scheduled'
-                            """,
-                            (db_tenant_id, intention.intention_id),
+                    cur.execute(
+                        """
+                        INSERT INTO intention_firing_receipts(
+                            tenant_id, intention_id, operation, canonical_event_id
                         )
-                    except Exception:
-                        # Concurrent fire: the unique index violated means
-                        # another worker won. Skip this one — it's already fired.
-                        conn.rollback()
+                        VALUES (%s, %s, 'fire', %s)
+                        ON CONFLICT (tenant_id, intention_id, operation) DO NOTHING
+                        RETURNING intention_id
+                        """,
+                        (db_tenant_id, intention.intention_id, canonical_event_id),
+                    )
+                    if cur.fetchone() is None:
+                        # A concurrent or replayed operation already owns the
+                        # durable receipt. This is the only expected loser path.
                         continue
+                    cur.execute(
+                        """
+                        UPDATE intentions
+                        SET status = 'fired'
+                        WHERE tenant_id = %s AND intention_id = %s
+                          AND status = 'scheduled'
+                        RETURNING intention_id
+                        """,
+                        (db_tenant_id, intention.intention_id),
+                    )
+                    if cur.fetchone() is None:
+                        raise RuntimeError(
+                            "firing receipt claimed without a scheduled intention"
+                        )
                     self._audit(
                         cur,
                         db_tenant_id,

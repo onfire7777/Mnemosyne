@@ -522,10 +522,7 @@ CREATE POLICY runtime_state_tenant_isolation ON runtime_state
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
--- Prospective-memory intentions (W3 Phase 2). Tenant-scoped, RLS-isolated,
--- and idempotency-guarded: the partial unique index allows at most one row
--- with status='fired' per (tenant_id, intention_id), so concurrent workers
--- or replay cannot create a second fire receipt.
+-- Prospective-memory intentions (W3 Phase 2). Tenant-scoped and RLS-isolated.
 CREATE TABLE IF NOT EXISTS intentions (
   tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
   intention_id TEXT NOT NULL,
@@ -559,6 +556,29 @@ ALTER TABLE intentions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE intentions FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS intentions_tenant_isolation ON intentions;
 CREATE POLICY intentions_tenant_isolation ON intentions
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+-- Durable, clock-independent idempotency receipts.  The operation is part of
+-- the key so retries of the same logical transition have one winner without
+-- relying on evaluation timestamps or audit-log timing.
+CREATE TABLE IF NOT EXISTS intention_firing_receipts (
+  tenant_id UUID NOT NULL,
+  intention_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation = 'fire'),
+  canonical_event_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, intention_id, operation),
+  FOREIGN KEY (tenant_id, intention_id)
+    REFERENCES intentions(tenant_id, intention_id) ON DELETE CASCADE
+);
+
+ALTER TABLE intention_firing_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intention_firing_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS intention_firing_receipts_tenant_isolation
+  ON intention_firing_receipts;
+CREATE POLICY intention_firing_receipts_tenant_isolation
+  ON intention_firing_receipts
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
