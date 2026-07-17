@@ -371,8 +371,76 @@ def test_policy_controlled_capabilities_survive_oidc_session_issuance() -> None:
         now=1_900_000_100,
     )
 
+    assert policy.audit_summary()["rules"][0]["capabilities"] == [
+        PROSPECTIVE_SCHEDULER_CAPABILITY
+    ]
+    assert policy.canonical_mapping()["rules"][0]["capabilities"] == [
+        PROSPECTIVE_SCHEDULER_CAPABILITY
+    ]
     assert issued.capabilities == (PROSPECTIVE_SCHEDULER_CAPABILITY,)
     assert signer.verify(token, now=1_900_000_100) == issued
+
+
+def test_capability_free_oidc_policy_preserves_schema_v1_outputs() -> None:
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "version": 1,
+            "allowed_client_ids": ["legacy-client"],
+            "rules": [
+                {
+                    "name": "legacy-reader",
+                    "tenant_ids": ["tenant-a"],
+                    "role": "reader",
+                    "source_trust_tier": int(TrustTier.NORMAL),
+                }
+            ],
+        }
+    )
+    fingerprint = "cd9f986fc23a111d9ddd1425493a9dc1147ae7ef309047e1590ff12604327339"
+
+    assert policy.canonical_mapping() == {
+        "version": 1,
+        "allowed_client_ids": ["legacy-client"],
+        "client_id_claims": ["azp", "client_id"],
+        "rules": [
+            {
+                "name": "legacy-reader",
+                "tenant_ids": ["tenant-a"],
+                "claim_equals": {},
+                "claim_contains": {},
+                "required_acr": [],
+                "required_amr": [],
+                "max_auth_age_seconds": None,
+                "role": "reader",
+                "source_trust_tier": int(TrustTier.NORMAL),
+            }
+        ],
+    }
+    assert policy.fingerprint() == fingerprint
+    assert policy.audit_summary() == {
+        "version": 1,
+        "fingerprint": fingerprint,
+        "allowed_client_ids_count": 1,
+        "client_id_claims": ["azp", "client_id"],
+        "rule_count": 1,
+        "roles": ["reader"],
+        "source_trust_tiers": [int(TrustTier.NORMAL)],
+        "rules": [
+            {
+                "index": 0,
+                "name": "legacy-reader",
+                "role": "reader",
+                "source_trust_tier": int(TrustTier.NORMAL),
+                "tenant_matcher_count": 1,
+                "claim_equals_fields": [],
+                "claim_contains_fields": [],
+                "elevated": False,
+                "required_acr_configured": False,
+                "required_amr_configured": False,
+                "auth_time_required": False,
+            }
+        ],
+    }
 
 
 def test_session_verification_rejects_malformed_capability_claims() -> None:
