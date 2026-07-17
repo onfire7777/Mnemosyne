@@ -36,6 +36,6 @@ Validation commands:
 - [x] Add deterministic synthetic fixture cases for all required edge conditions and a mismatch case.
 
 ### Task 3: Validate and reconcile
-- [ ] Run the focused pytest command.
-- [ ] Run the focused Ruff command.
-- [ ] Run `git diff --check` and confirm only the five leased files changed.
+- [x] Run the focused pytest command.
+- [x] Run the focused Ruff command.
+- [x] Run `git diff --check` and confirm only the five leased files changed.
