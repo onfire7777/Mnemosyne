@@ -114,10 +114,12 @@ class SessionIdentity:
         user_id = str(payload.get("user_id") or payload.get("user") or "")
         if not tenant_id or not user_id:
             raise SessionAuthError("session tenant_id and user_id are required")
-        try:
-            source_trust_tier = int(payload.get("source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)))
-        except (TypeError, ValueError) as exc:
-            raise SessionAuthError("session source_trust_tier is invalid") from exc
+        raw_source_trust_tier = payload.get(
+            "source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)
+        )
+        if isinstance(raw_source_trust_tier, bool) or not isinstance(raw_source_trust_tier, int):
+            raise SessionAuthError("session source_trust_tier is invalid")
+        source_trust_tier = int(raw_source_trust_tier)
         if source_trust_tier < int(TrustTier.DIRECT_USER) or source_trust_tier > int(TrustTier.UNTRUSTED_EXTERNAL):
             raise SessionAuthError("session source_trust_tier is out of range")
         expires_at = payload.get("exp", payload.get("expires_at"))
@@ -609,10 +611,10 @@ class OidcAuthorizationPolicy:
         role = rule.get("role")
         if role not in _WRITE_ROLES:
             raise SessionAuthError("OIDC authz rule role is not allowed")
-        try:
-            source_trust_tier = int(rule.get("source_trust_tier"))
-        except (TypeError, ValueError) as exc:
-            raise SessionAuthError("OIDC authz rule source_trust_tier is invalid") from exc
+        raw_source_trust_tier = rule.get("source_trust_tier")
+        if isinstance(raw_source_trust_tier, bool) or not isinstance(raw_source_trust_tier, int):
+            raise SessionAuthError("OIDC authz rule source_trust_tier is invalid")
+        source_trust_tier = int(raw_source_trust_tier)
         if source_trust_tier not in {int(item) for item in TrustTier}:
             raise SessionAuthError("OIDC authz rule source_trust_tier is out of range")
         capabilities = _nonempty_tuple(

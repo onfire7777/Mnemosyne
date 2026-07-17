@@ -398,6 +398,44 @@ def test_session_verification_rejects_malformed_capability_claims() -> None:
             )
 
 
+@pytest.mark.parametrize("source_trust_tier", [True, False, 1.5, "1"])
+def test_session_verification_rejects_non_integral_source_trust_tiers(
+    source_trust_tier: object,
+) -> None:
+    with pytest.raises(SessionAuthError, match="source_trust_tier is invalid"):
+        SessionTokenVerifier(SESSION_SECRET).verify(
+            _sign_payload(
+                {
+                    "tenant_id": "tenant-a",
+                    "user_id": "user-a",
+                    "role": "agent",
+                    "source_trust_tier": source_trust_tier,
+                    "exp": 2_000_000_000,
+                }
+            ),
+            now=1_900_000_000,
+        )
+
+
+@pytest.mark.parametrize("source_trust_tier", [True, False, 1.5, "1"])
+def test_oidc_policy_rejects_non_integral_source_trust_tiers(
+    source_trust_tier: object,
+) -> None:
+    with pytest.raises(SessionAuthError, match="source_trust_tier is invalid"):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["scheduler-client"],
+                "rules": [
+                    {
+                        "tenant_ids": ["tenant-a"],
+                        "role": "agent",
+                        "source_trust_tier": source_trust_tier,
+                    }
+                ],
+            }
+        )
+
+
 def test_oidc_policy_rejects_untrusted_or_ambiguous_capability_rules() -> None:
     base_rule = {
         "claim_contains": {"groups": "mnemosyne-schedulers"},
