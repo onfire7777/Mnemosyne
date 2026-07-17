@@ -56,18 +56,18 @@ core.
 
 ## Phase 1 — Prospective memory: model + deterministic evaluator (TDD)
 
-- [ ] RED: add `tests/test_prospective_memory.py` — an `Intention` with an
+- [x] RED: add `tests/test_prospective_memory.py` — an `Intention` with an
   `exact_time` trigger in the past fires exactly once and is marked fired;
   an unsatisfied trigger does not fire; firing is idempotent under replay;
   a cancelled intention never fires. Assert provenance to the originating
   episode and an audit entry per firing.
-- [ ] GREEN: define the `Intention` model (`intention_id`, tenant/user/agent ids,
+- [x] GREEN: define the `Intention` model (`intention_id`, tenant/user/agent ids,
   `trigger_type`, `trigger_expression`, `action`, `status`, `priority`, `due_at`,
   `dependencies[]`, `reschedule_history[]`, `cancellation_state`, `evidence_ids[]`)
   and a deterministic evaluator that fires satisfied triggers idempotently.
-- [ ] Add engine Protocol methods (`schedule_intention`, `cancel_intention`,
+- [x] Add engine Protocol methods (`schedule_intention`, `cancel_intention`,
   `evaluate_due_intentions`, `list_intentions`) to Local first; keep pure/in-mem.
-- [ ] Verify: focused test file green; §31/§33 unaffected.
+- [x] Verify: focused test file green; §31/§33 unaffected.
 
 ## Phase 2 — Prospective memory: Postgres + Sqlite parity + trigger types
 
