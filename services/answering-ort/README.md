@@ -56,8 +56,11 @@ receives one newline-terminated JSON response. The operations are:
 Successful responses use `{"ok":true,"result":{...}}`. Embed results contain
 an embedding, rerank results contain ordered evidence IDs, and read results are
 structural only: answer type (`span`, `yes`, `no`, or `null`), evidence ID,
-start/end offsets, and supporting evidence IDs. The model never returns answer
-text; the host must reconstruct and validate authorized evidence substrings.
+half-open UTF-8 byte offsets on character boundaries, and supporting evidence
+IDs. The model never returns answer text; the host must reconstruct authorized
+evidence substrings. The sidecar rejects non-finite or oversized embeddings,
+operation-mismatched results, unknown or duplicate evidence IDs, and invalid
+span boundaries before a successful response can leave the process.
 
 Failures use `{"ok":false,"error":{"code":"...","message":"..."}}`. Stable
 codes are `malformed_request`, `request_too_large`, `limit_exceeded`,
@@ -68,9 +71,11 @@ codes are `malformed_request`, `request_too_large`, `limit_exceeded`,
 The boundary rejects request bodies over 64 KiB, queries over 2,000 characters,
 more than 20 evidence rows, more than 24,000 evidence characters, and rerank
 widths outside 1 through 8. Evidence IDs must be non-empty and unique. One
-request may run at a time, and framing plus inference share a hard 30-second
-deadline. Inference implementations receive that deadline and must cooperate
-with cancellation rather than returning late output.
+inference request may run at a time; transport admission allows at most that
+active request plus one queued connection. Framing plus inference share a hard
+30-second deadline. A timeout response returns at the deadline even if an
+inference implementation fails to cooperate, while the runtime remains busy
+until that inference exits so a second inference cannot overlap it.
 
 ## Security and status boundaries
 

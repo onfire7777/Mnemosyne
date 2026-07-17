@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::protocol::{ApiError, ErrorCode, Output, Request, Response};
+use crate::protocol::{ApiError, Evidence, Output, ReadPrediction, Request, Response};
 
 pub const MAX_IN_FLIGHT: usize = 1;
 pub const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
+pub const MAX_EMBEDDING_DIMENSIONS: usize = 4_096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -58,7 +60,7 @@ pub trait InferenceSession: Send + Sync {
 pub struct Runtime {
     config: RuntimeConfig,
     session: Option<Arc<dyn InferenceSession>>,
-    in_flight: AtomicBool,
+    in_flight: Arc<AtomicBool>,
 }
 
 impl Runtime {
@@ -66,7 +68,7 @@ impl Runtime {
         Self {
             config,
             session: None,
-            in_flight: AtomicBool::new(false),
+            in_flight: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -74,7 +76,7 @@ impl Runtime {
         Self {
             config,
             session: Some(session),
-            in_flight: AtomicBool::new(false),
+            in_flight: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -87,43 +89,134 @@ impl Runtime {
             return Response::failure(ApiError::timed_out());
         }
 
-        let _permit = match InFlightPermit::acquire(&self.in_flight) {
+        let permit = match InFlightPermit::acquire(&self.in_flight) {
             Some(permit) => permit,
-            None => {
-                return Response::failure(ApiError::new(
-                    ErrorCode::RuntimeBusy,
-                    "one request is already in flight",
-                ))
-            }
+            None => return Response::failure(ApiError::busy()),
         };
 
         let Some(session) = &self.session else {
             return Response::failure(ApiError::unavailable());
         };
 
-        let result = session.infer(&request, deadline);
-        if deadline.is_expired() {
+        let Some(remaining) = deadline.remaining() else {
             return Response::failure(ApiError::timed_out());
+        };
+        let session = Arc::clone(session);
+        let worker_request = request.clone();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        if std::thread::Builder::new()
+            .name("answering-ort-inference".into())
+            .spawn(move || {
+                let _permit = permit;
+                let _ = sender.send(session.infer(&worker_request, deadline));
+            })
+            .is_err()
+        {
+            return Response::failure(ApiError::inference_failed());
         }
 
-        match result {
-            Ok(output) => Response::success(output),
-            Err(error) => Response::failure(error),
+        match receiver.recv_timeout(remaining) {
+            Ok(_) if deadline.is_expired() => Response::failure(ApiError::timed_out()),
+            Ok(Ok(output)) => match validate_output(&request, &output) {
+                Ok(()) => Response::success(output),
+                Err(error) => Response::failure(error),
+            },
+            Ok(Err(error)) => Response::failure(error),
+            Err(RecvTimeoutError::Timeout) => Response::failure(ApiError::timed_out()),
+            Err(RecvTimeoutError::Disconnected) => Response::failure(ApiError::inference_failed()),
         }
     }
 }
 
-struct InFlightPermit<'a>(&'a AtomicBool);
+fn validate_output(request: &Request, output: &Output) -> Result<(), ApiError> {
+    match (request, output) {
+        (Request::Embed { .. }, Output::Embed { embedding }) => {
+            if embedding.is_empty()
+                || embedding.len() > MAX_EMBEDDING_DIMENSIONS
+                || embedding.iter().any(|value| !value.is_finite())
+            {
+                return Err(ApiError::inference_failed());
+            }
+        }
+        (
+            Request::Rerank {
+                evidence,
+                rank_width,
+                ..
+            },
+            Output::Rerank { ranked_ids },
+        ) => {
+            let mut seen = std::collections::HashSet::with_capacity(ranked_ids.len());
+            if ranked_ids.len() > (*rank_width).min(evidence.len())
+                || ranked_ids
+                    .iter()
+                    .any(|id| !seen.insert(id) || !has_evidence_id(evidence, id))
+            {
+                return Err(ApiError::inference_failed());
+            }
+        }
+        (Request::Read { evidence, .. }, Output::Read { prediction }) => {
+            validate_read_prediction(evidence, prediction)?;
+        }
+        _ => return Err(ApiError::inference_failed()),
+    }
+    Ok(())
+}
 
-impl<'a> InFlightPermit<'a> {
-    fn acquire(flag: &'a AtomicBool) -> Option<Self> {
+fn validate_read_prediction(
+    evidence: &[Evidence],
+    prediction: &ReadPrediction,
+) -> Result<(), ApiError> {
+    let supporting_ids = match prediction {
+        ReadPrediction::Span {
+            evidence_id,
+            start,
+            end,
+            supporting_ids,
+        } => {
+            let Some(row) = evidence.iter().find(|row| row.id == *evidence_id) else {
+                return Err(ApiError::inference_failed());
+            };
+            if start >= end
+                || *end > row.text.len()
+                || !row.text.is_char_boundary(*start)
+                || !row.text.is_char_boundary(*end)
+            {
+                return Err(ApiError::inference_failed());
+            }
+            supporting_ids
+        }
+        ReadPrediction::Yes { supporting_ids }
+        | ReadPrediction::No { supporting_ids }
+        | ReadPrediction::Null { supporting_ids } => supporting_ids,
+    };
+
+    let mut seen = std::collections::HashSet::with_capacity(supporting_ids.len());
+    if supporting_ids.len() > evidence.len()
+        || supporting_ids
+            .iter()
+            .any(|id| !seen.insert(id) || !has_evidence_id(evidence, id))
+    {
+        return Err(ApiError::inference_failed());
+    }
+    Ok(())
+}
+
+fn has_evidence_id(evidence: &[Evidence], id: &str) -> bool {
+    evidence.iter().any(|row| row.id == id)
+}
+
+struct InFlightPermit(Arc<AtomicBool>);
+
+impl InFlightPermit {
+    fn acquire(flag: &Arc<AtomicBool>) -> Option<Self> {
         flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
             .ok()
-            .map(|_| Self(flag))
+            .map(|_| Self(Arc::clone(flag)))
     }
 }
 
-impl Drop for InFlightPermit<'_> {
+impl Drop for InFlightPermit {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
@@ -165,7 +258,7 @@ pub fn shared_runtime() -> &'static Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::Output;
+    use crate::protocol::{ErrorCode, Output};
     use std::sync::Barrier;
     use std::thread;
 
@@ -311,6 +404,122 @@ mod tests {
             Deadline::default(),
         );
         assert!(later.ok);
+    }
+
+    #[test]
+    fn hard_deadline_returns_while_blocked_session_remains_busy() {
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let runtime = Arc::new(Runtime::with_session(
+            RuntimeConfig::default(),
+            Arc::new(BlockingSession {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+                block_once: AtomicBool::new(true),
+            }),
+        ));
+
+        let worker_runtime = Arc::clone(&runtime);
+        let request = thread::spawn(move || {
+            worker_runtime.execute(
+                Request::Embed {
+                    query: "one".into(),
+                },
+                Deadline::after(Duration::from_millis(20)),
+            )
+        });
+        started.wait();
+        let response = request.join().unwrap();
+        assert_eq!(response.error.unwrap().code, ErrorCode::RequestTimedOut);
+        assert_eq!(
+            runtime
+                .execute(
+                    Request::Embed {
+                        query: "two".into()
+                    },
+                    Deadline::default(),
+                )
+                .error
+                .unwrap()
+                .code,
+            ErrorCode::RuntimeBusy
+        );
+
+        release.wait();
+        while runtime.in_flight.load(Ordering::Acquire) {
+            thread::yield_now();
+        }
+        assert!(
+            runtime
+                .execute(
+                    Request::Embed {
+                        query: "three".into(),
+                    },
+                    Deadline::default(),
+                )
+                .ok
+        );
+    }
+
+    #[test]
+    fn invalid_session_outputs_fail_closed() {
+        fn assert_invalid(request: Request, output: Output) {
+            let runtime =
+                Runtime::with_session(RuntimeConfig::default(), Arc::new(FixedSession(Ok(output))));
+            assert_eq!(
+                runtime
+                    .execute(request, Deadline::default())
+                    .error
+                    .unwrap()
+                    .code,
+                ErrorCode::InferenceFailed
+            );
+        }
+
+        assert_invalid(
+            Request::Embed { query: "q".into() },
+            Output::Embed {
+                embedding: vec![f32::NAN],
+            },
+        );
+        assert_invalid(
+            Request::Rerank {
+                query: "q".into(),
+                evidence: vec![Evidence {
+                    id: "known".into(),
+                    text: "text".into(),
+                }],
+                rank_width: 1,
+            },
+            Output::Rerank {
+                ranked_ids: vec!["unknown".into()],
+            },
+        );
+        assert_invalid(
+            Request::Read {
+                query: "q".into(),
+                evidence: vec![Evidence {
+                    id: "known".into(),
+                    text: "é".into(),
+                }],
+            },
+            Output::Read {
+                prediction: ReadPrediction::Span {
+                    evidence_id: "known".into(),
+                    start: 1,
+                    end: 2,
+                    supporting_ids: vec!["unknown".into()],
+                },
+            },
+        );
+        assert_invalid(
+            Request::Embed { query: "q".into() },
+            Output::Read {
+                prediction: ReadPrediction::Null {
+                    supporting_ids: Vec::new(),
+                },
+            },
+        );
     }
 
     #[test]
