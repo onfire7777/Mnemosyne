@@ -5,10 +5,8 @@ against a live database, covering all five trigger types, provenance fail-closed
 paths, cancellation ownership, tenant isolation, idempotent firing, and the
 audit/provenance invariants from the frozen contract.
 
-The Local Intention dataclass (Phase 1) only validates exact_time in
-__post_init__, so non-exact_time intentions are constructed via a bypass helper
-that sets fields directly without triggering Phase 1 validation. The PostgreSQL
-backend's _validate_intention_for_pg performs the full Phase 2 validation.
+The canonical engine contract validates all five trigger types and is used
+directly by these PostgreSQL parity tests.
 """
 
 from __future__ import annotations
@@ -20,13 +18,13 @@ from uuid import uuid4
 
 import pytest
 
-from mnemosyne.engine import Intention
-from mnemosyne.models import Evidence
-from mnemosyne.postgres_engine import (
-    PostgresEngine,
+from mnemosyne.engine import (
+    Intention,
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
 )
+from mnemosyne.models import Evidence
+from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.privacy import ErasureMode
 
 pytest.importorskip("psycopg")
@@ -63,30 +61,20 @@ def _make_intention(
     dependencies: list[str] | None = None,
     action: dict[str, Any] | None = None,
 ) -> Intention:
-    """Construct an Intention bypassing Phase 1 exact_time-only validation.
+    """Construct an intention through the canonical public contract."""
 
-    The Local Intention.__post_init__ rejects non-exact_time triggers (Phase 1
-    limitation). Phase 2 needs all five types, so we bypass __post_init__ and
-    set fields directly. The PostgreSQL backend validates via
-    _validate_intention_for_pg.
-    """
-
-    obj = object.__new__(Intention)
-    obj.intention_id = intention_id or f"intention-{uuid4().hex[:12]}"
-    obj.tenant_id = tenant_id
-    obj.user_id = user_id
-    obj.agent_id = agent_id
-    obj.trigger_type = trigger_type
-    obj.trigger_expression = dict(trigger_expression)
-    obj.action = action or {"type": "remind", "message": "Submit the report."}
-    obj.due_at = due_at.astimezone(UTC)
-    obj.status = "scheduled"
-    obj.priority = "normal"
-    obj.dependencies = list(dependencies or [])
-    obj.reschedule_history = []
-    obj.cancellation_state = None
-    obj.evidence_ids = [evidence_id]
-    return obj
+    return Intention(
+        intention_id=intention_id or f"intention-{uuid4().hex[:12]}",
+        tenant_id=tenant_id,
+        user_id=user_id,
+        agent_id=agent_id,
+        trigger_type=trigger_type,
+        trigger_expression=dict(trigger_expression),
+        action=action or {"type": "remind", "message": "Submit the report."},
+        due_at=due_at.astimezone(UTC),
+        dependencies=list(dependencies or []),
+        evidence_ids=[evidence_id],
+    )
 
 
 def _append_evidence(engine: PostgresEngine, *, tenant_id: str, user_id: str, agent_id: str, trust_tier: int = 2, capability_tags=None) -> str:
