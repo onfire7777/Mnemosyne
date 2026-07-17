@@ -83,6 +83,13 @@ def is_write_tainted(capability_tags: Sequence[str] | None) -> bool:
 WriteRole = Literal["reader", "agent", "consolidator", "operator"]
 _WRITE_ROLES = {"reader", "agent", "consolidator", "operator"}
 
+PROSPECTIVE_SCHEDULER_CAPABILITY = "prospective:evaluate"
+PROSPECTIVE_TENANT_READ_CAPABILITY = "prospective:read:tenant"
+PROSPECTIVE_MEMORY_CAPABILITIES = frozenset(
+    {PROSPECTIVE_SCHEDULER_CAPABILITY, PROSPECTIVE_TENANT_READ_CAPABILITY}
+)
+ProspectiveMemoryScope = Literal["subject", "tenant"]
+
 
 class SessionAuthError(ValueError):
     """Raised when a session token is missing, malformed, expired, or invalid."""
@@ -96,6 +103,7 @@ class SessionIdentity:
     source_trust_tier: int
     expires_at: int | None = None
     session_id: str | None = None
+    capabilities: tuple[str, ...] = ()
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "SessionIdentity":
@@ -117,6 +125,17 @@ class SessionIdentity:
             parsed_expires_at = int(expires_at) if expires_at is not None else None
         except (TypeError, ValueError) as exc:
             raise SessionAuthError("session exp is invalid") from exc
+        raw_capabilities = payload.get("capabilities", ())
+        if not isinstance(raw_capabilities, (list, tuple)):
+            raise SessionAuthError("session capabilities must be a list")
+        capabilities = tuple(raw_capabilities)
+        if any(not isinstance(capability, str) or not capability for capability in capabilities):
+            raise SessionAuthError("session capability is invalid")
+        if len(set(capabilities)) != len(capabilities):
+            raise SessionAuthError("session capabilities must be unique")
+        unknown_capabilities = set(capabilities) - PROSPECTIVE_MEMORY_CAPABILITIES
+        if unknown_capabilities:
+            raise SessionAuthError("session capability is not allowed")
         return cls(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -124,6 +143,7 @@ class SessionIdentity:
             source_trust_tier=source_trust_tier,
             expires_at=parsed_expires_at,
             session_id=str(payload["session_id"]) if payload.get("session_id") else None,
+            capabilities=capabilities,
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -137,6 +157,8 @@ class SessionIdentity:
             payload["exp"] = self.expires_at
         if self.session_id:
             payload["session_id"] = self.session_id
+        if self.capabilities:
+            payload["capabilities"] = list(self.capabilities)
         return payload
 
 
@@ -1003,6 +1025,7 @@ def issue_session_from_oidc(
         source_trust_tier=identity.source_trust_tier,
         expires_at=min(identity.expires_at or max_exp, max_exp),
         session_id=identity.session_id,
+        capabilities=identity.capabilities,
     )
     return signer.sign(issued), issued
 
@@ -1023,6 +1046,20 @@ class CapabilityDecision:
     required_role: WriteRole
     required_trust: int
     operation: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ProspectiveMemoryAuthorization:
+    allowed: bool
+    reason: str
+    operation: str
+    tenant_id: str | None = None
+    actor_id: str | None = None
+    owner_id: str | None = None
+    scope: ProspectiveMemoryScope | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1052,6 +1089,108 @@ class SecurityPolicy:
         "branch_promotion_requires_gate",
         "erasure_propagates_to_derived_indexes",
     )
+
+    def authorize_prospective_memory(
+        self,
+        operation: str,
+        identity: SessionIdentity,
+        *,
+        tenant_id: str,
+        actor_id: str | None = None,
+        owner_id: str | None = None,
+        tenant_wide: bool = False,
+    ) -> ProspectiveMemoryAuthorization:
+        """Authorize a prospective-memory operation from verified session identity.
+
+        Returned actor, owner, tenant, and scope values are authoritative. Denied
+        decisions intentionally return no bound context so callers cannot use
+        spoofed request values after a failed check.
+        """
+
+        def deny(reason: str) -> ProspectiveMemoryAuthorization:
+            return ProspectiveMemoryAuthorization(False, reason, operation if isinstance(operation, str) else "")
+
+        if not isinstance(identity, SessionIdentity):
+            return deny("verified session identity is required")
+        if operation not in {"schedule", "cancel", "evaluate", "read"}:
+            return deny("prospective-memory operation is not allowed")
+        if (
+            not isinstance(identity.tenant_id, str)
+            or not identity.tenant_id.strip()
+            or not isinstance(identity.user_id, str)
+            or not identity.user_id.strip()
+            or identity.role not in _WRITE_ROLES
+        ):
+            return deny("session identity is malformed")
+        if not isinstance(identity.capabilities, tuple):
+            return deny("session capabilities are malformed")
+        if any(not isinstance(capability, str) or not capability for capability in identity.capabilities):
+            return deny("session capabilities are malformed")
+        if len(set(identity.capabilities)) != len(identity.capabilities):
+            return deny("session capabilities are malformed")
+        if set(identity.capabilities) - PROSPECTIVE_MEMORY_CAPABILITIES:
+            return deny("session capability is not allowed")
+        if not isinstance(tenant_id, str) or not tenant_id.strip():
+            return deny("requested tenant is required")
+        if tenant_id != identity.tenant_id:
+            return deny("requested tenant does not match session identity")
+        if actor_id is not None and (not isinstance(actor_id, str) or actor_id != identity.user_id):
+            return deny("requested actor does not match session identity")
+        if not isinstance(tenant_wide, bool):
+            return deny("tenant-wide scope must be boolean")
+        if owner_id is not None and (not isinstance(owner_id, str) or not owner_id.strip()):
+            return deny("requested owner is malformed")
+
+        capabilities = set(identity.capabilities)
+        if operation == "evaluate":
+            if identity.role == "reader":
+                return deny("reader role cannot evaluate prospective memory")
+            if owner_id is not None or tenant_wide:
+                return deny("evaluation scope is fixed to the authenticated tenant")
+            if PROSPECTIVE_SCHEDULER_CAPABILITY not in capabilities:
+                return deny("evaluation requires authenticated scheduler capability")
+            return ProspectiveMemoryAuthorization(
+                True,
+                "allowed",
+                operation,
+                identity.tenant_id,
+                identity.user_id,
+                None,
+                "tenant",
+            )
+
+        if operation == "read" and tenant_wide:
+            if owner_id is not None:
+                return deny("tenant-wide reads cannot include a subject owner")
+            if PROSPECTIVE_TENANT_READ_CAPABILITY not in capabilities:
+                return deny("tenant-wide read requires explicit capability")
+            return ProspectiveMemoryAuthorization(
+                True,
+                "allowed",
+                operation,
+                identity.tenant_id,
+                identity.user_id,
+                None,
+                "tenant",
+            )
+
+        if tenant_wide:
+            return deny("tenant-wide scope is only available for reads")
+        if owner_id is None:
+            return deny("subject owner is required")
+        if owner_id != identity.user_id:
+            return deny("requested owner does not match session identity")
+        if identity.role == "reader" and operation != "read":
+            return deny("reader role cannot mutate prospective memory")
+        return ProspectiveMemoryAuthorization(
+            True,
+            "allowed",
+            operation,
+            identity.tenant_id,
+            identity.user_id,
+            identity.user_id,
+            "subject",
+        )
 
     def authorize_write(
         self,
