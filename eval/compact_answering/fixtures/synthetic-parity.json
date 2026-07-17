@@ -1,0 +1,119 @@
+{
+  "schema": "mnemosyne.compact-answering-parity-fixture.v1",
+  "cases": [
+    {
+      "id": "unicode",
+      "reference": {
+        "decoded_span_b64": "bmHDr3ZlIOadseS6rA==",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "unicode-doc", "sentence_index": 0}],
+        "null_margin": -2.5,
+        "abstained": false
+      },
+      "candidate": {
+        "decoded_span_b64": "bmHDr3ZlIOadseS6rA==",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "unicode-doc", "sentence_index": 0}],
+        "null_margin": -2.5,
+        "abstained": false
+      },
+      "matches": true
+    },
+    {
+      "id": "repeated-answer",
+      "reference": {
+        "decoded_span_b64": "UGFyaXM=",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "repeat-doc", "sentence_index": 3}],
+        "null_margin": -1.25,
+        "abstained": false
+      },
+      "candidate": {
+        "decoded_span_b64": "UGFyaXM=",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "repeat-doc", "sentence_index": 3}],
+        "null_margin": -1.25,
+        "abstained": false
+      },
+      "matches": true
+    },
+    {
+      "id": "null-answer",
+      "reference": {
+        "decoded_span_b64": "",
+        "answer_type": "null",
+        "supporting_facts": [],
+        "null_margin": 4.0,
+        "abstained": true
+      },
+      "candidate": {
+        "decoded_span_b64": "",
+        "answer_type": "null",
+        "supporting_facts": [],
+        "null_margin": 4.0,
+        "abstained": true
+      },
+      "matches": true
+    },
+    {
+      "id": "window-boundary",
+      "reference": {
+        "decoded_span_b64": "Ym91bmRhcnk=",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "window-384", "sentence_index": 7}],
+        "null_margin": -0.125,
+        "abstained": false
+      },
+      "candidate": {
+        "decoded_span_b64": "Ym91bmRhcnk=",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "window-384", "sentence_index": 7}],
+        "null_margin": -0.125,
+        "abstained": false
+      },
+      "matches": true
+    },
+    {
+      "id": "multi-window-reconstruction",
+      "reference": {
+        "decoded_span_b64": "YWxwaGEg4oaSIG9tZWdh",
+        "answer_type": "span",
+        "supporting_facts": [
+          {"source_id": "window-a", "sentence_index": 1},
+          {"source_id": "window-b", "sentence_index": 0}
+        ],
+        "null_margin": -3.75,
+        "abstained": false
+      },
+      "candidate": {
+        "decoded_span_b64": "YWxwaGEg4oaSIG9tZWdh",
+        "answer_type": "span",
+        "supporting_facts": [
+          {"source_id": "window-a", "sentence_index": 1},
+          {"source_id": "window-b", "sentence_index": 0}
+        ],
+        "null_margin": -3.75,
+        "abstained": false
+      },
+      "matches": true
+    },
+    {
+      "id": "explicit-mismatch",
+      "reference": {
+        "decoded_span_b64": "ZXhhY3Q=",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "mismatch-doc", "sentence_index": 2}],
+        "null_margin": -1.0,
+        "abstained": false
+      },
+      "candidate": {
+        "decoded_span_b64": "RVhBQ1Q=",
+        "answer_type": "span",
+        "supporting_facts": [{"source_id": "mismatch-doc", "sentence_index": 2}],
+        "null_margin": -1.0,
+        "abstained": false
+      },
+      "matches": false
+    }
+  ]
+}
