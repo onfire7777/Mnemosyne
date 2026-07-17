@@ -522,6 +522,46 @@ CREATE POLICY runtime_state_tenant_isolation ON runtime_state
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
+-- Prospective-memory intentions (W3 Phase 2). Tenant-scoped, RLS-isolated,
+-- and idempotency-guarded: the partial unique index allows at most one row
+-- with status='fired' per (tenant_id, intention_id), so concurrent workers
+-- or replay cannot create a second fire receipt.
+CREATE TABLE IF NOT EXISTS intentions (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  intention_id TEXT NOT NULL,
+  user_id UUID NOT NULL,
+  external_user_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  trigger_type TEXT NOT NULL CHECK (trigger_type IN ('exact_time', 'time_window', 'event', 'condition', 'dependency_completion')),
+  trigger_expression JSONB NOT NULL,
+  action JSONB NOT NULL DEFAULT '{}'::jsonb,
+  due_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'cancelled', 'fired')),
+  priority TEXT NOT NULL DEFAULT 'normal',
+  dependencies TEXT[] NOT NULL DEFAULT '{}',
+  reschedule_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+  cancellation_state JSONB,
+  evidence_ids BYTEA[] NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, intention_id)
+);
+
+-- Exactly one fired row per canonical firing key (tenant_id, intention_id).
+CREATE UNIQUE INDEX IF NOT EXISTS intentions_fired_unique
+  ON intentions (tenant_id, intention_id)
+  WHERE status = 'fired';
+
+CREATE INDEX IF NOT EXISTS intentions_tenant_due_idx
+  ON intentions (tenant_id, due_at, intention_id)
+  WHERE status = 'scheduled';
+
+ALTER TABLE intentions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intentions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS intentions_tenant_isolation ON intentions;
+CREATE POLICY intentions_tenant_isolation ON intentions
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
 -- ===========================================================================
 -- Additive blueprint-parity columns (idempotent migration).
 -- These are declared inline in the CREATE TABLE statements above for fresh
