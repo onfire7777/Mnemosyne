@@ -8,6 +8,7 @@ import math
 import os
 import secrets
 import threading
+import weakref
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -130,7 +131,7 @@ def _parse_aware_iso(value: Any, *, field: str) -> datetime:
     return parsed.astimezone(UTC)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ProspectiveOperatingPoint:
     """A caller-supplied precision/recall operating point for trigger evaluation.
 
@@ -155,13 +156,10 @@ class ProspectiveOperatingPoint:
             raise ValueError("measurement_cid must be a non-empty string")
         for name in ("threshold", "measured_precision", "measured_recall"):
             value = getattr(self, name)
-            if type(value) not in {int, float} or not math.isfinite(float(value)):
-                raise ValueError(f"{name} must be a finite number")
-            if not (0.0 <= float(value) <= 1.0):
+            if type(value) is not float or not math.isfinite(value):
+                raise ValueError(f"{name} must be a finite number expressed as float")
+            if not (0.0 <= value <= 1.0):
                 raise ValueError(f"{name} must be in [0, 1]")
-        self.threshold = float(self.threshold)
-        self.measured_precision = float(self.measured_precision)
-        self.measured_recall = float(self.measured_recall)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -202,6 +200,17 @@ class TriggerEvaluationContext:
             if type(event) is not dict:
                 raise ValueError(f"events[{index}] must be a JSON object")
             event = _normalize_json_value(event, path=f"events[{index}]")
+            unknown_keys = set(event) - {
+                "event_id",
+                "event_type",
+                "occurred_at",
+                "payload",
+                "confidence",
+            }
+            if unknown_keys:
+                raise ValueError(
+                    f"events[{index}] contains unknown keys: {sorted(unknown_keys)}"
+                )
             event_id = event.get("event_id")
             if type(event_id) is not str or not event_id.strip():
                 raise ValueError(f"events[{index}].event_id must be a non-empty string")
@@ -242,6 +251,12 @@ class TriggerEvaluationContext:
             observation = _normalize_json_value(
                 observation, path=f"conditions[{condition_id}]"
             )
+            unknown_keys = set(observation) - {"value", "observed_at", "confidence"}
+            if unknown_keys:
+                raise ValueError(
+                    f"conditions[{condition_id}] contains unknown keys: "
+                    f"{sorted(unknown_keys)}"
+                )
             if "value" not in observation:
                 raise ValueError(f"conditions[{condition_id}].value is required")
             observed_at = observation.get("observed_at")
@@ -1093,6 +1108,11 @@ class LocalMemoryEngine:
     counterfactual replay, and single-user operation.
     """
 
+    _writer_owners_lock = threading.Lock()
+    _writer_owners: weakref.WeakValueDictionary[str, LocalMemoryEngine] = (
+        weakref.WeakValueDictionary()
+    )
+
     def __init__(
         self,
         store_path: str | os.PathLike[str] | None = None,
@@ -1102,6 +1122,7 @@ class LocalMemoryEngine:
         read_only: bool = False,
     ):
         self.store_path = Path(store_path).expanduser() if store_path else None
+        self._writer_path_key: str | None = None
         self._journal_dir = Path(journal_dir).expanduser() if journal_dir else None
         self._read_only = read_only
         self._persistence_defer_depth = 0
@@ -1142,8 +1163,42 @@ class LocalMemoryEngine:
         # valid until that first allow→deny flip (None = no pending flip).
         self._candidate_memo: OrderedDict[tuple[Any, ...], tuple[datetime | None, list[Hit]]] = OrderedDict()
         self._candidate_memo_lock = threading.Lock()
-        if self.store_path and self.store_path.exists():
-            self._load()
+        if self.store_path and not self._read_only:
+            writer_path_key = str(self.store_path.resolve(strict=False))
+            with self._writer_owners_lock:
+                owner = self._writer_owners.get(writer_path_key)
+                if owner is not None and owner is not self:
+                    raise RuntimeError(
+                        f"local memory store already has a writer: {writer_path_key}"
+                    )
+                self._writer_owners[writer_path_key] = self
+                self._writer_path_key = writer_path_key
+        try:
+            if self.store_path and self.store_path.exists():
+                self._load()
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Release this engine's writable store-path ownership."""
+
+        writer_path_key = getattr(self, "_writer_path_key", None)
+        if writer_path_key is None:
+            return
+        with self._writer_owners_lock:
+            if self._writer_owners.get(writer_path_key) is self:
+                del self._writer_owners[writer_path_key]
+        self._writer_path_key = None
+
+    def __enter__(self) -> LocalMemoryEngine:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
 
     def _retrieval_result_cache_token(
         self, tenant_id: str, branch: str, effective_filter: dict[str, Any]
@@ -1297,6 +1352,28 @@ class LocalMemoryEngine:
             if dep is not None and dep.trigger_type == "dependency_completion":
                 pending.extend(dep.dependencies)
 
+    def _validate_intention_dependencies(self, intention: Intention) -> None:
+        for dep_id in intention.dependencies:
+            if (intention.tenant_id, dep_id) not in self.intentions:
+                raise ValueError(
+                    f"dependency {dep_id!r} is missing or cross-tenant"
+                )
+
+    @contextmanager
+    def _prospective_transaction(self):
+        """Roll back prospective state and audit if persistence does not commit."""
+
+        intentions_before = copy.deepcopy(self.intentions)
+        audit_before = copy.deepcopy(self.audit_log)
+        store_version_before = self._store_version
+        try:
+            yield
+        except BaseException:
+            self.intentions = intentions_before
+            self.audit_log = audit_before
+            self._store_version = store_version_before
+            raise
+
     def schedule_intention(self, intention: Intention) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
 
@@ -1305,22 +1382,24 @@ class LocalMemoryEngine:
             key = (intention.tenant_id, intention.intention_id)
             if key in self.intentions:
                 raise ValueError(f"intention {intention.intention_id!r} already exists")
+            self._validate_intention_dependencies(intention)
             if intention.trigger_type == "dependency_completion":
                 self._reject_dependency_cycle(intention)
             stored = copy.deepcopy(intention)
-            self.intentions[key] = stored
             trust_tier, capability_tags = self._intention_audit_context(provenance)
-            self._audit(
-                stored.tenant_id,
-                stored.agent_id,
-                "schedule_intention",
-                stored.intention_id,
-                self._intention_audit_diff(stored, status=stored.status),
-                source="prospective_memory",
-                trust_tier=trust_tier,
-                capability_tags=capability_tags,
-            )
-            self._persist()
+            with self._prospective_transaction():
+                self.intentions[key] = stored
+                self._audit(
+                    stored.tenant_id,
+                    stored.agent_id,
+                    "schedule_intention",
+                    stored.intention_id,
+                    self._intention_audit_diff(stored, status=stored.status),
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+                self._persist()
             return stored.intention_id
 
     def cancel_intention(self, tenant_id: str, intention_id: str, *, cancelled_by: str) -> None:
@@ -1341,19 +1420,20 @@ class LocalMemoryEngine:
                 )
             provenance = self._intention_provenance(intention)
             trust_tier, capability_tags = self._intention_audit_context(provenance)
-            intention.status = "cancelled"
-            intention.cancellation_state = {"cancelled_by": cancelled_by}
-            self._audit(
-                tenant_id,
-                cancelled_by,
-                "cancel_intention",
-                intention_id,
-                self._intention_audit_diff(intention, status="cancelled"),
-                source="prospective_memory",
-                trust_tier=trust_tier,
-                capability_tags=capability_tags,
-            )
-            self._persist()
+            with self._prospective_transaction():
+                intention.status = "cancelled"
+                intention.cancellation_state = {"cancelled_by": cancelled_by}
+                self._audit(
+                    tenant_id,
+                    cancelled_by,
+                    "cancel_intention",
+                    intention_id,
+                    self._intention_audit_diff(intention, status="cancelled"),
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+                self._persist()
 
     def evaluate_due_intentions(
         self,
@@ -1373,6 +1453,8 @@ class LocalMemoryEngine:
         zero mutation/audit.
         """
 
+        if type(tenant_id) is not str or not tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
         if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
             raise ValueError("evaluated_at must be timezone-aware")
         if not isinstance(trigger_context, TriggerEvaluationContext):
@@ -1390,8 +1472,8 @@ class LocalMemoryEngine:
                 if key[0] == tenant_id
             }
             evaluated_utc = evaluated_at.astimezone(UTC)
-            candidates: list[Intention] = []
-            matched_signals: list[dict[str, Any]] = []
+            frozen_intentions = copy.deepcopy(self.intentions)
+            candidate_results: list[tuple[Intention, dict[str, Any]]] = []
             for item in tenant_items.values():
                 if item.status != "scheduled":
                     continue
@@ -1400,52 +1482,54 @@ class LocalMemoryEngine:
                     evaluated_at=evaluated_utc,
                     context=trigger_context,
                     operating_point=operating_point,
-                    tenant_intentions=self.intentions,
+                    tenant_intentions=frozen_intentions,
                 )
                 if fires:
-                    candidates.append(item)
-                    matched_signals.append(signal)
-            candidates.sort(key=lambda item: (item.due_at, item.intention_id))
+                    candidate_results.append((item, signal))
+            candidate_results.sort(
+                key=lambda result: (result[0].due_at, result[0].intention_id)
+            )
             audit_contexts = [
                 self._intention_audit_context(self._intention_provenance(intention))
-                for intention in candidates
+                for intention, _signal in candidate_results
             ]
             fired: list[Intention] = []
-            for intention, (trust_tier, capability_tags), signal in zip(
-                candidates, audit_contexts, matched_signals, strict=True
-            ):
-                intention.status = "fired"
-                fire_diff = {
-                    **self._intention_audit_diff(intention, status="fired"),
-                    "evaluated_at": evaluated_utc.isoformat(),
-                    "operating_point": operating_point.to_dict(),
-                }
-                if "event_id" in signal:
-                    fire_diff["matched_event_id"] = signal["event_id"]
-                if "condition_id" in signal:
-                    fire_diff["matched_condition_id"] = signal["condition_id"]
-                self._audit(
-                    tenant_id,
-                    intention.agent_id,
-                    "fire_intention",
-                    intention.intention_id,
-                    fire_diff,
-                    source="prospective_memory",
-                    trust_tier=trust_tier,
-                    capability_tags=capability_tags,
-                    event_id=content_cid(
+            with self._prospective_transaction():
+                for (intention, signal), (trust_tier, capability_tags) in zip(
+                    candidate_results, audit_contexts, strict=True
+                ):
+                    intention.status = "fired"
+                    fire_diff = {
+                        **self._intention_audit_diff(intention, status="fired"),
+                        "evaluated_at": evaluated_utc.isoformat(),
+                        "operating_point": operating_point.to_dict(),
+                    }
+                    if "event_id" in signal:
+                        fire_diff["matched_event_id"] = signal["event_id"]
+                    if "condition_id" in signal:
+                        fire_diff["matched_condition_id"] = signal["condition_id"]
+                    self._audit(
+                        tenant_id,
+                        intention.agent_id,
                         "fire_intention",
-                        {
-                            "tenant_id": tenant_id,
-                            "intention_id": intention.intention_id,
-                            "op": "fire",
-                        },
-                    ),
-                    occurred_at=evaluated_utc,
-                )
-                fired.append(copy.deepcopy(intention))
-            if fired:
-                self._persist()
+                        intention.intention_id,
+                        fire_diff,
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=content_cid(
+                            "fire_intention",
+                            {
+                                "tenant_id": tenant_id,
+                                "intention_id": intention.intention_id,
+                                "op": "fire",
+                            },
+                        ),
+                        occurred_at=evaluated_utc,
+                    )
+                    fired.append(copy.deepcopy(intention))
+                if fired:
+                    self._persist()
             return fired
 
     def list_intentions(self, tenant_id: str) -> list[Intention]:
@@ -1469,6 +1553,13 @@ class LocalMemoryEngine:
             return
         if not self.store_path:
             return
+        writer_path_key = self._writer_path_key
+        with self._writer_owners_lock:
+            if (
+                writer_path_key is None
+                or self._writer_owners.get(writer_path_key) is not self
+            ):
+                raise RuntimeError("local memory engine does not own its writable store")
         if self.store_path.is_symlink():
             raise ValueError("local memory store must be a real file")
         parent = self.store_path.parent
@@ -1505,7 +1596,6 @@ class LocalMemoryEngine:
             raise
         tmp.chmod(0o600)
         tmp.replace(self.store_path)
-        self.store_path.chmod(0o600)
 
     @contextmanager
     def defer_persistence(self):

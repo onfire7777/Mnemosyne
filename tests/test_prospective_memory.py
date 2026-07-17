@@ -608,6 +608,7 @@ def test_local_store_round_trips_intention_and_audit_state(tmp_path: Path) -> No
     evidence_id = _originating_episode(engine)
     intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
     engine.schedule_intention(intention)
+    engine.close()
 
     reloaded = LocalMemoryEngine(store_path=store)
     assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
@@ -617,6 +618,7 @@ def test_local_store_round_trips_intention_and_audit_state(tmp_path: Path) -> No
         trigger_context=_context(),
         operating_point=OPERATING_POINT,
     )
+    reloaded.close()
 
     fired_reload = LocalMemoryEngine(store_path=store)
     assert fired_reload.list_intentions(TENANT_ID)[0].status == "fired"
@@ -1246,16 +1248,9 @@ def test_dependency_completion_fails_closed_on_missing_dep() -> None:
         trigger_expression={"require": "all"},
         dependencies=["missing-dep"],
     )
-    engine.schedule_intention(dependent)
-
     with pytest.raises(ValueError, match="missing or cross-tenant"):
-        engine.evaluate_due_intentions(
-            TENANT_ID,
-            evaluated_at=EVALUATED_AT,
-            trigger_context=_context(),
-            operating_point=OPERATING_POINT,
-        )
-    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+        engine.schedule_intention(dependent)
+    assert engine.list_intentions(TENANT_ID) == []
 
 
 def test_dependency_completion_rejects_self_reference() -> None:
@@ -1306,7 +1301,7 @@ def test_dependency_completion_rejects_cycle_at_schedule_time() -> None:
         trigger_expression={"require": "all"},
         dependencies=["intention-cycle"],
     )
-    engine.schedule_intention(dep)
+    engine.intentions[(TENANT_ID, dep.intention_id)] = dep
 
     cycling = _intention(
         evidence_id=evidence_id,
