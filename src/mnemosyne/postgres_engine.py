@@ -5,14 +5,12 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import math
 import os
 import threading
 import weakref
 from collections import defaultdict
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
-from dataclasses import dataclass, field
 from hashlib import sha256
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -36,9 +34,11 @@ from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
     Intention,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+    _evaluate_trigger,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
-    _normalize_json_value,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
@@ -275,241 +275,6 @@ class _PostgresConnectionPool:
             idle, self._idle = self._idle, []
         for conn in idle:
             self.discard(conn)
-
-
-# ---------------------------------------------------------------------------
-# Prospective-memory types and deterministic trigger evaluation (W3 Phase 2).
-#
-# These mirror the frozen Local contract (parent task t_9e216d1c): the same
-# five trigger types, the same firing rules, the same idempotency key, and the
-# same audit/provenance invariants. The Intention dataclass itself is imported
-# from mnemosyne.engine so all three backends share one canonical model.
-# ---------------------------------------------------------------------------
-
-_TRIGGER_TYPES = frozenset(
-    {"exact_time", "time_window", "event", "condition", "dependency_completion"}
-)
-_COMPARISON_OPERATORS = frozenset({"eq", "ne", "lt", "lte", "gt", "gte", "in"})
-
-
-@dataclass(slots=True)
-class ProspectiveOperatingPoint:
-    """A caller-supplied, no-silent-default precision/recall operating point.
-
-    Every evaluate_due_intentions call must receive one. The threshold gates
-    event/condition signal confidence; deterministic time/dependency triggers
-    do not trade correctness for threshold, but the operating point is still
-    recorded in the firing audit.
-    """
-
-    operating_point_id: str
-    threshold: float
-    measured_precision: float
-    measured_recall: float
-    measurement_cid: str
-
-    def __post_init__(self) -> None:
-        if type(self.operating_point_id) is not str or not self.operating_point_id.strip():
-            raise ValueError("operating_point_id must be a non-empty string")
-        if type(self.measurement_cid) is not str or not self.measurement_cid.strip():
-            raise ValueError("measurement_cid must be a non-empty string")
-        for name in ("threshold", "measured_precision", "measured_recall"):
-            value = getattr(self, name)
-            ok = type(value) in {int, float} and math.isfinite(float(value))
-            if not ok or not (0.0 <= float(value) <= 1.0):
-                raise ValueError(f"{name} must be a finite float in [0, 1]")
-
-
-@dataclass(slots=True)
-class TriggerEvaluationContext:
-    """Required, data-only trigger context normalized before any mutation."""
-
-    infrastructure_available: bool
-    events: list[dict[str, Any]] = field(default_factory=list)
-    conditions: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if type(self.infrastructure_available) is not bool:
-            raise ValueError("infrastructure_available must be a bool")
-        if type(self.events) is not list:
-            raise ValueError("events must be a list")
-        if type(self.conditions) is not dict:
-            raise ValueError("conditions must be a mapping")
-        normalized_events: list[dict[str, Any]] = []
-        for index, event in enumerate(self.events):
-            if type(event) is not dict:
-                raise ValueError(f"events[{index}] must be a JSON object")
-            normalized_events.append(_normalize_json_value(event, path=f"events[{index}]"))
-        self.events = normalized_events
-        normalized_conditions: dict[str, dict[str, Any]] = {}
-        for key, observation in self.conditions.items():
-            if type(key) is not str or not key.strip():
-                raise ValueError("conditions keys must be non-empty strings")
-            if type(observation) is not dict:
-                raise ValueError(f"conditions[{key!r}] must be a JSON object")
-            normalized_conditions[key] = _normalize_json_value(
-                observation, path=f"conditions[{key!r}]"
-            )
-        self.conditions = normalized_conditions
-
-
-def _validate_intention_for_pg(intention: Intention) -> None:
-    """Validate an Intention for all five Phase 2 trigger types.
-
-    The Local Intention.__post_init__ only validates exact_time (Phase 1).
-    This helper extends validation to the remaining four trigger types so the
-    PostgreSQL backend can accept the full Phase 2 contract. It re-validates
-    the shared invariants (non-empty IDs, aware due_at, JSON-only data,
-    non-empty duplicate-free evidence_ids, no cancellation state on new
-    intentions) and the trigger-specific expression shape.
-    """
-
-    for name in ("intention_id", "tenant_id", "user_id", "agent_id"):
-        value = getattr(intention, name)
-        if type(value) is not str or not value.strip():
-            raise ValueError(f"{name} must be a non-empty string")
-    if intention.trigger_type not in _TRIGGER_TYPES:
-        raise ValueError(f"unsupported trigger_type: {intention.trigger_type!r}")
-    if type(intention.status) is not str or intention.status not in {
-        "scheduled",
-        "cancelled",
-        "fired",
-    }:
-        raise ValueError(f"unsupported intention status: {intention.status!r}")
-    if type(intention.priority) is not str or not intention.priority.strip():
-        raise ValueError("priority must be a non-empty string")
-    if not isinstance(intention.due_at, datetime) or intention.due_at.tzinfo is None:
-        raise ValueError("due_at must be timezone-aware")
-    if type(intention.trigger_expression) is not dict:
-        raise ValueError("trigger_expression must be a JSON object")
-    if type(intention.action) is not dict:
-        raise ValueError("action must be a JSON object")
-    if type(intention.dependencies) is not list or any(
-        type(item) is not str or not item.strip() for item in intention.dependencies
-    ):
-        raise ValueError("dependencies must be a list of non-empty strings")
-    if type(intention.evidence_ids) is not list or not intention.evidence_ids:
-        raise ValueError("evidence_ids must contain originating evidence")
-    if any(type(item) is not str or not item.strip() for item in intention.evidence_ids):
-        raise ValueError("evidence_ids must contain non-empty strings")
-    if len(set(intention.evidence_ids)) != len(intention.evidence_ids):
-        raise ValueError("evidence_ids must not contain duplicates")
-    expr = _normalize_json_value(intention.trigger_expression, path="trigger_expression")
-    due_utc = intention.due_at.astimezone(UTC)
-    tt = intention.trigger_type
-    if tt == "exact_time":
-        at_raw = expr.get("at")
-        if type(at_raw) is not str:
-            raise ValueError("exact_time trigger_expression.at must be an ISO-8601 string")
-        try:
-            at_val = datetime.fromisoformat(at_raw)
-        except ValueError as exc:
-            raise ValueError("exact_time trigger_expression.at must be ISO-8601") from exc
-        if at_val.tzinfo is None:
-            raise ValueError("exact_time trigger_expression.at must be timezone-aware")
-        if at_val.astimezone(UTC) != due_utc:
-            raise ValueError("trigger_expression.at must identify the same instant as due_at")
-    elif tt == "time_window":
-        start_raw = expr.get("start")
-        end_raw = expr.get("end")
-        if type(start_raw) is not str or type(end_raw) is not str:
-            raise ValueError("time_window trigger_expression requires start and end ISO-8601 strings")
-        try:
-            start_val = datetime.fromisoformat(start_raw)
-            end_val = datetime.fromisoformat(end_raw)
-        except ValueError as exc:
-            raise ValueError("time_window trigger_expression times must be ISO-8601") from exc
-        if start_val.tzinfo is None or end_val.tzinfo is None:
-            raise ValueError("time_window trigger_expression times must be timezone-aware")
-        if not (start_val.astimezone(UTC) < end_val.astimezone(UTC)):
-            raise ValueError("time_window start must precede end")
-        if start_val.astimezone(UTC) != due_utc:
-            raise ValueError("time_window start must identify the same instant as due_at")
-    elif tt == "event":
-        event_type = expr.get("event_type")
-        if type(event_type) is not str or not event_type.strip():
-            raise ValueError("event trigger_expression.event_type must be a non-empty string")
-        if "match" not in expr:
-            raise ValueError("event trigger_expression.match is required (use {} for type-only)")
-        if type(expr["match"]) is not dict:
-            raise ValueError("event trigger_expression.match must be a JSON object")
-    elif tt == "condition":
-        condition_id = expr.get("condition_id")
-        operator = expr.get("operator")
-        if type(condition_id) is not str or not condition_id.strip():
-            raise ValueError("condition trigger_expression.condition_id must be a non-empty string")
-        if operator not in _COMPARISON_OPERATORS:
-            raise ValueError(f"condition trigger_expression.operator must be one of {sorted(_COMPARISON_OPERATORS)}")
-        if "value" not in expr:
-            raise ValueError("condition trigger_expression.value is required")
-    elif tt == "dependency_completion":
-        require = expr.get("require")
-        if require != "all":
-            raise ValueError("dependency_completion trigger_expression.require must be 'all'")
-        if not intention.dependencies:
-            raise ValueError("dependency_completion requires a non-empty dependencies list")
-        if len(set(intention.dependencies)) != len(intention.dependencies):
-            raise ValueError("dependencies must not contain duplicates")
-        if intention.intention_id in intention.dependencies:
-            raise ValueError("an intention cannot depend on itself")
-    intention.trigger_expression = expr
-
-
-def _typed_condition_compare(operator: str, observed: Any, expected: Any) -> bool:
-    """Deterministic typed comparison for condition triggers.
-
-    Ordering operators accept only same-type finite numbers or strings.
-    ``in`` means the observed value is an element of the expression's JSON-list
-    value. Malformed/incompatible operands raise ValueError (fail closed).
-    """
-
-    if operator == "eq":
-        return observed == expected
-    if operator == "ne":
-        return observed != expected
-    if operator == "in":
-        if type(expected) is not list:
-            raise ValueError("condition 'in' operator requires a list value")
-        return observed in expected
-    # Ordering operators: only same-type finite numbers or strings.
-    if type(observed) not in {int, float, str} or type(expected) not in {int, float, str}:
-        raise ValueError("ordering operators require numbers or strings")
-    if type(observed) is not type(expected) and not (
-        type(observed) in {int, float} and type(expected) in {int, float}
-    ):
-        raise ValueError("ordering operands must be the same type")
-    if type(observed) in {int, float} and (not math.isfinite(float(observed)) or not math.isfinite(float(expected))):
-        raise ValueError("ordering operands must be finite")
-    if operator == "lt":
-        return observed < expected
-    if operator == "lte":
-        return observed <= expected
-    if operator == "gt":
-        return observed > expected
-    if operator == "gte":
-        return observed >= expected
-    raise ValueError(f"unknown operator: {operator!r}")
-
-
-def _deep_json_contains(payload: dict[str, Any], match: dict[str, Any]) -> bool:
-    """True when payload contains every key/value in match by deep equality."""
-
-    for key, expected in match.items():
-        if key not in payload:
-            return False
-        if not _json_values_equal(payload[key], expected):
-            return False
-    return True
-
-
-def _json_values_equal(a: Any, b: Any) -> bool:
-    if type(a) in {bool, int, float, str, type(None)} and type(b) in {bool, int, float, str, type(None)}:
-        return a == b
-    if type(a) is list and type(b) is list:
-        return len(a) == len(b) and all(_json_values_equal(x, y) for x, y in zip(a, b, strict=True))
-    if type(a) is dict and type(b) is dict:
-        return a.keys() == b.keys() and all(_json_values_equal(a[k], b[k]) for k in a)
-    return a == b
 
 
 class PostgresEngine:
@@ -5470,36 +5235,39 @@ class PostgresEngine:
         }
 
     def _row_to_intention(self, row: dict[str, Any], tenant_id: str) -> Intention:
-        """Convert an intentions table row to a detached Intention.
-
-        Bypasses Intention.__post_init__ (Phase 1 only validates exact_time)
-        and Intention.from_dict (which calls __post_init__) so all five Phase 2
-        trigger types round-trip. The stored status/trigger_type were validated
-        at schedule time by _validate_intention_for_pg.
-        """
+        """Convert an intentions table row through canonical deserialization."""
 
         due_at_val = row["due_at"]
         if hasattr(due_at_val, "isoformat"):
             due_at_str = due_at_val.isoformat()
         else:
             due_at_str = str(due_at_val)
-        due_at = datetime.fromisoformat(due_at_str)
-        obj = object.__new__(Intention)
-        obj.intention_id = row["intention_id"]
-        obj.tenant_id = tenant_id
-        obj.user_id = str(row.get("external_user_id") or row.get("_external_user_id") or row["user_id"])
-        obj.agent_id = row["agent_id"]
-        obj.trigger_type = row["trigger_type"]
-        obj.trigger_expression = dict(row["trigger_expression"] or {})
-        obj.action = dict(row["action"] or {})
-        obj.due_at = due_at.astimezone(UTC)
-        obj.status = row["status"]
-        obj.priority = row["priority"]
-        obj.dependencies = list(row["dependencies"] or [])
-        obj.reschedule_history = list(row["reschedule_history"] or [])
-        obj.cancellation_state = dict(row["cancellation_state"]) if row.get("cancellation_state") else None
-        obj.evidence_ids = _bytes_list_to_cids(list(row["evidence_ids"] or []))
-        return obj
+        return Intention.from_dict(
+            {
+                "intention_id": row["intention_id"],
+                "tenant_id": tenant_id,
+                "user_id": str(
+                    row.get("external_user_id")
+                    or row.get("_external_user_id")
+                    or row["user_id"]
+                ),
+                "agent_id": row["agent_id"],
+                "trigger_type": row["trigger_type"],
+                "trigger_expression": dict(row["trigger_expression"] or {}),
+                "action": dict(row["action"] or {}),
+                "due_at": due_at_str,
+                "status": row["status"],
+                "priority": row["priority"],
+                "dependencies": list(row["dependencies"] or []),
+                "reschedule_history": list(row["reschedule_history"] or []),
+                "cancellation_state": (
+                    dict(row["cancellation_state"])
+                    if row.get("cancellation_state")
+                    else None
+                ),
+                "evidence_ids": _bytes_list_to_cids(list(row["evidence_ids"] or [])),
+            }
+        )
 
     def schedule_intention(self, intention: Intention) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks.
@@ -5509,7 +5277,11 @@ class PostgresEngine:
         raise ValueError and never mutate/audit.
         """
 
-        _validate_intention_for_pg(intention)
+        if not isinstance(intention, Intention):
+            raise ValueError("intention must be an Intention")
+        intention = Intention.from_dict(intention.to_dict())
+        if intention.status != "scheduled":
+            raise ValueError("only scheduled intentions may be persisted")
         self.ensure_tenant_and_branch(intention.tenant_id)
         db_tenant_id = _stable_uuid("tenant", intention.tenant_id)
         db_user_id = _stable_uuid("user", intention.user_id)
@@ -5714,6 +5486,32 @@ class PostgresEngine:
                     (db_tenant_id, evaluated_at_utc),
                 )
                 candidates = [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
+                tenant_intentions = {
+                    (tenant_id, intention.intention_id): intention
+                    for intention in candidates
+                }
+                dependency_ids = sorted(
+                    {
+                        dependency_id
+                        for intention in candidates
+                        for dependency_id in intention.dependencies
+                    }
+                )
+                if dependency_ids:
+                    cur.execute(
+                        """
+                        SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
+                               trigger_expression, action, due_at, status, priority,
+                               dependencies, reschedule_history, cancellation_state,
+                               evidence_ids
+                        FROM intentions
+                        WHERE tenant_id = %s AND intention_id = ANY(%s)
+                        """,
+                        (db_tenant_id, dependency_ids),
+                    )
+                    for row in cur.fetchall():
+                        dependency = self._row_to_intention(row, tenant_id)
+                        tenant_intentions[(tenant_id, dependency.intention_id)] = dependency
                 # Phase 1: pre-validate provenance for ALL due candidates before
                 # any transition. A single invalid candidate fails the whole
                 # batch with zero mutation/audit.
@@ -5728,15 +5526,14 @@ class PostgresEngine:
                 for intention, (trust_tier, capability_tags) in zip(
                     candidates, audit_contexts, strict=True
                 ):
-                    matched_signal = self._evaluate_trigger(
+                    fires, matched_signal = _evaluate_trigger(
                         intention,
-                        evaluated_at_utc=evaluated_at_utc,
-                        trigger_context=trigger_context,
+                        evaluated_at=evaluated_at_utc,
+                        context=trigger_context,
                         operating_point=operating_point,
-                        cur=cur,
-                        db_tenant_id=db_tenant_id,
+                        tenant_intentions=tenant_intentions,
                     )
-                    if matched_signal is None:
+                    if not fires:
                         continue
                     fire_audit_diff = {
                         **self._intention_audit_diff(intention, status="fired"),
@@ -5791,127 +5588,6 @@ class PostgresEngine:
                     )
                     fired.append(copy.deepcopy(intention))
         return fired
-
-    def _evaluate_trigger(
-        self,
-        intention: Intention,
-        *,
-        evaluated_at_utc: datetime,
-        trigger_context: TriggerEvaluationContext,
-        operating_point: ProspectiveOperatingPoint,
-        cur: Any,
-        db_tenant_id: str,
-    ) -> dict[str, Any] | None:
-        """Evaluate one intention's trigger. Return matched-signal dict or None.
-
-        The returned dict carries event_id or condition_id for the audit when
-        applicable. Deterministic time/dependency triggers return {} (matched
-        but no signal ID). Returns None when the trigger is not satisfied.
-        """
-
-        tt = intention.trigger_type
-        due_utc = intention.due_at.astimezone(UTC)
-        if tt == "exact_time":
-            if evaluated_at_utc >= due_utc:
-                return {}
-            return None
-        if tt == "time_window":
-            expr = intention.trigger_expression
-            start_utc = datetime.fromisoformat(expr["start"]).astimezone(UTC)
-            end_utc = datetime.fromisoformat(expr["end"]).astimezone(UTC)
-            if start_utc <= evaluated_at_utc < end_utc:
-                return {}
-            return None
-        if tt == "event":
-            expr = intention.trigger_expression
-            event_type = expr["event_type"]
-            match = expr["match"]
-            eligible: list[tuple[datetime, str]] = []
-            seen_event_ids: set[str] = set()
-            for event in trigger_context.events:
-                eid = event.get("event_id")
-                if type(eid) is not str or not eid.strip():
-                    raise ValueError("context event_id must be a non-empty string")
-                if eid in seen_event_ids:
-                    raise ValueError(f"duplicate context event_id: {eid!r}")
-                seen_event_ids.add(eid)
-                if event.get("event_type") != event_type:
-                    continue
-                payload = event.get("payload")
-                if type(payload) is not dict:
-                    continue
-                if not _deep_json_contains(payload, match):
-                    continue
-                occurred_raw = event.get("occurred_at")
-                if type(occurred_raw) is not str:
-                    continue
-                try:
-                    occurred = datetime.fromisoformat(occurred_raw)
-                except ValueError:
-                    raise ValueError("context event occurred_at must be ISO-8601")
-                if occurred.tzinfo is None:
-                    raise ValueError("context event occurred_at must be timezone-aware")
-                occurred_utc = occurred.astimezone(UTC)
-                if due_utc <= occurred_utc <= evaluated_at_utc:
-                    confidence = event.get("confidence")
-                    if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
-                        raise ValueError("context event confidence must be a finite float")
-                    if float(confidence) >= operating_point.threshold:
-                        eligible.append((occurred_utc, eid))
-            if not eligible:
-                return None
-            eligible.sort()
-            return {"event_id": eligible[0][1]}
-        if tt == "condition":
-            expr = intention.trigger_expression
-            condition_id = expr["condition_id"]
-            operator = expr["operator"]
-            expected = expr["value"]
-            observation = trigger_context.conditions.get(condition_id)
-            if observation is None:
-                return None
-            observed = observation.get("value")
-            observed_raw = observation.get("observed_at")
-            if type(observed_raw) is not str:
-                raise ValueError("context observation observed_at must be ISO-8601")
-            try:
-                observed_at = datetime.fromisoformat(observed_raw)
-            except ValueError:
-                raise ValueError("context observation observed_at must be ISO-8601")
-            if observed_at.tzinfo is None:
-                raise ValueError("context observation observed_at must be timezone-aware")
-            observed_utc = observed_at.astimezone(UTC)
-            if not (due_utc <= observed_utc <= evaluated_at_utc):
-                return None
-            confidence = observation.get("confidence")
-            if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
-                raise ValueError("context observation confidence must be a finite float")
-            if float(confidence) < operating_point.threshold:
-                return None
-            if _typed_condition_compare(operator, observed, expected):
-                return {"condition_id": condition_id}
-            return None
-        if tt == "dependency_completion":
-            if evaluated_at_utc < due_utc:
-                return None
-            # Read dependency statuses from persisted state, not caller context.
-            dep_ids = intention.dependencies
-            placeholders = ",".join(["%s"] * len(dep_ids))
-            cur.execute(
-                f"""
-                SELECT intention_id, status FROM intentions
-                WHERE tenant_id = %s AND intention_id IN ({placeholders})
-                """,
-                (db_tenant_id, *dep_ids),
-            )
-            statuses: dict[str, str] = {row["intention_id"]: row["status"] for row in cur.fetchall()}
-            for dep_id in dep_ids:
-                if dep_id not in statuses:
-                    raise ValueError(f"dependency {dep_id!r} is missing or cross-tenant")
-                if statuses[dep_id] != "fired":
-                    return None
-            return {}
-        return None
 
     @staticmethod
     def _mark_retrieved_text_as_data(hits: list[Hit]) -> list[Hit]:

@@ -603,6 +603,15 @@ CREATE TABLE IF NOT EXISTS graph_ppr_cache (
 -- preferences: supersession pointer for revised preferences.
 ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by UUID;
 
+-- intentions: retain the caller-facing user identifier alongside the stable
+-- UUID used for relational ownership checks. Existing deployments predate the
+-- external identifier; preserve their usable identity with the UUID text.
+ALTER TABLE intentions ADD COLUMN IF NOT EXISTS external_user_id TEXT;
+UPDATE intentions
+SET external_user_id = user_id::text
+WHERE external_user_id IS NULL;
+ALTER TABLE intentions ALTER COLUMN external_user_id SET NOT NULL;
+
 -- evidence: stored lexical tsvector (mirrors assertions.lexeme) + GIN index so
 -- full-text search stops recomputing to_tsvector('english', content) per row
 -- at query time. GENERATED ALWAYS pins the column to exactly the prior
