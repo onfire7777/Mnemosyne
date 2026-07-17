@@ -3,6 +3,8 @@ pub mod runtime;
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use protocol::MAX_REQUEST_BYTES;
@@ -10,6 +12,7 @@ pub use protocol::{handle_json, ApiError, ErrorCode, Request, Response};
 pub use runtime::{shared_runtime, Deadline, Runtime, RuntimeConfig, REQUEST_DEADLINE};
 
 pub const DEFAULT_TCP_ADDR: &str = "127.0.0.1:9294";
+const MAX_ADMITTED_CONNECTIONS: usize = 2;
 
 pub fn bind_tcp(address: SocketAddr) -> io::Result<TcpListener> {
     if !address.ip().is_loopback() {
@@ -27,13 +30,14 @@ pub fn serve_tcp(address: SocketAddr) -> io::Result<()> {
 }
 
 fn serve_tcp_listener(listener: TcpListener) -> io::Result<()> {
+    let admitted = Arc::new(AtomicUsize::new(0));
     loop {
         let (stream, _) = match listener.accept() {
             Ok(connection) => connection,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(error),
         };
-        if let Err(error) = handle_connection(stream, shared_runtime(), Deadline::default()) {
+        if let Err(error) = dispatch_connection(stream, shared_runtime(), &admitted) {
             eprintln!("answering-ort: TCP connection failed: {:?}", error.kind());
         }
     }
@@ -93,12 +97,60 @@ fn handle_connection<S: TimedStream>(
         }
     };
 
+    write_response(&mut stream, &response, deadline)
+}
+
+fn write_response<S: TimedStream>(
+    stream: &mut S,
+    response: &Response,
+    deadline: Deadline,
+) -> io::Result<()> {
     stream.set_write_deadline(Some(
         deadline.remaining().unwrap_or(Duration::from_millis(100)),
     ))?;
-    serde_json::to_writer(&mut stream, &response)?;
+    serde_json::to_writer(&mut *stream, response)?;
     stream.write_all(b"\n")?;
     stream.flush()
+}
+
+fn dispatch_connection<S: TimedStream + Send + 'static>(
+    mut stream: S,
+    runtime: &'static Runtime,
+    admitted: &Arc<AtomicUsize>,
+) -> io::Result<()> {
+    let deadline = Deadline::default();
+    let Some(permit) = ConnectionPermit::acquire(admitted) else {
+        return write_response(&mut stream, &Response::failure(ApiError::busy()), deadline);
+    };
+
+    std::thread::Builder::new()
+        .name("answering-ort-connection".into())
+        .spawn(move || {
+            let _permit = permit;
+            if let Err(error) = handle_connection(stream, runtime, deadline) {
+                eprintln!("answering-ort: connection failed: {:?}", error.kind());
+            }
+        })?;
+    Ok(())
+}
+
+struct ConnectionPermit(Arc<AtomicUsize>);
+
+impl ConnectionPermit {
+    fn acquire(count: &Arc<AtomicUsize>) -> Option<Self> {
+        count
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                (current < MAX_ADMITTED_CONNECTIONS).then_some(current + 1)
+            })
+            .ok()
+            .map(|_| Self(Arc::clone(count)))
+    }
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 fn trim_line_ending(body: &mut Vec<u8>) -> &[u8] {
@@ -112,7 +164,7 @@ fn trim_line_ending(body: &mut Vec<u8>) -> &[u8] {
 #[cfg(unix)]
 pub fn bind_unix(path: &std::path::Path) -> io::Result<std::os::unix::net::UnixListener> {
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::os::unix::net::UnixListener;
 
     match std::fs::symlink_metadata(path) {
         Ok(metadata) => {
@@ -122,18 +174,17 @@ pub fn bind_unix(path: &std::path::Path) -> io::Result<std::os::unix::net::UnixL
                     "Unix socket path exists and is not a socket",
                 ));
             }
-            match UnixStream::connect(path) {
-                Ok(_) => {
+            match probe_unix_socket(path)? {
+                UnixSocketState::Live => {
                     return Err(io::Error::new(
                         io::ErrorKind::AddrInUse,
                         "Unix socket is already accepting connections",
                     ))
                 }
-                Err(error) if error.kind() == io::ErrorKind::ConnectionRefused => {
+                UnixSocketState::Stale => {
                     std::fs::remove_file(path)?;
                 }
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => return Err(error),
+                UnixSocketState::Missing => {}
             }
         }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
@@ -146,15 +197,59 @@ pub fn bind_unix(path: &std::path::Path) -> io::Result<std::os::unix::net::UnixL
 }
 
 #[cfg(unix)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnixSocketState {
+    Live,
+    Stale,
+    Missing,
+}
+
+#[cfg(unix)]
+fn probe_unix_socket(path: &std::path::Path) -> io::Result<UnixSocketState> {
+    use std::os::unix::net::UnixStream;
+    use std::sync::mpsc;
+
+    let path = path.to_owned();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::Builder::new()
+        .name("answering-ort-unix-probe".into())
+        .spawn(move || {
+            let result = UnixStream::connect(path).map(drop);
+            let _ = sender.send(result);
+        })?;
+    await_unix_probe(receiver, Duration::from_millis(100))
+}
+
+#[cfg(unix)]
+fn await_unix_probe(
+    receiver: std::sync::mpsc::Receiver<io::Result<()>>,
+    timeout: Duration,
+) -> io::Result<UnixSocketState> {
+    use std::sync::mpsc::RecvTimeoutError;
+
+    match receiver.recv_timeout(timeout) {
+        Ok(Ok(())) => Ok(UnixSocketState::Live),
+        Ok(Err(error)) if error.kind() == io::ErrorKind::ConnectionRefused => {
+            Ok(UnixSocketState::Stale)
+        }
+        Ok(Err(error)) if error.kind() == io::ErrorKind::NotFound => Ok(UnixSocketState::Missing),
+        Ok(Err(error)) => Err(error),
+        Err(RecvTimeoutError::Timeout) => Ok(UnixSocketState::Live),
+        Err(RecvTimeoutError::Disconnected) => Err(io::Error::other("Unix socket probe failed")),
+    }
+}
+
+#[cfg(unix)]
 pub fn serve_unix(path: &std::path::Path) -> io::Result<()> {
     let listener = bind_unix(path)?;
+    let admitted = Arc::new(AtomicUsize::new(0));
     loop {
         let (stream, _) = match listener.accept() {
             Ok(connection) => connection,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(error),
         };
-        if let Err(error) = handle_connection(stream, shared_runtime(), Deadline::default()) {
+        if let Err(error) = dispatch_connection(stream, shared_runtime(), &admitted) {
             eprintln!("answering-ort: Unix connection failed: {:?}", error.kind());
         }
     }
@@ -210,6 +305,19 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
         let error = serve_tcp(address).expect_err("non-loopback serve must fail");
         assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn admission_is_bounded_to_one_active_and_one_queued_connection() {
+        let admitted = Arc::new(AtomicUsize::new(0));
+        let first = ConnectionPermit::acquire(&admitted).unwrap();
+        let second = ConnectionPermit::acquire(&admitted).unwrap();
+        assert!(ConnectionPermit::acquire(&admitted).is_none());
+        drop(first);
+        let replacement = ConnectionPermit::acquire(&admitted).unwrap();
+        drop(second);
+        drop(replacement);
+        assert_eq!(admitted.load(Ordering::Acquire), 0);
     }
 
     #[test]
@@ -330,6 +438,18 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
         drop(client.join().unwrap());
         drop(listener);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_probe_timeout_is_bounded_and_treated_as_live() {
+        let (_sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            await_unix_probe(receiver, Duration::from_millis(5)).unwrap(),
+            UnixSocketState::Live
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[cfg(unix)]
