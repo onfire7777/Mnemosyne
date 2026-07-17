@@ -529,7 +529,11 @@ class OidcAuthorizationPolicy:
                     **({"name": rule["name"]} if rule["name"] else {}),
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
-                    "capabilities": list(rule["capabilities"]),
+                    **(
+                        {"capabilities": list(rule["capabilities"])}
+                        if rule["capabilities"]
+                        else {}
+                    ),
                     "tenant_matcher_count": len(rule["tenant_ids"]),
                     "claim_equals_fields": sorted(rule["claim_equals"]),
                     "claim_contains_fields": sorted(rule["claim_contains"]),
@@ -566,7 +570,11 @@ class OidcAuthorizationPolicy:
                     "max_auth_age_seconds": rule["max_auth_age_seconds"],
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
-                    "capabilities": list(rule["capabilities"]),
+                    **(
+                        {"capabilities": list(rule["capabilities"])}
+                        if rule["capabilities"]
+                        else {}
+                    ),
                 }
                 for rule in self.rules
             ],
