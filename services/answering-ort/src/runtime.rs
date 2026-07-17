@@ -23,7 +23,10 @@ impl RuntimeConfig {
             model_path,
             cpu_arena_enabled: false,
             memory_map_model: true,
-            intra_op_threads: requested_intra_op_threads.clamp(1, 2),
+            intra_op_threads: clamp_intra_op_threads(
+                requested_intra_op_threads,
+                num_cpus::get_physical(),
+            ),
             inter_op_threads: 1,
         }
     }
@@ -38,6 +41,10 @@ impl RuntimeConfig {
     }
 }
 
+fn clamp_intra_op_threads(requested: usize, physical_cores: usize) -> usize {
+    requested.clamp(1, physical_cores.clamp(1, 2))
+}
+
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self::new(None, 2)
@@ -45,7 +52,7 @@ impl Default for RuntimeConfig {
 }
 
 pub trait InferenceSession: Send + Sync {
-    fn infer(&self, request: &Request) -> Result<Output, ApiError>;
+    fn infer(&self, request: &Request, deadline: Deadline) -> Result<Output, ApiError>;
 }
 
 pub struct Runtime {
@@ -94,7 +101,7 @@ impl Runtime {
             return Response::failure(ApiError::unavailable());
         };
 
-        let result = session.infer(&request);
+        let result = session.infer(&request, deadline);
         if deadline.is_expired() {
             return Response::failure(ApiError::timed_out());
         }
@@ -137,6 +144,10 @@ impl Deadline {
     pub fn is_expired(self) -> bool {
         Instant::now() >= self.0
     }
+
+    pub fn remaining(self) -> Option<Duration> {
+        self.0.checked_duration_since(Instant::now())
+    }
 }
 
 impl Default for Deadline {
@@ -145,17 +156,47 @@ impl Default for Deadline {
     }
 }
 
-static SHARED_RUNTIME: OnceLock<Arc<Runtime>> = OnceLock::new();
+static SHARED_RUNTIME: OnceLock<Runtime> = OnceLock::new();
 
-pub fn shared_runtime() -> Arc<Runtime> {
-    Arc::clone(
-        SHARED_RUNTIME.get_or_init(|| Arc::new(Runtime::unavailable(RuntimeConfig::from_env()))),
-    )
+pub fn shared_runtime() -> &'static Runtime {
+    SHARED_RUNTIME.get_or_init(|| Runtime::unavailable(RuntimeConfig::from_env()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::Output;
+    use std::sync::Barrier;
+    use std::thread;
+
+    struct FixedSession(Result<Output, ApiError>);
+
+    impl InferenceSession for FixedSession {
+        fn infer(&self, _request: &Request, _deadline: Deadline) -> Result<Output, ApiError> {
+            self.0.clone()
+        }
+    }
+
+    struct BlockingSession {
+        started: Arc<Barrier>,
+        release: Arc<Barrier>,
+        block_once: AtomicBool,
+    }
+
+    impl InferenceSession for BlockingSession {
+        fn infer(&self, _request: &Request, deadline: Deadline) -> Result<Output, ApiError> {
+            if self.block_once.swap(false, Ordering::Relaxed) {
+                self.started.wait();
+                self.release.wait();
+            }
+            if deadline.is_expired() {
+                return Err(ApiError::timed_out());
+            }
+            Ok(Output::Embed {
+                embedding: vec![1.0],
+            })
+        }
+    }
 
     #[test]
     fn configuration_enforces_the_resource_contract() {
@@ -163,7 +204,12 @@ mod tests {
         assert_eq!(config.model_path, Some(PathBuf::from("/models/local.onnx")));
         assert!(!config.cpu_arena_enabled);
         assert!(config.memory_map_model);
-        assert_eq!(config.intra_op_threads, 2);
+        assert_eq!(
+            config.intra_op_threads,
+            num_cpus::get_physical().clamp(1, 2)
+        );
+        assert_eq!(clamp_intra_op_threads(64, 1), 1);
+        assert_eq!(clamp_intra_op_threads(64, 8), 2);
         assert_eq!(config.inter_op_threads, 1);
         assert_eq!(MAX_IN_FLIGHT, 1);
         assert_eq!(REQUEST_DEADLINE, Duration::from_secs(30));
@@ -173,7 +219,7 @@ mod tests {
     fn process_runtime_is_shared_and_unavailable_fails_closed() {
         let first = shared_runtime();
         let second = shared_runtime();
-        assert!(Arc::ptr_eq(&first, &second));
+        assert!(std::ptr::eq(first, second));
 
         let response = first.execute(
             Request::Embed {
@@ -190,6 +236,98 @@ mod tests {
         let response = runtime.execute(
             Request::Embed { query: "q".into() },
             Deadline::from_start(Instant::now() - Duration::from_secs(31)),
+        );
+        assert_eq!(response.error.unwrap().code, ErrorCode::RequestTimedOut);
+    }
+
+    #[test]
+    fn session_success_and_error_are_propagated() {
+        let success = Runtime::with_session(
+            RuntimeConfig::default(),
+            Arc::new(FixedSession(Ok(Output::Embed {
+                embedding: vec![1.0],
+            }))),
+        );
+        assert!(
+            success
+                .execute(Request::Embed { query: "q".into() }, Deadline::default())
+                .ok
+        );
+
+        let failure = Runtime::with_session(
+            RuntimeConfig::default(),
+            Arc::new(FixedSession(Err(ApiError::new(
+                ErrorCode::InferenceFailed,
+                "inference failed",
+            )))),
+        );
+        assert_eq!(
+            failure
+                .execute(Request::Embed { query: "q".into() }, Deadline::default())
+                .error
+                .unwrap()
+                .code,
+            ErrorCode::InferenceFailed
+        );
+    }
+
+    #[test]
+    fn one_in_flight_is_enforced_and_permit_is_released() {
+        let started = Arc::new(Barrier::new(2));
+        let release = Arc::new(Barrier::new(2));
+        let runtime = Arc::new(Runtime::with_session(
+            RuntimeConfig::default(),
+            Arc::new(BlockingSession {
+                started: Arc::clone(&started),
+                release: Arc::clone(&release),
+                block_once: AtomicBool::new(true),
+            }),
+        ));
+        let worker_runtime = Arc::clone(&runtime);
+        let worker = thread::spawn(move || {
+            worker_runtime.execute(
+                Request::Embed {
+                    query: "one".into(),
+                },
+                Deadline::default(),
+            )
+        });
+        started.wait();
+
+        let busy = runtime.execute(
+            Request::Embed {
+                query: "two".into(),
+            },
+            Deadline::default(),
+        );
+        assert_eq!(busy.error.unwrap().code, ErrorCode::RuntimeBusy);
+        release.wait();
+        assert!(worker.join().unwrap().ok);
+
+        let later = runtime.execute(
+            Request::Embed {
+                query: "three".into(),
+            },
+            Deadline::default(),
+        );
+        assert!(later.ok);
+    }
+
+    #[test]
+    fn late_session_result_fails_closed() {
+        struct LateSession;
+        impl InferenceSession for LateSession {
+            fn infer(&self, _request: &Request, _deadline: Deadline) -> Result<Output, ApiError> {
+                thread::sleep(Duration::from_millis(10));
+                Ok(Output::Embed {
+                    embedding: vec![1.0],
+                })
+            }
+        }
+        let runtime = Runtime::with_session(RuntimeConfig::default(), Arc::new(LateSession));
+        let response = runtime.execute(
+            Request::Embed { query: "q".into() },
+            Deadline::after(Duration::from_millis(1)),
         );
         assert_eq!(response.error.unwrap().code, ErrorCode::RequestTimedOut);
     }
