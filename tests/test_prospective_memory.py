@@ -1482,3 +1482,305 @@ def test_fire_audit_event_id_is_deterministic_canonical_key() -> None:
     first, _ = _fire_audit_from_fresh_engine()
     second, _ = _fire_audit_from_fresh_engine()
     assert first["id"] == second["id"]
+
+
+def test_mixed_trigger_results_keep_their_matched_signals_after_sorting() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    engine.schedule_intention(
+        _event_intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="z-event",
+        )
+    )
+    engine.schedule_intention(
+        _condition_intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="a-condition",
+        )
+    )
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(
+            events=[
+                {
+                    "event_id": "evt-match",
+                    "event_type": "report.submitted",
+                    "occurred_at": due.isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                }
+            ],
+            conditions={
+                "temp-reading": {
+                    "value": 30,
+                    "observed_at": due.isoformat(),
+                    "confidence": 0.9,
+                }
+            },
+        ),
+        operating_point=OPERATING_POINT,
+    )
+
+    assert [item.intention_id for item in fired] == ["a-condition", "z-event"]
+    audits = {
+        row["target_id"]: row["diff"]
+        for row in engine.audit_log
+        if row["op"] == "fire_intention"
+    }
+    assert audits["a-condition"]["matched_condition_id"] == "temp-reading"
+    assert "matched_event_id" not in audits["a-condition"]
+    assert audits["z-event"]["matched_event_id"] == "evt-match"
+    assert "matched_condition_id" not in audits["z-event"]
+
+
+def _inject_replace_failure(monkeypatch: pytest.MonkeyPatch) -> Any:
+    original = Path.replace
+
+    def fail_replace(self: Path, target: Path) -> Path:
+        raise OSError("injected persistence failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    return original
+
+
+def test_schedule_rolls_back_memory_audit_and_store_on_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    audit_before = list(engine.audit_log)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.schedule_intention(
+            _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+        )
+
+    assert engine.list_intentions(TENANT_ID) == []
+    assert engine.audit_log == audit_before
+    engine.close()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID) == []
+    assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_cancel_rolls_back_memory_audit_and_store_on_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+    audit_before = list(engine.audit_log)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID)
+
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert engine.audit_log == audit_before
+    engine.close()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_evaluate_rolls_back_memory_audit_and_store_on_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+    audit_before = list(engine.audit_log)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert engine.audit_log == audit_before
+    engine.close()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_local_store_allows_only_one_writer_per_canonical_path(tmp_path: Path) -> None:
+    store = tmp_path / "nested" / ".." / "mnemosyne.json"
+    first = LocalMemoryEngine(store_path=store)
+
+    with pytest.raises(RuntimeError, match="already has a writer"):
+        LocalMemoryEngine(store_path=store.resolve())
+
+    first.close()
+    replacement = LocalMemoryEngine(store_path=store.resolve())
+    replacement.close()
+
+
+@pytest.mark.parametrize("field", ["threshold", "measured_precision", "measured_recall"])
+def test_operating_point_rejects_integer_metrics(field: str) -> None:
+    kwargs: dict[str, Any] = {
+        "operating_point_id": "op-1",
+        "threshold": 0.5,
+        "measured_precision": 0.9,
+        "measured_recall": 0.85,
+        "measurement_cid": "cid-1",
+    }
+    kwargs[field] = 1
+
+    with pytest.raises(ValueError, match="expressed as float"):
+        ProspectiveOperatingPoint(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("events", "conditions", "message"),
+    [
+        (
+            [
+                {
+                    "event_id": "evt-1",
+                    "event_type": "x",
+                    "occurred_at": EVALUATED_AT.isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                }
+            ],
+            {},
+            r"events\[0\] contains unknown keys",
+        ),
+        (
+            [],
+            {
+                "condition-1": {
+                    "value": True,
+                    "observed_at": EVALUATED_AT.isoformat(),
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                }
+            },
+            r"conditions\[condition-1\] contains unknown keys",
+        ),
+    ],
+)
+def test_context_rejects_unknown_signal_keys(
+    events: list[dict[str, Any]],
+    conditions: dict[str, dict[str, Any]],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        TriggerEvaluationContext(
+            infrastructure_available=True,
+            events=events,
+            conditions=conditions,
+        )
+
+
+def test_evaluate_rejects_empty_tenant_without_mutation() -> None:
+    engine = LocalMemoryEngine()
+    audit_before = list(engine.audit_log)
+
+    with pytest.raises(ValueError, match="tenant_id must be a non-empty string"):
+        engine.evaluate_due_intentions(
+            "",
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+
+    assert engine.audit_log == audit_before
+
+
+def test_event_replay_does_not_duplicate_firing_or_audit() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=1)
+    engine.schedule_intention(_event_intention(evidence_id=evidence_id, due_at=due))
+    context = _context(
+        events=[
+            {
+                "event_id": "evt-replay",
+                "event_type": "report.submitted",
+                "occurred_at": due.isoformat(),
+                "payload": {},
+                "confidence": 0.9,
+            }
+        ]
+    )
+
+    first = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )
+    replay = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT + timedelta(minutes=1),
+        trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )
+
+    assert [item.intention_id for item in first] == ["intention-event"]
+    assert replay == []
+    assert len([row for row in engine.audit_log if row["op"] == "fire_intention"]) == 1
+
+
+def test_dependency_does_not_cascade_from_a_firing_in_the_same_batch() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=1)
+    engine.schedule_intention(
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="dependency",
+        )
+    )
+    engine.schedule_intention(
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="dependent",
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=["dependency"],
+        )
+    )
+
+    first = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    second = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+
+    assert [item.intention_id for item in first] == ["dependency"]
+    assert [item.intention_id for item in second] == ["dependent"]

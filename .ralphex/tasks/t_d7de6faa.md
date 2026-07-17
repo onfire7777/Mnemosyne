@@ -29,9 +29,9 @@ Validation commands:
 - [x] Apply one strict fail-closed rule for unknown trigger-context keys, including empty tenant validation.
 
 ### Task 2: Add corrective regression coverage
-- [ ] Cover reversed-order mixed event/condition matches, injected persistence failures, shared store paths, missing dependencies, integer thresholds, empty tenant IDs, replay, and no-same-batch-cascade behavior.
+- [x] Cover reversed-order mixed event/condition matches, injected persistence failures, shared store paths, missing dependencies, integer thresholds, empty tenant IDs, replay, and no-same-batch-cascade behavior.
 
 ### Task 3: Validate and hand off
-- [ ] Run the focused pytest command.
-- [ ] Run focused Ruff and git diff checks.
-- [ ] Inspect the complete diff, commit only allowed files, and publish exact results for review.
+- [x] Run the focused pytest command.
+- [x] Run focused Ruff and git diff checks.
+- [x] Inspect the complete diff, commit only allowed files, and publish exact results for review.
