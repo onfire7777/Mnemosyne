@@ -16,6 +16,18 @@ cargo test --manifest-path services/answering-ort/Cargo.toml
 cargo clippy --manifest-path services/answering-ort/Cargo.toml --all-targets -- -D warnings
 ```
 
+## Run
+
+Start the fail-closed placeholder on its default loopback TCP address:
+
+```sh
+cargo run --manifest-path services/answering-ort/Cargo.toml
+```
+
+Set `ANSWERING_ORT_TCP_ADDR=127.0.0.1:9295` to select another loopback socket.
+On Unix, `ANSWERING_ORT_UNIX_SOCKET=/run/user/$(id -u)/answering-ort.sock`
+selects a Unix socket instead and takes precedence over the TCP setting.
+
 ## Configuration
 
 - `ANSWERING_ORT_TCP_ADDR` selects an exact TCP socket address and defaults to
@@ -26,8 +38,9 @@ cargo clippy --manifest-path services/answering-ort/Cargo.toml --all-targets -- 
 - `ANSWERING_ORT_MODEL_PATH` is the optional local model path seam. The skeleton
   never downloads a model.
 - `ANSWERING_ORT_INTRA_OP_THREADS` requests one or two intra-op threads; values
-  are clamped to that range. Inter-op threads are fixed at one, the CPU arena
-  seam is disabled, and the model-memory seam is configured for mapping.
+  are clamped to the lower of two or detected physical cores. Inter-op threads
+  are fixed at one, the CPU arena seam is disabled, and the model-memory seam is
+  configured for mapping.
 
 ## Protocol
 
@@ -40,10 +53,24 @@ receives one newline-terminated JSON response. The operations are:
 {"operation":"read","query":"...","evidence":[{"id":"1","text":"..."}]}
 ```
 
+Successful responses use `{"ok":true,"result":{...}}`. Embed results contain
+an embedding, rerank results contain ordered evidence IDs, and read results are
+structural only: answer type (`span`, `yes`, `no`, or `null`), evidence ID,
+start/end offsets, and supporting evidence IDs. The model never returns answer
+text; the host must reconstruct and validate authorized evidence substrings.
+
+Failures use `{"ok":false,"error":{"code":"...","message":"..."}}`. Stable
+codes are `malformed_request`, `request_too_large`, `limit_exceeded`,
+`unsupported_operation`, `request_timed_out`, `runtime_unavailable`,
+`runtime_busy`, and `inference_failed`. This placeholder returns
+`runtime_unavailable` for valid requests because it does not load a session.
+
 The boundary rejects request bodies over 64 KiB, queries over 2,000 characters,
 more than 20 evidence rows, more than 24,000 evidence characters, and rerank
-widths outside 1 through 8. One request may run at a time, and the deadline seam
-is capped at 30 seconds. Errors have stable codes and messages.
+widths outside 1 through 8. Evidence IDs must be non-empty and unique. One
+request may run at a time, and framing plus inference share a hard 30-second
+deadline. Inference implementations receive that deadline and must cooperate
+with cancellation rather than returning late output.
 
 ## Security and status boundaries
 
