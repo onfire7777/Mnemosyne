@@ -1,13 +1,37 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+
+import pytest
+
 from mnemosyne.security import (
+    OidcAuthorizationPolicy,
     PROSPECTIVE_SCHEDULER_CAPABILITY,
     PROSPECTIVE_TENANT_READ_CAPABILITY,
     ProspectiveMemoryAuthorization,
     SecurityPolicy,
+    SessionAuthError,
     SessionIdentity,
+    SessionTokenVerifier,
     TrustTier,
+    issue_session_from_oidc,
 )
+
+
+SESSION_SECRET = "prospective-session-secret"
+
+
+def _sign_payload(payload: dict[str, object]) -> str:
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).decode().rstrip("=")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(SESSION_SECRET.encode(), encoded.encode(), hashlib.sha256).digest()
+    ).decode().rstrip("=")
+    return f"{encoded}.{signature}"
 
 
 def _identity(
@@ -123,6 +147,13 @@ def test_prospective_authorization_rejects_spoofed_unknown_and_malformed_context
             owner_id="other-user",
         ),
         policy.authorize_prospective_memory(
+            "read",
+            identity,
+            tenant_id="tenant-a",
+            actor_id="user-a",
+            owner_id="other-user",
+        ),
+        policy.authorize_prospective_memory(
             "unknown",
             identity,
             tenant_id="tenant-a",
@@ -144,6 +175,48 @@ def test_prospective_authorization_rejects_spoofed_unknown_and_malformed_context
         ),
     ):
         _assert_denied_unbound(decision)
+
+    for malformed_operation in (None, [], {}):
+        _assert_denied_unbound(
+            policy.authorize_prospective_memory(  # type: ignore[arg-type]
+                malformed_operation,
+                identity,
+                tenant_id="tenant-a",
+                owner_id="user-a",
+            )
+        )
+
+    malformed_identities = (
+        object(),
+        _identity(role=[]),  # type: ignore[arg-type]
+        _identity(capabilities=[]),  # type: ignore[arg-type]
+        _identity(capabilities=(PROSPECTIVE_SCHEDULER_CAPABILITY,) * 2),
+        SessionIdentity("tenant-a", "user-a", "agent", "normal"),  # type: ignore[arg-type]
+        SessionIdentity("tenant-a", "user-a", "agent", 99),
+    )
+    for malformed_identity in malformed_identities:
+        _assert_denied_unbound(
+            policy.authorize_prospective_memory(  # type: ignore[arg-type]
+                "read",
+                malformed_identity,
+                tenant_id="tenant-a",
+                owner_id="user-a",
+            )
+        )
+
+    malformed_requests = (
+        {"tenant_id": "", "owner_id": "user-a"},
+        {"tenant_id": "tenant-a", "owner_id": ""},
+        {"tenant_id": "tenant-a", "owner_id": "user-a", "tenant_wide": 1},
+    )
+    for request in malformed_requests:
+        _assert_denied_unbound(
+            policy.authorize_prospective_memory(  # type: ignore[arg-type]
+                "read",
+                identity,
+                **request,
+            )
+        )
 
 
 def test_authorized_scheduler_evaluation_and_tenant_wide_read_are_explicit() -> None:
@@ -188,6 +261,163 @@ def test_authorized_scheduler_evaluation_and_tenant_wide_read_are_explicit() -> 
     )
     _assert_denied_unbound(missing_read_capability)
     assert "explicit capability" in missing_read_capability.reason
+
+    conflicting_scopes = (
+        policy.authorize_prospective_memory(
+            "evaluate",
+            _identity(role="operator", capabilities=(PROSPECTIVE_SCHEDULER_CAPABILITY,)),
+            tenant_id="tenant-a",
+            owner_id="user-a",
+        ),
+        policy.authorize_prospective_memory(
+            "evaluate",
+            _identity(role="operator", capabilities=(PROSPECTIVE_SCHEDULER_CAPABILITY,)),
+            tenant_id="tenant-a",
+            tenant_wide=True,
+        ),
+        policy.authorize_prospective_memory(
+            "read",
+            _identity(capabilities=(PROSPECTIVE_TENANT_READ_CAPABILITY,)),
+            tenant_id="tenant-a",
+            owner_id="user-a",
+            tenant_wide=True,
+        ),
+        policy.authorize_prospective_memory(
+            "schedule",
+            _identity(),
+            tenant_id="tenant-a",
+            owner_id="user-a",
+            tenant_wide=True,
+        ),
+        policy.authorize_prospective_memory(
+            "cancel",
+            _identity(),
+            tenant_id="tenant-a",
+            owner_id="user-a",
+            tenant_wide=True,
+        ),
+    )
+    for decision in conflicting_scopes:
+        _assert_denied_unbound(decision)
+
+
+def test_prospective_writes_require_normal_or_stronger_source_trust() -> None:
+    policy = SecurityPolicy()
+
+    for operation, capabilities in (
+        ("schedule", ()),
+        ("cancel", ()),
+        ("evaluate", (PROSPECTIVE_SCHEDULER_CAPABILITY,)),
+    ):
+        decision = policy.authorize_prospective_memory(
+            operation,
+            SessionIdentity(
+                tenant_id="tenant-a",
+                user_id="user-a",
+                role="operator",
+                source_trust_tier=int(TrustTier.LOW),
+                capabilities=capabilities,
+            ),
+            tenant_id="tenant-a",
+            owner_id="user-a" if operation != "evaluate" else None,
+        )
+        _assert_denied_unbound(decision)
+        assert "source trust" in decision.reason
+
+
+def test_policy_controlled_capabilities_survive_oidc_session_issuance() -> None:
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["scheduler-client"],
+            "rules": [
+                {
+                    "claim_contains": {"groups": "mnemosyne-schedulers"},
+                    "required_acr": "urn:mnemosyne:mfa",
+                    "required_amr": "mfa",
+                    "max_auth_age_seconds": 300,
+                    "role": "operator",
+                    "source_trust_tier": int(TrustTier.USER_AUTHORED),
+                    "capabilities": [PROSPECTIVE_SCHEDULER_CAPABILITY],
+                }
+            ],
+        }
+    )
+    identity = policy.authorize(
+        {
+            "azp": "scheduler-client",
+            "groups": ["mnemosyne-schedulers"],
+            "acr": "urn:mnemosyne:mfa",
+            "amr": ["pwd", "mfa"],
+            "auth_time": 1_900_000_000,
+        },
+        tenant_id="tenant-a",
+        user_id="scheduler-a",
+        expires_at=2_000_000_000,
+        session_id="idp-session-a",
+        now=1_900_000_100,
+    )
+
+    class VerifierStub:
+        def verify(self, token: str, *, now: int | None = None) -> SessionIdentity:
+            assert token == "idp-token"
+            assert now == 1_900_000_100
+            return identity
+
+    signer = SessionTokenVerifier(SESSION_SECRET)
+    token, issued = issue_session_from_oidc(
+        verifier=VerifierStub(),  # type: ignore[arg-type]
+        idp_token="idp-token",
+        signer=signer,
+        now=1_900_000_100,
+    )
+
+    assert issued.capabilities == (PROSPECTIVE_SCHEDULER_CAPABILITY,)
+    assert signer.verify(token, now=1_900_000_100) == issued
+
+
+def test_session_verification_rejects_malformed_capability_claims() -> None:
+    base_payload: dict[str, object] = {
+        "tenant_id": "tenant-a",
+        "user_id": "user-a",
+        "role": "operator",
+        "source_trust_tier": int(TrustTier.USER_AUTHORED),
+        "exp": 2_000_000_000,
+    }
+    malformed_capabilities = (
+        PROSPECTIVE_SCHEDULER_CAPABILITY,
+        [""],
+        [PROSPECTIVE_SCHEDULER_CAPABILITY, PROSPECTIVE_SCHEDULER_CAPABILITY],
+        ["prospective:unknown"],
+    )
+
+    for capabilities in malformed_capabilities:
+        with pytest.raises(SessionAuthError, match="capabilit"):
+            SessionTokenVerifier(SESSION_SECRET).verify(
+                _sign_payload({**base_payload, "capabilities": capabilities}),
+                now=1_900_000_000,
+            )
+
+
+def test_oidc_policy_rejects_untrusted_or_ambiguous_capability_rules() -> None:
+    base_rule = {
+        "claim_contains": {"groups": "mnemosyne-schedulers"},
+        "required_acr": "urn:mnemosyne:mfa",
+        "required_amr": "mfa",
+        "max_auth_age_seconds": 300,
+        "role": "agent",
+        "source_trust_tier": int(TrustTier.NORMAL),
+    }
+    for capabilities in (
+        ["prospective:unknown"],
+        [PROSPECTIVE_SCHEDULER_CAPABILITY, PROSPECTIVE_SCHEDULER_CAPABILITY],
+    ):
+        with pytest.raises(SessionAuthError, match="capabilit"):
+            OidcAuthorizationPolicy.from_mapping(
+                {
+                    "allowed_client_ids": ["scheduler-client"],
+                    "rules": [{**base_rule, "capabilities": capabilities}],
+                }
+            )
 
 
 def test_existing_memory_plane_authorization_behavior_is_unchanged() -> None:

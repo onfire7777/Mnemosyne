@@ -428,8 +428,16 @@ def _positive_int(value: Any, *, field: str) -> int:
     return parsed
 
 
-def _elevated_oidc_rule(role: str, source_trust_tier: int) -> bool:
-    return role in {"consolidator", "operator"} or source_trust_tier <= int(TrustTier.VERIFIED)
+def _elevated_oidc_rule(
+    role: str,
+    source_trust_tier: int,
+    capabilities: tuple[str, ...] = (),
+) -> bool:
+    return (
+        role in {"consolidator", "operator"}
+        or source_trust_tier <= int(TrustTier.VERIFIED)
+        or bool(capabilities)
+    )
 
 
 class OidcAuthorizationPolicy:
@@ -495,6 +503,7 @@ class OidcAuthorizationPolicy:
             "user_id": user_id,
             "role": rule["role"],
             "source_trust_tier": rule["source_trust_tier"],
+            "capabilities": rule["capabilities"],
             "exp": expires_at,
         }
         if session_id:
@@ -518,6 +527,7 @@ class OidcAuthorizationPolicy:
                     **({"name": rule["name"]} if rule["name"] else {}),
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
+                    "capabilities": list(rule["capabilities"]),
                     "tenant_matcher_count": len(rule["tenant_ids"]),
                     "claim_equals_fields": sorted(rule["claim_equals"]),
                     "claim_contains_fields": sorted(rule["claim_contains"]),
@@ -554,6 +564,7 @@ class OidcAuthorizationPolicy:
                     "max_auth_age_seconds": rule["max_auth_age_seconds"],
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
+                    "capabilities": list(rule["capabilities"]),
                 }
                 for rule in self.rules
             ],
@@ -591,6 +602,7 @@ class OidcAuthorizationPolicy:
             "max_auth_age_seconds",
             "role",
             "source_trust_tier",
+            "capabilities",
         }
         if set(rule).difference(allowed_fields):
             raise SessionAuthError("OIDC authz rule contains unknown fields")
@@ -603,6 +615,15 @@ class OidcAuthorizationPolicy:
             raise SessionAuthError("OIDC authz rule source_trust_tier is invalid") from exc
         if source_trust_tier not in {int(item) for item in TrustTier}:
             raise SessionAuthError("OIDC authz rule source_trust_tier is out of range")
+        capabilities = _nonempty_tuple(
+            _value_tuple(rule.get("capabilities", ())),
+            field="capabilities",
+            allow_empty=True,
+        )
+        if len(set(capabilities)) != len(capabilities):
+            raise SessionAuthError("OIDC authz rule capabilities must be unique")
+        if set(capabilities) - PROSPECTIVE_MEMORY_CAPABILITIES:
+            raise SessionAuthError("OIDC authz rule capability is not allowed")
         tenant_ids = _nonempty_tuple(
             _value_tuple(rule.get("tenant_ids", rule.get("tenants", ()))),
             field="tenant_ids",
@@ -625,7 +646,7 @@ class OidcAuthorizationPolicy:
             if "max_auth_age_seconds" in rule
             else None
         )
-        elevated = _elevated_oidc_rule(str(role), source_trust_tier)
+        elevated = _elevated_oidc_rule(str(role), source_trust_tier, capabilities)
         if (
             not tenant_ids
             and not claim_equals
@@ -647,6 +668,7 @@ class OidcAuthorizationPolicy:
             "name": str(rule.get("name", "")).strip() or None,
             "role": str(role),
             "source_trust_tier": source_trust_tier,
+            "capabilities": capabilities,
             "tenant_ids": tenant_ids,
             "claim_equals": claim_equals,
             "claim_contains": claim_contains,
@@ -1074,6 +1096,7 @@ class SecurityPolicy:
     min_branch_promotion_trust: int = int(TrustTier.USER_AUTHORED)
     min_policy_write_trust: int = int(TrustTier.OPERATOR)
     min_destructive_trust: int = int(TrustTier.USER_AUTHORED)
+    min_prospective_write_trust: int = int(TrustTier.NORMAL)
     consolidator_only_ops: tuple[str, ...] = (
         "run_consolidation_passes",
         "promote_candidate",
@@ -1112,14 +1135,18 @@ class SecurityPolicy:
 
         if not isinstance(identity, SessionIdentity):
             return deny("verified session identity is required")
-        if operation not in {"schedule", "cancel", "evaluate", "read"}:
+        if not isinstance(operation, str) or operation not in {"schedule", "cancel", "evaluate", "read"}:
             return deny("prospective-memory operation is not allowed")
         if (
             not isinstance(identity.tenant_id, str)
             or not identity.tenant_id.strip()
             or not isinstance(identity.user_id, str)
             or not identity.user_id.strip()
+            or not isinstance(identity.role, str)
             or identity.role not in _WRITE_ROLES
+            or not isinstance(identity.source_trust_tier, int)
+            or isinstance(identity.source_trust_tier, bool)
+            or identity.source_trust_tier not in {int(item) for item in TrustTier}
         ):
             return deny("session identity is malformed")
         if not isinstance(identity.capabilities, tuple):
@@ -1142,6 +1169,11 @@ class SecurityPolicy:
             return deny("requested owner is malformed")
 
         capabilities = set(identity.capabilities)
+        if operation in {"schedule", "cancel", "evaluate"} and not meets_trust(
+            identity.source_trust_tier,
+            self.min_prospective_write_trust,
+        ):
+            return deny("prospective-memory writes require normal-or-stronger source trust")
         if operation == "evaluate":
             if identity.role == "reader":
                 return deny("reader role cannot evaluate prospective memory")
