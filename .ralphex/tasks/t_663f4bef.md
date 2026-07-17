@@ -31,9 +31,9 @@ Validation commands:
 - [x] Add focused tests for missing, malformed, drifted, unsupported, and overwrite inputs.
 
 ### Task 2: Define byte-exact parity contract
-- [ ] Implement strict parsing and comparison of decoded span bytes, answer type, ordered support facts, null margin, and abstention.
-- [ ] Fail closed on malformed rows and every mismatched field.
-- [ ] Add deterministic synthetic fixture cases for all required edge conditions and a mismatch case.
+- [x] Implement strict parsing and comparison of decoded span bytes, answer type, ordered support facts, null margin, and abstention.
+- [x] Fail closed on malformed rows and every mismatched field.
+- [x] Add deterministic synthetic fixture cases for all required edge conditions and a mismatch case.
 
 ### Task 3: Validate and reconcile
 - [ ] Run the focused pytest command.
