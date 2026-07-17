@@ -99,6 +99,17 @@ impl ApiError {
     pub const fn unavailable() -> Self {
         Self::new(ErrorCode::RuntimeUnavailable, "ONNX session is unavailable")
     }
+
+    pub const fn busy() -> Self {
+        Self::new(ErrorCode::RuntimeBusy, "request capacity is exhausted")
+    }
+
+    pub const fn inference_failed() -> Self {
+        Self::new(
+            ErrorCode::InferenceFailed,
+            "inference returned an invalid result",
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
