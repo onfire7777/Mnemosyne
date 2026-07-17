@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use crate::runtime::{Deadline, Runtime};
 
@@ -8,14 +9,6 @@ pub const MAX_EVIDENCE_ROWS: usize = 20;
 pub const MAX_EVIDENCE_CHARS: usize = 24_000;
 pub const MAX_RANK_WIDTH: usize = 8;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Operation {
-    Embed,
-    Rerank,
-    Read,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Evidence {
@@ -23,7 +16,8 @@ pub struct Evidence {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     Embed {
         query: String,
@@ -39,36 +33,32 @@ pub enum Request {
     },
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct EmbedWire {
-    operation: Operation,
-    query: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RerankWire {
-    operation: Operation,
-    query: String,
-    evidence: Vec<Evidence>,
-    rank_width: usize,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ReadWire {
-    operation: Operation,
-    query: String,
-    evidence: Vec<Evidence>,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "operation", rename_all = "snake_case")]
 pub enum Output {
     Embed { embedding: Vec<f32> },
     Rerank { ranked_ids: Vec<String> },
-    Read { answer: Option<String> },
+    Read { prediction: ReadPrediction },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "answer_type", rename_all = "snake_case")]
+pub enum ReadPrediction {
+    Span {
+        evidence_id: String,
+        start: usize,
+        end: usize,
+        supporting_ids: Vec<String>,
+    },
+    Yes {
+        supporting_ids: Vec<String>,
+    },
+    No {
+        supporting_ids: Vec<String>,
+    },
+    Null {
+        supporting_ids: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -154,39 +144,17 @@ pub fn parse_request(body: &[u8]) -> Result<Request, ApiError> {
         .and_then(serde_json::Value::as_str)
         .ok_or_else(ApiError::malformed)?;
 
-    let request = match operation {
-        "embed" => {
-            let wire: EmbedWire =
-                serde_json::from_value(value).map_err(|_| ApiError::malformed())?;
-            debug_assert_eq!(wire.operation, Operation::Embed);
-            Request::Embed { query: wire.query }
-        }
-        "rerank" => {
-            let wire: RerankWire =
-                serde_json::from_value(value).map_err(|_| ApiError::malformed())?;
-            debug_assert_eq!(wire.operation, Operation::Rerank);
-            Request::Rerank {
-                query: wire.query,
-                evidence: wire.evidence,
-                rank_width: wire.rank_width,
-            }
-        }
-        "read" => {
-            let wire: ReadWire =
-                serde_json::from_value(value).map_err(|_| ApiError::malformed())?;
-            debug_assert_eq!(wire.operation, Operation::Read);
-            Request::Read {
-                query: wire.query,
-                evidence: wire.evidence,
-            }
-        }
+    match operation {
+        "embed" | "rerank" | "read" => {}
         _ => {
             return Err(ApiError::new(
                 ErrorCode::UnsupportedOperation,
                 "operation is not supported",
             ))
         }
-    };
+    }
+
+    let request: Request = serde_json::from_value(value).map_err(|_| ApiError::malformed())?;
 
     validate_request(&request)?;
     Ok(request)
@@ -226,6 +194,17 @@ fn validate_request(request: &Request) -> Result<(), ApiError> {
             return Err(ApiError::new(
                 ErrorCode::LimitExceeded,
                 "evidence exceeds 24,000 characters",
+            ));
+        }
+
+        let mut ids = HashSet::with_capacity(rows.len());
+        if rows
+            .iter()
+            .any(|row| row.id.is_empty() || !ids.insert(row.id.as_str()))
+        {
+            return Err(ApiError::new(
+                ErrorCode::LimitExceeded,
+                "evidence IDs must be non-empty and unique",
             ));
         }
     }
@@ -272,6 +251,29 @@ mod tests {
     }
 
     #[test]
+    fn accepts_exact_semantic_limits_and_unicode_char_counts() {
+        let query = "é".repeat(MAX_QUERY_CHARS);
+        let body = serde_json::json!({"operation": "embed", "query": query});
+        assert!(parse_request(&serde_json::to_vec(&body).unwrap()).is_ok());
+
+        let evidence: Vec<_> = (0..MAX_EVIDENCE_ROWS)
+            .map(|index| {
+                serde_json::json!({
+                    "id": index.to_string(),
+                    "text": "x".repeat(MAX_EVIDENCE_CHARS / MAX_EVIDENCE_ROWS)
+                })
+            })
+            .collect();
+        let body = serde_json::json!({
+            "operation": "rerank",
+            "query": "q",
+            "evidence": evidence,
+            "rank_width": MAX_RANK_WIDTH
+        });
+        assert!(parse_request(&serde_json::to_vec(&body).unwrap()).is_ok());
+    }
+
+    #[test]
     fn rejects_body_and_semantic_limits() {
         assert_eq!(
             error_code(&vec![b' '; MAX_REQUEST_BYTES + 1]),
@@ -306,11 +308,32 @@ mod tests {
 
         let body = br#"{"operation":"rerank","query":"q","evidence":[],"rank_width":9}"#;
         assert_eq!(error_code(body), ErrorCode::LimitExceeded);
+        let body = br#"{"operation":"rerank","query":"q","evidence":[],"rank_width":0}"#;
+        assert_eq!(error_code(body), ErrorCode::LimitExceeded);
+
+        for evidence in [
+            serde_json::json!([{"id": "", "text": "x"}]),
+            serde_json::json!([{"id": "same", "text": "x"}, {"id": "same", "text": "y"}]),
+        ] {
+            let body = serde_json::json!({"operation": "read", "query": "q", "evidence": evidence});
+            assert_eq!(
+                error_code(&serde_json::to_vec(&body).unwrap()),
+                ErrorCode::LimitExceeded
+            );
+        }
     }
 
     #[test]
     fn malformed_and_unsupported_errors_are_stable() {
-        assert_eq!(error_code(b"not json"), ErrorCode::MalformedRequest);
+        for body in [
+            b"not json".as_slice(),
+            br#"{"operation":"embed"}"#,
+            br#"{"operation":"embed","query":null}"#,
+            br#"{"operation":"embed","query":"q","extra":true}"#,
+            br#"{"operation":"read","query":"q","evidence":[{"id":"1","text":"x","extra":true}]}"#,
+        ] {
+            assert_eq!(error_code(body), ErrorCode::MalformedRequest);
+        }
         assert_eq!(
             error_code(br#"{"operation":"generate","query":"q"}"#),
             ErrorCode::UnsupportedOperation
