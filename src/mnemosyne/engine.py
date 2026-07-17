@@ -34,7 +34,7 @@ from mnemosyne.access_policy import (
 from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
-from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
+from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename
 from mnemosyne.models import (
     Assertion,
@@ -85,6 +85,30 @@ from mnemosyne.text import cosine, lexical_score, tokenize
 from mnemosyne.workspace import self_generation_budget_report
 
 
+def _normalize_json_value(value: Any, *, path: str) -> Any:
+    """Return a plain JSON value without invoking caller-defined copy hooks."""
+
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must contain finite JSON numbers")
+        return value
+    if type(value) is list:
+        return [
+            _normalize_json_value(item, path=f"{path}[{index}]")
+            for index, item in enumerate(value)
+        ]
+    if type(value) is dict:
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise ValueError(f"{path} keys must be strings")
+            normalized[key] = _normalize_json_value(item, path=f"{path}.{key}")
+        return normalized
+    raise ValueError(f"{path} must contain JSON data only")
+
+
 @dataclass(slots=True)
 class Intention:
     """A data-only prospective-memory record evaluated by an explicit clock."""
@@ -96,9 +120,9 @@ class Intention:
     trigger_type: str
     trigger_expression: dict[str, Any]
     action: dict[str, Any]
+    due_at: datetime
     status: str = "scheduled"
     priority: str = "normal"
-    due_at: datetime | None = None
     dependencies: list[str] = field(default_factory=list)
     reschedule_history: list[dict[str, Any]] = field(default_factory=list)
     cancellation_state: dict[str, Any] | None = None
@@ -106,16 +130,143 @@ class Intention:
 
     def __post_init__(self) -> None:
         for name in ("intention_id", "tenant_id", "user_id", "agent_id"):
-            if not str(getattr(self, name)).strip():
-                raise ValueError(f"{name} is required")
-        if self.trigger_type != "exact_time":
+            value = getattr(self, name)
+            if type(value) is not str or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        if type(self.trigger_type) is not str or self.trigger_type != "exact_time":
             raise ValueError("Phase 1 supports only exact_time triggers")
-        if self.status != "scheduled":
+        if type(self.status) is not str or self.status != "scheduled":
             raise ValueError("new intentions must be scheduled")
-        if self.due_at is None or self.due_at.tzinfo is None:
+        if type(self.priority) is not str or not self.priority.strip():
+            raise ValueError("priority must be a non-empty string")
+        if not isinstance(self.due_at, datetime) or self.due_at.tzinfo is None:
             raise ValueError("due_at must be timezone-aware")
-        if not self.evidence_ids:
+        if type(self.trigger_expression) is not dict:
+            raise ValueError("trigger_expression must be a JSON object")
+        if type(self.action) is not dict:
+            raise ValueError("action must be a JSON object")
+        self.trigger_expression = _normalize_json_value(
+            self.trigger_expression, path="trigger_expression"
+        )
+        self.action = _normalize_json_value(self.action, path="action")
+        trigger_at_raw = self.trigger_expression.get("at")
+        if type(trigger_at_raw) is not str:
+            raise ValueError(
+                "exact_time trigger_expression.at must be an ISO-8601 string"
+            )
+        try:
+            trigger_at = datetime.fromisoformat(trigger_at_raw)
+        except ValueError as exc:
+            raise ValueError(
+                "exact_time trigger_expression.at must be ISO-8601"
+            ) from exc
+        if trigger_at.tzinfo is None:
+            raise ValueError("exact_time trigger_expression.at must be timezone-aware")
+        due_at = self.due_at.astimezone(UTC)
+        if trigger_at.astimezone(UTC) != due_at:
+            raise ValueError(
+                "trigger_expression.at must identify the same instant as due_at"
+            )
+        self.due_at = due_at
+        self.trigger_expression["at"] = due_at.isoformat()
+        if type(self.dependencies) is not list or any(
+            type(item) is not str or not item.strip() for item in self.dependencies
+        ):
+            raise ValueError("dependencies must be a list of non-empty strings")
+        if self.dependencies:
+            raise ValueError("Phase 1 does not support dependency triggers")
+        if type(self.reschedule_history) is not list:
+            raise ValueError("reschedule_history must be a list of JSON objects")
+        normalized_history: list[dict[str, Any]] = []
+        for index, item in enumerate(self.reschedule_history):
+            if type(item) is not dict:
+                raise ValueError("reschedule_history must be a list of JSON objects")
+            normalized_history.append(
+                _normalize_json_value(item, path=f"reschedule_history[{index}]")
+            )
+        self.reschedule_history = normalized_history
+        if self.cancellation_state is not None:
+            raise ValueError("new scheduled intentions cannot have cancellation state")
+        if type(self.evidence_ids) is not list or not self.evidence_ids:
             raise ValueError("evidence_ids must contain originating evidence")
+        if any(type(item) is not str or not item.strip() for item in self.evidence_ids):
+            raise ValueError("evidence_ids must contain non-empty strings")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("evidence_ids must not contain duplicates")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "intention_id": self.intention_id,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "trigger_type": self.trigger_type,
+            "trigger_expression": copy.deepcopy(self.trigger_expression),
+            "action": copy.deepcopy(self.action),
+            "due_at": self.due_at.isoformat(),
+            "status": self.status,
+            "priority": self.priority,
+            "dependencies": list(self.dependencies),
+            "reschedule_history": copy.deepcopy(self.reschedule_history),
+            "cancellation_state": copy.deepcopy(self.cancellation_state),
+            "evidence_ids": list(self.evidence_ids),
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> Intention:
+        if type(row) is not dict:
+            raise ValueError("stored intention must be a JSON object")
+        status = row.get("status", "scheduled")
+        if type(status) is not str or status not in {"scheduled", "cancelled", "fired"}:
+            raise ValueError(f"unsupported stored intention status: {status!r}")
+        due_at = row.get("due_at")
+        if type(due_at) is not str:
+            raise ValueError("stored intention due_at must be an ISO-8601 string")
+        dependencies = row.get("dependencies", [])
+        reschedule_history = row.get("reschedule_history", [])
+        evidence_ids = row.get("evidence_ids", [])
+        if type(dependencies) is not list:
+            raise ValueError("stored intention dependencies must be a list")
+        if type(reschedule_history) is not list:
+            raise ValueError("stored intention reschedule_history must be a list")
+        if type(evidence_ids) is not list:
+            raise ValueError("stored intention evidence_ids must be a list")
+        cancellation_state = copy.deepcopy(row.get("cancellation_state"))
+        record = cls(
+            intention_id=row["intention_id"],
+            tenant_id=row["tenant_id"],
+            user_id=row["user_id"],
+            agent_id=row["agent_id"],
+            trigger_type=row["trigger_type"],
+            trigger_expression=copy.deepcopy(row["trigger_expression"]),
+            action=copy.deepcopy(row["action"]),
+            due_at=datetime.fromisoformat(due_at),
+            status="scheduled",
+            priority=row.get("priority", "normal"),
+            dependencies=copy.deepcopy(dependencies),
+            reschedule_history=copy.deepcopy(reschedule_history),
+            cancellation_state=None,
+            evidence_ids=copy.deepcopy(evidence_ids),
+        )
+        record.status = status
+        if status == "cancelled":
+            if type(cancellation_state) is not dict:
+                raise ValueError("cancelled intentions require cancellation state")
+            record.cancellation_state = _normalize_json_value(
+                cancellation_state, path="cancellation_state"
+            )
+            cancelled_by = record.cancellation_state.get("cancelled_by")
+            if (
+                type(cancelled_by) is not str
+                or not cancelled_by.strip()
+                or cancelled_by not in {record.user_id, record.agent_id}
+            ):
+                raise ValueError(
+                    "cancelled intention state must identify its owning user or agent"
+                )
+        elif cancellation_state is not None:
+            raise ValueError("only cancelled intentions may carry cancellation state")
+        return record
 
 
 def evaluate_intention(intention: Intention, *, evaluated_at: datetime) -> bool:
@@ -123,13 +274,9 @@ def evaluate_intention(intention: Intention, *, evaluated_at: datetime) -> bool:
 
     if evaluated_at.tzinfo is None:
         raise ValueError("evaluated_at must be timezone-aware")
-    return (
-        intention.status == "scheduled"
-        and intention.cancellation_state is None
-        and not intention.dependencies
-        and intention.due_at is not None
-        and intention.due_at.astimezone(UTC) <= evaluated_at.astimezone(UTC)
-    )
+    return intention.status == "scheduled" and intention.due_at.astimezone(
+        UTC
+    ) <= evaluated_at.astimezone(UTC)
 
 
 def _bounded_float(value: object, *, default: float) -> float:
@@ -644,7 +791,12 @@ class LocalMemoryEngine:
         source: str | None = None,
         trust_tier: int | None = None,
         capability_tags: list[str] | None = None,
+        event_id: str | None = None,
+        occurred_at: datetime | None = None,
     ) -> None:
+        event_time = occurred_at or utc_now()
+        if event_time.tzinfo is None:
+            raise ValueError("audit event time must be timezone-aware")
         normalized_tags = sorted(set(capability_tags or []))
         audit_diff = dict(diff)
         audit_diff.setdefault("source", source or actor)
@@ -654,7 +806,7 @@ class LocalMemoryEngine:
             audit_diff.setdefault("capability_tags", normalized_tags)
         self.audit_log.append(
             {
-                "id": new_id(),
+                "id": event_id or new_id(),
                 "tenant_id": tenant_id,
                 "actor": actor,
                 "op": op,
@@ -663,7 +815,7 @@ class LocalMemoryEngine:
                 "trust_tier": trust_tier,
                 "capability_tags": normalized_tags,
                 "diff": audit_diff,
-                "at": utc_now().isoformat(),
+                "at": event_time.astimezone(UTC).isoformat(),
             }
         )
 
@@ -711,6 +863,40 @@ class LocalMemoryEngine:
             evidence.append(source)
         return evidence
 
+    @staticmethod
+    def _intention_audit_context(provenance: list[Evidence]) -> tuple[int, list[str]]:
+        trust_tier = max(item.trust_tier for item in provenance)
+        capability_tags = sorted(
+            {tag for item in provenance for tag in item.capability_tags}
+        )
+        return trust_tier, capability_tags
+
+    @staticmethod
+    def _intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
+        immutable_snapshot = {
+            "intention_id": intention.intention_id,
+            "tenant_id": intention.tenant_id,
+            "user_id": intention.user_id,
+            "agent_id": intention.agent_id,
+            "trigger_type": intention.trigger_type,
+            "trigger_expression": intention.trigger_expression,
+            "action": intention.action,
+            "priority": intention.priority,
+            "due_at": intention.due_at.isoformat(),
+            "dependencies": intention.dependencies,
+            "reschedule_history": intention.reschedule_history,
+            "evidence_ids": intention.evidence_ids,
+        }
+        return {
+            "intention_digest": content_cid(
+                "prospective_intention", immutable_snapshot
+            ),
+            "trigger_type": intention.trigger_type,
+            "due_at": intention.due_at.isoformat(),
+            "evidence_ids": list(intention.evidence_ids),
+            "status": status,
+        }
+
     def schedule_intention(self, intention: Intention) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
 
@@ -721,14 +907,13 @@ class LocalMemoryEngine:
                 raise ValueError(f"intention {intention.intention_id!r} already exists")
             stored = copy.deepcopy(intention)
             self.intentions[key] = stored
-            trust_tier = max(item.trust_tier for item in provenance)
-            capability_tags = sorted({tag for item in provenance for tag in item.capability_tags})
+            trust_tier, capability_tags = self._intention_audit_context(provenance)
             self._audit(
                 stored.tenant_id,
                 stored.agent_id,
                 "schedule_intention",
                 stored.intention_id,
-                {"evidence_ids": list(stored.evidence_ids), "status": stored.status},
+                self._intention_audit_diff(stored, status=stored.status),
                 source="prospective_memory",
                 trust_tier=trust_tier,
                 capability_tags=capability_tags,
@@ -738,6 +923,8 @@ class LocalMemoryEngine:
 
     def cancel_intention(self, tenant_id: str, intention_id: str, *, cancelled_by: str) -> None:
         with self._lock:
+            if type(cancelled_by) is not str or not cancelled_by.strip():
+                raise ValueError("cancelled_by must be a non-empty string")
             key = (tenant_id, intention_id)
             intention = self.intentions.get(key)
             if intention is None:
@@ -746,6 +933,12 @@ class LocalMemoryEngine:
                 raise ValueError("a fired intention cannot be cancelled")
             if intention.status == "cancelled":
                 return
+            if cancelled_by not in {intention.user_id, intention.agent_id}:
+                raise PermissionError(
+                    "only the owning user or agent may cancel an intention"
+                )
+            provenance = self._intention_provenance(intention)
+            trust_tier, capability_tags = self._intention_audit_context(provenance)
             intention.status = "cancelled"
             intention.cancellation_state = {"cancelled_by": cancelled_by}
             self._audit(
@@ -753,8 +946,10 @@ class LocalMemoryEngine:
                 cancelled_by,
                 "cancel_intention",
                 intention_id,
-                {"status": "cancelled", "evidence_ids": list(intention.evidence_ids)},
+                self._intention_audit_diff(intention, status="cancelled"),
                 source="prospective_memory",
+                trust_tier=trust_tier,
+                capability_tags=capability_tags,
             )
             self._persist()
 
@@ -763,6 +958,8 @@ class LocalMemoryEngine:
     ) -> list[Intention]:
         """Fire due intentions once, ordered deterministically by due time and id."""
 
+        if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
+            raise ValueError("evaluated_at must be timezone-aware")
         with self._lock:
             due = sorted(
                 (
@@ -770,22 +967,39 @@ class LocalMemoryEngine:
                     for (item_tenant, _), item in self.intentions.items()
                     if item_tenant == tenant_id and evaluate_intention(item, evaluated_at=evaluated_at)
                 ),
-                key=lambda item: (item.due_at or datetime.max.replace(tzinfo=UTC), item.intention_id),
+                key=lambda item: (item.due_at, item.intention_id),
             )
+            audit_contexts = [
+                self._intention_audit_context(self._intention_provenance(intention))
+                for intention in due
+            ]
             fired: list[Intention] = []
-            for intention in due:
+            for intention, (trust_tier, capability_tags) in zip(
+                due, audit_contexts, strict=True
+            ):
                 intention.status = "fired"
+                evaluated_at_utc = evaluated_at.astimezone(UTC)
                 self._audit(
                     tenant_id,
                     intention.agent_id,
                     "fire_intention",
                     intention.intention_id,
                     {
-                        "evaluated_at": evaluated_at.astimezone(UTC).isoformat(),
-                        "evidence_ids": list(intention.evidence_ids),
-                        "status": "fired",
+                        **self._intention_audit_diff(intention, status="fired"),
+                        "evaluated_at": evaluated_at_utc.isoformat(),
                     },
                     source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    event_id=content_cid(
+                        "fire_intention",
+                        {
+                            "tenant_id": tenant_id,
+                            "intention_id": intention.intention_id,
+                            "evaluated_at": evaluated_at_utc.isoformat(),
+                        },
+                    ),
+                    occurred_at=evaluated_at_utc,
                 )
                 fired.append(copy.deepcopy(intention))
             if fired:
@@ -831,6 +1045,7 @@ class LocalMemoryEngine:
             "contradictions": [item.to_dict() for item in self.contradictions.values()],
             "calibrations": [item.to_dict() for item in self.calibrations.values()],
             "entities": list(self.entities.values()),
+            "intentions": [item.to_dict() for item in self.intentions.values()],
             "audit_log": self.audit_log,
             "deletion_log": self.deletion_log,
             "merge_log": self.merge_log,
@@ -918,6 +1133,12 @@ class LocalMemoryEngine:
             (str(row["tenant_id"]), str(row["canonical"])): dict(row)
             for row in data.get("entities", [])
             if row.get("tenant_id") and row.get("canonical")
+        }
+        self.intentions = {
+            (item.tenant_id, item.intention_id): item
+            for item in (
+                Intention.from_dict(row) for row in data.get("intentions", [])
+            )
         }
         self.audit_log = list(data.get("audit_log", []))
         self.deletion_log = list(data.get("deletion_log", []))
@@ -2629,10 +2850,18 @@ class LocalMemoryEngine:
                 "trimmed_relations": [],
                 "removed_entities": [],
                 "trimmed_entities": [],
+                "removed_intentions": [],
                 "erased_derived_evidence": derived_cids,
                 "retained_derived_evidence": sorted(retained_derived),
                 "trimmed_derived_evidence": sorted(retained_derived),
             }
+            for intention_key, intention in list(self.intentions.items()):
+                if intention.tenant_id != tenant_id:
+                    continue
+                if not affected_cids.intersection(intention.evidence_ids):
+                    continue
+                self.intentions.pop(intention_key, None)
+                propagated["removed_intentions"].append(intention.intention_id)
             propagated["standing_cascade"] = standing_erasure_cascade_report(
                 source_cid=cid,
                 erasure_mode=mode.value,
