@@ -67,6 +67,10 @@ core.
   and a deterministic evaluator that fires satisfied triggers idempotently.
 - [x] Add engine Protocol methods (`schedule_intention`, `cancel_intention`,
   `evaluate_due_intentions`, `list_intentions`) to Local first; keep pure/in-mem.
+  Phase 1 implemented these methods on `LocalMemoryEngine` only. Shared
+  `MemoryEngine` Protocol registration, Postgres/SQLite implementations,
+  CLI/MCP exposure, and cross-engine parity remain intentionally deferred to
+  Phase 2 so the existing backend contract is not falsely widened.
 - [x] Verify: focused test file green; §31/§33 unaffected.
 
 ## Phase 2 — Prospective memory: Postgres + Sqlite parity + trigger types
