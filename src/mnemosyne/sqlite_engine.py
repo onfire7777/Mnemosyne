@@ -3208,6 +3208,7 @@ class SqliteEngine:
             "trimmed_relations": [],
             "removed_entities": [],
             "trimmed_entities": [],
+            "removed_intentions": [],
             "erased_derived_evidence": [],
             "retained_derived_evidence": [],
             "trimmed_derived_evidence": [],
