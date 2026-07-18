@@ -1176,6 +1176,10 @@ class SqliteEngine:
         *,
         session_id: str | None = None,
         expired_at: datetime,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
     ) -> list[Any]:
         """Atomically transition due items to expired, auditing each once."""
         sweep = self._require_working_clock(expired_at, "expired_at")
@@ -1194,6 +1198,17 @@ class SqliteEngine:
                 if session_id is not None:
                     query += " AND session_id = ?"
                     params.append(session_id)
+                for column, value in (
+                    ("user_id", user_id),
+                    ("agent_id", agent_id),
+                    ("task_id", task_id),
+                ):
+                    if value is not None:
+                        query += f" AND {column} = ?"
+                        params.append(value)
+                if branch is not None:
+                    query += " AND json_extract(metadata, '$.branch') = ?"
+                    params.append(branch)
                 query += " ORDER BY expires_at ASC, session_id ASC, item_id ASC"
                 rows = conn.execute(query, params).fetchall()
                 due_values = [_working_payload(_working_from_row(row)) for row in rows]

@@ -775,6 +775,10 @@ class MemoryEngine(Protocol):
         *,
         expired_at: datetime,
         session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
     ) -> list[WorkingMemoryItem]:
         raise NotImplementedError
 
@@ -1449,6 +1453,10 @@ class LocalMemoryEngine:
         *,
         expired_at: datetime,
         session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
     ) -> list[WorkingMemoryItem]:
         sweep = self._working_clock(expired_at, "expired_at")
         with self._lock:
@@ -1458,6 +1466,10 @@ class LocalMemoryEngine:
                     for (item_tenant, item_session, _), item in self.working_memory.items()
                     if item_tenant == tenant_id
                     and (session_id is None or item_session == session_id)
+                    and (user_id is None or item.user_id == user_id)
+                    and (agent_id is None or item.agent_id == agent_id)
+                    and (task_id is None or item.task_id == task_id)
+                    and (branch is None or item.metadata.get("branch") == branch)
                     and item.status == "active"
                     and item.expires_at <= sweep
                 ),

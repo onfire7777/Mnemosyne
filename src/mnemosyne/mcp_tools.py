@@ -435,12 +435,16 @@ class MemoryTools:
             destructive=True, target_sink="belief",
         )
         clock = self._working_time(expired_at, "expired_at")
-        expired = self.engine.expire_working(tenant_id, session_id=session_id, expired_at=clock)
-        scoped = [
-            item for item in expired
-            if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
-        ]
-        return {"expired_at": clock.isoformat(), "items": [item.to_dict() for item in scoped], "security": security}
+        expired = self.engine.expire_working(
+            tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            task_id=task_id,
+            branch=branch,
+            expired_at=clock,
+        )
+        return {"expired_at": clock.isoformat(), "items": [item.to_dict() for item in expired], "security": security}
 
     def capture(
         self,
