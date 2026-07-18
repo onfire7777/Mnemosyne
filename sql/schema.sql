@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS conformal_calibration (
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,
+  event_id TEXT,
   tenant_id UUID,
   actor TEXT,
   op TEXT NOT NULL,
@@ -314,6 +315,11 @@ CREATE TABLE IF NOT EXISTS audit_log (
   diff JSONB NOT NULL DEFAULT '{}'::jsonb,
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS event_id TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS audit_log_event_id_unique
+  ON audit_log (event_id)
+  WHERE event_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION mnemosyne_audit_log_append_only()
 RETURNS trigger AS $$
@@ -543,10 +549,7 @@ CREATE TABLE IF NOT EXISTS intentions (
   PRIMARY KEY (tenant_id, intention_id)
 );
 
--- Exactly one fired row per canonical firing key (tenant_id, intention_id).
-CREATE UNIQUE INDEX IF NOT EXISTS intentions_fired_unique
-  ON intentions (tenant_id, intention_id)
-  WHERE status = 'fired';
+DROP INDEX IF EXISTS intentions_fired_unique;
 
 CREATE INDEX IF NOT EXISTS intentions_tenant_due_idx
   ON intentions (tenant_id, due_at, intention_id)
@@ -568,10 +571,31 @@ CREATE TABLE IF NOT EXISTS intention_firing_receipts (
   operation TEXT NOT NULL CHECK (operation = 'fire'),
   canonical_event_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (tenant_id, intention_id, operation),
-  FOREIGN KEY (tenant_id, intention_id)
-    REFERENCES intentions(tenant_id, intention_id) ON DELETE CASCADE
+  PRIMARY KEY (tenant_id, intention_id, operation)
 );
+
+-- Receipts outlive intention erasure and are immutable idempotency evidence.
+-- The named constraint is PostgreSQL's deterministic name for the historical
+-- inline composite foreign key; dropping it is idempotent for upgraded stores.
+ALTER TABLE intention_firing_receipts
+  DROP CONSTRAINT IF EXISTS intention_firing_receipts_tenant_id_intention_id_fkey;
+
+CREATE UNIQUE INDEX IF NOT EXISTS intention_firing_receipts_event_id_unique
+  ON intention_firing_receipts (canonical_event_id);
+
+CREATE OR REPLACE FUNCTION mnemosyne_intention_receipts_append_only()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'intention_firing_receipts is append-only; % is not allowed', TG_OP
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS intention_firing_receipts_append_only
+  ON intention_firing_receipts;
+CREATE TRIGGER intention_firing_receipts_append_only
+  BEFORE UPDATE OR DELETE ON intention_firing_receipts
+  FOR EACH ROW EXECUTE FUNCTION mnemosyne_intention_receipts_append_only();
 
 ALTER TABLE intention_firing_receipts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE intention_firing_receipts FORCE ROW LEVEL SECURITY;

@@ -4355,11 +4355,9 @@ class PostgresEngine:
                     else:
                         cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
                         propagated["removed_entities"].append(row["canonical"])
-                # Intentions derived from erased evidence are removed entirely
-                # (parity with LocalMemoryEngine.forget). An intention whose
-                # evidence_ids overlap the affected cids and have no remaining
-                # live evidence is deleted; one with surviving evidence is
-                # trimmed by removing the erased cids from its evidence_ids.
+                # Any provenance overlap invalidates the immutable intention
+                # snapshot. Remove it entirely, matching LocalMemoryEngine,
+                # rather than silently preserving a write the user erased.
                 cur.execute(
                     """
                     SELECT intention_id, evidence_ids FROM intentions
@@ -4368,21 +4366,11 @@ class PostgresEngine:
                     (db_tenant_id, affected_cid_bytes),
                 )
                 for row in cur.fetchall():
-                    remaining = [
-                        cid for cid in _bytes_list_to_cids(list(row["evidence_ids"] or []))
-                        if cid not in affected_cids
-                    ]
-                    if remaining:
-                        cur.execute(
-                            "UPDATE intentions SET evidence_ids = %s WHERE tenant_id = %s AND intention_id = %s",
-                            (_cid_list_to_bytes(remaining), db_tenant_id, row["intention_id"]),
-                        )
-                    else:
-                        cur.execute(
-                            "DELETE FROM intentions WHERE tenant_id = %s AND intention_id = %s",
-                            (db_tenant_id, row["intention_id"]),
-                        )
-                        propagated["removed_intentions"].append(row["intention_id"])
+                    cur.execute(
+                        "DELETE FROM intentions WHERE tenant_id = %s AND intention_id = %s",
+                        (db_tenant_id, row["intention_id"]),
+                    )
+                    propagated["removed_intentions"].append(row["intention_id"])
                 # Spec §7 privacy invariant 13: NO retained record for a hard delete
                 # may carry the erased cid (a salted sha256 of the content, so
                 # sha256(guess) could confirm it) — not the deletion_log evidence_cid,
@@ -5098,7 +5086,12 @@ class PostgresEngine:
         source: str | None = None,
         trust_tier: int | None = None,
         capability_tags: list[str] | None = None,
+        event_id: str | None = None,
+        occurred_at: datetime | None = None,
     ) -> None:
+        if occurred_at is not None and occurred_at.tzinfo is None:
+            raise ValueError("audit event time must be timezone-aware")
+        event_time = occurred_at.astimezone(UTC) if occurred_at is not None else None
         target_uuid = _uuid_or_none(target_id)
         audit_diff = dict(diff)
         if target_id and not target_uuid:
@@ -5111,10 +5104,23 @@ class PostgresEngine:
             audit_diff.setdefault("capability_tags", normalized_tags)
         cur.execute(
             """
-            INSERT INTO audit_log(tenant_id, actor, op, target_id, trust_tier, capability_tags, diff)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO audit_log(
+                event_id, tenant_id, actor, op, target_id, trust_tier,
+                capability_tags, diff, at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
             """,
-            (tenant_id, actor, op, target_uuid, trust_tier, normalized_tags, self._jsonb(audit_diff)),
+            (
+                event_id,
+                tenant_id,
+                actor,
+                op,
+                target_uuid,
+                trust_tier,
+                normalized_tags,
+                self._jsonb(audit_diff),
+                event_time,
+            ),
         )
 
     def record_audit_event(
@@ -5150,7 +5156,7 @@ class PostgresEngine:
     # Prospective-memory: schedule / cancel / list / evaluate (W3 Phase 2).
     # Exact parity with the frozen Local contract. All SQL is parameterized;
     # audit append and state transition share one transaction; idempotency is
-    # enforced by the partial unique index intentions_fired_unique.
+    # enforced by intention_firing_receipts.
     # ------------------------------------------------------------------
 
     def _intention_provenance_rows(
@@ -5178,6 +5184,8 @@ class PostgresEngine:
             SELECT cid, user_id, trust_tier, capability_tags, erased
             FROM evidence
             WHERE tenant_id = %s AND branch = 'main' AND cid = ANY(%s)
+            ORDER BY cid
+            FOR SHARE
             """,
             (db_tenant_id, cid_bytes_list),
         )
@@ -5248,7 +5256,6 @@ class PostgresEngine:
                 "tenant_id": tenant_id,
                 "user_id": str(
                     row.get("external_user_id")
-                    or row.get("_external_user_id")
                     or row["user_id"]
                 ),
                 "agent_id": row["agent_id"],
@@ -5288,27 +5295,41 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                # Duplicate check before any provenance work or mutation.
                 cur.execute(
-                    "SELECT 1 FROM intentions WHERE tenant_id = %s AND intention_id = %s",
+                    """
+                    SELECT 1
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
                     (db_tenant_id, intention.intention_id),
                 )
                 if cur.fetchone() is not None:
-                    raise ValueError(f"intention {intention.intention_id!r} already exists")
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already has a durable firing receipt"
+                    )
                 # Cycle rejection for dependency_completion: verify every
                 # dependency already exists in the same tenant (a dependency
                 # on a not-yet-scheduled intention is rejected so cycles can
                 # never form incrementally).
                 if intention.trigger_type == "dependency_completion":
-                    for dep_id in intention.dependencies:
-                        cur.execute(
-                            "SELECT 1 FROM intentions WHERE tenant_id = %s AND intention_id = %s",
-                            (db_tenant_id, dep_id),
+                    cur.execute(
+                        """
+                        SELECT intention_id
+                        FROM intentions
+                        WHERE tenant_id = %s AND intention_id = ANY(%s)
+                        ORDER BY intention_id
+                        FOR SHARE
+                        """,
+                        (db_tenant_id, list(intention.dependencies)),
+                    )
+                    existing_dependencies = {row["intention_id"] for row in cur.fetchall()}
+                    missing_dependencies = sorted(
+                        set(intention.dependencies) - existing_dependencies
+                    )
+                    if missing_dependencies:
+                        raise ValueError(
+                            f"dependency {missing_dependencies[0]!r} does not exist in the same tenant"
                         )
-                        if cur.fetchone() is None:
-                            raise ValueError(
-                                f"dependency {dep_id!r} does not exist in the same tenant"
-                            )
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=intention
                 )
@@ -5322,6 +5343,8 @@ class PostgresEngine:
                       evidence_ids
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', %s, %s, %s, NULL, %s)
+                    ON CONFLICT (tenant_id, intention_id) DO NOTHING
+                    RETURNING intention_id
                     """,
                     (
                         db_tenant_id,
@@ -5339,6 +5362,23 @@ class PostgresEngine:
                         _cid_list_to_bytes(intention.evidence_ids),
                     ),
                 )
+                if cur.fetchone() is None:
+                    raise ValueError(f"intention {intention.intention_id!r} already exists")
+                # Recheck after the conflict-aware insert. Under READ COMMITTED,
+                # this closes a fire -> forget race where the first receipt read
+                # preceded the firing commit but the insert waited for deletion.
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
+                    (db_tenant_id, intention.intention_id),
+                )
+                if cur.fetchone() is not None:
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already has a durable firing receipt"
+                    )
                 self._audit(
                     cur,
                     db_tenant_id,
@@ -5373,6 +5413,7 @@ class PostgresEngine:
                            evidence_ids
                     FROM intentions
                     WHERE tenant_id = %s AND intention_id = %s
+                    FOR UPDATE
                     """,
                     (db_tenant_id, intention_id),
                 )
@@ -5408,9 +5449,12 @@ class PostgresEngine:
                     UPDATE intentions
                     SET status = 'cancelled', cancellation_state = %s
                     WHERE tenant_id = %s AND intention_id = %s AND status = 'scheduled'
+                    RETURNING intention_id
                     """,
                     (self._jsonb({"cancelled_by": cancelled_by}), db_tenant_id, intention_id),
                 )
+                if cur.fetchone() is None:
+                    raise RuntimeError("scheduled intention was not cancelled")
                 self._audit(
                     cur,
                     db_tenant_id,
@@ -5454,11 +5498,13 @@ class PostgresEngine:
         """Fire due intentions once, ordered by (due_at UTC, intention_id).
 
         Full Phase 2 contract: all five trigger types, infrastructure gate,
-        pre-validation of all due candidates' provenance before any transition,
+        pre-validation of all firing candidates' provenance before any transition,
         atomic receipt + status change + fire audit per intention, and
         clock-independent idempotency enforced by a durable firing receipt.
         """
 
+        if type(tenant_id) is not str or not tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
         if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
             raise ValueError("evaluated_at must be timezone-aware")
         if not isinstance(trigger_context, TriggerEvaluationContext):
@@ -5507,26 +5553,19 @@ class PostgresEngine:
                                evidence_ids
                         FROM intentions
                         WHERE tenant_id = %s AND intention_id = ANY(%s)
+                        ORDER BY intention_id
+                        FOR SHARE
                         """,
                         (db_tenant_id, dependency_ids),
                     )
                     for row in cur.fetchall():
                         dependency = self._row_to_intention(row, tenant_id)
                         tenant_intentions[(tenant_id, dependency.intention_id)] = dependency
-                # Phase 1: pre-validate provenance for ALL due candidates before
-                # any transition. A single invalid candidate fails the whole
-                # batch with zero mutation/audit.
-                audit_contexts: list[tuple[int, list[str]]] = []
+                # Evaluate against the frozen tenant snapshot first, matching
+                # the canonical Local contract. Only candidates that would
+                # fire require provenance validation.
+                candidate_results: list[tuple[Intention, dict[str, Any]]] = []
                 for intention in candidates:
-                    provenance = self._intention_provenance_rows(
-                        cur, db_tenant_id=db_tenant_id, intention=intention
-                    )
-                    audit_contexts.append(self._intention_audit_context(provenance))
-                # Phase 2: evaluate each trigger and fire eligible intentions.
-                fired: list[Intention] = []
-                for intention, (trust_tier, capability_tags) in zip(
-                    candidates, audit_contexts, strict=True
-                ):
                     fires, matched_signal = _evaluate_trigger(
                         intention,
                         evaluated_at=evaluated_at_utc,
@@ -5534,16 +5573,26 @@ class PostgresEngine:
                         operating_point=operating_point,
                         tenant_intentions=tenant_intentions,
                     )
-                    if not fires:
-                        continue
+                    if fires:
+                        candidate_results.append((intention, matched_signal))
+                audit_contexts = [
+                    self._intention_audit_context(
+                        self._intention_provenance_rows(
+                            cur,
+                            db_tenant_id=db_tenant_id,
+                            intention=intention,
+                        )
+                    )
+                    for intention, _matched_signal in candidate_results
+                ]
+                fired: list[Intention] = []
+                for (intention, matched_signal), (trust_tier, capability_tags) in zip(
+                    candidate_results, audit_contexts, strict=True
+                ):
                     fire_audit_diff = {
                         **self._intention_audit_diff(intention, status="fired"),
                         "evaluated_at": evaluated_at_utc.isoformat(),
-                        "operating_point_id": operating_point.operating_point_id,
-                        "operating_point_threshold": operating_point.threshold,
-                        "operating_point_measured_precision": operating_point.measured_precision,
-                        "operating_point_measured_recall": operating_point.measured_recall,
-                        "operating_point_measurement_cid": operating_point.measurement_cid,
+                        "operating_point": operating_point.to_dict(),
                     }
                     if matched_signal.get("event_id"):
                         fire_audit_diff["matched_event_id"] = matched_signal["event_id"]
@@ -5587,6 +5636,7 @@ class PostgresEngine:
                         raise RuntimeError(
                             "firing receipt claimed without a scheduled intention"
                         )
+                    intention.status = "fired"
                     self._audit(
                         cur,
                         db_tenant_id,
@@ -5597,6 +5647,8 @@ class PostgresEngine:
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
+                        event_id=canonical_event_id,
+                        occurred_at=evaluated_at_utc,
                     )
                     fired.append(copy.deepcopy(intention))
         return fired
@@ -5845,6 +5897,9 @@ def _json_safe(value: Any) -> Any:
 
 def _row_to_audit_log(row: Any) -> dict[str, Any]:
     data = _json_safe(dict(row))
+    event_id = data.pop("event_id", None)
+    if event_id is not None:
+        data["id"] = event_id
     diff = data.get("diff")
     if isinstance(diff, dict):
         if not data.get("target_id") and diff.get("target_id"):
