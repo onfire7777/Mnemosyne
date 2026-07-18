@@ -4264,6 +4264,7 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     # derived_actions and erased_derived_evidence) — the exact fields the review
     # found leaking the plaintext cid past the top-level evidence_cid swap.
     cid = _append_evidence(engine, tenant, user, "Shared hard-delete contract evidence.")
+    surviving_cid = _append_evidence(engine, tenant, user, "Shared unaffected custody evidence.")
     summary_cid = engine.append_evidence(
         Evidence(
             tenant_id=tenant,
@@ -4271,7 +4272,7 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
             actor="user",
             source_type="derived-note",
             content="Derived summary of the hard-delete target.",
-            metadata={"source_evidence_cids": [cid]},
+            metadata={"source_evidence_cids": [cid, surviving_cid]},
             access_policy={"tenant": tenant},
         )
     )
@@ -4322,6 +4323,14 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     assert source_placeholder != cid
     assert source_placeholder in hard_entry["propagated"]["standing_cascade"]["affected_cids"]
     assert all(row["target_id"] == source_placeholder for row in forget_rows)
+
+    derived_action = hard_entry["propagated"]["standing_cascade"]["derived_actions"][0]
+    retained_sources = derived_action["source_evidence_cids_before"]
+    assert cid not in retained_sources
+    assert source_placeholder in retained_sources
+    assert surviving_cid in retained_sources
+    assert derived_action["cid"] != summary_cid
+    assert derived_action["cid"] in hard_entry["propagated"]["erased_derived_evidence"]
 
     # A tombstone_recompute forget KEEPS the cid (its ledger row is the blocklist).
     keep_cid = _append_evidence(engine, tenant, user, "Tombstone keeps its cid.")

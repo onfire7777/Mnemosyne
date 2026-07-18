@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import LocalMemoryEngine, WorkingMemoryItem
 from mnemosyne.retrieval import build_working_memory_hits, working_memory_hits
 from mnemosyne.security import SystemPromptSinkError, assemble_system_prompt
 
@@ -81,6 +81,23 @@ def test_working_route_is_tenant_session_scoped_and_ttl_is_half_open() -> None:
     assert [hit.id for hit in before_boundary] == ["visible", "expired"]
     assert [hit.id for hit in at_boundary] == ["visible"]
     assert rows == original
+
+
+def test_working_route_reads_branch_from_production_record_metadata() -> None:
+    def record(item_id: str, branch: str) -> WorkingMemoryItem:
+        values = _item(item_id, metadata={"branch": branch})
+        return WorkingMemoryItem(**values)
+
+    hits = working_memory_hits(
+        [record("main-item", "main"), record("other-item", "other")],
+        query="deploy",
+        tenant_id=TENANT,
+        session_id=SESSION,
+        evaluated_at=EVALUATED_AT,
+        branch="main",
+    )
+
+    assert [hit.id for hit in hits] == ["main-item"]
 
 
 def test_absent_session_fails_closed_without_reading_items() -> None:
