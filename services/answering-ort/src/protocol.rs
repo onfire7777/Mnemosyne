@@ -1,5 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashSet;
+use std::fmt;
 
 use crate::runtime::{Deadline, Runtime};
 
@@ -141,6 +143,118 @@ pub struct Response {
     pub error: Option<ApiError>,
 }
 
+struct DuplicateRejectingValue(serde_json::Value);
+
+impl<'de> Deserialize<'de> for DuplicateRejectingValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ValueVisitor;
+
+        impl<'de> Visitor<'de> for ValueVisitor {
+            type Value = serde_json::Value;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a JSON value")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::Bool(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::Number(value.into()))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::Number(value.into()))
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                serde_json::Number::from_f64(value)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| E::custom("invalid JSON number"))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::String(value.to_owned()))
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::String(value))
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::Null)
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(serde_json::Value::Null)
+            }
+
+            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                DuplicateRejectingValue::deserialize(deserializer).map(|value| value.0)
+            }
+
+            fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                let mut values = Vec::new();
+                while let Some(value) = sequence.next_element::<DuplicateRejectingValue>()? {
+                    values.push(value.0);
+                }
+                Ok(serde_json::Value::Array(values))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut values = serde_json::Map::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    if values.contains_key(&key) {
+                        return Err(de::Error::custom("duplicate JSON object key"));
+                    }
+                    let value = map.next_value::<DuplicateRejectingValue>()?;
+                    values.insert(key, value.0);
+                }
+                Ok(serde_json::Value::Object(values))
+            }
+        }
+
+        deserializer.deserialize_any(ValueVisitor).map(Self)
+    }
+}
+
 impl Response {
     pub fn success(result: Output) -> Self {
         Self {
@@ -167,8 +281,11 @@ pub fn parse_request(body: &[u8]) -> Result<Request, ApiError> {
         ));
     }
 
-    let value: serde_json::Value =
-        serde_json::from_slice(body).map_err(|_| ApiError::malformed())?;
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let value = DuplicateRejectingValue::deserialize(&mut deserializer)
+        .map_err(|_| ApiError::malformed())?
+        .0;
+    deserializer.end().map_err(|_| ApiError::malformed())?;
     let operation = value
         .as_object()
         .and_then(|object| object.get("operation"))
@@ -369,6 +486,13 @@ mod tests {
             br#"{"operation":"embed","query":null}"#,
             br#"{"operation":"embed","query":"q","extra":true}"#,
             br#"{"operation":"read","query":"q","evidence":[{"id":"1","text":"x","extra":true}]}"#,
+        ] {
+            assert_eq!(error_code(body), ErrorCode::MalformedRequest);
+        }
+        for body in [
+            br#"{"operation":"embed","query":"q","query":"r"}"# as &[u8],
+            br#"{"operation":"read","query":"q","evidence":[{"id":"one","id":"two","text":"x"}]}"#
+                as &[u8],
         ] {
             assert_eq!(error_code(body), ErrorCode::MalformedRequest);
         }
