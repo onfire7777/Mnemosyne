@@ -37,11 +37,13 @@ def _sign_payload(payload: dict[str, object]) -> str:
 def _identity(
     *,
     role: str = "agent",
+    agent_id: str | None = "agent-a",
     capabilities: tuple[str, ...] = (),
 ) -> SessionIdentity:
     return SessionIdentity(
         tenant_id="tenant-a",
         user_id="user-a",
+        agent_id=agent_id,
         role=role,  # type: ignore[arg-type]
         source_trust_tier=int(TrustTier.USER_AUTHORED),
         capabilities=capabilities,
@@ -75,6 +77,7 @@ def test_subject_operations_are_allowed_and_bound_to_session_identity() -> None:
             actor_id="user-a",
             owner_id="user-a",
             scope="subject",
+            agent_id="agent-a" if operation == "schedule" else None,
         )
 
     reader = policy.authorize_prospective_memory(
@@ -87,6 +90,19 @@ def test_subject_operations_are_allowed_and_bound_to_session_identity() -> None:
     assert reader.actor_id == "user-a"
     assert reader.owner_id == "user-a"
     assert reader.scope == "subject"
+
+
+def test_schedule_rejects_agent_assignment_not_bound_to_session() -> None:
+    decision = SecurityPolicy().authorize_prospective_memory(
+        "schedule",
+        _identity(agent_id="agent-a"),
+        tenant_id="tenant-a",
+        actor_id="user-a",
+        owner_id="user-a",
+        agent_id="agent-b",
+    )
+    _assert_denied_unbound(decision)
+    assert "agent" in decision.reason
 
 
 def test_reader_mutation_evaluation_and_missing_scheduler_authority_are_denied() -> None:
@@ -314,6 +330,7 @@ def test_prospective_writes_require_normal_or_stronger_source_trust() -> None:
             SessionIdentity(
                 tenant_id="tenant-a",
                 user_id="user-a",
+                agent_id="agent-a",
                 role="agent" if operation in {"schedule", "cancel"} else "operator",
                 source_trust_tier=int(TrustTier.UNTRUSTED_EXTERNAL),
                 capabilities=capabilities,
@@ -329,6 +346,7 @@ def test_prospective_writes_require_normal_or_stronger_source_trust() -> None:
             SessionIdentity(
                 tenant_id="tenant-a",
                 user_id="user-a",
+                agent_id="agent-a",
                 role="operator",
                 source_trust_tier=int(TrustTier.NORMAL),
                 capabilities=capabilities,

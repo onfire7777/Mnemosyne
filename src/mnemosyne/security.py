@@ -101,6 +101,7 @@ class SessionIdentity:
     user_id: str
     role: WriteRole
     source_trust_tier: int
+    agent_id: str | None = None
     expires_at: int | None = None
     session_id: str | None = None
     capabilities: tuple[str, ...] = ()
@@ -114,6 +115,9 @@ class SessionIdentity:
         user_id = str(payload.get("user_id") or payload.get("user") or "")
         if not tenant_id or not user_id:
             raise SessionAuthError("session tenant_id and user_id are required")
+        raw_agent_id = payload.get("agent_id")
+        if raw_agent_id is not None and (not isinstance(raw_agent_id, str) or not raw_agent_id.strip()):
+            raise SessionAuthError("session agent_id is invalid")
         raw_source_trust_tier = payload.get(
             "source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)
         )
@@ -143,6 +147,7 @@ class SessionIdentity:
             user_id=user_id,
             role=role,  # type: ignore[arg-type]
             source_trust_tier=source_trust_tier,
+            agent_id=raw_agent_id,
             expires_at=parsed_expires_at,
             session_id=str(payload["session_id"]) if payload.get("session_id") else None,
             capabilities=capabilities,
@@ -155,6 +160,8 @@ class SessionIdentity:
             "role": self.role,
             "source_trust_tier": self.source_trust_tier,
         }
+        if self.agent_id:
+            payload["agent_id"] = self.agent_id
         if self.expires_at is not None:
             payload["exp"] = self.expires_at
         if self.session_id:
@@ -1055,6 +1062,7 @@ def issue_session_from_oidc(
         user_id=identity.user_id,
         role=identity.role,
         source_trust_tier=identity.source_trust_tier,
+        agent_id=identity.agent_id,
         expires_at=min(identity.expires_at or max_exp, max_exp),
         session_id=identity.session_id,
         capabilities=identity.capabilities,
@@ -1092,6 +1100,7 @@ class ProspectiveMemoryAuthorization:
     actor_id: str | None = None
     owner_id: str | None = None
     scope: ProspectiveMemoryScope | None = None
+    agent_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -1131,6 +1140,7 @@ class SecurityPolicy:
         tenant_id: str,
         actor_id: str | None = None,
         owner_id: str | None = None,
+        agent_id: str | None = None,
         tenant_wide: bool = False,
     ) -> ProspectiveMemoryAuthorization:
         """Authorize a prospective-memory operation from verified session identity.
@@ -1157,6 +1167,10 @@ class SecurityPolicy:
             or not isinstance(identity.source_trust_tier, int)
             or isinstance(identity.source_trust_tier, bool)
             or identity.source_trust_tier not in {int(item) for item in TrustTier}
+            or (
+                identity.agent_id is not None
+                and (not isinstance(identity.agent_id, str) or not identity.agent_id.strip())
+            )
         ):
             return deny("session identity is malformed")
         if not isinstance(identity.capabilities, tuple):
@@ -1173,6 +1187,8 @@ class SecurityPolicy:
             return deny("requested tenant does not match session identity")
         if actor_id is not None and (not isinstance(actor_id, str) or actor_id != identity.user_id):
             return deny("requested actor does not match session identity")
+        if agent_id is not None and (not isinstance(agent_id, str) or not agent_id.strip()):
+            return deny("requested agent is malformed")
         if not isinstance(tenant_wide, bool):
             return deny("tenant-wide scope must be boolean")
         if owner_id is not None and (not isinstance(owner_id, str) or not owner_id.strip()):
@@ -1184,6 +1200,11 @@ class SecurityPolicy:
             self.min_prospective_write_trust,
         ):
             return deny("prospective-memory writes require normal-or-stronger source trust")
+        if operation == "schedule":
+            if identity.agent_id is None:
+                return deny("schedule requires an authenticated agent identity")
+            if agent_id is not None and agent_id != identity.agent_id:
+                return deny("requested agent does not match session identity")
         if operation == "evaluate":
             if identity.role == "reader":
                 return deny("reader role cannot evaluate prospective memory")
@@ -1232,6 +1253,7 @@ class SecurityPolicy:
             identity.user_id,
             identity.user_id,
             "subject",
+            identity.agent_id if operation == "schedule" else None,
         )
 
     def authorize_write(

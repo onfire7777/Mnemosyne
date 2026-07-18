@@ -43,12 +43,14 @@ EMPTY_CONTEXT = {"infrastructure_available": True, "events": [], "conditions": {
 def _identity(
     *,
     user_id: str = USER,
+    agent_id: str = AGENT,
     role: WriteRole = "agent",
     capabilities: tuple[str, ...] = (),
 ) -> SessionIdentity:
     return SessionIdentity(
         tenant_id=TENANT,
         user_id=user_id,
+        agent_id=agent_id,
         role=role,
         source_trust_tier=int(TrustTier.NORMAL),
         capabilities=capabilities,
@@ -398,6 +400,7 @@ def test_evaluate_serializes_context_and_operating_point_for_event(tmp_path: Pat
                 "occurred_at": due.isoformat(),
                 "payload": {"kind": "final"},
                 "confidence": 0.9,
+                "tenant_id": TENANT,
             }
         ],
         "conditions": {},

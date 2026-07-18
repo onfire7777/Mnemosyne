@@ -47,9 +47,10 @@ OPERATING_POINT = ProspectiveOperatingPoint(
 )
 
 
-def _context() -> TriggerEvaluationContext:
+def _context(tenant_id: str = TENANT_ID) -> TriggerEvaluationContext:
     return TriggerEvaluationContext(
         infrastructure_available=True,
+        tenant_id=tenant_id,
         events=[],
         conditions={},
     )
@@ -64,7 +65,7 @@ def _evaluate(
     return engine.evaluate_due_intentions(
         tenant_id,
         evaluated_at=evaluated_at,
-        trigger_context=_context(),
+        trigger_context=_context(tenant_id),
         operating_point=OPERATING_POINT,
     )
 
@@ -722,6 +723,7 @@ def test_all_five_canonical_trigger_types_fire_with_sqlite_parity(tmp_path: Path
 
     context = TriggerEvaluationContext(
         infrastructure_available=True,
+        tenant_id=TENANT_ID,
         events=[
             {
                 "event_id": "event-report-1",
@@ -729,6 +731,7 @@ def test_all_five_canonical_trigger_types_fire_with_sqlite_parity(tmp_path: Path
                 "occurred_at": (EVALUATED_AT - timedelta(minutes=1)).isoformat(),
                 "payload": {"report_id": "r-1", "pages": 3},
                 "confidence": 0.99,
+                "tenant_id": TENANT_ID,
             }
         ],
         conditions={
@@ -736,6 +739,7 @@ def test_all_five_canonical_trigger_types_fire_with_sqlite_parity(tmp_path: Path
                 "value": True,
                 "observed_at": (EVALUATED_AT - timedelta(minutes=1)).isoformat(),
                 "confidence": 0.99,
+                "tenant_id": TENANT_ID,
             }
         },
     )

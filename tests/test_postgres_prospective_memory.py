@@ -35,6 +35,7 @@ psycopg_sql = pytest.importorskip("psycopg.sql")
 
 _DSN = os.environ.get("MNEMOSYNE_POSTGRES_DSN")
 _RLS_TEST_ROLE = os.environ.get("MNEMOSYNE_POSTGRES_RLS_TEST_ROLE", "mnemosyne_pm_app")
+TENANT_ID = "tenant-a"
 _EVALUATED_AT = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
 _OP = ProspectiveOperatingPoint(
     operating_point_id="op-test",
@@ -45,11 +46,22 @@ _OP = ProspectiveOperatingPoint(
 )
 
 
-def _ctx(infra: bool = True, events=None, conditions=None) -> TriggerEvaluationContext:
+def _ctx(infra: bool = True, events=None, conditions=None, tenant_id: str = TENANT_ID) -> TriggerEvaluationContext:
+    normalized_events = [
+        {**event, "tenant_id": event.get("tenant_id", tenant_id)} for event in events or []
+    ]
+    normalized_conditions = {
+        condition_id: {
+            **observation,
+            "tenant_id": observation.get("tenant_id", tenant_id),
+        }
+        for condition_id, observation in (conditions or {}).items()
+    }
     return TriggerEvaluationContext(
         infrastructure_available=infra,
-        events=events or [],
-        conditions=conditions or {},
+        tenant_id=tenant_id,
+        events=normalized_events,
+        conditions=normalized_conditions,
     )
 
 
