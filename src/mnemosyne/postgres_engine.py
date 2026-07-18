@@ -11,7 +11,6 @@ import threading
 import weakref
 from collections import defaultdict
 from contextlib import nullcontext
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any, Mapping
@@ -36,6 +35,7 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
+    WorkingMemoryItem,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
@@ -125,98 +125,6 @@ def _normalize_working_json(value: Any, *, path: str) -> Any:
             normalized[key] = _normalize_working_json(item, path=f"{path}.{key}")
         return normalized
     raise ValueError(f"{path} must contain JSON data only")
-
-
-try:
-    from mnemosyne.engine import WorkingMemoryItem as WorkingMemoryItem
-except (ImportError, AttributeError):
-
-    @dataclass(slots=True)
-    class WorkingMemoryItem:
-        """Compatibility model used until the Local working-memory lane lands."""
-
-        item_id: str
-        tenant_id: str
-        session_id: str
-        user_id: str
-        agent_id: str
-        kind: str
-        task_id: str
-        content: str
-        created_at: datetime
-        expires_at: datetime
-        evidence_ids: list[str] = field(default_factory=list)
-        trust_tier: int = 0
-        access_policy: dict[str, Any] = field(default_factory=dict)
-        metadata: dict[str, Any] = field(default_factory=dict)
-        capability_tags: list[str] = field(default_factory=list)
-        sensitivity: int = 0
-        status: str = "active"
-        expired_at: datetime | None = None
-
-        def __post_init__(self) -> None:
-            for name in (
-                "item_id",
-                "tenant_id",
-                "session_id",
-                "user_id",
-                "agent_id",
-                "kind",
-                "task_id",
-                "content",
-            ):
-                if type(getattr(self, name)) is not str or not getattr(self, name).strip():
-                    raise ValueError(f"{name} must be a non-empty string")
-            if self.kind not in _WORKING_MEMORY_KINDS:
-                raise ValueError(f"unsupported working-memory kind: {self.kind!r}")
-            for name in ("created_at", "expires_at"):
-                value = getattr(self, name)
-                if not isinstance(value, datetime) or value.tzinfo is None:
-                    raise ValueError(f"{name} must be timezone-aware")
-            self.created_at = self.created_at.astimezone(UTC)
-            self.expires_at = self.expires_at.astimezone(UTC)
-            if self.expires_at <= self.created_at:
-                raise ValueError("expires_at must be after created_at")
-            if self.expires_at - self.created_at > timedelta(hours=24):
-                raise ValueError("working-memory TTL cannot exceed 24 hours")
-            if type(self.evidence_ids) is not list or not self.evidence_ids:
-                raise ValueError("evidence_ids must contain originating evidence")
-            if self.status not in {"active", "expired"}:
-                raise ValueError("status must be active or expired")
-            if self.status == "active" and self.expired_at is not None:
-                raise ValueError("active working-memory items cannot have expired_at")
-            if self.status == "expired" and self.expired_at is None:
-                raise ValueError("expired working-memory items require expired_at")
-
-        def to_dict(self) -> dict[str, Any]:
-            return {
-                "item_id": self.item_id,
-                "tenant_id": self.tenant_id,
-                "session_id": self.session_id,
-                "user_id": self.user_id,
-                "agent_id": self.agent_id,
-                "kind": self.kind,
-                "task_id": self.task_id,
-                "content": self.content,
-                "created_at": dt_to_json(self.created_at),
-                "expires_at": dt_to_json(self.expires_at),
-                "evidence_ids": copy.deepcopy(self.evidence_ids),
-                "trust_tier": self.trust_tier,
-                "access_policy": copy.deepcopy(self.access_policy),
-                "metadata": copy.deepcopy(self.metadata),
-                "capability_tags": list(self.capability_tags),
-                "sensitivity": self.sensitivity,
-                "status": self.status,
-                "expired_at": dt_to_json(self.expired_at),
-            }
-
-        @classmethod
-        def from_dict(cls, data: dict[str, Any]) -> "WorkingMemoryItem":
-            parsed = dict(data)
-            parsed["created_at"] = parse_dt(parsed.get("created_at"))
-            parsed["expires_at"] = parse_dt(parsed.get("expires_at"))
-            parsed["expired_at"] = parse_dt(parsed.get("expired_at"))
-            return cls(**parsed)
 
 
 _WORKING_FIELDS = (

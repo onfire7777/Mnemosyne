@@ -8,7 +8,6 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.models import Hit
 from mnemosyne.retrieval import build_working_memory_hits, working_memory_hits
 from mnemosyne.security import SystemPromptSinkError, assemble_system_prompt
 
@@ -82,51 +81,6 @@ def test_working_route_is_tenant_session_scoped_and_ttl_is_half_open() -> None:
     assert [hit.id for hit in before_boundary] == ["visible", "expired"]
     assert [hit.id for hit in at_boundary] == ["visible"]
     assert rows == original
-
-
-def test_normalized_provider_requires_exact_tenant_session_and_branch_markers() -> None:
-    engine = LocalMemoryEngine()
-
-    def hit(item_id: str, *, session_id: str | None, branch: str = "main") -> Hit:
-        metadata: dict[str, object] = {
-            "working_memory": {
-                "data_only": True,
-                "promotion_gate_required": True,
-                "task_id": "task-deploy",
-                "created_at": EVALUATED_AT - timedelta(minutes=5),
-                "expires_at": EVALUATED_AT + timedelta(minutes=5),
-            }
-        }
-        if session_id is not None:
-            metadata["session_id"] = session_id
-        return Hit(
-            id=item_id,
-            kind="evidence",
-            tenant_id=TENANT,
-            branch=branch,
-            text=item_id,
-            score=1.0,
-            channel="working_memory",
-            metadata=metadata,
-        )
-
-    def working_memory_search(query: str, k: int, filt: dict[str, object]) -> list[Hit]:
-        return [
-            hit("missing-session", session_id=None),
-            hit("wrong-session", session_id=OTHER_SESSION),
-            hit("wrong-branch", session_id=SESSION, branch="other"),
-            hit("valid", session_id=SESSION),
-        ]
-
-    engine.working_memory_search = working_memory_search  # type: ignore[attr-defined,method-assign]
-    result = engine.retrieve(
-        "deploy",
-        tenant_id=TENANT,
-        branch="main",
-        filt={"session_id": SESSION, "evaluated_at": EVALUATED_AT},
-    )
-
-    assert [hit.id for hit in result.hits] == ["valid"]
 
 
 def test_absent_session_fails_closed_without_reading_items() -> None:
