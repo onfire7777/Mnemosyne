@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from eval.harness.cli_driver import MnemoCLI
-from eval.public.action_cli import ActionCLI
+from eval.public.action_cli import ActionCLI, PM_TRIGGER_UNAVAILABLE_REASON
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
@@ -101,6 +101,11 @@ def test_action_run_verify_and_reproduce_are_byte_identical(
 ) -> None:
     source = tmp_path / f"{suite}-source"
     reproduced = tmp_path / f"{suite}-reproduced"
+    if suite != "working-memory-action-development":
+        with pytest.raises(ValueError, match="PM-Bench/TriggerBench are non-runnable"):
+            run_public_suite(suite, source)
+        assert not source.exists()
+        return
     run_public_suite(suite, source)
     assert verify_bundle(source) == {
         "family": "deterministic-action",
@@ -130,12 +135,7 @@ def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
     tmp_path: Path, suite: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     commands: list[str] = []
-    action_run = ActionCLI.run
     mnemo_run = MnemoCLI.run
-
-    def record_action(self: ActionCLI, command: str, *args: object) -> object:
-        commands.append(command)
-        return action_run(self, command, *args)  # type: ignore[arg-type]
 
     def record_mnemo(
         self: MnemoCLI, command: str, *args: str, **kwargs: object
@@ -143,9 +143,13 @@ def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
         commands.append(command)
         return mnemo_run(self, command, *args, **kwargs)
 
-    monkeypatch.setattr(ActionCLI, "run", record_action)
     monkeypatch.setattr(MnemoCLI, "run", record_mnemo)
     out = tmp_path / suite
+    if suite != "working-memory-action-development":
+        with pytest.raises(ValueError, match="PM-Bench/TriggerBench are non-runnable"):
+            run_public_suite(suite, out)
+        assert commands == []
+        return
     run_public_suite(suite, out)
     traces = [
         json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
@@ -155,14 +159,23 @@ def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
         not {"payload", "action_payload"} & trace.keys()
         for trace in traces
     )
-    if suite == "working-memory-action-development":
-        assert all(
-            not {"expected_action_id", "expected_abstain"} & trace.keys()
-            for trace in traces
-        )
-        assert {"capture", "working-seed", "working-query"} <= set(commands)
-    else:
-        assert {"task.create", "intention.query", "action.select"} <= set(commands)
+    assert all(
+        not {"expected_action_id", "expected_abstain"} & trace.keys()
+        for trace in traces
+    )
+    assert {"capture", "working-seed", "working-query"} <= set(commands)
+
+
+def test_pm_trigger_simulator_is_retired_with_exact_capability_gap(
+    tmp_path: Path,
+) -> None:
+    cli = ActionCLI(tmp_path / "action-state.json")
+    with pytest.raises(RuntimeError) as exc:
+        cli.run("intention.query", {"tenant_id": "t", "session_id": "s"})
+    assert str(exc.value) == PM_TRIGGER_UNAVAILABLE_REASON
+    assert "clock" in PM_TRIGGER_UNAVAILABLE_REASON
+    assert "event" in PM_TRIGGER_UNAVAILABLE_REASON
+    assert "dependency-aware" in PM_TRIGGER_UNAVAILABLE_REASON
 
 
 @pytest.mark.parametrize(
