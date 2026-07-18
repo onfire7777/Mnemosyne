@@ -499,6 +499,89 @@ def test_shared_prospective_trigger_matrix(
         assert row["diff"]["evidence_ids"] == [evidence_id]
 
 
+@pytest.mark.parametrize(
+    ("trigger_type", "trigger_expression"),
+    [
+        ("exact_time", {"at": _PROSPECTIVE_EVALUATED_AT.isoformat()}),
+        (
+            "time_window",
+            {
+                "start": _PROSPECTIVE_EVALUATED_AT.isoformat(),
+                "end": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=1)).isoformat(),
+            },
+        ),
+        ("event", {"event_type": "report.submitted", "match": {"report_id": "report-1"}}),
+        ("condition", {"condition_id": "report-ready", "operator": "gt", "value": 30}),
+    ],
+)
+def test_shared_non_dependency_triggers_reject_dependencies(
+    trigger_type: str, trigger_expression: dict[str, Any]
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="dependencies are only valid for dependency_completion triggers",
+    ):
+        Intention(
+            intention_id=f"invalid-dependencies-{trigger_type}",
+            tenant_id="tenant-shared",
+            user_id="user-shared",
+            agent_id="agent-shared",
+            trigger_type=trigger_type,
+            trigger_expression=trigger_expression,
+            action={"type": "remind"},
+            due_at=_PROSPECTIVE_EVALUATED_AT,
+            dependencies=["unexpected-dependency"],
+            evidence_ids=["evidence-shared"],
+        )
+
+
+def test_shared_firing_receipt_survives_erasure_and_rejects_reuse(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    evidence_id = _prospective_evidence(engine, tenant, user, "agent-receipt")
+    due_at = _PROSPECTIVE_EVALUATED_AT - timedelta(minutes=5)
+    intention = _prospective_intention(
+        intention_id="shared-receipt-reuse",
+        tenant=tenant,
+        user=user,
+        agent="agent-receipt",
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={"at": due_at.isoformat()},
+        due_at=due_at,
+    )
+    engine.schedule_intention(intention)
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+        trigger_context=_prospective_context("exact_time", positive=True),
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    )
+    engine.forget(
+        tenant,
+        evidence_id,
+        requested_by=user,
+        erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE,
+    )
+
+    replacement_evidence = _prospective_evidence(
+        engine, tenant, user, "agent-receipt-replacement"
+    )
+    replacement = _prospective_intention(
+        intention_id=intention.intention_id,
+        tenant=tenant,
+        user=user,
+        agent="agent-receipt",
+        evidence_id=replacement_evidence,
+        trigger_type="exact_time",
+        trigger_expression={"at": due_at.isoformat()},
+        due_at=due_at,
+    )
+    with pytest.raises(ValueError, match="already has a durable firing receipt"):
+        engine.schedule_intention(replacement)
+
+
 @pytest.mark.parametrize("case", ["missing", "foreign_tenant", "wrong_user"])
 def test_shared_prospective_provenance_rejects_without_mutation(
     engine_bundle: tuple[Any, str, str], case: str
