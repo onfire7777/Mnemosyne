@@ -195,6 +195,37 @@ ENSURE_STATEMENTS: list[str] = [
         PRIMARY KEY (tenant_id, canonical)
     )
     """,
+    # intentions — PK(tenant_id, intention_id); the record column holds the
+    # full Intention.to_dict() JSON so rows rehydrate through Intention.from_dict
+    # exactly (same pattern as preferences/justifications/contradictions). The
+    # status and due_at columns are denormalized from the record JSON so the
+    # evaluate_due_intentions scan and the forget cascade can filter in SQL
+    # without parsing every record. due_at is stored as the ISO-8601 string
+    # Local's to_dict emits (``.isoformat()``); comparisons are lexicographic on
+    # UTC-normalized instants, matching Local's (due_at, intention_id) order.
+    """
+    CREATE TABLE IF NOT EXISTS intentions (
+        tenant_id TEXT NOT NULL,
+        intention_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled'
+            CHECK (status IN ('scheduled', 'cancelled', 'fired')),
+        due_at TEXT NOT NULL,
+        record TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, intention_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS intentions_tenant_status_due_idx
+        ON intentions(tenant_id, status, due_at, intention_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS intention_fire_receipts (
+        event_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        intention_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+    )
+    """,
     # audit/deletion/merge logs — append-ordered plain dict rows persisted
     # verbatim (seq preserves LocalMemoryEngine's list ordering).
     """

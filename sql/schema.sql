@@ -305,6 +305,7 @@ CREATE TABLE IF NOT EXISTS conformal_calibration (
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id BIGSERIAL PRIMARY KEY,
+  event_id TEXT,
   tenant_id UUID,
   actor TEXT,
   op TEXT NOT NULL,
@@ -312,8 +313,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   trust_tier SMALLINT,
   capability_tags TEXT[] NOT NULL DEFAULT '{}',
   diff JSONB NOT NULL DEFAULT '{}'::jsonb,
-  at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  event_id TEXT
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS event_id TEXT;
@@ -572,6 +572,84 @@ CREATE POLICY runtime_state_tenant_isolation ON runtime_state
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
+-- Prospective-memory intentions (W3 Phase 2). Tenant-scoped and RLS-isolated.
+CREATE TABLE IF NOT EXISTS intentions (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  intention_id TEXT NOT NULL,
+  user_id UUID NOT NULL,
+  external_user_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  trigger_type TEXT NOT NULL CHECK (trigger_type IN ('exact_time', 'time_window', 'event', 'condition', 'dependency_completion')),
+  trigger_expression JSONB NOT NULL,
+  action JSONB NOT NULL DEFAULT '{}'::jsonb,
+  due_at TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'cancelled', 'fired')),
+  priority TEXT NOT NULL DEFAULT 'normal',
+  dependencies TEXT[] NOT NULL DEFAULT '{}',
+  reschedule_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+  cancellation_state JSONB,
+  evidence_ids BYTEA[] NOT NULL DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, intention_id)
+);
+
+DROP INDEX IF EXISTS intentions_fired_unique;
+
+CREATE INDEX IF NOT EXISTS intentions_tenant_due_idx
+  ON intentions (tenant_id, due_at, intention_id)
+  WHERE status = 'scheduled';
+
+ALTER TABLE intentions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intentions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS intentions_tenant_isolation ON intentions;
+CREATE POLICY intentions_tenant_isolation ON intentions
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+-- Durable, clock-independent idempotency receipts.  The operation is part of
+-- the key so retries of the same logical transition have one winner without
+-- relying on evaluation timestamps or audit-log timing.
+CREATE TABLE IF NOT EXISTS intention_firing_receipts (
+  tenant_id UUID NOT NULL,
+  intention_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation = 'fire'),
+  canonical_event_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, intention_id, operation)
+);
+
+-- Receipts outlive intention erasure and are immutable idempotency evidence.
+-- The named constraint is PostgreSQL's deterministic name for the historical
+-- inline composite foreign key; dropping it is idempotent for upgraded stores.
+ALTER TABLE intention_firing_receipts
+  DROP CONSTRAINT IF EXISTS intention_firing_receipts_tenant_id_intention_id_fkey;
+
+CREATE UNIQUE INDEX IF NOT EXISTS intention_firing_receipts_event_id_unique
+  ON intention_firing_receipts (canonical_event_id);
+
+CREATE OR REPLACE FUNCTION mnemosyne_intention_receipts_append_only()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'intention_firing_receipts is append-only; % is not allowed', TG_OP
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS intention_firing_receipts_append_only
+  ON intention_firing_receipts;
+CREATE TRIGGER intention_firing_receipts_append_only
+  BEFORE UPDATE OR DELETE ON intention_firing_receipts
+  FOR EACH ROW EXECUTE FUNCTION mnemosyne_intention_receipts_append_only();
+
+ALTER TABLE intention_firing_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intention_firing_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS intention_firing_receipts_tenant_isolation
+  ON intention_firing_receipts;
+CREATE POLICY intention_firing_receipts_tenant_isolation
+  ON intention_firing_receipts
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
 ALTER TABLE working_memory ENABLE ROW LEVEL SECURITY;
 ALTER TABLE working_memory FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS working_memory_tenant_isolation ON working_memory;
@@ -619,6 +697,15 @@ CREATE TABLE IF NOT EXISTS graph_ppr_cache (
 
 -- preferences: supersession pointer for revised preferences.
 ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by UUID;
+
+-- intentions: retain the caller-facing user identifier alongside the stable
+-- UUID used for relational ownership checks. Existing deployments predate the
+-- external identifier; preserve their usable identity with the UUID text.
+ALTER TABLE intentions ADD COLUMN IF NOT EXISTS external_user_id TEXT;
+UPDATE intentions
+SET external_user_id = user_id::text
+WHERE external_user_id IS NULL;
+ALTER TABLE intentions ALTER COLUMN external_user_id SET NOT NULL;
 
 -- evidence: stored lexical tsvector (mirrors assertions.lexeme) + GIN index so
 -- full-text search stops recomputing to_tsvector('english', content) per row
