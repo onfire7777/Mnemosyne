@@ -40,29 +40,32 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
-from mnemosyne.models import Hit, RetrievalResult
+from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
     QUERY_SUPPORT_THRESHOLD,
+    PROSPECTIVE_MEMORY_CHANNEL,
     RetrievalAdapters,
+    WORKING_MEMORY_CHANNEL,
     activation_explain,
     answer_grounding_floor_report,
     apply_activation_scores,
     apply_workspace_retrieval_advisory,
     gist_support_report,
     query_support,
+    prospective_memory_hits,
     schema_fast_path_rerank,
     semantic_entropy,
-    build_working_memory_hits,
     strip_workspace_broadcast_filter,
     workspace_broadcast_from_context,
+    working_memory_route_hits,
 )
 from mnemosyne.text import tokenize
 
 #: Capability-tier default to overlap the dense/lexical/graph channel calls on
 #: a 3-worker thread pool (registered in CONFIG-DRIFT-CHECKS.md). Operators can
 #: still force the knob on/off explicitly. Channel identity and the RRF input
-#: order stay exactly [dense, lexical, graph]; parallel results are
+#: order stay exactly [dense, lexical, graph, prospective, working]; parallel results are
 #: byte-identical (tests/test_engine_perf_lanes.py).
 _PARALLEL_CHANNELS_ENV = "MNEMOSYNE_PARALLEL_CHANNELS"
 _PARALLEL_CHANNELS_TRUTHY = {"1", "true", "yes", "on"}
@@ -345,7 +348,7 @@ def _working_memory_route(
             report.update({"status": "unavailable", "reason": "working_store_not_exposed"})
             return [], report
         items = list_working(tenant_id, session_id, as_of=evaluated_at)
-        scoped = build_working_memory_hits(
+        scoped = working_memory_route_hits(
             list(items or []),
             query=query,
             tenant_id=tenant_id,
@@ -406,7 +409,11 @@ class RetrievalPipelineOps(Protocol):
         filt: dict[str, Any] | None = None,
     ) -> list[Hit]: ...
 
-    # -- optional working-memory route ---------------------------------------
+    # -- volatile memory-plane routes ----------------------------------------
+    def list_intentions(self, tenant_id: str) -> list[Any]: ...
+
+    def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Any: ...
+
     def list_working(self, tenant_id: str, session_id: str, *, as_of: Any) -> list[Any]: ...
 
     # -- fusion / ordering / budget helpers ------------------------------------
@@ -459,10 +466,12 @@ def run_retrieval_pipeline(
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
+    retrieval_instant = parse_dt(effective_filter.get("as_of")) or utc_now()
+    prospective_requested = isinstance(effective_filter.get("prospective_owner"), dict)
+    working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
-    working_requested = _working_route_requested(effective_filter)
-    cache_key = _result_cache_key(
+    cache_key = None if prospective_requested or working_requested else _result_cache_key(
         ops,
         query=query,
         tenant_id=tenant_id,
@@ -485,7 +494,7 @@ def run_retrieval_pipeline(
             cached.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=True, stored=False)
             return cached
     if parallel_channels_enabled():
-        with ThreadPoolExecutor(max_workers=4 if working_requested else 3) as pool:
+        with ThreadPoolExecutor(max_workers=5) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
             lexical_future = pool.submit(ops.lexical_search, query, policy.rerank_width, effective_filter)
             graph_future = pool.submit(
@@ -497,6 +506,14 @@ def run_retrieval_pipeline(
                 branch=branch,
                 use_cache=not deep,
                 filt=effective_filter,
+            )
+            prospective_future = pool.submit(
+                prospective_memory_hits,
+                ops,
+                query,
+                policy.rerank_width,
+                effective_filter,
+                as_of=retrieval_instant,
             )
             working_future = pool.submit(
                 _working_memory_route,
@@ -511,6 +528,7 @@ def run_retrieval_pipeline(
             dense = dense_future.result()
             lexical = lexical_future.result()
             graph = _fast_graph_hits(graph_future.result(), deep=deep)
+            prospective = prospective_future.result()
             working, working_explain = working_future.result() if working_future is not None else ([], {})
     else:
         dense = ops.vector_search(query, policy.rerank_width, effective_filter)
@@ -527,6 +545,9 @@ def run_retrieval_pipeline(
             ),
             deep=deep,
         )
+        prospective = prospective_memory_hits(
+            ops, query, policy.rerank_width, effective_filter, as_of=retrieval_instant
+        )
         working, working_explain = (
             _working_memory_route(
                 ops,
@@ -540,10 +561,8 @@ def run_retrieval_pipeline(
             if working_requested
             else ([], {})
         )
-    ranked_channels = [dense, lexical, graph]
-    if working_requested:
-        ranked_channels.append(working)
-    fused = ops._rrf(ranked_channels, k=max(k * 2, policy.rerank_width))
+    ranked_routes = [dense, lexical, graph, prospective, working]
+    fused = ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width))
     reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     diversified = ops._mmr(query, reranked, k=max(k, 1))
@@ -631,10 +650,27 @@ def run_retrieval_pipeline(
         lexical_key: len(lexical),
         graph_key: len(graph),
     }
+    if prospective_requested:
+        channels[PROSPECTIVE_MEMORY_CHANNEL] = len(prospective)
     if working_requested:
-        channels["working_memory"] = len(working)
+        channels[WORKING_MEMORY_CHANNEL] = len(working)
     explain = {
         "channels": channels,
+        "routes": [
+            {"channel": dense_key, "count": len(dense), "requested": True},
+            {"channel": lexical_key, "count": len(lexical), "requested": True},
+            {"channel": graph_key, "count": len(graph), "requested": True},
+            {
+                "channel": PROSPECTIVE_MEMORY_CHANNEL,
+                "count": len(prospective),
+                "requested": prospective_requested,
+            },
+            {
+                "channel": WORKING_MEMORY_CHANNEL,
+                "count": len(working),
+                "requested": working_requested,
+            },
+        ],
         "rrf_k": policy.rrf_k,
         "mmr_lambda": policy.mmr_lambda,
         "activation": activation_explain(budgeted, policy),
