@@ -231,6 +231,15 @@ def test_working_reads_redact_metadata_fields_for_lower_roles() -> None:
     assert readable["metadata"] == {"secret": "[REDACTED:secret]", "public": "safe"}
 
 
+def test_working_expiry_requires_caller_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = PostgresEngine("postgresql://unit-test-fake", require_safe_role=False)
+    engine._psycopg = types.SimpleNamespace(rows=types.SimpleNamespace(dict_row=object()))
+    monkeypatch.setattr(engine, "connect", lambda: _RecordingConnection())
+
+    with pytest.raises(PermissionError, match="caller context"):
+        engine.expire_working("tenant-a", expired_at=CREATED_AT)
+
+
 def test_working_provenance_enforces_trust_ceiling_and_taint() -> None:
     engine = PostgresEngine(
         "postgresql://unit-test-fake",
@@ -594,7 +603,7 @@ def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
     engine.put_working(expired)
     monkeypatch.setattr(engine, "_audit", fail_audit)
     with pytest.raises(RuntimeError, match="audit write failed"):
-        engine.expire_working(tenant, expired_at=now)
+        engine.expire_working(tenant, expired_at=now, context=_read_context(tenant, user))
 
     still_active = engine.get_working(
         tenant,
@@ -637,7 +646,9 @@ def test_postgres_working_memory_expiry_is_exactly_once_under_concurrency() -> N
         engine.put_working(item)
 
     def sweep() -> list[WorkingMemoryItem]:
-        return PostgresEngine(dsn).expire_working(tenant, expired_at=now)
+        return PostgresEngine(dsn).expire_working(
+            tenant, expired_at=now, context=_read_context(tenant, user)
+        )
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(lambda _index: sweep(), range(4)))
@@ -680,7 +691,7 @@ def test_postgres_pool_clears_tenant_after_aborted_expiry(
 
     monkeypatch.setattr(engine, "_audit", fail_audit)
     with pytest.raises(RuntimeError, match="audit write failed"):
-        engine.expire_working(tenant, expired_at=now)
+        engine.expire_working(tenant, expired_at=now, context=_read_context(tenant, user))
 
     with engine.connect() as conn:
         with conn.cursor() as cur:

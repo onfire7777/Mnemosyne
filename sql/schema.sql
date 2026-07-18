@@ -386,7 +386,15 @@ CREATE TABLE IF NOT EXISTS working_memory (
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   PRIMARY KEY (tenant_id, session_id, item_id),
   CHECK (expires_at > created_at),
-  CHECK (expires_at <= created_at + interval '24 hours')
+  CHECK (expires_at <= created_at + interval '24 hours'),
+  CHECK (
+    (status = 'active' AND expired_at IS NULL AND cardinality(evidence_ids) > 0)
+    OR (status = 'expired' AND expired_at IS NOT NULL)
+  ),
+  CHECK (jsonb_typeof(access_policy) = 'object'),
+  CHECK (jsonb_typeof(metadata) = 'object'),
+  CHECK (trust_tier BETWEEN 0 AND 5),
+  CHECK (sensitivity >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS working_memory_scope_created_idx
