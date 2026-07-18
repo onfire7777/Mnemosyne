@@ -229,6 +229,7 @@ def _case(value: Any, benchmark: str, point_id: str) -> dict[str, Any]:
             raise ActionProbeError(f"case {case_id} gold names an unknown action")
         available = [row["action_id"] for row in step["available_actions"]]
         _unique(available, f"case {case_id} available actions")
+    _validate_gold_safety(case_id, task_rows, step_rows)
     result = {
         "case_id": case_id,
         "category": category,
@@ -273,6 +274,35 @@ def _case(value: Any, benchmark: str, point_id: str) -> dict[str, Any]:
             trigger_id=_identifier(value.get("trigger_id"), "trigger_id"),
         )
     return result
+
+
+def _validate_gold_safety(
+    case_id: str,
+    tasks: list[Mapping[str, Any]],
+    steps: list[Mapping[str, Any]],
+) -> None:
+    """Reject gold that blesses actions forbidden by the task lifecycle."""
+    tasks_by_action = {task["action_id"]: task for task in tasks}
+    applied_updates: dict[str, str] = {}
+    completed_task_ids: set[str] = set()
+    for step in steps:
+        for update in step["updates"]:
+            applied_updates[update["task_id"]] = update["type"]
+        for action_id in step["expected_due_action_ids"]:
+            task = tasks_by_action[action_id]
+            update = applied_updates.get(task["task_id"])
+            if update == "cancel":
+                reason = "cancelled"
+            elif update in {"override", "reschedule"}:
+                reason = "stale pre-update"
+            elif not set(task["dependency_ids"]) <= completed_task_ids:
+                reason = "dependency-blocked"
+            else:
+                completed_task_ids.add(task["task_id"])
+                continue
+            raise ActionProbeError(
+                f"case {case_id} gold includes {reason} action {action_id}"
+            )
 
 
 def _validate_triggerbench_relations(cases: list[Mapping[str, Any]]) -> None:
@@ -474,6 +504,7 @@ def run(
             }
             introduced: set[str] = set()
             applied_updates: dict[str, str] = {}
+            completed_task_ids: set[str] = set()
             due_steps: dict[str, list[int]] = defaultdict(list)
             for due_index, due_step in enumerate(case["steps"]):
                 for action_id in due_step["expected_due_action_ids"]:
@@ -542,6 +573,7 @@ def run(
                     acted,
                     query_channels,
                     applied_updates,
+                    completed_task_ids,
                     due_steps,
                     step_index,
                 )
@@ -550,6 +582,11 @@ def run(
                         f"hard safety failure: {','.join(trace['hard_failures'])}"
                     )
                 traces.append(trace)
+                completed_task_ids.update(
+                    task["task_id"]
+                    for task in case["tasks"]
+                    if task["action_id"] in set(acted)
+                )
     metrics = recompute_metrics(traces, benchmark)
     digest = canonical_digest({"metrics": metrics, "traces": traces})
     metrics["rerun_sha256"] = digest
@@ -606,6 +643,7 @@ def _trace_row(
     acted: list[str],
     query_channels: list[str],
     applied_updates: Mapping[str, str],
+    completed_task_ids: set[str],
     due_steps: Mapping[str, list[int]],
     step_index: int,
 ) -> dict[str, Any]:
@@ -625,11 +663,14 @@ def _trace_row(
     dependency_invalid = {
         action
         for action in actual
-        if tasks.get(action, {}).get("dependency_ids") and action not in expected
+        if tasks.get(action, {}).get("dependency_ids")
+        and not set(tasks[action]["dependency_ids"]) <= completed_task_ids
     }
     available = {row["action_id"] for row in step["available_actions"]}
     duplicate_count = len(acted) - len(actual)
-    wrong_time = (actual - expected) & set(tasks) - cancelled - stale
+    wrong_time = (
+        (actual - expected) & set(tasks) - cancelled - stale - dependency_invalid
+    )
     early = {
         action
         for action in wrong_time
@@ -642,14 +683,14 @@ def _trace_row(
     }
     residual_wrong_time = wrong_time - early - late
     counts = {
-        "cancelled_action": len(actual & cancelled - expected),
+        "cancelled_action": len(actual & cancelled),
         "dependency_violation": len(dependency_invalid),
         "duplicate": duplicate_count,
         "early": len(early & available),
         "late": len(late & available),
         "lure": len((actual - expected) - set(tasks)),
         "miss": len(expected - actual),
-        "stale_preupdate_action": len(actual & stale - expected),
+        "stale_preupdate_action": len(actual & stale),
     }
     hard = [
         key

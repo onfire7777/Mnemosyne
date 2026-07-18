@@ -78,14 +78,14 @@ def _fixture(benchmark: str = "pm-bench") -> dict[str, object]:
             ),
             _step(
                 "s2",
-                ["action-2"],
+                [],
                 ["action-2"],
                 boundary="cross_day",
                 updates=[{"type": "override", "task_id": "task-2"}],
             ),
             _step(
                 "s3",
-                ["action-3"],
+                [],
                 ["action-3"],
                 updates=[{"type": "reschedule", "task_id": "task-3"}],
                 channel=True,
@@ -335,6 +335,30 @@ def test_gold_payload_side_effect_isolation_and_safety_fail_closed() -> None:
 
 
 @pytest.mark.parametrize(
+    ("step_index", "action_id", "reason"),
+    (
+        (1, "action-1", "cancelled"),
+        (2, "action-2", "stale pre-update"),
+        (1, "action-4", "dependency-blocked"),
+    ),
+)
+def test_malformed_gold_cannot_bless_forbidden_actions(
+    step_index: int, action_id: str, reason: str
+) -> None:
+    fixture = _fixture()
+    if reason == "dependency-blocked":
+        fixture["cases"][0]["steps"][0]["expected_due_action_ids"] = []  # type: ignore[index]
+        fixture["cases"][0]["steps"][4]["expected_due_action_ids"] = []  # type: ignore[index]
+    fixture["cases"][0]["steps"][step_index]["expected_due_action_ids"] = [  # type: ignore[index]
+        action_id
+    ]
+    with pytest.raises(ActionProbeError, match=reason):
+        normalize(fixture)
+    with pytest.raises(ActionProbeError, match=reason):
+        run(fixture, _cli(fixture))
+
+
+@pytest.mark.parametrize(
     ("step_index", "action_id", "expected_failure"),
     (
         (0, "action-4", "early"),
@@ -348,6 +372,8 @@ def test_wrong_time_update_and_dependency_failures(
     step_index: int, action_id: str, expected_failure: str
 ) -> None:
     fixture = _fixture()
+    if expected_failure == "early":
+        fixture["cases"][0]["tasks"][4]["dependency_ids"] = []  # type: ignore[index]
     step = fixture["cases"][0]["steps"][step_index]  # type: ignore[index]
     if action_id not in {row["action_id"] for row in step["available_actions"]}:
         step["available_actions"].append(
@@ -357,6 +383,8 @@ def test_wrong_time_update_and_dependency_failures(
         step["expected_due_action_ids"] = []
     cli = _cli(fixture)
     key = ("tenant-pm", "session-pm")
+    if expected_failure == "dependency_violation":
+        cli.responses[key][0] = []
     cli.responses[key][step_index] = [action_id]
     with pytest.raises(ActionProbeError, match=expected_failure):
         run(fixture, cli)
@@ -366,6 +394,7 @@ def test_lure_count_and_cross_case_candidate_leakage() -> None:
     fixture = _fixture()
     cli = _cli(fixture)
     cli.responses[("tenant-pm", "session-pm")][0] = ["lure"]
+    cli.responses[("tenant-pm", "session-pm")][4] = []
     _, _, metrics = run(fixture, cli)
     assert metrics["safety_counts"]["lure"] == 1
 
