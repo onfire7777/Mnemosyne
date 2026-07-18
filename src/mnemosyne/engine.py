@@ -269,6 +269,144 @@ class Intention:
         return record
 
 
+_WORKING_MEMORY_KINDS = {
+    "active_goal",
+    "current_plan",
+    "active_constraint",
+    "constraint",
+    "unresolved_question",
+    "tool_result",
+    "recent_tool_result",
+    "intermediate_conclusion",
+}
+
+
+@dataclass(slots=True)
+class WorkingMemoryItem:
+    """A bounded, data-only item in the local working-memory plane."""
+
+    item_id: str
+    tenant_id: str
+    session_id: str
+    user_id: str
+    agent_id: str
+    kind: str
+    task_id: str
+    content: str
+    created_at: datetime
+    expires_at: datetime
+    evidence_ids: list[str]
+    access_policy: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    capability_tags: list[str] = field(default_factory=list)
+    sensitivity: int = 0
+    # Lifecycle state is intentionally excluded from value identity: callers
+    # can retain the item submitted to put_working while expiry returns its
+    # transitioned detached copy.
+    status: Literal["active", "expired"] = field(default="active", compare=False)
+    expired_at: datetime | None = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        for name in (
+            "item_id",
+            "tenant_id",
+            "session_id",
+            "user_id",
+            "agent_id",
+            "task_id",
+        ):
+            value = getattr(self, name)
+            if type(value) is not str or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        if type(self.kind) is not str or self.kind not in _WORKING_MEMORY_KINDS:
+            raise ValueError(f"unsupported working-memory kind: {self.kind!r}")
+        if type(self.content) is not str or not self.content.strip():
+            raise ValueError("content must be a non-empty string")
+        for name in ("created_at", "expires_at"):
+            value = getattr(self, name)
+            if not isinstance(value, datetime) or value.tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        created_at = self.created_at.astimezone(UTC)
+        expires_at = self.expires_at.astimezone(UTC)
+        if expires_at <= created_at:
+            raise ValueError("expires_at must be after created_at")
+        if expires_at - created_at > timedelta(hours=24):
+            raise ValueError("working-memory TTL must not exceed 24 hours")
+        self.created_at = created_at
+        self.expires_at = expires_at
+
+        if type(self.evidence_ids) is not list or not self.evidence_ids:
+            raise ValueError("evidence_ids must contain originating evidence")
+        if any(type(item) is not str or not item.strip() for item in self.evidence_ids):
+            raise ValueError("evidence_ids must contain non-empty strings")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("evidence_ids must not contain duplicates")
+        for name in ("access_policy", "metadata"):
+            value = getattr(self, name)
+            if type(value) is not dict:
+                raise ValueError(f"{name} must be a JSON object")
+            setattr(self, name, _normalize_json_value(value, path=name))
+        if type(self.capability_tags) is not list or any(
+            type(tag) is not str or not tag.strip() for tag in self.capability_tags
+        ):
+            raise ValueError("capability_tags must be a list of non-empty strings")
+        if len(set(self.capability_tags)) != len(self.capability_tags):
+            raise ValueError("capability_tags must not contain duplicates")
+        if type(self.sensitivity) is not int or isinstance(self.sensitivity, bool):
+            raise ValueError("sensitivity must be an integer")
+        if self.sensitivity < 0:
+            raise ValueError("sensitivity must not be negative")
+        if self.status not in {"active", "expired"}:
+            raise ValueError("status must be active or expired")
+        if self.expired_at is not None:
+            if not isinstance(self.expired_at, datetime) or self.expired_at.tzinfo is None:
+                raise ValueError("expired_at must be timezone-aware")
+            self.expired_at = self.expired_at.astimezone(UTC)
+        if self.status == "active" and self.expired_at is not None:
+            raise ValueError("active working-memory items cannot have expired_at")
+        if self.status == "expired" and self.expired_at is None:
+            raise ValueError("expired working-memory items require expired_at")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "tenant_id": self.tenant_id,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "kind": self.kind,
+            "task_id": self.task_id,
+            "content": self.content,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+            "evidence_ids": list(self.evidence_ids),
+            "access_policy": copy.deepcopy(self.access_policy),
+            "metadata": copy.deepcopy(self.metadata),
+            "capability_tags": list(self.capability_tags),
+            "sensitivity": self.sensitivity,
+            "status": self.status,
+            "expired_at": self.expired_at.isoformat() if self.expired_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "WorkingMemoryItem":
+        if type(row) is not dict:
+            raise ValueError("stored working-memory item must be a JSON object")
+        parsed = copy.deepcopy(row)
+        for name in ("created_at", "expires_at", "expired_at"):
+            value = parsed.get(name)
+            if value is not None:
+                if type(value) is not str:
+                    raise ValueError(f"stored working-memory {name} must be ISO-8601")
+                try:
+                    parsed[name] = datetime.fromisoformat(value)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"stored working-memory {name} must be ISO-8601"
+                    ) from exc
+        return cls(**parsed)
+
+
 def evaluate_intention(intention: Intention, *, evaluated_at: datetime) -> bool:
     """Return whether an intention is due without consulting wall-clock state."""
 
@@ -598,6 +736,37 @@ class MemoryEngine(Protocol):
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         raise NotImplementedError
 
+    def put_working(self, item: WorkingMemoryItem) -> str:
+        raise NotImplementedError
+
+    def get_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+    ) -> WorkingMemoryItem | None:
+        raise NotImplementedError
+
+    def list_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+    ) -> list[WorkingMemoryItem]:
+        raise NotImplementedError
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        expired_at: datetime,
+        session_id: str | None = None,
+    ) -> list[WorkingMemoryItem]:
+        raise NotImplementedError
+
     def explain(self, query: str, tenant_id: str, branch: str = "main") -> dict[str, Any]:
         raise NotImplementedError
 
@@ -743,6 +912,7 @@ class LocalMemoryEngine:
         self.calibrations: dict[tuple[str, str], CalibrationSet] = {}
         self.entities: dict[tuple[str, str], dict[str, Any]] = {}
         self.intentions: dict[tuple[str, str], Intention] = {}
+        self.working_memory: dict[tuple[str, str, str], WorkingMemoryItem] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -779,6 +949,12 @@ class LocalMemoryEngine:
     @staticmethod
     def _branch_key(tenant_id: str, branch: str, item_id: str) -> str:
         return f"{tenant_id}:{branch}:{item_id}"
+
+    @staticmethod
+    def _working_key(
+        tenant_id: str, session_id: str, item_id: str
+    ) -> tuple[str, str, str]:
+        return tenant_id, session_id, item_id
 
     def _audit(
         self,
@@ -1014,6 +1190,162 @@ class LocalMemoryEngine:
                 if item_tenant == tenant_id
             ]
 
+    @staticmethod
+    def _working_clock(value: datetime, name: str) -> datetime:
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise ValueError(f"{name} must be timezone-aware")
+        return value.astimezone(UTC)
+
+    def put_working(self, item: WorkingMemoryItem) -> str:
+        """Store one working item under its tenant/session/item composite key."""
+
+        if not isinstance(item, WorkingMemoryItem):
+            raise TypeError("item must be a WorkingMemoryItem")
+        with self._lock:
+            key = self._working_key(item.tenant_id, item.session_id, item.item_id)
+            if key in self.working_memory:
+                raise ValueError(f"working item {item.item_id!r} already exists")
+            before = (
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                self._store_version,
+            )
+            stored = copy.deepcopy(item)
+            try:
+                self.working_memory[key] = stored
+                self._audit(
+                    stored.tenant_id,
+                    stored.agent_id,
+                    "put_working",
+                    stored.item_id,
+                    {
+                        "session_id": stored.session_id,
+                        "task_id": stored.task_id,
+                        "kind": stored.kind,
+                        "status": stored.status,
+                        "deadline": stored.expires_at.isoformat(),
+                    },
+                    source="working_memory",
+                    event_id=content_cid(
+                        "put_working",
+                        {
+                            "tenant_id": stored.tenant_id,
+                            "session_id": stored.session_id,
+                            "item_id": stored.item_id,
+                            "deadline": stored.expires_at.isoformat(),
+                        },
+                    ),
+                    occurred_at=stored.created_at,
+                )
+                self._persist()
+            except BaseException:
+                self.working_memory, self.audit_log, self._store_version = before
+                raise
+            return stored.item_id
+
+    def get_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+    ) -> WorkingMemoryItem | None:
+        clock = self._working_clock(as_of, "as_of")
+        with self._lock:
+            item = self.working_memory.get(
+                self._working_key(tenant_id, session_id, item_id)
+            )
+            if item is None or item.status != "active" or clock >= item.expires_at:
+                return None
+            return copy.deepcopy(item)
+
+    def list_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+    ) -> list[WorkingMemoryItem]:
+        clock = self._working_clock(as_of, "as_of")
+        with self._lock:
+            items = [
+                item
+                for (item_tenant, item_session, _), item in self.working_memory.items()
+                if item_tenant == tenant_id
+                and item_session == session_id
+                and item.status == "active"
+                and clock < item.expires_at
+            ]
+            return [
+                copy.deepcopy(item)
+                for item in sorted(
+                    items, key=lambda value: (value.created_at, value.item_id)
+                )
+            ]
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        expired_at: datetime,
+        session_id: str | None = None,
+    ) -> list[WorkingMemoryItem]:
+        sweep = self._working_clock(expired_at, "expired_at")
+        with self._lock:
+            due = sorted(
+                (
+                    item
+                    for (item_tenant, item_session, _), item in self.working_memory.items()
+                    if item_tenant == tenant_id
+                    and (session_id is None or item_session == session_id)
+                    and item.status == "active"
+                    and item.expires_at <= sweep
+                ),
+                key=lambda value: (value.expires_at, value.session_id, value.item_id),
+            )
+            if not due:
+                return []
+            before = (
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                self._store_version,
+            )
+            expired: list[WorkingMemoryItem] = []
+            try:
+                for item in due:
+                    item.status = "expired"
+                    item.expired_at = item.expires_at
+                    self._audit(
+                        item.tenant_id,
+                        item.agent_id,
+                        "expire_working",
+                        item.item_id,
+                        {
+                            "session_id": item.session_id,
+                            "deadline": item.expires_at.isoformat(),
+                            "sweep": sweep.isoformat(),
+                            "status": item.status,
+                        },
+                        source="working_memory",
+                        event_id=content_cid(
+                            "expire_working",
+                            {
+                                "tenant_id": item.tenant_id,
+                                "session_id": item.session_id,
+                                "item_id": item.item_id,
+                                "deadline": item.expires_at.isoformat(),
+                            },
+                        ),
+                        occurred_at=item.expires_at,
+                    )
+                    expired.append(copy.deepcopy(item))
+                self._persist()
+            except BaseException:
+                self.working_memory, self.audit_log, self._store_version = before
+                raise
+            return expired
+
     def _persist(self) -> None:
         # Every mutator funnels through here; bump BEFORE the store_path early
         # return so in-memory engines invalidate the candidate memo too.
@@ -1046,6 +1378,7 @@ class LocalMemoryEngine:
             "calibrations": [item.to_dict() for item in self.calibrations.values()],
             "entities": list(self.entities.values()),
             "intentions": [item.to_dict() for item in self.intentions.values()],
+            "working_memory": [item.to_dict() for item in self.working_memory.values()],
             "audit_log": self.audit_log,
             "deletion_log": self.deletion_log,
             "merge_log": self.merge_log,
@@ -1138,6 +1471,13 @@ class LocalMemoryEngine:
             (item.tenant_id, item.intention_id): item
             for item in (
                 Intention.from_dict(row) for row in data.get("intentions", [])
+            )
+        }
+        self.working_memory = {
+            self._working_key(item.tenant_id, item.session_id, item.item_id): item
+            for item in (
+                WorkingMemoryItem.from_dict(row)
+                for row in data.get("working_memory", [])
             )
         }
         self.audit_log = list(data.get("audit_log", []))
@@ -2980,6 +3320,11 @@ class LocalMemoryEngine:
             "entities": [dict(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
             "justifications": [item.to_dict() for item in self.justifications.values() if item.tenant_id == tenant_id],
             "contradictions": [item.to_dict() for item in self.contradictions.values() if item.tenant_id == tenant_id],
+            "working_memory": [
+                item.to_dict()
+                for item in self.working_memory.values()
+                if item.tenant_id == tenant_id
+            ],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],
             "deletion_log": [item for item in self.deletion_log if item.get("tenant_id") == tenant_id],
             "merge_log": [
