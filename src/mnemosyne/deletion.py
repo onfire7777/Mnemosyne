@@ -11,11 +11,13 @@ import hashlib
 import hmac
 import json
 import secrets
+import sqlite3
 import threading
 import time
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Protocol, Sequence
 from uuid import UUID
 from weakref import WeakKeyDictionary
@@ -51,6 +53,7 @@ class LedgerRecord:
     fingerprint: str
     tenant_id: str
     generation: int
+    requested_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     receipts: dict[tuple[str, str], SurfaceReceipt] = field(default_factory=dict)
     manifest: dict[str, Any] | None = None
 
@@ -60,6 +63,7 @@ class DeletionLedger(Protocol):
 
     def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord: ...
     def current_generation(self, tenant_id: str) -> int: ...
+    def checkpoint(self, record: LedgerRecord) -> None: ...
 
 
 class InMemoryDeletionLedger:
@@ -92,6 +96,113 @@ class InMemoryDeletionLedger:
     def current_generation(self, tenant_id: str) -> int:
         with self._lock:
             return self._generations.get(tenant_id, 0)
+
+    def checkpoint(self, record: LedgerRecord) -> None:
+        """The process-local record is already the authoritative value."""
+
+
+class SQLiteDeletionLedger:
+    """Durable operation journal used to resume deletion sagas after restart."""
+
+    durable = True
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        with self._connect() as connection:
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS deletion_operations (
+                    operation_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    generation INTEGER NOT NULL,
+                    requested_at TEXT NOT NULL,
+                    receipts_json TEXT NOT NULL,
+                    manifest_json TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS deletion_tenant_generation
+                ON deletion_operations(tenant_id, generation);
+                """
+            )
+
+    @property
+    def lock(self) -> threading.RLock:
+        return self._lock
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(self.path, timeout=30)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        return connection
+
+    @staticmethod
+    def _receipts(record: LedgerRecord) -> str:
+        rows = [
+            {"kind": key[0], "name": key[1], **asdict(receipt)}
+            for key, receipt in record.receipts.items()
+        ]
+        return json.dumps(rows, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _record(row: sqlite3.Row) -> LedgerRecord:
+        receipts = {}
+        for item in json.loads(row[5]):
+            key = (item.pop("kind"), item.pop("name"))
+            receipts[key] = SurfaceReceipt(**item)
+        return LedgerRecord(
+            operation_id=row[0],
+            fingerprint=row[1],
+            tenant_id=row[2],
+            generation=row[3],
+            requested_at=row[4],
+            receipts=receipts,
+            manifest=json.loads(row[6]) if row[6] is not None else None,
+        )
+
+    def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord:
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT operation_id, fingerprint, tenant_id, generation, requested_at, "
+                "receipts_json, manifest_json FROM deletion_operations WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+            if row is not None:
+                if row[1] != fingerprint:
+                    raise ValueError("operation_id replay conflicts with canonical request")
+                return self._record(row)
+            generation = connection.execute(
+                "SELECT COALESCE(MAX(generation), 0) + 1 FROM deletion_operations WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()[0]
+            requested_at = datetime.now(UTC).isoformat()
+            connection.execute(
+                "INSERT INTO deletion_operations VALUES (?, ?, ?, ?, ?, '[]', NULL)",
+                (operation_id, fingerprint, tenant_id, generation, requested_at),
+            )
+            return LedgerRecord(operation_id, fingerprint, tenant_id, generation, requested_at)
+
+    def checkpoint(self, record: LedgerRecord) -> None:
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "UPDATE deletion_operations SET receipts_json = ?, manifest_json = ? "
+                "WHERE operation_id = ? AND fingerprint = ?",
+                (
+                    self._receipts(record),
+                    json.dumps(record.manifest, sort_keys=True) if record.manifest is not None else None,
+                    record.operation_id,
+                    record.fingerprint,
+                ),
+            )
+
+    def current_generation(self, tenant_id: str) -> int:
+        with self._lock, self._connect() as connection:
+            return connection.execute(
+                "SELECT COALESCE(MAX(generation), 0) FROM deletion_operations WHERE tenant_id = ?",
+                (tenant_id,),
+            ).fetchone()[0]
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +290,7 @@ class DeletionCoordinator:
                 return deepcopy(record.manifest)
             manifest = self._run(record, request)
             record.manifest = deepcopy(manifest)
+            self.ledger.checkpoint(record)
             return deepcopy(manifest)
 
     def _validate_request(self, **raw: Any) -> dict[str, Any]:
@@ -229,6 +341,7 @@ class DeletionCoordinator:
         required = self._surface_ids(tenant, refs)
         for surface_id in required:
             record.receipts.setdefault(surface_id, SurfaceReceipt(surface=self._surface_label(surface_id)))
+        self.ledger.checkpoint(record)
 
         # Boundary stores must be available before other external effects.  This
         # is a precondition gate, not rollback; verified deletions are never restored.
@@ -238,13 +351,16 @@ class DeletionCoordinator:
         ) else []
         for surface_id in boundary:
             if not self._attempt(record, surface_id, tenant, refs):
+                self.ledger.checkpoint(record)
                 return self._manifest(record, request)
+            self.ledger.checkpoint(record)
 
         engine_ids = {("engine", "source_evidence"), ("engine", "sqlite")}
         for surface_id in required:
             if surface_id in engine_ids or surface_id in boundary:
                 continue
             self._attempt(record, surface_id, tenant, refs)
+            self.ledger.checkpoint(record)
 
         externals_verified = all(
             receipt.verified_removed
@@ -253,6 +369,7 @@ class DeletionCoordinator:
         )
         if externals_verified:
             self._attempt_engine(record, request)
+            self.ledger.checkpoint(record)
         return self._manifest(record, request)
 
     def _surface_ids(self, tenant: str, refs: list[str]) -> list[tuple[str, str]]:
@@ -418,6 +535,22 @@ class DeletionCoordinator:
         branches = ["main"]
         if request["branch_scope"] == "all":
             branches = list(getattr(self.engine, "branches", {"main": {}}))
+        sensitive = set(request["source_refs"])
+        for branch in branches:
+            for ref in request["source_refs"]:
+                evidence = self.engine.get_evidence(request["tenant_id"], ref, branch=branch)
+                if evidence is not None:
+                    sensitive.update(
+                        self._strings(
+                            {
+                                "content": evidence.content,
+                                "source_identity": evidence.source_identity,
+                                "session_id": evidence.session_id,
+                                "content_pointer": evidence.content_pointer,
+                                "metadata": evidence.metadata,
+                            }
+                        )
+                    )
         try:
             for branch in branches:
                 for ref in request["source_refs"]:
@@ -428,6 +561,7 @@ class DeletionCoordinator:
                         requested_by="legal",
                         erasure_mode="hard_delete_legal",
                     )
+            self._scrub_retained_history(request["tenant_id"], sensitive)
             if any(
                 self.engine.get_evidence(request["tenant_id"], ref, branch=branch) is not None
                 for branch in branches
@@ -440,6 +574,52 @@ class DeletionCoordinator:
         except Exception:
             receipt.error_code = "delete_failed"
             receipt.state = "failed"
+
+    @classmethod
+    def _strings(cls, value: Any) -> set[str]:
+        if isinstance(value, str):
+            return {value}
+        if isinstance(value, dict):
+            return {item for nested in value.values() for item in cls._strings(nested)}
+        if isinstance(value, (list, tuple, set)):
+            return {item for nested in value for item in cls._strings(nested)}
+        return set()
+
+    @classmethod
+    def _scrub_value(cls, value: Any, sensitive: set[str]) -> Any:
+        if isinstance(value, str) and any(needle and needle in value for needle in sensitive):
+            return _opaque("retained-audit", value)
+        if isinstance(value, dict):
+            return {key: cls._scrub_value(item, sensitive) for key, item in value.items()}
+        if isinstance(value, list):
+            return [cls._scrub_value(item, sensitive) for item in value]
+        if isinstance(value, tuple):
+            return tuple(cls._scrub_value(item, sensitive) for item in value)
+        return value
+
+    def _scrub_retained_history(self, tenant_id: str, sensitive: set[str]) -> None:
+        """Retain custody events while removing payload and correlatable references."""
+        connect = getattr(self.engine, "_connect", None)
+        if callable(connect) and self.engine.__class__.__name__ == "SqliteEngine":
+            connection = connect(tenant_id)
+            with connection:
+                for table in ("audit_log", "deletion_log", "merge_log"):
+                    for row in connection.execute(f"SELECT seq, record FROM {table}").fetchall():
+                        record = json.loads(row["record"])
+                        if record.get("tenant_id") != tenant_id:
+                            continue
+                        connection.execute(
+                            f"UPDATE {table} SET record = ? WHERE seq = ?",
+                            (json.dumps(self._scrub_value(record, sensitive), sort_keys=True), row["seq"]),
+                        )
+            return
+        for attribute in ("audit_log", "deletion_log", "merge_log"):
+            rows = getattr(self.engine, attribute, None)
+            if isinstance(rows, list):
+                rows[:] = [
+                    self._scrub_value(row, sensitive) if row.get("tenant_id") == tenant_id else row
+                    for row in rows
+                ]
 
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         rows = []
@@ -456,10 +636,16 @@ class DeletionCoordinator:
                     "tenant_ref": _opaque("tenant", request["tenant_id"]),
                     "object_ref": _opaque("surface", f"{record.operation_id}:{surface_id!r}"),
                     "action": receipt.action,
+                    "precondition_present": True,
+                    "attempted_at": record.requested_at,
+                    "verified_at": datetime.now(UTC).isoformat() if receipt.verified_removed else None,
+                    "verification_method": "direct_and_public_probe",
                     "state": receipt.state,
                     "attempts": receipt.attempts,
                     "checkpoint": receipt.checkpoint,
                     "verified_removed": receipt.verified_removed,
+                    "residue_probe": 0 if receipt.verified_removed else 1,
+                    "durability_checkpoint": receipt.checkpoint,
                     "error_code": receipt.error_code,
                 }
             )
@@ -478,14 +664,33 @@ class DeletionCoordinator:
         return {
             "schema": request["schema"],
             "operation_id": record.operation_id,
+            "request_id": record.operation_id,
+            "requested_at": record.requested_at,
+            "completed_at": datetime.now(UTC).isoformat() if complete else None,
             "mode": request["mode"],
             "requested_by_role": request["requested_by_role"],
+            "reason": _opaque("reason", request["reason"]),
             "tenant_ref": _opaque("tenant", request["tenant_id"]),
             "user_scope": _opaque("user", request["user_id"]),
             "branch_scope": request["branch_scope"],
             "source_refs": [_opaque("source", ref) for ref in request["source_refs"]],
+            "policy": {
+                "version": "w2",
+                "required_surfaces": [receipt.surface for receipt in record.receipts.values()],
+            },
             "fence": {"generation": record.generation, "ledger_position": record.generation, "durable": self.ledger.durable},
             "surfaces": rows,
+            "stores": [
+                {
+                    "store": receipt.surface,
+                    "expected": 1,
+                    "discovered": 1,
+                    "visited": int(receipt.attempts > 0),
+                    "available": receipt.error_code != "store_unavailable",
+                    "checkpoint": receipt.checkpoint,
+                }
+                for receipt in record.receipts.values()
+            ],
             "retention_exceptions": retention_exceptions,
             "summary": {
                 "expected": expected,

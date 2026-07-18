@@ -1118,3 +1118,58 @@ def test_r25_complete_manifest_is_signed_then_semantically_verified(tmp_path: Pa
     verified = verify_evidence_manifest_signature(manifest_path, public_key)
     assert verified["verified"] is True
     _assert_complete(manifest)
+
+
+def test_r23_durable_journal_replays_after_coordinator_restart(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    request = {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    identity = SessionIdentity(
+        tenant_id=TENANT,
+        user_id=USER,
+        role="operator",
+        source_trust_tier=int(TrustTier.DIRECT_USER),
+        session_id="verified-delete-session",
+    )
+    first = deletion.DeletionCoordinator(
+        engine=world.engine,
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    ).delete(**request)
+    replay = deletion.DeletionCoordinator(
+        engine=world.engine,
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    ).delete(**request)
+    assert replay == first
+    assert replay["fence"]["durable"] is True
+    assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(replay) == {
+        "complete": True,
+        "errors": [],
+    }
+
+
+def test_r25_signed_deletion_manifest_helper_requires_semantic_completeness(tmp_path: Path) -> None:
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    generate_collector_keypair(private_key, public_key)
+    manifest = _valid_manifest()
+    manifest_path = tmp_path / "deletion-manifest.json"
+    verifier.write_signed_deletion_manifest(manifest, manifest_path, private_key)
+    result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
+    assert result["complete"] is True
+    manifest["summary"]["complete"] = False
+    with pytest.raises(ValueError, match="semantically incomplete"):
+        verifier.write_signed_deletion_manifest(manifest, manifest_path, private_key)
