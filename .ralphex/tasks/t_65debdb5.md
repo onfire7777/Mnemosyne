@@ -18,9 +18,9 @@ Forbidden/shared files:
 - [x] Provide native 768 and zero-padded 1024 cosine/ranking parity behavior with deterministic tie breaks.
 
 ### Task 2: Add synthetic TRAIN-only selection contract
-- [ ] Add source-owned synthetic fixture and Python validator/selection helpers.
-- [ ] Validate immutable bakeoff receipts, identity custody, dimensions, cosine/ranking parity, and deterministic selection without real model artifacts.
-- [ ] Add focused malformed, mismatch, non-finite, zero-vector, tie, and receipt immutability tests.
+- [x] Add source-owned synthetic fixture and Python validator/selection helpers.
+- [x] Validate immutable bakeoff receipts, identity custody, dimensions, cosine/ranking parity, and deterministic selection without real model artifacts.
+- [x] Add focused malformed, mismatch, non-finite, zero-vector, tie, and receipt immutability tests.
 
 Validation commands:
 - ~/.agents/skills/ralphex-kanban-lane/scripts/ralphex-kanban-lane --plan ".ralphex/tasks/${HERMES_KANBAN_TASK}.md" --lease-path services/answering-ort/src/embed.rs --lease-path eval/compact_answering/embedder_dev.py --lease-path eval/compact_answering/fixtures/embedder-selection-dev.json --lease-path tests/test_compact_answering_embedder.py --check

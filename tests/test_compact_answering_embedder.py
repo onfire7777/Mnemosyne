@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -11,12 +12,18 @@ from eval.compact_answering.embedder_dev import (
     ABI_VERSION,
     NATIVE_DIMENSIONS,
     EmbedderIdentity,
+    EmbedderSelectionValidationError,
     EmbedderValidationError,
     cosine_similarity,
+    fixture_digest,
+    load_selection_fixture,
     pad_native_to_1024,
     rank_by_cosine,
+    select_synthetic_embedder,
+    validate_bakeoff_receipt,
     validate_request,
     validate_response,
+    validate_selection_fixture,
 )
 
 ROOT = Path(__file__).parents[1]
@@ -116,3 +123,91 @@ def test_rust_module_unit_tests_pass_without_model_artifacts(tmp_path: Path) -> 
         text=True,
     )
     subprocess.run([str(binary)], cwd=ROOT, check=True, capture_output=True, text=True)
+
+
+def _selection_fixture() -> dict[str, object]:
+    return deepcopy(load_selection_fixture())
+
+
+def test_synthetic_train_fixture_validates_and_selects_without_artifacts() -> None:
+    fixture = load_selection_fixture()
+
+    assert fixture["split"] == "TRAIN"
+    assert fixture["fixture_status"] == "synthetic-unmeasured"
+    assert select_synthetic_embedder(fixture) == "synthetic-anchor-a"
+    assert fixture["selection"] == {
+        "method": "mean_cosine_then_id_v1",
+        "expected_candidate_id": "synthetic-anchor-a",
+    }
+
+
+def test_synthetic_fixture_rejects_malformed_top_level() -> None:
+    fixture = _selection_fixture()
+    del fixture["source"]
+
+    with pytest.raises(EmbedderSelectionValidationError, match="fields must be exact"):
+        validate_selection_fixture(fixture)
+
+
+def test_synthetic_fixture_rejects_identity_mismatch() -> None:
+    fixture = _selection_fixture()
+    candidate = fixture["candidates"][0]
+    receipt = candidate["receipt"]
+    drifted = deepcopy(receipt["identity"])
+    drifted["tokenizer"] = "synthetic-tokenizer-drifted-v1"
+    receipt["identity"] = drifted
+
+    with pytest.raises(EmbedderSelectionValidationError, match="identity mismatch"):
+        validate_bakeoff_receipt(
+            receipt,
+            expected_candidate_id=candidate["id"],
+            expected_identity=EmbedderIdentity.from_mapping(candidate["identity"]),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("coordinates", [[0, float("nan")]], "non-finite"),
+        ("coordinates", [[0, 0.0]], "zero"),
+    ],
+)
+def test_synthetic_fixture_rejects_nonfinite_and_zero_vectors(
+    field: str, value: object, message: str
+) -> None:
+    fixture = _selection_fixture()
+    query = fixture["probes"][0]["query"]["native_768"]
+    query[field] = value
+
+    with pytest.raises(EmbedderSelectionValidationError, match=message):
+        validate_selection_fixture(fixture)
+
+
+def test_synthetic_fixture_rejects_receipt_digest_mutation() -> None:
+    fixture = _selection_fixture()
+    receipt = fixture["candidates"][0]["receipt"]
+    receipt["parity"]["ranking"] = False
+
+    with pytest.raises(EmbedderSelectionValidationError, match="receipt parity"):
+        validate_selection_fixture(fixture)
+
+
+def test_synthetic_fixture_rejects_top_level_receipt_or_vector_drift() -> None:
+    fixture = _selection_fixture()
+    fixture["fixture_sha256"] = "0" * 64
+
+    with pytest.raises(EmbedderSelectionValidationError, match="fixture digest"):
+        validate_selection_fixture(fixture)
+
+
+def test_synthetic_fixture_tie_break_is_candidate_id_deterministic() -> None:
+    fixture = _selection_fixture()
+    fixture["candidates"] = [
+        fixture["candidates"][1],
+        fixture["candidates"][0],
+        fixture["candidates"][2],
+    ]
+    fixture["fixture_sha256"] = fixture_digest(fixture)
+
+    validate_selection_fixture(fixture)
+    assert select_synthetic_embedder(fixture) == "synthetic-anchor-a"
