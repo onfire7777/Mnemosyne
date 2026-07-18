@@ -1565,6 +1565,53 @@ def cmd_capture(args: argparse.Namespace) -> None:
     )
 
 
+def _working_scope(args: argparse.Namespace) -> dict[str, str]:
+    return {
+        "tenant_id": args.tenant,
+        "session_id": args.session_id,
+        "user_id": args.user,
+        "agent_id": args.agent_id,
+        "task_id": args.task_id,
+        "branch": args.branch,
+    }
+
+
+def cmd_working_seed(args: argparse.Namespace) -> None:
+    emit(
+        load_tools(args).working_seed(
+            **_working_scope(args), kind=args.kind, content=args.content,
+            evidence_ids=args.evidence_cid, ttl_seconds=args.ttl_seconds,
+            created_at=args.created_at, role=args.role,
+            source_trust_tier=args.source_trust_tier, item_id=args.item_id,
+        )
+    )
+
+
+def cmd_working_query(args: argparse.Namespace) -> None:
+    emit(load_tools(args).working_query(**_working_scope(args), as_of=args.as_of))
+
+
+def cmd_working_promote(args: argparse.Namespace) -> None:
+    cases = [json.loads(value) for value in args.regression_case]
+    if any(not isinstance(case, dict) for case in cases):
+        raise ValueError("--regression-case must contain a JSON object")
+    emit(
+        load_tools(args).working_promote(
+            **_working_scope(args), item_id=args.item_id, as_of=args.as_of,
+            cases=cases, role=args.role, source_trust_tier=args.source_trust_tier,
+        )
+    )
+
+
+def cmd_working_expire(args: argparse.Namespace) -> None:
+    emit(
+        load_tools(args).working_expire(
+            **_working_scope(args), expired_at=args.expired_at,
+            role=args.role, source_trust_tier=args.source_trust_tier,
+        )
+    )
+
+
 def cmd_capture_batch(args: argparse.Namespace) -> None:
     """Capture a bounded, prevalidated JSONL batch through one engine process."""
     from mnemosyne.media_limits import ensure_file_within_limit
@@ -19083,6 +19130,47 @@ def build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--branch", default="main")
     capture.add_argument("--trust-tier", type=int, default=0)
     capture.set_defaults(func=cmd_capture)
+
+    def add_working_scope(command: argparse.ArgumentParser) -> None:
+        command.add_argument("--tenant", required=True)
+        command.add_argument("--session-id", required=True)
+        command.add_argument("--user", required=True)
+        command.add_argument("--agent-id", required=True)
+        command.add_argument("--task-id", required=True)
+        command.add_argument("--branch", required=True)
+
+    working_seed = sub.add_parser("working-seed")
+    add_working_scope(working_seed)
+    working_seed.add_argument("--kind", required=True)
+    working_seed.add_argument("--content", required=True)
+    working_seed.add_argument("--evidence-cid", action="append", required=True)
+    working_seed.add_argument("--ttl-seconds", type=int, required=True)
+    working_seed.add_argument("--created-at", required=True)
+    working_seed.add_argument("--item-id")
+    working_seed.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"], default="agent")
+    working_seed.add_argument("--source-trust-tier", type=int, required=True)
+    working_seed.set_defaults(func=cmd_working_seed)
+
+    working_query = sub.add_parser("working-query")
+    add_working_scope(working_query)
+    working_query.add_argument("--as-of", required=True)
+    working_query.set_defaults(func=cmd_working_query)
+
+    working_promote = sub.add_parser("working-promote")
+    add_working_scope(working_promote)
+    working_promote.add_argument("--item-id", required=True)
+    working_promote.add_argument("--as-of", required=True)
+    working_promote.add_argument("--regression-case", action="append", required=True)
+    working_promote.add_argument("--role", choices=["consolidator", "operator"], required=True)
+    working_promote.add_argument("--source-trust-tier", type=int, required=True)
+    working_promote.set_defaults(func=cmd_working_promote)
+
+    working_expire = sub.add_parser("working-expire")
+    add_working_scope(working_expire)
+    working_expire.add_argument("--expired-at", required=True)
+    working_expire.add_argument("--role", choices=["consolidator", "operator"], required=True)
+    working_expire.add_argument("--source-trust-tier", type=int, required=True)
+    working_expire.set_defaults(func=cmd_working_expire)
 
     capture_batch = sub.add_parser("capture-batch")
     capture_batch.add_argument("--input-jsonl", type=Path, required=True)

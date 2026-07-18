@@ -317,8 +317,8 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS event_id TEXT;
-CREATE UNIQUE INDEX IF NOT EXISTS audit_log_event_id_unique
-  ON audit_log (event_id)
+CREATE UNIQUE INDEX IF NOT EXISTS audit_log_tenant_event_unique
+  ON audit_log(tenant_id, event_id)
   WHERE event_id IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION mnemosyne_audit_log_append_only()
@@ -358,6 +358,50 @@ CREATE TABLE IF NOT EXISTS runtime_state (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, key)
 );
+
+-- Working memory is transient, but it is still durable enough to survive a
+-- request boundary. External ids remain lossless while tenant/session/item is
+-- the composite identity used by the engine. Provenance is checked by the
+-- write/read paths against evidence; no implicit promotion foreign key exists.
+CREATE TABLE IF NOT EXISTS working_memory (
+  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  session_id UUID NOT NULL,
+  external_session_id TEXT NOT NULL,
+  item_id TEXT NOT NULL,
+  user_id UUID NOT NULL,
+  external_user_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  task_id TEXT NOT NULL,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  trust_tier SMALLINT NOT NULL DEFAULT 0,
+  capability_tags TEXT[] NOT NULL DEFAULT '{}',
+  sensitivity SMALLINT NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired')),
+  expired_at TIMESTAMPTZ,
+  evidence_ids BYTEA[] NOT NULL DEFAULT '{}',
+  access_policy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (tenant_id, session_id, item_id),
+  CHECK (expires_at > created_at),
+  CHECK (expires_at <= created_at + interval '24 hours'),
+  CHECK (
+    (status = 'active' AND expired_at IS NULL AND cardinality(evidence_ids) > 0)
+    OR (status = 'expired' AND expired_at IS NOT NULL)
+  ),
+  CHECK (jsonb_typeof(access_policy) = 'object'),
+  CHECK (jsonb_typeof(metadata) = 'object'),
+  CHECK (trust_tier BETWEEN 0 AND 5),
+  CHECK (sensitivity >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS working_memory_scope_created_idx
+  ON working_memory(tenant_id, session_id, status, created_at DESC, item_id);
+CREATE INDEX IF NOT EXISTS working_memory_expiry_idx
+  ON working_memory(tenant_id, status, expires_at, external_session_id, item_id)
+  WHERE status = 'active';
 
 CREATE OR REPLACE FUNCTION mnemosyne_current_tenant()
 RETURNS UUID
@@ -603,6 +647,13 @@ DROP POLICY IF EXISTS intention_firing_receipts_tenant_isolation
   ON intention_firing_receipts;
 CREATE POLICY intention_firing_receipts_tenant_isolation
   ON intention_firing_receipts
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+ALTER TABLE working_memory ENABLE ROW LEVEL SECURITY;
+ALTER TABLE working_memory FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS working_memory_tenant_isolation ON working_memory;
+CREATE POLICY working_memory_tenant_isolation ON working_memory
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
