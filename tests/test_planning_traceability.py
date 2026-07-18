@@ -9,6 +9,7 @@ PLANNING = ROOT / ".planning"
 REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
 V2_REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
 ARCHITECTURE_OVERVIEW = ROOT / "docs" / "ARCHITECTURE-OVERVIEW.md"
+ENGINE_CONTRACT = ROOT / "docs" / "ENGINE-CONTRACT.md"
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
@@ -122,5 +123,27 @@ def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
         "Local, Postgres, and Sqlite engines",
         "remain data-only",
         "docs/ENGINE-CONTRACT.md",
+    ):
+        assert expected in normalized
+
+
+def test_engine_contract_documents_three_engine_memory_plane_parity() -> None:
+    text = ENGINE_CONTRACT.read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
+
+    for expected in (
+        '@pytest.fixture(params=["local", "postgres", "sqlite"])',
+        "schedule_intention",
+        "cancel_intention",
+        "list_intentions",
+        "evaluate_due_intentions",
+        "put_working",
+        "get_working",
+        "list_working",
+        "expire_working",
+        "created_at <= as_of < expires_at",
+        "session_id`, `user_id`, `agent_id`, `task_id`, and `branch",
+        "legacy tombstone",
+        "limited to erased-replay detection",
     ):
         assert expected in normalized
