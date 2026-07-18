@@ -11,6 +11,7 @@ import os
 import ssl
 import sys
 import threading
+from contextlib import nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
@@ -173,6 +174,7 @@ class MnemosyneMcpServer:
             tuple[tuple[tuple[str, int | None], ...], tuple[Any, Any, Any, Any]],
         ] = {}
         self._stateless_tools_cache_lock = threading.Lock()
+        self._stateless_transaction_lock = threading.Lock()
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
 
@@ -181,6 +183,8 @@ class MnemosyneMcpServer:
         queue_tenant: str | None,
         arguments: dict[str, Any],
     ) -> tuple[Any, ...]:
+        if self.backend in {"local", "sqlite"}:
+            return (self.backend, queue_tenant or self.queue_tenant, str(self.store_path))
         return (
             queue_tenant or self.queue_tenant,
             arguments.get("tenant_id") or arguments.get("tenant"),
@@ -204,7 +208,9 @@ class MnemosyneMcpServer:
         stamp = self._stateless_tools_stamp()
         with self._stateless_tools_cache_lock:
             cached = self._stateless_tools_cache.get(key)
-            if cached and cached[0] == stamp:
+            if cached and (
+                self.backend in {"local", "sqlite"} or cached[0] == stamp
+            ):
                 return cached[1], key
             bundle = self._build_tools(queue_tenant)
             self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
@@ -353,7 +359,12 @@ class MnemosyneMcpServer:
                             result = _tool_error("Tool arguments must be a JSON object")
                         else:
                             prepared_arguments = self.prepare_tool_arguments(name, params, arguments)
-                            _validate_tool_arguments(name, prepared_arguments, self.tool_schemas_by_name)
+                            public_arguments = {
+                                key: value
+                                for key, value in prepared_arguments.items()
+                                if key != "session_identity"
+                            }
+                            _validate_tool_arguments(name, public_arguments, self.tool_schemas_by_name)
                             result = _tool_result(self.call_tool(name, prepared_arguments))
                 except Exception as exc:  # noqa: BLE001 - tool errors are MCP results, not transport failures.
                     result = _tool_error(str(exc))
@@ -476,6 +487,13 @@ class MnemosyneMcpServer:
             self._bind_string_claim(arguments, "user_id", identity.user_id, "user")
         if "user" in parameter_names:
             self._bind_string_claim(arguments, "user", identity.user_id, "user")
+        if "cancelled_by" in parameter_names:
+            self._bind_string_claim(
+                arguments,
+                "cancelled_by",
+                identity.user_id,
+                "cancellation principal",
+            )
         if "role" in parameter_names:
             arguments["role"] = identity.role
         if "source_trust_tier" in parameter_names:
@@ -484,6 +502,10 @@ class MnemosyneMcpServer:
             arguments["trust_tier"] = identity.source_trust_tier
         if "source_identity" in parameter_names and "source_identity" not in arguments and identity.session_id:
             arguments["source_identity"] = identity.session_id
+        if "session_identity" in parameter_names:
+            if "session_identity" in arguments:
+                raise PermissionError("session identity is transport-controlled")
+            arguments["session_identity"] = identity
         return arguments
 
     @staticmethod
@@ -510,12 +532,20 @@ class MnemosyneMcpServer:
         if not isinstance(arguments, dict):
             raise ValueError("Tool arguments must be a JSON object")
         if self.stateless:
-            bundle, cache_key = self._stateless_tools_for(self._queue_tenant_from_arguments(arguments), arguments)
-            _, queue, runtime_state, tools = bundle
-            result = getattr(tools, name)(**arguments)
-            self._save_queue(runtime_state, queue)
-            self._refresh_stateless_tools_cache(cache_key, bundle)
-            return result
+            transaction = (
+                self._stateless_transaction_lock
+                if self.backend in {"local", "sqlite"}
+                else nullcontext()
+            )
+            with transaction:
+                bundle, cache_key = self._stateless_tools_for(
+                    self._queue_tenant_from_arguments(arguments), arguments
+                )
+                _, queue, runtime_state, tools = bundle
+                result = getattr(tools, name)(**arguments)
+                self._save_queue(runtime_state, queue)
+                self._refresh_stateless_tools_cache(cache_key, bundle)
+                return result
         result = getattr(self.tools, name)(**arguments)
         self._save_queue(self.runtime_state, self.queue)
         return result
@@ -548,7 +578,7 @@ def _to_mcp_tool_spec(spec: dict[str, Any]) -> dict[str, Any]:
         properties = {}
         required = []
         for name, parameter in signature.parameters.items():
-            if name == "self":
+            if name in {"self", "session_identity"}:
                 continue
             schema = _schema_for_type(hints.get(name, parameter.annotation))
             if parameter.default is not inspect.Parameter.empty:

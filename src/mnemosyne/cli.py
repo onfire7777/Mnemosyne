@@ -263,6 +263,7 @@ def apply_session_identity(args: argparse.Namespace) -> None:
             raise SystemExit(f"session token denied: {exc}") from exc
         _bind_session_claim(args, "tenant", identity.tenant_id)
         _bind_session_claim(args, "user", identity.user_id)
+        _bind_session_claim(args, "cancelled_by", identity.user_id)
         if hasattr(args, "role"):
             args.role = identity.role
         if hasattr(args, "source_trust_tier"):
@@ -339,7 +340,16 @@ def _bind_session_claim(args: argparse.Namespace, attr: str, value: str) -> None
 
 
 def _require_authorization_context(args: argparse.Namespace) -> None:
+    from mnemosyne.security import SessionIdentity
+
     command = getattr(args, "command", None)
+    if command in {
+        "intention-schedule",
+        "intention-cancel",
+        "intention-evaluate",
+        "intention-list",
+    } and not isinstance(getattr(args, "session_identity", None), SessionIdentity):
+        raise SystemExit(f"{command} requires --session-token")
     if command not in {
         "confirm",
         "branch",
@@ -1452,6 +1462,7 @@ def _policy_authorization_outcome(policy: OidcAuthorizationPolicy, simulation: M
         "authorized": True,
         "role": identity.role,
         "source_trust_tier": identity.source_trust_tier,
+        "capabilities": list(identity.capabilities),
     }
 
 
@@ -8523,6 +8534,60 @@ def cmd_procedure_rollback(args: argparse.Namespace) -> None:
             source_trust_tier=args.source_trust_tier,
         )
     )
+
+
+def _intention_auth_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    return {"session_identity": args.session_identity}
+
+
+def cmd_intention_schedule(args: argparse.Namespace) -> None:
+    if not args.evidence_cid:
+        raise SystemExit("intention-schedule requires at least one --evidence-cid")
+    tools = load_tools(args)
+    emit(
+        tools.schedule_intention(
+            tenant_id=args.tenant,
+            user_id=args.user,
+            agent_id=args.agent,
+            trigger_type=args.trigger_type,
+            trigger_expression=parse_json_arg(args.trigger_expression, {}),
+            action=parse_json_arg(args.action, {}),
+            due_at=args.due_at,
+            evidence_ids=args.evidence_cid,
+            priority=args.priority,
+            **_intention_auth_kwargs(args),
+        )
+    )
+
+
+def cmd_intention_cancel(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.cancel_intention(
+            tenant_id=args.tenant,
+            intention_id=args.intention_id,
+            cancelled_by=args.cancelled_by,
+            **_intention_auth_kwargs(args),
+        )
+    )
+
+
+def cmd_intention_evaluate(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(
+        tools.evaluate_intentions(
+            tenant_id=args.tenant,
+            evaluated_at=args.evaluated_at,
+            trigger_context=parse_json_arg(args.trigger_context, {}),
+            operating_point=parse_json_arg(args.operating_point, {}),
+            **_intention_auth_kwargs(args),
+        )
+    )
+
+
+def cmd_intention_list(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.list_intentions(tenant_id=args.tenant, **_intention_auth_kwargs(args)))
 
 
 def cmd_outcome_evaluate(args: argparse.Namespace) -> None:
@@ -19680,6 +19745,35 @@ def build_parser() -> argparse.ArgumentParser:
     procedure_rollback.add_argument("--role", choices=["reader", "agent", "consolidator", "operator"])
     procedure_rollback.add_argument("--source-trust-tier", type=int)
     procedure_rollback.set_defaults(func=cmd_procedure_rollback)
+
+    intention_schedule = sub.add_parser("intention-schedule")
+    intention_schedule.add_argument("--tenant", required=True)
+    intention_schedule.add_argument("--user", required=True)
+    intention_schedule.add_argument("--agent", required=True)
+    intention_schedule.add_argument("--trigger-type", default="exact_time")
+    intention_schedule.add_argument("--trigger-expression", required=True)
+    intention_schedule.add_argument("--action", required=True)
+    intention_schedule.add_argument("--due-at", required=True)
+    intention_schedule.add_argument("--evidence-cid", action="append", default=[])
+    intention_schedule.add_argument("--priority", default="normal")
+    intention_schedule.set_defaults(func=cmd_intention_schedule)
+
+    intention_cancel = sub.add_parser("intention-cancel")
+    intention_cancel.add_argument("--tenant", required=True)
+    intention_cancel.add_argument("--intention-id", required=True)
+    intention_cancel.add_argument("--cancelled-by", required=True)
+    intention_cancel.set_defaults(func=cmd_intention_cancel)
+
+    intention_evaluate = sub.add_parser("intention-evaluate")
+    intention_evaluate.add_argument("--tenant", required=True)
+    intention_evaluate.add_argument("--evaluated-at", required=True)
+    intention_evaluate.add_argument("--trigger-context", required=True)
+    intention_evaluate.add_argument("--operating-point", required=True)
+    intention_evaluate.set_defaults(func=cmd_intention_evaluate)
+
+    intention_list = sub.add_parser("intention-list")
+    intention_list.add_argument("--tenant", required=True)
+    intention_list.set_defaults(func=cmd_intention_list)
 
     outcome_evaluate = sub.add_parser("outcome-evaluate")
     outcome_evaluate.add_argument("--trajectory-id")
