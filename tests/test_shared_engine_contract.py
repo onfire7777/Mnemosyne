@@ -4315,6 +4315,10 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
         )
     )
 
+    # Inspect source write custody before hard deletion redacts every retained
+    # reference to the erased CID. The post-delete audit below separately checks
+    # that the forget event uses a non-recomputable placeholder.
+    write_audit_log = engine.export_tenant(tenant)["audit_log"]
     engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
     exported = engine.export_tenant(tenant)
     audit_log = exported["audit_log"]
@@ -4327,19 +4331,25 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
         assert "capability_tags" in item
         assert isinstance(item["diff"], dict)
 
-    evidence_audit = next(item for item in audit_log if item["op"] == "append_evidence" and item["target_id"] == cid)
+    evidence_audit = next(
+        item for item in write_audit_log if item["op"] == "append_evidence" and item["target_id"] == cid
+    )
     assert evidence_audit["actor"] == "tool"
     assert evidence_audit["source"] == "workflow-log"
     assert evidence_audit["trust_tier"] == 2
     assert sorted(evidence_audit["capability_tags"]) == ["signed", "tool-import"]
     assert evidence_audit["diff"]["source_identity"] == "git:memory-source-truth.md"
 
-    assertion_audit = next(item for item in audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id)
+    assertion_audit = next(
+        item for item in write_audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id
+    )
     assert assertion_audit["source"] == "assertion"
     assert assertion_audit["trust_tier"] == 2
     assert assertion_audit["diff"]["source_evidence_cids"] == [cid, corroborating_cid]
 
-    preference_audit = next(item for item in audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id)
+    preference_audit = next(
+        item for item in write_audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id
+    )
     assert preference_audit["source"] == "preference"
     assert preference_audit["trust_tier"] == 0
     assert preference_audit["diff"]["source_evidence_cids"] == [cid]
