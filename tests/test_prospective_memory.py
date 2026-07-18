@@ -19,6 +19,9 @@ from mnemosyne.engine import (
     LocalMemoryEngine,
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
+    canonicalize_intention,
+    intention_audit_diff,
+    intention_fire_receipt_id,
 )
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
@@ -1482,6 +1485,20 @@ def test_fire_audit_event_id_is_deterministic_canonical_key() -> None:
     first, _ = _fire_audit_from_fresh_engine()
     second, _ = _fire_audit_from_fresh_engine()
     assert first["id"] == second["id"]
+
+
+def test_canonical_intention_helpers_detach_and_stabilize_receipts() -> None:
+    evidence_id = "evidence-canonical"
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+
+    canonical = canonicalize_intention(intention, require_scheduled=True)
+
+    assert canonical is not intention
+    assert canonical.to_dict() == intention.to_dict()
+    assert intention_fire_receipt_id(TENANT_ID, intention.intention_id)
+    assert intention_audit_diff(canonical, status="scheduled")["evidence_ids"] == [
+        evidence_id
+    ]
 
 
 def test_mixed_trigger_results_keep_their_matched_signals_after_sorting() -> None:

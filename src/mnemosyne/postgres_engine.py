@@ -42,13 +42,19 @@ from mnemosyne.engine import (
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    canonicalize_intention,
+    intention_audit_context,
+    intention_audit_diff,
+    intention_fire_receipt_id,
+    validate_intention_evaluation_inputs,
+    validate_intention_provenance_claim,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
     erasure_deletion_record_id,
     redact_erased_cids,
 )
-from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid
+from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -5181,7 +5187,7 @@ class PostgresEngine:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
         cur.execute(
             """
-            SELECT cid, user_id, trust_tier, capability_tags, erased
+            SELECT cid, user_id, external_user_id, trust_tier, capability_tags, erased
             FROM evidence
             WHERE tenant_id = %s AND branch = 'main' AND cid = ANY(%s)
             ORDER BY cid
@@ -5194,53 +5200,21 @@ class PostgresEngine:
         for row in rows:
             by_cid[_bytes_to_cid(row["cid"])] = row
         provenance: list[dict[str, Any]] = []
-        db_user_id = _stable_uuid("user", intention.user_id)
         for cid in intention.evidence_ids:
             row = by_cid.get(cid)
             if row is None or row["erased"]:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
-            if str(row["user_id"]) != str(db_user_id):
-                raise ValueError("intention user must match originating evidence")
-            if int(row["trust_tier"]) > self.policy.max_trust_tier:
-                raise PermissionError("originating evidence exceeds the write trust ceiling")
-            if is_write_tainted(list(row["capability_tags"] or [])):
-                raise PermissionError("data-only evidence cannot authorize an intention write")
+            validate_intention_provenance_claim(
+                intention,
+                evidence_id=cid,
+                user_id=str(row["external_user_id"]),
+                erased=bool(row["erased"]),
+                trust_tier=int(row["trust_tier"]),
+                capability_tags=list(row["capability_tags"] or []),
+                max_trust_tier=self.policy.max_trust_tier,
+            )
             provenance.append(row)
         return provenance
-
-    @staticmethod
-    def _intention_audit_context(
-        provenance: list[dict[str, Any]],
-    ) -> tuple[int, list[str]]:
-        trust_tier = max(int(item["trust_tier"]) for item in provenance)
-        capability_tags = sorted(
-            {tag for item in provenance for tag in (item["capability_tags"] or [])}
-        )
-        return trust_tier, capability_tags
-
-    @staticmethod
-    def _intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
-        immutable_snapshot = {
-            "intention_id": intention.intention_id,
-            "tenant_id": intention.tenant_id,
-            "user_id": intention.user_id,
-            "agent_id": intention.agent_id,
-            "trigger_type": intention.trigger_type,
-            "trigger_expression": intention.trigger_expression,
-            "action": intention.action,
-            "priority": intention.priority,
-            "due_at": intention.due_at.isoformat(),
-            "dependencies": intention.dependencies,
-            "reschedule_history": intention.reschedule_history,
-            "evidence_ids": intention.evidence_ids,
-        }
-        return {
-            "intention_digest": content_cid("prospective_intention", immutable_snapshot),
-            "trigger_type": intention.trigger_type,
-            "due_at": intention.due_at.isoformat(),
-            "evidence_ids": list(intention.evidence_ids),
-            "status": status,
-        }
 
     def _row_to_intention(self, row: dict[str, Any], tenant_id: str) -> Intention:
         """Convert an intentions table row through canonical deserialization."""
@@ -5284,11 +5258,7 @@ class PostgresEngine:
         raise ValueError and never mutate/audit.
         """
 
-        if not isinstance(intention, Intention):
-            raise ValueError("intention must be an Intention")
-        intention = Intention.from_dict(intention.to_dict())
-        if intention.status != "scheduled":
-            raise ValueError("only scheduled intentions may be persisted")
+        intention = canonicalize_intention(intention, require_scheduled=True)
         self.ensure_tenant_and_branch(intention.tenant_id)
         db_tenant_id = _stable_uuid("tenant", intention.tenant_id)
         db_user_id = _stable_uuid("user", intention.user_id)
@@ -5333,7 +5303,7 @@ class PostgresEngine:
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=intention
                 )
-                trust_tier, capability_tags = self._intention_audit_context(provenance)
+                trust_tier, capability_tags = intention_audit_context(provenance)
                 cur.execute(
                     """
                     INSERT INTO intentions (
@@ -5385,7 +5355,7 @@ class PostgresEngine:
                     intention.agent_id,
                     "schedule_intention",
                     intention.intention_id,
-                    self._intention_audit_diff(intention, status="scheduled"),
+                    intention_audit_diff(intention, status="scheduled"),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -5443,7 +5413,7 @@ class PostgresEngine:
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=intention
                 )
-                trust_tier, capability_tags = self._intention_audit_context(provenance)
+                trust_tier, capability_tags = intention_audit_context(provenance)
                 cur.execute(
                     """
                     UPDATE intentions
@@ -5461,7 +5431,7 @@ class PostgresEngine:
                     cancelled_by,
                     "cancel_intention",
                     intention_id,
-                    self._intention_audit_diff(intention, status="cancelled"),
+                    intention_audit_diff(intention, status="cancelled"),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -5503,17 +5473,13 @@ class PostgresEngine:
         clock-independent idempotency enforced by a durable firing receipt.
         """
 
-        if type(tenant_id) is not str or not tenant_id.strip():
-            raise ValueError("tenant_id must be a non-empty string")
-        if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
-            raise ValueError("evaluated_at must be timezone-aware")
-        if not isinstance(trigger_context, TriggerEvaluationContext):
-            raise ValueError("trigger_context must be a TriggerEvaluationContext")
-        if not isinstance(operating_point, ProspectiveOperatingPoint):
-            raise ValueError("operating_point must be a ProspectiveOperatingPoint")
-        if not trigger_context.infrastructure_available:
-            raise RuntimeError("infrastructure is not available for intention evaluation")
-        evaluated_at_utc = evaluated_at.astimezone(UTC)
+        evaluated_at_utc = validate_intention_evaluation_inputs(
+            tenant_id,
+            evaluated_at=evaluated_at,
+            trigger_context=trigger_context,
+            operating_point=operating_point,
+            infrastructure_error="infrastructure is not available for intention evaluation",
+        )
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -5576,7 +5542,7 @@ class PostgresEngine:
                     if fires:
                         candidate_results.append((intention, matched_signal))
                 audit_contexts = [
-                    self._intention_audit_context(
+                    intention_audit_context(
                         self._intention_provenance_rows(
                             cur,
                             db_tenant_id=db_tenant_id,
@@ -5590,7 +5556,7 @@ class PostgresEngine:
                     candidate_results, audit_contexts, strict=True
                 ):
                     fire_audit_diff = {
-                        **self._intention_audit_diff(intention, status="fired"),
+                        **intention_audit_diff(intention, status="fired"),
                         "evaluated_at": evaluated_at_utc.isoformat(),
                         "operating_point": operating_point.to_dict(),
                     }
@@ -5598,13 +5564,8 @@ class PostgresEngine:
                         fire_audit_diff["matched_event_id"] = matched_signal["event_id"]
                     if matched_signal.get("condition_id"):
                         fire_audit_diff["matched_condition_id"] = matched_signal["condition_id"]
-                    canonical_event_id = content_cid(
-                        "fire_intention",
-                        {
-                            "tenant_id": tenant_id,
-                            "intention_id": intention.intention_id,
-                            "op": "fire",
-                        },
+                    canonical_event_id = intention_fire_receipt_id(
+                        tenant_id, intention.intention_id
                     )
                     fire_audit_diff["canonical_event_id"] = canonical_event_id
                     cur.execute(
