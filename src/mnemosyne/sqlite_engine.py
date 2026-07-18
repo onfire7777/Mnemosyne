@@ -79,15 +79,17 @@ from mnemosyne.access_policy import (
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
+    _evaluate_trigger,
     Intention,
     LocalMemoryEngine,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
     _candidate_memo_enabled,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
-    evaluate_intention,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -3563,28 +3565,62 @@ class SqliteEngine:
             evidence.append(source)
         return evidence
 
-    def schedule_intention(self, intention: Intention) -> str:
-        """Store an intention after tenant, provenance, trust, and taint checks.
+    def _intention_rows(self, conn: sqlite3.Connection, tenant_id: str) -> dict[tuple[str, str], Intention]:
+        rows = conn.execute(
+            "SELECT record FROM intentions WHERE tenant_id = ? ORDER BY intention_id",
+            (tenant_id,),
+        ).fetchall()
+        return {
+            (intention.tenant_id, intention.intention_id): intention
+            for row in rows
+            for intention in [Intention.from_dict(json.loads(row["record"]))]
+        }
 
-        Atomic persistence + schedule audit in one transaction; a duplicate
-        ``(tenant_id, intention_id)`` raises ``ValueError`` and never mutates
-        or audits (the PK collision is caught and converted)."""
+    @staticmethod
+    def _validate_intention_dependencies(
+        intention: Intention,
+        tenant_intentions: dict[tuple[str, str], Intention],
+    ) -> None:
+        for dependency_id in intention.dependencies:
+            if (intention.tenant_id, dependency_id) not in tenant_intentions:
+                raise ValueError(
+                    f"dependency {dependency_id!r} is missing or cross-tenant"
+                )
+        if intention.trigger_type != "dependency_completion":
+            return
+        pending = list(intention.dependencies)
+        visited: set[str] = set()
+        while pending:
+            dependency_id = pending.pop()
+            if dependency_id == intention.intention_id:
+                raise ValueError("dependency cycle detected involving the new intention")
+            if dependency_id in visited:
+                continue
+            visited.add(dependency_id)
+            dependency = tenant_intentions.get((intention.tenant_id, dependency_id))
+            if dependency is not None and dependency.trigger_type == "dependency_completion":
+                pending.extend(dependency.dependencies)
+
+    def schedule_intention(self, intention: Intention) -> str:
+        """Store an intention after tenant, provenance, trust, and taint checks."""
         with self._lock:
             conn = self._connect(intention.tenant_id)
-            existing = conn.execute(
-                "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
-                (intention.tenant_id, intention.intention_id),
-            ).fetchone()
-            if existing is not None:
-                raise ValueError(
-                    f"intention {intention.intention_id!r} already exists"
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                existing = conn.execute(
+                    "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+                    (intention.tenant_id, intention.intention_id),
+                ).fetchone()
+                if existing is not None:
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already exists"
+                    )
+                tenant_intentions = self._intention_rows(conn, intention.tenant_id)
+                self._validate_intention_dependencies(intention, tenant_intentions)
+                provenance = self._intention_provenance_rows(conn, intention)
+                trust_tier, capability_tags = LocalMemoryEngine._intention_audit_context(
+                    provenance
                 )
-            provenance = self._intention_provenance_rows(conn, intention)
-            trust_tier, capability_tags = LocalMemoryEngine._intention_audit_context(
-                provenance
-            )
-            record = intention.to_dict()
-            with conn:
                 conn.execute(
                     "INSERT INTO intentions(tenant_id, intention_id, status, due_at, record) "
                     "VALUES (?, ?, ?, ?, ?)",
@@ -3592,8 +3628,8 @@ class SqliteEngine:
                         intention.tenant_id,
                         intention.intention_id,
                         intention.status,
-                        intention.due_at.isoformat(),
-                        json_text(record),
+                        dt_to_json(intention.due_at),
+                        json_text(intention.to_dict()),
                     ),
                 )
                 self._audit_row(
@@ -3609,6 +3645,10 @@ class SqliteEngine:
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
             return intention.intention_id
 
     def cancel_intention(
@@ -3618,31 +3658,33 @@ class SqliteEngine:
             raise ValueError("cancelled_by must be a non-empty string")
         with self._lock:
             conn = self._connect(tenant_id)
-            row = conn.execute(
-                "SELECT record FROM intentions WHERE tenant_id = ? AND intention_id = ?",
-                (tenant_id, intention_id),
-            ).fetchone()
-            if row is None:
-                raise KeyError(intention_id)
-            intention = Intention.from_dict(json.loads(row["record"]))
-            if intention.status == "fired":
-                raise ValueError("a fired intention cannot be cancelled")
-            if intention.status == "cancelled":
-                return
-            if cancelled_by not in {intention.user_id, intention.agent_id}:
-                raise PermissionError(
-                    "only the owning user or agent may cancel an intention"
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT record FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+                    (tenant_id, intention_id),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(intention_id)
+                intention = Intention.from_dict(json.loads(row["record"]))
+                if intention.status == "fired":
+                    raise ValueError("a fired intention cannot be cancelled")
+                if intention.status == "cancelled":
+                    conn.commit()
+                    return
+                if cancelled_by not in {intention.user_id, intention.agent_id}:
+                    raise PermissionError(
+                        "only the owning user or agent may cancel an intention"
+                    )
+                provenance = self._intention_provenance_rows(conn, intention)
+                trust_tier, capability_tags = LocalMemoryEngine._intention_audit_context(
+                    provenance
                 )
-            provenance = self._intention_provenance_rows(conn, intention)
-            trust_tier, capability_tags = LocalMemoryEngine._intention_audit_context(
-                provenance
-            )
-            intention.status = "cancelled"
-            intention.cancellation_state = {"cancelled_by": cancelled_by}
-            with conn:
-                conn.execute(
+                intention.status = "cancelled"
+                intention.cancellation_state = {"cancelled_by": cancelled_by}
+                cursor = conn.execute(
                     "UPDATE intentions SET status = ?, record = ? "
-                    "WHERE tenant_id = ? AND intention_id = ?",
+                    "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
                     (
                         intention.status,
                         json_text(intention.to_dict()),
@@ -3650,6 +3692,8 @@ class SqliteEngine:
                         intention_id,
                     ),
                 )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("intention cancellation lost its scheduled transition")
                 self._audit_row(
                     conn,
                     tenant_id,
@@ -3663,50 +3707,76 @@ class SqliteEngine:
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
 
     def evaluate_due_intentions(
-        self, tenant_id: str, *, evaluated_at: datetime
+        self,
+        tenant_id: str,
+        *,
+        evaluated_at: datetime,
+        trigger_context: TriggerEvaluationContext,
+        operating_point: ProspectiveOperatingPoint,
     ) -> list[Intention]:
-        """Fire due intentions once, ordered deterministically by due time and id.
-
-        All candidate provenance is prevalidated before any transition; a
-        single invalid candidate aborts the batch with no mutation or audit
-        (fail-closed). The fire audit ``id`` and ``at`` are deterministic
-        (canonical firing key + evaluated_at), so a replay returns ``[]`` and
-        cannot mint a second receipt."""
+        """Fire satisfied intentions once in deterministic order."""
+        if type(tenant_id) is not str or not tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
         if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
             raise ValueError("evaluated_at must be timezone-aware")
+        if not isinstance(trigger_context, TriggerEvaluationContext):
+            raise ValueError("trigger_context must be a TriggerEvaluationContext")
+        if not isinstance(operating_point, ProspectiveOperatingPoint):
+            raise ValueError("operating_point must be a ProspectiveOperatingPoint")
+        if not trigger_context.infrastructure_available:
+            raise RuntimeError(
+                "evaluate_due_intentions requires infrastructure_available=True"
+            )
         with self._lock:
             conn = self._connect(tenant_id)
-            candidates: list[Intention] = []
-            for row in conn.execute(
-                "SELECT record FROM intentions "
-                "WHERE tenant_id = ? AND status = 'scheduled' AND due_at <= ? "
-                "ORDER BY due_at, intention_id",
-                (tenant_id, evaluated_at.astimezone(UTC).isoformat()),
-            ).fetchall():
-                intention = Intention.from_dict(json.loads(row["record"]))
-                if evaluate_intention(intention, evaluated_at=evaluated_at):
-                    candidates.append(intention)
-            # Prevalidate every candidate's provenance before any transition
-            # (fail-closed: one invalid candidate aborts the whole batch with
-            # zero mutation/audit, matching Local's prevalidation loop).
-            audit_contexts = []
-            for intention in candidates:
-                provenance = self._intention_provenance_rows(conn, intention)
-                audit_contexts.append(
-                    LocalMemoryEngine._intention_audit_context(provenance)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                tenant_intentions = self._intention_rows(conn, tenant_id)
+                evaluated_at_utc = evaluated_at.astimezone(UTC)
+                candidate_results: list[tuple[Intention, dict[str, Any]]] = []
+                for intention in tenant_intentions.values():
+                    if intention.status != "scheduled":
+                        continue
+                    fires, signal = _evaluate_trigger(
+                        intention,
+                        evaluated_at=evaluated_at_utc,
+                        context=trigger_context,
+                        operating_point=operating_point,
+                        tenant_intentions=tenant_intentions,
+                    )
+                    if fires:
+                        candidate_results.append((intention, signal))
+                candidate_results.sort(
+                    key=lambda result: (result[0].due_at, result[0].intention_id)
                 )
-            fired: list[Intention] = []
-            evaluated_at_utc = evaluated_at.astimezone(UTC)
-            with conn:
-                for intention, (trust_tier, capability_tags) in zip(
-                    candidates, audit_contexts, strict=True
+                audit_contexts = [
+                    LocalMemoryEngine._intention_audit_context(
+                        self._intention_provenance_rows(conn, intention)
+                    )
+                    for intention, _signal in candidate_results
+                ]
+                fired: list[Intention] = []
+                for (intention, signal), (trust_tier, capability_tags) in zip(
+                    candidate_results, audit_contexts, strict=True
                 ):
                     intention.status = "fired"
-                    conn.execute(
+                    event_id = content_cid(
+                        "fire_intention",
+                        {
+                            "tenant_id": tenant_id,
+                            "intention_id": intention.intention_id,
+                            "op": "fire",
+                        },
+                    )
+                    cursor = conn.execute(
                         "UPDATE intentions SET status = ?, record = ? "
-                        "WHERE tenant_id = ? AND intention_id = ?",
+                        "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
                         (
                             intention.status,
                             json_text(intention.to_dict()),
@@ -3714,32 +3784,47 @@ class SqliteEngine:
                             intention.intention_id,
                         ),
                     )
+                    if cursor.rowcount != 1:
+                        raise RuntimeError("intention firing lost its scheduled transition")
+                    conn.execute(
+                        "INSERT INTO intention_fire_receipts "
+                        "(event_id, tenant_id, intention_id, occurred_at) VALUES (?, ?, ?, ?)",
+                        (
+                            event_id,
+                            tenant_id,
+                            intention.intention_id,
+                            dt_to_json(evaluated_at_utc),
+                        ),
+                    )
+                    fire_diff = {
+                        **LocalMemoryEngine._intention_audit_diff(
+                            intention, status="fired"
+                        ),
+                        "evaluated_at": evaluated_at_utc.isoformat(),
+                        "operating_point": operating_point.to_dict(),
+                    }
+                    if "event_id" in signal:
+                        fire_diff["matched_event_id"] = signal["event_id"]
+                    if "condition_id" in signal:
+                        fire_diff["matched_condition_id"] = signal["condition_id"]
                     self._audit_row(
                         conn,
                         tenant_id,
                         intention.agent_id,
                         "fire_intention",
                         intention.intention_id,
-                        {
-                            **LocalMemoryEngine._intention_audit_diff(
-                                intention, status="fired"
-                            ),
-                            "evaluated_at": evaluated_at_utc.isoformat(),
-                        },
+                        fire_diff,
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
-                        event_id=content_cid(
-                            "fire_intention",
-                            {
-                                "tenant_id": tenant_id,
-                                "intention_id": intention.intention_id,
-                                "evaluated_at": evaluated_at_utc.isoformat(),
-                            },
-                        ),
+                        event_id=event_id,
                         occurred_at=evaluated_at_utc,
                     )
                     fired.append(copy.deepcopy(intention))
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
             return fired
 
     def list_intentions(self, tenant_id: str) -> list[Intention]:
