@@ -19,11 +19,11 @@ Forbidden files:
 
 ### Task 1: Repair the RED contract and add rejection regressions
 
-- [ ] Correct only invalid test fixtures: use an existing working-memory kind, matching source/session provenance, an explicit `as_of` clock, and `Evidence.to_dict()` instead of a slots-incompatible `__dict__` assumption.
-- [ ] Replace the impossible cross-store rollback assertion with a forward-only resumable saga assertion: a verified deletion stays deleted, the engine remains until prerequisites verify, and retry skips verified surfaces.
-- [ ] Preserve the R05 security intent by requiring provenance-only cascade. Legal-blind derived payloads containing the deleted source must be absent; never accept raw substring replacement as recomputation.
-- [ ] Add literal regressions for same-operation/different-request conflict, forged high fence rejection, cross-tenant isolation, unknown branch rejection, delete-without-probe rejection, timeout-after-commit convergence, import side-effect absence, and concurrent same-operation serialization.
-- [ ] Extend the synthetic store with independent residue probing and explicit delete/probe fault modes. A successful delete return must never equal verified absence.
+- [x] Correct only invalid test fixtures: use an existing working-memory kind, matching source/session provenance, an explicit `as_of` clock, and `Evidence.to_dict()` instead of a slots-incompatible `__dict__` assumption.
+- [x] Replace the impossible cross-store rollback assertion with a forward-only resumable saga assertion: a verified deletion stays deleted, the engine remains until prerequisites verify, and retry skips verified surfaces.
+- [x] Preserve the R05 security intent by requiring provenance-only cascade. Legal-blind derived payloads containing the deleted source must be absent; never accept raw substring replacement as recomputation.
+- [x] Add literal regressions for same-operation/different-request conflict, forged high fence rejection, cross-tenant isolation, unknown branch rejection, delete-without-probe rejection, timeout-after-commit convergence, import side-effect absence, and concurrent same-operation serialization.
+- [x] Extend the synthetic store with independent residue probing and explicit delete/probe fault modes. A successful delete return must never equal verified absence.
 
 ### Task 2: Implement the forward-only authenticated deletion saga
 

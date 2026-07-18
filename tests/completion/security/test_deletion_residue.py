@@ -37,6 +37,7 @@ USER = "user-delete-a"
 OTHER_USER = "user-delete-b"
 OPERATION_ID = "00000000-0000-4000-8000-000000000025"
 SCHEMA = "mnemosyne.deletion_manifest.v1"
+AS_OF = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
 
 
 def _evidence(tenant: str = TENANT, *, user: str = USER, content: str = CANARY) -> Evidence:
@@ -76,14 +77,17 @@ class FakeStore:
     name: str
     available: bool = True
     fail_delete: bool = False
+    delete_fault: str | None = None
+    probe_fault: str | None = None
     rows: list[dict[str, Any]] = field(default_factory=list)
     delete_calls: list[tuple[str, str]] = field(default_factory=list)
+    probe_calls: list[tuple[str, str]] = field(default_factory=list)
 
     def delete(self, tenant: str, source_ref: str) -> dict[str, Any]:
         self.delete_calls.append((tenant, source_ref))
         if not self.available:
             raise ConnectionError(f"{self.name} unavailable")
-        if self.fail_delete:
+        if self.fail_delete or self.delete_fault == "before_commit":
             raise OSError(f"{self.name} delete failed")
         before = len(self.rows)
         self.rows = [
@@ -91,7 +95,21 @@ class FakeStore:
             for row in self.rows
             if not (row.get("tenant_id") == tenant and row.get("source_ref") == source_ref)
         ]
+        if self.delete_fault == "timeout_after_commit":
+            self.delete_fault = None
+            raise TimeoutError(f"{self.name} timed out after commit")
         return {"deleted": before - len(self.rows)}
+
+    def probe(self, tenant: str, source_ref: str) -> bool:
+        self.probe_calls.append((tenant, source_ref))
+        if self.probe_fault == "raise":
+            raise OSError(f"{self.name} probe failed")
+        if self.probe_fault == "residue":
+            return True
+        return any(
+            row.get("tenant_id") == tenant and row.get("source_ref") == source_ref
+            for row in self.rows
+        )
 
 
 @dataclass
@@ -121,8 +139,8 @@ def _working(source_ref: str) -> WorkingMemoryItem:
         kind="current_plan",
         task_id="task-delete",
         content=CANARY,
-        created_at=datetime.now(UTC),
-        expires_at=datetime.now(UTC) + timedelta(hours=1),
+        created_at=AS_OF,
+        expires_at=AS_OF + timedelta(hours=1),
         evidence_ids=[source_ref],
         access_policy={"tenant": TENANT},
     )
@@ -293,12 +311,17 @@ def test_r04_legal_delete_cascades_to_every_branch() -> None:
 def test_r05_mixed_source_derived_content_is_recomputed() -> None:
     world = _world()
     survivor = world.engine.append_evidence(_evidence(content="independent fact"))
+    unrelated = world.engine.append_evidence(
+        Evidence.from_dict(_evidence(content=f"unrelated literal {CANARY}").to_dict())
+    )
     derived_evidence = _evidence(content=f"{CANARY} plus independent fact")
     derived_evidence.metadata["source_evidence_cids"] = [world.source_ref, survivor]
     derived = world.engine.append_evidence(derived_evidence)
     _delete(world)
     assert world.engine.get_evidence(TENANT, derived) is None
     assert world.engine.get_evidence(TENANT, survivor) is not None
+    assert world.engine.get_evidence(TENANT, unrelated) is not None
+    assert world.engine.get_evidence(TENANT, unrelated).content == f"unrelated literal {CANARY}"
 
 
 def test_r06_assertion_history_and_vectors_are_scrubbed() -> None:
@@ -418,7 +441,7 @@ def test_r13_working_and_workspace_contexts_cannot_recall_or_broadcast() -> None
             TENANT,
             f"session-{CANARY}",
             "working-delete",
-            as_of=datetime.now(UTC),
+            as_of=AS_OF,
         )
         is None
     )
@@ -508,35 +531,34 @@ def test_r19_resource_uri_and_hash_confirmation_oracle_is_removed() -> None:
     assert world.stores["resources"].rows == []
 
 
-@pytest.mark.parametrize("failure", ["journal", "object_storage", "manifest_store"])
-def test_r20_boundary_failure_recovers_before_success_manifest(failure: str) -> None:
+def test_r20_verified_boundary_deletion_is_forward_only_and_retry_resumes() -> None:
     world = _world()
-    successful = FakeStore(
-        "procedures",
+    journal = FakeStore(
+        "journal",
         rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "body": CANARY}],
     )
-    failing = FakeStore(
-        failure,
-        fail_delete=True,
+    manifest_store = FakeStore(
+        "manifest_store",
+        delete_fault="before_commit",
         rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "body": CANARY}],
     )
-    world.stores["procedures"] = successful
-    world.stores[failure] = failing
-    before = copy.deepcopy(successful.rows)
+    world.stores.update(journal=journal, manifest_store=manifest_store)
 
     incomplete = _delete(world)
 
     assert incomplete["summary"]["complete"] is False
     assert incomplete["fence"]["durable"] is False
+    assert journal.rows == []
+    assert _surface(incomplete, "journal")["verified_removed"] is True
+    assert _surface(incomplete, "manifest_store")["verified_removed"] is False
     assert world.engine.get_evidence(TENANT, world.source_ref) is not None
-    assert successful.rows == before
 
-    failing.fail_delete = False
+    manifest_store.delete_fault = None
     complete = _delete(world)
     _assert_complete(complete)
+    assert journal.delete_calls == [(TENANT, world.source_ref)]
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
-    assert successful.rows == []
-    assert failing.rows == []
+    assert manifest_store.rows == []
 
 
 def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
@@ -746,6 +768,47 @@ def test_unprobed_store_remains_incomplete() -> None:
     assert _surface(manifest, "remote")["error_code"] == "probe_failed"
     assert manifest["summary"]["complete"] is False
     assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+@pytest.mark.parametrize("probe_fault", ["raise", "residue"])
+def test_probe_failure_never_treats_delete_return_as_verified_absence(probe_fault: str) -> None:
+    world = _world()
+    remote = FakeStore(
+        "remote",
+        probe_fault=probe_fault,
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.stores["remote"] = remote
+
+    manifest = _delete(world)
+
+    assert remote.rows == []
+    assert remote.probe_calls == [(TENANT, world.source_ref)]
+    assert _surface(manifest, "remote")["verified_removed"] is False
+    assert manifest["summary"]["complete"] is False
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+def test_timeout_after_commit_converges_on_retry_without_early_engine_delete() -> None:
+    world = _world()
+    remote = FakeStore(
+        "remote",
+        delete_fault="timeout_after_commit",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.stores["remote"] = remote
+
+    incomplete = _delete(world)
+
+    assert remote.rows == []
+    assert _surface(incomplete, "remote")["verified_removed"] is False
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+    complete = _delete(world)
+    _assert_complete(complete)
+    assert remote.delete_calls == [(TENANT, world.source_ref), (TENANT, world.source_ref)]
+    assert remote.probe_calls == [(TENANT, world.source_ref)]
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
 
 
 def test_concurrent_same_request_is_serialized_by_shared_ledger() -> None:
