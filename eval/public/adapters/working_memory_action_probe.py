@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import tempfile
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -32,8 +33,17 @@ OPERATING_POINT = {
     "policy": "highest-task-relevance-then-item-id",
     "positive_threshold": 0.75,
 }
+_CUSTODY = {
+    "publishable": False,
+    "headline_eligible": False,
+    "independent_reproduction": False,
+    "upstream_comparable": False,
+}
+_PUBLIC_KIND = {"current_plan_step": "current_plan"}
+_RELEVANCE = re.compile(r"^relevance=(0(?:\.\d+)?|1(?:\.0+)?);(?: |$)")
 _TOP_KEYS = {
-    "schema_version", "suite", "split_role", "seed", "operating_point", "cases"
+    "schema_version", "suite", "split_role", "seed", "operating_point", "cases",
+    *_CUSTODY,
 }
 _CASE_KEYS = {
     "case_id", "tenant_id", "session_id", "now", "category", "action_choices",
@@ -62,6 +72,11 @@ def run(
                 else cli
             )
             visible, command_log = _execute_case(case, case_cli)
+            foreign = sum(
+                item.get("tenant_id") != case["tenant_id"]
+                or item.get("session_id") != case["session_id"]
+                for item in visible
+            )
             decision = choose_action(
                 visible,
                 case["action_choices"],
@@ -78,6 +93,14 @@ def run(
                     ),
                     "command_log": command_log,
                     "scoring_family": "deterministic-action",
+                    "hard_gate_violations": {
+                        "fixture_gold_exposed_to_policy": 0,
+                        "foreign_scope_visible": foreign,
+                        "payload_executed": 0,
+                        "automatic_durable_promotion": int(
+                            "working-promote" in command_log
+                        ),
+                    },
                 }
             )
     labels = [
@@ -101,6 +124,8 @@ def normalize(value: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("working-action schema_version must be 1")
     if value.get("suite") != SUITE or value.get("split_role") != "development":
         raise ValueError("working-action fixture has invalid suite custody")
+    if any(value.get(name) is not expected for name, expected in _CUSTODY.items()):
+        raise ValueError("working-action fixture has invalid publication custody")
     seed = value.get("seed")
     if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
         raise ValueError("working-action seed must be a non-negative integer")
@@ -140,6 +165,7 @@ def normalize(value: Mapping[str, Any]) -> dict[str, Any]:
                 "split_role": "development",
                 "seed": seed,
                 "operating_point": OPERATING_POINT,
+                **_CUSTODY,
                 "cases": normalized_cases,
             },
             sort_keys=True,
@@ -160,11 +186,11 @@ def choose_action(
         item for item in visible_items
         if _valid_visible_item(item)
         and item["item_id"] in action_by_item
-        and float(item.get("task_relevance", 0.0)) >= threshold
+        and _visible_relevance(item) >= threshold
     ]
     if not candidates:
         return None
-    chosen = min(candidates, key=lambda item: (-float(item["task_relevance"]), item["item_id"]))
+    chosen = min(candidates, key=lambda item: (-_visible_relevance(item), item["item_id"]))
     return action_by_item[chosen["item_id"]]
 
 
@@ -221,10 +247,16 @@ def score(
             }
         ],
         "hard_gate_violations": {
-            "fixture_gold_exposed_to_policy": 0,
-            "foreign_scope_visible": 0,
-            "payload_executed": 0,
-            "automatic_durable_promotion": 0,
+            name: sum(
+                int(trace.get("hard_gate_violations", {}).get(name, 0))
+                for trace in traces
+            )
+            for name in (
+                "fixture_gold_exposed_to_policy",
+                "foreign_scope_visible",
+                "payload_executed",
+                "automatic_durable_promotion",
+            )
         },
     }
 
@@ -248,8 +280,10 @@ def _validate_case(value: Any) -> dict[str, Any]:
         _string(choice.get("item_id"), "choice item_id")
     if [choice["action_id"] for choice in choices] != sorted(
         choice["action_id"] for choice in choices
-    ) or len({choice["action_id"] for choice in choices}) != len(choices):
-        raise ValueError("working-action choices must have sorted unique opaque IDs")
+    ) or len({choice["action_id"] for choice in choices}) != len(choices) or len(
+        {choice["item_id"] for choice in choices}
+    ) != len(choices):
+        raise ValueError("working-action choices must have sorted unique opaque IDs and item IDs")
     expected = case.get("expected_action_id")
     abstain = case.get("expected_abstain")
     if not isinstance(abstain, bool) or (expected is None) != abstain:
@@ -264,8 +298,25 @@ def _validate_case(value: Any) -> dict[str, Any]:
     ):
         raise ValueError("working-action events must be sorted by event_id")
     seen_events: set[str] = set()
+    prior_events: dict[str, Mapping[str, Any]] = {}
+    prior_at: datetime | None = None
     for event in events:
         _validate_event(event, case, seen_events)
+        at = _timestamp(event["at"], "event at")
+        if prior_at is not None and at < prior_at:
+            raise ValueError("working-action events must be chronological")
+        operation = event["operation"]
+        if operation == "replace":
+            replaced = prior_events.get(event.get("supersedes"))
+            if replaced is None or replaced.get("expires_at") != event["at"]:
+                raise ValueError("working-action replacement must supersede an item expiring at replacement time")
+        elif operation in {"resolve", "expire"}:
+            target = prior_events.get(event["item_id"])
+            if target is None or target.get("expires_at") != event["at"]:
+                raise ValueError("working-action expiry must target an item expiring at event time")
+        if operation in {"put", "replace"}:
+            prior_events[event["item_id"]] = event
+        prior_at = at
     return json.loads(json.dumps(case, sort_keys=True, separators=(",", ":")))
 
 
@@ -290,6 +341,10 @@ def _validate_event(event: Any, case: dict[str, Any], seen: set[str]) -> None:
     relevance = event.get("task_relevance")
     if isinstance(relevance, bool) or not isinstance(relevance, (int, float)) or not 0 <= relevance <= 1:
         raise ValueError("working-action task_relevance must be between zero and one")
+    if event.get("operation") in {"put", "replace"}:
+        match = _RELEVANCE.match(event["content"])
+        if match is None or float(match.group(1)) != float(relevance):
+            raise ValueError("working-action content must expose canonical task_relevance")
     if event.get("tenant_id") != case["tenant_id"] or event.get("session_id") != case["session_id"]:
         raise ValueError("working-action event crosses its case scope")
     for name in _EVENT_OPTIONAL & set(event):
@@ -301,20 +356,30 @@ def _validate_event(event: Any, case: dict[str, Any], seen: set[str]) -> None:
 
 def _execute_case(case: dict[str, Any], cli: Any) -> tuple[list[dict[str, Any]], list[str]]:
     command_log: list[str] = []
-    for event in case["events"]:
+    for event_index, event in enumerate(case["events"]):
         operation = event["operation"]
         if operation in {"put", "replace"}:
+            if operation == "replace":
+                cli.run(
+                    "working-expire", *_scope_args(event), "--expired-at", event["at"],
+                    "--role", "operator", "--source-trust-tier", "0",
+                )
+                command_log.append("working-expire")
             captured = cli.run(
                 "capture", "--tenant", event["tenant_id"], "--user", event["user_id"],
                 "--actor", "user", "--source-type", "working-action-probe",
-                "--session-id", event["session_id"], "--content", event["content"],
+                "--source-identity", "working-action-probe", "--turn-index",
+                str(event_index), "--session-id", event["session_id"],
+                "--content", event["content"],
             ).json
             cid = captured.get("cid") if isinstance(captured, Mapping) else None
             if not isinstance(cid, str) or not cid:
                 raise ValueError("working-action capture omitted evidence CID")
             ttl = _ttl_seconds(event["at"], event.get("expires_at"))
             cli.run(
-                "working-seed", *_scope_args(event), "--kind", event["item_type"],
+                "working-seed", *_scope_args(event), "--kind", _PUBLIC_KIND.get(
+                    event["item_type"], event["item_type"]
+                ),
                 "--content", event["content"], "--evidence-cid", cid,
                 "--ttl-seconds", str(ttl), "--created-at", event["at"],
                 "--item-id", event["item_id"], "--source-trust-tier", "1",
@@ -355,13 +420,21 @@ def _ttl_seconds(created: str, expires: Any) -> int:
 
 
 def _valid_visible_item(item: Mapping[str, Any]) -> bool:
-    return isinstance(item.get("item_id"), str) and isinstance(
-        item.get("task_relevance"), (int, float)
-    ) and not isinstance(item.get("task_relevance"), bool)
+    return isinstance(item.get("item_id"), str) and _visible_relevance(item) >= 0
+
+
+def _visible_relevance(item: Mapping[str, Any]) -> float:
+    content = item.get("content")
+    if not isinstance(content, str):
+        return -1.0
+    match = _RELEVANCE.match(content)
+    return -1.0 if match is None else float(match.group(1))
 
 
 def _timestamp(value: Any, name: str) -> datetime:
-    if not isinstance(value, str) or not value.endswith("Z"):
+    if not isinstance(value, str) or re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value
+    ) is None:
         raise ValueError(f"working-action {name} must be RFC3339 UTC with Z")
     try:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
