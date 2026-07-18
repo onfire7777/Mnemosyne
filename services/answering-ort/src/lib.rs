@@ -1,4 +1,7 @@
+pub mod embed;
 pub mod protocol;
+pub mod reader;
+pub mod rerank;
 pub mod runtime;
 
 use std::io::{self, Read, Write};
@@ -9,7 +12,10 @@ use std::time::Duration;
 
 use protocol::MAX_REQUEST_BYTES;
 pub use protocol::{handle_json, ApiError, ErrorCode, Request, Response};
-pub use runtime::{shared_runtime, Deadline, Runtime, RuntimeConfig, REQUEST_DEADLINE};
+pub use runtime::{
+    shared_runtime, ComponentBackend, ComponentIdentities, ComponentSession, Deadline, Runtime,
+    RuntimeConfig, REQUEST_DEADLINE,
+};
 
 pub const DEFAULT_TCP_ADDR: &str = "127.0.0.1:9294";
 const MAX_ADMITTED_CONNECTIONS: usize = 2;

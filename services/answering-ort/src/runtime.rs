@@ -4,7 +4,10 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::embed::{EmbedRequest, EmbedResponse, EmbedSpace, EmbedderIdentity};
 use crate::protocol::{ApiError, Evidence, Output, ReadPrediction, Request, Response};
+use crate::reader::{ReaderAnswer, ReaderIdentity, ReaderPrediction, ReaderRequest};
+use crate::rerank::{RerankIdentity, RerankRequest, RerankResponse};
 
 pub const MAX_IN_FLIGHT: usize = 1;
 pub const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
@@ -57,6 +60,396 @@ pub trait InferenceSession: Send + Sync {
     fn infer(&self, request: &Request, deadline: Deadline) -> Result<Output, ApiError>;
 }
 
+/// The three model adapters share one serialized runtime session.
+///
+/// Implementations own model loading and tensor execution. They receive the
+/// versioned component requests after the sidecar has attached the configured
+/// identity, and must return the corresponding versioned response. The
+/// runtime validates every response again before it becomes protocol output.
+pub trait ComponentBackend: Send + Sync {
+    fn embed(
+        &self,
+        request: &EmbedRequest,
+        deadline: Deadline,
+    ) -> Result<EmbedResponse, crate::embed::EmbedError>;
+
+    fn rerank(
+        &self,
+        request: &RerankRequest,
+        deadline: Deadline,
+    ) -> Result<RerankResponse, crate::rerank::RerankError>;
+
+    fn read(
+        &self,
+        request: &ReaderRequest,
+        deadline: Deadline,
+    ) -> Result<Vec<ReaderPrediction>, crate::reader::ReaderError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentIdentities {
+    pub embedder: EmbedderIdentity,
+    pub reranker: RerankIdentity,
+    pub reader: ReaderIdentity,
+}
+
+/// Adapts the component ABIs to the single protocol-facing inference session.
+pub struct ComponentSession {
+    identities: ComponentIdentities,
+    backend: Arc<dyn ComponentBackend>,
+    embed_space: EmbedSpace,
+    null_threshold: f32,
+}
+
+impl ComponentSession {
+    pub fn new(identities: ComponentIdentities, backend: Arc<dyn ComponentBackend>) -> Self {
+        Self {
+            identities,
+            backend,
+            embed_space: EmbedSpace::Native768,
+            null_threshold: 0.0,
+        }
+    }
+
+    pub fn with_options(
+        identities: ComponentIdentities,
+        backend: Arc<dyn ComponentBackend>,
+        embed_space: EmbedSpace,
+        null_threshold: f32,
+    ) -> Result<Self, ApiError> {
+        if !null_threshold.is_finite() {
+            return Err(ApiError::inference_failed());
+        }
+        Ok(Self {
+            identities,
+            backend,
+            embed_space,
+            null_threshold,
+        })
+    }
+
+    pub fn identities(&self) -> &ComponentIdentities {
+        &self.identities
+    }
+
+    fn infer_embed(&self, query: &str, deadline: Deadline) -> Result<Output, ApiError> {
+        let request = EmbedRequest {
+            abi_version: crate::embed::EMBEDDER_ABI_VERSION,
+            identity: self.identities.embedder.clone(),
+            inputs: vec![query.to_owned()],
+            space: self.embed_space,
+        };
+        request
+            .validate(&self.identities.embedder)
+            .map_err(map_embed_error)?;
+        let response = self
+            .backend
+            .embed(&request, deadline)
+            .map_err(map_embed_error)?;
+        if deadline.is_expired() {
+            return Err(ApiError::timed_out());
+        }
+        response
+            .validate(&request, &self.identities.embedder)
+            .map_err(map_embed_error)?;
+        let embedding = response
+            .vectors
+            .into_iter()
+            .next()
+            .ok_or_else(ApiError::inference_failed)?;
+        Ok(Output::Embed { embedding })
+    }
+
+    fn infer_rerank(
+        &self,
+        query: &str,
+        evidence: &[Evidence],
+        rank_width: usize,
+        deadline: Deadline,
+    ) -> Result<Output, ApiError> {
+        let candidates = evidence
+            .iter()
+            .map(|row| crate::rerank::RerankCandidate {
+                evidence_id: row.id.clone(),
+                text: row.text.clone(),
+            })
+            .collect();
+        let request = RerankRequest::new(
+            self.identities.reranker.clone(),
+            query.to_owned(),
+            candidates,
+            rank_width,
+        )
+        .map_err(map_rerank_error)?;
+        let response = self
+            .backend
+            .rerank(&request, deadline)
+            .map_err(map_rerank_error)?;
+        let ranked = crate::rerank::validate_response_with_deadline(
+            &request,
+            &response,
+            deadline.expires_at(),
+        )
+        .map_err(map_rerank_error)?;
+        Ok(Output::Rerank {
+            ranked_ids: ranked.into_iter().map(|score| score.evidence_id).collect(),
+        })
+    }
+
+    fn infer_read(
+        &self,
+        query: &str,
+        evidence: &[Evidence],
+        deadline: Deadline,
+    ) -> Result<Output, ApiError> {
+        let Some(request) = build_reader_request(
+            &self.identities.reader,
+            query,
+            evidence,
+            self.null_threshold,
+        )?
+        else {
+            return Ok(Output::Read {
+                prediction: ReadPrediction::Null {
+                    supporting_ids: Vec::new(),
+                },
+            });
+        };
+
+        let predictions = self
+            .backend
+            .read(&request, deadline)
+            .map_err(map_reader_error)?;
+        let mut window_ids = std::collections::HashSet::with_capacity(predictions.len());
+        if predictions.len() != request.windows.len()
+            || predictions
+                .iter()
+                .any(|prediction| !window_ids.insert(prediction.window_id.as_str()))
+        {
+            return Err(ApiError::inference_failed());
+        }
+        for prediction in &predictions {
+            crate::reader::validate_prediction_with_deadline(
+                &request,
+                prediction,
+                deadline.expires_at(),
+            )
+            .map_err(map_reader_error)?;
+        }
+        let selected = predictions
+            .iter()
+            .max_by(|left, right| {
+                left.score
+                    .partial_cmp(&right.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then_with(|| (left.answer_type != "null").cmp(&(right.answer_type != "null")))
+                    .then_with(|| {
+                        right
+                            .null_margin
+                            .partial_cmp(&left.null_margin)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .then_with(|| left.window_id.cmp(&right.window_id))
+            })
+            .ok_or_else(ApiError::inference_failed)?;
+        if deadline.is_expired() {
+            return Err(ApiError::timed_out());
+        }
+        let answer =
+            crate::reader::decode_prediction(&request, selected).map_err(map_reader_error)?;
+        protocol_prediction(&request, answer)
+    }
+}
+
+impl InferenceSession for ComponentSession {
+    fn infer(&self, request: &Request, deadline: Deadline) -> Result<Output, ApiError> {
+        if deadline.is_expired() {
+            return Err(ApiError::timed_out());
+        }
+        match request {
+            Request::Embed { query } => self.infer_embed(query, deadline),
+            Request::Rerank {
+                query,
+                evidence,
+                rank_width,
+            } => self.infer_rerank(query, evidence, *rank_width, deadline),
+            Request::Read { query, evidence } => self.infer_read(query, evidence, deadline),
+        }
+    }
+}
+
+fn map_embed_error(error: crate::embed::EmbedError) -> ApiError {
+    match error {
+        crate::embed::EmbedError::InvalidIdentity { .. }
+        | crate::embed::EmbedError::IdentityMismatch { .. } => ApiError::identity_mismatch(),
+        crate::embed::EmbedError::EmptyInputBatch
+        | crate::embed::EmbedError::InvalidInput { .. }
+        | crate::embed::EmbedError::InvalidRankLimit => ApiError::limit_exceeded(),
+        _ => ApiError::inference_failed(),
+    }
+}
+
+fn map_rerank_error(error: crate::rerank::RerankError) -> ApiError {
+    match error {
+        crate::rerank::RerankError::InvalidIdentity
+        | crate::rerank::RerankError::IdentityMismatch => ApiError::identity_mismatch(),
+        crate::rerank::RerankError::RequestTooLarge => ApiError::request_too_large(),
+        crate::rerank::RerankError::LimitExceeded => ApiError::limit_exceeded(),
+        crate::rerank::RerankError::TimedOut => ApiError::timed_out(),
+        _ => ApiError::inference_failed(),
+    }
+}
+
+fn map_reader_error(error: crate::reader::ReaderError) -> ApiError {
+    match error {
+        crate::reader::ReaderError::InvalidIdentity
+        | crate::reader::ReaderError::IdentityMismatch => ApiError::identity_mismatch(),
+        crate::reader::ReaderError::RequestTooLarge => ApiError::request_too_large(),
+        crate::reader::ReaderError::TimedOut => ApiError::timed_out(),
+        _ => ApiError::inference_failed(),
+    }
+}
+
+fn build_reader_request(
+    identity: &ReaderIdentity,
+    query: &str,
+    evidence: &[Evidence],
+    null_threshold: f32,
+) -> Result<Option<ReaderRequest>, ApiError> {
+    let mut context = String::new();
+    let mut facts = Vec::with_capacity(evidence.len());
+    for row in evidence.iter().filter(|row| !row.text.is_empty()) {
+        if !context.is_empty() {
+            context.push('\n');
+        }
+        let raw_start = context.len();
+        context.push_str(&row.text);
+        let raw_end = context.len();
+        facts.push(crate::reader::SupportingFact {
+            fact_id: row.id.clone(),
+            raw_start,
+            raw_end,
+            text: row.text.clone(),
+        });
+    }
+    if facts.is_empty() {
+        return Ok(None);
+    }
+    if context.chars().count() > crate::reader::MAX_CONTEXT_CHARS
+        || context.len() > crate::reader::MAX_CONTEXT_BYTES
+    {
+        return Err(ApiError::limit_exceeded());
+    }
+
+    let tokens = tokenize_context(&context);
+    if tokens.is_empty() || tokens.len() > crate::reader::MAX_TOKEN_COUNT {
+        return Err(ApiError::limit_exceeded());
+    }
+    let starts = reader_window_starts(tokens.len());
+    if starts.len() > crate::reader::MAX_WINDOWS {
+        return Err(ApiError::limit_exceeded());
+    }
+    let windows = starts
+        .into_iter()
+        .enumerate()
+        .map(|(index, token_start)| {
+            let token_end = token_start
+                .saturating_add(crate::reader::WINDOW_TOKENS)
+                .min(tokens.len());
+            let window_tokens = tokens[token_start..token_end].to_vec();
+            crate::reader::ReaderWindow {
+                window_id: format!("window-{index:03}"),
+                token_start,
+                token_end,
+                raw_start: window_tokens[0].raw_start,
+                raw_end: window_tokens
+                    .last()
+                    .expect("reader window has a token")
+                    .raw_end,
+                tokens: window_tokens,
+            }
+        })
+        .collect();
+    let request = ReaderRequest {
+        schema: crate::reader::ABI_SCHEMA.to_owned(),
+        identity: identity.clone(),
+        query: query.to_owned(),
+        context,
+        facts,
+        windows,
+        null_threshold,
+    };
+    crate::reader::validate_request(&request).map_err(map_reader_error)?;
+    Ok(Some(request))
+}
+
+fn tokenize_context(context: &str) -> Vec<crate::reader::TokenSpan> {
+    let mut tokens = Vec::new();
+    let mut start = None;
+    for (offset, character) in context.char_indices() {
+        if character.is_whitespace() {
+            if let Some(raw_start) = start.take() {
+                tokens.push(crate::reader::TokenSpan {
+                    token: context[raw_start..offset].to_owned(),
+                    raw_start,
+                    raw_end: offset,
+                });
+            }
+        } else if start.is_none() {
+            start = Some(offset);
+        }
+    }
+    if let Some(raw_start) = start {
+        tokens.push(crate::reader::TokenSpan {
+            token: context[raw_start..].to_owned(),
+            raw_start,
+            raw_end: context.len(),
+        });
+    }
+    tokens
+}
+
+fn reader_window_starts(token_count: usize) -> Vec<usize> {
+    let regular_limit = token_count
+        .saturating_sub(crate::reader::WINDOW_TOKENS)
+        .saturating_add(1)
+        .max(1);
+    let mut starts: Vec<usize> = (0..regular_limit)
+        .step_by(crate::reader::WINDOW_STRIDE)
+        .collect();
+    let final_start = token_count.saturating_sub(crate::reader::WINDOW_TOKENS);
+    if starts.last().copied() != Some(final_start) {
+        starts.push(final_start);
+    }
+    starts
+}
+
+fn protocol_prediction(request: &ReaderRequest, answer: ReaderAnswer) -> Result<Output, ApiError> {
+    let supporting_ids = answer.supporting_facts;
+    let prediction = match answer.answer_type.as_str() {
+        "null" => ReadPrediction::Null { supporting_ids },
+        "yes" => ReadPrediction::Yes { supporting_ids },
+        "no" => ReadPrediction::No { supporting_ids },
+        "span" => {
+            let start = answer.raw_start.ok_or_else(ApiError::inference_failed)?;
+            let end = answer.raw_end.ok_or_else(ApiError::inference_failed)?;
+            let fact = request
+                .facts
+                .iter()
+                .find(|fact| fact.raw_start <= start && end <= fact.raw_end)
+                .ok_or_else(ApiError::inference_failed)?;
+            ReadPrediction::Span {
+                evidence_id: fact.fact_id.clone(),
+                start: start - fact.raw_start,
+                end: end - fact.raw_start,
+                supporting_ids,
+            }
+        }
+        _ => return Err(ApiError::inference_failed()),
+    };
+    Ok(Output::Read { prediction })
+}
+
 pub struct Runtime {
     config: RuntimeConfig,
     session: Option<Arc<dyn InferenceSession>>,
@@ -78,6 +471,26 @@ impl Runtime {
             session: Some(session),
             in_flight: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    pub fn with_components(
+        config: RuntimeConfig,
+        identities: ComponentIdentities,
+        backend: Arc<dyn ComponentBackend>,
+    ) -> Self {
+        Self::with_session(config, Arc::new(ComponentSession::new(identities, backend)))
+    }
+
+    pub fn with_component_options(
+        config: RuntimeConfig,
+        identities: ComponentIdentities,
+        backend: Arc<dyn ComponentBackend>,
+        embed_space: EmbedSpace,
+        null_threshold: f32,
+    ) -> Result<Self, ApiError> {
+        let session =
+            ComponentSession::with_options(identities, backend, embed_space, null_threshold)?;
+        Ok(Self::with_session(config, Arc::new(session)))
     }
 
     pub fn config(&self) -> &RuntimeConfig {
@@ -241,6 +654,10 @@ impl Deadline {
     pub fn remaining(self) -> Option<Duration> {
         self.0.checked_duration_since(Instant::now())
     }
+
+    pub fn expires_at(self) -> Instant {
+        self.0
+    }
 }
 
 impl Default for Deadline {
@@ -258,8 +675,12 @@ pub fn shared_runtime() -> &'static Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::{ErrorCode, Output};
+    use crate::embed::{EmbedRequest, EmbedResponse, EmbedderIdentity};
+    use crate::protocol::{handle_json, ErrorCode, Output};
+    use crate::reader::{ReaderIdentity, ReaderPrediction, ReaderRequest};
+    use crate::rerank::{RerankIdentity, RerankRequest, RerankResponse, RerankScore};
     use std::sync::Barrier;
+    use std::sync::Mutex;
     use std::thread;
 
     struct FixedSession(Result<Output, ApiError>);
@@ -288,6 +709,117 @@ mod tests {
             Ok(Output::Embed {
                 embedding: vec![1.0],
             })
+        }
+    }
+
+    fn synthetic_identities() -> ComponentIdentities {
+        ComponentIdentities {
+            embedder: EmbedderIdentity {
+                artifact: "embedder-artifact@dev".into(),
+                tokenizer: "embedder-tokenizer@dev".into(),
+                preprocessing: "embedder-preprocessing@dev".into(),
+                model_space: "native-768-zero-pad-1024-v1".into(),
+            },
+            reranker: RerankIdentity {
+                model_id: "reranker@dev".into(),
+                artifact_id: "reranker-artifact@dev".into(),
+                artifact_sha256: "a".repeat(64),
+                preprocessing_id: "reranker-preprocessing@dev".into(),
+                preprocessing_sha256: "b".repeat(64),
+            },
+            reader: ReaderIdentity {
+                model_id: "reader@dev".into(),
+                artifact_id: "reader-artifact@dev".into(),
+                artifact_sha256: "c".repeat(64),
+                preprocessing_id: "reader-preprocessing@dev".into(),
+                preprocessing_sha256: "d".repeat(64),
+            },
+        }
+    }
+
+    struct SyntheticComponentBackend {
+        calls: Mutex<Vec<String>>,
+        corrupt_embed_identity: bool,
+    }
+
+    impl SyntheticComponentBackend {
+        fn record(&self, component: &str, identity: &str) {
+            self.calls
+                .lock()
+                .expect("synthetic call log is not poisoned")
+                .push(format!("{component}:{identity}"));
+        }
+    }
+
+    impl ComponentBackend for SyntheticComponentBackend {
+        fn embed(
+            &self,
+            request: &EmbedRequest,
+            _deadline: Deadline,
+        ) -> Result<EmbedResponse, crate::embed::EmbedError> {
+            self.record("embed", &request.identity.artifact);
+            let mut identity = request.identity.clone();
+            if self.corrupt_embed_identity {
+                identity.artifact.push_str("-drift");
+            }
+            let mut vector = vec![0.0; request.space.dimensions()];
+            vector[0] = 1.0;
+            Ok(EmbedResponse {
+                abi_version: crate::embed::EMBEDDER_ABI_VERSION,
+                identity,
+                space: request.space,
+                vectors: vec![vector],
+            })
+        }
+
+        fn rerank(
+            &self,
+            request: &RerankRequest,
+            _deadline: Deadline,
+        ) -> Result<RerankResponse, crate::rerank::RerankError> {
+            self.record("rerank", &request.identity.model_id);
+            let scores = request
+                .candidates
+                .iter()
+                .enumerate()
+                .map(|(index, candidate)| RerankScore {
+                    evidence_id: candidate.evidence_id.clone(),
+                    score: (request.candidates.len() - index) as f32,
+                })
+                .collect();
+            Ok(RerankResponse::new(request.identity.clone(), scores))
+        }
+
+        fn read(
+            &self,
+            request: &ReaderRequest,
+            _deadline: Deadline,
+        ) -> Result<Vec<ReaderPrediction>, crate::reader::ReaderError> {
+            self.record("read", &request.identity.model_id);
+            let window = request
+                .windows
+                .first()
+                .expect("synthetic request has a window");
+            let token = window.tokens.first().expect("synthetic window has a token");
+            let fact_id = request
+                .facts
+                .first()
+                .expect("synthetic request has a fact")
+                .fact_id
+                .clone();
+            Ok(vec![ReaderPrediction {
+                schema: crate::reader::ABI_SCHEMA.into(),
+                identity: request.identity.clone(),
+                window_id: window.window_id.clone(),
+                answer_type: "span".into(),
+                start_token: Some(0),
+                end_token: Some(1),
+                raw_start: Some(token.raw_start),
+                raw_end: Some(token.raw_end),
+                supporting_facts: vec![fact_id],
+                null_margin: -1.0,
+                score: 1.0,
+            }])
         }
     }
 
@@ -362,6 +894,96 @@ mod tests {
                 .code,
             ErrorCode::InferenceFailed
         );
+    }
+
+    #[test]
+    fn synthetic_components_share_protocol_runtime_and_preserve_identity() {
+        let backend = Arc::new(SyntheticComponentBackend {
+            calls: Mutex::new(Vec::new()),
+            corrupt_embed_identity: false,
+        });
+        let backend_for_runtime: Arc<dyn ComponentBackend> = backend.clone();
+        let runtime = Runtime::with_components(
+            RuntimeConfig::default(),
+            synthetic_identities(),
+            backend_for_runtime,
+        );
+
+        let embed = handle_json(
+            br#"{"operation":"embed","query":"bounded query"}"#,
+            &runtime,
+            Deadline::default(),
+        );
+        let Some(Output::Embed { embedding }) = embed.result else {
+            panic!("synthetic embed must return an embedding");
+        };
+        assert_eq!(embedding.len(), crate::embed::NATIVE_DIMENSIONS);
+        assert_eq!(embedding[0], 1.0);
+
+        let rerank = handle_json(
+            br#"{"operation":"rerank","query":"bounded query","evidence":[{"id":"first","text":"first evidence"},{"id":"second","text":"second evidence"}],"rank_width":2}"#,
+            &runtime,
+            Deadline::default(),
+        );
+        assert_eq!(
+            rerank.result,
+            Some(Output::Rerank {
+                ranked_ids: vec!["first".into(), "second".into()],
+            })
+        );
+
+        let read = handle_json(
+            br#"{"operation":"read","query":"what is the answer","evidence":[{"id":"fact-1","text":"alpha beta"}]}"#,
+            &runtime,
+            Deadline::default(),
+        );
+        assert_eq!(
+            read.result,
+            Some(Output::Read {
+                prediction: ReadPrediction::Span {
+                    evidence_id: "fact-1".into(),
+                    start: 0,
+                    end: 5,
+                    supporting_ids: vec!["fact-1".into()],
+                },
+            })
+        );
+        assert_eq!(
+            backend
+                .calls
+                .lock()
+                .expect("synthetic call log is not poisoned")
+                .as_slice(),
+            [
+                "embed:embedder-artifact@dev",
+                "rerank:reranker@dev",
+                "read:reader@dev"
+            ]
+        );
+    }
+
+    #[test]
+    fn component_identity_drift_is_typed_and_fail_closed() {
+        let runtime = Runtime::with_components(
+            RuntimeConfig::default(),
+            synthetic_identities(),
+            Arc::new(SyntheticComponentBackend {
+                calls: Mutex::new(Vec::new()),
+                corrupt_embed_identity: true,
+            }),
+        );
+        let response = runtime.execute(
+            Request::Embed {
+                query: "query".into(),
+            },
+            Deadline::default(),
+        );
+        assert_eq!(
+            response.error.expect("drift must fail").code,
+            ErrorCode::IdentityMismatch
+        );
+        assert!(!response.ok);
+        assert!(response.result.is_none());
     }
 
     #[test]
