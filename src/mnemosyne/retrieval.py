@@ -32,6 +32,8 @@ from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 
 
 QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
+PROSPECTIVE_MEMORY_CHANNEL = "prospective_memory"
+WORKING_MEMORY_CHANNEL = "working_memory"
 WORKSPACE_BROADCAST_MAX_ITEMS = 4
 WORKSPACE_BROADCAST_MAX_CONTENT_CHARS = 160
 WORKSPACE_BROADCAST_FILTER_KEYS = ("workspace_broadcast", "workspace_focus")
@@ -42,13 +44,131 @@ WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS = (
     "workspace_retrieval_advisory_mode",
 )
 WORKSPACE_CONTROLLER_FILTER_KEYS = WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
-WORKING_MEMORY_CHANNEL = "working_memory"
 WORKING_MEMORY_ROUTE_VERSION = "working-memory-route.v1"
 WORKING_MEMORY_TASK_WEIGHT = 0.75
 WORKING_MEMORY_RECENCY_WEIGHT = 0.25
 HttpEmbeddingCacheKey = tuple[str, str, str, str, int, str, str]
 _HTTP_EMBEDDING_CACHE: OrderedDict[HttpEmbeddingCacheKey, tuple[float, ...]] = OrderedDict()
 _HTTP_EMBEDDING_CACHE_LOCK = RLock()
+
+
+def _plane_value(item: Any, name: str, default: Any = None) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(name, default)
+    return getattr(item, name, default)
+
+
+def _plane_relevance(query: str, text: str) -> float:
+    query_terms = set(tokenize(query))
+    if not query_terms:
+        return 0.0
+    return len(query_terms & set(tokenize(text))) / len(query_terms)
+
+
+def prospective_memory_hits(
+    ops: Any,
+    query: str,
+    k: int,
+    filt: Mapping[str, Any],
+    *,
+    as_of: datetime,
+) -> list[Hit]:
+    """Return due intentions for an explicitly authorized owner, without firing them."""
+
+    owner = filt.get("prospective_owner")
+    if not isinstance(owner, Mapping):
+        return []
+    user_id = str(owner.get("user_id") or "").strip()
+    agent_id = str(owner.get("agent_id") or "").strip()
+    if not all(isinstance(value, str) and value.strip() for value in (user_id, agent_id)):
+        return []
+    # The selector is not authority by itself.  Bind it to the authenticated
+    # retrieval principal so a caller cannot enumerate another owner's actions.
+    if str(filt.get("user_id") or "").strip() != user_id:
+        return []
+    if str(filt.get("agent_id") or "").strip() != agent_id:
+        return []
+    tenant_id = str(filt["tenant_id"])
+    branch = str(filt.get("branch", "main"))
+    hits: list[Hit] = []
+    for intention in ops.list_intentions(tenant_id):
+        if _plane_value(intention, "user_id") != user_id:
+            continue
+        if _plane_value(intention, "agent_id") != agent_id:
+            continue
+        due_at = _plane_value(intention, "due_at")
+        if not isinstance(due_at, datetime) or due_at.tzinfo is None:
+            continue
+        if _plane_value(intention, "status") != "scheduled" or due_at.astimezone(UTC) > as_of:
+            continue
+        raw_id = str(_plane_value(intention, "intention_id"))
+        action = _plane_value(intention, "action", {})
+        text = json.dumps(action, sort_keys=True, separators=(",", ":"), default=str)
+        provenance = [str(cid) for cid in _plane_value(intention, "evidence_ids", [])]
+        if not provenance:
+            continue
+        trust_tiers: list[int] = []
+        sensitivities: list[int] = []
+        capability_tags: set[str] = set()
+        privacy: list[dict[str, Any]] = []
+        allowed = True
+        for cid in provenance:
+            evidence = ops.get_evidence(tenant_id, cid, branch)
+            if (
+                evidence is None
+                or evidence.tenant_id != tenant_id
+                or evidence.user_id != user_id
+                or evidence.branch != branch
+                or evidence.trust_tier > ops.policy.max_trust_tier
+            ):
+                allowed = False
+                break
+            decision = may_read_item(
+                item_tenant_id=evidence.tenant_id,
+                sensitivity=evidence.sensitivity,
+                access_policy=evidence.access_policy,
+                context=filt,
+                policy_max_sensitivity=ops.policy.max_sensitivity,
+                erased=evidence.erased,
+            )
+            if not decision.allowed:
+                allowed = False
+                break
+            text, redaction = apply_text_redactions(text, evidence.access_policy, decision)
+            if not text:
+                allowed = False
+                break
+            if redaction.get("redacted"):
+                privacy.append(redaction)
+            trust_tiers.append(evidence.trust_tier)
+            sensitivities.append(evidence.sensitivity)
+            capability_tags.update(str(tag) for tag in evidence.capability_tags if str(tag).strip())
+        if not allowed:
+            continue
+        hits.append(
+            Hit(
+                id=raw_id,
+                kind="intention",
+                tenant_id=tenant_id,
+                branch=branch,
+                text=text,
+                score=_plane_relevance(query, text),
+                channel=PROSPECTIVE_MEMORY_CHANNEL,
+                provenance=provenance,
+                trust_tier=max(trust_tiers),
+                sensitivity=max(sensitivities),
+                metadata={
+                    "memory_plane": PROSPECTIVE_MEMORY_CHANNEL,
+                    "intention_id": raw_id,
+                    "due_at": due_at.astimezone(UTC).isoformat(),
+                    "capability_tags": sorted(capability_tags),
+                    "privacy": privacy,
+                },
+            )
+        )
+    return sorted(hits, key=lambda hit: (-hit.score, hit.metadata["due_at"], hit.id))[:k]
+
+
 QUERY_SUPPORT_STOPWORDS = {
     "a",
     "about",
@@ -2507,6 +2627,44 @@ def build_working_memory_hits(
         policy_max_sensitivity=policy_max_sensitivity,
         max_trust_tier=max_trust_tier,
     )
+
+
+def working_memory_route_hits(
+    items: Sequence[object],
+    *,
+    query: str,
+    tenant_id: str,
+    session_id: str,
+    evaluated_at: datetime,
+    branch: str,
+    limit: int,
+    access_context: Mapping[str, Any],
+    policy_max_sensitivity: int,
+    max_trust_tier: int,
+) -> list[Hit]:
+    """Adapt the Phase-3 security-aware working route to the shared plane shape."""
+
+    hits = build_working_memory_hits(
+        items,
+        query=query,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        evaluated_at=evaluated_at,
+        branch=branch,
+        limit=limit,
+        access_context=access_context,
+        policy_max_sensitivity=policy_max_sensitivity,
+        max_trust_tier=max_trust_tier,
+    )
+    for hit in hits:
+        raw_id = hit.id
+        hit.metadata.update(
+            {
+                "memory_plane": WORKING_MEMORY_CHANNEL,
+                "working_memory_id": raw_id,
+            }
+        )
+    return hits
 
 
 def _recency_score(value: object, now: datetime, decay: float) -> float:
