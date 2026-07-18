@@ -14,6 +14,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -56,6 +57,7 @@ class LedgerRecord:
     requested_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     receipts: dict[tuple[str, str], SurfaceReceipt] = field(default_factory=dict)
     manifest: dict[str, Any] | None = None
+    revision: int = 0
 
 
 class DeletionLedger(Protocol):
@@ -64,6 +66,7 @@ class DeletionLedger(Protocol):
     def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord: ...
     def current_generation(self, tenant_id: str) -> int: ...
     def checkpoint(self, record: LedgerRecord) -> None: ...
+    def operation_lock(self) -> Any: ...
 
 
 class InMemoryDeletionLedger:
@@ -100,6 +103,9 @@ class InMemoryDeletionLedger:
     def checkpoint(self, record: LedgerRecord) -> None:
         """The process-local record is already the authoritative value."""
 
+    def operation_lock(self) -> threading.RLock:
+        return self._lock
+
 
 class SQLiteDeletionLedger:
     """Durable operation journal used to resume deletion sagas after restart."""
@@ -120,12 +126,33 @@ class SQLiteDeletionLedger:
                     generation INTEGER NOT NULL,
                     requested_at TEXT NOT NULL,
                     receipts_json TEXT NOT NULL,
-                    manifest_json TEXT
+                    manifest_json TEXT,
+                    revision INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE UNIQUE INDEX IF NOT EXISTS deletion_tenant_generation
                 ON deletion_operations(tenant_id, generation);
+                CREATE TABLE IF NOT EXISTS deletion_ledger_metadata (
+                    key TEXT PRIMARY KEY,
+                    value BLOB NOT NULL
+                );
                 """
             )
+            connection.execute(
+                "INSERT OR IGNORE INTO deletion_ledger_metadata(key, value) VALUES ('opaque_key', ?)",
+                (secrets.token_bytes(32),),
+            )
+            self._opaque_key = bytes(
+                connection.execute(
+                    "SELECT value FROM deletion_ledger_metadata WHERE key = 'opaque_key'"
+                ).fetchone()[0]
+            )
+            columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(deletion_operations)")
+            }
+            if "revision" not in columns:
+                connection.execute(
+                    "ALTER TABLE deletion_operations ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
+                )
 
     @property
     def lock(self) -> threading.RLock:
@@ -137,6 +164,23 @@ class SQLiteDeletionLedger:
         connection.execute("PRAGMA synchronous=FULL")
         return connection
 
+    def _opaque(self, kind: str, value: str) -> str:
+        digest = hmac.new(self._opaque_key, f"{kind}\0{value}".encode(), hashlib.sha256).hexdigest()
+        return f"opaque:{digest}"
+
+    @contextmanager
+    def operation_lock(self) -> Any:
+        """Serialize coordinators sharing this ledger, including other processes."""
+        import fcntl
+
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        with lock_path.open("a+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     @staticmethod
     def _receipts(record: LedgerRecord) -> str:
         rows = [
@@ -146,62 +190,71 @@ class SQLiteDeletionLedger:
         return json.dumps(rows, sort_keys=True, separators=(",", ":"))
 
     @staticmethod
-    def _record(row: sqlite3.Row) -> LedgerRecord:
+    def _record(row: sqlite3.Row, *, fingerprint: str, tenant_id: str) -> LedgerRecord:
         receipts = {}
         for item in json.loads(row[5]):
             key = (item.pop("kind"), item.pop("name"))
             receipts[key] = SurfaceReceipt(**item)
         return LedgerRecord(
             operation_id=row[0],
-            fingerprint=row[1],
-            tenant_id=row[2],
+            fingerprint=fingerprint,
+            tenant_id=tenant_id,
             generation=row[3],
             requested_at=row[4],
             receipts=receipts,
             manifest=json.loads(row[6]) if row[6] is not None else None,
+            revision=row[7],
         )
 
     def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord:
+        stored_fingerprint = self._opaque("request", fingerprint)
+        stored_tenant = self._opaque("tenant", tenant_id)
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT operation_id, fingerprint, tenant_id, generation, requested_at, "
-                "receipts_json, manifest_json FROM deletion_operations WHERE operation_id = ?",
+                "receipts_json, manifest_json, revision FROM deletion_operations WHERE operation_id = ?",
                 (operation_id,),
             ).fetchone()
             if row is not None:
-                if row[1] != fingerprint:
+                if not hmac.compare_digest(row[1], stored_fingerprint):
                     raise ValueError("operation_id replay conflicts with canonical request")
-                return self._record(row)
+                return self._record(row, fingerprint=fingerprint, tenant_id=tenant_id)
             generation = connection.execute(
                 "SELECT COALESCE(MAX(generation), 0) + 1 FROM deletion_operations WHERE tenant_id = ?",
-                (tenant_id,),
+                (stored_tenant,),
             ).fetchone()[0]
             requested_at = datetime.now(UTC).isoformat()
             connection.execute(
-                "INSERT INTO deletion_operations VALUES (?, ?, ?, ?, ?, '[]', NULL)",
-                (operation_id, fingerprint, tenant_id, generation, requested_at),
+                "INSERT INTO deletion_operations "
+                "(operation_id, fingerprint, tenant_id, generation, requested_at, receipts_json, manifest_json, revision) "
+                "VALUES (?, ?, ?, ?, ?, '[]', NULL, 0)",
+                (operation_id, stored_fingerprint, stored_tenant, generation, requested_at),
             )
             return LedgerRecord(operation_id, fingerprint, tenant_id, generation, requested_at)
 
     def checkpoint(self, record: LedgerRecord) -> None:
         with self._lock, self._connect() as connection:
-            connection.execute(
-                "UPDATE deletion_operations SET receipts_json = ?, manifest_json = ? "
-                "WHERE operation_id = ? AND fingerprint = ?",
+            cursor = connection.execute(
+                "UPDATE deletion_operations SET receipts_json = ?, manifest_json = ?, "
+                "revision = revision + 1 WHERE operation_id = ? AND fingerprint = ? AND revision = ?",
                 (
                     self._receipts(record),
                     json.dumps(record.manifest, sort_keys=True) if record.manifest is not None else None,
                     record.operation_id,
-                    record.fingerprint,
+                    self._opaque("request", record.fingerprint),
+                    record.revision,
                 ),
             )
+            if cursor.rowcount != 1:
+                raise RuntimeError("deletion ledger checkpoint conflict")
+            record.revision += 1
 
     def current_generation(self, tenant_id: str) -> int:
         with self._lock, self._connect() as connection:
             return connection.execute(
                 "SELECT COALESCE(MAX(generation), 0) FROM deletion_operations WHERE tenant_id = ?",
-                (tenant_id,),
+                (self._opaque("tenant", tenant_id),),
             ).fetchone()[0]
 
 
@@ -283,9 +336,10 @@ class DeletionCoordinator:
             reason=reason,
         )
         fingerprint = _canonical_fingerprint(request)
-        record = self.ledger.begin(operation_id, fingerprint, tenant_id)
-        lock = getattr(self.ledger, "lock", threading.RLock())
-        with lock:
+        lock = getattr(self.ledger, "operation_lock", None)
+        operation_lock = lock() if callable(lock) else getattr(self.ledger, "lock", threading.RLock())
+        with operation_lock:
+            record = self.ledger.begin(operation_id, fingerprint, tenant_id)
             if record.manifest is not None and record.manifest["summary"]["complete"]:
                 return deepcopy(record.manifest)
             manifest = self._run(record, request)
@@ -435,6 +489,9 @@ class DeletionCoordinator:
                     if not destructive_attempted:
                         receipt.attempts += 1
                         destructive_attempted = True
+                        # Persist ambiguity before the external side effect.  A crash
+                        # after commit therefore resumes by probing every reference.
+                        self.ledger.checkpoint(record)
                     store.delete(tenant, ref)
                 except TimeoutError:
                     receipt.error_code = "delete_ambiguous"
@@ -535,7 +592,10 @@ class DeletionCoordinator:
         branches = ["main"]
         if request["branch_scope"] == "all":
             branches = list(getattr(self.engine, "branches", {"main": {}}))
-        sensitive = set(request["source_refs"])
+        # Tenant custody keys must remain intact so retained audit rows remain
+        # discoverable by their owning tenant; the durable journal stores only
+        # a keyed opaque tenant reference.
+        sensitive = {request["user_id"], *request["source_refs"]}
         for branch in branches:
             for ref in request["source_refs"]:
                 evidence = self.engine.get_evidence(request["tenant_id"], ref, branch=branch)
@@ -551,6 +611,7 @@ class DeletionCoordinator:
                             }
                         )
                     )
+        sensitive.update(hashlib.sha256(value.encode()).hexdigest() for value in tuple(sensitive) if value)
         try:
             for branch in branches:
                 for ref in request["source_refs"]:

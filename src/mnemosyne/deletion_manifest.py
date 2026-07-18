@@ -3,12 +3,45 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 from .evidence_signing import sign_evidence_manifest, verify_evidence_manifest_signature
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
+_RAW_HASH = re.compile(r"^[0-9a-fA-F]{32,}$")
+_FORBIDDEN_KEYS = {
+    "payload", "content", "content_pointer", "source_uri", "uri", "hash",
+    "tenant_id", "user_id", "source_ref", "evidence_cid", "source_identity",
+}
+
+
+def _custody_errors(value: Any, *, path: str = "manifest") -> list[str]:
+    errors: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _FORBIDDEN_KEYS:
+                errors.append(f"{path}.{key} is a forbidden direct-custody field")
+            errors.extend(_custody_errors(item, path=f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            errors.extend(_custody_errors(item, path=f"{path}[{index}]"))
+    elif isinstance(value, str):
+        lowered = value.lower()
+        if "canary" in lowered:
+            errors.append(f"{path} contains canary material")
+        if "://" in value:
+            errors.append(f"{path} contains a source URI")
+        if _RAW_HASH.fullmatch(value) and not value.startswith("opaque:"):
+            errors.append(f"{path} contains a direct hash")
+    return errors
+
+
+def _opaque_field(manifest: dict[str, Any], key: str, errors: list[str]) -> None:
+    value = manifest.get(key)
+    if not isinstance(value, str) or not value.startswith("opaque:"):
+        errors.append(f"{key} must be opaque")
 
 
 def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
@@ -18,6 +51,9 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         return {"complete": False, "errors": ["manifest must be an object"]}
     if manifest.get("schema") != SCHEMA:
         errors.append("schema is unsupported")
+    errors.extend(_custody_errors(manifest))
+    for field in ("tenant_ref", "user_scope", "reason"):
+        _opaque_field(manifest, field, errors)
 
     surfaces = manifest.get("surfaces")
     stores = manifest.get("stores")
@@ -41,9 +77,21 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     elif fence.get("durable") is not True:
         errors.append("fence is not durable")
 
-    surface_names = {row.get("surface") for row in surfaces if isinstance(row, dict)}
+    surface_values = [row.get("surface") for row in surfaces if isinstance(row, dict)]
+    store_values = [row.get("store") for row in stores if isinstance(row, dict)]
+    surface_names = set(surface_values)
+    store_names = set(store_values)
     required = policy.get("required_surfaces") if isinstance(policy, dict) else None
-    if not isinstance(required, list) or not required or not set(required).issubset(surface_names):
+    required_names = set(required) if isinstance(required, list) else set()
+    if (
+        not isinstance(required, list)
+        or not required
+        or len(required) != len(required_names)
+        or len(surface_values) != len(surface_names)
+        or len(store_values) != len(store_names)
+        or required_names != surface_names
+        or required_names != store_names
+    ):
         errors.append("required surfaces are not fully enumerated")
     if any(
         not isinstance(row, dict)
@@ -54,6 +102,15 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         for row in surfaces
     ):
         errors.append("one or more surfaces lack verified durable removal")
+    if any(
+        not isinstance(row.get("tenant_ref"), str)
+        or not row["tenant_ref"].startswith("opaque:")
+        or not isinstance(row.get("object_ref"), str)
+        or not row["object_ref"].startswith("opaque:")
+        for row in surfaces
+        if isinstance(row, dict)
+    ):
+        errors.append("surface custody references must be opaque")
     if any(
         not isinstance(row, dict)
         or row.get("available") is not True
@@ -107,4 +164,8 @@ def verify_signed_deletion_manifest(
     signature = verify_evidence_manifest_signature(manifest_path, public_key_path)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     semantic = verify_deletion_manifest(manifest)
-    return {"complete": semantic["complete"], "errors": semantic["errors"], "signature": signature}
+    signature_verified = signature.get("verified") is True
+    errors = list(semantic["errors"])
+    if not signature_verified:
+        errors.append("manifest signature is invalid")
+    return {"complete": semantic["complete"] and signature_verified, "errors": errors, "signature": signature}
