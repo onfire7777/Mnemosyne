@@ -3549,7 +3549,8 @@ class SqliteEngine:
         evidence: list[Evidence] = []
         for cid in intention.evidence_ids:
             row = conn.execute(
-                "SELECT * FROM evidence WHERE tenant_id = ? AND cid = ?",
+                "SELECT * FROM evidence "
+                "WHERE tenant_id = ? AND branch = 'main' AND cid = ?",
                 (intention.tenant_id, cid),
             ).fetchone()
             if row is None or row["erased"]:

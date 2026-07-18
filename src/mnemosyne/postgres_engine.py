@@ -1524,6 +1524,13 @@ class PostgresEngine:
     ) -> bool:
         if "access_policy" in metadata_patch:
             raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
+        reserved_provenance_keys = {
+            "_external_tenant_id",
+            "_external_user_id",
+            "_external_session_id",
+        }
+        if reserved_provenance_keys.intersection(metadata_patch):
+            raise ValueError("metadata_patch cannot modify reserved provenance metadata")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:

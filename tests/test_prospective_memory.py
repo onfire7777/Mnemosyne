@@ -306,6 +306,36 @@ def test_schedule_rejects_invalid_provenance_without_mutation(case: str) -> None
     assert len(engine.audit_log) == audit_count
 
 
+def test_intention_provenance_uses_main_branch_only() -> None:
+    engine = LocalMemoryEngine()
+    engine.branch("scratch")
+    scratch_evidence = Evidence(
+        tenant_id=TENANT_ID,
+        user_id=USER_ID,
+        actor=AGENT_ID,
+        source_type="episode",
+        source_identity="conversation:prospective-memory-contract",
+        content="Remind me to submit the report.",
+        capability_tags=["data-only", "no-write-authority"],
+        access_policy={"tenant": TENANT_ID},
+    )
+    main_evidence = Evidence(
+        tenant_id=TENANT_ID,
+        user_id=USER_ID,
+        actor=AGENT_ID,
+        source_type="episode",
+        source_identity="conversation:prospective-memory-contract",
+        content="Remind me to submit the report.",
+        capability_tags=["prospective-memory"],
+        access_policy={"tenant": TENANT_ID},
+    )
+    scratch_cid = engine.append_evidence(scratch_evidence, branch="scratch")
+    main_cid = engine.append_evidence(main_evidence, branch="main")
+    assert scratch_cid == main_cid
+
+    engine.schedule_intention(_intention(evidence_id=main_cid, due_at=EVALUATED_AT))
+
+
 def test_intention_tenant_scope_and_cancellation_ownership() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)

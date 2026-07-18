@@ -19763,7 +19763,7 @@ def build_parser() -> argparse.ArgumentParser:
     intention_cancel = sub.add_parser("intention-cancel")
     intention_cancel.add_argument("--tenant", required=True)
     intention_cancel.add_argument("--intention-id", required=True)
-    intention_cancel.add_argument("--cancelled-by", required=True)
+    intention_cancel.add_argument("--cancelled-by")
     intention_cancel.set_defaults(func=cmd_intention_cancel)
 
     intention_evaluate = sub.add_parser("intention-evaluate")
