@@ -143,4 +143,5 @@ required_tables = [
   "audit_log",
   "runtime_jobs",
   "runtime_state",
+  "working_memory",
 ]

@@ -83,6 +83,13 @@ def is_write_tainted(capability_tags: Sequence[str] | None) -> bool:
 WriteRole = Literal["reader", "agent", "consolidator", "operator"]
 _WRITE_ROLES = {"reader", "agent", "consolidator", "operator"}
 
+PROSPECTIVE_SCHEDULER_CAPABILITY = "prospective:evaluate"
+PROSPECTIVE_TENANT_READ_CAPABILITY = "prospective:read:tenant"
+PROSPECTIVE_MEMORY_CAPABILITIES = frozenset(
+    {PROSPECTIVE_SCHEDULER_CAPABILITY, PROSPECTIVE_TENANT_READ_CAPABILITY}
+)
+ProspectiveMemoryScope = Literal["subject", "tenant"]
+
 
 class SessionAuthError(ValueError):
     """Raised when a session token is missing, malformed, expired, or invalid."""
@@ -94,8 +101,10 @@ class SessionIdentity:
     user_id: str
     role: WriteRole
     source_trust_tier: int
+    agent_id: str | None = None
     expires_at: int | None = None
     session_id: str | None = None
+    capabilities: tuple[str, ...] = ()
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> "SessionIdentity":
@@ -106,10 +115,15 @@ class SessionIdentity:
         user_id = str(payload.get("user_id") or payload.get("user") or "")
         if not tenant_id or not user_id:
             raise SessionAuthError("session tenant_id and user_id are required")
-        try:
-            source_trust_tier = int(payload.get("source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)))
-        except (TypeError, ValueError) as exc:
-            raise SessionAuthError("session source_trust_tier is invalid") from exc
+        raw_agent_id = payload.get("agent_id")
+        if raw_agent_id is not None and (not isinstance(raw_agent_id, str) or not raw_agent_id.strip()):
+            raise SessionAuthError("session agent_id is invalid")
+        raw_source_trust_tier = payload.get(
+            "source_trust_tier", payload.get("trust_tier", TrustTier.NORMAL)
+        )
+        if isinstance(raw_source_trust_tier, bool) or not isinstance(raw_source_trust_tier, int):
+            raise SessionAuthError("session source_trust_tier is invalid")
+        source_trust_tier = int(raw_source_trust_tier)
         if source_trust_tier < int(TrustTier.DIRECT_USER) or source_trust_tier > int(TrustTier.UNTRUSTED_EXTERNAL):
             raise SessionAuthError("session source_trust_tier is out of range")
         expires_at = payload.get("exp", payload.get("expires_at"))
@@ -117,13 +131,26 @@ class SessionIdentity:
             parsed_expires_at = int(expires_at) if expires_at is not None else None
         except (TypeError, ValueError) as exc:
             raise SessionAuthError("session exp is invalid") from exc
+        raw_capabilities = payload.get("capabilities", ())
+        if not isinstance(raw_capabilities, (list, tuple)):
+            raise SessionAuthError("session capabilities must be a list")
+        capabilities = tuple(raw_capabilities)
+        if any(not isinstance(capability, str) or not capability for capability in capabilities):
+            raise SessionAuthError("session capability is invalid")
+        if len(set(capabilities)) != len(capabilities):
+            raise SessionAuthError("session capabilities must be unique")
+        unknown_capabilities = set(capabilities) - PROSPECTIVE_MEMORY_CAPABILITIES
+        if unknown_capabilities:
+            raise SessionAuthError("session capability is not allowed")
         return cls(
             tenant_id=tenant_id,
             user_id=user_id,
             role=role,  # type: ignore[arg-type]
             source_trust_tier=source_trust_tier,
+            agent_id=raw_agent_id,
             expires_at=parsed_expires_at,
             session_id=str(payload["session_id"]) if payload.get("session_id") else None,
+            capabilities=capabilities,
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -133,10 +160,14 @@ class SessionIdentity:
             "role": self.role,
             "source_trust_tier": self.source_trust_tier,
         }
+        if self.agent_id:
+            payload["agent_id"] = self.agent_id
         if self.expires_at is not None:
             payload["exp"] = self.expires_at
         if self.session_id:
             payload["session_id"] = self.session_id
+        if self.capabilities:
+            payload["capabilities"] = list(self.capabilities)
         return payload
 
 
@@ -406,8 +437,16 @@ def _positive_int(value: Any, *, field: str) -> int:
     return parsed
 
 
-def _elevated_oidc_rule(role: str, source_trust_tier: int) -> bool:
-    return role in {"consolidator", "operator"} or source_trust_tier <= int(TrustTier.VERIFIED)
+def _elevated_oidc_rule(
+    role: str,
+    source_trust_tier: int,
+    capabilities: tuple[str, ...] = (),
+) -> bool:
+    return (
+        role in {"consolidator", "operator"}
+        or source_trust_tier <= int(TrustTier.VERIFIED)
+        or bool(capabilities)
+    )
 
 
 class OidcAuthorizationPolicy:
@@ -473,6 +512,7 @@ class OidcAuthorizationPolicy:
             "user_id": user_id,
             "role": rule["role"],
             "source_trust_tier": rule["source_trust_tier"],
+            "capabilities": rule["capabilities"],
             "exp": expires_at,
         }
         if session_id:
@@ -496,6 +536,11 @@ class OidcAuthorizationPolicy:
                     **({"name": rule["name"]} if rule["name"] else {}),
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
+                    **(
+                        {"capabilities": list(rule["capabilities"])}
+                        if rule["capabilities"]
+                        else {}
+                    ),
                     "tenant_matcher_count": len(rule["tenant_ids"]),
                     "claim_equals_fields": sorted(rule["claim_equals"]),
                     "claim_contains_fields": sorted(rule["claim_contains"]),
@@ -532,6 +577,11 @@ class OidcAuthorizationPolicy:
                     "max_auth_age_seconds": rule["max_auth_age_seconds"],
                     "role": str(rule["role"]),
                     "source_trust_tier": int(rule["source_trust_tier"]),
+                    **(
+                        {"capabilities": list(rule["capabilities"])}
+                        if rule["capabilities"]
+                        else {}
+                    ),
                 }
                 for rule in self.rules
             ],
@@ -569,18 +619,28 @@ class OidcAuthorizationPolicy:
             "max_auth_age_seconds",
             "role",
             "source_trust_tier",
+            "capabilities",
         }
         if set(rule).difference(allowed_fields):
             raise SessionAuthError("OIDC authz rule contains unknown fields")
         role = rule.get("role")
         if role not in _WRITE_ROLES:
             raise SessionAuthError("OIDC authz rule role is not allowed")
-        try:
-            source_trust_tier = int(rule.get("source_trust_tier"))
-        except (TypeError, ValueError) as exc:
-            raise SessionAuthError("OIDC authz rule source_trust_tier is invalid") from exc
+        raw_source_trust_tier = rule.get("source_trust_tier")
+        if isinstance(raw_source_trust_tier, bool) or not isinstance(raw_source_trust_tier, int):
+            raise SessionAuthError("OIDC authz rule source_trust_tier is invalid")
+        source_trust_tier = int(raw_source_trust_tier)
         if source_trust_tier not in {int(item) for item in TrustTier}:
             raise SessionAuthError("OIDC authz rule source_trust_tier is out of range")
+        capabilities = _nonempty_tuple(
+            _value_tuple(rule.get("capabilities", ())),
+            field="capabilities",
+            allow_empty=True,
+        )
+        if len(set(capabilities)) != len(capabilities):
+            raise SessionAuthError("OIDC authz rule capabilities must be unique")
+        if set(capabilities) - PROSPECTIVE_MEMORY_CAPABILITIES:
+            raise SessionAuthError("OIDC authz rule capability is not allowed")
         tenant_ids = _nonempty_tuple(
             _value_tuple(rule.get("tenant_ids", rule.get("tenants", ()))),
             field="tenant_ids",
@@ -603,7 +663,7 @@ class OidcAuthorizationPolicy:
             if "max_auth_age_seconds" in rule
             else None
         )
-        elevated = _elevated_oidc_rule(str(role), source_trust_tier)
+        elevated = _elevated_oidc_rule(str(role), source_trust_tier, capabilities)
         if (
             not tenant_ids
             and not claim_equals
@@ -625,6 +685,7 @@ class OidcAuthorizationPolicy:
             "name": str(rule.get("name", "")).strip() or None,
             "role": str(role),
             "source_trust_tier": source_trust_tier,
+            "capabilities": capabilities,
             "tenant_ids": tenant_ids,
             "claim_equals": claim_equals,
             "claim_contains": claim_contains,
@@ -1001,8 +1062,10 @@ def issue_session_from_oidc(
         user_id=identity.user_id,
         role=identity.role,
         source_trust_tier=identity.source_trust_tier,
+        agent_id=identity.agent_id,
         expires_at=min(identity.expires_at or max_exp, max_exp),
         session_id=identity.session_id,
+        capabilities=identity.capabilities,
     )
     return signer.sign(issued), issued
 
@@ -1028,6 +1091,21 @@ class CapabilityDecision:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class ProspectiveMemoryAuthorization:
+    allowed: bool
+    reason: str
+    operation: str
+    tenant_id: str | None = None
+    actor_id: str | None = None
+    owner_id: str | None = None
+    scope: ProspectiveMemoryScope | None = None
+    agent_id: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 @dataclass(slots=True)
 class SecurityPolicy:
     min_preference_write_trust: int = int(TrustTier.USER_AUTHORED)
@@ -1037,6 +1115,7 @@ class SecurityPolicy:
     min_branch_promotion_trust: int = int(TrustTier.USER_AUTHORED)
     min_policy_write_trust: int = int(TrustTier.OPERATOR)
     min_destructive_trust: int = int(TrustTier.USER_AUTHORED)
+    min_prospective_write_trust: int = int(TrustTier.NORMAL)
     consolidator_only_ops: tuple[str, ...] = (
         "run_consolidation_passes",
         "promote_candidate",
@@ -1052,6 +1131,130 @@ class SecurityPolicy:
         "branch_promotion_requires_gate",
         "erasure_propagates_to_derived_indexes",
     )
+
+    def authorize_prospective_memory(
+        self,
+        operation: str,
+        identity: SessionIdentity,
+        *,
+        tenant_id: str,
+        actor_id: str | None = None,
+        owner_id: str | None = None,
+        agent_id: str | None = None,
+        tenant_wide: bool = False,
+    ) -> ProspectiveMemoryAuthorization:
+        """Authorize a prospective-memory operation from verified session identity.
+
+        Returned actor, owner, tenant, and scope values are authoritative. Denied
+        decisions intentionally return no bound context so callers cannot use
+        spoofed request values after a failed check.
+        """
+
+        def deny(reason: str) -> ProspectiveMemoryAuthorization:
+            return ProspectiveMemoryAuthorization(False, reason, operation if isinstance(operation, str) else "")
+
+        if not isinstance(identity, SessionIdentity):
+            return deny("verified session identity is required")
+        if not isinstance(operation, str) or operation not in {"schedule", "cancel", "evaluate", "read"}:
+            return deny("prospective-memory operation is not allowed")
+        if (
+            not isinstance(identity.tenant_id, str)
+            or not identity.tenant_id.strip()
+            or not isinstance(identity.user_id, str)
+            or not identity.user_id.strip()
+            or not isinstance(identity.role, str)
+            or identity.role not in _WRITE_ROLES
+            or not isinstance(identity.source_trust_tier, int)
+            or isinstance(identity.source_trust_tier, bool)
+            or identity.source_trust_tier not in {int(item) for item in TrustTier}
+            or (
+                identity.agent_id is not None
+                and (not isinstance(identity.agent_id, str) or not identity.agent_id.strip())
+            )
+        ):
+            return deny("session identity is malformed")
+        if not isinstance(identity.capabilities, tuple):
+            return deny("session capabilities are malformed")
+        if any(not isinstance(capability, str) or not capability for capability in identity.capabilities):
+            return deny("session capabilities are malformed")
+        if len(set(identity.capabilities)) != len(identity.capabilities):
+            return deny("session capabilities are malformed")
+        if set(identity.capabilities) - PROSPECTIVE_MEMORY_CAPABILITIES:
+            return deny("session capability is not allowed")
+        if not isinstance(tenant_id, str) or not tenant_id.strip():
+            return deny("requested tenant is required")
+        if tenant_id != identity.tenant_id:
+            return deny("requested tenant does not match session identity")
+        if actor_id is not None and (not isinstance(actor_id, str) or actor_id != identity.user_id):
+            return deny("requested actor does not match session identity")
+        if agent_id is not None and (not isinstance(agent_id, str) or not agent_id.strip()):
+            return deny("requested agent is malformed")
+        if not isinstance(tenant_wide, bool):
+            return deny("tenant-wide scope must be boolean")
+        if owner_id is not None and (not isinstance(owner_id, str) or not owner_id.strip()):
+            return deny("requested owner is malformed")
+
+        capabilities = set(identity.capabilities)
+        if operation in {"schedule", "cancel", "evaluate"} and not meets_trust(
+            identity.source_trust_tier,
+            self.min_prospective_write_trust,
+        ):
+            return deny("prospective-memory writes require normal-or-stronger source trust")
+        if operation == "schedule":
+            if identity.agent_id is None:
+                return deny("schedule requires an authenticated agent identity")
+            if agent_id is not None and agent_id != identity.agent_id:
+                return deny("requested agent does not match session identity")
+        if operation == "evaluate":
+            if identity.role == "reader":
+                return deny("reader role cannot evaluate prospective memory")
+            if owner_id is not None or tenant_wide:
+                return deny("evaluation scope is fixed to the authenticated tenant")
+            if PROSPECTIVE_SCHEDULER_CAPABILITY not in capabilities:
+                return deny("evaluation requires authenticated scheduler capability")
+            return ProspectiveMemoryAuthorization(
+                True,
+                "allowed",
+                operation,
+                identity.tenant_id,
+                identity.user_id,
+                None,
+                "tenant",
+            )
+
+        if operation == "read" and tenant_wide:
+            if owner_id is not None:
+                return deny("tenant-wide reads cannot include a subject owner")
+            if PROSPECTIVE_TENANT_READ_CAPABILITY not in capabilities:
+                return deny("tenant-wide read requires explicit capability")
+            return ProspectiveMemoryAuthorization(
+                True,
+                "allowed",
+                operation,
+                identity.tenant_id,
+                identity.user_id,
+                None,
+                "tenant",
+            )
+
+        if tenant_wide:
+            return deny("tenant-wide scope is only available for reads")
+        if owner_id is None:
+            return deny("subject owner is required")
+        if owner_id != identity.user_id:
+            return deny("requested owner does not match session identity")
+        if identity.role == "reader" and operation != "read":
+            return deny("reader role cannot mutate prospective memory")
+        return ProspectiveMemoryAuthorization(
+            True,
+            "allowed",
+            operation,
+            identity.tenant_id,
+            identity.user_id,
+            identity.user_id,
+            "subject",
+            identity.agent_id if operation == "schedule" else None,
+        )
 
     def authorize_write(
         self,
