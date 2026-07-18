@@ -158,16 +158,24 @@ def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path)
     assert audits[-1]["diff"]["working_digest"]
 
 
-def test_sqlite_working_expiry_cannot_cross_subject_scope(tmp_path) -> None:
+@pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
+def test_sqlite_working_expiry_cannot_cross_subject_scope(tmp_path, selector: str) -> None:
     engine = SqliteEngine(tmp_path)
     scope_a = _item(_evidence(engine), item_id="scope-a")
+    scope_b_values = {
+        "user_id": scope_a.user_id,
+        "agent_id": scope_a.agent_id,
+        "task_id": scope_a.task_id,
+    }
+    if selector != "branch":
+        scope_b_values[selector] = f"{selector}-other"
     scope_b = _item(
-        _evidence(engine, user_id="user-other", content="evidence for scope-b"),
+        _evidence(engine, user_id=scope_b_values["user_id"], content="evidence for scope-b"),
         item_id="scope-b",
-        user_id="user-other",
-        agent_id="agent-other",
-        task_id="task-other",
+        **scope_b_values,
     )
+    if selector == "branch":
+        scope_b.metadata["branch"] = "branch-other"
     engine.put_working(scope_a)
     engine.put_working(scope_b)
 

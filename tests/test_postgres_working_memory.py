@@ -430,7 +430,8 @@ def test_postgres_working_memory_live_round_trip_boundaries_isolation_and_orderi
     assert engine.list_working(f"tenant-missing-{uuid4()}", session, as_of=now) == []
 
 
-def test_postgres_working_expiry_cannot_cross_subject_scope() -> None:
+@pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
+def test_postgres_working_expiry_cannot_cross_subject_scope(selector: str) -> None:
     engine = _live_engine()
     tenant = f"working-subject-{uuid4()}"
     session = f"session-{uuid4()}"
@@ -450,15 +451,17 @@ def test_postgres_working_expiry_cannot_cross_subject_scope() -> None:
         engine,
         tenant_id=tenant,
         session_id=session,
-        user_id=f"user-b-{uuid4()}",
+        user_id=scope_a.user_id,
         item_id="scope-b",
         created_at=created_at,
         expires_at=expires_at,
     )
-    scope_b.agent_id = "agent-b"
-    scope_b.task_id = "task-b"
     scope_a.metadata["branch"] = "main"
     scope_b.metadata["branch"] = "main"
+    if selector == "branch":
+        scope_b.metadata["branch"] = "branch-b"
+    else:
+        setattr(scope_b, selector, f"{selector}-b-{uuid4()}")
     engine.put_working(scope_a)
     engine.put_working(scope_b)
 
