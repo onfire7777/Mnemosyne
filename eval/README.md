@@ -25,9 +25,6 @@ python -m eval.g0.runner --write-baseline
 
 # Unit + integration tests for the harness itself
 python -m pytest eval/tests/ -v
-
-# Compact-answering custody and byte-parity contract tests
-python -m pytest -q tests/test_compact_answering_parity.py
 ```
 
 Reports land in `eval/reports/`:
@@ -145,30 +142,12 @@ conservative CLI-cold-start upper bound) and **`fast_path_p95_ms_engine_only`**
 estimate is what a long-lived server backend exposes, since startup is paid once,
 not per request.
 
-## Compact-answering parity contracts
-
-`eval.compact_answering` provides the fail-closed contract primitives used by the
-compact reader workstream. Its custody API validates canonical, SHA-256-bound
-code, artifact, configuration, and provider identities; writes manifests with
-exclusive no-overwrite creation; rejects malformed or drifted manifests; and
-surfaces typed validation, drift, and existence errors. The parity API parses a
-closed row schema and compares exact decoded bytes, the three-way answer type,
-ordered supporting facts, null margin, and abstention decision.
-
-`eval/compact_answering/fixtures/synthetic-parity.json` is deterministic
-development/contract evidence. It encodes Unicode, repeated-answer selection,
-null-answer abstention, window-boundary, multi-window reconstruction, required
-64/128/384/512 token lengths, and an explicit mismatch. It does not execute a
-model, provider, physical 8 GiB acceptance run, or protected benchmark, and
-therefore cannot support compatibility, performance, or benchmark claims.
-
 ---
 
 ## Layout
 
 ```
 eval/
-  compact_answering/    # custody manifests + byte-exact parity contracts/fixtures
   run_eval.py            # runner: orchestrates suites + classes + ignition + reports
   datasets/              # curated + attack + belief seed datasets
   harness/
