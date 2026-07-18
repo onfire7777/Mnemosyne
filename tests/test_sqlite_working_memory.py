@@ -217,12 +217,12 @@ def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order
         _evidence(engine, session_id=SESSION),
         item_id="later-id",
         created_at=CREATED_AT - timedelta(seconds=1),
-        expires_at=EXPIRES_AT - timedelta(seconds=1),
+        expires_at=EXPIRES_AT + timedelta(seconds=10),
     )
     first = _item(
         _evidence(engine, session_id=SESSION),
         item_id="first",
-        expires_at=EXPIRES_AT + timedelta(seconds=5),
+        expires_at=EXPIRES_AT - timedelta(seconds=1),
     )
 
     engine.put_working(tenant_item)
@@ -231,9 +231,9 @@ def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order
     engine.put_working(first)
 
     assert [item.item_id for item in engine.list_working(TENANT, SESSION, as_of=CREATED_AT)] == [
-        "later-id",
-        "same",
         "first",
+        "same",
+        "later-id",
     ]
     assert engine.get_working(other_tenant, SESSION, "same", as_of=CREATED_AT).tenant_id == other_tenant
     with pytest.raises(ValueError, match="already exists"):

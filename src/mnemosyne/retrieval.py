@@ -2295,7 +2295,8 @@ def working_memory_hits(
     for item in items:
         item_tenant = _working_text(_working_field(item, "tenant_id"))
         item_session = _working_text(_working_field(item, "session_id"))
-        item_branch = _working_field(item, "branch")
+        item_metadata = _working_json_object(_working_field(item, "metadata", {}))
+        item_branch = _working_field(item, "branch", item_metadata.get("branch"))
         if item_tenant != tenant_id or item_session != session_id:
             continue
         if item_branch is not None and _working_text(item_branch) != branch:
@@ -2317,7 +2318,7 @@ def working_memory_hits(
         task_id = _working_text(_working_field(item, "task_id"))
         if not item_id or not kind or not content or not task_id:
             continue
-        metadata = copy.deepcopy(_working_json_object(_working_field(item, "metadata", {})))
+        metadata = copy.deepcopy(item_metadata)
         evidence_ids = _working_field(item, "evidence_ids", _working_field(item, "provenance", []))
         if not isinstance(evidence_ids, (list, tuple)):
             evidence_ids = []

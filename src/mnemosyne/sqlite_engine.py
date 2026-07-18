@@ -1154,7 +1154,7 @@ class SqliteEngine:
     def list_working(
         self, tenant_id: str, session_id: str, *, as_of: datetime
     ) -> list[Any]:
-        """List visible working items in deterministic expiry/id order."""
+        """List visible working items in the shared created-desc/id order."""
         moment = self._require_working_clock(as_of, "as_of")
         with self._lock:
             conn = self._connect(tenant_id)
@@ -1162,7 +1162,7 @@ class SqliteEngine:
                 "SELECT * FROM working_memory "
                 "WHERE tenant_id = ? AND session_id = ? AND status = 'active' "
                 "AND created_at <= ? AND expires_at > ? "
-                "ORDER BY expires_at ASC, item_id ASC",
+                "ORDER BY created_at DESC, item_id ASC",
                 (tenant_id, session_id, dt_to_json(moment), dt_to_json(moment)),
             ).fetchall()
             values = [_working_payload(_working_from_row(row)) for row in rows]
