@@ -62,6 +62,9 @@ _PROFILE_CONTRACTS = {
     "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
     "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
     "qa-em-f1-v1": ("qa", "bootstrap"),
+    "pm-bench-action-v1": ("deterministic-action", "wilson"),
+    "triggerbench-action-v1": ("deterministic-action", "wilson"),
+    "working-memory-action-v1": ("deterministic-action", "bootstrap"),
 }
 
 _FROZEN_RETRIEVAL_BASELINES = {

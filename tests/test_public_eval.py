@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
+from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
+from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
 from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
 from eval.public.scoring import score_profile
 
@@ -23,6 +25,32 @@ def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
     assert suite["publishable"] is False
     assert suite["pbpp_headline_eligible"] is False
     assert suite["independent_external_reproduction"] is False
+
+
+def test_deterministic_action_registry_is_bound_to_frozen_fixture_custody() -> None:
+    registry = load_registry()
+    expected = {
+        "pm-bench-development": ("pm-bench-development.json", normalize_action),
+        "triggerbench-development": ("triggerbench-development.json", normalize_action),
+        "working-memory-action-development": (
+            "working-memory-action-development.json",
+            normalize_working_action,
+        ),
+    }
+    for suite_name, (fixture_name, normalizer) in expected.items():
+        suite = registry[suite_name]
+        fixture_path = Path(__file__).resolve().parents[1] / "eval/public/fixtures"
+        raw = json.loads((fixture_path / fixture_name).read_text())
+        normalized = normalizer(raw)
+        assert suite["dataset_sha256"] == canonical_digest(normalized)
+        assert suite["revision"] == "5efcd320adf5ad737a497f992227550be67e42af"
+        assert suite["family"] == "deterministic-action"
+        assert suite["split_role"] == "development"
+        assert suite["license"] == "CC0-1.0"
+        assert suite["publishable"] is False
+        assert suite["pbpp_headline_eligible"] is False
+        assert suite["independent_external_reproduction"] is False
+        assert suite["upstream_comparable"] is False
 
 
 def test_reader_qa_suites_are_registered_pending_exact_dataset_custody() -> None:
