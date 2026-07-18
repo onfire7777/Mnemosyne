@@ -23,7 +23,7 @@ from eval.public.adapters import (
     working_memory_action_probe,
 )
 from eval.public.assets import AssetSpec, load_asset_set
-from eval.public.action_cli import ActionCLI
+from eval.public.action_cli import PM_TRIGGER_UNAVAILABLE_REASON
 from eval.public.bundle import _canonical, _scoring_labels, write_bundle
 from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import (
@@ -357,6 +357,8 @@ def run_public_suite(
         raise ValueError(
             f"{suite_name}: normalized benchmark digest does not match registry"
         )
+    if suite["adapter"] == "pm-bench-triggerbench":
+        raise ValueError(f"{suite_name}: {PM_TRIGGER_UNAVAILABLE_REASON}")
     allowed_env = {
         key: os.environ[key]
         for key in ("LANG", "LC_ALL", "PATH", "TMPDIR")
@@ -364,11 +366,7 @@ def run_public_suite(
     }
     allowed_env.update(runtime_env)
     with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
-        cli = (
-            ActionCLI(Path(temp) / "action-state.json")
-            if suite["adapter"] == "pm-bench-triggerbench"
-            else MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
-        )
+        cli = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
         with patch.dict(os.environ, allowed_env, clear=True):
             result = adapter(adapter_input, cli)
     if len(result) == 2:
