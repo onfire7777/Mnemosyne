@@ -22,7 +22,13 @@ from mnemosyne.audit_chain import (
     local_hmac_provider,
     verify_audit_chain,
 )
-from mnemosyne.engine import Evidence, Intention, LocalMemoryEngine
+from mnemosyne.engine import (
+    Evidence,
+    Intention,
+    LocalMemoryEngine,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+)
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.sqlite_engine import SqliteEngine
@@ -32,6 +38,35 @@ TENANT_ID = "tenant-prospective"
 USER_ID = "user-prospective"
 AGENT_ID = "agent-prospective"
 EVALUATED_AT = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+OPERATING_POINT = ProspectiveOperatingPoint(
+    operating_point_id="sqlite-test-op",
+    threshold=0.8,
+    measured_precision=0.95,
+    measured_recall=0.9,
+    measurement_cid="sqlite-test-measurement",
+)
+
+
+def _context() -> TriggerEvaluationContext:
+    return TriggerEvaluationContext(
+        infrastructure_available=True,
+        events=[],
+        conditions={},
+    )
+
+
+def _evaluate(
+    engine: SqliteEngine | LocalMemoryEngine,
+    tenant_id: str,
+    *,
+    evaluated_at: datetime,
+) -> list[Intention]:
+    return engine.evaluate_due_intentions(
+        tenant_id,
+        evaluated_at=evaluated_at,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
 
 
 def _audit_log(engine: SqliteEngine, tenant_id: str = TENANT_ID) -> list[dict[str, Any]]:
@@ -94,8 +129,8 @@ def test_due_exact_time_intention_fires_once_with_provenance_and_audit(
     )
 
     engine.schedule_intention(intention)
-    first_firings = engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
-    replay_firings = engine.evaluate_due_intentions(
+    first_firings = _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
+    replay_firings = _evaluate(engine,
         TENANT_ID, evaluated_at=EVALUATED_AT
     )
 
@@ -123,14 +158,14 @@ def test_fire_audit_byte_matches_local_oracle(tmp_path: Path) -> None:
     leid = _originating_episode(local)
     li = _intention(evidence_id=leid, due_at=EVALUATED_AT)
     local.schedule_intention(li)
-    local.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    _evaluate(local, TENANT_ID, evaluated_at=EVALUATED_AT)
     laudit = next(r for r in local.audit_log if r["op"] == "fire_intention")
 
     engine = SqliteEngine(tmp_path / "root")
     seid = _originating_episode(engine)
     si = _intention(evidence_id=seid, due_at=EVALUATED_AT)
     engine.schedule_intention(si)
-    engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
     saudit = next(r for r in _audit_log(engine) if r["op"] == "fire_intention")
 
     assert saudit == laudit
@@ -145,7 +180,7 @@ def test_future_exact_time_intention_does_not_fire(tmp_path: Path) -> None:
 
     engine.schedule_intention(intention)
 
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT) == []
     assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
 
 
@@ -159,7 +194,7 @@ def test_cancelled_intention_never_fires(tmp_path: Path) -> None:
     engine.schedule_intention(intention)
     engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID)
 
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT) == []
     stored = engine.list_intentions(TENANT_ID)[0]
     assert stored.status == "cancelled"
     assert stored.cancellation_state is not None
@@ -170,7 +205,7 @@ def test_cancelled_intention_never_fires(tmp_path: Path) -> None:
     [
         ({"intention_id": 7}, "intention_id must be a non-empty string"),
         ({"tenant_id": ""}, "tenant_id must be a non-empty string"),
-        ({"trigger_type": "event"}, "supports only exact_time"),
+        ({"trigger_type": "event"}, "trigger_expression.event_type"),
         ({"trigger_expression": {}}, "trigger_expression.at"),
         ({"trigger_expression": {"at": "not-a-time"}}, "must be ISO-8601"),
         (
@@ -183,8 +218,11 @@ def test_cancelled_intention_never_fires(tmp_path: Path) -> None:
         ),
         ({"action": {"payload": object()}}, "must contain JSON data only"),
         (
-            {"dependencies": ["future-intention"]},
-            "does not support dependency triggers",
+            {
+                "trigger_type": "dependency_completion",
+                "trigger_expression": {"require": "all"},
+            },
+            "requires non-empty dependencies",
         ),
         (
             {"cancellation_state": {"cancelled_by": USER_ID}},
@@ -215,13 +253,13 @@ def test_intention_rejects_naive_clocks_and_evaluator_accepts_equal_offset_time(
     intention = _intention(evidence_id=evidence_id, due_at=offset_due)
     engine.schedule_intention(intention)
 
-    fired = engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    fired = _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
 
     assert [item.intention_id for item in fired] == [intention.intention_id]
     assert fired[0].due_at == EVALUATED_AT
 
     with pytest.raises(ValueError, match="evaluated_at must be timezone-aware"):
-        engine.evaluate_due_intentions(
+        _evaluate(engine,
             TENANT_ID,
             evaluated_at=EVALUATED_AT.replace(tzinfo=None),
         )
@@ -297,7 +335,7 @@ def test_intention_tenant_scope_and_cancellation_ownership(tmp_path: Path) -> No
 
     assert engine.list_intentions("other-tenant") == []
     assert (
-        engine.evaluate_due_intentions("other-tenant", evaluated_at=EVALUATED_AT) == []
+        _evaluate(engine,"other-tenant", evaluated_at=EVALUATED_AT) == []
     )
     with pytest.raises(KeyError):
         engine.cancel_intention(
@@ -361,7 +399,7 @@ def test_forget_removes_intentions_derived_from_erased_evidence(
     assert report["erased"] is True
     assert report["propagated"]["removed_intentions"] == [intention.intention_id]
     assert engine.list_intentions(TENANT_ID) == []
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT) == []
 
 
 def test_evaluation_fails_closed_if_provenance_becomes_invalid(tmp_path: Path) -> None:
@@ -382,7 +420,7 @@ def test_evaluation_fails_closed_if_provenance_becomes_invalid(tmp_path: Path) -
         )
 
     with pytest.raises(ValueError, match="missing or outside"):
-        engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
 
     assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
     assert not any(row["op"] == "fire_intention" for row in _audit_log(engine))
@@ -392,7 +430,7 @@ def test_evaluation_validates_clock_without_stored_intentions(tmp_path: Path) ->
     engine = SqliteEngine(tmp_path / "root")
 
     with pytest.raises(ValueError, match="evaluated_at must be timezone-aware"):
-        engine.evaluate_due_intentions(
+        _evaluate(engine,
             TENANT_ID,
             evaluated_at=EVALUATED_AT.replace(tzinfo=None),
         )
@@ -437,7 +475,7 @@ def test_evaluation_prevalidates_all_due_provenance_before_firing(
         )
 
     with pytest.raises(ValueError, match="missing or outside"):
-        engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
 
     assert [item.status for item in engine.list_intentions(TENANT_ID)] == [
         "scheduled",
@@ -454,7 +492,7 @@ def test_audit_custody_is_complete_deterministic_and_hash_chain_compatible(
         evidence_id = _originating_episode(engine)
         intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
         engine.schedule_intention(intention)
-        engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
         return next(row for row in _audit_log(engine) if row["op"] == "fire_intention")
 
     first = _fire_audit_from_fresh_engine(tmp_path / "root-a")
@@ -477,7 +515,7 @@ def test_audit_custody_is_complete_deterministic_and_hash_chain_compatible(
     evidence_id = _originating_episode(engine)
     intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
     engine.schedule_intention(intention)
-    engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
     entries = _audit_log(engine)
     provider = local_hmac_provider("prospective-memory-test")
     document = build_audit_chain(
@@ -523,7 +561,7 @@ def test_concurrent_evaluation_fires_each_intention_once_in_stable_order(
 
     def evaluate() -> list[Intention]:
         barrier.wait()
-        return engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        return _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: evaluate(), range(2)))
@@ -552,7 +590,7 @@ def test_intention_values_are_isolated_from_caller_mutation(tmp_path: Path) -> N
     assert listed[0].action["message"] == "Submit the report."
     assert listed[0].evidence_ids == [evidence_id]
 
-    fired = engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    fired = _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
     fired[0].status = "scheduled"
     fired[0].action.clear()
     listed[0].status = "scheduled"
@@ -560,7 +598,7 @@ def test_intention_values_are_isolated_from_caller_mutation(tmp_path: Path) -> N
     stored = engine.list_intentions(TENANT_ID)[0]
     assert stored.status == "fired"
     assert stored.action["message"] == "Submit the report."
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT) == []
 
 
 def test_duplicate_schedule_raises_without_mutation_or_audit(tmp_path: Path) -> None:
@@ -582,7 +620,7 @@ def test_cancel_fired_intention_raises(tmp_path: Path) -> None:
     evidence_id = _originating_episode(engine)
     intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
     engine.schedule_intention(intention)
-    engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
 
     with pytest.raises(ValueError, match="fired intention cannot be cancelled"):
         engine.cancel_intention(
@@ -596,7 +634,7 @@ def test_persistence_survives_reopen(tmp_path: Path) -> None:
     evidence_id = _originating_episode(engine)
     intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
     engine.schedule_intention(intention)
-    engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
     engine.close()
 
     reopened = SqliteEngine(root)
@@ -605,8 +643,198 @@ def test_persistence_survives_reopen(tmp_path: Path) -> None:
     assert stored[0].status == "fired"
     assert stored[0].evidence_ids == [evidence_id]
     # Re-evaluation after reopen is a no-op (idempotent replay).
-    assert reopened.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert _evaluate(reopened, TENANT_ID, evaluated_at=EVALUATED_AT) == []
     audits = [
         row for row in _audit_log(reopened) if row["op"] == "fire_intention"
     ]
     assert len(audits) == 1
+
+
+def test_all_five_canonical_trigger_types_fire_with_sqlite_parity(tmp_path: Path) -> None:
+    engine = SqliteEngine(tmp_path / "root")
+    evidence_id = _originating_episode(engine)
+    due_at = EVALUATED_AT - timedelta(minutes=5)
+    prerequisite = _intention(
+        evidence_id=evidence_id,
+        due_at=due_at,
+        intention_id="intention-prerequisite",
+    )
+    intentions = [
+        prerequisite,
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due_at,
+            intention_id="intention-window",
+            trigger_type="time_window",
+            trigger_expression={
+                "start": due_at.isoformat(),
+                "end": (EVALUATED_AT + timedelta(minutes=1)).isoformat(),
+            },
+        ),
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due_at,
+            intention_id="intention-event",
+            trigger_type="event",
+            trigger_expression={
+                "event_type": "report.submitted",
+                "match": {"report_id": "r-1"},
+            },
+        ),
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due_at,
+            intention_id="intention-condition",
+            trigger_type="condition",
+            trigger_expression={
+                "condition_id": "report-ready",
+                "operator": "eq",
+                "value": True,
+            },
+        ),
+        _intention(
+            evidence_id=evidence_id,
+            due_at=EVALUATED_AT,
+            intention_id="intention-dependent",
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=["intention-prerequisite"],
+        ),
+    ]
+    for intention in intentions:
+        engine.schedule_intention(intention)
+
+    context = TriggerEvaluationContext(
+        infrastructure_available=True,
+        events=[
+            {
+                "event_id": "event-report-1",
+                "event_type": "report.submitted",
+                "occurred_at": (EVALUATED_AT - timedelta(minutes=1)).isoformat(),
+                "payload": {"report_id": "r-1", "pages": 3},
+                "confidence": 0.99,
+            }
+        ],
+        conditions={
+            "report-ready": {
+                "value": True,
+                "observed_at": (EVALUATED_AT - timedelta(minutes=1)).isoformat(),
+                "confidence": 0.99,
+            }
+        },
+    )
+    first = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in first] == [
+        "intention-condition",
+        "intention-event",
+        "intention-prerequisite",
+        "intention-window",
+    ]
+    second = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in second] == ["intention-dependent"]
+    assert all(item.status == "fired" for item in engine.list_intentions(TENANT_ID))
+
+
+def test_separate_sqlite_connections_create_one_fire_receipt(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    engine_a = SqliteEngine(root)
+    engine_b = SqliteEngine(root)
+    evidence_id = _originating_episode(engine_a)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine_a.schedule_intention(intention)
+    barrier = Barrier(2)
+
+    def evaluate(engine: SqliteEngine) -> list[Intention]:
+        barrier.wait()
+        return _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(evaluate, (engine_a, engine_b)))
+
+    assert sum(bool(result) for result in results) == 1
+    conn = engine_a._connect(TENANT_ID)
+    receipt_count = conn.execute(
+        "SELECT COUNT(*) FROM intention_fire_receipts WHERE tenant_id = ?",
+        (TENANT_ID,),
+    ).fetchone()[0]
+    assert receipt_count == 1
+    fire_audits = [row for row in _audit_log(engine_a) if row["op"] == "fire_intention"]
+    assert len(fire_audits) == 1
+    assert fire_audits[0]["id"] == conn.execute(
+        "SELECT event_id FROM intention_fire_receipts WHERE tenant_id = ?",
+        (TENANT_ID,),
+    ).fetchone()[0]
+
+
+def test_separate_connection_cancel_and_fire_have_one_winner(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    engine_a = SqliteEngine(root)
+    engine_b = SqliteEngine(root)
+    evidence_id = _originating_episode(engine_a)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine_a.schedule_intention(intention)
+    barrier = Barrier(2)
+
+    def fire() -> tuple[str, Any]:
+        barrier.wait()
+        try:
+            return ("fire", _evaluate(engine_a, TENANT_ID, evaluated_at=EVALUATED_AT))
+        except Exception as exc:  # pragma: no cover - records unexpected race failure
+            return ("fire-error", exc)
+
+    def cancel() -> tuple[str, Any]:
+        barrier.wait()
+        try:
+            engine_b.cancel_intention(
+                TENANT_ID, intention.intention_id, cancelled_by=USER_ID
+            )
+            return ("cancel", None)
+        except Exception as exc:
+            return ("cancel-error", exc)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fire_result, cancel_result = executor.map(lambda fn: fn(), (fire, cancel))
+
+    assert fire_result[0] == "fire"
+    assert cancel_result[0] in {"cancel", "cancel-error"}
+    stored = engine_a.list_intentions(TENANT_ID)[0]
+    assert stored.status in {"fired", "cancelled"}
+    if stored.status == "fired":
+        assert cancel_result[0] == "cancel-error"
+        assert isinstance(cancel_result[1], ValueError)
+    else:
+        assert cancel_result[0] == "cancel"
+        assert fire_result[1] == []
+    operations = [row["op"] for row in _audit_log(engine_a)]
+    assert operations.count("fire_intention") + operations.count("cancel_intention") == 1
+
+
+def test_fire_transaction_rolls_back_status_audit_and_receipt(tmp_path: Path, monkeypatch):
+    engine = SqliteEngine(tmp_path / "root")
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+    audit_count = len(_audit_log(engine))
+
+    def fail_audit(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("synthetic audit failure")
+
+    monkeypatch.setattr(engine, "_audit_row", fail_audit)
+    with pytest.raises(RuntimeError, match="synthetic audit failure"):
+        _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT)
+
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert len(_audit_log(engine)) == audit_count
+    assert engine._connect(TENANT_ID).execute(
+        "SELECT COUNT(*) FROM intention_fire_receipts"
+    ).fetchone()[0] == 0

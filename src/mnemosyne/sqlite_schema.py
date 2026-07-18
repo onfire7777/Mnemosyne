@@ -218,6 +218,14 @@ ENSURE_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS intentions_tenant_status_due_idx
         ON intentions(tenant_id, status, due_at, intention_id)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS intention_fire_receipts (
+        event_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        intention_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+    )
+    """,
     # audit/deletion/merge logs — append-ordered plain dict rows persisted
     # verbatim (seq preserves LocalMemoryEngine's list ordering).
     """
