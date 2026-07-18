@@ -38,22 +38,25 @@ def _item(
     evidence_id: str,
     *,
     item_id: str = "item-a",
+    tenant_id: str = TENANT,
     session_id: str = SESSION,
+    user_id: str = USER,
+    created_at: datetime = CREATED_AT,
     expires_at: datetime = EXPIRES_AT,
 ) -> _SQLiteWorkingMemoryItem:
     return _SQLiteWorkingMemoryItem(
         item_id=item_id,
-        tenant_id=TENANT,
+        tenant_id=tenant_id,
         session_id=session_id,
-        user_id=USER,
+        user_id=user_id,
         agent_id=AGENT,
         kind="active_goal",
         task_id="task-1",
         content=f"content-{item_id}",
-        created_at=CREATED_AT,
+        created_at=created_at,
         expires_at=expires_at,
         evidence_ids=[evidence_id],
-        access_policy={"tenant": TENANT},
+        access_policy={"tenant": tenant_id},
         metadata={"priority": "high"},
     )
 
@@ -103,6 +106,38 @@ def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path)
     assert audits[-1]["diff"]["sweep"] == EXPIRES_AT.isoformat()
 
 
+def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    tenant_item = _item(_evidence(engine, session_id=SESSION), item_id="same")
+    other_tenant = "tenant-other"
+    other_tenant_item = _item(
+        _evidence(engine, tenant_id=other_tenant, session_id=SESSION),
+        tenant_id=other_tenant,
+        item_id="same",
+    )
+    earlier = _item(
+        _evidence(engine, session_id=SESSION),
+        item_id="later-id",
+        created_at=CREATED_AT - timedelta(seconds=1),
+        expires_at=EXPIRES_AT - timedelta(seconds=1),
+    )
+    first = _item(_evidence(engine, session_id=SESSION), item_id="first")
+
+    engine.put_working(tenant_item)
+    engine.put_working(other_tenant_item)
+    engine.put_working(earlier)
+    engine.put_working(first)
+
+    assert [item.item_id for item in engine.list_working(TENANT, SESSION, as_of=CREATED_AT)] == [
+        "later-id",
+        "first",
+        "same",
+    ]
+    assert engine.get_working(other_tenant, SESSION, "same", as_of=CREATED_AT).tenant_id == other_tenant
+    with pytest.raises(ValueError, match="already exists"):
+        engine.put_working(_item(_evidence(engine, session_id=SESSION), item_id="same"))
+
+
 def test_sqlite_working_memory_expiry_orders_and_prevalidates_provenance(tmp_path) -> None:
     engine = SqliteEngine(tmp_path)
     evidence = [_evidence(engine) for _ in range(3)]
@@ -120,6 +155,42 @@ def test_sqlite_working_memory_expiry_orders_and_prevalidates_provenance(tmp_pat
         engine.expire_working(TENANT, expired_at=EXPIRES_AT + timedelta(seconds=1))
     assert conn.execute("SELECT count(*) FROM working_memory WHERE status = 'active'").fetchone()[0] == 3
     assert not [row for row in engine.export_tenant(TENANT)["audit_log"] if row["op"] == "expire_working"]
+
+
+def test_sqlite_working_memory_validates_provenance_on_put_and_get(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+
+    with pytest.raises(ValueError, match="session must match"):
+        engine.put_working(_item(evidence_id, session_id="wrong-session"))
+    with pytest.raises(ValueError, match="user must match"):
+        engine.put_working(_item(evidence_id, user_id="wrong-user"))
+
+    engine.put_working(_item(evidence_id))
+    conn = engine._connect(TENANT)
+    conn.execute(
+        "UPDATE evidence SET erased = 1 WHERE tenant_id = ? AND cid = ?",
+        (TENANT, evidence_id),
+    )
+    conn.commit()
+    with pytest.raises(ValueError, match="is erased"):
+        engine.get_working(TENANT, SESSION, "item-a", as_of=CREATED_AT)
+
+
+def test_sqlite_working_memory_accepts_inclusive_24_hour_ttl(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+    expires_at = CREATED_AT + timedelta(hours=24)
+    engine.put_working(_item(evidence_id, expires_at=expires_at))
+
+    assert engine.get_working(TENANT, SESSION, "item-a", as_of=expires_at - timedelta(microseconds=1)) is not None
+    assert engine.get_working(TENANT, SESSION, "item-a", as_of=expires_at) is None
+    with pytest.raises(ValueError, match="cannot exceed 24 hours"):
+        _item(
+            evidence_id,
+            item_id="too-long",
+            expires_at=expires_at + timedelta(microseconds=1),
+        )
 
 
 def test_sqlite_working_memory_put_and_expiry_audits_share_transaction(tmp_path) -> None:
@@ -152,6 +223,7 @@ def test_sqlite_working_memory_put_and_expiry_audits_share_transaction(tmp_path)
     with pytest.raises(sqlite3.Error, match="working expiry audit unavailable"):
         engine.expire_working(TENANT, expired_at=EXPIRES_AT)
     assert conn.execute("SELECT status FROM working_memory WHERE item_id = 'item-a'").fetchone()[0] == "active"
+    assert not [row for row in engine.export_tenant(TENANT)["audit_log"] if row["op"] == "expire_working"]
 
 
 def test_sqlite_working_memory_same_database_expiry_is_exactly_once(tmp_path) -> None:
