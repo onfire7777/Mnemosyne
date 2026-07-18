@@ -1536,7 +1536,6 @@ class LocalMemoryEngine:
             raise
         tmp.chmod(0o600)
         tmp.replace(self.store_path)
-        self.store_path.chmod(0o600)
 
     @contextmanager
     def defer_persistence(self):
