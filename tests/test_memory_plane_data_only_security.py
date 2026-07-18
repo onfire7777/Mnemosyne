@@ -356,11 +356,18 @@ def test_tainted_content_denial_precedes_elevated_role_and_trust_claims() -> Non
         assert decision.reason == "tainted data carries no write authority (data is not instruction)"
 
 
-def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(engine: Any) -> None:
+def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(
+    engine: Any,
+    execution_tripwire: tuple[list[str], Callable[[], None]],
+    tmp_path: Path,
+) -> None:
     case = next(case for case in CORPUS if case.case_id == "W-TOOL-1")
+    sentinel = tmp_path / "executed"
+    payload = _payload(case, sentinel)
     evidence_id = _evidence(engine)
     tools = MemoryTools(engine)
-    before = engine.export_tenant(TENANT)
+    calls, install_tripwire = execution_tripwire
+    install_tripwire()
     seeded = tools.working_seed(
         tenant_id=TENANT,
         session_id=SESSION,
@@ -369,7 +376,7 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(engine: 
         task_id=TASK,
         branch="main",
         kind="active_goal",
-        content=case.content,
+        content=payload,
         evidence_ids=[evidence_id],
         ttl_seconds=300,
         created_at=NOW,
@@ -377,7 +384,8 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(engine: 
         source_trust_tier=1,
         item_id="public-working",
     )
-    assert seeded["item"]["content"] == case.content
+    assert seeded["item"]["content"] == payload
+    expected_state = deepcopy(engine.export_tenant(TENANT))
     result = tools.working_query(
         tenant_id=TENANT,
         session_id=SESSION,
@@ -387,7 +395,7 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(engine: 
         branch="main",
         as_of=NOW,
     )
-    assert [item["content"] for item in result["items"]] == [case.content]
+    assert [item["content"] for item in result["items"]] == [payload]
     assert tools.working_query(
         tenant_id=TENANT,
         session_id="session-other",
@@ -397,9 +405,9 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(engine: 
         branch="main",
         as_of=NOW,
     )["items"] == []
-    after = engine.export_tenant(TENANT)
-    assert after.get("assertions", []) == before.get("assertions", [])
-    assert after.get("preferences", []) == before.get("preferences", [])
+    assert engine.export_tenant(TENANT) == expected_state
+    assert calls == []
+    assert not sentinel.exists()
 
 
 def test_memory_tools_prospective_payload_remains_literal_and_scoped(
