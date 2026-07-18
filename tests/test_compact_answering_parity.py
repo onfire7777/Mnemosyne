@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from pathlib import Path
 
@@ -129,6 +132,55 @@ def test_manifest_rejects_drifted_and_malformed_overwrite(tmp_path, manifest) ->
         create_manifest(path, manifest)
 
 
+def test_manifest_rejects_duplicate_json_keys(tmp_path, manifest) -> None:
+    path = tmp_path / "custody.json"
+    payload = json.dumps(manifest).replace(
+        '"schema": "mnemosyne.compact-answering-custody.v1"',
+        '"schema": "mnemosyne.compact-answering-custody.v1", '
+        '"schema": "mnemosyne.compact-answering-custody.v1"',
+        1,
+    )
+    path.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ManifestValidationError, match="duplicate"):
+        load_manifest(path)
+
+
+def test_manifest_creation_is_exclusive_under_concurrency(tmp_path, manifest) -> None:
+    path = tmp_path / "custody.json"
+    barrier = threading.Barrier(2)
+
+    def create_once() -> type[BaseException] | None:
+        barrier.wait()
+        try:
+            create_manifest(path, manifest)
+        except BaseException as exc:  # capture the losing creator for exact assertion
+            return type(exc)
+        return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: create_once(), range(2)))
+
+    assert sorted(result.__name__ if result else "success" for result in results) == [
+        "ManifestExistsError",
+        "success",
+    ]
+    assert load_manifest(path, expected=manifest) == manifest
+
+
+def test_manifest_removes_partial_file_when_fsync_fails(tmp_path, manifest, monkeypatch) -> None:
+    path = tmp_path / "custody.json"
+
+    def fail_fsync(_descriptor: int) -> None:
+        raise OSError("injected fsync failure")
+
+    monkeypatch.setattr(os, "fsync", fail_fsync)
+    with pytest.raises(OSError, match="injected"):
+        create_manifest(path, manifest)
+
+    assert not path.exists()
+
+
 @pytest.fixture
 def parity_row() -> dict[str, object]:
     return {
@@ -155,6 +207,29 @@ def test_parity_row_decodes_exact_bytes_and_preserves_fact_order(parity_row) -> 
 
 
 @pytest.mark.parametrize(
+    ("answer_type", "decoded_span_b64", "abstained"),
+    [
+        ("span", "ZXhhY3Q=", False),
+        ("yes", "eWVz", False),
+        ("no", "bm8=", False),
+        ("span", "", True),
+    ],
+)
+def test_parity_accepts_canonical_answer_states(
+    parity_row, answer_type, decoded_span_b64, abstained
+) -> None:
+    parity_row.update(
+        {
+            "answer_type": answer_type,
+            "decoded_span_b64": decoded_span_b64,
+            "abstained": abstained,
+        }
+    )
+
+    parse_parity_row(parity_row)
+
+
+@pytest.mark.parametrize(
     ("field", "replacement", "error_field"),
     [
         ("decoded_span_b64", "RVhBQ1Q=", "decoded_span_bytes"),
@@ -176,6 +251,10 @@ def test_parity_rejects_every_mismatched_field(
 ) -> None:
     candidate = deepcopy(parity_row)
     candidate[field] = replacement
+    if field == "answer_type":
+        candidate["decoded_span_b64"] = "eWVz"
+    elif field == "abstained":
+        candidate["decoded_span_b64"] = ""
 
     with pytest.raises(ParityMismatchError, match=error_field):
         compare_parity_rows(parity_row, candidate)
@@ -195,6 +274,11 @@ def test_parity_rejects_every_mismatched_field(
         lambda row: row.update({"null_margin": 1}),
         lambda row: row.update({"null_margin": float("nan")}),
         lambda row: row.update({"abstained": 0}),
+        lambda row: row.update({"answer_type": "null", "decoded_span_b64": ""}),
+        lambda row: row.update({"abstained": True}),
+        lambda row: row.update({"decoded_span_b64": ""}),
+        lambda row: row.update({"answer_type": "yes"}),
+        lambda row: row.update({"answer_type": "no"}),
     ],
 )
 def test_parity_fails_closed_on_malformed_rows(parity_row, mutation) -> None:
@@ -217,8 +301,42 @@ def test_synthetic_fixture_covers_required_edges_and_mismatch() -> None:
         "multi-window-reconstruction",
         "explicit-mismatch",
     }
+    assert {case["input"]["token_length"] for case in cases.values()} == {
+        64,
+        128,
+        384,
+        512,
+    }
 
     for case in cases.values():
+        fixture_input = case["input"]
+        source = fixture_input["source_utf8"].encode("utf-8")
+        segments = fixture_input["answer_byte_segments"]
+        windows = fixture_input["windows"]
+        assert len(segments) == len(windows)
+        reconstructed = b""
+        for (start, end), (window_start, window_end) in zip(
+            segments, windows, strict=True
+        ):
+            assert 0 <= window_start <= start <= end <= window_end <= len(source)
+            reconstructed += source[start:end]
+
+        reference = parse_parity_row(case["reference"])
+        if reference.abstained:
+            assert segments == []
+            assert reference.decoded_span_bytes == b""
+        else:
+            assert reconstructed == reference.decoded_span_bytes
+
+        if case["id"] == "repeated-answer":
+            occurrence = fixture_input["selected_occurrence"]
+            assert fixture_input["occurrences"][occurrence] == segments[0]
+            assert len(fixture_input["occurrences"]) > 1
+        elif case["id"] == "window-boundary":
+            assert segments[0][1] == windows[0][1]
+        elif case["id"] == "multi-window-reconstruction":
+            assert len(segments) > 1
+
         if case["matches"]:
             compare_parity_rows(case["reference"], case["candidate"])
         else:
