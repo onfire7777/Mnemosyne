@@ -4332,4 +4332,9 @@ class LocalMemoryEngine:
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": self.merge_log,
             "tenants": tenant_exports,
+            "working_memory": [
+                item
+                for tenant_export in tenant_exports
+                for item in tenant_export["working_memory"]
+            ],
         }
