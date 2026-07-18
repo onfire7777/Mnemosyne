@@ -2283,7 +2283,8 @@ def working_memory_hits(
     for item in items:
         item_tenant = _working_text(_working_field(item, "tenant_id"))
         item_session = _working_text(_working_field(item, "session_id"))
-        if item_tenant != tenant_id or item_session != session_id:
+        item_branch = _working_text(_working_field(item, "branch", "main"))
+        if item_tenant != tenant_id or item_session != session_id or item_branch != branch:
             continue
         if _working_text(_working_field(item, "status", "active")) != "active":
             continue
