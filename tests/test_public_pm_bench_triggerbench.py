@@ -383,6 +383,71 @@ def test_lure_count_and_cross_case_candidate_leakage() -> None:
     with pytest.raises(ActionProbeError, match="tenant/session"):
         run(triggerbench, leaked)
 
+    selected = _cli(triggerbench)
+    foreign_action = second["tasks"][0]["action_id"]
+    first["steps"][0]["available_actions"].append(
+        {"action_id": foreign_action, "opaque_token": "opaque-foreign"}
+    )
+    original = selected.run
+
+    def select_foreign(command: str, *args: dict[str, object]) -> dict[str, object]:
+        if command == "action.select" and args[0]["tenant_id"] == first["tenant_id"]:
+            return {"action_ids": [foreign_action]}
+        return original(command, *args)
+
+    selected.run = select_foreign  # type: ignore[method-assign]
+    with pytest.raises(ActionProbeError, match="tenant/session"):
+        run(triggerbench, selected)
+
+
+def test_never_due_action_is_a_hard_wrong_time_failure() -> None:
+    fixture = _fixture("triggerbench")
+    negative = next(
+        case for case in fixture["cases"] if case["variant"] == "negative_clean"  # type: ignore[index]
+    )
+    cli = _cli(fixture)
+    key = (negative["tenant_id"], negative["session_id"])
+    cli.responses[key][0] = [negative["tasks"][0]["action_id"]]
+    with pytest.raises(ActionProbeError, match="wrong_time"):
+        run(fixture, cli)
+
+
+def test_triggerbench_relations_fail_closed() -> None:
+    fixture = _fixture("triggerbench")
+    unmatched = copy.deepcopy(fixture)
+    unmatched["cases"] = [
+        case
+        for case in unmatched["cases"]  # type: ignore[index]
+        if not (
+            case["dimension"] == TRIGGER_DIMENSIONS[0]
+            and case["variant"] == "rm_control"
+        )
+    ]
+    with pytest.raises(ActionProbeError, match="variants are not matched"):
+        normalize(unmatched)
+
+    broken_prefix = copy.deepcopy(fixture)
+    overloaded = next(
+        case
+        for case in broken_prefix["cases"]  # type: ignore[index]
+        if case["dimension"] == TRIGGER_DIMENSIONS[0]
+        and case["variant"] == "positive_overloaded"
+    )
+    overloaded["steps"][0]["narrative_observations"] = [{"text": "changed"}]
+    with pytest.raises(ActionProbeError, match="preserve clean prefix"):
+        normalize(broken_prefix)
+
+    unmatched_control = copy.deepcopy(fixture)
+    control = next(
+        case
+        for case in unmatched_control["cases"]  # type: ignore[index]
+        if case["dimension"] == TRIGGER_DIMENSIONS[0]
+        and case["variant"] == "rm_control"
+    )
+    control["steps"][0]["event_observations"] = [{"kind": "different"}]
+    with pytest.raises(ActionProbeError, match="RM control is not matched"):
+        normalize(unmatched_control)
+
 
 def test_missing_category_hidden_channel_and_byte_identical_reruns() -> None:
     fixture = _fixture()

@@ -147,6 +147,7 @@ def normalize(value: Mapping[str, Any]) -> dict[str, Any]:
             raise ActionProbeError(
                 f"missing TriggerBench dimensions: {sorted(missing_dimensions)}"
             )
+        _validate_triggerbench_relations(cases)
     normalized = {
         "benchmark": benchmark,
         "cases": cases,
@@ -272,6 +273,42 @@ def _case(value: Any, benchmark: str, point_id: str) -> dict[str, Any]:
             trigger_id=_identifier(value.get("trigger_id"), "trigger_id"),
         )
     return result
+
+
+def _validate_triggerbench_relations(cases: list[Mapping[str, Any]]) -> None:
+    groups: defaultdict[tuple[str, str, str], list[Mapping[str, Any]]] = defaultdict(list)
+    for case in cases:
+        groups[(case["dimension"], case["constraint_id"], case["trigger_id"])].append(case)
+    for key, members in groups.items():
+        by_variant = {case["variant"]: case for case in members}
+        if set(by_variant) != set(TRIGGER_VARIANTS) or len(members) != len(TRIGGER_VARIANTS):
+            raise ActionProbeError(f"TriggerBench variants are not matched for {key}")
+        clean = by_variant["positive_clean"]["steps"]
+        overloaded = by_variant["positive_overloaded"]["steps"]
+        control = by_variant["rm_control"]["steps"]
+        if len(overloaded) < len(clean):
+            raise ActionProbeError("TriggerBench overload does not preserve clean prefix")
+        for clean_step, overloaded_step in zip(clean, overloaded):
+            for field in (
+                "narrative_observations",
+                "event_observations",
+                "channel_observations",
+            ):
+                prefix = overloaded_step[field][: len(clean_step[field])]
+                if prefix != clean_step[field]:
+                    raise ActionProbeError(
+                        "TriggerBench overload does not preserve clean prefix"
+                    )
+        if len(control) != len(clean) or any(
+            control_step[field] != clean_step[field]
+            for clean_step, control_step in zip(clean, control, strict=True)
+            for field in (
+                "narrative_observations",
+                "event_observations",
+                "channel_observations",
+            )
+        ):
+            raise ActionProbeError("TriggerBench RM control is not matched")
 
 
 def _task(value: Any, case_id: str) -> dict[str, Any]:
@@ -485,6 +522,12 @@ def run(
                 )
                 acted = _action_ids(selected, "selection")
                 _check_canary(canary)
+                if any(
+                    action_id in action_owners
+                    and current_owner not in action_owners[action_id]
+                    for action_id in acted
+                ):
+                    raise ActionProbeError("selection leaked across tenant/session scope")
                 if not set(acted) <= {
                     row["action_id"] for row in step["available_actions"]
                 }:
@@ -597,6 +640,7 @@ def _trace_row(
         for action in wrong_time
         if any(due_index < step_index for due_index in due_steps.get(action, []))
     }
+    residual_wrong_time = wrong_time - early - late
     counts = {
         "cancelled_action": len(actual & cancelled - expected),
         "dependency_violation": len(dependency_invalid),
@@ -619,6 +663,8 @@ def _trace_row(
         )
         if counts[key]
     ]
+    if residual_wrong_time:
+        hard.append("wrong_time")
     if set(step["expected_query_channels"]) != set(query_channels):
         hard.append("missing_query_channel")
     updated_task_ids = {update["task_id"] for update in step["updates"]}
