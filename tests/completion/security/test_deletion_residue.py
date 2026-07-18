@@ -867,6 +867,34 @@ def test_timeout_after_commit_retry_probes_before_repeating_delete() -> None:
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
 
 
+def test_multi_ref_timeout_recovery_never_repeats_committed_delete() -> None:
+    world = _world()
+    second_ref = world.engine.append_evidence(_evidence(content=f"{CANARY}-second"))
+    refs = [world.source_ref, second_ref]
+    remote = FakeStore(
+        "remote",
+        delete_fault="timeout_after_commit",
+        probe_fault="raise",
+        rows=[{"tenant_id": TENANT, "source_ref": ref} for ref in refs],
+    )
+    world.stores["remote"] = remote
+
+    incomplete = _delete(world, source_refs=refs)
+
+    assert incomplete["summary"]["complete"] is False
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+    assert world.engine.get_evidence(TENANT, second_ref) is not None
+
+    remote.probe_fault = None
+    complete = _delete(world, source_refs=refs)
+
+    _assert_complete(complete)
+    assert remote.delete_calls == [(TENANT, world.source_ref), (TENANT, second_ref)]
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+    assert world.engine.get_evidence(TENANT, second_ref) is None
+
+
 def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
     world = _world()
     world.stores["cache:shared"] = FakeStore(
