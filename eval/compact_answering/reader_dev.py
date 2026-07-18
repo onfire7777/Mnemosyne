@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import re
+import struct
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,7 +87,10 @@ def _is_clean_string(value: object, *, max_chars: int = MAX_ID_CHARS) -> bool:
         and bool(value)
         and value == value.strip()
         and len(value) <= max_chars
-        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+        and not any(
+            ord(character) < 32 or 127 <= ord(character) <= 159
+            for character in value
+        )
     )
 
 
@@ -111,6 +115,17 @@ def _as_finite(value: object, *, label: str) -> float:
     if not math.isfinite(number):
         raise ReaderValidationError(f"{label} must be finite")
     return number
+
+
+def _as_finite_f32(value: object, *, label: str) -> float:
+    number = _as_finite(value, label=label)
+    try:
+        quantized = struct.unpack("!f", struct.pack("!f", number))[0]
+    except OverflowError as exc:
+        raise ReaderValidationError(f"{label} must fit in f32") from exc
+    if not math.isfinite(quantized):
+        raise ReaderValidationError(f"{label} must be finite")
+    return quantized
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -435,7 +450,7 @@ class ReaderRequest:
         windows = tuple(ReaderWindow.from_mapping(window) for window in windows_value)
         _validate_request_facts(context, facts)
         _validate_request_windows(context, windows)
-        null_threshold = _as_finite(row["null_threshold"], label="null_threshold")
+        null_threshold = _as_finite_f32(row["null_threshold"], label="null_threshold")
         return cls(row["schema"], identity, query, context, facts, windows, null_threshold)
 
     def as_mapping(self) -> dict[str, object]:
@@ -529,7 +544,7 @@ class ReaderPrediction:
         if not _is_clean_string(window_id):
             raise ReaderValidationError("prediction window_id must be non-empty")
         answer_type = row["answer_type"]
-        if answer_type not in SUPPORTED_ANSWER_TYPES:
+        if not isinstance(answer_type, str) or answer_type not in SUPPORTED_ANSWER_TYPES:
             raise ReaderUnsupportedAnswerError(f"unsupported answer type: {answer_type}")
         start_token = None if row["start_token"] is None else _as_int(row["start_token"], label="start_token")
         end_token = None if row["end_token"] is None else _as_int(row["end_token"], label="end_token")
@@ -553,8 +568,8 @@ class ReaderPrediction:
             raw_start,
             raw_end,
             supporting_facts,
-            _as_finite(row["null_margin"], label="null_margin"),
-            _as_finite(row["score"], label="score"),
+            _as_finite_f32(row["null_margin"], label="null_margin"),
+            _as_finite_f32(row["score"], label="score"),
         )
 
     def as_mapping(self) -> dict[str, object]:
@@ -619,6 +634,9 @@ class ReaderLogits:
         answer_type_logits_value = _exact_object(
             row["answer_type_logits"], set(_ANSWER_TYPES), label="answer type logits"
         )
+        window_id = row["window_id"]
+        if not _is_clean_string(window_id):
+            raise ReaderValidationError("logits window_id must be non-empty")
         start_logits = _finite_float_list(row["start_logits"], label="start_logits")
         end_logits = _finite_float_list(row["end_logits"], label="end_logits")
         supporting_fact_logits = _finite_float_list(
@@ -630,22 +648,49 @@ class ReaderLogits:
             row["window_id"],
             tuple(start_logits),
             tuple(end_logits),
-            {key: _as_finite(answer_type_logits_value[key], label=f"{key}_logit") for key in _ANSWER_TYPES},
+            {
+                key: _as_finite_f32(answer_type_logits_value[key], label=f"{key}_logit")
+                for key in _ANSWER_TYPES
+            },
             tuple(supporting_fact_logits),
-            _as_finite(row["null_logit"], label="null_logit"),
+            _as_finite_f32(row["null_logit"], label="null_logit"),
         )
 
 
 def _finite_float_list(value: object, *, label: str) -> list[float]:
     if not isinstance(value, list):
         raise ReaderValidationError(f"{label} shape is invalid")
-    return [_as_finite(item, label=label) for item in value]
+    return [_as_finite_f32(item, label=label) for item in value]
 
 
 def validate_prediction(request: ReaderRequest, prediction: ReaderPrediction) -> ReaderPrediction:
+    if not isinstance(prediction, ReaderPrediction):
+        raise ReaderValidationError("reader prediction type is invalid")
+    if not isinstance(prediction.identity, ReaderIdentity):
+        raise ReaderValidationError("reader prediction identity is invalid")
     request.identity.require_match(prediction.identity)
     if prediction.schema != ABI_SCHEMA:
         raise ReaderValidationError("unsupported reader prediction schema")
+    if not _is_clean_string(prediction.window_id):
+        raise ReaderValidationError("prediction window_id must be non-empty")
+    if not isinstance(prediction.answer_type, str) or prediction.answer_type not in SUPPORTED_ANSWER_TYPES:
+        raise ReaderUnsupportedAnswerError(f"unsupported answer type: {prediction.answer_type}")
+    if not isinstance(prediction.supporting_facts, tuple) or len(prediction.supporting_facts) > MAX_SUPPORTING_FACTS:
+        raise ReaderValidationError("supporting_facts shape is invalid")
+    if any(not _is_clean_string(fact_id) for fact_id in prediction.supporting_facts):
+        raise ReaderValidationError("supporting fact IDs must be exact strings")
+    if len(set(prediction.supporting_facts)) != len(prediction.supporting_facts):
+        raise ReaderValidationError("supporting fact IDs must be unique")
+    for value, label in (
+        (prediction.start_token, "start_token"),
+        (prediction.end_token, "end_token"),
+        (prediction.raw_start, "raw_start"),
+        (prediction.raw_end, "raw_end"),
+    ):
+        if value is not None:
+            _as_int(value, label=label)
+    null_margin = _as_finite_f32(prediction.null_margin, label="null_margin")
+    _as_finite_f32(prediction.score, label="score")
     windows = {window.window_id: window for window in request.windows}
     window = windows.get(prediction.window_id)
     if window is None:
@@ -654,7 +699,7 @@ def validate_prediction(request: ReaderRequest, prediction: ReaderPrediction) ->
     if not set(prediction.supporting_facts).issubset(fact_ids):
         raise ReaderValidationError("prediction references an unknown supporting fact")
     is_null = prediction.answer_type == NULL_ANSWER_TYPE
-    if is_null != (prediction.null_margin >= request.null_threshold):
+    if is_null != (null_margin >= _as_finite_f32(request.null_threshold, label="null_threshold")):
         raise ReaderValidationError("null margin and abstention decision disagree")
     if is_null:
         if any(value is not None for value in (prediction.start_token, prediction.end_token, prediction.raw_start, prediction.raw_end)):
@@ -727,9 +772,9 @@ def select_prediction(request: ReaderRequest, predictions: Iterable[ReaderPredic
     selected = max(
         rows,
         key=lambda row: (
-            row.score,
+            _as_finite_f32(row.score, label="score"),
             0 if row.answer_type == NULL_ANSWER_TYPE else 1,
-            -row.null_margin,
+            -_as_finite_f32(row.null_margin, label="null_margin"),
             row.window_id,
         ),
     )
@@ -739,9 +784,19 @@ def select_prediction(request: ReaderRequest, predictions: Iterable[ReaderPredic
 def decode_logits(request: ReaderRequest, logits: ReaderLogits) -> ReaderPrediction:
     """Decode one finite window tensor into a source-bound prediction."""
 
+    if not isinstance(logits, ReaderLogits):
+        raise ReaderValidationError("reader logits type is invalid")
+    if not isinstance(logits.identity, ReaderIdentity):
+        raise ReaderValidationError("reader logits identity is invalid")
     request.identity.require_match(logits.identity)
     if logits.schema != ABI_SCHEMA:
         raise ReaderValidationError("unsupported reader logits schema")
+    if not _is_clean_string(logits.window_id):
+        raise ReaderValidationError("logits window_id must be non-empty")
+    if not isinstance(logits.answer_type_logits, dict) or set(logits.answer_type_logits) != set(_ANSWER_TYPES):
+        raise ReaderValidationError("answer type logits shape is invalid")
+    if not all(isinstance(values, (tuple, list)) for values in (logits.start_logits, logits.end_logits, logits.supporting_fact_logits)):
+        raise ReaderValidationError("reader logits shape is invalid")
     windows = {window.window_id: window for window in request.windows}
     window = windows.get(logits.window_id)
     if window is None:
@@ -750,21 +805,47 @@ def decode_logits(request: ReaderRequest, logits: ReaderLogits) -> ReaderPredict
         raise ReaderValidationError("reader logits shape is invalid")
     if len(logits.supporting_fact_logits) != len(request.facts):
         raise ReaderValidationError("supporting_fact_logits shape is invalid")
+    start_logits = tuple(
+        _as_finite_f32(value, label="start_logits") for value in logits.start_logits
+    )
+    end_logits = tuple(
+        _as_finite_f32(value, label="end_logits") for value in logits.end_logits
+    )
+    supporting_fact_logits = tuple(
+        _as_finite_f32(value, label="supporting_fact_logits")
+        for value in logits.supporting_fact_logits
+    )
+    answer_type_logits = {
+        answer_type: _as_finite_f32(
+            logits.answer_type_logits[answer_type], label=f"{answer_type}_logit"
+        )
+        for answer_type in _ANSWER_TYPES
+    }
+    null_logit = _as_finite_f32(logits.null_logit, label="null_logit")
     best_start, best_end, best_span_score = 0, 0, float("-inf")
-    for start, start_score in enumerate(logits.start_logits):
-        for end in range(start, len(logits.end_logits)):
-            score = start_score + logits.end_logits[end]
+    for start, start_score in enumerate(start_logits):
+        for end in range(start, len(end_logits)):
+            score = _as_finite_f32(
+                start_score + end_logits[end], label="span score"
+            )
             if score > best_span_score or (score == best_span_score and (start, end) < (best_start, best_end)):
                 best_start, best_end, best_span_score = start, end, score
+    span_score = _as_finite_f32(
+        answer_type_logits["span"] + best_span_score, label="span score"
+    )
     type_scores = {
-        "span": logits.answer_type_logits["span"] + best_span_score,
-        "yes": logits.answer_type_logits["yes"],
-        "no": logits.answer_type_logits["no"],
+        "span": span_score,
+        "yes": answer_type_logits["yes"],
+        "no": answer_type_logits["no"],
     }
     best_type = max(_ANSWER_TYPES, key=lambda answer_type: type_scores[answer_type])
     best_non_null = type_scores[best_type]
-    null_margin = logits.null_logit - best_non_null
-    answer_type = NULL_ANSWER_TYPE if null_margin >= request.null_threshold else best_type
+    null_margin = _as_finite_f32(null_logit - best_non_null, label="null margin")
+    answer_type = (
+        NULL_ANSWER_TYPE
+        if null_margin >= _as_finite_f32(request.null_threshold, label="null_threshold")
+        else best_type
+    )
     if answer_type == "span":
         start_token = best_start
         end_token = best_end + 1
@@ -772,7 +853,7 @@ def decode_logits(request: ReaderRequest, logits: ReaderLogits) -> ReaderPredict
         raw_end = window.tokens[best_end].raw_end
     else:
         start_token = end_token = raw_start = raw_end = None
-    return ReaderPrediction(
+    prediction = ReaderPrediction(
         ABI_SCHEMA,
         request.identity,
         logits.window_id,
@@ -783,12 +864,16 @@ def decode_logits(request: ReaderRequest, logits: ReaderLogits) -> ReaderPredict
         raw_end,
         tuple(
             fact.fact_id
-            for fact, score in zip(request.facts, logits.supporting_fact_logits)
+            for fact, score in zip(request.facts, supporting_fact_logits)
             if score > 0.0
         ),
         null_margin,
         best_non_null,
     )
+    if len(prediction.supporting_facts) > MAX_SUPPORTING_FACTS:
+        raise ReaderValidationError("supporting_facts shape is invalid")
+    validate_prediction(request, prediction)
+    return prediction
 
 
 def receipt_digest(receipt: dict[str, Any]) -> str:
@@ -1029,6 +1114,18 @@ def validate_selection_fixture(document: object, *, deadline: float | None = Non
 
 def parse_selection_fixture(payload: str | bytes | bytearray) -> dict[str, Any]:
     return validate_selection_fixture(_parse_json(payload))
+
+
+def parse_request(payload: str | bytes | bytearray) -> ReaderRequest:
+    if isinstance(payload, str):
+        raw_payload = payload.encode("utf-8")
+    elif isinstance(payload, (bytes, bytearray)):
+        raw_payload = bytes(payload)
+    else:
+        raise ReaderValidationError("payload must be JSON text or bytes")
+    if len(raw_payload) > MAX_REQUEST_BYTES:
+        raise ReaderValidationError("reader request exceeds the byte limit")
+    return ReaderRequest.from_mapping(_parse_json(raw_payload))
 
 
 def load_selection_fixture(path: str | Path = SELECTION_FIXTURE_PATH) -> dict[str, Any]:
