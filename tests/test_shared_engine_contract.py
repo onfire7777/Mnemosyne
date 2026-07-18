@@ -335,6 +335,73 @@ def test_shared_engine_contract_working_memory_is_scoped_detached_and_non_durabl
     assert engine.list_working(tenant, "shared-session", as_of=expires_at) == []
 
 
+def test_shared_engine_contract_working_expiry_is_subject_scoped(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    expires_at = created_at + timedelta(minutes=10)
+
+    def add_item(item_id: str, scoped_user: str, agent: str, task: str) -> None:
+        source_cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=scoped_user,
+                session_id="shared-subject-session",
+                actor="user",
+                source_type="shared-contract",
+                content=f"Provenance for {item_id}.",
+                access_policy={"tenant": tenant},
+            )
+        )
+        engine.put_working(
+            WorkingMemoryItem(
+                item_id=item_id,
+                tenant_id=tenant,
+                session_id="shared-subject-session",
+                user_id=scoped_user,
+                agent_id=agent,
+                kind="current_plan",
+                task_id=task,
+                content=f"Transient plan for {item_id}.",
+                created_at=created_at,
+                expires_at=expires_at,
+                evidence_ids=[source_cid],
+                access_policy={"tenant": tenant},
+                metadata={"branch": "main"},
+            )
+        )
+
+    add_item("scope-a", user, "agent-a", "task-a")
+    add_item("scope-b", f"{user}-other", "agent-b", "task-b")
+
+    expired = engine.expire_working(
+        tenant,
+        session_id="shared-subject-session",
+        user_id=user,
+        agent_id="agent-a",
+        task_id="task-a",
+        branch="main",
+        expired_at=expires_at,
+    )
+
+    assert [item.item_id for item in expired] == ["scope-a"]
+    assert engine.expire_working(
+        tenant,
+        session_id="shared-subject-session",
+        user_id=user,
+        agent_id="agent-a",
+        task_id="task-a",
+        branch="main",
+        expired_at=expires_at,
+    ) == []
+    remaining = engine.get_working(
+        tenant, "shared-subject-session", "scope-b", as_of=created_at
+    )
+    assert remaining is not None
+    assert remaining.status == "active"
+
+
 def test_shared_engine_contract_working_hit_cannot_collide_with_or_mark_durable_evidence(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
