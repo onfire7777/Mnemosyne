@@ -7,6 +7,7 @@ pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub const MAX_QUERY_CHARS: usize = 2_000;
 pub const MAX_EVIDENCE_ROWS: usize = 20;
 pub const MAX_EVIDENCE_CHARS: usize = 24_000;
+pub const MAX_ID_CHARS: usize = 256;
 pub const MAX_RANK_WIDTH: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +72,7 @@ pub enum ErrorCode {
     RequestTimedOut,
     RuntimeUnavailable,
     RuntimeBusy,
+    IdentityMismatch,
     InferenceFailed,
 }
 
@@ -96,6 +98,17 @@ impl ApiError {
         Self::new(ErrorCode::RequestTimedOut, "request deadline exceeded")
     }
 
+    pub const fn request_too_large() -> Self {
+        Self::new(ErrorCode::RequestTooLarge, "request body exceeds 64 KiB")
+    }
+
+    pub const fn limit_exceeded() -> Self {
+        Self::new(
+            ErrorCode::LimitExceeded,
+            "request exceeds a component limit",
+        )
+    }
+
     pub const fn unavailable() -> Self {
         Self::new(ErrorCode::RuntimeUnavailable, "ONNX session is unavailable")
     }
@@ -108,6 +121,13 @@ impl ApiError {
         Self::new(
             ErrorCode::InferenceFailed,
             "inference returned an invalid result",
+        )
+    }
+
+    pub const fn identity_mismatch() -> Self {
+        Self::new(
+            ErrorCode::IdentityMismatch,
+            "component identity does not match configured custody",
         )
     }
 }
@@ -182,10 +202,14 @@ fn validate_request(request: &Request) -> Result<(), ApiError> {
         Request::Read { query, evidence } => (query, Some(evidence), None),
     };
 
-    if query.chars().count() > MAX_QUERY_CHARS {
+    if query.is_empty()
+        || query.trim() != query
+        || query.chars().any(char::is_control)
+        || query.chars().count() > MAX_QUERY_CHARS
+    {
         return Err(ApiError::new(
             ErrorCode::LimitExceeded,
-            "query exceeds 2,000 characters",
+            "query must be a bounded non-empty string",
         ));
     }
 
@@ -209,13 +233,16 @@ fn validate_request(request: &Request) -> Result<(), ApiError> {
         }
 
         let mut ids = HashSet::with_capacity(rows.len());
-        if rows
-            .iter()
-            .any(|row| row.id.is_empty() || !ids.insert(row.id.as_str()))
-        {
+        if rows.iter().any(|row| {
+            row.id.is_empty()
+                || row.id.trim() != row.id
+                || row.id.chars().count() > MAX_ID_CHARS
+                || row.id.chars().any(char::is_control)
+                || !ids.insert(row.id.as_str())
+        }) {
             return Err(ApiError::new(
                 ErrorCode::LimitExceeded,
-                "evidence IDs must be non-empty and unique",
+                "evidence IDs must be bounded, non-empty, and unique",
             ));
         }
     }

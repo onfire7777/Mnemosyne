@@ -205,7 +205,8 @@ pub fn parse_prediction(payload: &[u8]) -> Result<ReaderPrediction, ReaderError>
     if payload.len() > MAX_REQUEST_BYTES {
         return Err(ReaderError::RequestTooLarge);
     }
-    let prediction = serde_json::from_slice(payload).map_err(|_| ReaderError::MalformedPayload)?;
+    let prediction: ReaderPrediction =
+        serde_json::from_slice(payload).map_err(|_| ReaderError::MalformedPayload)?;
     if prediction.schema != ABI_SCHEMA {
         return Err(ReaderError::UnsupportedSchema);
     }
@@ -227,7 +228,7 @@ pub fn validate_request(request: &ReaderRequest) -> Result<(), ReaderError> {
     }
     if request.context.is_empty()
         || request.context.chars().count() > MAX_CONTEXT_CHARS
-        || request.context.as_bytes().len() > MAX_CONTEXT_BYTES
+        || request.context.len() > MAX_CONTEXT_BYTES
     {
         return Err(ReaderError::InvalidShape);
     }
@@ -643,7 +644,7 @@ pub fn decode_logits(
             best
         }
     });
-    let best_non_null = *best_type.1;
+    let best_non_null = best_type.1;
     let null_margin = logits.null_logit - best_non_null;
     if !null_margin.is_finite() {
         return Err(ReaderError::NonFinite);
@@ -667,7 +668,8 @@ pub fn decode_logits(
         .supporting_fact_logits
         .iter()
         .enumerate()
-        .filter_map(|(index, score)| (*score > 0.0).then(|| request.facts[index].fact_id.clone()))
+        .filter(|&(_, score)| *score > 0.0)
+        .map(|(index, _)| request.facts[index].fact_id.clone())
         .collect();
     if supporting_facts.len() > MAX_SUPPORTING_FACTS {
         return Err(ReaderError::InvalidShape);
@@ -712,7 +714,7 @@ fn validate_digest(value: &str) -> Result<(), ReaderError> {
 }
 
 fn validate_source_range(context: &str, start: usize, end: usize) -> Result<(), ReaderError> {
-    if start >= end || end > context.as_bytes().len() {
+    if start >= end || end > context.len() {
         return Err(ReaderError::InvalidOffset);
     }
     if !context.is_char_boundary(start) || !context.is_char_boundary(end) {
