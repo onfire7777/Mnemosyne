@@ -28,6 +28,7 @@ from eval.compact_answering.reader_dev import (
     parse_selection_fixture,
     parse_request,
     run_synthetic_bakeoff,
+    select_prediction,
     validate_bakeoff_receipt,
     validate_prediction,
     validate_selection_fixture,
@@ -176,6 +177,61 @@ def test_unicode_repeated_and_window_boundary_spans_reconstruct_exact_text(fixtu
     assert decode_prediction(boundary_request, boundary_prediction).answer == "edge"
 
 
+def test_window_schedule_and_direct_request_validation_are_fail_closed() -> None:
+    context = " ".join(f"t{index:03d}" for index in range(700))
+    request_mapping = request_for(context).as_mapping()
+
+    undersized = copy.deepcopy(request_mapping)
+    undersized["windows"][0]["tokens"] = undersized["windows"][0]["tokens"][:1]
+    undersized["windows"][0]["token_end"] = 1
+    undersized["windows"][0]["raw_end"] = undersized["windows"][0]["tokens"][0]["raw_end"]
+    with pytest.raises(ReaderValidationError, match="window"):
+        ReaderRequest.from_mapping(undersized)
+
+    sparse_tail = copy.deepcopy(request_mapping)
+    sparse_tail["windows"][1]["token_start"] = 1_000
+    sparse_tail["windows"][1]["token_end"] = 1_512
+    with pytest.raises(ReaderValidationError, match="window"):
+        ReaderRequest.from_mapping(sparse_tail)
+
+    reordered = copy.deepcopy(request_mapping)
+    reordered["windows"][1] = copy.deepcopy(reordered["windows"][0])
+    reordered["windows"][1]["window_id"] = "window-001"
+    reordered["windows"][1]["token_start"] = 128
+    reordered["windows"][1]["token_end"] = 640
+    with pytest.raises(ReaderOffsetError, match="token map"):
+        ReaderRequest.from_mapping(reordered)
+
+    request = request_for("The answer is Paris.")
+    prediction = prediction_for(request, answer_type="yes")
+    malformed_request = ReaderRequest(**{**request.__dict__, "context": ""})
+    with pytest.raises(ReaderValidationError, match="context"):
+        validate_prediction(malformed_request, prediction)
+
+    malformed_identity = ReaderIdentity(
+        model_id="", artifact_id=identity().artifact_id,
+        artifact_sha256=DIGEST, preprocessing_id=identity().preprocessing_id,
+        preprocessing_sha256=DIGEST,
+    )
+    malformed_request = ReaderRequest(**{**request.__dict__, "identity": malformed_identity})
+    malformed_prediction = ReaderPrediction(**{**prediction.__dict__, "identity": malformed_identity})
+    with pytest.raises(ReaderValidationError, match="identity"):
+        validate_prediction(malformed_request, malformed_prediction)
+
+
+def test_selection_rejects_duplicate_windows_and_non_null_answers_without_facts() -> None:
+    request = request_for("The answer is Paris.")
+    prediction = prediction_for(request, answer_type="yes")
+    with pytest.raises(ReaderValidationError, match="unique"):
+        select_prediction(request, [prediction, prediction])
+
+    unsupported_grounding = ReaderPrediction(
+        **{**prediction.__dict__, "supporting_facts": ()}
+    )
+    with pytest.raises(ReaderValidationError, match="supporting facts"):
+        validate_prediction(request, unsupported_grounding)
+
+
 @pytest.mark.parametrize("answer_type", ["yes", "no"])
 def test_yes_no_answers_have_no_span_offsets(answer_type: str) -> None:
     request = request_for("The launch is enabled.")
@@ -274,6 +330,11 @@ def test_logits_shape_and_finiteness_are_checked() -> None:
     with pytest.raises(ReaderValidationError, match="shape"):
         decode_logits(request, ReaderLogits.from_mapping(malformed))
 
+    overflowing_integer = copy.deepcopy(logits)
+    overflowing_integer["null_logit"] = 10**1_000
+    with pytest.raises(ReaderValidationError, match="finite float|f32"):
+        ReaderLogits.from_mapping(overflowing_integer)
+
 
 def test_reader_parser_enforces_request_byte_limit() -> None:
     request = request_for("The answer is Paris.")
@@ -293,7 +354,7 @@ def test_logits_ties_are_stable_and_derived_nonfinite_scores_fail_closed() -> No
         "start_logits": [0.0] * len(window.tokens),
         "end_logits": [0.0] * len(window.tokens),
         "answer_type_logits": {"span": 0.0, "yes": 0.0, "no": 0.0},
-        "supporting_fact_logits": [0.0],
+        "supporting_fact_logits": [1.0],
         "null_logit": -1.0,
     }
     assert decode_logits(request, ReaderLogits.from_mapping(tied)).answer_type == "span"
@@ -317,26 +378,12 @@ def test_direct_prediction_validation_rejects_malformed_types_and_controls() -> 
         request_for("The answer is Paris.", query="what\u0085is it?")
 
 
-def test_decode_logits_rejects_too_many_supporting_facts() -> None:
+def test_request_rejects_too_many_supporting_facts() -> None:
     context = "x"
     request_mapping = request_for(context).as_mapping()
     request_mapping["facts"] = [
         {"fact_id": f"fact-{index}", "raw_start": 0, "raw_end": 1, "text": context}
         for index in range(MAX_SUPPORTING_FACTS + 1)
     ]
-    request = ReaderRequest.from_mapping(request_mapping)
-    window = request.windows[0]
-    logits = ReaderLogits.from_mapping(
-        {
-            "schema": ABI_SCHEMA,
-            "identity": request.identity.as_mapping(),
-            "window_id": window.window_id,
-            "start_logits": [0.0],
-            "end_logits": [0.0],
-            "answer_type_logits": {"span": 0.0, "yes": 0.0, "no": 0.0},
-            "supporting_fact_logits": [1.0] * len(request.facts),
-            "null_logit": -1.0,
-        }
-    )
-    with pytest.raises(ReaderValidationError, match="supporting_facts"):
-        decode_logits(request, logits)
+    with pytest.raises(ReaderValidationError, match="supporting facts"):
+        ReaderRequest.from_mapping(request_mapping)
