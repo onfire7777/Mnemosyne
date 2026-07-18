@@ -8,6 +8,7 @@ import math
 import os
 import secrets
 import threading
+import weakref
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -109,6 +110,202 @@ def _normalize_json_value(value: Any, *, path: str) -> Any:
     raise ValueError(f"{path} must contain JSON data only")
 
 
+_TRIGGER_TYPES: frozenset[str] = frozenset(
+    {"exact_time", "time_window", "event", "condition", "dependency_completion"}
+)
+
+_CONDITION_OPERATORS: frozenset[str] = frozenset(
+    {"eq", "ne", "lt", "lte", "gt", "gte", "in"}
+)
+
+
+def _parse_aware_iso(value: Any, *, field: str) -> datetime:
+    if type(value) is not str:
+        raise ValueError(f"{field} must be an ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return parsed.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class ProspectiveOperatingPoint:
+    """A caller-supplied precision/recall operating point for trigger evaluation.
+
+    There is no constructor, engine, CLI, or MCP default. A caller must supply
+    this object on every evaluation; invalid or missing values fail before
+    state mutation. The ``threshold`` gates event/condition signal confidence;
+    deterministic time/dependency triggers do not trade correctness for
+    threshold, but the supplied operating point is still recorded in the
+    firing audit.
+    """
+
+    operating_point_id: str
+    threshold: float
+    measured_precision: float
+    measured_recall: float
+    measurement_cid: str
+
+    def __post_init__(self) -> None:
+        if type(self.operating_point_id) is not str or not self.operating_point_id.strip():
+            raise ValueError("operating_point_id must be a non-empty string")
+        if type(self.measurement_cid) is not str or not self.measurement_cid.strip():
+            raise ValueError("measurement_cid must be a non-empty string")
+        for name in ("threshold", "measured_precision", "measured_recall"):
+            value = getattr(self, name)
+            if type(value) is not float or not math.isfinite(value):
+                raise ValueError(f"{name} must be a finite number expressed as float")
+            if not (0.0 <= value <= 1.0):
+                raise ValueError(f"{name} must be in [0, 1]")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operating_point_id": self.operating_point_id,
+            "threshold": self.threshold,
+            "measured_precision": self.measured_precision,
+            "measured_recall": self.measured_recall,
+            "measurement_cid": self.measurement_cid,
+        }
+
+
+@dataclass(slots=True)
+class TriggerEvaluationContext:
+    """A data-only, prevalidated context for evaluating due intentions.
+
+    ``events`` is a sequence of JSON objects with ``event_id`` (non-empty,
+    unique within context), ``event_type``, ``occurred_at`` (aware ISO-8601),
+    ``payload`` (JSON object), and ``confidence`` in [0, 1].
+    ``conditions`` maps ``condition_id`` to a JSON object with ``value``,
+    ``observed_at`` (aware ISO-8601), and ``confidence`` in [0, 1].
+    Malformed, naive-time, cross-tenant, or non-JSON input fails closed.
+    """
+
+    infrastructure_available: bool
+    tenant_id: str
+    events: list[dict[str, Any]]
+    conditions: dict[str, dict[str, Any]]
+
+    def __post_init__(self) -> None:
+        if type(self.infrastructure_available) is not bool:
+            raise ValueError("infrastructure_available must be a bool")
+        if type(self.tenant_id) is not str or not self.tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
+        if type(self.events) is not list:
+            raise ValueError("events must be a list of JSON objects")
+        if type(self.conditions) is not dict:
+            raise ValueError("conditions must be a mapping of condition_id -> JSON object")
+        seen_event_ids: set[str] = set()
+        normalized_events: list[dict[str, Any]] = []
+        for index, event in enumerate(self.events):
+            if type(event) is not dict:
+                raise ValueError(f"events[{index}] must be a JSON object")
+            event = _normalize_json_value(event, path=f"events[{index}]")
+            unknown_keys = set(event) - {
+                "event_id",
+                "event_type",
+                "occurred_at",
+                "payload",
+                "confidence",
+                "tenant_id",
+            }
+            if unknown_keys:
+                raise ValueError(
+                    f"events[{index}] contains unknown keys: {sorted(unknown_keys)}"
+                )
+            event_id = event.get("event_id")
+            if type(event_id) is not str or not event_id.strip():
+                raise ValueError(f"events[{index}].event_id must be a non-empty string")
+            if event_id in seen_event_ids:
+                raise ValueError(f"events[{index}].event_id must be unique within context")
+            seen_event_ids.add(event_id)
+            event_tenant_id = event.get("tenant_id")
+            if type(event_tenant_id) is not str or not event_tenant_id.strip():
+                raise ValueError(f"events[{index}].tenant_id must be a non-empty string")
+            if event_tenant_id != self.tenant_id:
+                raise ValueError(f"events[{index}].tenant_id must match context tenant_id")
+            event["tenant_id"] = event_tenant_id
+            event_type = event.get("event_type")
+            if type(event_type) is not str or not event_type.strip():
+                raise ValueError(f"events[{index}].event_type must be a non-empty string")
+            occurred_at = event.get("occurred_at")
+            if type(occurred_at) is not str:
+                raise ValueError(f"events[{index}].occurred_at must be an ISO-8601 string")
+            try:
+                parsed = datetime.fromisoformat(occurred_at)
+            except ValueError as exc:
+                raise ValueError(f"events[{index}].occurred_at must be ISO-8601") from exc
+            if parsed.tzinfo is None:
+                raise ValueError(f"events[{index}].occurred_at must be timezone-aware")
+            event["occurred_at"] = parsed.astimezone(UTC).isoformat()
+            payload = event.get("payload")
+            if type(payload) is not dict:
+                raise ValueError(f"events[{index}].payload must be a JSON object")
+            payload_tenant_id = payload.get("tenant_id")
+            if payload_tenant_id is not None and payload_tenant_id != self.tenant_id:
+                raise ValueError(f"events[{index}].payload tenant_id must match context tenant_id")
+            event["payload"] = _normalize_json_value(payload, path=f"events[{index}].payload")
+            confidence = event.get("confidence")
+            if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
+                raise ValueError(f"events[{index}].confidence must be a finite number")
+            if not (0.0 <= float(confidence) <= 1.0):
+                raise ValueError(f"events[{index}].confidence must be in [0, 1]")
+            event["confidence"] = float(confidence)
+            normalized_events.append(event)
+        self.events = normalized_events
+        normalized_conditions: dict[str, dict[str, Any]] = {}
+        for condition_id, observation in self.conditions.items():
+            if type(condition_id) is not str or not condition_id.strip():
+                raise ValueError("conditions keys must be non-empty strings")
+            if type(observation) is not dict:
+                raise ValueError(f"conditions[{condition_id}] must be a JSON object")
+            observation = _normalize_json_value(
+                observation, path=f"conditions[{condition_id}]"
+            )
+            unknown_keys = set(observation) - {"value", "observed_at", "confidence", "tenant_id"}
+            if unknown_keys:
+                raise ValueError(
+                    f"conditions[{condition_id}] contains unknown keys: "
+                    f"{sorted(unknown_keys)}"
+                )
+            if "value" not in observation:
+                raise ValueError(f"conditions[{condition_id}].value is required")
+            observation_tenant_id = observation.get("tenant_id")
+            if type(observation_tenant_id) is not str or not observation_tenant_id.strip():
+                raise ValueError(f"conditions[{condition_id}].tenant_id must be a non-empty string")
+            if observation_tenant_id != self.tenant_id:
+                raise ValueError(f"conditions[{condition_id}].tenant_id must match context tenant_id")
+            observation["tenant_id"] = observation_tenant_id
+            observed_at = observation.get("observed_at")
+            if type(observed_at) is not str:
+                raise ValueError(
+                    f"conditions[{condition_id}].observed_at must be an ISO-8601 string"
+                )
+            try:
+                parsed = datetime.fromisoformat(observed_at)
+            except ValueError as exc:
+                raise ValueError(
+                    f"conditions[{condition_id}].observed_at must be ISO-8601"
+                ) from exc
+            if parsed.tzinfo is None:
+                raise ValueError(
+                    f"conditions[{condition_id}].observed_at must be timezone-aware"
+                )
+            observation["observed_at"] = parsed.astimezone(UTC).isoformat()
+            confidence = observation.get("confidence")
+            if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
+                raise ValueError(
+                    f"conditions[{condition_id}].confidence must be a finite number"
+                )
+            if not (0.0 <= float(confidence) <= 1.0):
+                raise ValueError(f"conditions[{condition_id}].confidence must be in [0, 1]")
+            observation["confidence"] = float(confidence)
+            normalized_conditions[condition_id] = observation
+        self.conditions = normalized_conditions
+
+
 @dataclass(slots=True)
 class Intention:
     """A data-only prospective-memory record evaluated by an explicit clock."""
@@ -133,8 +330,10 @@ class Intention:
             value = getattr(self, name)
             if type(value) is not str or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
-        if type(self.trigger_type) is not str or self.trigger_type != "exact_time":
-            raise ValueError("Phase 1 supports only exact_time triggers")
+        if type(self.trigger_type) is not str or self.trigger_type not in _TRIGGER_TYPES:
+            raise ValueError(
+                f"trigger_type must be one of {sorted(_TRIGGER_TYPES)}"
+            )
         if type(self.status) is not str or self.status != "scheduled":
             raise ValueError("new intentions must be scheduled")
         if type(self.priority) is not str or not self.priority.strip():
@@ -149,32 +348,26 @@ class Intention:
             self.trigger_expression, path="trigger_expression"
         )
         self.action = _normalize_json_value(self.action, path="action")
-        trigger_at_raw = self.trigger_expression.get("at")
-        if type(trigger_at_raw) is not str:
-            raise ValueError(
-                "exact_time trigger_expression.at must be an ISO-8601 string"
-            )
-        try:
-            trigger_at = datetime.fromisoformat(trigger_at_raw)
-        except ValueError as exc:
-            raise ValueError(
-                "exact_time trigger_expression.at must be ISO-8601"
-            ) from exc
-        if trigger_at.tzinfo is None:
-            raise ValueError("exact_time trigger_expression.at must be timezone-aware")
         due_at = self.due_at.astimezone(UTC)
-        if trigger_at.astimezone(UTC) != due_at:
-            raise ValueError(
-                "trigger_expression.at must identify the same instant as due_at"
-            )
         self.due_at = due_at
-        self.trigger_expression["at"] = due_at.isoformat()
+        self._validate_trigger_expression(due_at)
         if type(self.dependencies) is not list or any(
             type(item) is not str or not item.strip() for item in self.dependencies
         ):
             raise ValueError("dependencies must be a list of non-empty strings")
-        if self.dependencies:
-            raise ValueError("Phase 1 does not support dependency triggers")
+        if self.dependencies and self.trigger_type != "dependency_completion":
+            raise ValueError(
+                "dependencies are only valid for dependency_completion triggers"
+            )
+        if self.trigger_type == "dependency_completion":
+            if not self.dependencies:
+                raise ValueError(
+                    "dependency_completion trigger requires non-empty dependencies"
+                )
+            if len(set(self.dependencies)) != len(self.dependencies):
+                raise ValueError("dependencies must not contain duplicates")
+            if self.intention_id in self.dependencies:
+                raise ValueError("an intention cannot depend on itself")
         if type(self.reschedule_history) is not list:
             raise ValueError("reschedule_history must be a list of JSON objects")
         normalized_history: list[dict[str, Any]] = []
@@ -193,6 +386,73 @@ class Intention:
             raise ValueError("evidence_ids must contain non-empty strings")
         if len(set(self.evidence_ids)) != len(self.evidence_ids):
             raise ValueError("evidence_ids must not contain duplicates")
+
+    def _validate_trigger_expression(self, due_at: datetime) -> None:
+        expr = self.trigger_expression
+        if self.trigger_type == "exact_time":
+            at_raw = expr.get("at")
+            if type(at_raw) is not str:
+                raise ValueError(
+                    "exact_time trigger_expression.at must be an ISO-8601 string"
+                )
+            trigger_at = _parse_aware_iso(at_raw, field="exact_time.at")
+            if trigger_at != due_at:
+                raise ValueError(
+                    "trigger_expression.at must identify the same instant as due_at"
+                )
+            self.trigger_expression["at"] = due_at.isoformat()
+        elif self.trigger_type == "time_window":
+            start_raw = expr.get("start")
+            end_raw = expr.get("end")
+            if type(start_raw) is not str:
+                raise ValueError(
+                    "time_window trigger_expression.start must be an ISO-8601 string"
+                )
+            if type(end_raw) is not str:
+                raise ValueError(
+                    "time_window trigger_expression.end must be an ISO-8601 string"
+                )
+            start = _parse_aware_iso(start_raw, field="time_window.start")
+            end = _parse_aware_iso(end_raw, field="time_window.end")
+            if start >= end:
+                raise ValueError("time_window start must precede end")
+            if start != due_at:
+                raise ValueError(
+                    "time_window.start must identify the same instant as due_at"
+                )
+            self.trigger_expression["start"] = start.isoformat()
+            self.trigger_expression["end"] = end.isoformat()
+        elif self.trigger_type == "event":
+            event_type = expr.get("event_type")
+            if type(event_type) is not str or not event_type.strip():
+                raise ValueError(
+                    "event trigger_expression.event_type must be a non-empty string"
+                )
+            if "match" not in expr:
+                raise ValueError("event trigger_expression.match is required")
+            match = expr["match"]
+            if type(match) is not dict:
+                raise ValueError("event trigger_expression.match must be a JSON object")
+        elif self.trigger_type == "condition":
+            condition_id = expr.get("condition_id")
+            if type(condition_id) is not str or not condition_id.strip():
+                raise ValueError(
+                    "condition trigger_expression.condition_id must be a non-empty string"
+                )
+            operator = expr.get("operator")
+            if type(operator) is not str or operator not in _CONDITION_OPERATORS:
+                raise ValueError(
+                    f"condition trigger_expression.operator must be one of "
+                    f"{sorted(_CONDITION_OPERATORS)}"
+                )
+            if "value" not in expr:
+                raise ValueError("condition trigger_expression.value is required")
+        elif self.trigger_type == "dependency_completion":
+            require = expr.get("require")
+            if require != "all":
+                raise ValueError(
+                    "dependency_completion trigger_expression.require must be 'all'"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -269,14 +529,438 @@ class Intention:
         return record
 
 
-def evaluate_intention(intention: Intention, *, evaluated_at: datetime) -> bool:
-    """Return whether an intention is due without consulting wall-clock state."""
+def _json_deep_contains(haystack: Any, needle: Any) -> bool:
+    """Return True if ``haystack`` deeply equals ``needle`` for every key in needle."""
+    if type(needle) is dict:
+        if type(haystack) is not dict:
+            return False
+        for key, value in needle.items():
+            if key not in haystack or not _json_deep_contains(haystack[key], value):
+                return False
+        return True
+    if type(needle) is list:
+        if type(haystack) is not list:
+            return False
+        return len(needle) == len(haystack) and all(
+            _json_deep_contains(haystack[i], needle[i]) for i in range(len(needle))
+        )
+    return type(haystack) is type(needle) and haystack == needle
+_WORKING_MEMORY_KINDS = {
+    "active_goal",
+    "current_plan",
+    "active_constraint",
+    "constraint",
+    "unresolved_question",
+    "tool_result",
+    "recent_tool_result",
+    "intermediate_conclusion",
+}
 
-    if evaluated_at.tzinfo is None:
+
+@dataclass(slots=True)
+class WorkingMemoryItem:
+    """A bounded, data-only item in the local working-memory plane."""
+
+    item_id: str
+    tenant_id: str
+    session_id: str
+    user_id: str
+    agent_id: str
+    kind: str
+    task_id: str
+    content: str
+    created_at: datetime
+    expires_at: datetime
+    evidence_ids: list[str]
+    trust_tier: int = 0
+    access_policy: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    capability_tags: list[str] = field(default_factory=list)
+    sensitivity: int = 0
+    # Lifecycle state is intentionally excluded from value identity: callers
+    # can retain the item submitted to put_working while expiry returns its
+    # transitioned detached copy.
+    status: Literal["active", "expired"] = field(default="active", compare=False)
+    expired_at: datetime | None = field(default=None, compare=False)
+
+    def __post_init__(self) -> None:
+        for name in (
+            "item_id",
+            "tenant_id",
+            "session_id",
+            "user_id",
+            "agent_id",
+            "task_id",
+        ):
+            value = getattr(self, name)
+            if type(value) is not str or not value.strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        if type(self.kind) is not str or self.kind not in _WORKING_MEMORY_KINDS:
+            raise ValueError(f"unsupported working-memory kind: {self.kind!r}")
+        if type(self.content) is not str or not self.content.strip():
+            raise ValueError("content must be a non-empty string")
+        for name in ("created_at", "expires_at"):
+            value = getattr(self, name)
+            if not isinstance(value, datetime) or value.tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        created_at = self.created_at.astimezone(UTC)
+        expires_at = self.expires_at.astimezone(UTC)
+        if expires_at <= created_at:
+            raise ValueError("expires_at must be after created_at")
+        if expires_at - created_at > timedelta(hours=24):
+            raise ValueError("working-memory TTL must not exceed 24 hours")
+        self.created_at = created_at
+        self.expires_at = expires_at
+
+        if type(self.evidence_ids) is not list or not self.evidence_ids:
+            raise ValueError("evidence_ids must contain originating evidence")
+        if any(type(item) is not str or not item.strip() for item in self.evidence_ids):
+            raise ValueError("evidence_ids must contain non-empty strings")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("evidence_ids must not contain duplicates")
+        if type(self.trust_tier) is not int or isinstance(self.trust_tier, bool):
+            raise ValueError("trust_tier must be an integer")
+        if not int(TrustTier.DIRECT_USER) <= self.trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+            raise ValueError("trust_tier is out of range")
+        for name in ("access_policy", "metadata"):
+            value = getattr(self, name)
+            if type(value) is not dict:
+                raise ValueError(f"{name} must be a JSON object")
+            setattr(self, name, _normalize_json_value(value, path=name))
+        self.access_policy = validate_access_policy(
+            self.access_policy,
+            tenant_id=self.tenant_id,
+            location="working_memory.access_policy",
+        )
+        if type(self.capability_tags) is not list or any(
+            type(tag) is not str or not tag.strip() for tag in self.capability_tags
+        ):
+            raise ValueError("capability_tags must be a list of non-empty strings")
+        if len(set(self.capability_tags)) != len(self.capability_tags):
+            raise ValueError("capability_tags must not contain duplicates")
+        if type(self.sensitivity) is not int or isinstance(self.sensitivity, bool):
+            raise ValueError("sensitivity must be an integer")
+        if self.sensitivity < 0:
+            raise ValueError("sensitivity must not be negative")
+        if self.status not in {"active", "expired"}:
+            raise ValueError("status must be active or expired")
+        if self.expired_at is not None:
+            if not isinstance(self.expired_at, datetime) or self.expired_at.tzinfo is None:
+                raise ValueError("expired_at must be timezone-aware")
+            self.expired_at = self.expired_at.astimezone(UTC)
+        if self.status == "active" and self.expired_at is not None:
+            raise ValueError("active working-memory items cannot have expired_at")
+        if self.status == "expired" and self.expired_at is None:
+            raise ValueError("expired working-memory items require expired_at")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "tenant_id": self.tenant_id,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "kind": self.kind,
+            "task_id": self.task_id,
+            "content": self.content,
+            "created_at": self.created_at.isoformat(),
+            "expires_at": self.expires_at.isoformat(),
+            "evidence_ids": list(self.evidence_ids),
+            "trust_tier": self.trust_tier,
+            "access_policy": copy.deepcopy(self.access_policy),
+            "metadata": copy.deepcopy(self.metadata),
+            "capability_tags": list(self.capability_tags),
+            "sensitivity": self.sensitivity,
+            "status": self.status,
+            "expired_at": self.expired_at.isoformat() if self.expired_at else None,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict[str, Any]) -> "WorkingMemoryItem":
+        if type(row) is not dict:
+            raise ValueError("stored working-memory item must be a JSON object")
+        parsed = copy.deepcopy(row)
+        for name in ("created_at", "expires_at", "expired_at"):
+            value = parsed.get(name)
+            if value is not None:
+                if type(value) is not str:
+                    raise ValueError(f"stored working-memory {name} must be ISO-8601")
+                try:
+                    parsed[name] = datetime.fromisoformat(value)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"stored working-memory {name} must be ISO-8601"
+                    ) from exc
+        return cls(**parsed)
+
+
+def _compare_condition(
+    observed: Any, operator: str, expected: Any
+) -> bool:
+    """Typed deterministic comparison for condition triggers."""
+    if operator == "eq":
+        return type(observed) is type(expected) and observed == expected
+    if operator == "ne":
+        return not (type(observed) is type(expected) and observed == expected)
+    if operator == "in":
+        if type(expected) is not list:
+            raise ValueError("condition 'in' operator requires a JSON-list value")
+        return any(
+            type(observed) is type(item) and observed == item for item in expected
+        )
+    if operator in {"lt", "lte", "gt", "gte"}:
+        if type(observed) not in {int, float, str} or type(expected) not in {
+            int,
+            float,
+            str,
+        }:
+            raise ValueError(
+                f"condition {operator} operator requires same-type finite numbers or strings"
+            )
+        if type(observed) is not type(expected):
+            raise ValueError(
+                f"condition {operator} operator requires same-type operands"
+            )
+        if type(observed) in {int, float}:
+            if not math.isfinite(float(observed)) or not math.isfinite(float(expected)):
+                raise ValueError(
+                    f"condition {operator} operator requires finite numbers"
+                )
+        if operator == "lt":
+            return observed < expected
+        if operator == "lte":
+            return observed <= expected
+        if operator == "gt":
+            return observed > expected
+        return observed >= expected
+    raise ValueError(f"unsupported condition operator: {operator!r}")
+
+
+def _evaluate_trigger(
+    intention: Intention,
+    *,
+    evaluated_at: datetime,
+    context: TriggerEvaluationContext,
+    operating_point: ProspectiveOperatingPoint,
+    tenant_intentions: dict[tuple[str, str], Intention],
+) -> tuple[bool, dict[str, Any]]:
+    """Return (fires, matched_signal) for a single intention.
+
+    ``matched_signal`` carries ``event_id`` or ``condition_id`` when applicable.
+    Raises ``ValueError`` if a due candidate's trigger inputs are malformed
+    (fail-closed before any state mutation).
+    """
+    expr = intention.trigger_expression
+    evaluated_utc = evaluated_at.astimezone(UTC)
+    due_utc = intention.due_at.astimezone(UTC)
+
+    if intention.trigger_type == "exact_time":
+        at = _parse_aware_iso(expr["at"], field="exact_time.at")
+        fires = evaluated_utc >= at
+        return fires, {}
+
+    if intention.trigger_type == "time_window":
+        start = _parse_aware_iso(expr["start"], field="time_window.start")
+        end = _parse_aware_iso(expr["end"], field="time_window.end")
+        fires = start <= evaluated_utc < end
+        return fires, {}
+
+    if intention.trigger_type == "event":
+        event_type = expr["event_type"]
+        match = expr.get("match", {})
+        threshold = operating_point.threshold
+        candidates = []
+        for event in context.events:
+            if event["event_type"] != event_type:
+                continue
+            if event["confidence"] < threshold:
+                continue
+            occurred = _parse_aware_iso(
+                event["occurred_at"], field="event.occurred_at"
+            )
+            if not (due_utc <= occurred <= evaluated_utc):
+                continue
+            payload = event.get("payload", {})
+            if not _json_deep_contains(payload, match):
+                continue
+            candidates.append(event)
+        if not candidates:
+            return False, {}
+        canonical = min(
+            candidates,
+            key=lambda e: (
+                _parse_aware_iso(e["occurred_at"], field="event.occurred_at"),
+                e["event_id"],
+            ),
+        )
+        return True, {"event_id": canonical["event_id"]}
+
+    if intention.trigger_type == "condition":
+        condition_id = expr["condition_id"]
+        operator = expr["operator"]
+        expected = expr["value"]
+        observation = context.conditions.get(condition_id)
+        if observation is None:
+            return False, {}
+        if observation["confidence"] < operating_point.threshold:
+            return False, {}
+        observed_at = _parse_aware_iso(
+            observation["observed_at"], field="condition.observed_at"
+        )
+        if not (due_utc <= observed_at <= evaluated_utc):
+            return False, {}
+        if _compare_condition(observation["value"], operator, expected):
+            return True, {"condition_id": condition_id}
+        return False, {}
+
+    if intention.trigger_type == "dependency_completion":
+        for dep_id in intention.dependencies:
+            dep = tenant_intentions.get((intention.tenant_id, dep_id))
+            if dep is None:
+                raise ValueError(
+                    f"dependency {dep_id!r} is missing or cross-tenant"
+                )
+            if dep.status != "fired":
+                return False, {}
+        fires = evaluated_utc >= due_utc
+        return fires, {}
+
+    raise ValueError(f"unsupported trigger_type: {intention.trigger_type!r}")
+
+
+def canonicalize_intention(
+    intention: Intention, *, require_scheduled: bool = False
+) -> Intention:
+    """Return the canonical, detached representation used by every backend."""
+
+    if not isinstance(intention, Intention):
+        raise ValueError("intention must be an Intention")
+    normalized = Intention.from_dict(intention.to_dict())
+    if require_scheduled and normalized.status != "scheduled":
+        raise ValueError("only scheduled intentions may be persisted")
+    return normalized
+
+
+def validate_intention_provenance_claim(
+    intention: Intention,
+    *,
+    evidence_id: str,
+    user_id: str,
+    erased: bool,
+    trust_tier: int,
+    capability_tags: list[str],
+    max_trust_tier: int,
+) -> None:
+    """Apply the canonical provenance and write-capability checks."""
+
+    if erased or evidence_id not in intention.evidence_ids:
+        raise ValueError(
+            f"evidence {evidence_id!r} is missing or outside the intention tenant"
+        )
+    if user_id != intention.user_id:
+        raise ValueError("intention user must match originating evidence")
+    if trust_tier > max_trust_tier:
+        raise PermissionError("originating evidence exceeds the write trust ceiling")
+    if is_write_tainted(capability_tags):
+        raise PermissionError("data-only evidence cannot authorize an intention write")
+
+
+def intention_audit_context(provenance: list[Evidence | dict[str, Any]]) -> tuple[int, list[str]]:
+    """Build the canonical trust and capability context for an audit row."""
+
+    def field(source: Evidence | dict[str, Any], name: str) -> Any:
+        return getattr(source, name) if isinstance(source, Evidence) else source[name]
+
+    trust_tier = max(int(field(item, "trust_tier")) for item in provenance)
+    capability_tags = sorted(
+        {tag for item in provenance for tag in field(item, "capability_tags")}
+    )
+    return trust_tier, capability_tags
+
+
+def intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
+    """Build the canonical immutable intention audit payload."""
+
+    immutable_snapshot = {
+        "intention_id": intention.intention_id,
+        "tenant_id": intention.tenant_id,
+        "user_id": intention.user_id,
+        "agent_id": intention.agent_id,
+        "trigger_type": intention.trigger_type,
+        "trigger_expression": intention.trigger_expression,
+        "action": intention.action,
+        "priority": intention.priority,
+        "due_at": intention.due_at.isoformat(),
+        "dependencies": intention.dependencies,
+        "reschedule_history": intention.reschedule_history,
+        "evidence_ids": intention.evidence_ids,
+    }
+    return {
+        "intention_digest": content_cid("prospective_intention", immutable_snapshot),
+        "trigger_type": intention.trigger_type,
+        "due_at": intention.due_at.isoformat(),
+        "evidence_ids": list(intention.evidence_ids),
+        "status": status,
+    }
+
+
+def intention_fire_receipt_id(tenant_id: str, intention_id: str) -> str:
+    """Return the single canonical identity for a logical fire transition."""
+
+    return content_cid(
+        "fire_intention",
+        {"tenant_id": tenant_id, "intention_id": intention_id, "op": "fire"},
+    )
+
+
+def validate_intention_dependencies(
+    intention: Intention,
+    tenant_intentions: dict[tuple[str, str], Intention],
+) -> None:
+    """Validate tenant-local dependencies and reject transitive cycles."""
+
+    for dependency_id in intention.dependencies:
+        if (intention.tenant_id, dependency_id) not in tenant_intentions:
+            raise ValueError(f"dependency {dependency_id!r} is missing or cross-tenant")
+    if intention.trigger_type != "dependency_completion":
+        return
+    pending = list(intention.dependencies)
+    visited: set[str] = set()
+    while pending:
+        dependency_id = pending.pop()
+        if dependency_id == intention.intention_id:
+            raise ValueError("dependency cycle detected involving the new intention")
+        if dependency_id in visited:
+            continue
+        visited.add(dependency_id)
+        dependency = tenant_intentions.get((intention.tenant_id, dependency_id))
+        if dependency is not None and dependency.trigger_type == "dependency_completion":
+            pending.extend(dependency.dependencies)
+
+
+def validate_intention_evaluation_inputs(
+    tenant_id: str,
+    *,
+    evaluated_at: datetime,
+    trigger_context: TriggerEvaluationContext,
+    operating_point: ProspectiveOperatingPoint,
+    infrastructure_error: str = "evaluate_due_intentions requires infrastructure_available=True",
+) -> datetime:
+    """Validate shared evaluator inputs and return a UTC evaluation instant."""
+
+    if type(tenant_id) is not str or not tenant_id.strip():
+        raise ValueError("tenant_id must be a non-empty string")
+    if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
         raise ValueError("evaluated_at must be timezone-aware")
-    return intention.status == "scheduled" and intention.due_at.astimezone(
-        UTC
-    ) <= evaluated_at.astimezone(UTC)
+    if not isinstance(trigger_context, TriggerEvaluationContext):
+        raise ValueError("trigger_context must be a TriggerEvaluationContext")
+    if trigger_context.tenant_id != tenant_id:
+        raise ValueError("trigger_context tenant_id must match tenant_id")
+    if not isinstance(operating_point, ProspectiveOperatingPoint):
+        raise ValueError("operating_point must be a ProspectiveOperatingPoint")
+    if not trigger_context.infrastructure_available:
+        raise RuntimeError(infrastructure_error)
+    return evaluated_at.astimezone(UTC)
 
 
 def _bounded_float(value: object, *, default: float) -> float:
@@ -598,6 +1282,41 @@ class MemoryEngine(Protocol):
     def deep_search(self, query: str, tenant_id: str, branch: str = "main", filt: dict[str, Any] | None = None) -> RetrievalResult:
         raise NotImplementedError
 
+    def put_working(self, item: WorkingMemoryItem) -> str:
+        raise NotImplementedError
+
+    def get_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+    ) -> WorkingMemoryItem | None:
+        raise NotImplementedError
+
+    def list_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+    ) -> list[WorkingMemoryItem]:
+        raise NotImplementedError
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        expired_at: datetime,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[WorkingMemoryItem]:
+        raise NotImplementedError
+
     def explain(self, query: str, tenant_id: str, branch: str = "main") -> dict[str, Any]:
         raise NotImplementedError
 
@@ -650,6 +1369,27 @@ class MemoryEngine(Protocol):
         raise NotImplementedError
 
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
+        raise NotImplementedError
+
+    def schedule_intention(self, intention: Intention) -> str:
+        raise NotImplementedError
+
+    def cancel_intention(
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str
+    ) -> None:
+        raise NotImplementedError
+
+    def evaluate_due_intentions(
+        self,
+        tenant_id: str,
+        *,
+        evaluated_at: datetime,
+        trigger_context: TriggerEvaluationContext,
+        operating_point: ProspectiveOperatingPoint,
+    ) -> list[Intention]:
+        raise NotImplementedError
+
+    def list_intentions(self, tenant_id: str) -> list[Intention]:
         raise NotImplementedError
 
 
@@ -708,6 +1448,11 @@ class LocalMemoryEngine:
     counterfactual replay, and single-user operation.
     """
 
+    _writer_owners_lock = threading.Lock()
+    _writer_owners: weakref.WeakValueDictionary[str, LocalMemoryEngine] = (
+        weakref.WeakValueDictionary()
+    )
+
     def __init__(
         self,
         store_path: str | os.PathLike[str] | None = None,
@@ -717,6 +1462,7 @@ class LocalMemoryEngine:
         read_only: bool = False,
     ):
         self.store_path = Path(store_path).expanduser() if store_path else None
+        self._writer_path_key: str | None = None
         self._journal_dir = Path(journal_dir).expanduser() if journal_dir else None
         self._read_only = read_only
         self._persistence_defer_depth = 0
@@ -743,6 +1489,7 @@ class LocalMemoryEngine:
         self.calibrations: dict[tuple[str, str], CalibrationSet] = {}
         self.entities: dict[tuple[str, str], dict[str, Any]] = {}
         self.intentions: dict[tuple[str, str], Intention] = {}
+        self.working_memory: dict[tuple[str, str, str], WorkingMemoryItem] = {}
         self.audit_log: list[dict[str, Any]] = []
         self.deletion_log: list[dict[str, Any]] = []
         self.merge_log: list[dict[str, Any]] = []
@@ -757,8 +1504,42 @@ class LocalMemoryEngine:
         # valid until that first allow→deny flip (None = no pending flip).
         self._candidate_memo: OrderedDict[tuple[Any, ...], tuple[datetime | None, list[Hit]]] = OrderedDict()
         self._candidate_memo_lock = threading.Lock()
-        if self.store_path and self.store_path.exists():
-            self._load()
+        if self.store_path and not self._read_only:
+            writer_path_key = str(self.store_path.resolve(strict=False))
+            with self._writer_owners_lock:
+                owner = self._writer_owners.get(writer_path_key)
+                if owner is not None and owner is not self:
+                    raise RuntimeError(
+                        f"local memory store already has a writer: {writer_path_key}"
+                    )
+                self._writer_owners[writer_path_key] = self
+                self._writer_path_key = writer_path_key
+        try:
+            if self.store_path and self.store_path.exists():
+                self._load()
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Release this engine's writable store-path ownership."""
+
+        writer_path_key = getattr(self, "_writer_path_key", None)
+        if writer_path_key is None:
+            return
+        with self._writer_owners_lock:
+            if self._writer_owners.get(writer_path_key) is self:
+                del self._writer_owners[writer_path_key]
+        self._writer_path_key = None
+
+    def __enter__(self) -> LocalMemoryEngine:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
 
     def _retrieval_result_cache_token(
         self, tenant_id: str, branch: str, effective_filter: dict[str, Any]
@@ -779,6 +1560,12 @@ class LocalMemoryEngine:
     @staticmethod
     def _branch_key(tenant_id: str, branch: str, item_id: str) -> str:
         return f"{tenant_id}:{branch}:{item_id}"
+
+    @staticmethod
+    def _working_key(
+        tenant_id: str, session_id: str, item_id: str
+    ) -> tuple[str, str, str]:
+        return tenant_id, session_id, item_id
 
     def _audit(
         self,
@@ -804,6 +1591,10 @@ class LocalMemoryEngine:
             audit_diff.setdefault("trust_tier", trust_tier)
         if normalized_tags:
             audit_diff.setdefault("capability_tags", normalized_tags)
+        if event_id is not None and any(
+            row.get("id") == event_id for row in self.audit_log
+        ):
+            return
         self.audit_log.append(
             {
                 "id": event_id or new_id(),
@@ -849,76 +1640,78 @@ class LocalMemoryEngine:
             matches = [
                 item
                 for item in self.evidence.values()
-                if item.cid == cid and item.tenant_id == intention.tenant_id and not item.erased
+                if (
+                    item.cid == cid
+                    and item.tenant_id == intention.tenant_id
+                    and item.branch == "main"
+                    and not item.erased
+                )
             ]
             if not matches:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
             source = matches[0]
-            if source.user_id != intention.user_id:
-                raise ValueError("intention user must match originating evidence")
-            if source.trust_tier > self.policy.max_trust_tier:
-                raise PermissionError("originating evidence exceeds the write trust ceiling")
-            if is_write_tainted(source.capability_tags):
-                raise PermissionError("data-only evidence cannot authorize an intention write")
+            validate_intention_provenance_claim(
+                intention,
+                evidence_id=cid,
+                user_id=source.user_id,
+                erased=source.erased,
+                trust_tier=source.trust_tier,
+                capability_tags=source.capability_tags,
+                max_trust_tier=self.policy.max_trust_tier,
+            )
             evidence.append(source)
         return evidence
 
-    @staticmethod
-    def _intention_audit_context(provenance: list[Evidence]) -> tuple[int, list[str]]:
-        trust_tier = max(item.trust_tier for item in provenance)
-        capability_tags = sorted(
-            {tag for item in provenance for tag in item.capability_tags}
-        )
-        return trust_tier, capability_tags
+    @contextmanager
+    def _prospective_transaction(self):
+        """Roll back prospective state and audit if persistence does not commit."""
 
-    @staticmethod
-    def _intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
-        immutable_snapshot = {
-            "intention_id": intention.intention_id,
-            "tenant_id": intention.tenant_id,
-            "user_id": intention.user_id,
-            "agent_id": intention.agent_id,
-            "trigger_type": intention.trigger_type,
-            "trigger_expression": intention.trigger_expression,
-            "action": intention.action,
-            "priority": intention.priority,
-            "due_at": intention.due_at.isoformat(),
-            "dependencies": intention.dependencies,
-            "reschedule_history": intention.reschedule_history,
-            "evidence_ids": intention.evidence_ids,
-        }
-        return {
-            "intention_digest": content_cid(
-                "prospective_intention", immutable_snapshot
-            ),
-            "trigger_type": intention.trigger_type,
-            "due_at": intention.due_at.isoformat(),
-            "evidence_ids": list(intention.evidence_ids),
-            "status": status,
-        }
+        intentions_before = copy.deepcopy(self.intentions)
+        audit_before = copy.deepcopy(self.audit_log)
+        store_version_before = self._store_version
+        try:
+            yield
+        except BaseException:
+            self.intentions = intentions_before
+            self.audit_log = audit_before
+            self._store_version = store_version_before
+            raise
 
     def schedule_intention(self, intention: Intention) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
 
         with self._lock:
+            intention = canonicalize_intention(intention, require_scheduled=True)
+            receipt_id = intention_fire_receipt_id(
+                intention.tenant_id, intention.intention_id
+            )
+            if any(
+                row.get("op") == "fire_intention" and row.get("id") == receipt_id
+                for row in self.audit_log
+            ):
+                raise ValueError(
+                    f"intention {intention.intention_id!r} already has a durable firing receipt"
+                )
             provenance = self._intention_provenance(intention)
             key = (intention.tenant_id, intention.intention_id)
             if key in self.intentions:
                 raise ValueError(f"intention {intention.intention_id!r} already exists")
+            validate_intention_dependencies(intention, self.intentions)
             stored = copy.deepcopy(intention)
-            self.intentions[key] = stored
-            trust_tier, capability_tags = self._intention_audit_context(provenance)
-            self._audit(
-                stored.tenant_id,
-                stored.agent_id,
-                "schedule_intention",
-                stored.intention_id,
-                self._intention_audit_diff(stored, status=stored.status),
-                source="prospective_memory",
-                trust_tier=trust_tier,
-                capability_tags=capability_tags,
-            )
-            self._persist()
+            trust_tier, capability_tags = intention_audit_context(provenance)
+            with self._prospective_transaction():
+                self.intentions[key] = stored
+                self._audit(
+                    stored.tenant_id,
+                    stored.agent_id,
+                    "schedule_intention",
+                    stored.intention_id,
+                    intention_audit_diff(stored, status=stored.status),
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+                self._persist()
             return stored.intention_id
 
     def cancel_intention(self, tenant_id: str, intention_id: str, *, cancelled_by: str) -> None:
@@ -938,72 +1731,106 @@ class LocalMemoryEngine:
                     "only the owning user or agent may cancel an intention"
                 )
             provenance = self._intention_provenance(intention)
-            trust_tier, capability_tags = self._intention_audit_context(provenance)
-            intention.status = "cancelled"
-            intention.cancellation_state = {"cancelled_by": cancelled_by}
-            self._audit(
-                tenant_id,
-                cancelled_by,
-                "cancel_intention",
-                intention_id,
-                self._intention_audit_diff(intention, status="cancelled"),
-                source="prospective_memory",
-                trust_tier=trust_tier,
-                capability_tags=capability_tags,
-            )
-            self._persist()
-
-    def evaluate_due_intentions(
-        self, tenant_id: str, *, evaluated_at: datetime
-    ) -> list[Intention]:
-        """Fire due intentions once, ordered deterministically by due time and id."""
-
-        if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
-            raise ValueError("evaluated_at must be timezone-aware")
-        with self._lock:
-            due = sorted(
-                (
-                    item
-                    for (item_tenant, _), item in self.intentions.items()
-                    if item_tenant == tenant_id and evaluate_intention(item, evaluated_at=evaluated_at)
-                ),
-                key=lambda item: (item.due_at, item.intention_id),
-            )
-            audit_contexts = [
-                self._intention_audit_context(self._intention_provenance(intention))
-                for intention in due
-            ]
-            fired: list[Intention] = []
-            for intention, (trust_tier, capability_tags) in zip(
-                due, audit_contexts, strict=True
-            ):
-                intention.status = "fired"
-                evaluated_at_utc = evaluated_at.astimezone(UTC)
+            trust_tier, capability_tags = intention_audit_context(provenance)
+            with self._prospective_transaction():
+                intention.status = "cancelled"
+                intention.cancellation_state = {"cancelled_by": cancelled_by}
                 self._audit(
                     tenant_id,
-                    intention.agent_id,
-                    "fire_intention",
-                    intention.intention_id,
-                    {
-                        **self._intention_audit_diff(intention, status="fired"),
-                        "evaluated_at": evaluated_at_utc.isoformat(),
-                    },
+                    cancelled_by,
+                    "cancel_intention",
+                    intention_id,
+                    intention_audit_diff(intention, status="cancelled"),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
-                    event_id=content_cid(
-                        "fire_intention",
-                        {
-                            "tenant_id": tenant_id,
-                            "intention_id": intention.intention_id,
-                            "evaluated_at": evaluated_at_utc.isoformat(),
-                        },
-                    ),
-                    occurred_at=evaluated_at_utc,
                 )
-                fired.append(copy.deepcopy(intention))
-            if fired:
                 self._persist()
+
+    def evaluate_due_intentions(
+        self,
+        tenant_id: str,
+        *,
+        evaluated_at: datetime,
+        trigger_context: TriggerEvaluationContext,
+        operating_point: ProspectiveOperatingPoint,
+    ) -> list[Intention]:
+        """Fire due intentions once, ordered deterministically by due time and id.
+
+        Returns detached :class:`Intention` copies actually transitioned
+        ``scheduled -> fired`` in this call, ordered by ``(due_at UTC,
+        intention_id)``. Re-evaluation returns ``[]``. All candidate inputs,
+        provenance, and audit contexts are prevalidated before any transition.
+        ``infrastructure_available=False`` raises :class:`RuntimeError` with
+        zero mutation/audit.
+        """
+
+        evaluated_at = validate_intention_evaluation_inputs(
+            tenant_id,
+            evaluated_at=evaluated_at,
+            trigger_context=trigger_context,
+            operating_point=operating_point,
+        )
+        with self._lock:
+            tenant_items = {
+                key: item
+                for key, item in self.intentions.items()
+                if key[0] == tenant_id
+            }
+            evaluated_utc = evaluated_at
+            frozen_intentions = copy.deepcopy(self.intentions)
+            candidate_results: list[tuple[Intention, dict[str, Any]]] = []
+            for item in tenant_items.values():
+                if item.status != "scheduled":
+                    continue
+                fires, signal = _evaluate_trigger(
+                    item,
+                    evaluated_at=evaluated_utc,
+                    context=trigger_context,
+                    operating_point=operating_point,
+                    tenant_intentions=frozen_intentions,
+                )
+                if fires:
+                    candidate_results.append((item, signal))
+            candidate_results.sort(
+                key=lambda result: (result[0].due_at, result[0].intention_id)
+            )
+            audit_contexts = [
+                intention_audit_context(self._intention_provenance(intention))
+                for intention, _signal in candidate_results
+            ]
+            fired: list[Intention] = []
+            with self._prospective_transaction():
+                for (intention, signal), (trust_tier, capability_tags) in zip(
+                    candidate_results, audit_contexts, strict=True
+                ):
+                    intention.status = "fired"
+                    fire_diff = {
+                        **intention_audit_diff(intention, status="fired"),
+                        "evaluated_at": evaluated_utc.isoformat(),
+                        "operating_point": operating_point.to_dict(),
+                    }
+                    if "event_id" in signal:
+                        fire_diff["matched_event_id"] = signal["event_id"]
+                    if "condition_id" in signal:
+                        fire_diff["matched_condition_id"] = signal["condition_id"]
+                    self._audit(
+                        tenant_id,
+                        intention.agent_id,
+                        "fire_intention",
+                        intention.intention_id,
+                        fire_diff,
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=intention_fire_receipt_id(
+                            tenant_id, intention.intention_id
+                        ),
+                        occurred_at=evaluated_utc,
+                    )
+                    fired.append(copy.deepcopy(intention))
+                if fired:
+                    self._persist()
             return fired
 
     def list_intentions(self, tenant_id: str) -> list[Intention]:
@@ -1013,6 +1840,309 @@ class LocalMemoryEngine:
                 for (item_tenant, _), item in sorted(self.intentions.items())
                 if item_tenant == tenant_id
             ]
+
+    @staticmethod
+    def _working_clock(value: datetime, name: str) -> datetime:
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise ValueError(f"{name} must be timezone-aware")
+        return value.astimezone(UTC)
+
+    def _working_provenance(
+        self, item: WorkingMemoryItem
+    ) -> tuple[int, list[str], int, dict[str, Any]]:
+        """Validate backing evidence and derive the effective security envelope.
+
+        Working memory is a transient view over evidence, but it still has to
+        carry the evidence ownership and security rails with it.  The most
+        restrictive trust, capability, sensitivity, and access-policy values
+        therefore win across the item and every originating evidence row.
+        """
+
+        access_policy = validate_access_policy(
+            item.access_policy,
+            tenant_id=item.tenant_id,
+            location="working_memory.access_policy",
+        )
+        trust_tiers: list[int] = [item.trust_tier]
+        capability_tags = {tag.strip().lower() for tag in item.capability_tags}
+        sensitivities = [int(item.sensitivity)]
+        source_policies: list[dict[str, Any]] = [access_policy]
+        for cid in item.evidence_ids:
+            evidence = self.evidence.get(self._evidence_key(item.tenant_id, "main", cid))
+            if evidence is None:
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the working tenant"
+                )
+            if evidence.erased:
+                raise ValueError(f"evidence {cid!r} is erased")
+            if evidence.user_id != item.user_id:
+                raise ValueError("working item user must match originating evidence")
+            if evidence.session_id != item.session_id:
+                raise ValueError("working item session must match originating evidence")
+            if type(evidence.trust_tier) is not int:
+                raise ValueError("originating evidence trust tier is invalid")
+            trust_tier = evidence.trust_tier
+            if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+                raise ValueError("originating evidence trust tier is out of range")
+            if trust_tier > int(self.policy.max_trust_tier):
+                raise PermissionError(
+                    "originating evidence exceeds the working write trust ceiling"
+                )
+            trust_tiers.append(trust_tier)
+            if type(evidence.capability_tags) is not list or any(
+                type(tag) is not str or not tag.strip() for tag in evidence.capability_tags
+            ):
+                raise ValueError("originating evidence capability tags are invalid")
+            capability_tags.update(tag.strip().lower() for tag in evidence.capability_tags)
+            if type(evidence.sensitivity) is not int or isinstance(evidence.sensitivity, bool):
+                raise ValueError("originating evidence sensitivity is invalid")
+            if evidence.sensitivity < 0:
+                raise ValueError("originating evidence sensitivity is negative")
+            sensitivities.append(evidence.sensitivity)
+            source_policies.append(
+                validate_access_policy(
+                    evidence.access_policy,
+                    tenant_id=item.tenant_id,
+                    location="evidence.access_policy",
+                )
+            )
+        effective_policy = merge_access_policies(
+            source_policies,
+            tenant_id=item.tenant_id,
+        )
+        return (
+            max(trust_tiers),
+            sorted(capability_tags),
+            max(sensitivities),
+            effective_policy,
+        )
+
+    @staticmethod
+    def _working_snapshot(item: WorkingMemoryItem) -> dict[str, Any]:
+        return {
+            "item_id": item.item_id,
+            "tenant_id": item.tenant_id,
+            "session_id": item.session_id,
+            "user_id": item.user_id,
+            "agent_id": item.agent_id,
+            "kind": item.kind,
+            "task_id": item.task_id,
+            "content": item.content,
+            "created_at": item.created_at.isoformat(),
+            "expires_at": item.expires_at.isoformat(),
+            "evidence_ids": list(item.evidence_ids),
+            "trust_tier": item.trust_tier,
+            "access_policy": copy.deepcopy(item.access_policy),
+            "metadata": copy.deepcopy(item.metadata),
+            "capability_tags": list(item.capability_tags),
+            "sensitivity": item.sensitivity,
+        }
+
+    @classmethod
+    def _working_audit_diff(
+        cls,
+        item: WorkingMemoryItem,
+        *,
+        status: str,
+        sweep: datetime | None = None,
+    ) -> dict[str, Any]:
+        diff: dict[str, Any] = {
+            "working_item_digest": content_cid("working_memory", cls._working_snapshot(item)),
+            "tenant_id": item.tenant_id,
+            "session_id": item.session_id,
+            "item_id": item.item_id,
+            "task_id": item.task_id,
+            "kind": item.kind,
+            "created_at": item.created_at.isoformat(),
+            "expires_at": item.expires_at.isoformat(),
+            "evidence_ids": list(item.evidence_ids),
+            "deadline": item.expires_at.isoformat(),
+            "status": status,
+        }
+        if sweep is not None:
+            diff["sweep"] = sweep.isoformat()
+        return diff
+
+    @staticmethod
+    def _working_event_id(item: WorkingMemoryItem, op: str) -> str:
+        return content_cid(
+            "working_memory_audit",
+            {
+                "tenant_id": item.tenant_id,
+                "session_id": item.session_id,
+                "item_id": item.item_id,
+                "op": op,
+            },
+        )
+
+    def _working_detached(self, item: WorkingMemoryItem) -> WorkingMemoryItem:
+        trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(item)
+        detached = copy.deepcopy(item)
+        detached.trust_tier = trust_tier
+        detached.capability_tags = capability_tags
+        detached.sensitivity = sensitivity
+        detached.access_policy = access_policy
+        return detached
+
+    def put_working(self, item: WorkingMemoryItem) -> str:
+        """Store one working item under its tenant/session/item composite key."""
+
+        if not isinstance(item, WorkingMemoryItem):
+            raise TypeError("item must be a WorkingMemoryItem")
+        if item.status != "active":
+            raise ValueError("put_working accepts only active working items")
+        with self._lock:
+            key = self._working_key(item.tenant_id, item.session_id, item.item_id)
+            if key in self.working_memory:
+                raise ValueError(f"working item {item.item_id!r} already exists")
+            before = (
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                self._store_version,
+            )
+            stored = copy.deepcopy(item)
+            try:
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(stored)
+                stored.trust_tier = trust_tier
+                stored.capability_tags = capability_tags
+                stored.sensitivity = sensitivity
+                stored.access_policy = access_policy
+                self.working_memory[key] = stored
+                self._audit(
+                    stored.tenant_id,
+                    stored.agent_id,
+                    "put_working",
+                    stored.item_id,
+                    self._working_audit_diff(stored, status=stored.status),
+                    source="working_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    event_id=self._working_event_id(stored, "put_working"),
+                    occurred_at=stored.created_at,
+                )
+                self._persist()
+            except BaseException:
+                self.working_memory, self.audit_log, self._store_version = before
+                raise
+            # Expose the canonical derived envelope to the caller while the
+            # stored record remains detached from all caller-owned containers.
+            item.trust_tier = stored.trust_tier
+            item.capability_tags = list(stored.capability_tags)
+            item.sensitivity = stored.sensitivity
+            item.access_policy = copy.deepcopy(stored.access_policy)
+            return stored.item_id
+
+    def get_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+    ) -> WorkingMemoryItem | None:
+        clock = self._working_clock(as_of, "as_of")
+        with self._lock:
+            item = self.working_memory.get(
+                self._working_key(tenant_id, session_id, item_id)
+            )
+            if (
+                item is None
+                or item.status != "active"
+                or clock < item.created_at
+                or clock >= item.expires_at
+            ):
+                return None
+            return self._working_detached(item)
+
+    def list_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+    ) -> list[WorkingMemoryItem]:
+        clock = self._working_clock(as_of, "as_of")
+        with self._lock:
+            items = [
+                item
+                for (item_tenant, item_session, _), item in self.working_memory.items()
+                if item_tenant == tenant_id
+                and item_session == session_id
+                and item.status == "active"
+                and item.created_at <= clock
+                and clock < item.expires_at
+            ]
+            return [
+                self._working_detached(item)
+                for item in sorted(
+                    items, key=lambda value: (-value.created_at.timestamp(), value.item_id)
+                )
+            ]
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        expired_at: datetime,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[WorkingMemoryItem]:
+        sweep = self._working_clock(expired_at, "expired_at")
+        with self._lock:
+            due = sorted(
+                (
+                    item
+                    for (item_tenant, item_session, _), item in self.working_memory.items()
+                    if item_tenant == tenant_id
+                    and (session_id is None or item_session == session_id)
+                    and (user_id is None or item.user_id == user_id)
+                    and (agent_id is None or item.agent_id == agent_id)
+                    and (task_id is None or item.task_id == task_id)
+                    and (branch is None or item.metadata.get("branch") == branch)
+                    and item.status == "active"
+                    and item.expires_at <= sweep
+                ),
+                key=lambda value: (value.expires_at, value.session_id, value.item_id),
+            )
+            if not due:
+                return []
+            provenance = [self._working_provenance(item) for item in due]
+            before = (
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                self._store_version,
+            )
+            expired: list[WorkingMemoryItem] = []
+            try:
+                for item, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
+                    due, provenance, strict=True
+                ):
+                    item.capability_tags = capability_tags
+                    item.sensitivity = sensitivity
+                    item.access_policy = access_policy
+                    item.status = "expired"
+                    item.expired_at = sweep
+                    self._audit(
+                        item.tenant_id,
+                        item.agent_id,
+                        "expire_working",
+                        item.item_id,
+                        self._working_audit_diff(item, status=item.status, sweep=sweep),
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=self._working_event_id(item, "expire_working"),
+                        occurred_at=sweep,
+                    )
+                    expired.append(copy.deepcopy(item))
+                self._persist()
+            except BaseException:
+                self.working_memory, self.audit_log, self._store_version = before
+                raise
+            return expired
 
     def _persist(self) -> None:
         # Every mutator funnels through here; bump BEFORE the store_path early
@@ -1027,6 +2157,13 @@ class LocalMemoryEngine:
             return
         if not self.store_path:
             return
+        writer_path_key = self._writer_path_key
+        with self._writer_owners_lock:
+            if (
+                writer_path_key is None
+                or self._writer_owners.get(writer_path_key) is not self
+            ):
+                raise RuntimeError("local memory engine does not own its writable store")
         if self.store_path.is_symlink():
             raise ValueError("local memory store must be a real file")
         parent = self.store_path.parent
@@ -1046,6 +2183,7 @@ class LocalMemoryEngine:
             "calibrations": [item.to_dict() for item in self.calibrations.values()],
             "entities": list(self.entities.values()),
             "intentions": [item.to_dict() for item in self.intentions.values()],
+            "working_memory": [item.to_dict() for item in self.working_memory.values()],
             "audit_log": self.audit_log,
             "deletion_log": self.deletion_log,
             "merge_log": self.merge_log,
@@ -1063,7 +2201,6 @@ class LocalMemoryEngine:
             raise
         tmp.chmod(0o600)
         tmp.replace(self.store_path)
-        self.store_path.chmod(0o600)
 
     @contextmanager
     def defer_persistence(self):
@@ -1138,6 +2275,13 @@ class LocalMemoryEngine:
             (item.tenant_id, item.intention_id): item
             for item in (
                 Intention.from_dict(row) for row in data.get("intentions", [])
+            )
+        }
+        self.working_memory = {
+            self._working_key(item.tenant_id, item.session_id, item.item_id): item
+            for item in (
+                WorkingMemoryItem.from_dict(row)
+                for row in data.get("working_memory", [])
             )
         }
         self.audit_log = list(data.get("audit_log", []))
@@ -2210,6 +3354,8 @@ class LocalMemoryEngine:
         with self._lock:
             evidence_cids: set[tuple[str, str, str]] = set()
             for hit in hits:
+                if hit.kind == "working":
+                    continue
                 if hit.kind == "evidence" and hit.id:
                     evidence_cids.add((hit.tenant_id, hit.branch, hit.id))
                 for cid in hit.provenance:
@@ -2773,6 +3919,83 @@ class LocalMemoryEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        with self._lock:
+            before = (
+                copy.deepcopy(self.evidence),
+                copy.deepcopy(self.assertions),
+                copy.deepcopy(self.relations),
+                copy.deepcopy(self.preferences),
+                copy.deepcopy(self.entities),
+                copy.deepcopy(self.intentions),
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                copy.deepcopy(self.deletion_log),
+                copy.deepcopy(self.merge_log),
+                self._store_version,
+            )
+            try:
+                return self._forget_impl(
+                    tenant_id,
+                    cid,
+                    branch=branch,
+                    requested_by=requested_by,
+                    erasure_mode=erasure_mode,
+                )
+            except BaseException:
+                (
+                    self.evidence,
+                    self.assertions,
+                    self.relations,
+                    self.preferences,
+                    self.entities,
+                    self.intentions,
+                    self.working_memory,
+                    self.audit_log,
+                    self.deletion_log,
+                    self.merge_log,
+                    self._store_version,
+                ) = before
+                raise
+
+    @staticmethod
+    def _redact_working_digests(
+        value: Any, placeholder_map: dict[str, str]
+    ) -> Any:
+        redacted = redact_erased_cids(value, placeholder_map)
+        placeholders = set(placeholder_map.values())
+
+        def scrub(node: Any) -> Any:
+            if isinstance(node, dict):
+                result = {key: scrub(item) for key, item in node.items()}
+                evidence_ids = result.get("evidence_ids")
+                diff = result.get("diff")
+                diff_evidence_ids = diff.get("evidence_ids") if isinstance(diff, dict) else None
+                affected = (
+                    isinstance(evidence_ids, list) and placeholders.intersection(evidence_ids)
+                ) or (
+                    isinstance(diff_evidence_ids, list)
+                    and placeholders.intersection(diff_evidence_ids)
+                )
+                if affected:
+                    result.pop("working_digest", None)
+                    result.pop("working_item_digest", None)
+                    if "id" in result:
+                        result["id"] = new_id()
+                return result
+            if isinstance(node, list):
+                return [scrub(item) for item in node]
+            return node
+
+        return scrub(redacted)
+
+    def _forget_impl(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         mode = ErasureMode(erasure_mode)
         with self._lock:
             key = self._evidence_key(tenant_id, branch, cid)
@@ -2841,6 +4064,23 @@ class LocalMemoryEngine:
                 }
                 for retained_cid, metadata in retained_derived.items()
             }
+            working_removals: list[tuple[tuple[str, str, str], dict[str, str]]] = []
+            working_trims: list[tuple[tuple[str, str, str], list[str]]] = []
+            for working_key, item in sorted(self.working_memory.items()):
+                if item.tenant_id != tenant_id:
+                    continue
+                surviving = [cid for cid in item.evidence_ids if cid not in affected_cids]
+                if len(surviving) == len(item.evidence_ids):
+                    continue
+                descriptor = {
+                    "tenant_id": item.tenant_id,
+                    "session_id": item.session_id,
+                    "item_id": item.item_id,
+                }
+                if surviving:
+                    working_trims.append((working_key, surviving))
+                else:
+                    working_removals.append((working_key, descriptor))
             propagated: dict[str, Any] = {
                 "retracted_assertions": [],
                 "trimmed_assertions": [],
@@ -2854,6 +4094,17 @@ class LocalMemoryEngine:
                 "erased_derived_evidence": derived_cids,
                 "retained_derived_evidence": sorted(retained_derived),
                 "trimmed_derived_evidence": sorted(retained_derived),
+                "removed_working_items": [
+                    descriptor for _, descriptor in working_removals
+                ],
+                "trimmed_working_items": [
+                    {
+                        "tenant_id": self.working_memory[key].tenant_id,
+                        "session_id": self.working_memory[key].session_id,
+                        "item_id": self.working_memory[key].item_id,
+                    }
+                    for key, _ in working_trims
+                ],
             }
             for intention_key, intention in list(self.intentions.items()):
                 if intention.tenant_id != tenant_id:
@@ -2925,6 +4176,18 @@ class LocalMemoryEngine:
                 else:
                     self.entities.pop(key, None)
                     propagated["removed_entities"].append(entity["canonical"])
+            for working_key, surviving in working_trims:
+                working = self.working_memory.get(working_key)
+                if working is None:
+                    continue
+                working.evidence_ids = surviving
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(working)
+                working.trust_tier = trust_tier
+                working.capability_tags = capability_tags
+                working.sensitivity = sensitivity
+                working.access_policy = access_policy
+            for working_key, _ in working_removals:
+                self.working_memory.pop(working_key, None)
             # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so NO
             # retained record may carry the erased cid — not the deletion_log
             # evidence_cid, not the provenance arrays / standing-cascade refs inside
@@ -2940,6 +4203,21 @@ class LocalMemoryEngine:
             if mode is ErasureMode.HARD_DELETE_LEGAL:
                 placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
                 stored_propagated = redact_erased_cids(propagated, placeholder_map)
+                # A legal hard delete must redact the erased provenance from
+                # every retained custody record, including audits emitted
+                # before this erasure was requested.
+                self.audit_log[:] = [
+                    self._redact_working_digests(record, placeholder_map)
+                    for record in self.audit_log
+                ]
+                self.deletion_log[:] = [
+                    self._redact_working_digests(record, placeholder_map)
+                    for record in self.deletion_log
+                ]
+                self.merge_log[:] = [
+                    self._redact_working_digests(record, placeholder_map)
+                    for record in self.merge_log
+                ]
                 deletion_record_cid = erasure_deletion_record_id(cid, tenant_id, ev.user_id)
                 audit_target_id = placeholder_map[cid]
             else:
@@ -2980,6 +4258,11 @@ class LocalMemoryEngine:
             "entities": [dict(item) for item in self.entities.values() if item.get("tenant_id") == tenant_id],
             "justifications": [item.to_dict() for item in self.justifications.values() if item.tenant_id == tenant_id],
             "contradictions": [item.to_dict() for item in self.contradictions.values() if item.tenant_id == tenant_id],
+            "working_memory": [
+                item.to_dict()
+                for item in self.working_memory.values()
+                if item.tenant_id == tenant_id
+            ],
             "audit_log": [item for item in self.audit_log if item.get("tenant_id") == tenant_id],
             "deletion_log": [item for item in self.deletion_log if item.get("tenant_id") == tenant_id],
             "merge_log": [
@@ -3688,4 +4971,9 @@ class LocalMemoryEngine:
             "deletion_log": [item for exported in tenant_exports for item in exported["deletion_log"]],
             "merge_log": self.merge_log,
             "tenants": tenant_exports,
+            "working_memory": [
+                item
+                for tenant_export in tenant_exports
+                for item in tenant_export["working_memory"]
+            ],
         }
