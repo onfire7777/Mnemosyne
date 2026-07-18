@@ -8,6 +8,7 @@ import math
 import os
 import secrets
 import threading
+import weakref
 from collections import OrderedDict, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -109,6 +110,202 @@ def _normalize_json_value(value: Any, *, path: str) -> Any:
     raise ValueError(f"{path} must contain JSON data only")
 
 
+_TRIGGER_TYPES: frozenset[str] = frozenset(
+    {"exact_time", "time_window", "event", "condition", "dependency_completion"}
+)
+
+_CONDITION_OPERATORS: frozenset[str] = frozenset(
+    {"eq", "ne", "lt", "lte", "gt", "gte", "in"}
+)
+
+
+def _parse_aware_iso(value: Any, *, field: str) -> datetime:
+    if type(value) is not str:
+        raise ValueError(f"{field} must be an ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return parsed.astimezone(UTC)
+
+
+@dataclass(frozen=True, slots=True)
+class ProspectiveOperatingPoint:
+    """A caller-supplied precision/recall operating point for trigger evaluation.
+
+    There is no constructor, engine, CLI, or MCP default. A caller must supply
+    this object on every evaluation; invalid or missing values fail before
+    state mutation. The ``threshold`` gates event/condition signal confidence;
+    deterministic time/dependency triggers do not trade correctness for
+    threshold, but the supplied operating point is still recorded in the
+    firing audit.
+    """
+
+    operating_point_id: str
+    threshold: float
+    measured_precision: float
+    measured_recall: float
+    measurement_cid: str
+
+    def __post_init__(self) -> None:
+        if type(self.operating_point_id) is not str or not self.operating_point_id.strip():
+            raise ValueError("operating_point_id must be a non-empty string")
+        if type(self.measurement_cid) is not str or not self.measurement_cid.strip():
+            raise ValueError("measurement_cid must be a non-empty string")
+        for name in ("threshold", "measured_precision", "measured_recall"):
+            value = getattr(self, name)
+            if type(value) is not float or not math.isfinite(value):
+                raise ValueError(f"{name} must be a finite number expressed as float")
+            if not (0.0 <= value <= 1.0):
+                raise ValueError(f"{name} must be in [0, 1]")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "operating_point_id": self.operating_point_id,
+            "threshold": self.threshold,
+            "measured_precision": self.measured_precision,
+            "measured_recall": self.measured_recall,
+            "measurement_cid": self.measurement_cid,
+        }
+
+
+@dataclass(slots=True)
+class TriggerEvaluationContext:
+    """A data-only, prevalidated context for evaluating due intentions.
+
+    ``events`` is a sequence of JSON objects with ``event_id`` (non-empty,
+    unique within context), ``event_type``, ``occurred_at`` (aware ISO-8601),
+    ``payload`` (JSON object), and ``confidence`` in [0, 1].
+    ``conditions`` maps ``condition_id`` to a JSON object with ``value``,
+    ``observed_at`` (aware ISO-8601), and ``confidence`` in [0, 1].
+    Malformed, naive-time, cross-tenant, or non-JSON input fails closed.
+    """
+
+    infrastructure_available: bool
+    tenant_id: str
+    events: list[dict[str, Any]]
+    conditions: dict[str, dict[str, Any]]
+
+    def __post_init__(self) -> None:
+        if type(self.infrastructure_available) is not bool:
+            raise ValueError("infrastructure_available must be a bool")
+        if type(self.tenant_id) is not str or not self.tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
+        if type(self.events) is not list:
+            raise ValueError("events must be a list of JSON objects")
+        if type(self.conditions) is not dict:
+            raise ValueError("conditions must be a mapping of condition_id -> JSON object")
+        seen_event_ids: set[str] = set()
+        normalized_events: list[dict[str, Any]] = []
+        for index, event in enumerate(self.events):
+            if type(event) is not dict:
+                raise ValueError(f"events[{index}] must be a JSON object")
+            event = _normalize_json_value(event, path=f"events[{index}]")
+            unknown_keys = set(event) - {
+                "event_id",
+                "event_type",
+                "occurred_at",
+                "payload",
+                "confidence",
+                "tenant_id",
+            }
+            if unknown_keys:
+                raise ValueError(
+                    f"events[{index}] contains unknown keys: {sorted(unknown_keys)}"
+                )
+            event_id = event.get("event_id")
+            if type(event_id) is not str or not event_id.strip():
+                raise ValueError(f"events[{index}].event_id must be a non-empty string")
+            if event_id in seen_event_ids:
+                raise ValueError(f"events[{index}].event_id must be unique within context")
+            seen_event_ids.add(event_id)
+            event_tenant_id = event.get("tenant_id")
+            if type(event_tenant_id) is not str or not event_tenant_id.strip():
+                raise ValueError(f"events[{index}].tenant_id must be a non-empty string")
+            if event_tenant_id != self.tenant_id:
+                raise ValueError(f"events[{index}].tenant_id must match context tenant_id")
+            event["tenant_id"] = event_tenant_id
+            event_type = event.get("event_type")
+            if type(event_type) is not str or not event_type.strip():
+                raise ValueError(f"events[{index}].event_type must be a non-empty string")
+            occurred_at = event.get("occurred_at")
+            if type(occurred_at) is not str:
+                raise ValueError(f"events[{index}].occurred_at must be an ISO-8601 string")
+            try:
+                parsed = datetime.fromisoformat(occurred_at)
+            except ValueError as exc:
+                raise ValueError(f"events[{index}].occurred_at must be ISO-8601") from exc
+            if parsed.tzinfo is None:
+                raise ValueError(f"events[{index}].occurred_at must be timezone-aware")
+            event["occurred_at"] = parsed.astimezone(UTC).isoformat()
+            payload = event.get("payload")
+            if type(payload) is not dict:
+                raise ValueError(f"events[{index}].payload must be a JSON object")
+            payload_tenant_id = payload.get("tenant_id")
+            if payload_tenant_id is not None and payload_tenant_id != self.tenant_id:
+                raise ValueError(f"events[{index}].payload tenant_id must match context tenant_id")
+            event["payload"] = _normalize_json_value(payload, path=f"events[{index}].payload")
+            confidence = event.get("confidence")
+            if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
+                raise ValueError(f"events[{index}].confidence must be a finite number")
+            if not (0.0 <= float(confidence) <= 1.0):
+                raise ValueError(f"events[{index}].confidence must be in [0, 1]")
+            event["confidence"] = float(confidence)
+            normalized_events.append(event)
+        self.events = normalized_events
+        normalized_conditions: dict[str, dict[str, Any]] = {}
+        for condition_id, observation in self.conditions.items():
+            if type(condition_id) is not str or not condition_id.strip():
+                raise ValueError("conditions keys must be non-empty strings")
+            if type(observation) is not dict:
+                raise ValueError(f"conditions[{condition_id}] must be a JSON object")
+            observation = _normalize_json_value(
+                observation, path=f"conditions[{condition_id}]"
+            )
+            unknown_keys = set(observation) - {"value", "observed_at", "confidence", "tenant_id"}
+            if unknown_keys:
+                raise ValueError(
+                    f"conditions[{condition_id}] contains unknown keys: "
+                    f"{sorted(unknown_keys)}"
+                )
+            if "value" not in observation:
+                raise ValueError(f"conditions[{condition_id}].value is required")
+            observation_tenant_id = observation.get("tenant_id")
+            if type(observation_tenant_id) is not str or not observation_tenant_id.strip():
+                raise ValueError(f"conditions[{condition_id}].tenant_id must be a non-empty string")
+            if observation_tenant_id != self.tenant_id:
+                raise ValueError(f"conditions[{condition_id}].tenant_id must match context tenant_id")
+            observation["tenant_id"] = observation_tenant_id
+            observed_at = observation.get("observed_at")
+            if type(observed_at) is not str:
+                raise ValueError(
+                    f"conditions[{condition_id}].observed_at must be an ISO-8601 string"
+                )
+            try:
+                parsed = datetime.fromisoformat(observed_at)
+            except ValueError as exc:
+                raise ValueError(
+                    f"conditions[{condition_id}].observed_at must be ISO-8601"
+                ) from exc
+            if parsed.tzinfo is None:
+                raise ValueError(
+                    f"conditions[{condition_id}].observed_at must be timezone-aware"
+                )
+            observation["observed_at"] = parsed.astimezone(UTC).isoformat()
+            confidence = observation.get("confidence")
+            if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
+                raise ValueError(
+                    f"conditions[{condition_id}].confidence must be a finite number"
+                )
+            if not (0.0 <= float(confidence) <= 1.0):
+                raise ValueError(f"conditions[{condition_id}].confidence must be in [0, 1]")
+            observation["confidence"] = float(confidence)
+            normalized_conditions[condition_id] = observation
+        self.conditions = normalized_conditions
+
+
 @dataclass(slots=True)
 class Intention:
     """A data-only prospective-memory record evaluated by an explicit clock."""
@@ -133,8 +330,10 @@ class Intention:
             value = getattr(self, name)
             if type(value) is not str or not value.strip():
                 raise ValueError(f"{name} must be a non-empty string")
-        if type(self.trigger_type) is not str or self.trigger_type != "exact_time":
-            raise ValueError("Phase 1 supports only exact_time triggers")
+        if type(self.trigger_type) is not str or self.trigger_type not in _TRIGGER_TYPES:
+            raise ValueError(
+                f"trigger_type must be one of {sorted(_TRIGGER_TYPES)}"
+            )
         if type(self.status) is not str or self.status != "scheduled":
             raise ValueError("new intentions must be scheduled")
         if type(self.priority) is not str or not self.priority.strip():
@@ -149,32 +348,26 @@ class Intention:
             self.trigger_expression, path="trigger_expression"
         )
         self.action = _normalize_json_value(self.action, path="action")
-        trigger_at_raw = self.trigger_expression.get("at")
-        if type(trigger_at_raw) is not str:
-            raise ValueError(
-                "exact_time trigger_expression.at must be an ISO-8601 string"
-            )
-        try:
-            trigger_at = datetime.fromisoformat(trigger_at_raw)
-        except ValueError as exc:
-            raise ValueError(
-                "exact_time trigger_expression.at must be ISO-8601"
-            ) from exc
-        if trigger_at.tzinfo is None:
-            raise ValueError("exact_time trigger_expression.at must be timezone-aware")
         due_at = self.due_at.astimezone(UTC)
-        if trigger_at.astimezone(UTC) != due_at:
-            raise ValueError(
-                "trigger_expression.at must identify the same instant as due_at"
-            )
         self.due_at = due_at
-        self.trigger_expression["at"] = due_at.isoformat()
+        self._validate_trigger_expression(due_at)
         if type(self.dependencies) is not list or any(
             type(item) is not str or not item.strip() for item in self.dependencies
         ):
             raise ValueError("dependencies must be a list of non-empty strings")
-        if self.dependencies:
-            raise ValueError("Phase 1 does not support dependency triggers")
+        if self.dependencies and self.trigger_type != "dependency_completion":
+            raise ValueError(
+                "dependencies are only valid for dependency_completion triggers"
+            )
+        if self.trigger_type == "dependency_completion":
+            if not self.dependencies:
+                raise ValueError(
+                    "dependency_completion trigger requires non-empty dependencies"
+                )
+            if len(set(self.dependencies)) != len(self.dependencies):
+                raise ValueError("dependencies must not contain duplicates")
+            if self.intention_id in self.dependencies:
+                raise ValueError("an intention cannot depend on itself")
         if type(self.reschedule_history) is not list:
             raise ValueError("reschedule_history must be a list of JSON objects")
         normalized_history: list[dict[str, Any]] = []
@@ -193,6 +386,73 @@ class Intention:
             raise ValueError("evidence_ids must contain non-empty strings")
         if len(set(self.evidence_ids)) != len(self.evidence_ids):
             raise ValueError("evidence_ids must not contain duplicates")
+
+    def _validate_trigger_expression(self, due_at: datetime) -> None:
+        expr = self.trigger_expression
+        if self.trigger_type == "exact_time":
+            at_raw = expr.get("at")
+            if type(at_raw) is not str:
+                raise ValueError(
+                    "exact_time trigger_expression.at must be an ISO-8601 string"
+                )
+            trigger_at = _parse_aware_iso(at_raw, field="exact_time.at")
+            if trigger_at != due_at:
+                raise ValueError(
+                    "trigger_expression.at must identify the same instant as due_at"
+                )
+            self.trigger_expression["at"] = due_at.isoformat()
+        elif self.trigger_type == "time_window":
+            start_raw = expr.get("start")
+            end_raw = expr.get("end")
+            if type(start_raw) is not str:
+                raise ValueError(
+                    "time_window trigger_expression.start must be an ISO-8601 string"
+                )
+            if type(end_raw) is not str:
+                raise ValueError(
+                    "time_window trigger_expression.end must be an ISO-8601 string"
+                )
+            start = _parse_aware_iso(start_raw, field="time_window.start")
+            end = _parse_aware_iso(end_raw, field="time_window.end")
+            if start >= end:
+                raise ValueError("time_window start must precede end")
+            if start != due_at:
+                raise ValueError(
+                    "time_window.start must identify the same instant as due_at"
+                )
+            self.trigger_expression["start"] = start.isoformat()
+            self.trigger_expression["end"] = end.isoformat()
+        elif self.trigger_type == "event":
+            event_type = expr.get("event_type")
+            if type(event_type) is not str or not event_type.strip():
+                raise ValueError(
+                    "event trigger_expression.event_type must be a non-empty string"
+                )
+            if "match" not in expr:
+                raise ValueError("event trigger_expression.match is required")
+            match = expr["match"]
+            if type(match) is not dict:
+                raise ValueError("event trigger_expression.match must be a JSON object")
+        elif self.trigger_type == "condition":
+            condition_id = expr.get("condition_id")
+            if type(condition_id) is not str or not condition_id.strip():
+                raise ValueError(
+                    "condition trigger_expression.condition_id must be a non-empty string"
+                )
+            operator = expr.get("operator")
+            if type(operator) is not str or operator not in _CONDITION_OPERATORS:
+                raise ValueError(
+                    f"condition trigger_expression.operator must be one of "
+                    f"{sorted(_CONDITION_OPERATORS)}"
+                )
+            if "value" not in expr:
+                raise ValueError("condition trigger_expression.value is required")
+        elif self.trigger_type == "dependency_completion":
+            require = expr.get("require")
+            if require != "all":
+                raise ValueError(
+                    "dependency_completion trigger_expression.require must be 'all'"
+                )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -269,6 +529,22 @@ class Intention:
         return record
 
 
+def _json_deep_contains(haystack: Any, needle: Any) -> bool:
+    """Return True if ``haystack`` deeply equals ``needle`` for every key in needle."""
+    if type(needle) is dict:
+        if type(haystack) is not dict:
+            return False
+        for key, value in needle.items():
+            if key not in haystack or not _json_deep_contains(haystack[key], value):
+                return False
+        return True
+    if type(needle) is list:
+        if type(haystack) is not list:
+            return False
+        return len(needle) == len(haystack) and all(
+            _json_deep_contains(haystack[i], needle[i]) for i in range(len(needle))
+        )
+    return type(haystack) is type(needle) and haystack == needle
 _WORKING_MEMORY_KINDS = {
     "active_goal",
     "current_plan",
@@ -418,14 +694,273 @@ class WorkingMemoryItem:
         return cls(**parsed)
 
 
-def evaluate_intention(intention: Intention, *, evaluated_at: datetime) -> bool:
-    """Return whether an intention is due without consulting wall-clock state."""
+def _compare_condition(
+    observed: Any, operator: str, expected: Any
+) -> bool:
+    """Typed deterministic comparison for condition triggers."""
+    if operator == "eq":
+        return type(observed) is type(expected) and observed == expected
+    if operator == "ne":
+        return not (type(observed) is type(expected) and observed == expected)
+    if operator == "in":
+        if type(expected) is not list:
+            raise ValueError("condition 'in' operator requires a JSON-list value")
+        return any(
+            type(observed) is type(item) and observed == item for item in expected
+        )
+    if operator in {"lt", "lte", "gt", "gte"}:
+        if type(observed) not in {int, float, str} or type(expected) not in {
+            int,
+            float,
+            str,
+        }:
+            raise ValueError(
+                f"condition {operator} operator requires same-type finite numbers or strings"
+            )
+        if type(observed) is not type(expected):
+            raise ValueError(
+                f"condition {operator} operator requires same-type operands"
+            )
+        if type(observed) in {int, float}:
+            if not math.isfinite(float(observed)) or not math.isfinite(float(expected)):
+                raise ValueError(
+                    f"condition {operator} operator requires finite numbers"
+                )
+        if operator == "lt":
+            return observed < expected
+        if operator == "lte":
+            return observed <= expected
+        if operator == "gt":
+            return observed > expected
+        return observed >= expected
+    raise ValueError(f"unsupported condition operator: {operator!r}")
 
-    if evaluated_at.tzinfo is None:
+
+def _evaluate_trigger(
+    intention: Intention,
+    *,
+    evaluated_at: datetime,
+    context: TriggerEvaluationContext,
+    operating_point: ProspectiveOperatingPoint,
+    tenant_intentions: dict[tuple[str, str], Intention],
+) -> tuple[bool, dict[str, Any]]:
+    """Return (fires, matched_signal) for a single intention.
+
+    ``matched_signal`` carries ``event_id`` or ``condition_id`` when applicable.
+    Raises ``ValueError`` if a due candidate's trigger inputs are malformed
+    (fail-closed before any state mutation).
+    """
+    expr = intention.trigger_expression
+    evaluated_utc = evaluated_at.astimezone(UTC)
+    due_utc = intention.due_at.astimezone(UTC)
+
+    if intention.trigger_type == "exact_time":
+        at = _parse_aware_iso(expr["at"], field="exact_time.at")
+        fires = evaluated_utc >= at
+        return fires, {}
+
+    if intention.trigger_type == "time_window":
+        start = _parse_aware_iso(expr["start"], field="time_window.start")
+        end = _parse_aware_iso(expr["end"], field="time_window.end")
+        fires = start <= evaluated_utc < end
+        return fires, {}
+
+    if intention.trigger_type == "event":
+        event_type = expr["event_type"]
+        match = expr.get("match", {})
+        threshold = operating_point.threshold
+        candidates = []
+        for event in context.events:
+            if event["event_type"] != event_type:
+                continue
+            if event["confidence"] < threshold:
+                continue
+            occurred = _parse_aware_iso(
+                event["occurred_at"], field="event.occurred_at"
+            )
+            if not (due_utc <= occurred <= evaluated_utc):
+                continue
+            payload = event.get("payload", {})
+            if not _json_deep_contains(payload, match):
+                continue
+            candidates.append(event)
+        if not candidates:
+            return False, {}
+        canonical = min(
+            candidates,
+            key=lambda e: (
+                _parse_aware_iso(e["occurred_at"], field="event.occurred_at"),
+                e["event_id"],
+            ),
+        )
+        return True, {"event_id": canonical["event_id"]}
+
+    if intention.trigger_type == "condition":
+        condition_id = expr["condition_id"]
+        operator = expr["operator"]
+        expected = expr["value"]
+        observation = context.conditions.get(condition_id)
+        if observation is None:
+            return False, {}
+        if observation["confidence"] < operating_point.threshold:
+            return False, {}
+        observed_at = _parse_aware_iso(
+            observation["observed_at"], field="condition.observed_at"
+        )
+        if not (due_utc <= observed_at <= evaluated_utc):
+            return False, {}
+        if _compare_condition(observation["value"], operator, expected):
+            return True, {"condition_id": condition_id}
+        return False, {}
+
+    if intention.trigger_type == "dependency_completion":
+        for dep_id in intention.dependencies:
+            dep = tenant_intentions.get((intention.tenant_id, dep_id))
+            if dep is None:
+                raise ValueError(
+                    f"dependency {dep_id!r} is missing or cross-tenant"
+                )
+            if dep.status != "fired":
+                return False, {}
+        fires = evaluated_utc >= due_utc
+        return fires, {}
+
+    raise ValueError(f"unsupported trigger_type: {intention.trigger_type!r}")
+
+
+def canonicalize_intention(
+    intention: Intention, *, require_scheduled: bool = False
+) -> Intention:
+    """Return the canonical, detached representation used by every backend."""
+
+    if not isinstance(intention, Intention):
+        raise ValueError("intention must be an Intention")
+    normalized = Intention.from_dict(intention.to_dict())
+    if require_scheduled and normalized.status != "scheduled":
+        raise ValueError("only scheduled intentions may be persisted")
+    return normalized
+
+
+def validate_intention_provenance_claim(
+    intention: Intention,
+    *,
+    evidence_id: str,
+    user_id: str,
+    erased: bool,
+    trust_tier: int,
+    capability_tags: list[str],
+    max_trust_tier: int,
+) -> None:
+    """Apply the canonical provenance and write-capability checks."""
+
+    if erased or evidence_id not in intention.evidence_ids:
+        raise ValueError(
+            f"evidence {evidence_id!r} is missing or outside the intention tenant"
+        )
+    if user_id != intention.user_id:
+        raise ValueError("intention user must match originating evidence")
+    if trust_tier > max_trust_tier:
+        raise PermissionError("originating evidence exceeds the write trust ceiling")
+    if is_write_tainted(capability_tags):
+        raise PermissionError("data-only evidence cannot authorize an intention write")
+
+
+def intention_audit_context(provenance: list[Evidence | dict[str, Any]]) -> tuple[int, list[str]]:
+    """Build the canonical trust and capability context for an audit row."""
+
+    def field(source: Evidence | dict[str, Any], name: str) -> Any:
+        return getattr(source, name) if isinstance(source, Evidence) else source[name]
+
+    trust_tier = max(int(field(item, "trust_tier")) for item in provenance)
+    capability_tags = sorted(
+        {tag for item in provenance for tag in field(item, "capability_tags")}
+    )
+    return trust_tier, capability_tags
+
+
+def intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
+    """Build the canonical immutable intention audit payload."""
+
+    immutable_snapshot = {
+        "intention_id": intention.intention_id,
+        "tenant_id": intention.tenant_id,
+        "user_id": intention.user_id,
+        "agent_id": intention.agent_id,
+        "trigger_type": intention.trigger_type,
+        "trigger_expression": intention.trigger_expression,
+        "action": intention.action,
+        "priority": intention.priority,
+        "due_at": intention.due_at.isoformat(),
+        "dependencies": intention.dependencies,
+        "reschedule_history": intention.reschedule_history,
+        "evidence_ids": intention.evidence_ids,
+    }
+    return {
+        "intention_digest": content_cid("prospective_intention", immutable_snapshot),
+        "trigger_type": intention.trigger_type,
+        "due_at": intention.due_at.isoformat(),
+        "evidence_ids": list(intention.evidence_ids),
+        "status": status,
+    }
+
+
+def intention_fire_receipt_id(tenant_id: str, intention_id: str) -> str:
+    """Return the single canonical identity for a logical fire transition."""
+
+    return content_cid(
+        "fire_intention",
+        {"tenant_id": tenant_id, "intention_id": intention_id, "op": "fire"},
+    )
+
+
+def validate_intention_dependencies(
+    intention: Intention,
+    tenant_intentions: dict[tuple[str, str], Intention],
+) -> None:
+    """Validate tenant-local dependencies and reject transitive cycles."""
+
+    for dependency_id in intention.dependencies:
+        if (intention.tenant_id, dependency_id) not in tenant_intentions:
+            raise ValueError(f"dependency {dependency_id!r} is missing or cross-tenant")
+    if intention.trigger_type != "dependency_completion":
+        return
+    pending = list(intention.dependencies)
+    visited: set[str] = set()
+    while pending:
+        dependency_id = pending.pop()
+        if dependency_id == intention.intention_id:
+            raise ValueError("dependency cycle detected involving the new intention")
+        if dependency_id in visited:
+            continue
+        visited.add(dependency_id)
+        dependency = tenant_intentions.get((intention.tenant_id, dependency_id))
+        if dependency is not None and dependency.trigger_type == "dependency_completion":
+            pending.extend(dependency.dependencies)
+
+
+def validate_intention_evaluation_inputs(
+    tenant_id: str,
+    *,
+    evaluated_at: datetime,
+    trigger_context: TriggerEvaluationContext,
+    operating_point: ProspectiveOperatingPoint,
+    infrastructure_error: str = "evaluate_due_intentions requires infrastructure_available=True",
+) -> datetime:
+    """Validate shared evaluator inputs and return a UTC evaluation instant."""
+
+    if type(tenant_id) is not str or not tenant_id.strip():
+        raise ValueError("tenant_id must be a non-empty string")
+    if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
         raise ValueError("evaluated_at must be timezone-aware")
-    return intention.status == "scheduled" and intention.due_at.astimezone(
-        UTC
-    ) <= evaluated_at.astimezone(UTC)
+    if not isinstance(trigger_context, TriggerEvaluationContext):
+        raise ValueError("trigger_context must be a TriggerEvaluationContext")
+    if trigger_context.tenant_id != tenant_id:
+        raise ValueError("trigger_context tenant_id must match tenant_id")
+    if not isinstance(operating_point, ProspectiveOperatingPoint):
+        raise ValueError("operating_point must be a ProspectiveOperatingPoint")
+    if not trigger_context.infrastructure_available:
+        raise RuntimeError(infrastructure_error)
+    return evaluated_at.astimezone(UTC)
 
 
 def _bounded_float(value: object, *, default: float) -> float:
@@ -836,6 +1371,27 @@ class MemoryEngine(Protocol):
     def discard(self, branch: str, tenant_id: str | None = None) -> None:
         raise NotImplementedError
 
+    def schedule_intention(self, intention: Intention) -> str:
+        raise NotImplementedError
+
+    def cancel_intention(
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str
+    ) -> None:
+        raise NotImplementedError
+
+    def evaluate_due_intentions(
+        self,
+        tenant_id: str,
+        *,
+        evaluated_at: datetime,
+        trigger_context: TriggerEvaluationContext,
+        operating_point: ProspectiveOperatingPoint,
+    ) -> list[Intention]:
+        raise NotImplementedError
+
+    def list_intentions(self, tenant_id: str) -> list[Intention]:
+        raise NotImplementedError
+
 
 #: Kill-switch for the candidate-scan memo (default ON — byte-parity-proven in
 #: tests/test_engine_perf_lanes.py; registered in CONFIG-DRIFT-CHECKS.md).
@@ -892,6 +1448,11 @@ class LocalMemoryEngine:
     counterfactual replay, and single-user operation.
     """
 
+    _writer_owners_lock = threading.Lock()
+    _writer_owners: weakref.WeakValueDictionary[str, LocalMemoryEngine] = (
+        weakref.WeakValueDictionary()
+    )
+
     def __init__(
         self,
         store_path: str | os.PathLike[str] | None = None,
@@ -901,6 +1462,7 @@ class LocalMemoryEngine:
         read_only: bool = False,
     ):
         self.store_path = Path(store_path).expanduser() if store_path else None
+        self._writer_path_key: str | None = None
         self._journal_dir = Path(journal_dir).expanduser() if journal_dir else None
         self._read_only = read_only
         self._persistence_defer_depth = 0
@@ -942,8 +1504,42 @@ class LocalMemoryEngine:
         # valid until that first allow→deny flip (None = no pending flip).
         self._candidate_memo: OrderedDict[tuple[Any, ...], tuple[datetime | None, list[Hit]]] = OrderedDict()
         self._candidate_memo_lock = threading.Lock()
-        if self.store_path and self.store_path.exists():
-            self._load()
+        if self.store_path and not self._read_only:
+            writer_path_key = str(self.store_path.resolve(strict=False))
+            with self._writer_owners_lock:
+                owner = self._writer_owners.get(writer_path_key)
+                if owner is not None and owner is not self:
+                    raise RuntimeError(
+                        f"local memory store already has a writer: {writer_path_key}"
+                    )
+                self._writer_owners[writer_path_key] = self
+                self._writer_path_key = writer_path_key
+        try:
+            if self.store_path and self.store_path.exists():
+                self._load()
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        """Release this engine's writable store-path ownership."""
+
+        writer_path_key = getattr(self, "_writer_path_key", None)
+        if writer_path_key is None:
+            return
+        with self._writer_owners_lock:
+            if self._writer_owners.get(writer_path_key) is self:
+                del self._writer_owners[writer_path_key]
+        self._writer_path_key = None
+
+    def __enter__(self) -> LocalMemoryEngine:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
 
     def _retrieval_result_cache_token(
         self, tenant_id: str, branch: str, effective_filter: dict[str, Any]
@@ -1044,76 +1640,78 @@ class LocalMemoryEngine:
             matches = [
                 item
                 for item in self.evidence.values()
-                if item.cid == cid and item.tenant_id == intention.tenant_id and not item.erased
+                if (
+                    item.cid == cid
+                    and item.tenant_id == intention.tenant_id
+                    and item.branch == "main"
+                    and not item.erased
+                )
             ]
             if not matches:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
             source = matches[0]
-            if source.user_id != intention.user_id:
-                raise ValueError("intention user must match originating evidence")
-            if source.trust_tier > self.policy.max_trust_tier:
-                raise PermissionError("originating evidence exceeds the write trust ceiling")
-            if is_write_tainted(source.capability_tags):
-                raise PermissionError("data-only evidence cannot authorize an intention write")
+            validate_intention_provenance_claim(
+                intention,
+                evidence_id=cid,
+                user_id=source.user_id,
+                erased=source.erased,
+                trust_tier=source.trust_tier,
+                capability_tags=source.capability_tags,
+                max_trust_tier=self.policy.max_trust_tier,
+            )
             evidence.append(source)
         return evidence
 
-    @staticmethod
-    def _intention_audit_context(provenance: list[Evidence]) -> tuple[int, list[str]]:
-        trust_tier = max(item.trust_tier for item in provenance)
-        capability_tags = sorted(
-            {tag for item in provenance for tag in item.capability_tags}
-        )
-        return trust_tier, capability_tags
+    @contextmanager
+    def _prospective_transaction(self):
+        """Roll back prospective state and audit if persistence does not commit."""
 
-    @staticmethod
-    def _intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
-        immutable_snapshot = {
-            "intention_id": intention.intention_id,
-            "tenant_id": intention.tenant_id,
-            "user_id": intention.user_id,
-            "agent_id": intention.agent_id,
-            "trigger_type": intention.trigger_type,
-            "trigger_expression": intention.trigger_expression,
-            "action": intention.action,
-            "priority": intention.priority,
-            "due_at": intention.due_at.isoformat(),
-            "dependencies": intention.dependencies,
-            "reschedule_history": intention.reschedule_history,
-            "evidence_ids": intention.evidence_ids,
-        }
-        return {
-            "intention_digest": content_cid(
-                "prospective_intention", immutable_snapshot
-            ),
-            "trigger_type": intention.trigger_type,
-            "due_at": intention.due_at.isoformat(),
-            "evidence_ids": list(intention.evidence_ids),
-            "status": status,
-        }
+        intentions_before = copy.deepcopy(self.intentions)
+        audit_before = copy.deepcopy(self.audit_log)
+        store_version_before = self._store_version
+        try:
+            yield
+        except BaseException:
+            self.intentions = intentions_before
+            self.audit_log = audit_before
+            self._store_version = store_version_before
+            raise
 
     def schedule_intention(self, intention: Intention) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
 
         with self._lock:
+            intention = canonicalize_intention(intention, require_scheduled=True)
+            receipt_id = intention_fire_receipt_id(
+                intention.tenant_id, intention.intention_id
+            )
+            if any(
+                row.get("op") == "fire_intention" and row.get("id") == receipt_id
+                for row in self.audit_log
+            ):
+                raise ValueError(
+                    f"intention {intention.intention_id!r} already has a durable firing receipt"
+                )
             provenance = self._intention_provenance(intention)
             key = (intention.tenant_id, intention.intention_id)
             if key in self.intentions:
                 raise ValueError(f"intention {intention.intention_id!r} already exists")
+            validate_intention_dependencies(intention, self.intentions)
             stored = copy.deepcopy(intention)
-            self.intentions[key] = stored
-            trust_tier, capability_tags = self._intention_audit_context(provenance)
-            self._audit(
-                stored.tenant_id,
-                stored.agent_id,
-                "schedule_intention",
-                stored.intention_id,
-                self._intention_audit_diff(stored, status=stored.status),
-                source="prospective_memory",
-                trust_tier=trust_tier,
-                capability_tags=capability_tags,
-            )
-            self._persist()
+            trust_tier, capability_tags = intention_audit_context(provenance)
+            with self._prospective_transaction():
+                self.intentions[key] = stored
+                self._audit(
+                    stored.tenant_id,
+                    stored.agent_id,
+                    "schedule_intention",
+                    stored.intention_id,
+                    intention_audit_diff(stored, status=stored.status),
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+                self._persist()
             return stored.intention_id
 
     def cancel_intention(self, tenant_id: str, intention_id: str, *, cancelled_by: str) -> None:
@@ -1133,72 +1731,106 @@ class LocalMemoryEngine:
                     "only the owning user or agent may cancel an intention"
                 )
             provenance = self._intention_provenance(intention)
-            trust_tier, capability_tags = self._intention_audit_context(provenance)
-            intention.status = "cancelled"
-            intention.cancellation_state = {"cancelled_by": cancelled_by}
-            self._audit(
-                tenant_id,
-                cancelled_by,
-                "cancel_intention",
-                intention_id,
-                self._intention_audit_diff(intention, status="cancelled"),
-                source="prospective_memory",
-                trust_tier=trust_tier,
-                capability_tags=capability_tags,
-            )
-            self._persist()
-
-    def evaluate_due_intentions(
-        self, tenant_id: str, *, evaluated_at: datetime
-    ) -> list[Intention]:
-        """Fire due intentions once, ordered deterministically by due time and id."""
-
-        if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
-            raise ValueError("evaluated_at must be timezone-aware")
-        with self._lock:
-            due = sorted(
-                (
-                    item
-                    for (item_tenant, _), item in self.intentions.items()
-                    if item_tenant == tenant_id and evaluate_intention(item, evaluated_at=evaluated_at)
-                ),
-                key=lambda item: (item.due_at, item.intention_id),
-            )
-            audit_contexts = [
-                self._intention_audit_context(self._intention_provenance(intention))
-                for intention in due
-            ]
-            fired: list[Intention] = []
-            for intention, (trust_tier, capability_tags) in zip(
-                due, audit_contexts, strict=True
-            ):
-                intention.status = "fired"
-                evaluated_at_utc = evaluated_at.astimezone(UTC)
+            trust_tier, capability_tags = intention_audit_context(provenance)
+            with self._prospective_transaction():
+                intention.status = "cancelled"
+                intention.cancellation_state = {"cancelled_by": cancelled_by}
                 self._audit(
                     tenant_id,
-                    intention.agent_id,
-                    "fire_intention",
-                    intention.intention_id,
-                    {
-                        **self._intention_audit_diff(intention, status="fired"),
-                        "evaluated_at": evaluated_at_utc.isoformat(),
-                    },
+                    cancelled_by,
+                    "cancel_intention",
+                    intention_id,
+                    intention_audit_diff(intention, status="cancelled"),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
-                    event_id=content_cid(
-                        "fire_intention",
-                        {
-                            "tenant_id": tenant_id,
-                            "intention_id": intention.intention_id,
-                            "evaluated_at": evaluated_at_utc.isoformat(),
-                        },
-                    ),
-                    occurred_at=evaluated_at_utc,
                 )
-                fired.append(copy.deepcopy(intention))
-            if fired:
                 self._persist()
+
+    def evaluate_due_intentions(
+        self,
+        tenant_id: str,
+        *,
+        evaluated_at: datetime,
+        trigger_context: TriggerEvaluationContext,
+        operating_point: ProspectiveOperatingPoint,
+    ) -> list[Intention]:
+        """Fire due intentions once, ordered deterministically by due time and id.
+
+        Returns detached :class:`Intention` copies actually transitioned
+        ``scheduled -> fired`` in this call, ordered by ``(due_at UTC,
+        intention_id)``. Re-evaluation returns ``[]``. All candidate inputs,
+        provenance, and audit contexts are prevalidated before any transition.
+        ``infrastructure_available=False`` raises :class:`RuntimeError` with
+        zero mutation/audit.
+        """
+
+        evaluated_at = validate_intention_evaluation_inputs(
+            tenant_id,
+            evaluated_at=evaluated_at,
+            trigger_context=trigger_context,
+            operating_point=operating_point,
+        )
+        with self._lock:
+            tenant_items = {
+                key: item
+                for key, item in self.intentions.items()
+                if key[0] == tenant_id
+            }
+            evaluated_utc = evaluated_at
+            frozen_intentions = copy.deepcopy(self.intentions)
+            candidate_results: list[tuple[Intention, dict[str, Any]]] = []
+            for item in tenant_items.values():
+                if item.status != "scheduled":
+                    continue
+                fires, signal = _evaluate_trigger(
+                    item,
+                    evaluated_at=evaluated_utc,
+                    context=trigger_context,
+                    operating_point=operating_point,
+                    tenant_intentions=frozen_intentions,
+                )
+                if fires:
+                    candidate_results.append((item, signal))
+            candidate_results.sort(
+                key=lambda result: (result[0].due_at, result[0].intention_id)
+            )
+            audit_contexts = [
+                intention_audit_context(self._intention_provenance(intention))
+                for intention, _signal in candidate_results
+            ]
+            fired: list[Intention] = []
+            with self._prospective_transaction():
+                for (intention, signal), (trust_tier, capability_tags) in zip(
+                    candidate_results, audit_contexts, strict=True
+                ):
+                    intention.status = "fired"
+                    fire_diff = {
+                        **intention_audit_diff(intention, status="fired"),
+                        "evaluated_at": evaluated_utc.isoformat(),
+                        "operating_point": operating_point.to_dict(),
+                    }
+                    if "event_id" in signal:
+                        fire_diff["matched_event_id"] = signal["event_id"]
+                    if "condition_id" in signal:
+                        fire_diff["matched_condition_id"] = signal["condition_id"]
+                    self._audit(
+                        tenant_id,
+                        intention.agent_id,
+                        "fire_intention",
+                        intention.intention_id,
+                        fire_diff,
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=intention_fire_receipt_id(
+                            tenant_id, intention.intention_id
+                        ),
+                        occurred_at=evaluated_utc,
+                    )
+                    fired.append(copy.deepcopy(intention))
+                if fired:
+                    self._persist()
             return fired
 
     def list_intentions(self, tenant_id: str) -> list[Intention]:
@@ -1525,6 +2157,13 @@ class LocalMemoryEngine:
             return
         if not self.store_path:
             return
+        writer_path_key = self._writer_path_key
+        with self._writer_owners_lock:
+            if (
+                writer_path_key is None
+                or self._writer_owners.get(writer_path_key) is not self
+            ):
+                raise RuntimeError("local memory engine does not own its writable store")
         if self.store_path.is_symlink():
             raise ValueError("local memory store must be a real file")
         parent = self.store_path.parent
