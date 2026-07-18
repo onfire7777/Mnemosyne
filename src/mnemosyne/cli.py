@@ -264,6 +264,13 @@ def apply_session_identity(args: argparse.Namespace) -> None:
         _bind_session_claim(args, "tenant", identity.tenant_id)
         _bind_session_claim(args, "user", identity.user_id)
         _bind_session_claim(args, "cancelled_by", identity.user_id)
+        if getattr(args, "command", "").startswith("working-"):
+            if not identity.agent_id:
+                raise SystemExit("working memory requires an authenticated agent identity")
+            if not identity.session_id:
+                raise SystemExit("working memory requires an authenticated session identifier")
+            _bind_session_claim(args, "agent_id", identity.agent_id)
+            _bind_session_claim(args, "session_id", identity.session_id)
         if hasattr(args, "role"):
             args.role = identity.role
         if hasattr(args, "source_trust_tier"):
@@ -348,6 +355,10 @@ def _require_authorization_context(args: argparse.Namespace) -> None:
         "intention-cancel",
         "intention-evaluate",
         "intention-list",
+        "working-seed",
+        "working-query",
+        "working-promote",
+        "working-expire",
     } and not isinstance(getattr(args, "session_identity", None), SessionIdentity):
         raise SystemExit(f"{command} requires --session-token")
     if command not in {
@@ -1583,12 +1594,16 @@ def cmd_working_seed(args: argparse.Namespace) -> None:
             evidence_ids=args.evidence_cid, ttl_seconds=args.ttl_seconds,
             created_at=args.created_at, role=args.role,
             source_trust_tier=args.source_trust_tier, item_id=args.item_id,
+            session_identity=args.session_identity,
         )
     )
 
 
 def cmd_working_query(args: argparse.Namespace) -> None:
-    emit(load_tools(args).working_query(**_working_scope(args), as_of=args.as_of))
+    emit(load_tools(args).working_query(
+        **_working_scope(args), as_of=args.as_of,
+        session_identity=args.session_identity,
+    ))
 
 
 def cmd_working_promote(args: argparse.Namespace) -> None:
@@ -1599,6 +1614,7 @@ def cmd_working_promote(args: argparse.Namespace) -> None:
         load_tools(args).working_promote(
             **_working_scope(args), item_id=args.item_id, as_of=args.as_of,
             cases=cases, role=args.role, source_trust_tier=args.source_trust_tier,
+            session_identity=args.session_identity,
         )
     )
 
@@ -1608,6 +1624,7 @@ def cmd_working_expire(args: argparse.Namespace) -> None:
         load_tools(args).working_expire(
             **_working_scope(args), expired_at=args.expired_at,
             role=args.role, source_trust_tier=args.source_trust_tier,
+            session_identity=args.session_identity,
         )
     )
 

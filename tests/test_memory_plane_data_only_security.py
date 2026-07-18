@@ -419,6 +419,9 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(
     payload = _payload(case, sentinel)
     evidence_id = _evidence(engine)
     tools = MemoryTools(engine)
+    identity = SessionIdentity(
+        TENANT, USER, "agent", 1, agent_id=AGENT, session_id=SESSION
+    )
     calls, install_tripwire = execution_tripwire
     install_tripwire()
     seeded = tools.working_seed(
@@ -436,6 +439,7 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(
         role="agent",
         source_trust_tier=1,
         item_id="public-working",
+        session_identity=identity,
     )
     assert seeded["item"]["content"] == payload
     expected_state = deepcopy(engine.export_tenant(TENANT))
@@ -447,17 +451,20 @@ def test_memory_tools_query_is_literal_scoped_and_does_not_auto_promote(
         task_id=TASK,
         branch="main",
         as_of=NOW,
+        session_identity=identity,
     )
     assert [item["content"] for item in result["items"]] == [payload]
-    assert tools.working_query(
-        tenant_id=TENANT,
-        session_id="session-other",
-        user_id=USER,
-        agent_id=AGENT,
-        task_id=TASK,
-        branch="main",
-        as_of=NOW,
-    )["items"] == []
+    with pytest.raises(PermissionError, match="session mismatch"):
+        tools.working_query(
+            tenant_id=TENANT,
+            session_id="session-other",
+            user_id=USER,
+            agent_id=AGENT,
+            task_id=TASK,
+            branch="main",
+            as_of=NOW,
+            session_identity=identity,
+        )
     assert engine.export_tenant(TENANT) == expected_state
     assert calls == []
     assert not sentinel.exists()

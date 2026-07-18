@@ -406,12 +406,44 @@ class MemoryTools:
             and item.metadata.get("branch") == branch
         )
 
+    def _authorize_working(
+        self,
+        identity: SessionIdentity | None,
+        *,
+        tenant_id: str,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+    ) -> SessionIdentity:
+        authorization = self._authorize_prospective(
+            "read",
+            identity,
+            tenant_id=tenant_id,
+            owner_id=user_id,
+        )
+        if not isinstance(identity, SessionIdentity):
+            raise PermissionError("working memory requires verified session identity")
+        if not identity.agent_id or identity.agent_id != agent_id:
+            raise PermissionError("working memory agent mismatch")
+        if not identity.session_id or identity.session_id != session_id:
+            raise PermissionError("working memory session mismatch")
+        if authorization.tenant_id != tenant_id or authorization.owner_id != user_id:
+            raise PermissionError("working memory subject mismatch")
+        return identity
+
     def working_seed(
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, kind: str, content: str, evidence_ids: list[str],
         ttl_seconds: int, created_at: str | datetime, role: WriteRole = "agent",
         source_trust_tier: int = int(TrustTier.NORMAL), item_id: str | None = None,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
         if type(ttl_seconds) is not int or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be a positive integer")
         if ttl_seconds > 24 * 60 * 60:
@@ -433,7 +465,12 @@ class MemoryTools:
     def working_query(
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, as_of: str | datetime,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
         clock = self._working_time(as_of, "as_of")
         items = [
             item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
@@ -445,7 +482,14 @@ class MemoryTools:
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, item_id: str, as_of: str | datetime,
         cases: list[dict[str, Any]], role: WriteRole, source_trust_tier: int,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
         security = self._authorize(
             "working_promote", role=role, source_trust_tier=source_trust_tier,
             target_sink="branch_promotion",
@@ -482,8 +526,14 @@ class MemoryTools:
     def working_expire(
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, expired_at: str | datetime, role: WriteRole,
-        source_trust_tier: int,
+        source_trust_tier: int, session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
         security = self._authorize(
             "working_expire", role=role, source_trust_tier=source_trust_tier,
             destructive=True, target_sink="belief",
