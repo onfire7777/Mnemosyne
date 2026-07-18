@@ -504,8 +504,30 @@ def test_r20_boundary_failure_recovers_before_success_manifest(failure: str) -> 
 
 def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
     world = _world()
+    world.engine.audit_log.append(
+        {
+            "id": "audit-r21",
+            "tenant_id": TENANT,
+            "op": "remember",
+            "target_id": world.source_ref,
+            "details": {"content": CANARY, "source_ref": world.source_ref},
+        }
+    )
+    world.engine.deletion_log.append(
+        {
+            "id": "deletion-r21",
+            "tenant_id": TENANT,
+            "evidence_cid": world.source_ref,
+            "reason": CANARY,
+        }
+    )
     manifest = _delete(world)
+    retained = world.engine.export_tenant(TENANT)
     _assert_absent(manifest, CANARY, world.source_ref)
+    _assert_absent(retained["audit_log"], CANARY, world.source_ref)
+    _assert_absent(retained["deletion_log"], CANARY, world.source_ref)
+    assert any(row["id"] == "audit-r21" and row["op"] == "remember" for row in retained["audit_log"])
+    assert any(row["id"] == "deletion-r21" for row in retained["deletion_log"])
     assert manifest["source_refs"]
     assert all(ref.startswith("opaque:") for ref in manifest["source_refs"])
 
