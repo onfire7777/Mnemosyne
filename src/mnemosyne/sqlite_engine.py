@@ -90,6 +90,13 @@ from mnemosyne.engine import (
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    canonicalize_intention,
+    intention_audit_context,
+    intention_audit_diff,
+    intention_fire_receipt_id,
+    validate_intention_dependencies,
+    validate_intention_evaluation_inputs,
+    validate_intention_provenance_claim,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
@@ -97,7 +104,7 @@ from mnemosyne.erasure_ids import (
     erasure_tombstone_hash,
     redact_erased_cids,
 )
-from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
+from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
 from mnemosyne.models import (
     Assertion,
@@ -125,7 +132,7 @@ from mnemosyne.retrieval import (
     embed_query,
     validate_adapter_hit_scope,
 )
-from mnemosyne.security import TrustTier, is_write_tainted
+from mnemosyne.security import TrustTier
 from mnemosyne.sqlite_schema import (
     ENSURE_STATEMENTS,
     PRAGMA_STATEMENTS,
@@ -3525,9 +3532,7 @@ class SqliteEngine:
     # The four Protocol methods below mirror ``LocalMemoryEngine``'s Phase-1
     # exact_time semantics byte-for-byte: the same provenance, trust-ceiling,
     # write-taint, tenant-scope, cancellation-ownership, and idempotent-fire
-    # invariants, the same audit ``diff`` shape (reusing Local's static
-    # ``_intention_audit_diff`` / ``_intention_audit_context`` helpers so the
-    # audit record is byte-identical for the same inputs), and the same
+    # invariants, the same canonical audit ``diff`` shape, and the same
     # deterministic firing key ``(tenant_id, intention_id, 'fire')`` so a
     # replay cannot mint a second receipt. Atomicity is the SQLite
     # ``with conn:`` transaction — audit append and status transition share one
@@ -3552,16 +3557,15 @@ class SqliteEngine:
                     f"evidence {cid!r} is missing or outside the intention tenant"
                 )
             source = _evidence_from_row(row)
-            if source.user_id != intention.user_id:
-                raise ValueError("intention user must match originating evidence")
-            if source.trust_tier > self.policy.max_trust_tier:
-                raise PermissionError(
-                    "originating evidence exceeds the write trust ceiling"
-                )
-            if is_write_tainted(source.capability_tags):
-                raise PermissionError(
-                    "data-only evidence cannot authorize an intention write"
-                )
+            validate_intention_provenance_claim(
+                intention,
+                evidence_id=cid,
+                user_id=source.user_id,
+                erased=source.erased,
+                trust_tier=source.trust_tier,
+                capability_tags=source.capability_tags,
+                max_trust_tier=self.policy.max_trust_tier,
+            )
             evidence.append(source)
         return evidence
 
@@ -3576,33 +3580,9 @@ class SqliteEngine:
             for intention in [Intention.from_dict(json.loads(row["record"]))]
         }
 
-    @staticmethod
-    def _validate_intention_dependencies(
-        intention: Intention,
-        tenant_intentions: dict[tuple[str, str], Intention],
-    ) -> None:
-        for dependency_id in intention.dependencies:
-            if (intention.tenant_id, dependency_id) not in tenant_intentions:
-                raise ValueError(
-                    f"dependency {dependency_id!r} is missing or cross-tenant"
-                )
-        if intention.trigger_type != "dependency_completion":
-            return
-        pending = list(intention.dependencies)
-        visited: set[str] = set()
-        while pending:
-            dependency_id = pending.pop()
-            if dependency_id == intention.intention_id:
-                raise ValueError("dependency cycle detected involving the new intention")
-            if dependency_id in visited:
-                continue
-            visited.add(dependency_id)
-            dependency = tenant_intentions.get((intention.tenant_id, dependency_id))
-            if dependency is not None and dependency.trigger_type == "dependency_completion":
-                pending.extend(dependency.dependencies)
-
     def schedule_intention(self, intention: Intention) -> str:
         """Store an intention after tenant, provenance, trust, and taint checks."""
+        intention = canonicalize_intention(intention, require_scheduled=True)
         with self._lock:
             conn = self._connect(intention.tenant_id)
             conn.execute("BEGIN IMMEDIATE")
@@ -3616,11 +3596,9 @@ class SqliteEngine:
                         f"intention {intention.intention_id!r} already exists"
                     )
                 tenant_intentions = self._intention_rows(conn, intention.tenant_id)
-                self._validate_intention_dependencies(intention, tenant_intentions)
+                validate_intention_dependencies(intention, tenant_intentions)
                 provenance = self._intention_provenance_rows(conn, intention)
-                trust_tier, capability_tags = LocalMemoryEngine._intention_audit_context(
-                    provenance
-                )
+                trust_tier, capability_tags = intention_audit_context(provenance)
                 conn.execute(
                     "INSERT INTO intentions(tenant_id, intention_id, status, due_at, record) "
                     "VALUES (?, ?, ?, ?, ?)",
@@ -3638,9 +3616,7 @@ class SqliteEngine:
                     intention.agent_id,
                     "schedule_intention",
                     intention.intention_id,
-                    LocalMemoryEngine._intention_audit_diff(
-                        intention, status=intention.status
-                    ),
+                    intention_audit_diff(intention, status=intention.status),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -3677,9 +3653,7 @@ class SqliteEngine:
                         "only the owning user or agent may cancel an intention"
                     )
                 provenance = self._intention_provenance_rows(conn, intention)
-                trust_tier, capability_tags = LocalMemoryEngine._intention_audit_context(
-                    provenance
-                )
+                trust_tier, capability_tags = intention_audit_context(provenance)
                 intention.status = "cancelled"
                 intention.cancellation_state = {"cancelled_by": cancelled_by}
                 cursor = conn.execute(
@@ -3700,9 +3674,7 @@ class SqliteEngine:
                     cancelled_by,
                     "cancel_intention",
                     intention_id,
-                    LocalMemoryEngine._intention_audit_diff(
-                        intention, status="cancelled"
-                    ),
+                    intention_audit_diff(intention, status="cancelled"),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -3721,24 +3693,18 @@ class SqliteEngine:
         operating_point: ProspectiveOperatingPoint,
     ) -> list[Intention]:
         """Fire satisfied intentions once in deterministic order."""
-        if type(tenant_id) is not str or not tenant_id.strip():
-            raise ValueError("tenant_id must be a non-empty string")
-        if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
-            raise ValueError("evaluated_at must be timezone-aware")
-        if not isinstance(trigger_context, TriggerEvaluationContext):
-            raise ValueError("trigger_context must be a TriggerEvaluationContext")
-        if not isinstance(operating_point, ProspectiveOperatingPoint):
-            raise ValueError("operating_point must be a ProspectiveOperatingPoint")
-        if not trigger_context.infrastructure_available:
-            raise RuntimeError(
-                "evaluate_due_intentions requires infrastructure_available=True"
-            )
+        evaluated_at = validate_intention_evaluation_inputs(
+            tenant_id,
+            evaluated_at=evaluated_at,
+            trigger_context=trigger_context,
+            operating_point=operating_point,
+        )
         with self._lock:
             conn = self._connect(tenant_id)
             conn.execute("BEGIN IMMEDIATE")
             try:
                 tenant_intentions = self._intention_rows(conn, tenant_id)
-                evaluated_at_utc = evaluated_at.astimezone(UTC)
+                evaluated_at_utc = evaluated_at
                 candidate_results: list[tuple[Intention, dict[str, Any]]] = []
                 for intention in tenant_intentions.values():
                     if intention.status != "scheduled":
@@ -3756,7 +3722,7 @@ class SqliteEngine:
                     key=lambda result: (result[0].due_at, result[0].intention_id)
                 )
                 audit_contexts = [
-                    LocalMemoryEngine._intention_audit_context(
+                    intention_audit_context(
                         self._intention_provenance_rows(conn, intention)
                     )
                     for intention, _signal in candidate_results
@@ -3766,13 +3732,8 @@ class SqliteEngine:
                     candidate_results, audit_contexts, strict=True
                 ):
                     intention.status = "fired"
-                    event_id = content_cid(
-                        "fire_intention",
-                        {
-                            "tenant_id": tenant_id,
-                            "intention_id": intention.intention_id,
-                            "op": "fire",
-                        },
+                    event_id = intention_fire_receipt_id(
+                        tenant_id, intention.intention_id
                     )
                     cursor = conn.execute(
                         "UPDATE intentions SET status = ?, record = ? "
@@ -3797,9 +3758,7 @@ class SqliteEngine:
                         ),
                     )
                     fire_diff = {
-                        **LocalMemoryEngine._intention_audit_diff(
-                            intention, status="fired"
-                        ),
+                        **intention_audit_diff(intention, status="fired"),
                         "evaluated_at": evaluated_at_utc.isoformat(),
                         "operating_point": operating_point.to_dict(),
                     }

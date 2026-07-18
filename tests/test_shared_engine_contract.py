@@ -225,7 +225,7 @@ def engine_bundle(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, 
     tenant = f"tenant-shared-{request.param}-{uuid4()}"
     user = f"user-shared-{request.param}"
     if request.param == "local":
-        return LocalMemoryEngine(), tenant, user
+        return LocalMemoryEngine(store_path=tmp_path / "local-store.json"), tenant, user
     if request.param == "sqlite":
         # Per-tenant SQLite files under a tmp root — no external service, so the
         # contract suite RUNS this third param by default (no DSN skip).
@@ -297,9 +297,6 @@ def test_shared_engine_read_without_access_telemetry_is_store_immutable_cached_a
             access_policy={"tenant": tenant},
         )
     )
-    if isinstance(engine, LocalMemoryEngine):
-        engine.store_path = tmp_path / "local-store.json"
-        engine._persist()
     monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
     with pipeline._RESULT_CACHE_LOCK:
         pipeline._RESULT_CACHE.clear()

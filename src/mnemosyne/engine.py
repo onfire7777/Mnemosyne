@@ -658,6 +658,139 @@ def _evaluate_trigger(
     raise ValueError(f"unsupported trigger_type: {intention.trigger_type!r}")
 
 
+def canonicalize_intention(
+    intention: Intention, *, require_scheduled: bool = False
+) -> Intention:
+    """Return the canonical, detached representation used by every backend."""
+
+    if not isinstance(intention, Intention):
+        raise ValueError("intention must be an Intention")
+    normalized = Intention.from_dict(intention.to_dict())
+    if require_scheduled and normalized.status != "scheduled":
+        raise ValueError("only scheduled intentions may be persisted")
+    return normalized
+
+
+def validate_intention_provenance_claim(
+    intention: Intention,
+    *,
+    evidence_id: str,
+    user_id: str,
+    erased: bool,
+    trust_tier: int,
+    capability_tags: list[str],
+    max_trust_tier: int,
+) -> None:
+    """Apply the canonical provenance and write-capability checks."""
+
+    if erased or evidence_id not in intention.evidence_ids:
+        raise ValueError(
+            f"evidence {evidence_id!r} is missing or outside the intention tenant"
+        )
+    if user_id != intention.user_id:
+        raise ValueError("intention user must match originating evidence")
+    if trust_tier > max_trust_tier:
+        raise PermissionError("originating evidence exceeds the write trust ceiling")
+    if is_write_tainted(capability_tags):
+        raise PermissionError("data-only evidence cannot authorize an intention write")
+
+
+def intention_audit_context(provenance: list[Evidence | dict[str, Any]]) -> tuple[int, list[str]]:
+    """Build the canonical trust and capability context for an audit row."""
+
+    def field(source: Evidence | dict[str, Any], name: str) -> Any:
+        return getattr(source, name) if isinstance(source, Evidence) else source[name]
+
+    trust_tier = max(int(field(item, "trust_tier")) for item in provenance)
+    capability_tags = sorted(
+        {tag for item in provenance for tag in field(item, "capability_tags")}
+    )
+    return trust_tier, capability_tags
+
+
+def intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
+    """Build the canonical immutable intention audit payload."""
+
+    immutable_snapshot = {
+        "intention_id": intention.intention_id,
+        "tenant_id": intention.tenant_id,
+        "user_id": intention.user_id,
+        "agent_id": intention.agent_id,
+        "trigger_type": intention.trigger_type,
+        "trigger_expression": intention.trigger_expression,
+        "action": intention.action,
+        "priority": intention.priority,
+        "due_at": intention.due_at.isoformat(),
+        "dependencies": intention.dependencies,
+        "reschedule_history": intention.reschedule_history,
+        "evidence_ids": intention.evidence_ids,
+    }
+    return {
+        "intention_digest": content_cid("prospective_intention", immutable_snapshot),
+        "trigger_type": intention.trigger_type,
+        "due_at": intention.due_at.isoformat(),
+        "evidence_ids": list(intention.evidence_ids),
+        "status": status,
+    }
+
+
+def intention_fire_receipt_id(tenant_id: str, intention_id: str) -> str:
+    """Return the single canonical identity for a logical fire transition."""
+
+    return content_cid(
+        "fire_intention",
+        {"tenant_id": tenant_id, "intention_id": intention_id, "op": "fire"},
+    )
+
+
+def validate_intention_dependencies(
+    intention: Intention,
+    tenant_intentions: dict[tuple[str, str], Intention],
+) -> None:
+    """Validate tenant-local dependencies and reject transitive cycles."""
+
+    for dependency_id in intention.dependencies:
+        if (intention.tenant_id, dependency_id) not in tenant_intentions:
+            raise ValueError(f"dependency {dependency_id!r} is missing or cross-tenant")
+    if intention.trigger_type != "dependency_completion":
+        return
+    pending = list(intention.dependencies)
+    visited: set[str] = set()
+    while pending:
+        dependency_id = pending.pop()
+        if dependency_id == intention.intention_id:
+            raise ValueError("dependency cycle detected involving the new intention")
+        if dependency_id in visited:
+            continue
+        visited.add(dependency_id)
+        dependency = tenant_intentions.get((intention.tenant_id, dependency_id))
+        if dependency is not None and dependency.trigger_type == "dependency_completion":
+            pending.extend(dependency.dependencies)
+
+
+def validate_intention_evaluation_inputs(
+    tenant_id: str,
+    *,
+    evaluated_at: datetime,
+    trigger_context: TriggerEvaluationContext,
+    operating_point: ProspectiveOperatingPoint,
+    infrastructure_error: str = "evaluate_due_intentions requires infrastructure_available=True",
+) -> datetime:
+    """Validate shared evaluator inputs and return a UTC evaluation instant."""
+
+    if type(tenant_id) is not str or not tenant_id.strip():
+        raise ValueError("tenant_id must be a non-empty string")
+    if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
+        raise ValueError("evaluated_at must be timezone-aware")
+    if not isinstance(trigger_context, TriggerEvaluationContext):
+        raise ValueError("trigger_context must be a TriggerEvaluationContext")
+    if not isinstance(operating_point, ProspectiveOperatingPoint):
+        raise ValueError("operating_point must be a ProspectiveOperatingPoint")
+    if not trigger_context.infrastructure_available:
+        raise RuntimeError(infrastructure_error)
+    return evaluated_at.astimezone(UTC)
+
+
 def _bounded_float(value: object, *, default: float) -> float:
     try:
         number = float(value)  # type: ignore[arg-type]
@@ -1294,70 +1427,17 @@ class LocalMemoryEngine:
             if not matches:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
             source = matches[0]
-            if source.user_id != intention.user_id:
-                raise ValueError("intention user must match originating evidence")
-            if source.trust_tier > self.policy.max_trust_tier:
-                raise PermissionError("originating evidence exceeds the write trust ceiling")
-            if is_write_tainted(source.capability_tags):
-                raise PermissionError("data-only evidence cannot authorize an intention write")
+            validate_intention_provenance_claim(
+                intention,
+                evidence_id=cid,
+                user_id=source.user_id,
+                erased=source.erased,
+                trust_tier=source.trust_tier,
+                capability_tags=source.capability_tags,
+                max_trust_tier=self.policy.max_trust_tier,
+            )
             evidence.append(source)
         return evidence
-
-    @staticmethod
-    def _intention_audit_context(provenance: list[Evidence]) -> tuple[int, list[str]]:
-        trust_tier = max(item.trust_tier for item in provenance)
-        capability_tags = sorted(
-            {tag for item in provenance for tag in item.capability_tags}
-        )
-        return trust_tier, capability_tags
-
-    @staticmethod
-    def _intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]:
-        immutable_snapshot = {
-            "intention_id": intention.intention_id,
-            "tenant_id": intention.tenant_id,
-            "user_id": intention.user_id,
-            "agent_id": intention.agent_id,
-            "trigger_type": intention.trigger_type,
-            "trigger_expression": intention.trigger_expression,
-            "action": intention.action,
-            "priority": intention.priority,
-            "due_at": intention.due_at.isoformat(),
-            "dependencies": intention.dependencies,
-            "reschedule_history": intention.reschedule_history,
-            "evidence_ids": intention.evidence_ids,
-        }
-        return {
-            "intention_digest": content_cid(
-                "prospective_intention", immutable_snapshot
-            ),
-            "trigger_type": intention.trigger_type,
-            "due_at": intention.due_at.isoformat(),
-            "evidence_ids": list(intention.evidence_ids),
-            "status": status,
-        }
-
-    def _reject_dependency_cycle(self, intention: Intention) -> None:
-        """Reject dependency graphs that cycle back to the new intention."""
-        visited: set[str] = set()
-        pending = list(intention.dependencies)
-        while pending:
-            dep_id = pending.pop()
-            if dep_id == intention.intention_id:
-                raise ValueError("dependency cycle detected involving the new intention")
-            if dep_id in visited:
-                continue
-            visited.add(dep_id)
-            dep = self.intentions.get((intention.tenant_id, dep_id))
-            if dep is not None and dep.trigger_type == "dependency_completion":
-                pending.extend(dep.dependencies)
-
-    def _validate_intention_dependencies(self, intention: Intention) -> None:
-        for dep_id in intention.dependencies:
-            if (intention.tenant_id, dep_id) not in self.intentions:
-                raise ValueError(
-                    f"dependency {dep_id!r} is missing or cross-tenant"
-                )
 
     @contextmanager
     def _prospective_transaction(self):
@@ -1378,15 +1458,14 @@ class LocalMemoryEngine:
         """Store an intention after tenant, provenance, trust, and taint checks."""
 
         with self._lock:
+            intention = canonicalize_intention(intention, require_scheduled=True)
             provenance = self._intention_provenance(intention)
             key = (intention.tenant_id, intention.intention_id)
             if key in self.intentions:
                 raise ValueError(f"intention {intention.intention_id!r} already exists")
-            self._validate_intention_dependencies(intention)
-            if intention.trigger_type == "dependency_completion":
-                self._reject_dependency_cycle(intention)
+            validate_intention_dependencies(intention, self.intentions)
             stored = copy.deepcopy(intention)
-            trust_tier, capability_tags = self._intention_audit_context(provenance)
+            trust_tier, capability_tags = intention_audit_context(provenance)
             with self._prospective_transaction():
                 self.intentions[key] = stored
                 self._audit(
@@ -1394,7 +1473,7 @@ class LocalMemoryEngine:
                     stored.agent_id,
                     "schedule_intention",
                     stored.intention_id,
-                    self._intention_audit_diff(stored, status=stored.status),
+                    intention_audit_diff(stored, status=stored.status),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -1419,7 +1498,7 @@ class LocalMemoryEngine:
                     "only the owning user or agent may cancel an intention"
                 )
             provenance = self._intention_provenance(intention)
-            trust_tier, capability_tags = self._intention_audit_context(provenance)
+            trust_tier, capability_tags = intention_audit_context(provenance)
             with self._prospective_transaction():
                 intention.status = "cancelled"
                 intention.cancellation_state = {"cancelled_by": cancelled_by}
@@ -1428,7 +1507,7 @@ class LocalMemoryEngine:
                     cancelled_by,
                     "cancel_intention",
                     intention_id,
-                    self._intention_audit_diff(intention, status="cancelled"),
+                    intention_audit_diff(intention, status="cancelled"),
                     source="prospective_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -1453,25 +1532,19 @@ class LocalMemoryEngine:
         zero mutation/audit.
         """
 
-        if type(tenant_id) is not str or not tenant_id.strip():
-            raise ValueError("tenant_id must be a non-empty string")
-        if not isinstance(evaluated_at, datetime) or evaluated_at.tzinfo is None:
-            raise ValueError("evaluated_at must be timezone-aware")
-        if not isinstance(trigger_context, TriggerEvaluationContext):
-            raise ValueError("trigger_context must be a TriggerEvaluationContext")
-        if not isinstance(operating_point, ProspectiveOperatingPoint):
-            raise ValueError("operating_point must be a ProspectiveOperatingPoint")
-        if not trigger_context.infrastructure_available:
-            raise RuntimeError(
-                "evaluate_due_intentions requires infrastructure_available=True"
-            )
+        evaluated_at = validate_intention_evaluation_inputs(
+            tenant_id,
+            evaluated_at=evaluated_at,
+            trigger_context=trigger_context,
+            operating_point=operating_point,
+        )
         with self._lock:
             tenant_items = {
                 key: item
                 for key, item in self.intentions.items()
                 if key[0] == tenant_id
             }
-            evaluated_utc = evaluated_at.astimezone(UTC)
+            evaluated_utc = evaluated_at
             frozen_intentions = copy.deepcopy(self.intentions)
             candidate_results: list[tuple[Intention, dict[str, Any]]] = []
             for item in tenant_items.values():
@@ -1490,7 +1563,7 @@ class LocalMemoryEngine:
                 key=lambda result: (result[0].due_at, result[0].intention_id)
             )
             audit_contexts = [
-                self._intention_audit_context(self._intention_provenance(intention))
+                intention_audit_context(self._intention_provenance(intention))
                 for intention, _signal in candidate_results
             ]
             fired: list[Intention] = []
@@ -1500,7 +1573,7 @@ class LocalMemoryEngine:
                 ):
                     intention.status = "fired"
                     fire_diff = {
-                        **self._intention_audit_diff(intention, status="fired"),
+                        **intention_audit_diff(intention, status="fired"),
                         "evaluated_at": evaluated_utc.isoformat(),
                         "operating_point": operating_point.to_dict(),
                     }
@@ -1517,13 +1590,8 @@ class LocalMemoryEngine:
                         source="prospective_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
-                        event_id=content_cid(
-                            "fire_intention",
-                            {
-                                "tenant_id": tenant_id,
-                                "intention_id": intention.intention_id,
-                                "op": "fire",
-                            },
+                        event_id=intention_fire_receipt_id(
+                            tenant_id, intention.intention_id
                         ),
                         occurred_at=evaluated_utc,
                     )
