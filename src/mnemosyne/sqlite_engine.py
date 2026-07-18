@@ -61,7 +61,6 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -83,6 +82,7 @@ from mnemosyne.calibration import CalibrationSet
 from mnemosyne.engine import (
     _CANDIDATE_MEMO_SIZE,
     LocalMemoryEngine,
+    WorkingMemoryItem,
     _candidate_memo_enabled,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
@@ -177,136 +177,6 @@ def _normalize_working_json(value: Any, *, path: str) -> Any:
             normalized[key] = _normalize_working_json(item, path=f"{path}.{key}")
         return normalized
     raise ValueError(f"{path} must contain JSON data only")
-
-
-@dataclass(slots=True)
-class _SQLiteWorkingMemoryItem:
-    """Temporary compatibility model for the SQLite lane's isolated worktree.
-
-    The parent Local lane supplies ``mnemosyne.engine.WorkingMemoryItem``. The
-    SQLite task cannot edit that shared file, so this small fallback keeps this
-    branch importable and its focused tests runnable before the parent commit is
-    integrated. Runtime rows prefer the parent model whenever it is present.
-    """
-
-    item_id: str
-    tenant_id: str
-    session_id: str
-    user_id: str
-    agent_id: str
-    kind: str
-    task_id: str
-    content: str
-    created_at: datetime
-    expires_at: datetime
-    evidence_ids: list[str] = field(default_factory=list)
-    access_policy: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-    capability_tags: list[str] = field(default_factory=list)
-    sensitivity: int = 0
-    status: str = "active"
-    expired_at: datetime | None = None
-
-    def __post_init__(self) -> None:
-        for name in (
-            "item_id",
-            "tenant_id",
-            "session_id",
-            "user_id",
-            "agent_id",
-            "kind",
-            "task_id",
-            "content",
-        ):
-            if type(getattr(self, name)) is not str or not getattr(self, name).strip():
-                raise ValueError(f"{name} must be a non-empty string")
-        if self.kind not in _WORKING_MEMORY_KINDS:
-            raise ValueError(f"unsupported working-memory kind: {self.kind!r}")
-        for name in ("created_at", "expires_at"):
-            value = getattr(self, name)
-            if not isinstance(value, datetime) or value.tzinfo is None:
-                raise ValueError(f"{name} must be timezone-aware")
-        created_at = self.created_at.astimezone(UTC)
-        expires_at = self.expires_at.astimezone(UTC)
-        if expires_at <= created_at:
-            raise ValueError("expires_at must be after created_at")
-        if expires_at - created_at > timedelta(hours=24):
-            raise ValueError("working-memory TTL cannot exceed 24 hours")
-        if self.status not in {"active", "expired"}:
-            raise ValueError("unsupported working-memory status")
-        if self.status == "active" and self.expired_at is not None:
-            raise ValueError("active working items cannot have expired_at")
-        if self.expired_at is not None:
-            if not isinstance(self.expired_at, datetime) or self.expired_at.tzinfo is None:
-                raise ValueError("expired_at must be timezone-aware")
-            self.expired_at = self.expired_at.astimezone(UTC)
-        if self.status == "expired" and self.expired_at is None:
-            raise ValueError("expired working items require expired_at")
-        if type(self.evidence_ids) is not list or not self.evidence_ids:
-            raise ValueError("evidence_ids must be a non-empty list")
-        if any(type(cid) is not str or not cid.strip() for cid in self.evidence_ids):
-            raise ValueError("evidence_ids must contain non-empty strings")
-        if len(set(self.evidence_ids)) != len(self.evidence_ids):
-            raise ValueError("evidence_ids must not contain duplicates")
-        if type(self.capability_tags) is not list or any(
-            type(tag) is not str or not tag.strip() for tag in self.capability_tags
-        ):
-            raise ValueError("capability_tags must be a list of non-empty strings")
-        if len(set(self.capability_tags)) != len(self.capability_tags):
-            raise ValueError("capability_tags must not contain duplicates")
-        if type(self.sensitivity) is not int or isinstance(self.sensitivity, bool) or self.sensitivity < 0:
-            raise ValueError("sensitivity must be a non-negative integer")
-        try:
-            json.dumps(self.metadata, sort_keys=True)
-            json.dumps(self.access_policy, sort_keys=True)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("working-memory metadata and access_policy must be JSON") from exc
-        self.created_at = created_at
-        self.expires_at = expires_at
-        self.evidence_ids = list(self.evidence_ids)
-        self.access_policy = copy.deepcopy(self.access_policy)
-        self.metadata = copy.deepcopy(self.metadata)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "item_id": self.item_id,
-            "tenant_id": self.tenant_id,
-            "session_id": self.session_id,
-            "user_id": self.user_id,
-            "agent_id": self.agent_id,
-            "kind": self.kind,
-            "task_id": self.task_id,
-            "content": self.content,
-            "created_at": dt_to_json(self.created_at),
-            "expires_at": dt_to_json(self.expires_at),
-            "evidence_ids": copy.deepcopy(self.evidence_ids),
-            "access_policy": copy.deepcopy(self.access_policy),
-            "metadata": copy.deepcopy(self.metadata),
-            "capability_tags": list(self.capability_tags),
-            "sensitivity": self.sensitivity,
-            "status": self.status,
-            "expired_at": dt_to_json(self.expired_at),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "_SQLiteWorkingMemoryItem":
-        return cls(
-            **{
-                **dict(data),
-                "created_at": parse_dt(data.get("created_at")),
-                "expires_at": parse_dt(data.get("expires_at")),
-                "expired_at": parse_dt(data.get("expired_at")),
-            }
-        )
-
-
-def _working_memory_item_class() -> type[Any]:
-    """Resolve the parent lane's model without importing it at module load."""
-    try:
-        from mnemosyne.engine import WorkingMemoryItem
-    except (ImportError, AttributeError):
-        return _SQLiteWorkingMemoryItem
-    return WorkingMemoryItem
 
 
 def fts_safe_query(tokens: list[str]) -> bool:
@@ -747,15 +617,7 @@ def _working_from_row(row: sqlite3.Row) -> Any:
 
 
 def _working_from_payload(payload: dict[str, Any]) -> Any:
-    cls = _working_memory_item_class()
-    from_dict = getattr(cls, "from_dict", None)
-    if callable(from_dict):
-        return from_dict(copy.deepcopy(payload))
-    constructor_payload = copy.deepcopy(payload)
-    constructor_payload["created_at"] = parse_dt(constructor_payload["created_at"])
-    constructor_payload["expires_at"] = parse_dt(constructor_payload["expires_at"])
-    constructor_payload["expired_at"] = parse_dt(constructor_payload["expired_at"])
-    return cls(**constructor_payload)
+    return WorkingMemoryItem.from_dict(copy.deepcopy(payload))
 
 
 def _working_from_values(values: dict[str, Any]) -> Any:
@@ -1196,7 +1058,7 @@ class SqliteEngine:
 
     def put_working(self, item: Any) -> str:
         """Persist one validated working item and its audit event atomically."""
-        if not isinstance(item, _working_memory_item_class()):
+        if not isinstance(item, WorkingMemoryItem):
             raise TypeError("item must be a WorkingMemoryItem")
         values = _working_payload(item)
         if values["status"] != "active":

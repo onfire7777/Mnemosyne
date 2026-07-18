@@ -8,8 +8,9 @@ from typing import Any
 
 import pytest
 
+from mnemosyne.engine import WorkingMemoryItem
 from mnemosyne.models import Evidence
-from mnemosyne.sqlite_engine import SqliteEngine, _working_memory_item_class
+from mnemosyne.sqlite_engine import SqliteEngine
 
 
 CREATED_AT = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
@@ -59,7 +60,7 @@ def _item(
     sensitivity: int = 0,
     access_policy: dict[str, Any] | None = None,
 ) -> Any:
-    return _working_memory_item_class()(
+    return WorkingMemoryItem(
         item_id=item_id,
         tenant_id=tenant_id,
         session_id=session_id,
@@ -378,7 +379,7 @@ def test_sqlite_working_memory_normalizes_offset_instants_before_sql_comparison(
     engine = SqliteEngine(tmp_path)
     offset_created = datetime.fromisoformat("2026-07-17T05:00:00-07:00")
     offset_expires = datetime.fromisoformat("2026-07-17T05:00:30-07:00")
-    item = _working_memory_item_class()(
+    item = WorkingMemoryItem(
         item_id="offset",
         tenant_id=TENANT,
         session_id=SESSION,
