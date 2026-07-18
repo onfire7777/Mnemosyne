@@ -155,5 +155,14 @@ def test_ordering_duplicate_scores_and_rank_width_are_strict() -> None:
 def test_timeout_is_fail_closed_without_model_execution(fixture) -> None:
     with pytest.raises(RerankerTimeoutError, match="timed out"):
         run_synthetic_bakeoff(fixture, deadline=time.monotonic() - 1)
+    for expired_deadline in (0.0, -1.0):
+        with pytest.raises(RerankerTimeoutError, match="timed out"):
+            run_synthetic_bakeoff(
+                fixture,
+                deadline=expired_deadline,
+                timeout_ms=1_000,
+            )
+    with pytest.raises(RerankerTimeoutError, match="finite"):
+        run_synthetic_bakeoff(fixture, deadline=float("nan"))
     with pytest.raises(RerankerTimeoutError, match="positive"):
         run_synthetic_bakeoff(fixture, timeout_ms=0)
