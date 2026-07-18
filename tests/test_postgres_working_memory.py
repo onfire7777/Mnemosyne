@@ -430,6 +430,63 @@ def test_postgres_working_memory_live_round_trip_boundaries_isolation_and_orderi
     assert engine.list_working(f"tenant-missing-{uuid4()}", session, as_of=now) == []
 
 
+def test_postgres_working_expiry_cannot_cross_subject_scope() -> None:
+    engine = _live_engine()
+    tenant = f"working-subject-{uuid4()}"
+    session = f"session-{uuid4()}"
+    now = datetime.now(UTC)
+    created_at = now - timedelta(minutes=2)
+    expires_at = now + timedelta(minutes=10)
+    scope_a = _live_item(
+        engine,
+        tenant_id=tenant,
+        session_id=session,
+        user_id=f"user-a-{uuid4()}",
+        item_id="scope-a",
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    scope_b = _live_item(
+        engine,
+        tenant_id=tenant,
+        session_id=session,
+        user_id=f"user-b-{uuid4()}",
+        item_id="scope-b",
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+    scope_b.agent_id = "agent-b"
+    scope_b.task_id = "task-b"
+    scope_a.metadata["branch"] = "main"
+    scope_b.metadata["branch"] = "main"
+    engine.put_working(scope_a)
+    engine.put_working(scope_b)
+
+    expired = engine.expire_working(
+        tenant,
+        session_id=session,
+        user_id=scope_a.user_id,
+        agent_id=scope_a.agent_id,
+        task_id=scope_a.task_id,
+        branch=scope_a.metadata["branch"],
+        expired_at=expires_at,
+    )
+
+    assert [item.item_id for item in expired] == ["scope-a"]
+    assert engine.expire_working(
+        tenant,
+        session_id=session,
+        user_id=scope_a.user_id,
+        agent_id=scope_a.agent_id,
+        task_id=scope_a.task_id,
+        branch=scope_a.metadata["branch"],
+        expired_at=expires_at,
+    ) == []
+    remaining = engine.get_working(tenant, session, "scope-b", as_of=now)
+    assert remaining is not None
+    assert remaining.status == "active"
+
+
 def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -> None:
     engine = _live_engine()
     tenant = f"working-identity-{uuid4()}"

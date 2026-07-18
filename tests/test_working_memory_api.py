@@ -143,3 +143,41 @@ def test_expire_is_authorized_deterministic_and_session_bound() -> None:
     assert prepared["source_trust_tier"] == 1
     with pytest.raises(PermissionError, match="session mismatch"):
         server._bind_session_identity("working_query", {**SCOPE, "session_id": "session-b"}, identity)
+
+
+def test_expire_cannot_cross_authenticated_subject_scope() -> None:
+    tools, cid = seeded_tools()
+    seed(tools, cid)
+    other_scope = {
+        **SCOPE,
+        "user_id": "user-b",
+        "agent_id": "agent-b",
+        "task_id": "task-b",
+    }
+    other_cid = tools.engine.append_evidence(
+        Evidence(
+            tenant_id="tenant-a", user_id="user-b", actor="user",
+            source_type="episode", content="Preserve the other scoped task",
+            session_id="session-a", trust_tier=1, access_policy={"tenant": "tenant-a"},
+        )
+    )
+    seed(
+        tools,
+        other_cid,
+        **other_scope,
+        item_id="working-b",
+        content="Preserve the other scoped task",
+    )
+
+    result = tools.working_expire(
+        **SCOPE, expired_at="2026-07-18T12:00:30Z", role="operator", source_trust_tier=0
+    )
+
+    assert [item["item_id"] for item in result["items"]] == ["working-a"]
+    assert tools.working_query(**SCOPE, as_of=NOW)["items"] == []
+    assert [item["item_id"] for item in tools.working_query(**other_scope, as_of=NOW)["items"]] == [
+        "working-b"
+    ]
+    assert tools.working_expire(
+        **SCOPE, expired_at="2026-07-18T12:00:30Z", role="operator", source_trust_tier=0
+    )["items"] == []

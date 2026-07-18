@@ -26,6 +26,7 @@ def _evidence(
     *,
     tenant_id: str = TENANT,
     session_id: str = SESSION,
+    user_id: str = USER,
     capability_tags: list[str] | None = None,
     sensitivity: int = 0,
     access_policy: dict[str, Any] | None = None,
@@ -35,7 +36,7 @@ def _evidence(
     return engine.append_evidence(
         Evidence(
             tenant_id=tenant_id,
-            user_id=USER,
+            user_id=user_id,
             actor=AGENT,
             source_type="episode",
             source_identity="sqlite-working-test",
@@ -56,6 +57,8 @@ def _item(
     tenant_id: str = TENANT,
     session_id: str = SESSION,
     user_id: str = USER,
+    agent_id: str = AGENT,
+    task_id: str = "task-1",
     created_at: datetime = CREATED_AT,
     expires_at: datetime = EXPIRES_AT,
     capability_tags: list[str] | None = None,
@@ -68,16 +71,16 @@ def _item(
         tenant_id=tenant_id,
         session_id=session_id,
         user_id=user_id,
-        agent_id=AGENT,
+        agent_id=agent_id,
         kind="active_goal",
-        task_id="task-1",
+        task_id=task_id,
         content=f"content-{item_id}",
         created_at=created_at,
         expires_at=expires_at,
         evidence_ids=[evidence_id],
         trust_tier=trust_tier,
         access_policy=access_policy or {"tenant": tenant_id},
-        metadata={"priority": "high"},
+        metadata={"priority": "high", "branch": "main"},
         capability_tags=capability_tags or [],
         sensitivity=sensitivity,
     )
@@ -129,7 +132,10 @@ def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path)
     fetched = engine.get_working(TENANT, "s1", "same", as_of=EXPIRES_AT - timedelta(microseconds=1))
     assert fetched is not None
     fetched.metadata["priority"] = "return-mutation"
-    assert engine.get_working(TENANT, "s1", "same", as_of=CREATED_AT).metadata == {"priority": "high"}
+    assert engine.get_working(TENANT, "s1", "same", as_of=CREATED_AT).metadata == {
+        "priority": "high",
+        "branch": "main",
+    }
     assert engine.get_working(TENANT, "s2", "same", as_of=CREATED_AT).content == second.content
     assert engine.get_working("other-tenant", "s1", "same", as_of=CREATED_AT) is None
 
@@ -150,6 +156,44 @@ def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path)
     assert audits[-1]["diff"]["item_id"] == "same"
     assert audits[-1]["diff"]["evidence_ids"] == first.evidence_ids[:1]
     assert audits[-1]["diff"]["working_digest"]
+
+
+def test_sqlite_working_expiry_cannot_cross_subject_scope(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    scope_a = _item(_evidence(engine), item_id="scope-a")
+    scope_b = _item(
+        _evidence(engine, user_id="user-other", content="evidence for scope-b"),
+        item_id="scope-b",
+        user_id="user-other",
+        agent_id="agent-other",
+        task_id="task-other",
+    )
+    engine.put_working(scope_a)
+    engine.put_working(scope_b)
+
+    expired = engine.expire_working(
+        TENANT,
+        session_id=SESSION,
+        user_id=scope_a.user_id,
+        agent_id=scope_a.agent_id,
+        task_id=scope_a.task_id,
+        branch=scope_a.metadata["branch"],
+        expired_at=EXPIRES_AT,
+    )
+
+    assert [item.item_id for item in expired] == ["scope-a"]
+    assert engine.expire_working(
+        TENANT,
+        session_id=SESSION,
+        user_id=scope_a.user_id,
+        agent_id=scope_a.agent_id,
+        task_id=scope_a.task_id,
+        branch=scope_a.metadata["branch"],
+        expired_at=EXPIRES_AT,
+    ) == []
+    remaining = engine.get_working(TENANT, SESSION, "scope-b", as_of=CREATED_AT)
+    assert remaining is not None
+    assert remaining.status == "active"
 
 
 def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order(tmp_path) -> None:
