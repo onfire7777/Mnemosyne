@@ -30,5 +30,5 @@ Validation commands:
 - [x] Integrate working-item erasure cascade without changing the existing durable-memory contract.
 
 ### Task 3: Verify focused behavior
-- [ ] Add focused regression tests covering model validation, TTL boundaries, isolation, detached values, audit idempotency, rollback, erasure, and no auto-promotion.
-- [ ] Run the focused validation commands and reconcile the final lease-clean diff.
+- [x] Add focused regression tests covering model validation, TTL boundaries, isolation, detached values, audit idempotency, rollback, erasure, and no auto-promotion.
+- [x] Run the focused validation commands and reconcile the final lease-clean diff.
