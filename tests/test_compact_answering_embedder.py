@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -18,6 +19,8 @@ from eval.compact_answering.embedder_dev import (
     fixture_digest,
     load_selection_fixture,
     pad_native_to_1024,
+    parse_request,
+    parse_response,
     rank_by_cosine,
     select_synthetic_embedder,
     validate_bakeoff_receipt,
@@ -94,6 +97,28 @@ def test_request_and_response_require_exact_custody(identity: EmbedderIdentity) 
     }
     with pytest.raises(EmbedderValidationError):
         validate_request(c1_identity, identity)
+
+
+def test_wire_parsers_reject_duplicate_nonfinite_and_invalid_utf8(identity: EmbedderIdentity) -> None:
+    request_payload = json.dumps(request(identity))
+    duplicate = request_payload.replace('"space": "native_768"', '"space": "native_768", "space": "native_768"')
+    with pytest.raises(EmbedderValidationError, match="duplicate key"):
+        parse_request(duplicate, identity)
+
+    nonfinite = request_payload.replace('"abi_version": 1', '"abi_version": NaN')
+    with pytest.raises(EmbedderValidationError, match="unsupported JSON constant"):
+        parse_request(nonfinite, identity)
+
+    with pytest.raises(EmbedderValidationError, match="valid JSON"):
+        parse_request(b"\xff", identity)
+
+    parsed_request = parse_request(request_payload, identity)
+    parsed_response = parse_response(
+        json.dumps(response(identity, [vector(1.0)])),
+        parsed_request,
+        identity,
+    )
+    assert parsed_response.vectors[0][0] == 1.0
 
 
 def test_vectors_reject_nonfinite_zero_and_bad_padding(identity: EmbedderIdentity) -> None:
@@ -208,9 +233,9 @@ def test_synthetic_fixture_rejects_nonfinite_and_zero_vectors(
 def test_synthetic_fixture_rejects_receipt_digest_mutation() -> None:
     fixture = _selection_fixture()
     receipt = fixture["candidates"][0]["receipt"]
-    receipt["parity"]["ranking"] = False
+    receipt["receipt_sha256"] = "0" * 64
 
-    with pytest.raises(EmbedderSelectionValidationError, match="receipt parity"):
+    with pytest.raises(EmbedderSelectionValidationError, match="receipt digest"):
         validate_selection_fixture(fixture)
 
 
