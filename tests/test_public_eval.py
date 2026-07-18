@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -74,7 +75,6 @@ def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
     assert result["system_seam"] == "public-cli-subprocess"
     assert result["publishable"] is False
     assert verify_bundle(out)["valid"] is True
-
     traces = [
         json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
     ]
@@ -84,6 +84,81 @@ def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
     metrics = json.loads((out / "metrics.json").read_text())
     assert metrics["interval"]["method"] == "wilson"
     assert metrics["trace_count"] == len(traces)
+
+
+@pytest.mark.parametrize(
+    "suite",
+    [
+        "pm-bench-development",
+        "triggerbench-development",
+        "working-memory-action-development",
+    ],
+)
+def test_action_run_verify_and_reproduce_are_byte_identical(
+    tmp_path: Path, suite: str
+) -> None:
+    source = tmp_path / f"{suite}-source"
+    reproduced = tmp_path / f"{suite}-reproduced"
+    run_public_suite(suite, source)
+    assert verify_bundle(source) == {
+        "family": "deterministic-action",
+        "suite": suite,
+        "valid": True,
+    }
+    assert json.loads((source / "judge.json").read_text()) == {
+        "judge": None,
+        "reader": None,
+        "reason": "deterministic-action family",
+    }
+    reproduce_bundle(source, reproduced)
+    manifest = json.loads((source / "bundle-manifest.json").read_text())
+    for name in manifest["files"]:
+        assert (source / name).read_bytes() == (reproduced / name).read_bytes()
+
+
+@pytest.mark.parametrize(
+    ("target", "field"),
+    [
+        ("metadata", "fixture"),
+        ("metadata", "revision"),
+        ("metadata", "dataset_sha256"),
+        ("data", "operating_point"),
+        ("case", "category"),
+        ("trace", "category"),
+        ("trace", "hard_gate_violations"),
+        ("config", "scoring_profile"),
+    ],
+)
+def test_action_bundle_rejects_registry_and_trace_tampering(
+    tmp_path: Path, target: str, field: str
+) -> None:
+    source = tmp_path / "source"
+    tampered = tmp_path / f"tampered-{target}-{field}"
+    run_public_suite("working-memory-action-development", source)
+    shutil.copytree(source, tampered)
+    if target in {"metadata", "data", "case"}:
+        document = json.loads((tampered / "benchmark.json").read_text())
+        node = document[target] if target != "case" else document["data"]["cases"][0]
+        node[field] = "tampered"
+        _rewrite_json(tampered / "benchmark.json", document)
+        _refresh_digest(tampered, "benchmark.json")
+    elif target == "config":
+        document = json.loads((tampered / "config.json").read_text())
+        document[field] = "tampered"
+        _rewrite_json(tampered / "config.json", document)
+        _refresh_digest(tampered, "config.json")
+    else:
+        traces = [
+            json.loads(line)
+            for line in (tampered / "traces.jsonl").read_text().splitlines()
+        ]
+        traces[0][field] = "tampered"
+        (tampered / "traces.jsonl").write_text(
+            "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in traces)
+        )
+        _refresh_digest(tampered, "traces.jsonl")
+    with pytest.raises(BundleError):
+        verify_bundle(tampered)
 
 
 def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -> None:
