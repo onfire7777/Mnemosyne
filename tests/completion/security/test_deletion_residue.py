@@ -1027,9 +1027,9 @@ def _valid_manifest() -> dict[str, Any]:
         "completed_at": "2026-07-18T00:00:01Z",
         "mode": "hard_delete_legal",
         "requested_by_role": "legal",
-        "reason": "synthetic",
+        "reason": "opaque:reason",
         "tenant_ref": "opaque:tenant",
-        "user_scope": "all",
+        "user_scope": "opaque:user",
         "branch_scope": "all",
         "source_refs": ["opaque:source"],
         "policy": {"version": "w2", "required_surfaces": ["source_evidence"]},
@@ -1053,7 +1053,7 @@ def _valid_manifest() -> dict[str, Any]:
         ],
         "stores": [
             {
-                "store": "local",
+                "store": "source_evidence",
                 "expected": 1,
                 "discovered": 1,
                 "visited": 1,
