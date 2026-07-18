@@ -60,7 +60,9 @@ def _strings(value: Any) -> list[str]:
     if isinstance(value, str):
         return [value]
     if isinstance(value, dict):
-        return [item for nested in value.values() for item in _strings(nested)]
+        return [str(key) for key in value] + [
+            item for nested in value.values() for item in _strings(nested)
+        ]
     if isinstance(value, (list, tuple, set)):
         return [item for nested in value for item in _strings(nested)]
     return []
@@ -601,7 +603,11 @@ def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
             "tenant_id": TENANT,
             "op": "remember",
             "target_id": world.source_ref,
-            "details": {"content": CANARY, "source_ref": world.source_ref},
+            "details": {
+                "content": CANARY,
+                "source_ref": world.source_ref,
+                f"{CANARY}:{world.source_ref}": "sensitive-key",
+            },
         }
     )
     world.engine.deletion_log.append(
@@ -1134,6 +1140,15 @@ def test_r25_semantic_verifier_fails_closed_for_malformed_names_and_fences(
 ) -> None:
     manifest = _valid_manifest()
     mutate(manifest)
+    result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert result["errors"]
+
+
+@pytest.mark.parametrize("field", ["Payload", "extra"])
+def test_r25_semantic_verifier_rejects_unknown_custody_fields(field: str) -> None:
+    manifest = _valid_manifest()
+    manifest[field] = "direct-user-identifier"
     result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
     assert result["complete"] is False
     assert result["errors"]

@@ -15,13 +15,56 @@ _FORBIDDEN_KEYS = {
     "payload", "content", "content_pointer", "source_uri", "uri", "hash",
     "tenant_id", "user_id", "source_ref", "evidence_cid", "source_identity",
 }
+_ALLOWED_KEYS = {
+    "manifest": {
+        "schema", "operation_id", "request_id", "requested_at", "completed_at",
+        "mode", "requested_by_role", "reason", "tenant_ref", "user_scope",
+        "branch_scope", "source_refs", "policy", "fence", "surfaces", "stores",
+        "retention_exceptions", "summary",
+    },
+    "policy": {"version", "required_surfaces"},
+    "fence": {"generation", "ledger_position", "durable"},
+    "surface": {
+        "surface", "surface_type", "backend", "tenant_ref", "object_ref", "action",
+        "precondition_present", "attempted_at", "verified_at", "verification_method",
+        "state", "attempts", "checkpoint", "verified_removed", "residue_probe",
+        "durability_checkpoint", "error_code",
+    },
+    "store": {"store", "expected", "discovered", "visited", "available", "checkpoint"},
+    "retention_exception": {"surface", "restore_block_fence", "deadline"},
+    "summary": {
+        "expected", "visited", "verified", "failed", "unavailable", "cascade_percent",
+        "recoverable_residue_count", "cross_tenant_mutations", "complete",
+    },
+}
+
+
+def _schema_errors(manifest: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+
+    def check(value: Any, kind: str, path: str) -> None:
+        if not isinstance(value, dict):
+            return
+        unknown = set(value) - _ALLOWED_KEYS[kind]
+        if unknown:
+            errors.append(f"{path} contains unknown fields: {', '.join(sorted(map(str, unknown)))}")
+
+    check(manifest, "manifest", "manifest")
+    for field, kind in (("policy", "policy"), ("fence", "fence"), ("summary", "summary")):
+        check(manifest.get(field), kind, f"manifest.{field}")
+    for field, kind in (("surfaces", "surface"), ("stores", "store"), ("retention_exceptions", "retention_exception")):
+        rows = manifest.get(field)
+        if isinstance(rows, list):
+            for index, row in enumerate(rows):
+                check(row, kind, f"manifest.{field}[{index}]")
+    return errors
 
 
 def _custody_errors(value: Any, *, path: str = "manifest") -> list[str]:
     errors: list[str] = []
     if isinstance(value, dict):
         for key, item in value.items():
-            if key in _FORBIDDEN_KEYS:
+            if isinstance(key, str) and key.lower() in _FORBIDDEN_KEYS:
                 errors.append(f"{path}.{key} is a forbidden direct-custody field")
             errors.extend(_custody_errors(item, path=f"{path}.{key}"))
     elif isinstance(value, list):
@@ -51,6 +94,7 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         return {"complete": False, "errors": ["manifest must be an object"]}
     if manifest.get("schema") != SCHEMA:
         errors.append("schema is unsupported")
+    errors.extend(_schema_errors(manifest))
     errors.extend(_custody_errors(manifest))
     for field in ("tenant_ref", "user_scope", "reason"):
         _opaque_field(manifest, field, errors)
