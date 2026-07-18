@@ -7,7 +7,13 @@ from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any
 
-from mnemosyne.engine import LocalMemoryEngine, WorkingMemoryItem
+from mnemosyne.engine import (
+    Intention,
+    LocalMemoryEngine,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+    WorkingMemoryItem,
+)
 from mnemosyne.ids import new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
@@ -19,9 +25,21 @@ from mnemosyne.parametric import ParametricTier, protected_suite_is_gating, prot
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SecurityPolicy, TrustTier, WriteRole
+from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier, WriteRole
 from mnemosyne.source_truth import apply_markdown_git_source
 from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry
+
+
+def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
+    if type(value) is not str:
+        raise ValueError(f"{field} must be an ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return parsed
 
 
 TOOL_SPEC: list[dict[str, Any]] = [
@@ -85,6 +103,42 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "preference",
         "description": "Record an explicit or inferred preference with precedence rules.",
         "arguments": ["tenant_id", "user_id", "category", "statement"],
+    },
+    {
+        "name": "schedule_intention",
+        "description": "Schedule a data-only prospective-memory intention backed by originating evidence.",
+        "arguments": [
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "trigger_type",
+            "trigger_expression",
+            "action",
+            "due_at",
+            "evidence_ids",
+            "priority",
+            "dependencies",
+            "reschedule_history",
+        ],
+    },
+    {
+        "name": "cancel_intention",
+        "description": "Cancel a scheduled prospective-memory intention as its owning user or agent.",
+        "arguments": [
+            "tenant_id",
+            "intention_id",
+            "cancelled_by",
+        ],
+    },
+    {
+        "name": "evaluate_intentions",
+        "description": "Evaluate due prospective-memory intentions from an authenticated scheduler context.",
+        "arguments": ["tenant_id", "evaluated_at", "trigger_context", "operating_point"],
+    },
+    {
+        "name": "list_intentions",
+        "description": "List prospective-memory intentions owned by the authenticated subject.",
+        "arguments": ["tenant_id"],
     },
     {
         "name": "search",
@@ -676,6 +730,147 @@ class MemoryTools:
             )
         )
         return {"id": preference_id, "security": decision}
+
+    def schedule_intention(
+        self,
+        tenant_id: str,
+        user_id: str,
+        agent_id: str,
+        trigger_type: str,
+        trigger_expression: dict[str, Any],
+        action: dict[str, Any],
+        due_at: str,
+        evidence_ids: list[str],
+        priority: str = "normal",
+        dependencies: list[str] | None = None,
+        reschedule_history: list[dict[str, Any]] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "schedule",
+            session_identity,
+            tenant_id=tenant_id,
+            actor_id=user_id,
+            owner_id=user_id,
+            agent_id=agent_id,
+        )
+        intention = Intention(
+            intention_id=new_id(),
+            tenant_id=authorization.tenant_id or tenant_id,
+            user_id=authorization.owner_id or user_id,
+            agent_id=authorization.agent_id or agent_id,
+            trigger_type=trigger_type,
+            trigger_expression=trigger_expression,
+            action=action,
+            due_at=_parse_prospective_datetime(due_at, field="due_at"),
+            priority=priority,
+            dependencies=dependencies or [],
+            reschedule_history=reschedule_history or [],
+            evidence_ids=evidence_ids,
+        )
+        self.engine.schedule_intention(intention)
+        return intention.to_dict()
+
+    def cancel_intention(
+        self,
+        tenant_id: str,
+        intention_id: str,
+        cancelled_by: str,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "cancel",
+            session_identity,
+            tenant_id=tenant_id,
+            actor_id=cancelled_by,
+            owner_id=cancelled_by,
+        )
+        self.engine.cancel_intention(
+            authorization.tenant_id or tenant_id,
+            intention_id,
+            cancelled_by=authorization.actor_id or cancelled_by,
+        )
+        return next(
+            intention.to_dict()
+            for intention in self.engine.list_intentions(tenant_id)
+            if intention.intention_id == intention_id
+        )
+
+    def evaluate_intentions(
+        self,
+        tenant_id: str,
+        evaluated_at: str,
+        trigger_context: dict[str, Any],
+        operating_point: dict[str, Any],
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "evaluate",
+            session_identity,
+            tenant_id=tenant_id,
+        )
+        evaluated = _parse_prospective_datetime(
+            evaluated_at,
+            field="evaluated_at",
+        )
+        if type(trigger_context) is not dict:
+            raise ValueError("trigger_context must be a JSON object")
+        if type(operating_point) is not dict:
+            raise ValueError("operating_point must be a JSON object")
+        context_tenant_id = trigger_context.get("tenant_id", authorization.tenant_id or tenant_id)
+        if context_tenant_id != (authorization.tenant_id or tenant_id):
+            raise ValueError("trigger_context tenant_id must match authenticated tenant")
+        context_arguments = dict(trigger_context)
+        context_arguments["tenant_id"] = authorization.tenant_id or tenant_id
+        context = TriggerEvaluationContext(**context_arguments)
+        point = ProspectiveOperatingPoint(**operating_point)
+        intentions = self.engine.evaluate_due_intentions(
+            authorization.tenant_id or tenant_id,
+            evaluated_at=evaluated,
+            trigger_context=context,
+            operating_point=point,
+        )
+        return {"intentions": [intention.to_dict() for intention in intentions]}
+
+    def list_intentions(
+        self,
+        tenant_id: str,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "read",
+            session_identity,
+            tenant_id=tenant_id,
+            owner_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
+        )
+        intentions = [
+            intention
+            for intention in self.engine.list_intentions(authorization.tenant_id or tenant_id)
+            if intention.user_id == authorization.owner_id
+        ]
+        return {"intentions": [intention.to_dict() for intention in intentions]}
+
+    def _authorize_prospective(
+        self,
+        operation: str,
+        identity: SessionIdentity | None,
+        *,
+        tenant_id: str,
+        actor_id: str | None = None,
+        owner_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> Any:
+        decision = self.security.authorize_prospective_memory(
+            operation,
+            identity,  # type: ignore[arg-type]
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+            agent_id=agent_id,
+        )
+        if not decision.allowed:
+            raise PermissionError(f"{operation} intention denied: {decision.reason}")
+        return decision
 
     def search(
         self,
