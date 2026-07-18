@@ -15,6 +15,7 @@ TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
     r"\| ([^|]+) \| \[x\] Verified \|$"
 )
+V2_CAP_ROW = re.compile(r"^\| \[[ x]\] (CAP-\d{3}) \|")
 
 
 def _frontmatter_list(text: str, key: str) -> set[str]:
@@ -100,15 +101,19 @@ def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
         ),
     }
 
+    rows_by_requirement: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        match = V2_CAP_ROW.match(line)
+        if match:
+            rows_by_requirement.setdefault(match.group(1), []).append(line)
+
     for requirement, (description, authority) in expected_rows.items():
-        rows = [line for line in text.splitlines() if f"[x] {requirement}" in line]
-        assert rows == [
+        assert rows_by_requirement.get(requirement) == [
             f"| [x] {requirement} | {description} | {authority} | Complete |"
         ]
 
     phase_15 = next(line for line in text.splitlines() if line.startswith("| 15 |"))
-    assert "CAP-012" in phase_15
-    assert "CAP-013" in phase_15
+    assert phase_15 == "| 15 | CAP-004..010, CAP-012, CAP-013, RAIL-001..004 |"
 
 
 def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
@@ -121,6 +126,7 @@ def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
         "without firing or mutating them",
         "never promotes them implicitly",
         "Local, Postgres, and Sqlite engines",
+        "kind ∈ {evidence, assertion, relation, preference, intention, working}",
         "remain data-only",
         "docs/ENGINE-CONTRACT.md",
     ):
@@ -153,5 +159,11 @@ def test_engine_contract_documents_three_engine_memory_plane_parity() -> None:
         "session_id`, `user_id`, `agent_id`, `task_id`, and `branch",
         "legacy tombstone",
         "limited to erased-replay detection",
+        "restricted to the owning user or agent",
+        "working_promote",
+        "working-promote",
+        "PromotionGate",
+        "Memory-plane implementation mapping",
+        "SqliteEngine (`src/mnemosyne/sqlite_engine.py`)",
     ):
         assert expected in normalized
