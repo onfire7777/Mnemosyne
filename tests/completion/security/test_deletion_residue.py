@@ -1120,6 +1120,25 @@ def test_r25_complete_manifest_is_signed_then_semantically_verified(tmp_path: Pa
     _assert_complete(manifest)
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest["fence"].update(generation=True, ledger_position=True),
+        lambda manifest: manifest["surfaces"][0].update(surface=[]),
+        lambda manifest: manifest["stores"][0].update(store={}),
+        lambda manifest: manifest["policy"].update(required_surfaces=[[]]),
+    ],
+)
+def test_r25_semantic_verifier_fails_closed_for_malformed_names_and_fences(
+    mutate: Callable[[dict[str, Any]], None],
+) -> None:
+    manifest = _valid_manifest()
+    mutate(manifest)
+    result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert result["errors"]
+
+
 def test_r23_durable_journal_replays_after_coordinator_restart(tmp_path: Path) -> None:
     deletion = importlib.import_module("mnemosyne.deletion")
     world = _world()

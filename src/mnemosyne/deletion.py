@@ -392,7 +392,7 @@ class DeletionCoordinator:
     def _run(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         tenant = request["tenant_id"]
         refs = request["source_refs"]
-        required = self._surface_ids(tenant, refs)
+        required = list(dict.fromkeys([*self._surface_ids(tenant, refs), *record.receipts]))
         for surface_id in required:
             record.receipts.setdefault(surface_id, SurfaceReceipt(surface=self._surface_label(surface_id)))
         self.ledger.checkpoint(record)
@@ -461,15 +461,23 @@ class DeletionCoordinator:
         receipt.state = "deleting"
         receipt.error_code = None
         try:
-            if kind == "object" and self._target_object_keys(tenant, refs):
+            if kind == "object":
                 receipt.attempts += 1
+                self.ledger.checkpoint(record)
                 return self._delete_objects(receipt, tenant, refs)
             if kind == "backup":
                 receipt.attempts += 1
+                self.ledger.checkpoint(record)
                 return self._delete_backups(receipt, tenant, refs)
             if kind == "cache":
                 receipt.attempts += 1
-                del self.process_cache[name]
+                self.ledger.checkpoint(record)
+                if name in self.process_cache:
+                    del self.process_cache[name]
+                elif not resuming:
+                    receipt.error_code = "probe_failed"
+                    receipt.state = "failed"
+                    return False
                 receipt.action = "invalidated"
                 return self._verified(receipt)
             store = self.stores[name]
@@ -613,6 +621,10 @@ class DeletionCoordinator:
                     )
         sensitive.update(hashlib.sha256(value.encode()).hexdigest() for value in tuple(sensitive) if value)
         try:
+            # Scrub while the evidence still exists so a crash after forget cannot
+            # destroy the only copy of payload-derived scrub inputs. Replay can
+            # always scrub the new forget custody rows from request-owned refs.
+            self._scrub_retained_history(request["tenant_id"], sensitive)
             for branch in branches:
                 for ref in request["source_refs"]:
                     self.engine.forget(
