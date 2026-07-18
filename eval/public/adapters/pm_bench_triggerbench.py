@@ -826,6 +826,7 @@ def _trace_row(
         "operating_point_id": benchmark["operating_point_id"],
         "queried_channels": query_channels,
         "regularities": sorted({task["regularity"] for task in relevant_tasks}),
+        "scoring_family": "deterministic-action",
         "step_id": step["step_id"],
         "temporal_scopes": sorted({task["temporal_scope"] for task in relevant_tasks}),
         "trigger_types": sorted({task["trigger"]["type"] for task in relevant_tasks}),

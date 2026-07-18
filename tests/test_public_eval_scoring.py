@@ -69,11 +69,12 @@ def test_working_action_dispatch_preserves_categories_safety_and_metadata() -> N
     labels = [
         {
             "case_id": f"case-{index}",
+            "category": category,
             "expected_action_id": f"action-{index}",
             "expected_abstain": False,
             "seed": 94125,
         }
-        for index, _ in enumerate(categories)
+        for index, category in enumerate(categories)
     ]
     traces = [
         {

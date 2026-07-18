@@ -10,6 +10,24 @@ independent external reproduction. Retrieval proportions use Wilson intervals;
 future answer-quality tracks must name their reader/judge and use bootstrap
 intervals. Families are never aggregated.
 
+## Deterministic action development suites
+
+The live registry exposes three repository-authored, non-publishable action
+profiles: `pm-bench-development`, `triggerbench-development`, and
+`working-memory-action-development`. Run one through the public subprocess
+path, then verify and reproduce its byte-identical bundle:
+
+```
+uv run --locked mneme eval-public --suite pm-bench-development --out-dir /tmp/mneme-pm-action
+uv run --locked mneme eval-public --verify-bundle /tmp/mneme-pm-action
+uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-pm-action --out-dir /tmp/mneme-pm-action-reproduced
+```
+
+These are deterministic development probes, not official PM-Bench or
+TriggerBench reproductions. Their bundles retain scoring-side fixture custody,
+an exact operating point, action traces, null reader/judge fields, registry
+revision and dataset digests, and false publication/headline flags.
+
 ## Frozen Phase 12 QA protocol
 
 The `_qa_protocol` registry entry preregisters the deterministic

@@ -95,6 +95,10 @@ def _score_pm_action(
     operating_point_id, frozen_config = operating_points.pop()
     merged: list[dict[str, Any]] = []
     for label, trace in pairs:
+        if trace.get("category") != label.get("category"):
+            raise ScoringError("action trace category does not match scoring custody")
+        if trace.get("operating_point_id") != label.get("operating_point_id"):
+            raise ScoringError("action trace operating point does not match scoring custody")
         expected = label.get("expected_due_action_ids")
         if not isinstance(expected, list) or any(
             not isinstance(value, str) or not value for value in expected
@@ -146,6 +150,8 @@ def _score_working_action(
         [trace for _, trace in pairs],
         seed=seed,
     )
+    if any(trace.get("category") != label.get("category") for label, trace in pairs):
+        raise ScoringError("working-action category does not match scoring custody")
     bootstrap = measured["bootstrap_macro_accuracy"]
     measured.update(
         family="deterministic-action",
