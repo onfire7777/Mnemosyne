@@ -3,11 +3,12 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 import sqlite3
+from typing import Any
 
 import pytest
 
 from mnemosyne.models import Evidence
-from mnemosyne.sqlite_engine import SqliteEngine, _SQLiteWorkingMemoryItem
+from mnemosyne.sqlite_engine import SqliteEngine, _working_memory_item_class
 
 
 CREATED_AT = datetime(2026, 7, 17, 12, 0, tzinfo=UTC)
@@ -18,7 +19,15 @@ SESSION = "session-working"
 AGENT = "agent-working"
 
 
-def _evidence(engine: SqliteEngine, *, tenant_id: str = TENANT, session_id: str = SESSION) -> str:
+def _evidence(
+    engine: SqliteEngine,
+    *,
+    tenant_id: str = TENANT,
+    session_id: str = SESSION,
+    capability_tags: list[str] | None = None,
+    sensitivity: int = 0,
+    access_policy: dict[str, Any] | None = None,
+) -> str:
     return engine.append_evidence(
         Evidence(
             tenant_id=tenant_id,
@@ -28,8 +37,9 @@ def _evidence(engine: SqliteEngine, *, tenant_id: str = TENANT, session_id: str 
             source_identity="sqlite-working-test",
             session_id=session_id,
             content=f"evidence-{tenant_id}-{session_id}",
-            capability_tags=["working-memory"],
-            access_policy={"tenant": tenant_id},
+            capability_tags=capability_tags or ["working-memory"],
+            sensitivity=sensitivity,
+            access_policy=access_policy or {"tenant": tenant_id},
         )
     )
 
@@ -43,8 +53,11 @@ def _item(
     user_id: str = USER,
     created_at: datetime = CREATED_AT,
     expires_at: datetime = EXPIRES_AT,
-) -> _SQLiteWorkingMemoryItem:
-    return _SQLiteWorkingMemoryItem(
+    capability_tags: list[str] | None = None,
+    sensitivity: int = 0,
+    access_policy: dict[str, Any] | None = None,
+) -> Any:
+    return _working_memory_item_class()(
         item_id=item_id,
         tenant_id=tenant_id,
         session_id=session_id,
@@ -56,8 +69,10 @@ def _item(
         created_at=created_at,
         expires_at=expires_at,
         evidence_ids=[evidence_id],
-        access_policy={"tenant": tenant_id},
+        access_policy=access_policy or {"tenant": tenant_id},
         metadata={"priority": "high"},
+        capability_tags=capability_tags or [],
+        sensitivity=sensitivity,
     )
 
 
@@ -94,16 +109,21 @@ def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path)
 
     assert engine.list_working(TENANT, "s1", as_of=EXPIRES_AT - timedelta(microseconds=1))
     assert engine.get_working(TENANT, "s1", "same", as_of=EXPIRES_AT) is None
-    expired = engine.expire_working(TENANT, session_id="s1", expired_at=EXPIRES_AT)
+    sweep = EXPIRES_AT + timedelta(seconds=1)
+    expired = engine.expire_working(TENANT, session_id="s1", expired_at=sweep)
     assert [item.item_id for item in expired] == ["same"]
-    assert engine.expire_working(TENANT, session_id="s1", expired_at=EXPIRES_AT) == []
+    assert expired[0].expired_at == sweep
+    assert engine.expire_working(TENANT, session_id="s1", expired_at=sweep) == []
     audits = [
         row
         for row in engine.export_tenant(TENANT)["audit_log"]
         if row["target_id"] == "same" and row["diff"]["session_id"] == "s1"
     ]
     assert [row["op"] for row in audits] == ["put_working", "expire_working"]
-    assert audits[-1]["diff"]["sweep"] == EXPIRES_AT.isoformat()
+    assert audits[-1]["diff"]["sweep"] == sweep.isoformat()
+    assert audits[-1]["diff"]["item_id"] == "same"
+    assert audits[-1]["diff"]["evidence_ids"] == first.evidence_ids[:1]
+    assert audits[-1]["diff"]["working_digest"]
 
 
 def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order(tmp_path) -> None:
@@ -121,7 +141,11 @@ def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order
         created_at=CREATED_AT - timedelta(seconds=1),
         expires_at=EXPIRES_AT - timedelta(seconds=1),
     )
-    first = _item(_evidence(engine, session_id=SESSION), item_id="first")
+    first = _item(
+        _evidence(engine, session_id=SESSION),
+        item_id="first",
+        expires_at=EXPIRES_AT + timedelta(seconds=5),
+    )
 
     engine.put_working(tenant_item)
     engine.put_working(other_tenant_item)
@@ -130,8 +154,8 @@ def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order
 
     assert [item.item_id for item in engine.list_working(TENANT, SESSION, as_of=CREATED_AT)] == [
         "later-id",
-        "first",
         "same",
+        "first",
     ]
     assert engine.get_working(other_tenant, SESSION, "same", as_of=CREATED_AT).tenant_id == other_tenant
     with pytest.raises(ValueError, match="already exists"):
@@ -175,6 +199,25 @@ def test_sqlite_working_memory_validates_provenance_on_put_and_get(tmp_path) -> 
     conn.commit()
     with pytest.raises(ValueError, match="is erased"):
         engine.get_working(TENANT, SESSION, "item-a", as_of=CREATED_AT)
+
+
+def test_sqlite_working_memory_persists_restrictive_provenance_envelope(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(
+        engine,
+        capability_tags=["source-capability"],
+        sensitivity=2,
+        access_policy={"tenant": TENANT, "max_sensitivity": 1},
+    )
+    item = _item(evidence_id, capability_tags=["item-capability"])
+
+    engine.put_working(item)
+
+    stored = engine.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT)
+    assert stored is not None
+    assert stored.sensitivity == 2
+    assert stored.capability_tags == ["item-capability", "source-capability"]
+    assert stored.access_policy["max_sensitivity"] == 1
 
 
 def test_sqlite_working_memory_accepts_inclusive_24_hour_ttl(tmp_path) -> None:
@@ -265,7 +308,7 @@ def test_sqlite_working_memory_normalizes_offset_instants_before_sql_comparison(
     engine = SqliteEngine(tmp_path)
     offset_created = datetime.fromisoformat("2026-07-17T05:00:00-07:00")
     offset_expires = datetime.fromisoformat("2026-07-17T05:00:30-07:00")
-    item = _SQLiteWorkingMemoryItem(
+    item = _working_memory_item_class()(
         item_id="offset",
         tenant_id=TENANT,
         session_id=SESSION,
