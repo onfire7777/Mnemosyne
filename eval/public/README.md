@@ -25,10 +25,17 @@ uv run --locked mneme eval-public --verify-bundle /tmp/mneme-working-action
 uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-working-action --out-dir /tmp/mneme-working-action-reproduced
 ```
 
-These are deterministic development probes, not official PM-Bench or
-TriggerBench reproductions. Their bundles retain scoring-side fixture custody,
-an exact operating point, action traces, null reader/judge fields, registry
-revision and dataset digests, and false publication/headline flags.
+The registered PM-Bench and TriggerBench profiles retain repository-authored
+fixture and scoring custody, but they cannot run or produce bundles. The
+runnable Working Memory profile produces a deterministic development bundle
+with its exact operating point, action traces, null reader/judge fields,
+registry revision and dataset digest, and false publication/headline flags. It
+is not an official PM-Bench or TriggerBench reproduction.
+
+This is an evaluator/custody checkpoint only. It provides no Phase-4
+PM-Bench/TriggerBench execution and no authenticated Working Memory evidence.
+Those gaps are routed through A1 `t_5163502e` → P5 `t_8c72180a` → I0R
+`t_63a207ee` → R1/R2/F0.
 
 ## Frozen Phase 12 QA protocol
 

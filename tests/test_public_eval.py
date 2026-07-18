@@ -196,6 +196,21 @@ def test_action_readme_only_advertises_the_runnable_action_profile() -> None:
     )
     assert all("--suite pm-bench-development" not in line for line in command_lines)
     assert all("--suite triggerbench-development" not in line for line in command_lines)
+    assert "fixture and scoring custody, but they cannot run or produce bundles" in readme
+    assert "runnable Working Memory profile produces" in readme
+
+
+def test_action_readme_preserves_checkpoint_limitations_and_gap_route() -> None:
+    readme = (
+        Path(__file__).resolve().parents[1] / "eval/public/README.md"
+    ).read_text()
+    for boundary in (
+        "evaluator/custody checkpoint only",
+        "no Phase-4\nPM-Bench/TriggerBench execution",
+        "no authenticated Working Memory evidence",
+        "A1 `t_5163502e` → P5 `t_8c72180a` → I0R\n`t_63a207ee` → R1/R2/F0",
+    ):
+        assert boundary in readme
 
 
 @pytest.mark.parametrize(
