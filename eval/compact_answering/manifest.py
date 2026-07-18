@@ -25,6 +25,24 @@ class ManifestDriftError(ManifestExistsError):
     """Existing custody differs from the requested or expected manifest."""
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    document: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ManifestValidationError(f"duplicate manifest key: {key}")
+        document[key] = value
+    return document
+
+
+def _fsync_directory(path: Path) -> None:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def validate_manifest(document: object) -> dict[str, Any]:
     """Validate and return a manifest using only the exact v1 schema."""
     if not isinstance(document, dict):
@@ -68,7 +86,10 @@ def load_manifest(path: str | Path, *, expected: object | None = None) -> dict[s
     """Load validated custody, optionally failing if it drifted from expected."""
     manifest_path = Path(path)
     try:
-        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+        document = json.loads(
+            manifest_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ManifestValidationError(f"cannot read valid manifest {manifest_path}") from exc
     validated = validate_manifest(document)
@@ -104,6 +125,7 @@ def create_manifest(path: str | Path, document: object) -> None:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        _fsync_directory(manifest_path.parent)
     except BaseException:
         manifest_path.unlink(missing_ok=True)
         raise
