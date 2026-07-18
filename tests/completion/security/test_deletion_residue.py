@@ -1028,7 +1028,7 @@ def _valid_manifest() -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "operation_id": OPERATION_ID,
-        "request_id": "request-25",
+        "request_id": OPERATION_ID,
         "requested_at": "2026-07-18T00:00:00Z",
         "completed_at": "2026-07-18T00:00:01Z",
         "mode": "hard_delete_legal",
@@ -1043,6 +1043,7 @@ def _valid_manifest() -> dict[str, Any]:
         "surfaces": [
             {
                 "surface": "source_evidence",
+                "surface_type": "engine",
                 "backend": "local",
                 "tenant_ref": "opaque:tenant",
                 "object_ref": "opaque:source",
@@ -1051,6 +1052,9 @@ def _valid_manifest() -> dict[str, Any]:
                 "attempted_at": "2026-07-18T00:00:00Z",
                 "verified_at": "2026-07-18T00:00:01Z",
                 "verification_method": "direct_and_public_probe",
+                "state": "verified",
+                "attempts": 1,
+                "checkpoint": "local:1",
                 "verified_removed": True,
                 "residue_probe": 0,
                 "durability_checkpoint": "local:1",
@@ -1106,6 +1110,34 @@ def test_r25_semantic_verifier_rejects_signed_but_incomplete_manifest(
     assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
     verifier = importlib.import_module("mnemosyne.deletion_manifest")
     result = verifier.verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert result["errors"]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest.pop("operation_id"),
+        lambda manifest: manifest.update(request_id="different-request"),
+        lambda manifest: manifest.pop("completed_at"),
+        lambda manifest: manifest.update(completed_at="2026-07-18T00:00:01"),
+        lambda manifest: manifest.update(mode="soft_delete"),
+        lambda manifest: manifest.update(requested_by_role="operator"),
+        lambda manifest: manifest["policy"].pop("version"),
+        lambda manifest: manifest["surfaces"][0].update(action="retained"),
+        lambda manifest: manifest["surfaces"][0].update(state="failed"),
+        lambda manifest: manifest["surfaces"][0].update(precondition_present=False),
+        lambda manifest: manifest["surfaces"][0].update(verification_method="none"),
+        lambda manifest: manifest["surfaces"][0].pop("attempted_at"),
+        lambda manifest: manifest["surfaces"][0].pop("verified_at"),
+    ],
+)
+def test_r25_semantic_verifier_requires_identity_policy_and_receipt_semantics(
+    mutate: Callable[[dict[str, Any]], Any],
+) -> None:
+    manifest = _valid_manifest()
+    mutate(manifest)
+    result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
     assert result["complete"] is False
     assert result["errors"]
 
