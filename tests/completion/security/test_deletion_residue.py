@@ -463,10 +463,24 @@ def test_r22_backup_retention_and_restore_are_reported_honestly(available: bool,
         }
     )
     manifest = _delete(world)
+    if available and not immutable:
+        _assert_complete(manifest)
+        assert world.backup_snapshots == []
+        return
+
     exception = manifest["retention_exceptions"][0]
-    assert exception["restore_block_fence"] >= manifest["fence"]["generation"]
+    fence_generation = manifest["fence"]["generation"]
+    assert exception["restore_block_fence"] >= fence_generation
     assert exception["deadline"]
     assert manifest["summary"]["complete"] is False
+
+    coordinator = _coordinator_type()
+    for restore_generation in (fence_generation - 1, fence_generation):
+        restore_allowed = coordinator.writer_allowed(TENANT, restore_generation)
+        if restore_allowed:
+            world.engine.append_evidence(_evidence())
+        assert restore_allowed is False
+    assert world.engine.retrieve(CANARY, TENANT).hits == []
 
 
 def test_r23_replay_returns_same_outcome_and_partial_retry_resumes() -> None:
@@ -532,6 +546,11 @@ def test_r24_identical_cross_tenant_canary_is_not_mutated() -> None:
     assert world.object_keys[other_pointer] == b"other-tenant-key"
     assert world.backup_snapshots == backups_before
     assert manifest["summary"]["cross_tenant_mutations"] == 0
+    target_recall = world.engine.retrieve(CANARY, TENANT)
+    other_recall = world.engine.retrieve(CANARY, OTHER_TENANT)
+    assert target_recall.hits == []
+    assert all(hit.tenant_id == OTHER_TENANT for hit in other_recall.hits)
+    assert any(hit.id == other_ref for hit in other_recall.hits)
 
 
 def _valid_manifest() -> dict[str, Any]:
@@ -634,3 +653,31 @@ def test_r25_complete_manifest_is_signed_then_semantically_verified(tmp_path: Pa
     verified = verify_evidence_manifest_signature(manifest_path, public_key)
     assert verified["verified"] is True
     _assert_complete(manifest)
+
+
+def test_r25_coordinator_persists_signed_complete_multi_surface_manifest(tmp_path: Path) -> None:
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    manifest_path = tmp_path / "deletion-manifest.json"
+    generate_collector_keypair(private_key, public_key)
+    world = _world()
+    world.stores["queue"] = FakeStore(
+        "queue",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "payload": CANARY}],
+    )
+    object_pointer = f"s3_encrypted://{TENANT}/{world.source_ref}"
+    world.object_keys[object_pointer] = b"wrapped-data-key"
+
+    manifest = _delete(
+        world,
+        manifest_path=str(manifest_path),
+        signing_private_key_path=str(private_key),
+    )
+
+    assert json.loads(manifest_path.read_text(encoding="utf-8")) == manifest
+    assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
+    discovered_surfaces = {row["surface"] for row in manifest["surfaces"]}
+    assert {"source_evidence", "queue", "object_storage"} <= discovered_surfaces
+    assert all(row["verified_removed"] is True for row in manifest["surfaces"])
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    assert verifier.verify_deletion_manifest(manifest) == {"complete": True, "errors": []}
