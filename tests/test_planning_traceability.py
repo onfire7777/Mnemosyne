@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
 REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
+V2_REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
@@ -78,3 +79,31 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     ids = set(ID_PATTERN.findall(text))
     assert {f"REQ-{index:03d}" for index in range(1, 19)} <= ids
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
+
+
+def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
+    text = V2_REQUIREMENTS.read_text(encoding="utf-8")
+    expected_rows = {
+        "CAP-012": (
+            "Prospective memory persists subject-scoped intentions and evaluates "
+            "supported triggers deterministically and idempotently with provenance "
+            "and audit records across Local, Postgres, and Sqlite engines.",
+            "W3 P1/P4",
+        ),
+        "CAP-013": (
+            "Working memory provides tenant/session-scoped short-TTL storage, "
+            "explicit promotion, deterministic expiry, and a distinct retrieval "
+            "route across Local, Postgres, and Sqlite engines.",
+            "W3 P3/P4",
+        ),
+    }
+
+    for requirement, (description, authority) in expected_rows.items():
+        rows = [line for line in text.splitlines() if f"[x] {requirement}" in line]
+        assert rows == [
+            f"| [x] {requirement} | {description} | {authority} | Complete |"
+        ]
+
+    phase_15 = next(line for line in text.splitlines() if line.startswith("| 15 |"))
+    assert "CAP-012" in phase_15
+    assert "CAP-013" in phase_15
