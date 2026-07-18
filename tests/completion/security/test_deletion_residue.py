@@ -204,27 +204,26 @@ def test_r03_unavailable_postgres_is_explicitly_incomplete() -> None:
 
 def test_r04_legal_delete_cascades_to_every_branch() -> None:
     world = _world()
-    world.engine.branch("feature", tenant_id=TENANT)
-    feature_ref = world.engine.append_evidence(_evidence(), branch="feature")
+    branch_refs: dict[str, str] = {"main": world.source_ref}
+    for branch in ("feature", "release"):
+        world.engine.branch(branch, tenant_id=TENANT)
+        branch_refs[branch] = world.engine.append_evidence(_evidence(), branch=branch)
     manifest = _delete(world)
-    assert world.engine.get_evidence(TENANT, feature_ref, branch="feature") is None
+    for branch, source_ref in branch_refs.items():
+        assert world.engine.get_evidence(TENANT, source_ref, branch=branch) is None
     assert manifest["branch_scope"] == "all"
 
 
 def test_r05_mixed_source_derived_content_is_recomputed() -> None:
     world = _world()
     survivor = world.engine.append_evidence(_evidence(content="independent fact"))
-    derived = world.engine.append_evidence(
-        _evidence(
-            content=f"{CANARY} plus independent fact",
-        )
-    )
-    row = world.engine.get_evidence(TENANT, derived)
-    assert row is not None
-    row.metadata["source_evidence_cids"] = [world.source_ref, survivor]
+    derived_evidence = _evidence(content=f"{CANARY} plus independent fact")
+    derived_evidence.metadata["source_evidence_cids"] = [world.source_ref, survivor]
+    derived = world.engine.append_evidence(derived_evidence)
     _delete(world)
     retained = world.engine.get_evidence(TENANT, derived)
     assert retained is not None
+    assert "independent fact" in retained.content
     _assert_absent(retained.__dict__, CANARY, world.source_ref)
 
 
@@ -415,12 +414,32 @@ def test_r19_resource_uri_and_hash_confirmation_oracle_is_removed() -> None:
 @pytest.mark.parametrize("failure", ["journal", "object_storage", "manifest_store"])
 def test_r20_boundary_failure_recovers_before_success_manifest(failure: str) -> None:
     world = _world()
-    world.stores[failure] = FakeStore(failure, fail_delete=True)
-    before = copy.deepcopy(world.stores[failure].rows)
-    manifest = _delete(world)
-    assert manifest["summary"]["complete"] is False
-    assert world.stores[failure].rows == before
-    assert manifest["fence"]["durable"] is False
+    successful = FakeStore(
+        "procedures",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "body": CANARY}],
+    )
+    failing = FakeStore(
+        failure,
+        fail_delete=True,
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "body": CANARY}],
+    )
+    world.stores["procedures"] = successful
+    world.stores[failure] = failing
+    before = copy.deepcopy(successful.rows)
+
+    incomplete = _delete(world)
+
+    assert incomplete["summary"]["complete"] is False
+    assert incomplete["fence"]["durable"] is False
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+    assert successful.rows == before
+
+    failing.fail_delete = False
+    complete = _delete(world)
+    _assert_complete(complete)
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+    assert successful.rows == []
+    assert failing.rows == []
 
 
 def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
@@ -452,10 +471,25 @@ def test_r22_backup_retention_and_restore_are_reported_honestly(available: bool,
 
 def test_r23_replay_returns_same_outcome_and_partial_retry_resumes() -> None:
     world = _world()
-    first = _delete(world)
-    second = _delete(world)
-    assert second == first
-    assert second["operation_id"] == OPERATION_ID
+    provider = FakeStore(
+        "embedding_provider",
+        fail_delete=True,
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "vector": CANARY}],
+    )
+    world.stores["embedding_provider"] = provider
+
+    incomplete = _delete(world)
+    assert incomplete["summary"]["complete"] is False
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+    provider.fail_delete = False
+    complete = _delete(world)
+    replay = _delete(world)
+    _assert_complete(complete)
+    assert replay == complete
+    assert complete["operation_id"] == OPERATION_ID
+    assert provider.rows == []
+    assert len(provider.delete_calls) == 2
 
 
 def test_r23_deletion_fence_blocks_racing_resurrection() -> None:
@@ -469,10 +503,34 @@ def test_r23_deletion_fence_blocks_racing_resurrection() -> None:
 def test_r24_identical_cross_tenant_canary_is_not_mutated() -> None:
     world = _world()
     other_ref = world.engine.append_evidence(_evidence(OTHER_TENANT, user=OTHER_USER))
+    world.stores["queue"] = FakeStore(
+        "queue",
+        rows=[
+            {"tenant_id": TENANT, "source_ref": world.source_ref, "payload": CANARY},
+            {"tenant_id": OTHER_TENANT, "source_ref": world.source_ref, "payload": CANARY},
+        ],
+    )
+    world.process_cache["other-tenant"] = {
+        "tenant_id": OTHER_TENANT,
+        "source_ref": world.source_ref,
+        "payload": CANARY,
+    }
+    other_pointer = f"s3_encrypted://{OTHER_TENANT}/{world.source_ref}"
+    world.object_keys[other_pointer] = b"other-tenant-key"
+    world.backup_snapshots.append(
+        {"tenant_id": OTHER_TENANT, "source_ref": world.source_ref, "payload": CANARY}
+    )
     other_before = copy.deepcopy(world.engine.export_tenant(OTHER_TENANT))
+    store_before = copy.deepcopy(world.stores["queue"].rows[1])
+    cache_before = copy.deepcopy(world.process_cache["other-tenant"])
+    backups_before = copy.deepcopy(world.backup_snapshots)
     manifest = _delete(world)
     assert world.engine.export_tenant(OTHER_TENANT) == other_before
     assert world.engine.get_evidence(OTHER_TENANT, other_ref) is not None
+    assert world.stores["queue"].rows == [store_before]
+    assert world.process_cache["other-tenant"] == cache_before
+    assert world.object_keys[other_pointer] == b"other-tenant-key"
+    assert world.backup_snapshots == backups_before
     assert manifest["summary"]["cross_tenant_mutations"] == 0
 
 
