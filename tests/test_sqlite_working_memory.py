@@ -95,6 +95,21 @@ def test_sqlite_schema_adds_working_memory_without_changing_core_tables(tmp_path
     assert "working_memory" in engine.export_all()
 
 
+def test_sqlite_export_all_migrates_legacy_database_before_enumerating_tables(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    _evidence(engine)
+    conn = engine._connect(TENANT)
+    conn.execute("DROP TABLE working_memory")
+    conn.commit()
+    engine.close()
+
+    reopened = SqliteEngine(tmp_path)
+    exported = reopened.export_all()
+
+    assert exported["tenants"][0]["tenant_id"] == TENANT
+    assert exported["tenants"][0]["working_memory"] == []
+
+
 def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path) -> None:
     engine = SqliteEngine(tmp_path)
     first = _item(_evidence(engine, session_id="s1"), item_id="same", session_id="s1")
@@ -164,6 +179,15 @@ def test_sqlite_working_memory_uses_composite_scope_and_deterministic_list_order
     assert engine.get_working(other_tenant, SESSION, "same", as_of=CREATED_AT).tenant_id == other_tenant
     with pytest.raises(ValueError, match="already exists"):
         engine.put_working(_item(_evidence(engine, session_id=SESSION), item_id="same"))
+
+
+def test_sqlite_working_memory_rejects_falsy_status_mutation(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    item = _item(_evidence(engine))
+    item.status = None
+
+    with pytest.raises(ValueError, match="status"):
+        engine.put_working(item)
 
 
 def test_sqlite_working_memory_expiry_orders_and_prevalidates_provenance(tmp_path) -> None:
@@ -391,6 +415,20 @@ def test_sqlite_forget_trims_multi_provenance_working_items(tmp_path) -> None:
     retained = engine.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT)
     assert retained is not None
     assert retained.evidence_ids == [second]
+
+
+def test_sqlite_forget_orders_working_item_removals_by_identity(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+    engine.put_working(_item(evidence_id, item_id="b"))
+    engine.put_working(_item(evidence_id, item_id="a"))
+
+    report = engine.forget(TENANT, evidence_id)
+
+    assert report["propagated"]["removed_working_items"] == [
+        {"tenant_id": TENANT, "session_id": SESSION, "item_id": "a"},
+        {"tenant_id": TENANT, "session_id": SESSION, "item_id": "b"},
+    ]
 
 
 def test_sqlite_hard_delete_redacts_prior_working_audit_custody(tmp_path) -> None:
