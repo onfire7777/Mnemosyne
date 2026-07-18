@@ -126,6 +126,14 @@ def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
     ):
         assert expected in normalized
 
+    for engine_contract_detail in (
+        "schedule_intention",
+        "evaluate_due_intentions",
+        "put_working",
+        "expire_working",
+    ):
+        assert engine_contract_detail not in normalized
+
 
 def test_engine_contract_documents_three_engine_memory_plane_parity() -> None:
     text = ENGINE_CONTRACT.read_text(encoding="utf-8")
