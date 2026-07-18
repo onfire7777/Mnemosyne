@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from eval.harness.cli_driver import MnemoCLI
+from eval.public.action_cli import ActionCLI
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
@@ -114,6 +116,108 @@ def test_action_run_verify_and_reproduce_are_byte_identical(
     manifest = json.loads((source / "bundle-manifest.json").read_text())
     for name in manifest["files"]:
         assert (source / name).read_bytes() == (reproduced / name).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "suite",
+    [
+        "pm-bench-development",
+        "triggerbench-development",
+        "working-memory-action-development",
+    ],
+)
+def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
+    tmp_path: Path, suite: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[str] = []
+    action_run = ActionCLI.run
+    mnemo_run = MnemoCLI.run
+
+    def record_action(self: ActionCLI, command: str, *args: object) -> object:
+        commands.append(command)
+        return action_run(self, command, *args)  # type: ignore[arg-type]
+
+    def record_mnemo(
+        self: MnemoCLI, command: str, *args: str, **kwargs: object
+    ) -> object:
+        commands.append(command)
+        return mnemo_run(self, command, *args, **kwargs)
+
+    monkeypatch.setattr(ActionCLI, "run", record_action)
+    monkeypatch.setattr(MnemoCLI, "run", record_mnemo)
+    out = tmp_path / suite
+    run_public_suite(suite, out)
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
+    assert traces
+    assert all(
+        not {"payload", "action_payload"} & trace.keys()
+        for trace in traces
+    )
+    if suite == "working-memory-action-development":
+        assert all(
+            not {"expected_action_id", "expected_abstain"} & trace.keys()
+            for trace in traces
+        )
+        assert {"capture", "working-seed", "working-query"} <= set(commands)
+    else:
+        assert {"task.create", "intention.query", "action.select"} <= set(commands)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("cancelled", "cancelled"),
+        ("stale", "stale pre-update"),
+        ("rescheduled", "rescheduled action at wrong time"),
+        ("dependency", "dependency-blocked"),
+    ],
+)
+def test_pm_fixture_rejects_temporal_and_dependency_gold_errors(
+    mutation: str, expected: str
+) -> None:
+    from eval.public.adapters.pm_bench_triggerbench import ActionProbeError
+
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "eval/public/fixtures/pm-bench-development.json"
+    )
+    fixture = json.loads(fixture_path.read_text())
+    case = fixture["cases"][0]
+    if mutation == "cancelled":
+        case["steps"][1]["expected_due_action_ids"] = ["action-1"]
+    elif mutation == "stale":
+        case["steps"][5]["expected_due_action_ids"] = ["action-2"]
+    elif mutation == "rescheduled":
+        case["steps"][3]["expected_due_action_ids"] = ["action-3-v2"]
+    else:
+        dependency_task = next(
+            task for task in case["tasks"] if task["dependency_ids"]
+        )
+        case["steps"][0]["expected_due_action_ids"] = [
+            dependency_task["action_id"]
+        ]
+    with pytest.raises(ActionProbeError, match=expected):
+        normalize_action(fixture)
+
+
+def test_working_action_fixture_rejects_scope_and_executable_payloads() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "eval/public/fixtures/working-memory-action-development.json"
+    )
+    fixture = json.loads(fixture_path.read_text())
+    fixture["cases"][0]["events"][0]["tenant_id"] = "foreign-tenant"
+    with pytest.raises(ValueError, match="crosses its case scope"):
+        normalize_working_action(fixture)
+
+    fixture = json.loads(fixture_path.read_text())
+    fixture["cases"][0]["action_choices"][0]["payload"] = {
+        "command": "touch forbidden"
+    }
+    with pytest.raises(ValueError, match="action_choices"):
+        normalize_working_action(fixture)
 
 
 @pytest.mark.parametrize(
