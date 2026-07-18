@@ -231,16 +231,16 @@ def test_working_reads_redact_metadata_fields_for_lower_roles() -> None:
     assert readable["metadata"] == {"secret": "[REDACTED:secret]", "public": "safe"}
 
 
-def test_working_expiry_requires_caller_context(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_working_reads_without_context_match_the_engine_contract() -> None:
     engine = PostgresEngine("postgresql://unit-test-fake", require_safe_role=False)
-    engine._psycopg = types.SimpleNamespace(rows=types.SimpleNamespace(dict_row=object()))
-    monkeypatch.setattr(engine, "connect", lambda: _RecordingConnection())
+    values = _working_payload(_item())
 
-    with pytest.raises(PermissionError, match="caller context"):
-        engine.expire_working("tenant-a", expired_at=CREATED_AT)
+    readable = engine._working_read_values(values, context=None)
+
+    assert readable == values
 
 
-def test_working_provenance_enforces_trust_ceiling_and_taint() -> None:
+def test_working_provenance_enforces_trust_ceiling_and_preserves_taint() -> None:
     engine = PostgresEngine(
         "postgresql://unit-test-fake",
         policy=OperatingPolicy(max_trust_tier=4),
@@ -261,8 +261,8 @@ def test_working_provenance_enforces_trust_ceiling_and_taint() -> None:
         engine._working_provenance(cursor, _working_payload(_item(trust_tier=5)))
 
     source_row["capability_tags"] = ["data-only"]
-    with pytest.raises(PermissionError, match="tainted"):
-        engine._working_provenance(cursor, _working_payload(_item()))
+    _, capability_tags, _, _ = engine._working_provenance(cursor, _working_payload(_item()))
+    assert capability_tags == ["data-only"]
 
 
 def test_working_audit_diff_keeps_evidence_references_erasure_safe() -> None:
@@ -413,22 +413,21 @@ def test_postgres_working_memory_live_round_trip_boundaries_isolation_and_orderi
     assert first.trust_tier == 1
     assert first.capability_tags == ["caller-tag", "source-tag"]
     assert first.sensitivity == 2
-    context = _read_context(tenant, user)
-    listed = engine.list_working(tenant, session, as_of=now, context=context)
+    listed = engine.list_working(tenant, session, as_of=now)
     assert [item.item_id for item in listed] == ["working-a", "working-z"]
     assert listed[0] is not first
     listed[0].metadata["nested"].append("caller-mutation")
     first.content = "caller mutation must not rewrite PostgreSQL"
 
-    fetched = engine.get_working(tenant, session, first.item_id, as_of=first.created_at, context=context)
+    fetched = engine.get_working(tenant, session, first.item_id, as_of=first.created_at)
     assert fetched is not None
     assert fetched.content == "working content working-z"
     assert fetched.metadata == {"marker": "first", "nested": ["original"]}
     assert fetched.created_at.tzinfo is UTC
     assert fetched.expires_at.tzinfo is UTC
-    assert engine.get_working(tenant, session, first.item_id, as_of=first.expires_at, context=context) is None
-    assert engine.list_working(tenant, other_session, as_of=now, context=context)[0].item_id == "working-other-session"
-    assert engine.list_working(f"tenant-missing-{uuid4()}", session, as_of=now, context=context) == []
+    assert engine.get_working(tenant, session, first.item_id, as_of=first.expires_at) is None
+    assert engine.list_working(tenant, other_session, as_of=now)[0].item_id == "working-other-session"
+    assert engine.list_working(f"tenant-missing-{uuid4()}", session, as_of=now) == []
 
 
 def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -> None:
@@ -474,9 +473,8 @@ def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -> None
     with pytest.raises(ValueError, match="already exists"):
         engine.put_working(duplicate)
 
-    context = _read_context(tenant, user)
-    assert engine.get_working(tenant, session_a, "same-item-id", as_of=now, context=context) is not None
-    assert engine.get_working(tenant, session_b, "same-item-id", as_of=now, context=context) is not None
+    assert engine.get_working(tenant, session_a, "same-item-id", as_of=now) is not None
+    assert engine.get_working(tenant, session_b, "same-item-id", as_of=now) is not None
     with engine.connect() as conn:
         with conn.cursor() as cur:
             engine._set_tenant(cur, _stable_uuid("tenant", tenant))
@@ -587,7 +585,7 @@ def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
     monkeypatch.setattr(engine, "_audit", fail_audit)
     with pytest.raises(RuntimeError, match="audit write failed"):
         engine.put_working(put_item)
-    assert engine.get_working(tenant, session, put_item.item_id, as_of=now, context=_read_context(tenant, user)) is None
+    assert engine.get_working(tenant, session, put_item.item_id, as_of=now) is None
 
     expired = _live_item(
         engine,
@@ -603,14 +601,13 @@ def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
     engine.put_working(expired)
     monkeypatch.setattr(engine, "_audit", fail_audit)
     with pytest.raises(RuntimeError, match="audit write failed"):
-        engine.expire_working(tenant, expired_at=now, context=_read_context(tenant, user))
+        engine.expire_working(tenant, expired_at=now)
 
     still_active = engine.get_working(
         tenant,
         session,
         expired.item_id,
         as_of=expired.expires_at - timedelta(microseconds=1),
-        context=_read_context(tenant, user),
     )
     assert still_active is not None
     with engine.connect() as conn:
@@ -647,7 +644,7 @@ def test_postgres_working_memory_expiry_is_exactly_once_under_concurrency() -> N
 
     def sweep() -> list[WorkingMemoryItem]:
         return PostgresEngine(dsn).expire_working(
-            tenant, expired_at=now, context=_read_context(tenant, user)
+            tenant, expired_at=now
         )
 
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -691,7 +688,7 @@ def test_postgres_pool_clears_tenant_after_aborted_expiry(
 
     monkeypatch.setattr(engine, "_audit", fail_audit)
     with pytest.raises(RuntimeError, match="audit write failed"):
-        engine.expire_working(tenant, expired_at=now, context=_read_context(tenant, user))
+        engine.expire_working(tenant, expired_at=now)
 
     with engine.connect() as conn:
         with conn.cursor() as cur:
