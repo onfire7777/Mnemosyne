@@ -270,6 +270,7 @@ def test_prospective_payload_is_literal_copy_safe_and_fires_once(
     }
     listed[0].action.clear()
     assert engine.list_intentions(TENANT)[0].action["message"] == payload
+    expected_state = deepcopy(engine.export_tenant(TENANT))
 
     fired = engine.evaluate_due_intentions(
         TENANT,
@@ -288,8 +289,13 @@ def test_prospective_payload_is_literal_copy_safe_and_fires_once(
     assert engine.list_intentions("tenant-other") == []
     assert calls == []
     assert not sentinel.exists()
-    audits = [row for row in engine.export_tenant(TENANT)["audit_log"] if row["op"] == "fire_intention"]
+    final_state = engine.export_tenant(TENANT)
+    audits = [row for row in final_state["audit_log"] if row["op"] == "fire_intention"]
     assert len(audits) == 1
+    final_state["audit_log"] = [
+        row for row in final_state["audit_log"] if row["op"] != "fire_intention"
+    ]
+    assert final_state == expected_state
 
 
 @pytest.mark.parametrize("case", [case for case in CORPUS if case.plane == "working"], ids=lambda case: case.case_id)
@@ -307,6 +313,7 @@ def test_working_payload_is_literal_sanitized_scoped_and_replay_stable(
     install_tripwire()
     engine.put_working(item)
     canonical = deepcopy(item.to_dict())
+    expected_state = deepcopy(engine.export_tenant(TENANT))
 
     first_rows = engine.list_working(TENANT, SESSION, as_of=NOW)
     second_rows = engine.list_working(TENANT, SESSION, as_of=NOW)
@@ -337,6 +344,7 @@ def test_working_payload_is_literal_sanitized_scoped_and_replay_stable(
         assemble_system_prompt([hit], sink="system_prompt")
     assert assemble_system_prompt([hit], sink="context") == payload
     assert item.to_dict() == canonical
+    assert engine.export_tenant(TENANT) == expected_state
     assert calls == []
     assert not sentinel.exists()
 
