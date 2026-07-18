@@ -40,6 +40,10 @@ def _item(**overrides: object) -> WorkingMemoryItem:
     return WorkingMemoryItem(**values)
 
 
+def _read_context(tenant_id: str, user_id: str) -> dict[str, object]:
+    return {"tenant_id": tenant_id, "user_id": user_id, "role": "agent"}
+
+
 class _RecordingCursor:
     def __init__(self, connection: "_RecordingConnection") -> None:
         self.connection = connection
@@ -335,21 +339,22 @@ def test_postgres_working_memory_live_round_trip_boundaries_isolation_and_orderi
     assert first.trust_tier == 1
     assert first.capability_tags == ["caller-tag", "source-tag"]
     assert first.sensitivity == 2
-    listed = engine.list_working(tenant, session, as_of=now)
+    context = _read_context(tenant, user)
+    listed = engine.list_working(tenant, session, as_of=now, context=context)
     assert [item.item_id for item in listed] == ["working-a", "working-z"]
     assert listed[0] is not first
     listed[0].metadata["nested"].append("caller-mutation")
     first.content = "caller mutation must not rewrite PostgreSQL"
 
-    fetched = engine.get_working(tenant, session, first.item_id, as_of=first.created_at)
+    fetched = engine.get_working(tenant, session, first.item_id, as_of=first.created_at, context=context)
     assert fetched is not None
     assert fetched.content == "working content working-z"
     assert fetched.metadata == {"marker": "first", "nested": ["original"]}
     assert fetched.created_at.tzinfo is UTC
     assert fetched.expires_at.tzinfo is UTC
-    assert engine.get_working(tenant, session, first.item_id, as_of=first.expires_at) is None
-    assert engine.list_working(tenant, other_session, as_of=now)[0].item_id == "working-other-session"
-    assert engine.list_working(f"tenant-missing-{uuid4()}", session, as_of=now) == []
+    assert engine.get_working(tenant, session, first.item_id, as_of=first.expires_at, context=context) is None
+    assert engine.list_working(tenant, other_session, as_of=now, context=context)[0].item_id == "working-other-session"
+    assert engine.list_working(f"tenant-missing-{uuid4()}", session, as_of=now, context=context) == []
 
 
 def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -> None:
@@ -395,8 +400,9 @@ def test_postgres_working_memory_duplicate_item_ids_are_session_scoped() -> None
     with pytest.raises(ValueError, match="already exists"):
         engine.put_working(duplicate)
 
-    assert engine.get_working(tenant, session_a, "same-item-id", as_of=now) is not None
-    assert engine.get_working(tenant, session_b, "same-item-id", as_of=now) is not None
+    context = _read_context(tenant, user)
+    assert engine.get_working(tenant, session_a, "same-item-id", as_of=now, context=context) is not None
+    assert engine.get_working(tenant, session_b, "same-item-id", as_of=now, context=context) is not None
     with engine.connect() as conn:
         with conn.cursor() as cur:
             engine._set_tenant(cur, _stable_uuid("tenant", tenant))
@@ -507,7 +513,7 @@ def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
     monkeypatch.setattr(engine, "_audit", fail_audit)
     with pytest.raises(RuntimeError, match="audit write failed"):
         engine.put_working(put_item)
-    assert engine.get_working(tenant, session, put_item.item_id, as_of=now) is None
+    assert engine.get_working(tenant, session, put_item.item_id, as_of=now, context=_read_context(tenant, user)) is None
 
     expired = _live_item(
         engine,
@@ -525,7 +531,13 @@ def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
     with pytest.raises(RuntimeError, match="audit write failed"):
         engine.expire_working(tenant, expired_at=now)
 
-    still_active = engine.get_working(tenant, session, expired.item_id, as_of=expired.expires_at - timedelta(microseconds=1))
+    still_active = engine.get_working(
+        tenant,
+        session,
+        expired.item_id,
+        as_of=expired.expires_at - timedelta(microseconds=1),
+        context=_read_context(tenant, user),
+    )
     assert still_active is not None
     with engine.connect() as conn:
         with conn.cursor() as cur:
