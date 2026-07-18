@@ -1426,7 +1426,12 @@ class LocalMemoryEngine:
             matches = [
                 item
                 for item in self.evidence.values()
-                if item.cid == cid and item.tenant_id == intention.tenant_id and not item.erased
+                if (
+                    item.cid == cid
+                    and item.tenant_id == intention.tenant_id
+                    and item.branch == "main"
+                    and not item.erased
+                )
             ]
             if not matches:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")

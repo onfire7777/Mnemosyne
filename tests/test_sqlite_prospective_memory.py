@@ -82,6 +82,7 @@ def _originating_episode(
     agent_id: str = AGENT_ID,
     trust_tier: int = 2,
     capability_tags: list[str] | None = None,
+    branch: str = "main",
 ) -> str:
     return engine.append_evidence(
         Evidence(
@@ -94,7 +95,8 @@ def _originating_episode(
             trust_tier=trust_tier,
             capability_tags=capability_tags or ["prospective-memory"],
             access_policy={"tenant": tenant_id},
-        )
+        ),
+        branch=branch,
     )
 
 
@@ -149,6 +151,20 @@ def test_due_exact_time_intention_fires_once_with_provenance_and_audit(
     assert len(firing_audits) == 1
     assert firing_audits[0]["tenant_id"] == TENANT_ID
     assert firing_audits[0]["diff"]["evidence_ids"] == [evidence_id]
+
+
+def test_sqlite_intention_provenance_uses_main_branch_only(tmp_path: Path) -> None:
+    engine = SqliteEngine(tmp_path / "root")
+    engine.branch("scratch", tenant_id=TENANT_ID)
+    scratch_cid = _originating_episode(
+        engine,
+        capability_tags=["data-only", "no-write-authority"],
+        branch="scratch",
+    )
+    main_cid = _originating_episode(engine, branch="main")
+    assert scratch_cid == main_cid
+
+    engine.schedule_intention(_intention(evidence_id=main_cid, due_at=EVALUATED_AT))
 
 
 def test_fire_audit_byte_matches_local_oracle(tmp_path: Path) -> None:

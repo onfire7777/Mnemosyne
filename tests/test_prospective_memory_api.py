@@ -232,6 +232,28 @@ def test_cli_evaluate_requires_scheduler_and_explicit_context(
     assert [item["status"] for item in fired["intentions"]] == ["fired"]
 
 
+def test_cli_cancellation_uses_signed_identity_when_principal_is_omitted(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "cli-store.json"
+    evidence_id = _seed_evidence(LocalMemoryEngine(store))
+    due_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    scheduled = _run_cli(capsys, store, _token(), *_cli_schedule(evidence_id, due_at))
+
+    cancelled = _run_cli(
+        capsys,
+        store,
+        _token(),
+        "intention-cancel",
+        "--tenant",
+        TENANT,
+        "--intention-id",
+        scheduled["intention_id"],
+    )
+
+    assert cancelled["cancellation_state"] == {"cancelled_by": USER}
+
+
 def test_cli_schedule_supports_dependency_completion(
     capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
