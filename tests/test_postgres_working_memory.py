@@ -447,7 +447,7 @@ def test_postgres_working_memory_rls_blocks_direct_cross_tenant_dml() -> None:
                 (db_tenant_a, item.item_id),
             )
             assert cur.rowcount == 0
-            with pytest.raises(Exception):
+            with pytest.raises(Exception) as exc_info:
                 cur.execute(
                     """
                     INSERT INTO working_memory(
@@ -471,6 +471,7 @@ def test_postgres_working_memory_rls_blocks_direct_cross_tenant_dml() -> None:
                         now + timedelta(minutes=5),
                     ),
                 )
+            assert getattr(exc_info.value, "sqlstate", None) == "42501"
 
 
 def test_postgres_working_memory_put_and_expiry_roll_back_with_audit(
