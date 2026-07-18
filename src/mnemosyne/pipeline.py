@@ -450,7 +450,7 @@ def run_retrieval_pipeline(
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
-    cache_key = None if prospective_requested or working_requested else _result_cache_key(
+    cache_key = _result_cache_key(
         ops,
         query=query,
         tenant_id=tenant_id,
@@ -630,26 +630,13 @@ def run_retrieval_pipeline(
         dense_key: len(dense),
         lexical_key: len(lexical),
         graph_key: len(graph),
-        PROSPECTIVE_MEMORY_CHANNEL: len(prospective),
-        WORKING_MEMORY_CHANNEL: len(working),
     }
+    if prospective_requested:
+        channels[PROSPECTIVE_MEMORY_CHANNEL] = len(prospective)
+    if working_requested:
+        channels[WORKING_MEMORY_CHANNEL] = len(working)
     explain = {
         "channels": channels,
-        "routes": [
-            {"channel": dense_key, "count": len(dense), "requested": True},
-            {"channel": lexical_key, "count": len(lexical), "requested": True},
-            {"channel": graph_key, "count": len(graph), "requested": True},
-            {
-                "channel": PROSPECTIVE_MEMORY_CHANNEL,
-                "count": len(prospective),
-                "requested": prospective_requested,
-            },
-            {
-                "channel": WORKING_MEMORY_CHANNEL,
-                "count": len(working),
-                "requested": working_requested,
-            },
-        ],
         "rrf_k": policy.rrf_k,
         "mmr_lambda": policy.mmr_lambda,
         "activation": activation_explain(budgeted, policy),
@@ -680,6 +667,22 @@ def run_retrieval_pipeline(
         },
         "rails": policy.immutable_rails,
     }
+    if prospective_requested or working_requested:
+        explain["routes"] = [
+            {"channel": dense_key, "count": len(dense), "requested": True},
+            {"channel": lexical_key, "count": len(lexical), "requested": True},
+            {"channel": graph_key, "count": len(graph), "requested": True},
+            {
+                "channel": PROSPECTIVE_MEMORY_CHANNEL,
+                "count": len(prospective),
+                "requested": prospective_requested,
+            },
+            {
+                "channel": WORKING_MEMORY_CHANNEL,
+                "count": len(working),
+                "requested": working_requested,
+            },
+        ]
     if working_requested:
         explain["working_memory"] = working_explain
     result = RetrievalResult(
