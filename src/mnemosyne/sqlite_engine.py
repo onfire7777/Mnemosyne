@@ -60,7 +60,8 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
-from datetime import UTC, datetime
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -93,7 +94,7 @@ from mnemosyne.erasure_ids import (
     erasure_tombstone_hash,
     redact_erased_cids,
 )
-from mnemosyne.ids import evidence_cid, evidence_unscoped_cid, new_id
+from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename, safe_tenant_filename
 from mnemosyne.models import (
     Assertion,
@@ -140,6 +141,146 @@ GRAPH_BACKEND = "sqlite-cached-ppr"
 # A query token is FTS5-safe when it is a bare word under the unicode61
 # tokenizer (which we configure with ``tokenchars '_'`` so ``_`` counts too).
 _FTS_SAFE_TOKEN = re.compile(r"[a-z0-9_]+")
+_WORKING_MEMORY_KINDS = {
+    "active_goal",
+    "current_plan",
+    "active_constraint",
+    "constraint",
+    "unresolved_question",
+    "tool_result",
+    "recent_tool_result",
+    "intermediate_conclusion",
+}
+
+
+@dataclass(slots=True)
+class _SQLiteWorkingMemoryItem:
+    """Temporary compatibility model for the SQLite lane's isolated worktree.
+
+    The parent Local lane supplies ``mnemosyne.engine.WorkingMemoryItem``. The
+    SQLite task cannot edit that shared file, so this small fallback keeps this
+    branch importable and its focused tests runnable before the parent commit is
+    integrated. Runtime rows prefer the parent model whenever it is present.
+    """
+
+    item_id: str
+    tenant_id: str
+    session_id: str
+    user_id: str
+    agent_id: str
+    kind: str
+    task_id: str
+    content: str
+    created_at: datetime
+    expires_at: datetime
+    evidence_ids: list[str] = field(default_factory=list)
+    access_policy: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    capability_tags: list[str] = field(default_factory=list)
+    sensitivity: int = 0
+    status: str = "active"
+    expired_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        for name in (
+            "item_id",
+            "tenant_id",
+            "session_id",
+            "user_id",
+            "agent_id",
+            "kind",
+            "task_id",
+            "content",
+        ):
+            if type(getattr(self, name)) is not str or not getattr(self, name).strip():
+                raise ValueError(f"{name} must be a non-empty string")
+        if self.kind not in _WORKING_MEMORY_KINDS:
+            raise ValueError(f"unsupported working-memory kind: {self.kind!r}")
+        for name in ("created_at", "expires_at"):
+            value = getattr(self, name)
+            if not isinstance(value, datetime) or value.tzinfo is None:
+                raise ValueError(f"{name} must be timezone-aware")
+        created_at = self.created_at.astimezone(UTC)
+        expires_at = self.expires_at.astimezone(UTC)
+        if expires_at <= created_at:
+            raise ValueError("expires_at must be after created_at")
+        if expires_at - created_at > timedelta(hours=24):
+            raise ValueError("working-memory TTL cannot exceed 24 hours")
+        if self.status not in {"active", "expired"}:
+            raise ValueError("unsupported working-memory status")
+        if self.status == "active" and self.expired_at is not None:
+            raise ValueError("active working items cannot have expired_at")
+        if self.expired_at is not None:
+            if not isinstance(self.expired_at, datetime) or self.expired_at.tzinfo is None:
+                raise ValueError("expired_at must be timezone-aware")
+            self.expired_at = self.expired_at.astimezone(UTC)
+        if self.status == "expired" and self.expired_at is None:
+            raise ValueError("expired working items require expired_at")
+        if type(self.evidence_ids) is not list or not self.evidence_ids:
+            raise ValueError("evidence_ids must be a non-empty list")
+        if any(type(cid) is not str or not cid.strip() for cid in self.evidence_ids):
+            raise ValueError("evidence_ids must contain non-empty strings")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("evidence_ids must not contain duplicates")
+        if type(self.capability_tags) is not list or any(
+            type(tag) is not str or not tag.strip() for tag in self.capability_tags
+        ):
+            raise ValueError("capability_tags must be a list of non-empty strings")
+        if len(set(self.capability_tags)) != len(self.capability_tags):
+            raise ValueError("capability_tags must not contain duplicates")
+        if type(self.sensitivity) is not int or isinstance(self.sensitivity, bool) or self.sensitivity < 0:
+            raise ValueError("sensitivity must be a non-negative integer")
+        try:
+            json.dumps(self.metadata, sort_keys=True)
+            json.dumps(self.access_policy, sort_keys=True)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("working-memory metadata and access_policy must be JSON") from exc
+        self.created_at = created_at
+        self.expires_at = expires_at
+        self.evidence_ids = list(self.evidence_ids)
+        self.access_policy = copy.deepcopy(self.access_policy)
+        self.metadata = copy.deepcopy(self.metadata)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "item_id": self.item_id,
+            "tenant_id": self.tenant_id,
+            "session_id": self.session_id,
+            "user_id": self.user_id,
+            "agent_id": self.agent_id,
+            "kind": self.kind,
+            "task_id": self.task_id,
+            "content": self.content,
+            "created_at": dt_to_json(self.created_at),
+            "expires_at": dt_to_json(self.expires_at),
+            "evidence_ids": copy.deepcopy(self.evidence_ids),
+            "access_policy": copy.deepcopy(self.access_policy),
+            "metadata": copy.deepcopy(self.metadata),
+            "capability_tags": list(self.capability_tags),
+            "sensitivity": self.sensitivity,
+            "status": self.status,
+            "expired_at": dt_to_json(self.expired_at),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "_SQLiteWorkingMemoryItem":
+        return cls(
+            **{
+                **dict(data),
+                "created_at": parse_dt(data.get("created_at")),
+                "expires_at": parse_dt(data.get("expires_at")),
+                "expired_at": parse_dt(data.get("expired_at")),
+            }
+        )
+
+
+def _working_memory_item_class() -> type[Any]:
+    """Resolve the parent lane's model without importing it at module load."""
+    try:
+        from mnemosyne.engine import WorkingMemoryItem
+    except (ImportError, AttributeError):
+        return _SQLiteWorkingMemoryItem
+    return WorkingMemoryItem
 
 
 def fts_safe_query(tokens: list[str]) -> bool:
@@ -445,6 +586,194 @@ def _relation_from_row(row: sqlite3.Row) -> Relation:
     )
 
 
+_WORKING_FIELDS = (
+    "item_id",
+    "tenant_id",
+    "session_id",
+    "user_id",
+    "agent_id",
+    "kind",
+    "task_id",
+    "content",
+    "created_at",
+    "expires_at",
+    "evidence_ids",
+    "access_policy",
+    "metadata",
+    "capability_tags",
+    "sensitivity",
+    "status",
+    "expired_at",
+)
+
+
+def _working_datetime(value: Any, field_name: str) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise ValueError(f"working-memory {field_name} must be timezone-aware")
+    return value.astimezone(UTC)
+
+
+def _working_payload(item: Any) -> dict[str, Any]:
+    """Extract and canonicalize a parent-lane WorkingMemoryItem for SQL."""
+    values = {name: getattr(item, name, None) for name in _WORKING_FIELDS}
+    required_strings = (
+        "item_id",
+        "tenant_id",
+        "session_id",
+        "user_id",
+        "agent_id",
+        "kind",
+        "task_id",
+        "content",
+    )
+    for name in required_strings:
+        if type(values[name]) is not str or not values[name].strip():
+            raise ValueError(f"working-memory {name} must be a non-empty string")
+    created_at = _working_datetime(values["created_at"], "created_at")
+    expires_at = _working_datetime(values["expires_at"], "expires_at")
+    if expires_at <= created_at:
+        raise ValueError("working-memory expires_at must be after created_at")
+    if expires_at - created_at > timedelta(hours=24):
+        raise ValueError("working-memory TTL cannot exceed 24 hours")
+    status = values["status"] or "active"
+    if status not in {"active", "expired"}:
+        raise ValueError(f"unsupported working-memory status: {status!r}")
+    expired_at = values["expired_at"]
+    if expired_at is not None:
+        expired_at = _working_datetime(expired_at, "expired_at")
+    if status == "active" and expired_at is not None:
+        raise ValueError("active working items cannot have expired_at")
+    evidence_ids = values["evidence_ids"]
+    if type(evidence_ids) is not list or not evidence_ids:
+        raise ValueError("working-memory evidence_ids must be a non-empty list")
+    if any(type(cid) is not str or not cid.strip() for cid in evidence_ids):
+        raise ValueError("working-memory evidence_ids must contain non-empty strings")
+    if len(set(evidence_ids)) != len(evidence_ids):
+        raise ValueError("working-memory evidence_ids must not contain duplicates")
+    access_policy = validate_access_policy(
+        values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
+    )
+    metadata = values["metadata"]
+    capability_tags = values["capability_tags"] or []
+    if type(capability_tags) is not list or any(
+        type(tag) is not str or not tag.strip() for tag in capability_tags
+    ):
+        raise ValueError("working-memory capability_tags must be a list of non-empty strings")
+    if len(set(capability_tags)) != len(capability_tags):
+        raise ValueError("working-memory capability_tags must not contain duplicates")
+    sensitivity = values["sensitivity"]
+    if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
+        raise ValueError("working-memory sensitivity must be a non-negative integer")
+    try:
+        # Round-trip through JSON both validates the data-only boundary and
+        # detaches all caller-owned containers before the transaction begins.
+        evidence_ids = json.loads(json_text(evidence_ids))
+        access_policy = json.loads(json_text(access_policy))
+        metadata = json.loads(json_text(metadata))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("working-memory evidence_ids, access_policy, and metadata must be JSON") from exc
+    if type(metadata) is not dict:
+        raise ValueError("working-memory metadata must be a JSON object")
+    return {
+        "item_id": values["item_id"],
+        "tenant_id": values["tenant_id"],
+        "session_id": values["session_id"],
+        "user_id": values["user_id"],
+        "agent_id": values["agent_id"],
+        "kind": values["kind"],
+        "task_id": values["task_id"],
+        "content": values["content"],
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "evidence_ids": evidence_ids,
+        "access_policy": access_policy,
+        "metadata": metadata,
+        "capability_tags": list(capability_tags),
+        "sensitivity": sensitivity,
+        "status": status,
+        "expired_at": expired_at,
+    }
+
+
+def _working_from_row(row: sqlite3.Row) -> Any:
+    return _working_from_payload(
+        {
+            "item_id": row["item_id"],
+            "tenant_id": row["tenant_id"],
+            "session_id": row["session_id"],
+            "user_id": row["user_id"],
+            "agent_id": row["agent_id"],
+            "kind": row["kind"],
+            "task_id": row["task_id"],
+            "content": row["content"],
+            "created_at": row["created_at"],
+            "expires_at": row["expires_at"],
+            "evidence_ids": json.loads(row["evidence_ids"]),
+            "access_policy": json.loads(row["access_policy"]),
+            "metadata": json.loads(row["metadata"]),
+            "capability_tags": json.loads(row["capability_tags"]),
+            "sensitivity": row["sensitivity"],
+            "status": row["status"],
+            "expired_at": row["expired_at"],
+        }
+    )
+
+
+def _working_from_payload(payload: dict[str, Any]) -> Any:
+    cls = _working_memory_item_class()
+    from_dict = getattr(cls, "from_dict", None)
+    if callable(from_dict):
+        return from_dict(copy.deepcopy(payload))
+    constructor_payload = copy.deepcopy(payload)
+    constructor_payload["created_at"] = parse_dt(constructor_payload["created_at"])
+    constructor_payload["expires_at"] = parse_dt(constructor_payload["expires_at"])
+    constructor_payload["expired_at"] = parse_dt(constructor_payload["expired_at"])
+    return cls(**constructor_payload)
+
+
+def _working_from_values(values: dict[str, Any]) -> Any:
+    return _working_from_payload(
+        {
+            **_working_snapshot(values),
+            "status": values["status"],
+            "expired_at": dt_to_json(values["expired_at"]),
+        }
+    )
+
+
+def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "item_id": values["item_id"],
+        "tenant_id": values["tenant_id"],
+        "session_id": values["session_id"],
+        "user_id": values["user_id"],
+        "agent_id": values["agent_id"],
+        "kind": values["kind"],
+        "task_id": values["task_id"],
+        "content": values["content"],
+        "created_at": dt_to_json(values["created_at"]),
+        "expires_at": dt_to_json(values["expires_at"]),
+        "evidence_ids": copy.deepcopy(values["evidence_ids"]),
+        "access_policy": copy.deepcopy(values["access_policy"]),
+        "metadata": copy.deepcopy(values["metadata"]),
+        "capability_tags": list(values["capability_tags"]),
+        "sensitivity": values["sensitivity"],
+    }
+
+
+def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
+    diff: dict[str, Any] = {
+        "session_id": values["session_id"],
+        "deadline": values["expires_at"].isoformat(),
+        "status": status,
+    }
+    if status == "active":
+        diff.update({"task_id": values["task_id"], "kind": values["kind"]})
+    if sweep is not None:
+        diff["sweep"] = sweep.isoformat()
+    return diff
+
+
 class SqliteEngine:
     """One-SQLite-file-per-tenant engine; LocalMemoryEngine is the parity oracle."""
 
@@ -699,6 +1028,8 @@ class SqliteEngine:
         source: str | None = None,
         trust_tier: int | None = None,
         capability_tags: list[str] | None = None,
+        event_id: str | None = None,
+        occurred_at: datetime | None = None,
     ) -> None:
         """Append an audit row riding the caller's transaction; the record dict
         byte-matches ``LocalMemoryEngine._audit`` (round-trips via export)."""
@@ -710,7 +1041,7 @@ class SqliteEngine:
         if normalized_tags:
             audit_diff.setdefault("capability_tags", normalized_tags)
         record = {
-            "id": new_id(),
+            "id": event_id or new_id(),
             "tenant_id": tenant_id,
             "actor": actor,
             "op": op,
@@ -719,7 +1050,7 @@ class SqliteEngine:
             "trust_tier": trust_tier,
             "capability_tags": normalized_tags,
             "diff": audit_diff,
-            "at": utc_now().isoformat(),
+            "at": (occurred_at or utc_now()).astimezone(UTC).isoformat(),
         }
         conn.execute(
             "INSERT INTO audit_log(tenant_id, record) VALUES (?, ?)",
@@ -740,6 +1071,230 @@ class SqliteEngine:
             (tenant_id, branch),
         ).fetchall()
         return [_evidence_from_row(row) for row in rows]
+
+    def _working_provenance(
+        self, conn: sqlite3.Connection, values: dict[str, Any]
+    ) -> tuple[int, list[str]]:
+        """Validate all backing evidence before a working read or mutation."""
+        trust_tiers: list[int] = []
+        capability_tags: set[str] = set()
+        for cid in values["evidence_ids"]:
+            row = conn.execute(
+                "SELECT * FROM evidence "
+                "WHERE tenant_id = ? AND branch = 'main' AND cid = ?",
+                (values["tenant_id"], cid),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+            evidence = _evidence_from_row(row)
+            if evidence.erased:
+                raise ValueError(f"evidence {cid!r} is erased")
+            if evidence.user_id != values["user_id"]:
+                raise ValueError("working item user must match originating evidence")
+            if evidence.session_id != values["session_id"]:
+                raise ValueError("working item session must match originating evidence")
+            if int(evidence.trust_tier) > int(self.policy.max_trust_tier):
+                raise PermissionError("originating evidence exceeds the working write trust ceiling")
+            trust_tiers.append(int(evidence.trust_tier))
+            capability_tags.update(str(tag) for tag in evidence.capability_tags)
+        return max(trust_tiers), sorted(capability_tags)
+
+    @staticmethod
+    def _working_insert_values(values: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            values["tenant_id"],
+            values["session_id"],
+            values["item_id"],
+            values["user_id"],
+            values["agent_id"],
+            values["kind"],
+            values["task_id"],
+            values["content"],
+            dt_to_json(values["created_at"]),
+            dt_to_json(values["expires_at"]),
+            json_text(values["capability_tags"]),
+            values["sensitivity"],
+            values["status"],
+            dt_to_json(values["expired_at"]),
+            json_text(values["evidence_ids"]),
+            json_text(values["access_policy"]),
+            json_text(values["metadata"]),
+        )
+
+    def put_working(self, item: Any) -> str:
+        """Persist one validated working item and its audit event atomically."""
+        if not isinstance(item, _working_memory_item_class()):
+            raise TypeError("item must be a WorkingMemoryItem")
+        values = _working_payload(item)
+        if values["status"] != "active":
+            raise ValueError("put_working accepts only active working items")
+        with self._lock:
+            conn = self._connect(values["tenant_id"])
+            trust_tier, capability_tags = self._working_provenance(conn, values)
+            event_id = content_cid(
+                "put_working",
+                {
+                    "tenant_id": values["tenant_id"],
+                    "session_id": values["session_id"],
+                    "item_id": values["item_id"],
+                    "deadline": values["expires_at"].isoformat(),
+                },
+            )
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                conn.execute(
+                    "INSERT INTO working_memory ("
+                    "tenant_id, session_id, item_id, user_id, agent_id, kind, task_id, content, "
+                    "created_at, expires_at, capability_tags, sensitivity, status, expired_at, "
+                    "evidence_ids, access_policy, metadata"
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    self._working_insert_values(values),
+                )
+                self._audit_row(
+                    conn,
+                    values["tenant_id"],
+                    values["agent_id"],
+                    "put_working",
+                    values["item_id"],
+                    _working_audit_diff(values, status="active"),
+                    source="working_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    event_id=event_id,
+                    occurred_at=values["created_at"],
+                )
+                conn.commit()
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                message = str(exc).upper()
+                if "UNIQUE" in message or "PRIMARY KEY" in message:
+                    raise ValueError(f"working item already exists: {values['item_id']!r}") from exc
+                raise
+            except BaseException:
+                conn.rollback()
+                raise
+            return values["item_id"]
+
+    @staticmethod
+    def _require_working_clock(value: datetime, field_name: str) -> datetime:
+        return _working_datetime(value, field_name)
+
+    def get_working(
+        self, tenant_id: str, session_id: str, item_id: str, *, as_of: datetime
+    ) -> Any | None:
+        """Return a detached active item only inside its half-open TTL window."""
+        moment = self._require_working_clock(as_of, "as_of")
+        with self._lock:
+            conn = self._connect(tenant_id)
+            row = conn.execute(
+                "SELECT * FROM working_memory "
+                "WHERE tenant_id = ? AND session_id = ? AND item_id = ? "
+                "AND status = 'active' AND created_at <= ? AND expires_at > ?",
+                (tenant_id, session_id, item_id, dt_to_json(moment), dt_to_json(moment)),
+            ).fetchone()
+            if row is None:
+                return None
+            values = _working_payload(_working_from_row(row))
+            self._working_provenance(conn, values)
+            return _working_from_values(values)
+
+    def list_working(
+        self, tenant_id: str, session_id: str, *, as_of: datetime
+    ) -> list[Any]:
+        """List visible working items in deterministic expiry/id order."""
+        moment = self._require_working_clock(as_of, "as_of")
+        with self._lock:
+            conn = self._connect(tenant_id)
+            rows = conn.execute(
+                "SELECT * FROM working_memory "
+                "WHERE tenant_id = ? AND session_id = ? AND status = 'active' "
+                "AND created_at <= ? AND expires_at > ? "
+                "ORDER BY created_at ASC, item_id ASC",
+                (tenant_id, session_id, dt_to_json(moment), dt_to_json(moment)),
+            ).fetchall()
+            values = [_working_payload(_working_from_row(row)) for row in rows]
+            for item_values in values:
+                self._working_provenance(conn, item_values)
+            return [_working_from_values(item_values) for item_values in values]
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        session_id: str | None = None,
+        expired_at: datetime,
+    ) -> list[Any]:
+        """Atomically transition due items to expired, auditing each once."""
+        sweep = self._require_working_clock(expired_at, "expired_at")
+        with self._lock:
+            conn = self._connect(tenant_id)
+            try:
+                # BEGIN IMMEDIATE is the cross-connection linearization point:
+                # two engine instances on the same tenant file cannot both
+                # select and expire the same active rows.
+                conn.execute("BEGIN IMMEDIATE")
+                query = (
+                    "SELECT * FROM working_memory WHERE tenant_id = ? "
+                    "AND status = 'active' AND expires_at <= ?"
+                )
+                params: list[Any] = [tenant_id, dt_to_json(sweep)]
+                if session_id is not None:
+                    query += " AND session_id = ?"
+                    params.append(session_id)
+                query += " ORDER BY expires_at ASC, session_id ASC, item_id ASC"
+                rows = conn.execute(query, params).fetchall()
+                due_values = [_working_payload(_working_from_row(row)) for row in rows]
+                # Validate the complete batch before changing the first row or
+                # appending the first audit record.
+                audit_context = [
+                    self._working_provenance(conn, values) for values in due_values
+                ]
+                expired_values: list[dict[str, Any]] = []
+                for values, (trust_tier, capability_tags) in zip(
+                    due_values, audit_context, strict=True
+                ):
+                    values["status"] = "expired"
+                    values["expired_at"] = values["expires_at"]
+                    updated = conn.execute(
+                        "UPDATE working_memory SET status = 'expired', expired_at = ? "
+                        "WHERE tenant_id = ? AND session_id = ? AND item_id = ? "
+                        "AND status = 'active'",
+                        (
+                            dt_to_json(values["expired_at"]),
+                            values["tenant_id"],
+                            values["session_id"],
+                            values["item_id"],
+                        ),
+                    )
+                    if updated.rowcount != 1:
+                        raise RuntimeError("working-memory expiry lost its serialization claim")
+                    self._audit_row(
+                        conn,
+                        values["tenant_id"],
+                        values["agent_id"],
+                        "expire_working",
+                        values["item_id"],
+                        _working_audit_diff(values, status="expired", sweep=sweep),
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=content_cid(
+                            "expire_working",
+                            {
+                                "tenant_id": values["tenant_id"],
+                                "session_id": values["session_id"],
+                                "item_id": values["item_id"],
+                                "deadline": dt_to_json(values["expires_at"]),
+                            },
+                        ),
+                        occurred_at=values["expires_at"],
+                    )
+                    expired_values.append(values)
+                conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+            return [_working_from_values(values) for values in expired_values]
 
     def _self_generation_budget_usage(
         self, conn: sqlite3.Connection, *, tenant_id: str, branch: str
@@ -1154,6 +1709,13 @@ class SqliteEngine:
             entities = self._records(conn, "entities", tenant_id)
             justifications = self._records(conn, "justifications", tenant_id)
             contradictions = self._records(conn, "contradictions", tenant_id)
+            working_memory = [
+                _working_from_row(row).to_dict()
+                for row in conn.execute(
+                    "SELECT * FROM working_memory WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
+                )
+            ]
             all_audit = [
                 json.loads(row["record"])
                 for row in conn.execute("SELECT record FROM audit_log ORDER BY seq")
@@ -1181,7 +1743,7 @@ class SqliteEngine:
                 for audit in all_audit
             )
         ]
-        return {
+        exported = {
             "tenant_id": tenant_id,
             "evidence": evidence,
             "assertions": assertions,
@@ -1195,6 +1757,9 @@ class SqliteEngine:
             "deletion_log": deletion_log,
             "merge_log": merge_log,
         }
+        if working_memory:
+            exported["working_memory"] = working_memory
+        return exported
 
     def export_tenant_filtered(self, tenant_id: str, access_context: dict[str, Any]) -> dict[str, Any]:
         return filter_export_for_context(
@@ -1239,6 +1804,7 @@ class SqliteEngine:
             "contradictions",
             "calibrations",
             "entities",
+            "working_memory",
             "audit_log",
             "deletion_log",
             "merge_log",
@@ -1292,7 +1858,7 @@ class SqliteEngine:
             finally:
                 if owned:
                     conn.close()
-        return {
+        exported = {
             "policy": self.policy.to_dict(),
             "branches": self._export_branches(),
             "evidence": [item for exported in tenant_exports for item in exported["evidence"]],
@@ -1308,6 +1874,10 @@ class SqliteEngine:
             "merge_log": merge_log,
             "tenants": tenant_exports,
         }
+        working_memory = [item for tenant_export in tenant_exports for item in tenant_export.get("working_memory", [])]
+        if working_memory:
+            exported["working_memory"] = working_memory
+        return exported
 
     # --- scan surfaces (dense / lexical / graph) -----------------------------
     #
@@ -3248,6 +3818,28 @@ class SqliteEngine:
                     _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates)
                 affected_cids = {cid, *derived_cids}
                 propagated["erased_derived_evidence"] = derived_cids
+                working_rows = conn.execute(
+                    "SELECT tenant_id, session_id, item_id, evidence_ids "
+                    "FROM working_memory WHERE tenant_id = ? ORDER BY rowid",
+                    (tenant_id,),
+                ).fetchall()
+                removed_working_items = [
+                    {
+                        "tenant_id": row["tenant_id"],
+                        "session_id": row["session_id"],
+                        "item_id": row["item_id"],
+                    }
+                    for row in working_rows
+                    if affected_cids.intersection(json.loads(row["evidence_ids"] or "[]"))
+                ]
+                for removed in removed_working_items:
+                    conn.execute(
+                        "DELETE FROM working_memory "
+                        "WHERE tenant_id = ? AND session_id = ? AND item_id = ?",
+                        (removed["tenant_id"], removed["session_id"], removed["item_id"]),
+                    )
+                if removed_working_items:
+                    propagated["removed_working_items"] = removed_working_items
                 propagated["retained_derived_evidence"] = sorted(_bytes_to_cid(item) for item in retained_metadata)
                 propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
                 retained_cascade_metadata = {
