@@ -610,15 +610,15 @@ class DeletionCoordinator:
                 if evidence is not None:
                     sensitive.update(
                         self._strings(
-                            {
-                                "content": evidence.content,
-                                "source_identity": evidence.source_identity,
-                                "session_id": evidence.session_id,
-                                "content_pointer": evidence.content_pointer,
-                                "metadata": evidence.metadata,
-                            }
+                            (
+                                evidence.content,
+                                evidence.source_identity,
+                                evidence.session_id,
+                                evidence.content_pointer,
+                            )
                         )
                     )
+                    sensitive.update(self._strings(evidence.metadata, include_keys=True))
         sensitive.update(hashlib.sha256(value.encode()).hexdigest() for value in tuple(sensitive) if value)
         try:
             # Scrub while the evidence still exists so a crash after forget cannot
@@ -649,13 +649,24 @@ class DeletionCoordinator:
             receipt.state = "failed"
 
     @classmethod
-    def _strings(cls, value: Any) -> set[str]:
+    def _strings(cls, value: Any, *, include_keys: bool = False) -> set[str]:
         if isinstance(value, str):
             return {value}
         if isinstance(value, dict):
-            return {item for nested in value.values() for item in cls._strings(nested)}
+            strings = {
+                item
+                for nested in value.values()
+                for item in cls._strings(nested, include_keys=include_keys)
+            }
+            if include_keys:
+                strings.update(key for key in value if isinstance(key, str))
+            return strings
         if isinstance(value, (list, tuple, set)):
-            return {item for nested in value for item in cls._strings(nested)}
+            return {
+                item
+                for nested in value
+                for item in cls._strings(nested, include_keys=include_keys)
+            }
         return set()
 
     @classmethod
@@ -663,7 +674,13 @@ class DeletionCoordinator:
         if isinstance(value, str) and any(needle and needle in value for needle in sensitive):
             return _opaque("retained-audit", value)
         if isinstance(value, dict):
-            return {key: cls._scrub_value(item, sensitive) for key, item in value.items()}
+            scrubbed = {}
+            for key, item in value.items():
+                scrubbed_key = cls._scrub_value(key, sensitive)
+                if scrubbed_key in scrubbed:
+                    scrubbed_key = _opaque("retained-audit-key", repr(key))
+                scrubbed[scrubbed_key] = cls._scrub_value(item, sensitive)
+            return scrubbed
         if isinstance(value, list):
             return [cls._scrub_value(item, sensitive) for item in value]
         if isinstance(value, tuple):
