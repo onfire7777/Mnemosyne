@@ -6,6 +6,9 @@
       "input": {
         "source_utf8": "prefix naïve 東京 suffix",
         "token_length": 64,
+        "padding_tokens": 60,
+        "answer_token_segments": [[1, 3]],
+        "token_windows": [[0, 64]],
         "answer_byte_segments": [[7, 20]],
         "windows": [[0, 27]]
       },
@@ -30,6 +33,9 @@
       "input": {
         "source_utf8": "Paris then Paris again",
         "token_length": 128,
+        "padding_tokens": 124,
+        "answer_token_segments": [[2, 3]],
+        "token_windows": [[0, 128]],
         "answer_byte_segments": [[11, 16]],
         "windows": [[6, 22]],
         "occurrences": [[0, 5], [11, 16]],
@@ -56,6 +62,9 @@
       "input": {
         "source_utf8": "no grounded answer",
         "token_length": 64,
+        "padding_tokens": 61,
+        "answer_token_segments": [],
+        "token_windows": [],
         "answer_byte_segments": [],
         "windows": []
       },
@@ -80,6 +89,9 @@
       "input": {
         "source_utf8": "prefix-boundary-suffix",
         "token_length": 384,
+        "padding_tokens": 383,
+        "answer_token_segments": [[383, 384]],
+        "token_windows": [[0, 384]],
         "answer_byte_segments": [[7, 15]],
         "windows": [[0, 15]]
       },
@@ -104,6 +116,9 @@
       "input": {
         "source_utf8": "alpha → omega",
         "token_length": 512,
+        "padding_tokens": 509,
+        "answer_token_segments": [[382, 384], [384, 386]],
+        "token_windows": [[0, 384], [128, 512]],
         "answer_byte_segments": [[0, 10], [10, 15]],
         "windows": [[0, 10], [6, 15]]
       },
@@ -134,6 +149,9 @@
       "input": {
         "source_utf8": "exact",
         "token_length": 128,
+        "padding_tokens": 127,
+        "answer_token_segments": [[0, 1]],
+        "token_windows": [[0, 128]],
         "answer_byte_segments": [[0, 5]],
         "windows": [[0, 5]]
       },
