@@ -246,7 +246,13 @@ def _validate_rank_width(value: object, *, candidate_count: int | None = None) -
 
 
 def _check_deadline(deadline: float | None) -> None:
-    if deadline is not None and time.monotonic() >= deadline:
+    if deadline is None:
+        return
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+        raise RerankerTimeoutError("reranker deadline must be finite")
+    if not math.isfinite(float(deadline)):
+        raise RerankerTimeoutError("reranker deadline must be finite")
+    if time.monotonic() >= deadline:
         raise RerankerTimeoutError("reranker bakeoff validation timed out")
 
 
@@ -478,7 +484,11 @@ def run_synthetic_bakeoff(
             raise RerankerTimeoutError("timeout_ms must be a positive finite number")
         if not math.isfinite(float(timeout_ms)) or timeout_ms <= 0:
             raise RerankerTimeoutError("timeout_ms must be a positive finite number")
-        deadline = min(deadline, time.monotonic() + timeout_ms / 1000) if deadline else time.monotonic() + timeout_ms / 1000
+        deadline = (
+            min(deadline, time.monotonic() + timeout_ms / 1000)
+            if deadline is not None
+            else time.monotonic() + timeout_ms / 1000
+        )
     fixture = validate_selection_fixture(document, deadline=deadline)
     return fixture["selection"]["expected_candidate_id"]
 
