@@ -1646,6 +1646,10 @@ class PostgresEngine:
         *,
         expired_at: datetime,
         session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
     ) -> list[WorkingMemoryItem]:
         sweep = _working_datetime(expired_at, "expired_at")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1663,6 +1667,17 @@ class PostgresEngine:
                 if session_id is not None:
                     query += " AND w.external_session_id = %s"
                     params.append(session_id)
+                for column, value in (
+                    ("external_user_id", user_id),
+                    ("agent_id", agent_id),
+                    ("task_id", task_id),
+                ):
+                    if value is not None:
+                        query += f" AND w.{column} = %s"
+                        params.append(value)
+                if branch is not None:
+                    query += " AND w.metadata->>'branch' = %s"
+                    params.append(branch)
                 query += " ORDER BY w.expires_at ASC, w.external_session_id ASC, w.item_id ASC FOR UPDATE SKIP LOCKED"
                 cur.execute(query, tuple(params))
                 rows = list(cur.fetchall())
