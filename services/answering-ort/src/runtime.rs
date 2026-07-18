@@ -560,7 +560,7 @@ fn validate_output(request: &Request, output: &Output) -> Result<(), ApiError> {
             Output::Rerank { ranked_ids },
         ) => {
             let mut seen = std::collections::HashSet::with_capacity(ranked_ids.len());
-            if ranked_ids.len() > (*rank_width).min(evidence.len())
+            if ranked_ids.len() != (*rank_width).min(evidence.len())
                 || ranked_ids
                     .iter()
                     .any(|id| !seen.insert(id) || !has_evidence_id(evidence, id))
@@ -597,11 +597,18 @@ fn validate_read_prediction(
             {
                 return Err(ApiError::inference_failed());
             }
+            if supporting_ids.is_empty() || !supporting_ids.iter().any(|id| id == evidence_id) {
+                return Err(ApiError::inference_failed());
+            }
             supporting_ids
         }
-        ReadPrediction::Yes { supporting_ids }
-        | ReadPrediction::No { supporting_ids }
-        | ReadPrediction::Null { supporting_ids } => supporting_ids,
+        ReadPrediction::Yes { supporting_ids } | ReadPrediction::No { supporting_ids } => {
+            if supporting_ids.is_empty() {
+                return Err(ApiError::inference_failed());
+            }
+            supporting_ids
+        }
+        ReadPrediction::Null { supporting_ids } => supporting_ids,
     };
 
     let mut seen = std::collections::HashSet::with_capacity(supporting_ids.len());
@@ -1131,6 +1138,56 @@ mod tests {
                     start: 1,
                     end: 2,
                     supporting_ids: vec!["unknown".into()],
+                },
+            },
+        );
+        assert_invalid(
+            Request::Rerank {
+                query: "q".into(),
+                evidence: vec![Evidence {
+                    id: "known".into(),
+                    text: "text".into(),
+                }],
+                rank_width: 1,
+            },
+            Output::Rerank {
+                ranked_ids: Vec::new(),
+            },
+        );
+        assert_invalid(
+            Request::Read {
+                query: "q".into(),
+                evidence: vec![
+                    Evidence {
+                        id: "known".into(),
+                        text: "text".into(),
+                    },
+                    Evidence {
+                        id: "other".into(),
+                        text: "other".into(),
+                    },
+                ],
+            },
+            Output::Read {
+                prediction: ReadPrediction::Span {
+                    evidence_id: "known".into(),
+                    start: 0,
+                    end: 1,
+                    supporting_ids: vec!["other".into()],
+                },
+            },
+        );
+        assert_invalid(
+            Request::Read {
+                query: "q".into(),
+                evidence: vec![Evidence {
+                    id: "known".into(),
+                    text: "text".into(),
+                }],
+            },
+            Output::Read {
+                prediction: ReadPrediction::Yes {
+                    supporting_ids: Vec::new(),
                 },
             },
         );
