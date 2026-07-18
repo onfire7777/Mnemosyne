@@ -13,7 +13,7 @@ import pytest
 
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import LocalMemoryEngine, WorkingMemoryItem
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ids import evidence_unscoped_cid
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -277,6 +277,98 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert recalled.content == "Shared engine contract stores the orchid retrieval fact."
     assert any(hit.id == cid for hit in retrieved.hits)
     assert any(item["cid"] == cid for item in exported["evidence"])
+
+
+def test_shared_engine_contract_working_memory_is_scoped_detached_and_non_durable(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    expires_at = created_at + timedelta(minutes=10)
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            session_id="shared-session",
+            actor="user",
+            source_type="shared-contract",
+            content="Working-memory provenance source.",
+            access_policy={"tenant": tenant},
+        )
+    )
+    item = WorkingMemoryItem(
+        item_id="shared-working-item",
+        tenant_id=tenant,
+        session_id="shared-session",
+        user_id=user,
+        agent_id=user,
+        kind="current_plan",
+        task_id="shared-task",
+        content="Transient shared plan content.",
+        created_at=created_at,
+        expires_at=expires_at,
+        evidence_ids=[source_cid],
+        access_policy={"tenant": tenant},
+    )
+
+    assert engine.put_working(item) == item.item_id
+    assert engine.get_working(tenant, "other-session", item.item_id, as_of=created_at) is None
+    assert engine.list_working("other-tenant", "shared-session", as_of=created_at) == []
+    detached = engine.get_working(tenant, "shared-session", item.item_id, as_of=created_at)
+    assert detached is not None
+    detached.metadata["caller_mutation"] = True
+    reread = engine.get_working(tenant, "shared-session", item.item_id, as_of=created_at)
+    assert reread is not None
+    assert "caller_mutation" not in reread.metadata
+    assert engine.get_working(tenant, "shared-session", item.item_id, as_of=expires_at) is None
+
+    exported = engine.export_tenant(tenant)
+    assert all(row.get("content") != item.content for row in exported["evidence"])
+    assert any(
+        row["op"] == "put_working" and row["target_id"] == item.item_id
+        for row in exported["audit_log"]
+    )
+
+    expired = engine.expire_working(tenant, expired_at=expires_at, session_id="shared-session")
+    assert [row.item_id for row in expired] == [item.item_id]
+    assert expired[0].status == "expired"
+    assert engine.list_working(tenant, "shared-session", as_of=expires_at) == []
+
+
+def test_shared_engine_contract_working_hit_cannot_collide_with_or_mark_durable_evidence(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Durable collision sentinel.")
+    durable = Hit(
+        id=cid,
+        kind="evidence",
+        tenant_id=tenant,
+        branch="main",
+        text="Durable collision sentinel.",
+        score=1.0,
+        channel="lexical",
+    )
+    working = Hit(
+        id=cid,
+        kind="working",
+        tenant_id=tenant,
+        branch="main",
+        text="Transient collision sentinel.",
+        score=1.0,
+        channel="working_memory",
+        provenance=[cid],
+        metadata={"memory_type": "working"},
+    )
+
+    fused = engine._rrf([[durable], [working]], k=10)
+    assert {(hit.kind, hit.id) for hit in fused} == {("evidence", cid), ("working", cid)}
+    before = engine.get_evidence(tenant, cid)
+    assert before is not None
+    assert engine._record_retrieval_access([working]) == {"assertions": 0, "evidence": 0}
+    after = engine.get_evidence(tenant, cid)
+    assert after is not None
+    assert after.metadata == before.metadata
 
 
 def test_shared_engine_read_without_access_telemetry_is_store_immutable_cached_and_uncached(

@@ -186,7 +186,7 @@ class Preference:
 @dataclass(slots=True)
 class Hit:
     id: str
-    kind: Literal["evidence", "assertion", "relation", "preference"]
+    kind: Literal["evidence", "assertion", "relation", "preference", "working"]
     tenant_id: str
     branch: str
     text: str

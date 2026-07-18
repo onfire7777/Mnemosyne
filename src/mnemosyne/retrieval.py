@@ -2453,9 +2453,8 @@ def working_memory_hits(
             Hit(
                 id=row["item_id"],
                 # Keep transient working items out of durable-evidence identity
-                # and access-marking paths. The runtime Hit model predates this
-                # Phase-3 kind, so the string is intentionally additive here.
-                kind="working",  # type: ignore[arg-type]
+                # and access-marking paths.
+                kind="working",
                 tenant_id=tenant_id,
                 branch=branch,
                 text=row["content"],
