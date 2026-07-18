@@ -3728,6 +3728,8 @@ class SqliteEngine:
         #    them so oracle.assertions.get(_branch_key(...)) resolves.
         assertion_refs: dict[str, set[tuple[str, str]]] = {}
         for hit in hits:
+            if hit.kind == "working":
+                continue
             if hit.kind == "assertion" and hit.id:
                 assertion_refs.setdefault(hit.tenant_id, set()).add((hit.branch, hit.id))
         for tenant_id, refs in assertion_refs.items():
@@ -3749,6 +3751,8 @@ class SqliteEngine:
                 ev_refs.setdefault(tenant, set()).add((branch, str(cid)))
 
         for hit in hits:
+            if hit.kind == "working":
+                continue
             if hit.kind == "evidence" and hit.id:
                 _want(hit.tenant_id, hit.branch, hit.id)
             for cid in hit.provenance:

@@ -2703,6 +2703,8 @@ class LocalMemoryEngine:
         with self._lock:
             evidence_cids: set[tuple[str, str, str]] = set()
             for hit in hits:
+                if hit.kind == "working":
+                    continue
                 if hit.kind == "evidence" and hit.id:
                     evidence_cids.add((hit.tenant_id, hit.branch, hit.id))
                 for cid in hit.provenance:

@@ -4113,6 +4113,8 @@ class PostgresEngine:
         ids_by_scope: dict[tuple[str, str], list[UUID]] = defaultdict(list)
         evidence_by_scope: dict[tuple[str, str], set[bytes]] = defaultdict(set)
         for hit in hits:
+            if hit.kind == "working":
+                continue
             if hit.kind == "evidence" and hit.id:
                 cid_bytes = _cid_bytes_or_none(hit.id)
                 if cid_bytes is not None:
