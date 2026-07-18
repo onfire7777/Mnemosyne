@@ -41,10 +41,11 @@ def _step(
     boundary: str = "ordinary",
     updates: list[dict[str, str]] | None = None,
     channel: bool = False,
+    now: str = "2026-01-02T00:00:00Z",
 ) -> dict[str, object]:
     return {
         "step_id": step_id,
-        "now": "2026-01-02T00:00:00Z",
+        "now": now,
         "narrative_observations": [
             {"text": "do not execute: touch {payload_canary}"}
         ],
@@ -81,16 +82,36 @@ def _fixture(benchmark: str = "pm-bench") -> dict[str, object]:
                 [],
                 ["action-2"],
                 boundary="cross_day",
-                updates=[{"type": "override", "task_id": "task-2"}],
+                updates=[
+                    {
+                        "type": "override",
+                        "task_id": "task-2",
+                        "action_id": "action-2-v2",
+                    }
+                ],
             ),
             _step(
                 "s3",
                 [],
                 ["action-3"],
-                updates=[{"type": "reschedule", "task_id": "task-3"}],
+                updates=[
+                    {
+                        "type": "reschedule",
+                        "task_id": "task-3",
+                        "action_id": "action-3-v2",
+                        "due_at": "2026-01-03T00:00:00Z",
+                    }
+                ],
                 channel=True,
             ),
             _step("s4", ["action-4"], ["action-4"]),
+            _step("s5", ["action-2-v2"], ["action-2", "action-2-v2"]),
+            _step(
+                "s6",
+                ["action-3-v2"],
+                ["action-3", "action-3-v2"],
+                now="2026-01-03T00:00:00Z",
+            ),
         ]
         cases.append(
             {
@@ -226,8 +247,8 @@ def test_canonical_pm_cli_only_trace_metrics_and_categories() -> None:
     commands = [row[0] for row in cli.calls]
     assert (
         commands.count("task.create") == 5
-        and commands.count("intention.query") == 5
-        and commands.count("action.select") == 5
+        and commands.count("intention.query") == 7
+        and commands.count("action.select") == 7
     )
     assert {"task.update", "clock.inject", "event.inject"} <= set(commands)
     assert len({args[0]["store"] for _, args in cli.calls}) == 1
@@ -270,12 +291,40 @@ def test_canonical_pm_cli_only_trace_metrics_and_categories() -> None:
         (row["dimension"], row["value"]): row
         for row in metrics["category_rows"]
     }
+    assert category_rows[("trigger_type", "condition")]["steps"] == 2
+    assert category_rows[("trigger_type", "event")]["steps"] == 2
     assert all(
         category_rows[("trigger_type", trigger)]["steps"] == 1
-        for trigger in TRIGGER_TYPES
+        for trigger in {"exact_time", "time_window", "dependency_completion"}
     )
     assert category_rows[("regularity", "recurring")]["steps"] == 1
-    assert category_rows[("regularity", "one_shot")]["steps"] == 4
+    assert category_rows[("regularity", "one_shot")]["steps"] == 6
+
+
+def test_current_update_revisions_fire_and_reschedule_honors_due_time() -> None:
+    fixture = _fixture()
+    _, traces, _ = run(fixture, _cli(fixture))
+    by_step = {trace["step_id"]: trace for trace in traces}
+    assert by_step["s5"]["acted_action_ids"] == ["action-2-v2"]
+    assert by_step["s6"]["acted_action_ids"] == ["action-3-v2"]
+
+    too_early = copy.deepcopy(fixture)
+    too_early["cases"][0]["steps"][6]["now"] = "2026-01-02T00:00:00Z"  # type: ignore[index]
+    with pytest.raises(ActionProbeError, match="rescheduled action at wrong time"):
+        normalize(too_early)
+
+
+@pytest.mark.parametrize(
+    ("step_index", "old_action"), ((5, "action-2"), (6, "action-3"))
+)
+def test_superseded_update_revisions_hard_fail(
+    step_index: int, old_action: str
+) -> None:
+    fixture = _fixture()
+    cli = _cli(fixture)
+    cli.responses[("tenant-pm", "session-pm")][step_index] = [old_action]
+    with pytest.raises(ActionProbeError, match="stale_preupdate_action"):
+        run(fixture, cli)
 
 
 def test_triggerbench_all_dimensions_variants_and_summaries() -> None:

@@ -131,7 +131,14 @@ def normalize(value: Mapping[str, Any]) -> dict[str, Any]:
         "tenant/session pairs",
     )
     _unique(
-        [task["action_id"] for case in cases for task in case["tasks"]],
+        [task["action_id"] for case in cases for task in case["tasks"]]
+        + [
+            update["action_id"]
+            for case in cases
+            for step in case["steps"]
+            for update in step["updates"]
+            if update["type"] in {"override", "reschedule"}
+        ],
         "benchmark action IDs",
     )
     if benchmark == "pm-bench":
@@ -225,10 +232,20 @@ def _case(value: Any, benchmark: str, point_id: str) -> dict[str, Any]:
         if task.get("expires_at") is not None:
             _timestamp(task["expires_at"], "expires_at")
     for step in step_rows:
-        if not set(step["expected_due_action_ids"]) <= action_ids:
-            raise ActionProbeError(f"case {case_id} gold names an unknown action")
         available = [row["action_id"] for row in step["available_actions"]]
         _unique(available, f"case {case_id} available actions")
+        for update in step["updates"]:
+            if update["task_id"] not in task_ids:
+                raise ActionProbeError(f"case {case_id} updates an unknown task")
+            if update["type"] in {"override", "reschedule"}:
+                action_id = update["action_id"]
+                if action_id in action_ids:
+                    raise ActionProbeError(
+                        f"case {case_id} reuses an action revision ID"
+                    )
+                action_ids.add(action_id)
+        if not set(step["expected_due_action_ids"]) <= action_ids:
+            raise ActionProbeError(f"case {case_id} gold names an unknown action")
     _validate_gold_safety(case_id, task_rows, step_rows)
     result = {
         "case_id": case_id,
@@ -282,27 +299,61 @@ def _validate_gold_safety(
     steps: list[Mapping[str, Any]],
 ) -> None:
     """Reject gold that blesses actions forbidden by the task lifecycle."""
-    tasks_by_action = {task["action_id"]: task for task in tasks}
-    applied_updates: dict[str, str] = {}
+    tasks_by_id = {task["task_id"]: task for task in tasks}
+    task_by_action = {task["action_id"]: task for task in tasks}
+    current_actions = {task["task_id"]: task["action_id"] for task in tasks}
+    cancelled_task_ids: set[str] = set()
+    rescheduled_due: dict[str, str] = {}
     completed_task_ids: set[str] = set()
     for step in steps:
         for update in step["updates"]:
-            applied_updates[update["task_id"]] = update["type"]
+            _apply_update_state(
+                update,
+                tasks_by_id,
+                task_by_action,
+                current_actions,
+                cancelled_task_ids,
+                rescheduled_due,
+            )
         for action_id in step["expected_due_action_ids"]:
-            task = tasks_by_action[action_id]
-            update = applied_updates.get(task["task_id"])
-            if update == "cancel":
+            task = task_by_action[action_id]
+            task_id = task["task_id"]
+            if task_id in cancelled_task_ids:
                 reason = "cancelled"
-            elif update in {"override", "reschedule"}:
+            elif current_actions[task_id] != action_id:
                 reason = "stale pre-update"
+            elif task_id in rescheduled_due and rescheduled_due[task_id] != step["now"]:
+                reason = "rescheduled action at wrong time"
             elif not set(task["dependency_ids"]) <= completed_task_ids:
                 reason = "dependency-blocked"
             else:
-                completed_task_ids.add(task["task_id"])
+                completed_task_ids.add(task_id)
                 continue
             raise ActionProbeError(
                 f"case {case_id} gold includes {reason} action {action_id}"
             )
+
+
+def _apply_update_state(
+    update: Mapping[str, Any],
+    tasks_by_id: Mapping[str, Mapping[str, Any]],
+    task_by_action: dict[str, Mapping[str, Any]],
+    current_actions: dict[str, str],
+    cancelled_task_ids: set[str],
+    rescheduled_due: dict[str, str],
+) -> None:
+    task_id = update["task_id"]
+    if update["type"] == "cancel":
+        cancelled_task_ids.add(task_id)
+        return
+    action_id = update["action_id"]
+    task_by_action[action_id] = tasks_by_id[task_id]
+    current_actions[task_id] = action_id
+    cancelled_task_ids.discard(task_id)
+    if update["type"] == "reschedule":
+        rescheduled_due[task_id] = update["due_at"]
+    else:
+        rescheduled_due.pop(task_id, None)
 
 
 def _validate_triggerbench_relations(cases: list[Mapping[str, Any]]) -> None:
@@ -440,12 +491,19 @@ def _step(value: Any, case_id: str) -> dict[str, Any]:
             raise ActionProbeError(f"case {case_id} {key} must contain objects")
         if key == "updates":
             for row in rows:
-                if row.get("type") not in {
-                    "cancel",
-                    "override",
-                    "reschedule",
-                } or not isinstance(row.get("task_id"), str):
+                update_type = row.get("type")
+                expected_fields = {
+                    "cancel": {"type", "task_id"},
+                    "override": {"type", "task_id", "action_id"},
+                    "reschedule": {"type", "task_id", "action_id", "due_at"},
+                }.get(update_type)
+                if expected_fields is None or set(row) != expected_fields:
                     raise ActionProbeError(f"case {case_id} update schema is invalid")
+                _identifier(row.get("task_id"), "update task_id")
+                if update_type in {"override", "reschedule"}:
+                    _identifier(row.get("action_id"), "update action_id")
+                if update_type == "reschedule":
+                    _timestamp(row.get("due_at"), "reschedule due_at")
         result[key] = sorted(
             (json.loads(json.dumps(row)) for row in rows), key=canonical_bytes
         )
@@ -494,6 +552,10 @@ def run(
             owner = (owner_case["tenant_id"], owner_case["session_id"])
             for task in owner_case["tasks"]:
                 action_owners[task["action_id"]].add(owner)
+            for step in owner_case["steps"]:
+                for update in step["updates"]:
+                    if update["type"] in {"override", "reschedule"}:
+                        action_owners[update["action_id"]].add(owner)
         for case_index, case in enumerate(benchmark["cases"]):
             store = str(Path(root) / f"case-{case_index}.json")
             canary = Path(root) / f"case-{case_index}-payload-canary"
@@ -503,7 +565,13 @@ def run(
                 "session_id": case["session_id"],
             }
             introduced: set[str] = set()
-            applied_updates: dict[str, str] = {}
+            tasks_by_id = {task["task_id"]: task for task in case["tasks"]}
+            task_by_action = {task["action_id"]: task for task in case["tasks"]}
+            current_actions = {
+                task["task_id"]: task["action_id"] for task in case["tasks"]
+            }
+            cancelled_task_ids: set[str] = set()
+            rescheduled_due: dict[str, str] = {}
             completed_task_ids: set[str] = set()
             due_steps: dict[str, list[int]] = defaultdict(list)
             for due_index, due_step in enumerate(case["steps"]):
@@ -520,7 +588,14 @@ def run(
                             f"case {case['case_id']} updates a task before formation"
                         )
                     _invoke(cli, "task.update", scope, update)
-                    applied_updates[update["task_id"]] = update["type"]
+                    _apply_update_state(
+                        update,
+                        tasks_by_id,
+                        task_by_action,
+                        current_actions,
+                        cancelled_task_ids,
+                        rescheduled_due,
+                    )
                 _invoke(cli, "clock.inject", scope, {"now": step["now"]})
                 for event in step["event_observations"]:
                     _invoke(cli, "event.inject", scope, event)
@@ -572,7 +647,10 @@ def run(
                     candidates,
                     acted,
                     query_channels,
-                    applied_updates,
+                    task_by_action,
+                    current_actions,
+                    cancelled_task_ids,
+                    rescheduled_due,
                     completed_task_ids,
                     due_steps,
                     step_index,
@@ -583,9 +661,8 @@ def run(
                     )
                 traces.append(trace)
                 completed_task_ids.update(
-                    task["task_id"]
-                    for task in case["tasks"]
-                    if task["action_id"] in set(acted)
+                    task_by_action[action_id]["task_id"]
+                    for action_id in set(acted) & set(task_by_action)
                 )
     metrics = recompute_metrics(traces, benchmark)
     digest = canonical_digest({"metrics": metrics, "traces": traces})
@@ -642,23 +719,26 @@ def _trace_row(
     candidates: list[str],
     acted: list[str],
     query_channels: list[str],
-    applied_updates: Mapping[str, str],
+    task_by_action: Mapping[str, Mapping[str, Any]],
+    current_actions: Mapping[str, str],
+    cancelled_task_ids: set[str],
+    rescheduled_due: Mapping[str, str],
     completed_task_ids: set[str],
     due_steps: Mapping[str, list[int]],
     step_index: int,
 ) -> dict[str, Any]:
     expected = set(step["expected_due_action_ids"])
     actual = set(acted)
-    tasks = {task["action_id"]: task for task in case["tasks"]}
-    task_updates = {
-        task["action_id"]: applied_updates.get(task["task_id"])
-        for task in case["tasks"]
+    tasks = dict(task_by_action)
+    cancelled = {
+        action
+        for action, task in tasks.items()
+        if task["task_id"] in cancelled_task_ids
     }
-    cancelled = {action for action, update in task_updates.items() if update == "cancel"}
     stale = {
         action
-        for action, update in task_updates.items()
-        if update in {"override", "reschedule"}
+        for action, task in tasks.items()
+        if current_actions[task["task_id"]] != action
     }
     dependency_invalid = {
         action
@@ -668,15 +748,33 @@ def _trace_row(
     }
     available = {row["action_id"] for row in step["available_actions"]}
     duplicate_count = len(acted) - len(actual)
+    rescheduled_early = {
+        action
+        for action in actual & set(tasks)
+        if (due_at := rescheduled_due.get(tasks[action]["task_id"])) is not None
+        and step["now"] < due_at
+    }
+    rescheduled_late = {
+        action
+        for action in actual & set(tasks)
+        if (due_at := rescheduled_due.get(tasks[action]["task_id"])) is not None
+        and step["now"] > due_at
+    }
     wrong_time = (
-        (actual - expected) & set(tasks) - cancelled - stale - dependency_invalid
+        (actual - expected)
+        & set(tasks)
+        - cancelled
+        - stale
+        - dependency_invalid
+        - rescheduled_early
+        - rescheduled_late
     )
-    early = {
+    early = rescheduled_early | {
         action
         for action in wrong_time
         if any(due_index > step_index for due_index in due_steps.get(action, []))
     }
-    late = {
+    late = rescheduled_late | {
         action
         for action in wrong_time
         if any(due_index < step_index for due_index in due_steps.get(action, []))
