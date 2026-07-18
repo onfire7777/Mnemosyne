@@ -494,6 +494,7 @@ _WORKING_FIELDS = (
     "created_at",
     "expires_at",
     "evidence_ids",
+    "trust_tier",
     "access_policy",
     "metadata",
     "capability_tags",
@@ -550,6 +551,11 @@ def _working_payload(item: Any) -> dict[str, Any]:
         raise ValueError("working-memory evidence_ids must contain non-empty strings")
     if len(set(evidence_ids)) != len(evidence_ids):
         raise ValueError("working-memory evidence_ids must not contain duplicates")
+    trust_tier = values["trust_tier"]
+    if type(trust_tier) is not int or isinstance(trust_tier, bool):
+        raise ValueError("working-memory trust_tier must be an integer")
+    if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+        raise ValueError("working-memory trust_tier is out of range")
     access_policy = validate_access_policy(
         values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
     )
@@ -583,6 +589,7 @@ def _working_payload(item: Any) -> dict[str, Any]:
         "created_at": created_at,
         "expires_at": expires_at,
         "evidence_ids": evidence_ids,
+        "trust_tier": trust_tier,
         "access_policy": access_policy,
         "metadata": metadata,
         "capability_tags": list(capability_tags),
@@ -606,6 +613,7 @@ def _working_from_row(row: sqlite3.Row) -> Any:
             "created_at": row["created_at"],
             "expires_at": row["expires_at"],
             "evidence_ids": json.loads(row["evidence_ids"]),
+            "trust_tier": row["trust_tier"],
             "access_policy": json.loads(row["access_policy"]),
             "metadata": json.loads(row["metadata"]),
             "capability_tags": json.loads(row["capability_tags"]),
@@ -643,6 +651,7 @@ def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
         "created_at": values["created_at"].isoformat(),
         "expires_at": values["expires_at"].isoformat(),
         "evidence_ids": copy.deepcopy(values["evidence_ids"]),
+        "trust_tier": values["trust_tier"],
         "access_policy": copy.deepcopy(values["access_policy"]),
         "metadata": copy.deepcopy(values["metadata"]),
         "capability_tags": list(values["capability_tags"]),
@@ -787,6 +796,14 @@ class SqliteEngine:
         with conn:
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
+            working_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(working_memory)")
+            }
+            if "trust_tier" not in working_columns:
+                conn.execute(
+                    "ALTER TABLE working_memory ADD COLUMN trust_tier INTEGER NOT NULL "
+                    "DEFAULT 0 CHECK (trust_tier BETWEEN 0 AND 4)"
+                )
             conn.execute(
                 "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
@@ -977,7 +994,9 @@ class SqliteEngine:
         self, conn: sqlite3.Connection, values: dict[str, Any]
     ) -> tuple[int, list[str]]:
         """Validate all backing evidence before a working read or mutation."""
-        trust_tiers: list[int] = []
+        if values["trust_tier"] > int(self.policy.max_trust_tier):
+            raise PermissionError("working item exceeds the working write trust ceiling")
+        trust_tiers: list[int] = [values["trust_tier"]]
         capability_tags: set[str] = set(values["capability_tags"])
         sensitivities = [values["sensitivity"]]
         access_policies = [
@@ -1032,7 +1051,8 @@ class SqliteEngine:
             access_policies,
             tenant_id=values["tenant_id"],
         )
-        return max(trust_tiers), values["capability_tags"]
+        values["trust_tier"] = max(trust_tiers)
+        return values["trust_tier"], values["capability_tags"]
 
     @staticmethod
     def _working_insert_values(values: dict[str, Any]) -> tuple[Any, ...]:
@@ -1047,6 +1067,7 @@ class SqliteEngine:
             values["content"],
             dt_to_json(values["created_at"]),
             dt_to_json(values["expires_at"]),
+            values["trust_tier"],
             json_text(values["capability_tags"]),
             values["sensitivity"],
             values["status"],
@@ -1073,9 +1094,9 @@ class SqliteEngine:
                 conn.execute(
                     "INSERT INTO working_memory ("
                     "tenant_id, session_id, item_id, user_id, agent_id, kind, task_id, content, "
-                    "created_at, expires_at, capability_tags, sensitivity, status, expired_at, "
+                    "created_at, expires_at, trust_tier, capability_tags, sensitivity, status, expired_at, "
                     "evidence_ids, access_policy, metadata"
-                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     self._working_insert_values(values),
                 )
                 self._audit_row(
@@ -1102,6 +1123,7 @@ class SqliteEngine:
                 conn.rollback()
                 raise
             item.capability_tags = list(values["capability_tags"])
+            item.trust_tier = values["trust_tier"]
             item.sensitivity = values["sensitivity"]
             item.access_policy = copy.deepcopy(values["access_policy"])
             return values["item_id"]
@@ -1188,11 +1210,12 @@ class SqliteEngine:
                     values["status"] = "expired"
                     values["expired_at"] = sweep
                     updated = conn.execute(
-                        "UPDATE working_memory SET capability_tags = ?, sensitivity = ?, "
+                        "UPDATE working_memory SET trust_tier = ?, capability_tags = ?, sensitivity = ?, "
                         "access_policy = ?, status = 'expired', expired_at = ? "
                         "WHERE tenant_id = ? AND session_id = ? AND item_id = ? "
                         "AND status = 'active'",
                         (
+                            values["trust_tier"],
                             json_text(values["capability_tags"]),
                             values["sensitivity"],
                             json_text(values["access_policy"]),

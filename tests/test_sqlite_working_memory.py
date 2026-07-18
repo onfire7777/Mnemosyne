@@ -30,6 +30,7 @@ def _evidence(
     sensitivity: int = 0,
     access_policy: dict[str, Any] | None = None,
     content: str | None = None,
+    trust_tier: int = 0,
 ) -> str:
     return engine.append_evidence(
         Evidence(
@@ -40,6 +41,7 @@ def _evidence(
             source_identity="sqlite-working-test",
             session_id=session_id,
             content=content or f"evidence-{tenant_id}-{session_id}",
+            trust_tier=trust_tier,
             capability_tags=capability_tags or ["working-memory"],
             sensitivity=sensitivity,
             access_policy=access_policy or {"tenant": tenant_id},
@@ -59,6 +61,7 @@ def _item(
     capability_tags: list[str] | None = None,
     sensitivity: int = 0,
     access_policy: dict[str, Any] | None = None,
+    trust_tier: int = 0,
 ) -> Any:
     return WorkingMemoryItem(
         item_id=item_id,
@@ -72,6 +75,7 @@ def _item(
         created_at=created_at,
         expires_at=expires_at,
         evidence_ids=[evidence_id],
+        trust_tier=trust_tier,
         access_policy=access_policy or {"tenant": tenant_id},
         metadata={"priority": "high"},
         capability_tags=capability_tags or [],
@@ -91,7 +95,9 @@ def test_sqlite_schema_adds_working_memory_without_changing_core_tables(tmp_path
         row[1]
         for row in conn.execute("PRAGMA table_info(working_memory)")
     }
-    assert {"tenant_id", "session_id", "item_id", "expires_at", "status", "evidence_ids"} <= columns
+    assert {
+        "tenant_id", "session_id", "item_id", "expires_at", "trust_tier", "status", "evidence_ids"
+    } <= columns
     assert "working_memory" in engine.export_tenant(TENANT)
     assert "working_memory" in engine.export_all()
 
@@ -247,6 +253,23 @@ def test_sqlite_working_memory_persists_restrictive_provenance_envelope(tmp_path
     assert stored.sensitivity == 2
     assert stored.capability_tags == ["item-capability", "source-capability"]
     assert stored.access_policy["max_sensitivity"] == 1
+
+
+def test_sqlite_working_memory_persists_effective_trust_tier_across_reload(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine, trust_tier=3)
+    item = _item(evidence_id, trust_tier=2)
+
+    engine.put_working(item)
+    assert item.trust_tier == 3
+    engine.close()
+
+    reopened = SqliteEngine(tmp_path)
+    stored = reopened.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT)
+    listed = reopened.list_working(TENANT, SESSION, as_of=CREATED_AT)
+    assert stored is not None
+    assert stored.trust_tier == 3
+    assert [entry.trust_tier for entry in listed] == [3]
 
 
 def test_sqlite_expiry_persists_refreshed_provenance_envelope(tmp_path) -> None:
