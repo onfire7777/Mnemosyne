@@ -133,9 +133,9 @@ def test_local_candidate_memo_byte_identical_and_single_scan_per_retrieve(
     store = tmp_path / "store.json"
     _seed(LocalMemoryEngine(store_path=store))
 
-    # Both engines load the identical persisted snapshot before any retrieve.
-    plain = LocalMemoryEngine(store_path=store)
-    memo = LocalMemoryEngine(store_path=store)
+    # Both read-only engines load the identical persisted snapshot before any retrieve.
+    plain = LocalMemoryEngine(store_path=store, read_only=True)
+    memo = LocalMemoryEngine(store_path=store, read_only=True)
 
     scans = 0
     real_scan = LocalMemoryEngine._candidate_hits_uncached
@@ -436,8 +436,8 @@ def test_parallel_channels_byte_identical_local(tmp_path: Path, monkeypatch: pyt
     _freeze_time(monkeypatch)
     store = tmp_path / "store.json"
     _seed(LocalMemoryEngine(store_path=store))
-    sequential = LocalMemoryEngine(store_path=store)
-    parallel = LocalMemoryEngine(store_path=store)
+    sequential = LocalMemoryEngine(store_path=store, read_only=True)
+    parallel = LocalMemoryEngine(store_path=store, read_only=True)
 
     monkeypatch.delenv("MNEMOSYNE_PARALLEL_CHANNELS", raising=False)
     sequential_results = _retrieve_sequence(sequential)
