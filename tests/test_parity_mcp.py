@@ -97,7 +97,11 @@ def _call(server: MnemosyneMcpServer, name: str, arguments: dict[str, Any]) -> d
 
 
 def _method_parameters(name: str) -> list[str]:
-    return [key for key in inspect.signature(getattr(MemoryTools, name)).parameters if key != "self"]
+    return [
+        key
+        for key in inspect.signature(getattr(MemoryTools, name)).parameters
+        if key not in {"self", "session_identity"}
+    ]
 
 
 def _required_parameters(name: str) -> list[str]:

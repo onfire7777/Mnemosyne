@@ -18,6 +18,7 @@ from mnemosyne.engine import (
     LocalMemoryEngine,
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
+    WorkingMemoryItem,
 )
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ids import evidence_unscoped_cid
@@ -723,6 +724,169 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert recalled.content == "Shared engine contract stores the orchid retrieval fact."
     assert any(hit.id == cid for hit in retrieved.hits)
     assert any(item["cid"] == cid for item in exported["evidence"])
+
+
+def test_shared_engine_contract_working_memory_is_scoped_detached_and_non_durable(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    expires_at = created_at + timedelta(minutes=10)
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            session_id="shared-session",
+            actor="user",
+            source_type="shared-contract",
+            content="Working-memory provenance source.",
+            access_policy={"tenant": tenant},
+        )
+    )
+    item = WorkingMemoryItem(
+        item_id="shared-working-item",
+        tenant_id=tenant,
+        session_id="shared-session",
+        user_id=user,
+        agent_id=user,
+        kind="current_plan",
+        task_id="shared-task",
+        content="Transient shared plan content.",
+        created_at=created_at,
+        expires_at=expires_at,
+        evidence_ids=[source_cid],
+        access_policy={"tenant": tenant},
+    )
+
+    assert engine.put_working(item) == item.item_id
+    assert engine.get_working(tenant, "other-session", item.item_id, as_of=created_at) is None
+    assert engine.list_working("other-tenant", "shared-session", as_of=created_at) == []
+    detached = engine.get_working(tenant, "shared-session", item.item_id, as_of=created_at)
+    assert detached is not None
+    detached.metadata["caller_mutation"] = True
+    reread = engine.get_working(tenant, "shared-session", item.item_id, as_of=created_at)
+    assert reread is not None
+    assert "caller_mutation" not in reread.metadata
+    assert engine.get_working(tenant, "shared-session", item.item_id, as_of=expires_at) is None
+
+    exported = engine.export_tenant(tenant)
+    assert all(row.get("content") != item.content for row in exported["evidence"])
+    assert any(
+        row["op"] == "put_working" and row["target_id"] == item.item_id
+        for row in exported["audit_log"]
+    )
+
+    expired = engine.expire_working(tenant, expired_at=expires_at, session_id="shared-session")
+    assert [row.item_id for row in expired] == [item.item_id]
+    assert expired[0].status == "expired"
+    assert engine.list_working(tenant, "shared-session", as_of=expires_at) == []
+
+
+@pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
+def test_shared_engine_contract_working_expiry_is_subject_scoped(
+    engine_bundle: tuple[Any, str, str],
+    selector: str,
+) -> None:
+    engine, tenant, user = engine_bundle
+    created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    expires_at = created_at + timedelta(minutes=10)
+
+    def add_item(item_id: str, scoped_user: str, agent: str, task: str, branch: str) -> None:
+        source_cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=scoped_user,
+                session_id="shared-subject-session",
+                actor="user",
+                source_type="shared-contract",
+                content=f"Provenance for {item_id}.",
+                access_policy={"tenant": tenant},
+            )
+        )
+        engine.put_working(
+            WorkingMemoryItem(
+                item_id=item_id,
+                tenant_id=tenant,
+                session_id="shared-subject-session",
+                user_id=scoped_user,
+                agent_id=agent,
+                kind="current_plan",
+                task_id=task,
+                content=f"Transient plan for {item_id}.",
+                created_at=created_at,
+                expires_at=expires_at,
+                evidence_ids=[source_cid],
+                access_policy={"tenant": tenant},
+                metadata={"branch": branch},
+            )
+        )
+
+    scope_a = {"user_id": user, "agent_id": "agent-a", "task_id": "task-a", "branch": "main"}
+    scope_b = {**scope_a, selector: f"{selector}-other"}
+    add_item("scope-a", scope_a["user_id"], scope_a["agent_id"], scope_a["task_id"], scope_a["branch"])
+    add_item("scope-b", scope_b["user_id"], scope_b["agent_id"], scope_b["task_id"], scope_b["branch"])
+
+    expired = engine.expire_working(
+        tenant,
+        session_id="shared-subject-session",
+        user_id=scope_a["user_id"],
+        agent_id=scope_a["agent_id"],
+        task_id=scope_a["task_id"],
+        branch=scope_a["branch"],
+        expired_at=expires_at,
+    )
+
+    assert [item.item_id for item in expired] == ["scope-a"]
+    assert engine.expire_working(
+        tenant,
+        session_id="shared-subject-session",
+        user_id=scope_a["user_id"],
+        agent_id=scope_a["agent_id"],
+        task_id=scope_a["task_id"],
+        branch=scope_a["branch"],
+        expired_at=expires_at,
+    ) == []
+    remaining = engine.get_working(
+        tenant, "shared-subject-session", "scope-b", as_of=created_at
+    )
+    assert remaining is not None
+    assert remaining.status == "active"
+
+
+def test_shared_engine_contract_working_hit_cannot_collide_with_or_mark_durable_evidence(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Durable collision sentinel.")
+    durable = Hit(
+        id=cid,
+        kind="evidence",
+        tenant_id=tenant,
+        branch="main",
+        text="Durable collision sentinel.",
+        score=1.0,
+        channel="lexical",
+    )
+    working = Hit(
+        id=cid,
+        kind="working",
+        tenant_id=tenant,
+        branch="main",
+        text="Transient collision sentinel.",
+        score=1.0,
+        channel="working_memory",
+        provenance=[cid],
+        metadata={"memory_type": "working"},
+    )
+
+    fused = engine._rrf([[durable], [working]], k=10)
+    assert {(hit.kind, hit.id) for hit in fused} == {("evidence", cid), ("working", cid)}
+    before = engine.get_evidence(tenant, cid)
+    assert before is not None
+    assert engine._record_retrieval_access([working]) == {"assertions": 0, "evidence": 0}
+    after = engine.get_evidence(tenant, cid)
+    assert after is not None
+    assert after.metadata == before.metadata
 
 
 def test_shared_engine_read_without_access_telemetry_is_store_immutable_cached_and_uncached(
@@ -4544,6 +4708,7 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     # derived_actions and erased_derived_evidence) — the exact fields the review
     # found leaking the plaintext cid past the top-level evidence_cid swap.
     cid = _append_evidence(engine, tenant, user, "Shared hard-delete contract evidence.")
+    surviving_cid = _append_evidence(engine, tenant, user, "Shared unaffected custody evidence.")
     summary_cid = engine.append_evidence(
         Evidence(
             tenant_id=tenant,
@@ -4551,7 +4716,7 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
             actor="user",
             source_type="derived-note",
             content="Derived summary of the hard-delete target.",
-            metadata={"source_evidence_cids": [cid]},
+            metadata={"source_evidence_cids": [cid, surviving_cid]},
             access_policy={"tenant": tenant},
         )
     )
@@ -4602,6 +4767,14 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     assert source_placeholder != cid
     assert source_placeholder in hard_entry["propagated"]["standing_cascade"]["affected_cids"]
     assert all(row["target_id"] == source_placeholder for row in forget_rows)
+
+    derived_action = hard_entry["propagated"]["standing_cascade"]["derived_actions"][0]
+    retained_sources = derived_action["source_evidence_cids_before"]
+    assert cid not in retained_sources
+    assert source_placeholder in retained_sources
+    assert surviving_cid in retained_sources
+    assert derived_action["cid"] != summary_cid
+    assert derived_action["cid"] in hard_entry["propagated"]["erased_derived_evidence"]
 
     # A tombstone_recompute forget KEEPS the cid (its ledger row is the blocklist).
     keep_cid = _append_evidence(engine, tenant, user, "Tombstone keeps its cid.")
@@ -4666,6 +4839,10 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
         )
     )
 
+    # Inspect source write custody before hard deletion redacts every retained
+    # reference to the erased CID. The post-delete audit below separately checks
+    # that the forget event uses a non-recomputable placeholder.
+    write_audit_log = engine.export_tenant(tenant)["audit_log"]
     engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
     exported = engine.export_tenant(tenant)
     audit_log = exported["audit_log"]
@@ -4678,19 +4855,25 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
         assert "capability_tags" in item
         assert isinstance(item["diff"], dict)
 
-    evidence_audit = next(item for item in audit_log if item["op"] == "append_evidence" and item["target_id"] == cid)
+    evidence_audit = next(
+        item for item in write_audit_log if item["op"] == "append_evidence" and item["target_id"] == cid
+    )
     assert evidence_audit["actor"] == "tool"
     assert evidence_audit["source"] == "workflow-log"
     assert evidence_audit["trust_tier"] == 2
     assert sorted(evidence_audit["capability_tags"]) == ["signed", "tool-import"]
     assert evidence_audit["diff"]["source_identity"] == "git:memory-source-truth.md"
 
-    assertion_audit = next(item for item in audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id)
+    assertion_audit = next(
+        item for item in write_audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id
+    )
     assert assertion_audit["source"] == "assertion"
     assert assertion_audit["trust_tier"] == 2
     assert assertion_audit["diff"]["source_evidence_cids"] == [cid, corroborating_cid]
 
-    preference_audit = next(item for item in audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id)
+    preference_audit = next(
+        item for item in write_audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id
+    )
     assert preference_audit["source"] == "preference"
     assert preference_audit["trust_tier"] == 0
     assert preference_audit["diff"]["source_evidence_cids"] == [cid]

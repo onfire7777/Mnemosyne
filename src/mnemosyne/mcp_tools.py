@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any
 
@@ -12,10 +12,11 @@ from mnemosyne.engine import (
     LocalMemoryEngine,
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
+    WorkingMemoryItem,
 )
 from mnemosyne.ids import new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.gate import GATING_CASE_ORIGINS, GateResult, RegressionCase
+from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
@@ -42,6 +43,26 @@ def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
 
 
 TOOL_SPEC: list[dict[str, Any]] = [
+    {
+        "name": "working_seed",
+        "description": "Seed tenant/session-scoped working memory with bounded TTL and evidence provenance.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "kind", "content", "evidence_ids", "ttl_seconds", "created_at", "role", "source_trust_tier"],
+    },
+    {
+        "name": "working_query",
+        "description": "List live working-memory items in an explicit authenticated subject scope.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "as_of"],
+    },
+    {
+        "name": "working_promote",
+        "description": "Promote one working item through the regression-backed promotion gate.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "item_id", "as_of", "cases", "role", "source_trust_tier"],
+    },
+    {
+        "name": "working_expire",
+        "description": "Expire due working-memory items in an explicit authenticated subject scope.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "expired_at", "role", "source_trust_tier"],
+    },
     {
         "name": "capture",
         "description": "Append verbatim evidence to the content-addressed ledger.",
@@ -366,6 +387,118 @@ class MemoryTools:
             self.learning = runtime_state.load_learning(self.learning)
         self.parametric = parametric or ParametricTier()
         self.metrics = metrics or (runtime_state.load_metrics() if runtime_state else MetricsRegistry())
+
+    @staticmethod
+    def _working_time(value: str | datetime, name: str) -> datetime:
+        parsed = parse_dt(value)
+        if parsed is None or parsed.tzinfo is None:
+            raise ValueError(f"{name} must be an ISO 8601 timestamp with timezone")
+        return parsed.astimezone(UTC)
+
+    @staticmethod
+    def _working_matches(
+        item: WorkingMemoryItem, *, user_id: str, agent_id: str, task_id: str, branch: str
+    ) -> bool:
+        return (
+            item.user_id == user_id
+            and item.agent_id == agent_id
+            and item.task_id == task_id
+            and item.metadata.get("branch") == branch
+        )
+
+    def working_seed(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, kind: str, content: str, evidence_ids: list[str],
+        ttl_seconds: int, created_at: str | datetime, role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.NORMAL), item_id: str | None = None,
+    ) -> dict[str, Any]:
+        if type(ttl_seconds) is not int or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive integer")
+        if ttl_seconds > 24 * 60 * 60:
+            raise ValueError("ttl_seconds must not exceed 86400")
+        security = self._authorize(
+            "working_seed", role=role, source_trust_tier=source_trust_tier, target_sink="belief"
+        )
+        created = self._working_time(created_at, "created_at")
+        item = WorkingMemoryItem(
+            item_id=item_id or new_id(), tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id, kind=kind, task_id=task_id,
+            content=content, created_at=created, expires_at=created + timedelta(seconds=ttl_seconds),
+            evidence_ids=evidence_ids, trust_tier=source_trust_tier,
+            access_policy={"tenant": tenant_id}, metadata={"branch": branch},
+        )
+        self.engine.put_working(item)
+        return {"item": item.to_dict(), "security": security}
+
+    def working_query(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, as_of: str | datetime,
+    ) -> dict[str, Any]:
+        clock = self._working_time(as_of, "as_of")
+        items = [
+            item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
+            if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+        ]
+        return {"as_of": clock.isoformat(), "items": [item.to_dict() for item in items]}
+
+    def working_promote(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, item_id: str, as_of: str | datetime,
+        cases: list[dict[str, Any]], role: WriteRole, source_trust_tier: int,
+    ) -> dict[str, Any]:
+        security = self._authorize(
+            "working_promote", role=role, source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
+        if not cases:
+            raise ValueError("working promotion requires explicit regression cases")
+        clock = self._working_time(as_of, "as_of")
+        item = self.engine.get_working(tenant_id, session_id, item_id, as_of=clock)
+        if item is None or not self._working_matches(
+            item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch
+        ):
+            raise KeyError("live working item not found in authenticated scope")
+        regression_cases = [RegressionCase.from_dict(case) for case in cases]
+        candidate = Candidate(
+            id=item.item_id, kind="fact", signature=f"{item.kind} {item.task_id}",
+            description=item.content, branch=f"working-promote-{new_id()}",
+            source_evidence_cids=list(item.evidence_ids),
+        )
+
+        def apply_candidate(engine: LocalMemoryEngine, candidate_branch: str) -> None:
+            engine.upsert_assertion(
+                Assertion(
+                    tenant_id=tenant_id, user_id=user_id, subject=item.task_id,
+                    predicate=item.kind, object=item.content,
+                    source_evidence_cids=list(item.evidence_ids), trust_tier=item.trust_tier,
+                    access_policy=dict(item.access_policy),
+                ),
+                branch=candidate_branch,
+            )
+
+        gate = PromotionGate(self.engine, regression_cases).evaluate(tenant_id, candidate, apply_candidate)
+        return {"item_id": item.item_id, "gate": gate.to_dict(), "security": security}
+
+    def working_expire(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, expired_at: str | datetime, role: WriteRole,
+        source_trust_tier: int,
+    ) -> dict[str, Any]:
+        security = self._authorize(
+            "working_expire", role=role, source_trust_tier=source_trust_tier,
+            destructive=True, target_sink="belief",
+        )
+        clock = self._working_time(expired_at, "expired_at")
+        expired = self.engine.expire_working(
+            tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            task_id=task_id,
+            branch=branch,
+            expired_at=clock,
+        )
+        return {"expired_at": clock.isoformat(), "items": [item.to_dict() for item in expired], "security": security}
 
     def capture(
         self,

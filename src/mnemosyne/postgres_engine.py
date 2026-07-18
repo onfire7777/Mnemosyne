@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import os
 import threading
 import weakref
@@ -12,12 +13,13 @@ from collections import defaultdict
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any
+from typing import Any, Mapping
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
     AccessDecision,
     apply_relation_redactions,
+    apply_record_redactions,
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
@@ -36,6 +38,7 @@ from mnemosyne.engine import (
     Intention,
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
+    WorkingMemoryItem,
     _evaluate_trigger,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
@@ -54,7 +57,7 @@ from mnemosyne.erasure_ids import (
     erasure_deletion_record_id,
     redact_erased_cids,
 )
-from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
+from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -99,6 +102,204 @@ class PostgresUnavailableError(RuntimeError):
 
 
 _DB_USER_ID_UNSET = object()
+
+
+_WORKING_MEMORY_KINDS = {
+    "active_goal",
+    "current_plan",
+    "active_constraint",
+    "constraint",
+    "unresolved_question",
+    "tool_result",
+    "recent_tool_result",
+    "intermediate_conclusion",
+}
+
+
+def _normalize_working_json(value: Any, *, path: str) -> Any:
+    """Accept only plain, finite JSON data at the SQL boundary."""
+
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must contain finite JSON numbers")
+        return value
+    if type(value) is list:
+        return [_normalize_working_json(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
+    if type(value) is dict:
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise ValueError(f"{path} keys must be strings")
+            normalized[key] = _normalize_working_json(item, path=f"{path}.{key}")
+        return normalized
+    raise ValueError(f"{path} must contain JSON data only")
+
+
+_WORKING_FIELDS = (
+    "item_id",
+    "tenant_id",
+    "session_id",
+    "user_id",
+    "agent_id",
+    "kind",
+    "task_id",
+    "content",
+    "created_at",
+    "expires_at",
+    "evidence_ids",
+    "trust_tier",
+    "access_policy",
+    "metadata",
+    "capability_tags",
+    "sensitivity",
+    "status",
+    "expired_at",
+)
+
+
+def _working_datetime(value: Any, field_name: str) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise ValueError(f"working-memory {field_name} must be timezone-aware")
+    return value.astimezone(UTC)
+
+
+def _working_payload(item: Any) -> dict[str, Any]:
+    values = {name: getattr(item, name, None) for name in _WORKING_FIELDS}
+    for name in ("item_id", "tenant_id", "session_id", "user_id", "agent_id", "kind", "task_id", "content"):
+        if type(values[name]) is not str or not values[name].strip():
+            raise ValueError(f"working-memory {name} must be a non-empty string")
+    if values["kind"] not in _WORKING_MEMORY_KINDS:
+        raise ValueError(f"unsupported working-memory kind: {values['kind']!r}")
+    created_at = _working_datetime(values["created_at"], "created_at")
+    expires_at = _working_datetime(values["expires_at"], "expires_at")
+    if expires_at <= created_at:
+        raise ValueError("working-memory expires_at must be after created_at")
+    if expires_at - created_at > timedelta(hours=24):
+        raise ValueError("working-memory TTL cannot exceed 24 hours")
+    status = values["status"]
+    if status not in {"active", "expired"}:
+        raise ValueError(f"unsupported working-memory status: {status!r}")
+    expired_at = values["expired_at"]
+    if expired_at is not None:
+        expired_at = _working_datetime(expired_at, "expired_at")
+    if status == "active" and expired_at is not None:
+        raise ValueError("active working-memory items cannot have expired_at")
+    if status == "expired" and expired_at is None:
+        raise ValueError("expired working-memory items require expired_at")
+    evidence_ids = values["evidence_ids"]
+    if type(evidence_ids) is not list or not evidence_ids:
+        raise ValueError("working-memory evidence_ids must contain originating evidence")
+    if any(type(cid) is not str or not cid.strip() for cid in evidence_ids):
+        raise ValueError("working-memory evidence_ids must contain non-empty strings")
+    if len(set(evidence_ids)) != len(evidence_ids):
+        raise ValueError("working-memory evidence_ids must not contain duplicates")
+    trust_tier = values["trust_tier"]
+    if type(trust_tier) is not int or isinstance(trust_tier, bool):
+        raise ValueError("working-memory trust_tier must be an integer")
+    if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+        raise ValueError("working-memory trust_tier is out of range")
+    capability_tags = values["capability_tags"] or []
+    if type(capability_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in capability_tags):
+        raise ValueError("working-memory capability_tags must be a list of non-empty strings")
+    if len(set(capability_tags)) != len(capability_tags):
+        raise ValueError("working-memory capability_tags must not contain duplicates")
+    sensitivity = values["sensitivity"]
+    if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
+        raise ValueError("working-memory sensitivity must be a non-negative integer")
+    access_policy = validate_access_policy(
+        values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
+    )
+    metadata = _normalize_working_json(values["metadata"], path="working_memory.metadata")
+    if type(metadata) is not dict:
+        raise ValueError("working-memory metadata must be a JSON object")
+    return {
+        **values,
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "expired_at": expired_at,
+        "evidence_ids": _normalize_working_json(evidence_ids, path="working_memory.evidence_ids"),
+        "trust_tier": trust_tier,
+        "access_policy": _normalize_working_json(access_policy, path="working_memory.access_policy"),
+        "metadata": metadata,
+        "capability_tags": list(capability_tags),
+        "sensitivity": sensitivity,
+    }
+
+
+def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "item_id": values["item_id"],
+        "tenant_id": values["tenant_id"],
+        "session_id": values["session_id"],
+        "user_id": values["user_id"],
+        "agent_id": values["agent_id"],
+        "kind": values["kind"],
+        "task_id": values["task_id"],
+        "content": values["content"],
+        "created_at": values["created_at"].isoformat(),
+        "expires_at": values["expires_at"].isoformat(),
+        "evidence_ids": copy.deepcopy(values["evidence_ids"]),
+        "trust_tier": values["trust_tier"],
+        "access_policy": copy.deepcopy(values["access_policy"]),
+        "metadata": copy.deepcopy(values["metadata"]),
+        "capability_tags": list(values["capability_tags"]),
+        "sensitivity": values["sensitivity"],
+    }
+
+
+def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
+    diff: dict[str, Any] = {
+        "working_item_digest": content_cid("working_memory", _working_snapshot(values)),
+        "evidence_ref_digest": content_cid(
+            "working_memory_evidence_refs",
+            {
+                "tenant_id": values["tenant_id"],
+                "session_id": values["session_id"],
+                "item_id": values["item_id"],
+                "evidence_ids": list(values["evidence_ids"]),
+            },
+        ),
+        "evidence_count": len(values["evidence_ids"]),
+        "tenant_id": values["tenant_id"],
+        "session_id": values["session_id"],
+        "item_id": values["item_id"],
+        "task_id": values["task_id"],
+        "kind": values["kind"],
+        "created_at": values["created_at"].isoformat(),
+        "expires_at": values["expires_at"].isoformat(),
+        "deadline": values["expires_at"].isoformat(),
+        "status": status,
+    }
+    if sweep is not None:
+        diff["sweep"] = sweep.isoformat()
+    return diff
+
+
+def _working_event_id(values: dict[str, Any], op: str) -> str:
+    return content_cid(
+        "working_memory_audit",
+        {
+            "tenant_id": values["tenant_id"],
+            "session_id": values["session_id"],
+            "item_id": values["item_id"],
+            "op": op,
+        },
+    )
+
+
+def _working_from_values(values: dict[str, Any]) -> WorkingMemoryItem:
+    payload = _working_snapshot(values)
+    payload.update(
+        {
+            "created_at": dt_to_json(values["created_at"]),
+            "expires_at": dt_to_json(values["expires_at"]),
+            "status": values["status"],
+            "expired_at": dt_to_json(values["expired_at"]),
+        }
+    )
+    return WorkingMemoryItem.from_dict(payload)
 
 
 class _ExistingCursorConnection:
@@ -375,6 +576,14 @@ class PostgresEngine:
     @staticmethod
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
+
+    @staticmethod
+    def _lock_working_tenant(cur: Any, tenant_id: str) -> None:
+        """Serialize evidence validation and working-memory erasure per tenant."""
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (str(tenant_id),),
+        )
 
     @staticmethod
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
@@ -1133,6 +1342,429 @@ class PostgresEngine:
               WITH CHECK (tenant_id = mnemosyne_current_tenant())
             """
         )
+
+    @staticmethod
+    def _working_from_row(row: dict[str, Any]) -> WorkingMemoryItem:
+        return _working_from_values(
+            _working_payload(
+                WorkingMemoryItem(
+                    item_id=str(row["item_id"]),
+                    tenant_id=str(row.get("tenant_name") or row["tenant_id"]),
+                    session_id=str(row["external_session_id"]),
+                    user_id=str(row["external_user_id"]),
+                    agent_id=str(row["agent_id"]),
+                    kind=str(row["kind"]),
+                    task_id=str(row["task_id"]),
+                    content=str(row["content"]),
+                    created_at=row["created_at"],
+                    expires_at=row["expires_at"],
+                    evidence_ids=_bytes_list_to_cids(row.get("evidence_ids")),
+                    trust_tier=int(row["trust_tier"]),
+                    access_policy=dict(row.get("access_policy") or {}),
+                    metadata=dict(row.get("metadata") or {}),
+                    capability_tags=list(row.get("capability_tags") or []),
+                    sensitivity=int(row["sensitivity"]),
+                    status=str(row["status"]),
+                    expired_at=row.get("expired_at"),
+                )
+            )
+        )
+
+    def _working_provenance(
+        self, cur: Any, values: dict[str, Any]
+    ) -> tuple[int, list[str], int, dict[str, Any]]:
+        """Validate source ownership and derive the effective security envelope."""
+
+        trust_tiers = [values["trust_tier"]]
+        capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
+        if values["trust_tier"] > self.policy.max_trust_tier:
+            raise PermissionError("working item exceeds the working write trust ceiling")
+        sensitivities = [values["sensitivity"]]
+        access_policies = [
+            validate_access_policy(
+                values["access_policy"],
+                tenant_id=values["tenant_id"],
+                location="working_memory.access_policy",
+            )
+        ]
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        for cid in values["evidence_ids"]:
+            try:
+                cid_bytes = _cid_to_bytes(cid)
+            except ValueError as exc:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant") from exc
+            cur.execute(
+                """
+                SELECT user_id, session_id, erased, trust_tier, capability_tags,
+                       sensitivity, access_policy
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, cid_bytes),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+            if bool(row["erased"]):
+                raise ValueError(f"evidence {cid!r} is erased")
+            if str(row["user_id"]) != db_user_id:
+                raise ValueError("working item user must match originating evidence")
+            if row["session_id"] is None or str(row["session_id"]) != db_session_id:
+                raise ValueError("working item session must match originating evidence")
+            trust_tier = row["trust_tier"]
+            if type(trust_tier) is not int or not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+                raise ValueError("originating evidence trust tier is invalid")
+            if trust_tier > int(self.policy.max_trust_tier):
+                raise PermissionError("originating evidence exceeds the working write trust ceiling")
+            trust_tiers.append(trust_tier)
+            source_tags = list(row["capability_tags"] or [])
+            if type(source_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in source_tags):
+                raise ValueError("originating evidence capability tags are invalid")
+            normalized_source_tags = [tag.strip().lower() for tag in source_tags]
+            capability_tags.update(normalized_source_tags)
+            sensitivity = row["sensitivity"]
+            if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
+                raise ValueError("originating evidence sensitivity is invalid")
+            sensitivities.append(sensitivity)
+            access_policies.append(
+                validate_access_policy(
+                    dict(row["access_policy"] or {}),
+                    tenant_id=values["tenant_id"],
+                    location="evidence.access_policy",
+                )
+            )
+        effective_policy = merge_access_policies(access_policies, tenant_id=values["tenant_id"])
+        values["capability_tags"] = sorted(capability_tags)
+        values["sensitivity"] = max(sensitivities)
+        values["access_policy"] = effective_policy
+        return max(trust_tiers), values["capability_tags"], values["sensitivity"], effective_policy
+
+    def _working_read_values(
+        self, values: dict[str, Any], *, context: Mapping[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Apply caller-scoped policy before returning working-memory data."""
+
+        if context is None:
+            return copy.deepcopy(values)
+        context_tenant = str(context.get("tenant_id") or context.get("tenant") or "")
+        if context_tenant != values["tenant_id"]:
+            return None
+        context_user = str(context.get("user_id") or context.get("subject") or "")
+        if context_user != values["user_id"]:
+            return None
+        decision = may_read_item(
+            item_tenant_id=values["tenant_id"],
+            sensitivity=int(values["sensitivity"]),
+            access_policy=values["access_policy"],
+            context=context,
+            policy_max_sensitivity=self.policy.max_sensitivity,
+            status=values["status"],
+        )
+        if not decision.allowed:
+            return None
+        redacted_values = copy.deepcopy(values)
+        redacted_values["content"] = apply_text_redactions(
+            str(redacted_values["content"]), redacted_values["access_policy"], decision
+        )[0]
+        redacted_values["metadata"], _ = apply_record_redactions(
+            redacted_values["metadata"], redacted_values["access_policy"], decision
+        )
+        return redacted_values
+
+    @staticmethod
+    def _working_insert_values(
+        values: dict[str, Any], db_tenant_id: str, db_session_id: str, db_user_id: str, jsonb: Any
+    ) -> tuple[Any, ...]:
+        return (
+            db_tenant_id,
+            db_session_id,
+            values["session_id"],
+            values["item_id"],
+            db_user_id,
+            values["user_id"],
+            values["agent_id"],
+            values["kind"],
+            values["task_id"],
+            values["content"],
+            values["created_at"],
+            values["expires_at"],
+            values["trust_tier"],
+            values["capability_tags"],
+            values["sensitivity"],
+            values["status"],
+            values["expired_at"],
+            _cid_list_to_bytes(values["evidence_ids"]),
+            jsonb(values["access_policy"]),
+            jsonb(values["metadata"]),
+        )
+
+    def put_working(self, item: Any) -> str:
+        """Persist one working item and its audit receipt in one transaction."""
+
+        if not isinstance(item, WorkingMemoryItem):
+            raise TypeError("item must be a WorkingMemoryItem")
+        values = _working_payload(item)
+        if values["status"] != "active":
+            raise ValueError("put_working accepts only active working items")
+        self.ensure_tenant_and_branch(values["tenant_id"])
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+        try:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, db_tenant_id)
+                    self._lock_working_tenant(cur, values["tenant_id"])
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO working_memory(
+                          tenant_id, session_id, external_session_id, item_id,
+                          user_id, external_user_id, agent_id, kind, task_id, content,
+                          created_at, expires_at, trust_tier, capability_tags, sensitivity,
+                          status, expired_at, evidence_ids, access_policy, metadata
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        self._working_insert_values(
+                            values, db_tenant_id, db_session_id, db_user_id, self._jsonb
+                        ),
+                    )
+                    audit_inserted = self._audit(
+                        cur,
+                        db_tenant_id,
+                        values["agent_id"],
+                        "put_working",
+                        values["item_id"],
+                        _working_audit_diff(values, status="active"),
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=_working_event_id(values, "put_working"),
+                        occurred_at=values["created_at"],
+                    )
+                    if not audit_inserted:
+                        raise ValueError(
+                            f"working item {values['item_id']!r} has an existing audit lifecycle"
+                        )
+        except Exception as exc:
+            if getattr(exc, "sqlstate", None) == "23505":
+                raise ValueError(f"working item {values['item_id']!r} already exists") from exc
+            raise
+        item.trust_tier = trust_tier
+        item.capability_tags = list(capability_tags)
+        item.sensitivity = sensitivity
+        item.access_policy = copy.deepcopy(access_policy)
+        return values["item_id"]
+
+    def get_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+    ) -> WorkingMemoryItem | None:
+        moment = _working_datetime(as_of, "as_of")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        db_session_id = _stable_uuid("session", session_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.session_id = %s AND w.item_id = %s
+                      AND w.status = 'active' AND w.created_at <= %s AND w.expires_at > %s
+                    """,
+                    (db_tenant_id, db_session_id, item_id, moment, moment),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                item = self._working_from_row(row)
+                values = _working_payload(item)
+                try:
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                except (PermissionError, ValueError):
+                    return None
+                values.update(
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    sensitivity=sensitivity,
+                    access_policy=access_policy,
+                )
+                readable = self._working_read_values(values, context=None)
+                return _working_from_values(readable) if readable is not None else None
+
+    def list_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+    ) -> list[WorkingMemoryItem]:
+        moment = _working_datetime(as_of, "as_of")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        db_session_id = _stable_uuid("session", session_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.session_id = %s AND w.status = 'active'
+                      AND w.created_at <= %s AND w.expires_at > %s
+                    ORDER BY w.created_at DESC, w.item_id ASC
+                    """,
+                    (db_tenant_id, db_session_id, moment, moment),
+                )
+                items: list[WorkingMemoryItem] = []
+                for row in cur.fetchall():
+                    item = self._working_from_row(row)
+                    values = _working_payload(item)
+                    try:
+                        trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    except (PermissionError, ValueError):
+                        continue
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                    )
+                    readable = self._working_read_values(values, context=None)
+                    if readable is not None:
+                        items.append(_working_from_values(readable))
+                return items
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        expired_at: datetime,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[WorkingMemoryItem]:
+        sweep = _working_datetime(expired_at, "expired_at")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
+                query = """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.status = 'active' AND w.expires_at <= %s
+                """
+                params: list[Any] = [db_tenant_id, sweep]
+                if session_id is not None:
+                    query += " AND w.external_session_id = %s"
+                    params.append(session_id)
+                for column, value in (
+                    ("external_user_id", user_id),
+                    ("agent_id", agent_id),
+                    ("task_id", task_id),
+                ):
+                    if value is not None:
+                        query += f" AND w.{column} = %s"
+                        params.append(value)
+                if branch is not None:
+                    query += " AND w.metadata->>'branch' = %s"
+                    params.append(branch)
+                query += " ORDER BY w.expires_at ASC, w.external_session_id ASC, w.item_id ASC FOR UPDATE SKIP LOCKED"
+                cur.execute(query, tuple(params))
+                rows = list(cur.fetchall())
+                due_values: list[dict[str, Any]] = []
+                audit_context: list[tuple[int, list[str], int, dict[str, Any]]] = []
+                for row in rows:
+                    values = _working_payload(self._working_from_row(row))
+                    provenance = self._working_provenance(cur, values)
+                    due_values.append(values)
+                    audit_context.append(provenance)
+                expired_values: list[dict[str, Any]] = []
+                for values, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
+                    due_values, audit_context, strict=True
+                ):
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                        status="expired",
+                        expired_at=sweep,
+                    )
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET trust_tier = %s, capability_tags = %s, sensitivity = %s,
+                            access_policy = %s, status = 'expired', expired_at = %s
+                        WHERE tenant_id = %s AND session_id = %s AND item_id = %s
+                          AND status = 'active' AND expires_at <= %s
+                        """,
+                        (
+                            trust_tier,
+                            capability_tags,
+                            sensitivity,
+                            self._jsonb(access_policy),
+                            sweep,
+                            db_tenant_id,
+                            _stable_uuid("session", values["session_id"]),
+                            values["item_id"],
+                            sweep,
+                        ),
+                    )
+                    if cur.rowcount != 1:
+                        raise RuntimeError("working-memory expiry lost its serialization claim")
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        "working_memory_sweeper",
+                        "expire_working",
+                        values["item_id"],
+                        _working_audit_diff(values, status="expired", sweep=sweep),
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=_working_event_id(values, "expire_working"),
+                        occurred_at=sweep,
+                    )
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', trust_tier = 0, capability_tags = '{}',
+                            sensitivity = 0, evidence_ids = '{}',
+                            access_policy = '{}'::jsonb, metadata = '{}'::jsonb
+                        WHERE tenant_id = %s AND session_id = %s AND item_id = %s
+                          AND status = 'expired' AND expired_at = %s
+                        """,
+                        (
+                            db_tenant_id,
+                            _stable_uuid("session", values["session_id"]),
+                            values["item_id"],
+                            sweep,
+                        ),
+                    )
+                    if cur.rowcount != 1:
+                        raise RuntimeError("working-memory expiry scrub lost its serialization claim")
+                    expired_values.append(copy.deepcopy(values))
+                return [_working_from_values(values) for values in expired_values]
 
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -3421,6 +4053,8 @@ class PostgresEngine:
         ids_by_scope: dict[tuple[str, str], list[UUID]] = defaultdict(list)
         evidence_by_scope: dict[tuple[str, str], set[bytes]] = defaultdict(set)
         for hit in hits:
+            if hit.kind == "working":
+                continue
             if hit.kind == "evidence" and hit.id:
                 cid_bytes = _cid_bytes_or_none(hit.id)
                 if cid_bytes is not None:
@@ -4141,6 +4775,8 @@ class PostgresEngine:
             "trimmed_relations": [],
             "removed_entities": [],
             "trimmed_entities": [],
+            "expired_working_memory": [],
+            "removed_working_memory": [],
             "removed_intentions": [],
             "erased_derived_evidence": [],
             "retained_derived_evidence": [],
@@ -4149,6 +4785,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
                 cur.execute(
                     """
                     SELECT cid, source_type, trust_tier, capability_tags, metadata, user_id
@@ -4197,6 +4834,16 @@ class PostgresEngine:
                     _bytes_to_cid(item) for item in retained_metadata
                 )
                 propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                cur.execute(
+                    """
+                    SELECT item_id
+                    FROM working_memory
+                    WHERE tenant_id = %s AND evidence_ids && %s
+                    ORDER BY item_id
+                    """,
+                    (db_tenant_id, affected_cid_bytes),
+                )
+                working_item_ids = [str(row["item_id"]) for row in cur.fetchall()]
                 retained_cascade_metadata = {
                     _bytes_to_cid(retained_bytes): {
                         **dict(metadata),
@@ -4239,6 +4886,29 @@ class PostgresEngine:
                             "min_corroboration_for_delete": minimum,
                             "blocking_assertions": blocking,
                         }
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    cur.execute(
+                        """
+                        DELETE FROM working_memory
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["removed_working_memory"] = working_item_ids
+                else:
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', status = 'expired',
+                            trust_tier = 0, capability_tags = '{}', sensitivity = 0,
+                            evidence_ids = '{}', access_policy = '{}'::jsonb,
+                            metadata = '{}'::jsonb,
+                            expired_at = COALESCE(expired_at, clock_timestamp())
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["expired_working_memory"] = working_item_ids
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     cur.execute(
                         """
@@ -5101,10 +5771,10 @@ class PostgresEngine:
         capability_tags: list[str] | None = None,
         event_id: str | None = None,
         occurred_at: datetime | None = None,
-    ) -> None:
-        if occurred_at is not None and occurred_at.tzinfo is None:
+    ) -> bool:
+        event_time = occurred_at or utc_now()
+        if event_time.tzinfo is None:
             raise ValueError("audit event time must be timezone-aware")
-        event_time = occurred_at.astimezone(UTC) if occurred_at is not None else None
         target_uuid = _uuid_or_none(target_id)
         audit_diff = dict(diff)
         if target_id and not target_uuid:
@@ -5118,13 +5788,11 @@ class PostgresEngine:
         cur.execute(
             """
             INSERT INTO audit_log(
-                event_id, tenant_id, actor, op, target_id, trust_tier,
-                capability_tags, diff, at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
+              tenant_id, actor, op, target_id, trust_tier, capability_tags, diff, at, event_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
             """,
             (
-                event_id,
                 tenant_id,
                 actor,
                 op,
@@ -5132,9 +5800,11 @@ class PostgresEngine:
                 trust_tier,
                 normalized_tags,
                 self._jsonb(audit_diff),
-                event_time,
+                event_time.astimezone(UTC),
+                event_id,
             ),
         )
+        return cur.rowcount == 1
 
     def record_audit_event(
         self,
