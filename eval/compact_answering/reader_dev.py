@@ -29,12 +29,16 @@ ARTIFACT_CUSTODY = "synthetic-fixture-no-model-artifact"
 WINDOW_TOKENS = 512
 WINDOW_STRIDE = 128
 MAX_WINDOWS = 64
-MAX_FACTS = 64
+MAX_FACTS = 20
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_QUERY_CHARS = 2_000
+MAX_CONTEXT_CHARS = 24_000
 MAX_CONTEXT_BYTES = 64 * 1024
 MAX_ID_CHARS = 256
-MAX_SUPPORTING_FACTS = 32
+MAX_SUPPORTING_FACTS = 20
+MAX_TOKEN_COUNT = WINDOW_TOKENS + WINDOW_STRIDE * (MAX_WINDOWS - 1)
+MAX_FIXTURE_BYTES = 256 * 1024
+MAX_FIXTURE_VARIANTS = 8
 _DIGEST_HEX_LENGTH = 64
 _ANSWER_TYPES = ("span", "yes", "no")
 NULL_ANSWER_TYPE = "null"
@@ -111,7 +115,10 @@ def _as_int(value: object, *, label: str) -> int:
 def _as_finite(value: object, *, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ReaderValidationError(f"{label} must be numeric")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ReaderValidationError(f"{label} must fit in a finite float") from exc
     if not math.isfinite(number):
         raise ReaderValidationError(f"{label} must be finite")
     return number
@@ -219,6 +226,10 @@ class ReaderIdentity:
         }
 
     def require_match(self, expected: "ReaderIdentity") -> None:
+        if not isinstance(expected, ReaderIdentity):
+            raise ReaderValidationError("identity type is invalid")
+        ReaderIdentity.from_mapping(self.as_mapping())
+        ReaderIdentity.from_mapping(expected.as_mapping())
         if self == expected:
             return
         for field in _IDENTITY_FIELDS:
@@ -228,7 +239,10 @@ class ReaderIdentity:
 
 
 def identity_digest(identity: ReaderIdentity | dict[str, object]) -> str:
-    parsed = identity if isinstance(identity, ReaderIdentity) else ReaderIdentity.from_mapping(identity)
+    if isinstance(identity, ReaderIdentity):
+        parsed = ReaderIdentity.from_mapping(identity.as_mapping())
+    else:
+        parsed = ReaderIdentity.from_mapping(identity)
     return _sha256(parsed.as_mapping())
 
 
@@ -360,7 +374,7 @@ def build_windows(context: str) -> tuple[ReaderWindow, ...]:
     if not isinstance(context, str) or not context:
         raise ReaderValidationError("reader context must be a non-empty string")
     context_bytes = _utf8_length(context)
-    if context_bytes > MAX_CONTEXT_BYTES:
+    if len(context) > MAX_CONTEXT_CHARS or context_bytes > MAX_CONTEXT_BYTES:
         raise ReaderValidationError("reader context exceeds the byte limit")
     offsets = _byte_offsets(context)
     matches = list(_TOKEN_PATTERN.finditer(context))
@@ -371,10 +385,7 @@ def build_windows(context: str) -> tuple[ReaderWindow, ...]:
         for match in matches
     )
     token_count = len(all_tokens)
-    starts = list(range(0, max(token_count - WINDOW_TOKENS + 1, 1), WINDOW_STRIDE))
-    final_start = max(token_count - WINDOW_TOKENS, 0)
-    if starts[-1] != final_start:
-        starts.append(final_start)
+    starts = _expected_window_starts(token_count)
     windows: list[ReaderWindow] = []
     for index, token_start in enumerate(starts):
         token_end = min(token_start + WINDOW_TOKENS, token_count)
@@ -412,6 +423,19 @@ def _validate_context_offsets(context: str, start: int, end: int, *, label: str)
         raise ReaderOffsetError(f"{label} must align to UTF-8 boundaries") from exc
 
 
+def _expected_window_starts(token_count: int) -> list[int]:
+    if token_count <= 0 or token_count > MAX_TOKEN_COUNT:
+        raise ReaderValidationError("reader token count exceeds the window limit")
+    regular_limit = max(token_count - WINDOW_TOKENS + 1, 1)
+    starts = list(range(0, regular_limit, WINDOW_STRIDE))
+    final_start = max(token_count - WINDOW_TOKENS, 0)
+    if starts[-1] != final_start:
+        starts.append(final_start)
+    if len(starts) > MAX_WINDOWS:
+        raise ReaderValidationError("reader context produces too many windows")
+    return starts
+
+
 @dataclass(frozen=True)
 class ReaderRequest:
     schema: str
@@ -438,7 +462,7 @@ class ReaderRequest:
             raise ReaderValidationError("reader query must be a bounded non-empty string")
         if not isinstance(context, str) or not context:
             raise ReaderValidationError("reader context must be a non-empty string")
-        if _utf8_length(context) > MAX_CONTEXT_BYTES:
+        if len(context) > MAX_CONTEXT_CHARS or _utf8_length(context) > MAX_CONTEXT_BYTES:
             raise ReaderValidationError("reader context exceeds the byte limit")
         facts_value = row["facts"]
         windows_value = row["windows"]
@@ -467,6 +491,7 @@ class ReaderRequest:
 
 def _validate_request_facts(context: str, facts: Iterable[SupportingFact]) -> None:
     seen: set[str] = set()
+    evidence_chars = 0
     for fact in facts:
         if fact.fact_id in seen:
             raise ReaderValidationError("supporting fact IDs must be unique")
@@ -474,10 +499,17 @@ def _validate_request_facts(context: str, facts: Iterable[SupportingFact]) -> No
         _validate_context_offsets(context, fact.raw_start, fact.raw_end, label=f"fact {fact.fact_id}")
         if context.encode("utf-8")[fact.raw_start : fact.raw_end].decode("utf-8") != fact.text:
             raise ReaderOffsetError(f"fact {fact.fact_id} text does not match source bytes")
+        evidence_chars += len(fact.text)
+        if evidence_chars > MAX_CONTEXT_CHARS:
+            raise ReaderValidationError("supporting evidence exceeds the character limit")
 
 
 def _validate_request_windows(context: str, windows: tuple[ReaderWindow, ...]) -> None:
     context_bytes = context.encode("utf-8")
+    token_count = windows[-1].token_end
+    expected_starts = _expected_window_starts(token_count)
+    if len(expected_starts) != len(windows):
+        raise ReaderValidationError("reader windows do not cover the token schedule")
     seen: set[str] = set()
     for index, window in enumerate(windows):
         if window.window_id in seen:
@@ -489,19 +521,49 @@ def _validate_request_windows(context: str, windows: tuple[ReaderWindow, ...]) -
             _validate_context_offsets(context, token.raw_start, token.raw_end, label="window token")
             if context_bytes[token.raw_start : token.raw_end].decode("utf-8") != token.token:
                 raise ReaderOffsetError("window token text does not match source bytes")
+        expected_start = expected_starts[index]
+        expected_end = min(expected_start + WINDOW_TOKENS, token_count)
+        if (
+            window.token_start != expected_start
+            or window.token_end != expected_end
+            or len(window.tokens) != expected_end - expected_start
+        ):
+            raise ReaderValidationError("reader windows must cover the 128-token schedule")
         if index:
             previous = windows[index - 1]
-            regular_stride = window.token_start == previous.token_start + WINDOW_STRIDE
-            tail_window = (
-                index + 1 == len(windows)
-                and len(window.tokens) == WINDOW_TOKENS
-                and window.token_end > previous.token_end
-                and window.token_start + WINDOW_TOKENS == window.token_end
-            )
-            if not regular_stride and not tail_window:
-                raise ReaderValidationError("reader windows must use the 128-token stride")
-    if windows[0].token_start != 0:
-        raise ReaderValidationError("reader windows must start at token zero")
+            overlap_start = window.token_start - previous.token_start
+            overlap_tokens = previous.token_end - window.token_start
+            if (
+                overlap_tokens <= 0
+                or overlap_start >= len(previous.tokens)
+                or overlap_tokens != len(previous.tokens) - overlap_start
+                or overlap_tokens > len(window.tokens)
+                or previous.tokens[overlap_start:] != window.tokens[:overlap_tokens]
+            ):
+                raise ReaderOffsetError("reader windows must share one token map")
+
+
+def validate_request(request: ReaderRequest) -> None:
+    """Re-validate directly constructed requests before any reader operation."""
+
+    if not isinstance(request, ReaderRequest):
+        raise ReaderValidationError("reader request type is invalid")
+    if not isinstance(request.identity, ReaderIdentity):
+        raise ReaderValidationError("reader request identity is invalid")
+    if not isinstance(request.facts, tuple) or any(
+        not isinstance(fact, SupportingFact) for fact in request.facts
+    ):
+        raise ReaderValidationError("reader request facts shape is invalid")
+    if not isinstance(request.windows, tuple) or any(
+        not isinstance(window, ReaderWindow) or not isinstance(window.tokens, tuple)
+        or any(not isinstance(token, TokenSpan) for token in window.tokens)
+        for window in request.windows
+    ):
+        raise ReaderValidationError("reader request windows shape is invalid")
+    try:
+        ReaderRequest.from_mapping(request.as_mapping())
+    except (AttributeError, TypeError) as exc:
+        raise ReaderValidationError("reader request is invalid") from exc
 
 
 @dataclass(frozen=True)
@@ -664,6 +726,7 @@ def _finite_float_list(value: object, *, label: str) -> list[float]:
 
 
 def validate_prediction(request: ReaderRequest, prediction: ReaderPrediction) -> ReaderPrediction:
+    validate_request(request)
     if not isinstance(prediction, ReaderPrediction):
         raise ReaderValidationError("reader prediction type is invalid")
     if not isinstance(prediction.identity, ReaderIdentity):
@@ -699,6 +762,8 @@ def validate_prediction(request: ReaderRequest, prediction: ReaderPrediction) ->
     if not set(prediction.supporting_facts).issubset(fact_ids):
         raise ReaderValidationError("prediction references an unknown supporting fact")
     is_null = prediction.answer_type == NULL_ANSWER_TYPE
+    if not is_null and not prediction.supporting_facts:
+        raise ReaderValidationError("non-null answers require supporting facts")
     if is_null != (null_margin >= _as_finite_f32(request.null_threshold, label="null_threshold")):
         raise ReaderValidationError("null margin and abstention decision disagree")
     if is_null:
@@ -764,11 +829,19 @@ def decode_prediction(request: ReaderRequest, prediction: ReaderPrediction) -> R
 def select_prediction(request: ReaderRequest, predictions: Iterable[ReaderPrediction]) -> ReaderAnswer:
     """Validate all windows and choose one deterministic answer."""
 
-    rows = list(predictions)
+    validate_request(request)
+    rows: list[ReaderPrediction] = []
+    seen_window_ids: set[str] = set()
+    for prediction in predictions:
+        validate_prediction(request, prediction)
+        if prediction.window_id in seen_window_ids:
+            raise ReaderValidationError("reader prediction windows must be unique")
+        if len(rows) >= len(request.windows):
+            raise ReaderValidationError("reader predictions exceed the window limit")
+        seen_window_ids.add(prediction.window_id)
+        rows.append(prediction)
     if not rows:
         raise ReaderValidationError("reader predictions must be non-empty")
-    for prediction in rows:
-        validate_prediction(request, prediction)
     selected = max(
         rows,
         key=lambda row: (
@@ -784,6 +857,7 @@ def select_prediction(request: ReaderRequest, predictions: Iterable[ReaderPredic
 def decode_logits(request: ReaderRequest, logits: ReaderLogits) -> ReaderPrediction:
     """Decode one finite window tensor into a source-bound prediction."""
 
+    validate_request(request)
     if not isinstance(logits, ReaderLogits):
         raise ReaderValidationError("reader logits type is invalid")
     if not isinstance(logits.identity, ReaderIdentity):
@@ -1067,7 +1141,11 @@ def validate_selection_fixture(document: object, *, deadline: float | None = Non
         cases.append((case_id, request, prediction))
 
     variants_value = fixture["variants"]
-    if not isinstance(variants_value, list) or not variants_value:
+    if (
+        not isinstance(variants_value, list)
+        or not variants_value
+        or len(variants_value) > MAX_FIXTURE_VARIANTS
+    ):
         raise ReaderFixtureValidationError("reader fixture variants must be non-empty")
     variant_ids: set[str] = set()
     variant_scores: list[tuple[str, list[float]]] = []
@@ -1113,7 +1191,15 @@ def validate_selection_fixture(document: object, *, deadline: float | None = Non
 
 
 def parse_selection_fixture(payload: str | bytes | bytearray) -> dict[str, Any]:
-    return validate_selection_fixture(_parse_json(payload))
+    if isinstance(payload, str):
+        raw_payload = payload.encode("utf-8")
+    elif isinstance(payload, (bytes, bytearray)):
+        raw_payload = bytes(payload)
+    else:
+        raise ReaderFixtureValidationError("payload must be JSON text or bytes")
+    if len(raw_payload) > MAX_FIXTURE_BYTES:
+        raise ReaderFixtureValidationError("reader fixture exceeds the byte limit")
+    return validate_selection_fixture(_parse_json(raw_payload))
 
 
 def parse_request(payload: str | bytes | bytearray) -> ReaderRequest:
@@ -1129,8 +1215,13 @@ def parse_request(payload: str | bytes | bytearray) -> ReaderRequest:
 
 
 def load_selection_fixture(path: str | Path = SELECTION_FIXTURE_PATH) -> dict[str, Any]:
+    fixture_path = Path(path)
     try:
-        payload = Path(path).read_bytes()
+        if fixture_path.stat().st_size > MAX_FIXTURE_BYTES:
+            raise ReaderFixtureValidationError("reader fixture exceeds the byte limit")
+        payload = fixture_path.read_bytes()
+    except ReaderFixtureValidationError:
+        raise
     except (OSError, UnicodeError) as exc:
         raise ReaderFixtureValidationError(f"cannot read reader fixture {path}") from exc
     return parse_selection_fixture(payload)

@@ -17,12 +17,14 @@ pub const READER_ABI: &str = ABI_SCHEMA;
 pub const WINDOW_TOKENS: usize = 512;
 pub const WINDOW_STRIDE: usize = 128;
 pub const MAX_WINDOWS: usize = 64;
-pub const MAX_FACTS: usize = 64;
-pub const MAX_SUPPORTING_FACTS: usize = 32;
+pub const MAX_FACTS: usize = 20;
+pub const MAX_SUPPORTING_FACTS: usize = 20;
 pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
 pub const MAX_QUERY_CHARS: usize = 2_000;
+pub const MAX_CONTEXT_CHARS: usize = 24_000;
 pub const MAX_CONTEXT_BYTES: usize = 64 * 1024;
 pub const MAX_ID_CHARS: usize = 256;
+pub const MAX_TOKEN_COUNT: usize = WINDOW_TOKENS + WINDOW_STRIDE * (MAX_WINDOWS - 1);
 pub const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 
 const DIGEST_CHARS: usize = 64;
@@ -223,7 +225,10 @@ pub fn validate_request(request: &ReaderRequest) -> Result<(), ReaderError> {
     {
         return Err(ReaderError::InvalidShape);
     }
-    if request.context.is_empty() || request.context.as_bytes().len() > MAX_CONTEXT_BYTES {
+    if request.context.is_empty()
+        || request.context.chars().count() > MAX_CONTEXT_CHARS
+        || request.context.as_bytes().len() > MAX_CONTEXT_BYTES
+    {
         return Err(ReaderError::InvalidShape);
     }
     if std::str::from_utf8(request.context.as_bytes()).is_err() {
@@ -240,6 +245,12 @@ pub fn validate_request(request: &ReaderRequest) -> Result<(), ReaderError> {
     }
 
     let mut fact_ids = HashSet::with_capacity(request.facts.len());
+    let evidence_chars = request.facts.iter().fold(0usize, |total, fact| {
+        total.saturating_add(fact.text.chars().count())
+    });
+    if evidence_chars > MAX_CONTEXT_CHARS {
+        return Err(ReaderError::InvalidShape);
+    }
     for fact in &request.facts {
         validate_id(&fact.fact_id)?;
         if !fact_ids.insert(fact.fact_id.as_str()) {
@@ -252,34 +263,70 @@ pub fn validate_request(request: &ReaderRequest) -> Result<(), ReaderError> {
     }
 
     let mut window_ids = HashSet::with_capacity(request.windows.len());
+    let token_count = request
+        .windows
+        .last()
+        .map(|window| window.token_end)
+        .unwrap_or(0);
+    let expected_starts = expected_window_starts(token_count)?;
+    if expected_starts.len() != request.windows.len() {
+        return Err(ReaderError::InvalidWindow);
+    }
     for (index, window) in request.windows.iter().enumerate() {
         validate_window(&request.context, window)?;
         if !window_ids.insert(window.window_id.as_str()) {
             return Err(ReaderError::DuplicateId);
         }
-        if index == 0 && window.token_start != 0 {
+        let expected_start = expected_starts[index];
+        let expected_end = expected_start
+            .saturating_add(WINDOW_TOKENS)
+            .min(token_count);
+        if window.token_start != expected_start
+            || window.token_end != expected_end
+            || window.tokens.len() != expected_end - expected_start
+        {
             return Err(ReaderError::InvalidWindow);
         }
-        if let Some(previous) = index.checked_sub(1).map(|i| &request.windows[i]) {
-            let is_regular_stride = previous
+        if index > 0 {
+            let previous = &request.windows[index - 1];
+            let overlap_start = window
                 .token_start
-                .checked_add(WINDOW_STRIDE)
-                .map(|expected| window.token_start == expected)
-                .unwrap_or(false);
-            let is_tail_window = index.checked_add(1) == Some(request.windows.len())
-                && window.tokens.len() == WINDOW_TOKENS
-                && window.token_end > previous.token_end
-                && window
-                    .token_start
-                    .checked_add(WINDOW_TOKENS)
-                    .map(|expected| expected == window.token_end)
-                    .unwrap_or(false);
-            if !is_regular_stride && !is_tail_window {
-                return Err(ReaderError::InvalidWindow);
+                .checked_sub(previous.token_start)
+                .ok_or(ReaderError::InvalidWindow)?;
+            let overlap_tokens = previous
+                .token_end
+                .checked_sub(window.token_start)
+                .ok_or(ReaderError::InvalidWindow)?;
+            if overlap_tokens == 0
+                || overlap_start >= previous.tokens.len()
+                || overlap_tokens != previous.tokens.len() - overlap_start
+                || overlap_tokens > window.tokens.len()
+                || previous.tokens[overlap_start..] != window.tokens[..overlap_tokens]
+            {
+                return Err(ReaderError::InvalidOffset);
             }
         }
     }
     Ok(())
+}
+
+fn expected_window_starts(token_count: usize) -> Result<Vec<usize>, ReaderError> {
+    if token_count == 0 || token_count > MAX_TOKEN_COUNT {
+        return Err(ReaderError::InvalidWindow);
+    }
+    let regular_limit = token_count
+        .saturating_sub(WINDOW_TOKENS)
+        .saturating_add(1)
+        .max(1);
+    let mut starts: Vec<usize> = (0..regular_limit).step_by(WINDOW_STRIDE).collect();
+    let final_start = token_count.saturating_sub(WINDOW_TOKENS);
+    if starts.last().copied() != Some(final_start) {
+        starts.push(final_start);
+    }
+    if starts.len() > MAX_WINDOWS {
+        return Err(ReaderError::InvalidWindow);
+    }
+    Ok(starts)
 }
 
 fn validate_window(context: &str, window: &ReaderWindow) -> Result<(), ReaderError> {
@@ -357,6 +404,9 @@ pub fn validate_prediction_with_deadline(
         return Err(ReaderError::TimedOut);
     }
     validate_request(request)?;
+    if Instant::now() >= deadline {
+        return Err(ReaderError::TimedOut);
+    }
     validate_prediction_shape(prediction)?;
     request.identity.require_match(&prediction.identity)?;
     let window = request
@@ -380,6 +430,9 @@ pub fn validate_prediction_with_deadline(
     let is_null = prediction.answer_type == "null";
     if is_null != (prediction.null_margin >= request.null_threshold) {
         return Err(ReaderError::NullDecisionMismatch);
+    }
+    if !is_null && prediction.supporting_facts.is_empty() {
+        return Err(ReaderError::InvalidShape);
     }
     if is_null || matches!(prediction.answer_type.as_str(), "yes" | "no") {
         if prediction.start_token.is_some()
@@ -459,8 +512,16 @@ pub fn select_prediction(
     if predictions.is_empty() {
         return Err(ReaderError::InvalidShape);
     }
+    validate_request(request)?;
+    if predictions.len() > request.windows.len() {
+        return Err(ReaderError::InvalidShape);
+    }
+    let mut window_ids = HashSet::with_capacity(predictions.len());
     for prediction in predictions {
         validate_prediction(request, prediction)?;
+        if !window_ids.insert(prediction.window_id.as_str()) {
+            return Err(ReaderError::DuplicateId);
+        }
     }
     let selected = predictions
         .iter()
@@ -552,15 +613,13 @@ pub fn decode_logits(
         ("yes", logits.answer_type_logits.yes),
         ("no", logits.answer_type_logits.no),
     ];
-    let best_type = type_scores
-        .iter()
-        .fold(&type_scores[0], |best, candidate| {
-            if candidate.1 > best.1 {
-                candidate
-            } else {
-                best
-            }
-        });
+    let best_type = type_scores.iter().fold(&type_scores[0], |best, candidate| {
+        if candidate.1 > best.1 {
+            candidate
+        } else {
+            best
+        }
+    });
     let best_non_null = *best_type.1;
     let null_margin = logits.null_logit - best_non_null;
     if !null_margin.is_finite() {
@@ -737,7 +796,7 @@ mod tests {
             end_token: None,
             raw_start: None,
             raw_end: None,
-            supporting_facts: vec![],
+            supporting_facts: vec!["fact-1".into()],
             null_margin: 0.0,
             score: 1.0,
         };
@@ -767,7 +826,7 @@ mod tests {
             end_token: Some(4),
             raw_start: Some(13),
             raw_end: Some(20),
-            supporting_facts: vec![],
+            supporting_facts: vec!["fact-1".into()],
             null_margin: 0.0,
             score: 1.0,
         };
