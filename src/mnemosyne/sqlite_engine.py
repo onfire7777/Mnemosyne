@@ -71,6 +71,7 @@ from mnemosyne.access_policy import (
     VECTOR_PARTITION_PUBLIC,
     effective_max_sensitivity,
     filter_export_for_context,
+    merge_access_policies,
     may_embed_item,
     may_read_item,
     may_use_stored_embedding,
@@ -762,10 +763,18 @@ def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
+    snapshot = _working_snapshot(values)
+    snapshot["status"] = status
+    if sweep is not None:
+        snapshot["sweep"] = dt_to_json(sweep)
     diff: dict[str, Any] = {
+        "tenant_id": values["tenant_id"],
+        "item_id": values["item_id"],
         "session_id": values["session_id"],
         "deadline": values["expires_at"].isoformat(),
         "status": status,
+        "evidence_ids": copy.deepcopy(values["evidence_ids"]),
+        "working_digest": content_cid("working_memory", snapshot),
     }
     if status == "active":
         diff.update({"task_id": values["task_id"], "kind": values["kind"]})
@@ -1077,7 +1086,9 @@ class SqliteEngine:
     ) -> tuple[int, list[str]]:
         """Validate all backing evidence before a working read or mutation."""
         trust_tiers: list[int] = []
-        capability_tags: set[str] = set()
+        capability_tags: set[str] = set(values["capability_tags"])
+        sensitivities = [int(values["sensitivity"])]
+        access_policies = [values["access_policy"]]
         for cid in values["evidence_ids"]:
             row = conn.execute(
                 "SELECT * FROM evidence "
@@ -1097,7 +1108,15 @@ class SqliteEngine:
                 raise PermissionError("originating evidence exceeds the working write trust ceiling")
             trust_tiers.append(int(evidence.trust_tier))
             capability_tags.update(str(tag) for tag in evidence.capability_tags)
-        return max(trust_tiers), sorted(capability_tags)
+            sensitivities.append(int(evidence.sensitivity))
+            access_policies.append(evidence.access_policy)
+        values["capability_tags"] = sorted(capability_tags)
+        values["sensitivity"] = max(sensitivities)
+        values["access_policy"] = merge_access_policies(
+            access_policies,
+            tenant_id=values["tenant_id"],
+        )
+        return max(trust_tiers), values["capability_tags"]
 
     @staticmethod
     def _working_insert_values(values: dict[str, Any]) -> tuple[Any, ...]:
@@ -1130,18 +1149,11 @@ class SqliteEngine:
             raise ValueError("put_working accepts only active working items")
         with self._lock:
             conn = self._connect(values["tenant_id"])
-            trust_tier, capability_tags = self._working_provenance(conn, values)
-            event_id = content_cid(
-                "put_working",
-                {
-                    "tenant_id": values["tenant_id"],
-                    "session_id": values["session_id"],
-                    "item_id": values["item_id"],
-                    "deadline": values["expires_at"].isoformat(),
-                },
-            )
             try:
                 conn.execute("BEGIN IMMEDIATE")
+                trust_tier, capability_tags = self._working_provenance(conn, values)
+                audit_diff = _working_audit_diff(values, status="active")
+                event_id = content_cid("put_working", audit_diff)
                 conn.execute(
                     "INSERT INTO working_memory ("
                     "tenant_id, session_id, item_id, user_id, agent_id, kind, task_id, content, "
@@ -1156,7 +1168,7 @@ class SqliteEngine:
                     values["agent_id"],
                     "put_working",
                     values["item_id"],
-                    _working_audit_diff(values, status="active"),
+                    audit_diff,
                     source="working_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
@@ -1209,7 +1221,7 @@ class SqliteEngine:
                 "SELECT * FROM working_memory "
                 "WHERE tenant_id = ? AND session_id = ? AND status = 'active' "
                 "AND created_at <= ? AND expires_at > ? "
-                "ORDER BY created_at ASC, item_id ASC",
+                "ORDER BY expires_at ASC, item_id ASC",
                 (tenant_id, session_id, dt_to_json(moment), dt_to_json(moment)),
             ).fetchall()
             values = [_working_payload(_working_from_row(row)) for row in rows]
@@ -1254,7 +1266,7 @@ class SqliteEngine:
                     due_values, audit_context, strict=True
                 ):
                     values["status"] = "expired"
-                    values["expired_at"] = values["expires_at"]
+                    values["expired_at"] = sweep
                     updated = conn.execute(
                         "UPDATE working_memory SET status = 'expired', expired_at = ? "
                         "WHERE tenant_id = ? AND session_id = ? AND item_id = ? "
@@ -1268,26 +1280,19 @@ class SqliteEngine:
                     )
                     if updated.rowcount != 1:
                         raise RuntimeError("working-memory expiry lost its serialization claim")
+                    audit_diff = _working_audit_diff(values, status="expired", sweep=sweep)
                     self._audit_row(
                         conn,
                         values["tenant_id"],
                         values["agent_id"],
                         "expire_working",
                         values["item_id"],
-                        _working_audit_diff(values, status="expired", sweep=sweep),
+                        audit_diff,
                         source="working_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
-                        event_id=content_cid(
-                            "expire_working",
-                            {
-                                "tenant_id": values["tenant_id"],
-                                "session_id": values["session_id"],
-                                "item_id": values["item_id"],
-                                "deadline": dt_to_json(values["expires_at"]),
-                            },
-                        ),
-                        occurred_at=values["expires_at"],
+                        event_id=content_cid("expire_working", audit_diff),
+                        occurred_at=sweep,
                     )
                     expired_values.append(values)
                 conn.commit()
@@ -3818,6 +3823,26 @@ class SqliteEngine:
                     _derived_bytes, derived_cids, retained_metadata = _derived_evidence_forget_plan(cid, candidates)
                 affected_cids = {cid, *derived_cids}
                 propagated["erased_derived_evidence"] = derived_cids
+                if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
+                    minimum = self.policy.min_corroboration_for_delete
+                    blocking: list[str] = []
+                    for row in conn.execute(
+                        "SELECT id, source_evidence_cids FROM assertions "
+                        "WHERE tenant_id = ? AND branch = ? AND status = 'active' ORDER BY rowid",
+                        (tenant_id, branch),
+                    ).fetchall():
+                        sources = set(json.loads(row["source_evidence_cids"] or "[]"))
+                        if sources and sources <= affected_cids and len(sources) < minimum:
+                            blocking.append(row["id"])
+                    if blocking:
+                        return {
+                            "erased": False,
+                            "reason": "min_corroboration_for_delete",
+                            "cid": cid,
+                            "erasure_mode": mode.value,
+                            "min_corroboration_for_delete": minimum,
+                            "blocking_assertions": blocking,
+                        }
                 working_rows = conn.execute(
                     "SELECT tenant_id, session_id, item_id, evidence_ids "
                     "FROM working_memory WHERE tenant_id = ? ORDER BY rowid",
@@ -3857,26 +3882,6 @@ class SqliteEngine:
                     retained_metadata_by_cid=retained_cascade_metadata,
                     metadata_by_cid=cascade_metadata,
                 )
-                if mode is ErasureMode.HARD_DELETE_LEGAL and requested_by != "legal":
-                    minimum = self.policy.min_corroboration_for_delete
-                    blocking: list[str] = []
-                    for row in conn.execute(
-                        "SELECT id, source_evidence_cids FROM assertions "
-                        "WHERE tenant_id = ? AND branch = ? AND status = 'active' ORDER BY rowid",
-                        (tenant_id, branch),
-                    ).fetchall():
-                        sources = set(json.loads(row["source_evidence_cids"] or "[]"))
-                        if sources and sources <= affected_cids and len(sources) < minimum:
-                            blocking.append(row["id"])
-                    if blocking:
-                        return {
-                            "erased": False,
-                            "reason": "min_corroboration_for_delete",
-                            "cid": cid,
-                            "erasure_mode": mode.value,
-                            "min_corroboration_for_delete": minimum,
-                            "blocking_assertions": blocking,
-                        }
                 affected_order = [cid, *derived_cids]
                 # Capture original content/user before erasing (needed for the
                 # tombstone journal salted-hash — the UPDATE nulls content).
