@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from .evidence_signing import sign_evidence_manifest, verify_evidence_manifest_signature
 
@@ -37,6 +39,14 @@ _ALLOWED_KEYS = {
         "recoverable_residue_count", "cross_tenant_mutations", "complete",
     },
 }
+_REQUIRED_KEYS = {
+    "manifest": _ALLOWED_KEYS["manifest"],
+    "policy": _ALLOWED_KEYS["policy"],
+    "fence": _ALLOWED_KEYS["fence"],
+    "surface": _ALLOWED_KEYS["surface"],
+    "store": _ALLOWED_KEYS["store"],
+    "summary": _ALLOWED_KEYS["summary"],
+}
 
 
 def _schema_errors(manifest: dict[str, Any]) -> list[str]:
@@ -48,6 +58,10 @@ def _schema_errors(manifest: dict[str, Any]) -> list[str]:
         unknown = set(value) - _ALLOWED_KEYS[kind]
         if unknown:
             errors.append(f"{path} contains unknown fields: {', '.join(sorted(map(str, unknown)))}")
+        required = _REQUIRED_KEYS.get(kind, set())
+        missing = required - set(value)
+        if missing:
+            errors.append(f"{path} lacks required fields: {', '.join(sorted(missing))}")
 
     check(manifest, "manifest", "manifest")
     for field, kind in (("policy", "policy"), ("fence", "fence"), ("summary", "summary")):
@@ -87,6 +101,16 @@ def _opaque_field(manifest: dict[str, Any], key: str, errors: list[str]) -> None
         errors.append(f"{key} must be opaque")
 
 
+def _timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
 def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     """Verify deletion meaning; a valid detached signature alone is insufficient."""
     errors: list[str] = []
@@ -98,12 +122,30 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     errors.extend(_custody_errors(manifest))
     for field in ("tenant_ref", "user_scope", "reason"):
         _opaque_field(manifest, field, errors)
+    try:
+        operation_id = UUID(manifest.get("operation_id", ""))
+    except (TypeError, ValueError):
+        operation_id = None
+    if operation_id is None or manifest.get("request_id") != str(operation_id):
+        errors.append("operation and request identifiers must name the same UUID")
+    requested_at = _timestamp(manifest.get("requested_at"))
+    completed_at = _timestamp(manifest.get("completed_at"))
+    if requested_at is None or completed_at is None or completed_at < requested_at:
+        errors.append("manifest timestamps must prove ordered completion")
+    if manifest.get("mode") != "hard_delete_legal":
+        errors.append("deletion mode is unsupported")
+    if manifest.get("requested_by_role") != "legal":
+        errors.append("deletion manifest lacks legal authorization semantics")
+    if manifest.get("branch_scope") not in {"main", "all"}:
+        errors.append("branch scope is unsupported")
 
     surfaces = manifest.get("surfaces")
     stores = manifest.get("stores")
     summary = manifest.get("summary")
     fence = manifest.get("fence")
     policy = manifest.get("policy")
+    if not isinstance(policy, dict) or policy.get("version") != "w2":
+        errors.append("deletion policy version is unsupported")
     if not isinstance(surfaces, list) or not surfaces:
         errors.append("surfaces must be nonempty")
         surfaces = []
@@ -146,9 +188,19 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         errors.append("required surfaces are not fully enumerated")
     if any(
         not isinstance(row, dict)
+        or row.get("action") not in {"deleted", "invalidated", "crypto_shredded"}
+        or row.get("state") != "verified"
+        or row.get("precondition_present") is not True
+        or row.get("verification_method") != "direct_and_public_probe"
+        or _timestamp(row.get("attempted_at")) is None
+        or _timestamp(row.get("verified_at")) is None
+        or type(row.get("attempts")) is not int
+        or row["attempts"] < 1
+        or not row.get("checkpoint")
         or row.get("verified_removed") is not True
         or row.get("residue_probe") != 0
         or not row.get("durability_checkpoint")
+        or row.get("durability_checkpoint") != row.get("checkpoint")
         or row.get("error_code") is not None
         for row in surfaces
     ):
@@ -164,6 +216,7 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         errors.append("surface custody references must be opaque")
     if any(
         not isinstance(row, dict)
+        or any(type(row.get(field)) is not int or row[field] < 0 for field in ("expected", "discovered", "visited"))
         or row.get("available") is not True
         or row.get("visited") != row.get("expected")
         or row.get("discovered") != row.get("expected")
