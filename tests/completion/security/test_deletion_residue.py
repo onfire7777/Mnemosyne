@@ -132,14 +132,18 @@ def _coordinator_type() -> type[Any]:
     return module.DeletionCoordinator
 
 
-def _delete(world: FakeWorld, **overrides: Any) -> dict[str, Any]:
-    coordinator = _coordinator_type()(
+def _coordinator(world: FakeWorld) -> Any:
+    return _coordinator_type()(
         engine=world.engine,
         stores=world.stores,
         process_cache=world.process_cache,
         object_keys=world.object_keys,
         backup_snapshots=world.backup_snapshots,
     )
+
+
+def _delete(world: FakeWorld, **overrides: Any) -> dict[str, Any]:
+    coordinator = _coordinator(world)
     request = {
         "schema": SCHEMA,
         "operation_id": OPERATION_ID,
@@ -202,15 +206,71 @@ def test_r03_unavailable_postgres_is_explicitly_incomplete() -> None:
     assert manifest["summary"]["complete"] is False
 
 
+def test_r03_available_postgres_removes_row_metadata_vector_and_index() -> None:
+    world = _world()
+    postgres = FakeStore(
+        "postgres",
+        rows=[
+            {
+                "tenant_id": TENANT,
+                "source_ref": world.source_ref,
+                "content": CANARY,
+                "metadata": {"secret": CANARY},
+                "embedding": [0.125, 0.25],
+                "lexical_index": CANARY,
+            }
+        ],
+    )
+    world.stores["postgres"] = postgres
+    manifest = _delete(world)
+    assert postgres.delete_calls == [(TENANT, world.source_ref)]
+    assert postgres.rows == []
+    postgres_surface = _surface(manifest, "postgres")
+    assert postgres_surface["verified_removed"] is True
+    assert postgres_surface["checkpoint"]
+    _assert_complete(manifest)
+
+
 def test_r04_legal_delete_cascades_to_every_branch() -> None:
     world = _world()
     branch_refs: dict[str, str] = {"main": world.source_ref}
     for branch in ("feature", "release"):
         world.engine.branch(branch, tenant_id=TENANT)
         branch_refs[branch] = world.engine.append_evidence(_evidence(), branch=branch)
+
+    feature_ref = branch_refs["feature"]
+    survivor = world.engine.append_evidence(_evidence(content="feature survivor"), branch="feature")
+    derived_evidence = _evidence(content=f"{CANARY} plus feature survivor")
+    derived_evidence.metadata["source_evidence_cids"] = [feature_ref, survivor]
+    world.engine.append_evidence(derived_evidence, branch="feature")
+    world.engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject=CANARY,
+            predicate="is",
+            object="feature projection",
+            confidence=1.0,
+            source_evidence_cids=[feature_ref],
+        ),
+        branch="feature",
+    )
+    world.engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source=CANARY,
+            predicate="projects",
+            target="feature graph",
+            source_evidence_cids=[feature_ref],
+        ),
+        branch="feature",
+    )
     manifest = _delete(world)
     for branch, source_ref in branch_refs.items():
         assert world.engine.get_evidence(TENANT, source_ref, branch=branch) is None
+    exported = world.engine.export_tenant(TENANT)
+    _assert_absent(exported, CANARY, feature_ref)
+    assert "feature survivor" in "\n".join(_strings(exported))
     assert manifest["branch_scope"] == "all"
 
 
@@ -474,12 +534,14 @@ def test_r22_backup_retention_and_restore_are_reported_honestly(available: bool,
     assert exception["deadline"]
     assert manifest["summary"]["complete"] is False
 
-    coordinator = _coordinator_type()
+    coordinator = _coordinator(world)
     for restore_generation in (fence_generation - 1, fence_generation):
-        restore_allowed = coordinator.writer_allowed(TENANT, restore_generation)
-        if restore_allowed:
-            world.engine.append_evidence(_evidence())
-        assert restore_allowed is False
+        with pytest.raises(PermissionError, match="deletion fence"):
+            coordinator.restore_backup(
+                tenant_id=TENANT,
+                snapshot={"tenant_id": TENANT, "payload": CANARY},
+                fence_generation=restore_generation,
+            )
     assert world.engine.retrieve(CANARY, TENANT).hits == []
 
 
@@ -510,8 +572,10 @@ def test_r23_deletion_fence_blocks_racing_resurrection() -> None:
     world = _world()
     manifest = _delete(world)
     stale_generation = manifest["fence"]["generation"] - 1
-    coordinator = _coordinator_type()
-    assert coordinator.writer_allowed(TENANT, stale_generation) is False
+    coordinator = _coordinator(world)
+    with pytest.raises(PermissionError, match="deletion fence"):
+        coordinator.append_evidence(_evidence(), fence_generation=stale_generation)
+    assert world.engine.retrieve(CANARY, TENANT).hits == []
 
 
 def test_r24_identical_cross_tenant_canary_is_not_mutated() -> None:
