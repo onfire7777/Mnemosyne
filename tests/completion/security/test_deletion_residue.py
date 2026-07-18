@@ -486,7 +486,7 @@ def test_r14_process_caches_are_synchronously_invalidated(cache: str) -> None:
     world.process_cache[cache] = {"tenant_id": TENANT, "source_ref": world.source_ref, "hit": CANARY}
     manifest = _delete(world)
     _assert_absent(world.process_cache, CANARY, world.source_ref)
-    assert _surface(manifest, cache)["action"] == "invalidated"
+    assert _surface(manifest, f"cache:{cache}")["action"] == "invalidated"
 
 
 def test_r15_provider_purge_failure_never_reports_success() -> None:
@@ -653,7 +653,7 @@ def test_r22_backup_retention_and_restore_are_reported_honestly(available: bool,
             coordinator.restore_backup(
                 tenant_id=TENANT,
                 snapshot={"tenant_id": TENANT, "payload": CANARY},
-                fence_generation=restore_generation,
+                capability=restore_generation,
             )
     assert world.engine.retrieve(CANARY, TENANT).hits
 
@@ -687,7 +687,7 @@ def test_r23_deletion_fence_blocks_racing_resurrection() -> None:
     stale_generation = manifest["fence"]["generation"] - 1
     coordinator = _coordinator(world)
     with pytest.raises(PermissionError, match="deletion fence"):
-        coordinator.append_evidence(_evidence(), fence_generation=stale_generation)
+        coordinator.append_evidence(_evidence(), capability=stale_generation)
     assert world.engine.retrieve(CANARY, TENANT).hits == []
 
 
@@ -843,6 +843,62 @@ def test_timeout_after_commit_converges_on_retry_without_early_engine_delete() -
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
 
 
+def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
+    world = _world()
+    world.stores["shared"] = FakeStore(
+        "shared",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.process_cache["shared"] = {
+        "tenant_id": TENANT,
+        "source_ref": world.source_ref,
+        "payload": CANARY,
+    }
+
+    manifest = _delete(world)
+
+    _assert_complete(manifest)
+    assert world.stores["shared"].delete_calls == [(TENANT, world.source_ref)]
+    assert "shared" not in world.process_cache
+    assert {row["surface"] for row in manifest["surfaces"]} >= {"shared", "cache:shared"}
+
+
+def test_r18_object_deletion_does_not_match_source_ref_prefixes() -> None:
+    world = _world()
+    target = f"s3_encrypted://{TENANT}/{world.source_ref}"
+    unrelated = f"s3_encrypted://{TENANT}/{world.source_ref}-unrelated"
+    world.object_keys.update({target: b"target-key", unrelated: b"unrelated-key"})
+
+    _assert_complete(_delete(world))
+
+    assert world.object_keys[target] is None
+    assert world.object_keys[unrelated] == b"unrelated-key"
+
+
+def test_replay_conflict_retry_persists_manifest_after_signing_failure(tmp_path: Path) -> None:
+    world = _world()
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    manifest_path = tmp_path / "deletion-manifest.json"
+    generate_collector_keypair(private_key, public_key)
+
+    with pytest.raises(Exception):
+        _delete(
+            world,
+            manifest_path=str(manifest_path),
+            signing_private_key_path=str(tmp_path / "missing-key.pem"),
+        )
+
+    manifest = _delete(
+        world,
+        manifest_path=str(manifest_path),
+        signing_private_key_path=str(private_key),
+    )
+
+    _assert_complete(manifest)
+    assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
+
+
 @pytest.mark.parametrize("surface", ["manifest_store", "remote"])
 @pytest.mark.parametrize(
     ("fault_field", "fault_value"),
@@ -911,7 +967,7 @@ def test_forged_generation_cannot_authorize_resurrection() -> None:
     with pytest.raises(PermissionError, match="capability"):
         coordinator.append_evidence(
             _evidence(),
-            fence_generation=manifest["fence"]["generation"],
+            capability=manifest["fence"]["generation"],
         )
 
 
