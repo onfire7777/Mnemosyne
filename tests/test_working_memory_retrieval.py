@@ -92,6 +92,9 @@ def test_normalized_provider_requires_exact_tenant_session_and_branch_markers() 
             "working_memory": {
                 "data_only": True,
                 "promotion_gate_required": True,
+                "task_id": "task-deploy",
+                "created_at": EVALUATED_AT - timedelta(minutes=5),
+                "expires_at": EVALUATED_AT + timedelta(minutes=5),
             }
         }
         if session_id is not None:
@@ -192,6 +195,8 @@ def test_provenance_metadata_and_data_only_sink_rail_are_preserved() -> None:
     )[0]
 
     assert hit.provenance == ["cid-a", "cid-b"]
+    assert hit.kind == "working"
+    assert hit.metadata["working_item_id"] == "provenance"
     assert hit.trust_tier == 4
     assert hit.sensitivity == 3
     assert hit.metadata["access_policy"]["max_sensitivity"] == 3
@@ -324,3 +329,28 @@ def test_naive_evaluation_clock_is_rejected() -> None:
             session_id=SESSION,
             evaluated_at=datetime(2026, 7, 18, 12, 0),
         )
+    with pytest.raises(ValueError, match="evaluated_at"):
+        working_memory_hits(
+            [_item("naive-string")],
+            query="deploy",
+            tenant_id=TENANT,
+            session_id=SESSION,
+            evaluated_at="2026-07-18T12:00:00",
+        )
+
+
+def test_working_store_failure_does_not_suppress_durable_retrieval() -> None:
+    engine = LocalMemoryEngine()
+
+    def list_working(*args: object, **kwargs: object) -> list[object]:
+        raise RuntimeError("working store unavailable")
+
+    engine.list_working = list_working  # type: ignore[attr-defined,method-assign]
+    result = engine.retrieve(
+        "deploy",
+        tenant_id=TENANT,
+        filt={"session_id": SESSION, "evaluated_at": EVALUATED_AT},
+    )
+
+    assert result.explain["working_memory"]["reason"] == "working_store_error"
+    assert "working_memory" not in [hit.metadata.get("memory_type") for hit in result.hits]

@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
+from mnemosyne.access_policy import apply_text_redactions, may_read_item
 from mnemosyne.evidence_redaction import redaction_findings
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Hit, parse_dt, utc_now
@@ -2222,7 +2223,15 @@ def _working_field(item: object, name: str, default: object = None) -> object:
 
 
 def _working_datetime(value: object, *, field: str) -> datetime:
-    parsed = value if isinstance(value, datetime) else parse_dt(value if isinstance(value, str) else None)
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"working-memory {field} must be timezone-aware") from exc
+    else:
+        parsed = None
     if parsed is None or parsed.tzinfo is None:
         raise ValueError(f"working-memory {field} must be timezone-aware")
     return parsed.astimezone(UTC)
@@ -2262,6 +2271,9 @@ def working_memory_hits(
     evaluated_at: datetime | str,
     branch: str = "main",
     limit: int | None = None,
+    access_context: Mapping[str, Any] | None = None,
+    policy_max_sensitivity: int | None = None,
+    max_trust_tier: int | None = None,
 ) -> list[Hit]:
     """Rank active working items for one tenant/session at an explicit instant.
 
@@ -2283,8 +2295,10 @@ def working_memory_hits(
     for item in items:
         item_tenant = _working_text(_working_field(item, "tenant_id"))
         item_session = _working_text(_working_field(item, "session_id"))
-        item_branch = _working_text(_working_field(item, "branch", "main"))
-        if item_tenant != tenant_id or item_session != session_id or item_branch != branch:
+        item_branch = _working_field(item, "branch")
+        if item_tenant != tenant_id or item_session != session_id:
+            continue
+        if item_branch is not None and _working_text(item_branch) != branch:
             continue
         if _working_text(_working_field(item, "status", "active")) != "active":
             continue
@@ -2317,11 +2331,65 @@ def working_memory_hits(
             sensitivity = int(sensitivity_value)
         except (TypeError, ValueError):
             continue
-        access_policy = _working_field(item, "access_policy", metadata.get("access_policy", {}))
-        if isinstance(access_policy, Mapping):
-            metadata["access_policy"] = copy.deepcopy(
-                {str(key): value for key, value in access_policy.items()}
+        if max_trust_tier is not None and trust_tier > max_trust_tier:
+            continue
+        access_policy = _working_json_object(_working_field(item, "access_policy", metadata.get("access_policy", {})))
+        if access_context is not None:
+            decision = may_read_item(
+                item_tenant_id=tenant_id,
+                sensitivity=sensitivity,
+                access_policy=access_policy,
+                context=access_context,
+                policy_max_sensitivity=(
+                    policy_max_sensitivity if policy_max_sensitivity is not None else sensitivity
+                ),
+                status="active",
+                erased=False,
             )
+            if not decision.allowed:
+                continue
+        else:
+            policy_tenant = str(access_policy.get("tenant") or access_policy.get("tenant_id") or tenant_id)
+            if policy_tenant != tenant_id or sensitivity >= 4:
+                continue
+            try:
+                policy_max = access_policy.get("max_sensitivity")
+                if policy_max is not None and sensitivity > int(policy_max):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            if access_policy.get("restricted") or access_policy.get("hold"):
+                continue
+            if any(
+                key in access_policy
+                for key in (
+                    "allow_principals",
+                    "allow_roles",
+                    "require_capabilities",
+                    "scope",
+                    "scopes",
+                    "purpose",
+                    "purposes",
+                    "residency",
+                    "residencies",
+                    "lawful_basis",
+                    "min_role_for_raw",
+                )
+            ):
+                continue
+            decision = None
+        content_for_hit = content
+        privacy_metadata: dict[str, Any] = {}
+        if decision is not None:
+            content_for_hit, privacy_metadata = apply_text_redactions(content, access_policy, decision)
+            if not content_for_hit:
+                continue
+        if privacy_metadata:
+            metadata["privacy"] = privacy_metadata
+        capability_tags = _working_field(item, "capability_tags", metadata.get("capability_tags"))
+        if isinstance(capability_tags, (list, tuple, set)):
+            metadata["capability_tags"] = [str(value) for value in capability_tags if str(value).strip()]
+        metadata["access_policy"] = copy.deepcopy(access_policy)
         for field_name in ("reality_class", "source_type", "source_identity"):
             field_value = _working_field(item, field_name)
             if field_value is not None:
@@ -2337,7 +2405,7 @@ def working_memory_hits(
                 "item": item,
                 "item_id": item_id,
                 "kind": kind,
-                "content": content,
+                "content": content_for_hit,
                 "task_id": task_id,
                 "metadata": metadata,
                 "provenance": provenance,
@@ -2363,6 +2431,7 @@ def working_memory_hits(
         metadata.update(
             {
                 "memory_type": "working",
+                "working_item_id": row["item_id"],
                 "session_id": session_id,
                 "task_id": row["task_id"],
                 "working_memory_route": WORKING_MEMORY_ROUTE_VERSION,
@@ -2383,7 +2452,10 @@ def working_memory_hits(
         ranked.append(
             Hit(
                 id=row["item_id"],
-                kind="evidence",
+                # Keep transient working items out of durable-evidence identity
+                # and access-marking paths. The runtime Hit model predates this
+                # Phase-3 kind, so the string is intentionally additive here.
+                kind="working",  # type: ignore[arg-type]
                 tenant_id=tenant_id,
                 branch=branch,
                 text=row["content"],
@@ -2417,6 +2489,9 @@ def build_working_memory_hits(
     evaluated_at: datetime | str,
     branch: str = "main",
     limit: int | None = None,
+    access_context: Mapping[str, Any] | None = None,
+    policy_max_sensitivity: int | None = None,
+    max_trust_tier: int | None = None,
 ) -> list[Hit]:
     """Named adapter alias used by engine lanes and retrieval tests."""
 
@@ -2428,6 +2503,9 @@ def build_working_memory_hits(
         evaluated_at=evaluated_at,
         branch=branch,
         limit=limit,
+        access_context=access_context,
+        policy_max_sensitivity=policy_max_sensitivity,
+        max_trust_tier=max_trust_tier,
     )
 
 

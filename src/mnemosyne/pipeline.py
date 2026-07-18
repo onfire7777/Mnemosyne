@@ -36,10 +36,11 @@ import os
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
-from mnemosyne.models import Hit, RetrievalResult, parse_dt
+from mnemosyne.models import Hit, RetrievalResult
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
     QUERY_SUPPORT_THRESHOLD,
@@ -283,13 +284,18 @@ def _working_evaluation_instant(effective_filter: dict[str, Any]) -> Any | None:
     raw = effective_filter.get("evaluated_at", effective_filter.get("working_evaluated_at"))
     if raw is None:
         raw = effective_filter.get("as_of")
-    try:
-        evaluated_at = parse_dt(raw) if isinstance(raw, str) else raw
-    except (TypeError, ValueError):
+    if isinstance(raw, datetime):
+        evaluated_at = raw
+    elif isinstance(raw, str):
+        try:
+            evaluated_at = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
         return None
     if evaluated_at is None or getattr(evaluated_at, "tzinfo", None) is None:
         return None
-    return evaluated_at
+    return evaluated_at.astimezone(UTC)
 
 
 def _working_memory_route(
@@ -300,6 +306,7 @@ def _working_memory_route(
     branch: str,
     k: int,
     effective_filter: dict[str, Any],
+    policy: OperatingPolicy,
 ) -> tuple[list[Hit], dict[str, Any]]:
     """Load the optional fourth route without widening the existing stores."""
 
@@ -332,40 +339,79 @@ def _working_memory_route(
         return [], report
     report["evaluated_at"] = evaluated_at.isoformat()
 
-    search = getattr(ops, "working_memory_search", None)
-    if callable(search):
-        raw_hits = search(query, k, effective_filter)
-        hits = [hit for hit in (raw_hits or []) if isinstance(hit, Hit)]
-        scoped: list[Hit] = []
-        for hit in hits:
-            if hit.tenant_id != tenant_id or hit.branch != branch:
-                continue
-            marker = hit.metadata.get("session_id") if isinstance(hit.metadata, dict) else None
-            if not isinstance(marker, str) or marker != session_id:
-                continue
-            copied = _clone_hit(hit)
-            copied.metadata = {
-                **copied.metadata,
-                "memory_type": "working",
-                "session_id": session_id,
-                "working_memory_route": "working-memory-route.v1",
+    try:
+        search = getattr(ops, "working_memory_search", None)
+        if callable(search):
+            raw_hits = search(query, k, effective_filter)
+            hits = [hit for hit in (raw_hits or []) if isinstance(hit, Hit)]
+            provider_items: list[dict[str, Any]] = []
+            for hit in hits:
+                if hit.tenant_id != tenant_id or hit.branch != branch:
+                    continue
+                metadata = hit.metadata if isinstance(hit.metadata, dict) else {}
+                working_metadata = metadata.get("working_memory")
+                if not isinstance(working_metadata, dict):
+                    continue
+                provider_items.append(
+                    {
+                        "item_id": hit.id,
+                        "tenant_id": hit.tenant_id,
+                        "session_id": metadata.get("session_id"),
+                        "kind": metadata.get("kind", hit.kind),
+                        "task_id": metadata.get("task_id", working_metadata.get("task_id")),
+                        "content": hit.text,
+                        "created_at": metadata.get("created_at", working_metadata.get("created_at")),
+                        "expires_at": metadata.get("expires_at", working_metadata.get("expires_at")),
+                        "evidence_ids": list(hit.provenance),
+                        "trust_tier": hit.trust_tier,
+                        "sensitivity": hit.sensitivity,
+                        "access_policy": metadata.get("access_policy", {}),
+                        "capability_tags": metadata.get(
+                            "capability_tags", working_metadata.get("capability_tags")
+                        ),
+                        "metadata": copy.deepcopy(metadata),
+                        "status": metadata.get("status", working_metadata.get("status", "active")),
+                    }
+                )
+            scoped = build_working_memory_hits(
+                provider_items,
+                query=query,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                evaluated_at=evaluated_at,
+                branch=branch,
+                limit=k,
+                access_context=effective_filter,
+                policy_max_sensitivity=policy.max_sensitivity,
+                max_trust_tier=policy.max_trust_tier,
+            )
+        else:
+            list_working = getattr(ops, "list_working", None)
+            if not callable(list_working):
+                report.update({"status": "unavailable", "reason": "working_store_not_exposed"})
+                return [], report
+            items = list_working(tenant_id, session_id, as_of=evaluated_at)
+            scoped = build_working_memory_hits(
+                list(items or []),
+                query=query,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                evaluated_at=evaluated_at,
+                branch=branch,
+                limit=k,
+                access_context=effective_filter,
+                policy_max_sensitivity=policy.max_sensitivity,
+                max_trust_tier=policy.max_trust_tier,
+            )
+    except Exception as exc:  # optional route failures must not suppress durable retrieval
+        report.update(
+            {
+                "status": "unavailable",
+                "reason": "working_store_error",
+                "error_type": type(exc).__name__,
             }
-            scoped.append(copied)
-    else:
-        list_working = getattr(ops, "list_working", None)
-        if not callable(list_working):
-            report.update({"status": "unavailable", "reason": "working_store_not_exposed"})
-            return [], report
-        items = list_working(tenant_id, session_id, as_of=evaluated_at)
-        scoped = build_working_memory_hits(
-            list(items or []),
-            query=query,
-            tenant_id=tenant_id,
-            session_id=session_id,
-            evaluated_at=evaluated_at,
-            branch=branch,
-            limit=k,
         )
+        return [], report
     report.update(
         {
             "status": "applied",
@@ -510,6 +556,7 @@ def run_retrieval_pipeline(
                 branch=branch,
                 k=policy.rerank_width,
                 effective_filter=effective_filter,
+                policy=policy,
             ) if working_requested else None
             dense = dense_future.result()
             lexical = lexical_future.result()
@@ -538,6 +585,7 @@ def run_retrieval_pipeline(
                 branch=branch,
                 k=policy.rerank_width,
                 effective_filter=effective_filter,
+                policy=policy,
             )
             if working_requested
             else ([], {})
