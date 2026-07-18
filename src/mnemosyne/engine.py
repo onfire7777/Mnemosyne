@@ -296,6 +296,7 @@ class WorkingMemoryItem:
     created_at: datetime
     expires_at: datetime
     evidence_ids: list[str]
+    trust_tier: int = 0
     access_policy: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     capability_tags: list[str] = field(default_factory=list)
@@ -341,6 +342,10 @@ class WorkingMemoryItem:
             raise ValueError("evidence_ids must contain non-empty strings")
         if len(set(self.evidence_ids)) != len(self.evidence_ids):
             raise ValueError("evidence_ids must not contain duplicates")
+        if type(self.trust_tier) is not int or isinstance(self.trust_tier, bool):
+            raise ValueError("trust_tier must be an integer")
+        if not int(TrustTier.DIRECT_USER) <= self.trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+            raise ValueError("trust_tier is out of range")
         for name in ("access_policy", "metadata"):
             value = getattr(self, name)
             if type(value) is not dict:
@@ -385,6 +390,7 @@ class WorkingMemoryItem:
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
             "evidence_ids": list(self.evidence_ids),
+            "trust_tier": self.trust_tier,
             "access_policy": copy.deepcopy(self.access_policy),
             "metadata": copy.deepcopy(self.metadata),
             "capability_tags": list(self.capability_tags),
@@ -1221,8 +1227,8 @@ class LocalMemoryEngine:
             tenant_id=item.tenant_id,
             location="working_memory.access_policy",
         )
-        trust_tiers: list[int] = []
-        capability_tags = {str(tag) for tag in item.capability_tags}
+        trust_tiers: list[int] = [item.trust_tier]
+        capability_tags = {tag.strip().lower() for tag in item.capability_tags}
         sensitivities = [int(item.sensitivity)]
         source_policies: list[dict[str, Any]] = [access_policy]
         for cid in item.evidence_ids:
@@ -1251,7 +1257,7 @@ class LocalMemoryEngine:
                 type(tag) is not str or not tag.strip() for tag in evidence.capability_tags
             ):
                 raise ValueError("originating evidence capability tags are invalid")
-            capability_tags.update(evidence.capability_tags)
+            capability_tags.update(tag.strip().lower() for tag in evidence.capability_tags)
             if type(evidence.sensitivity) is not int or isinstance(evidence.sensitivity, bool):
                 raise ValueError("originating evidence sensitivity is invalid")
             if evidence.sensitivity < 0:
@@ -1289,6 +1295,7 @@ class LocalMemoryEngine:
             "created_at": item.created_at.isoformat(),
             "expires_at": item.expires_at.isoformat(),
             "evidence_ids": list(item.evidence_ids),
+            "trust_tier": item.trust_tier,
             "access_policy": copy.deepcopy(item.access_policy),
             "metadata": copy.deepcopy(item.metadata),
             "capability_tags": list(item.capability_tags),
@@ -1304,10 +1311,14 @@ class LocalMemoryEngine:
         sweep: datetime | None = None,
     ) -> dict[str, Any]:
         diff: dict[str, Any] = {
-            "working_digest": content_cid("working_memory", cls._working_snapshot(item)),
+            "working_item_digest": content_cid("working_memory", cls._working_snapshot(item)),
             "tenant_id": item.tenant_id,
             "session_id": item.session_id,
             "item_id": item.item_id,
+            "task_id": item.task_id,
+            "kind": item.kind,
+            "created_at": item.created_at.isoformat(),
+            "expires_at": item.expires_at.isoformat(),
             "evidence_ids": list(item.evidence_ids),
             "deadline": item.expires_at.isoformat(),
             "status": status,
@@ -1316,9 +1327,22 @@ class LocalMemoryEngine:
             diff["sweep"] = sweep.isoformat()
         return diff
 
+    @staticmethod
+    def _working_event_id(item: WorkingMemoryItem, op: str) -> str:
+        return content_cid(
+            "working_memory_audit",
+            {
+                "tenant_id": item.tenant_id,
+                "session_id": item.session_id,
+                "item_id": item.item_id,
+                "op": op,
+            },
+        )
+
     def _working_detached(self, item: WorkingMemoryItem) -> WorkingMemoryItem:
-        _, capability_tags, sensitivity, access_policy = self._working_provenance(item)
+        trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(item)
         detached = copy.deepcopy(item)
+        detached.trust_tier = trust_tier
         detached.capability_tags = capability_tags
         detached.sensitivity = sensitivity
         detached.access_policy = access_policy
@@ -1343,6 +1367,7 @@ class LocalMemoryEngine:
             stored = copy.deepcopy(item)
             try:
                 trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(stored)
+                stored.trust_tier = trust_tier
                 stored.capability_tags = capability_tags
                 stored.sensitivity = sensitivity
                 stored.access_policy = access_policy
@@ -1356,10 +1381,7 @@ class LocalMemoryEngine:
                     source="working_memory",
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
-                    event_id=content_cid(
-                        "put_working",
-                        self._working_snapshot(stored),
-                    ),
+                    event_id=self._working_event_id(stored, "put_working"),
                     occurred_at=stored.created_at,
                 )
                 self._persist()
@@ -1368,6 +1390,7 @@ class LocalMemoryEngine:
                 raise
             # Expose the canonical derived envelope to the caller while the
             # stored record remains detached from all caller-owned containers.
+            item.trust_tier = stored.trust_tier
             item.capability_tags = list(stored.capability_tags)
             item.sensitivity = stored.sensitivity
             item.access_policy = copy.deepcopy(stored.access_policy)
@@ -1416,7 +1439,7 @@ class LocalMemoryEngine:
             return [
                 self._working_detached(item)
                 for item in sorted(
-                    items, key=lambda value: (value.expires_at, value.item_id)
+                    items, key=lambda value: (-value.created_at.timestamp(), value.item_id)
                 )
             ]
 
@@ -1467,16 +1490,7 @@ class LocalMemoryEngine:
                         source="working_memory",
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
-                        event_id=content_cid(
-                            "expire_working",
-                            {
-                                "tenant_id": item.tenant_id,
-                                "session_id": item.session_id,
-                                "item_id": item.item_id,
-                                "deadline": item.expires_at.isoformat(),
-                                "sweep": sweep.isoformat(),
-                            },
-                        ),
+                        event_id=self._working_event_id(item, "expire_working"),
                         occurred_at=sweep,
                     )
                     expired.append(copy.deepcopy(item))
@@ -3311,6 +3325,7 @@ class LocalMemoryEngine:
                 )
                 if affected:
                     result.pop("working_digest", None)
+                    result.pop("working_item_digest", None)
                     if "id" in result:
                         result["id"] = new_id()
                 return result
@@ -3513,7 +3528,8 @@ class LocalMemoryEngine:
                 if working is None:
                     continue
                 working.evidence_ids = surviving
-                _, capability_tags, sensitivity, access_policy = self._working_provenance(working)
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(working)
+                working.trust_tier = trust_tier
                 working.capability_tags = capability_tags
                 working.sensitivity = sensitivity
                 working.access_policy = access_policy
