@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
 REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
 V2_REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
+ARCHITECTURE_OVERVIEW = ROOT / "docs" / "ARCHITECTURE-OVERVIEW.md"
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
@@ -107,3 +108,19 @@ def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
     phase_15 = next(line for line in text.splitlines() if line.startswith("| 15 |"))
     assert "CAP-012" in phase_15
     assert "CAP-013" in phase_15
+
+
+def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
+    text = ARCHITECTURE_OVERVIEW.read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
+
+    for expected in (
+        "prospective_memory",
+        "working_memory",
+        "without firing or mutating them",
+        "never promotes them implicitly",
+        "Local, Postgres, and Sqlite engines",
+        "remain data-only",
+        "docs/ENGINE-CONTRACT.md",
+    ):
+        assert expected in normalized
