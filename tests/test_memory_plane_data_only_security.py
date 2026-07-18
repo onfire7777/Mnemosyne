@@ -87,6 +87,9 @@ COVERAGE_MATRIX = {
     ("working", engine, surface, "shared")
     for engine in ("local", "sqlite")
     for surface in ("direct", "public")
+} | {
+    ("prospective", engine, "retrieval", "shared")
+    for engine in ("local", "sqlite")
 } | {("prospective", "local", "public", "postgres-independent")}
 
 
@@ -298,6 +301,48 @@ def test_prospective_payload_is_literal_copy_safe_and_fires_once(
     assert final_state == expected_state
 
 
+def test_prospective_payload_retrieval_is_fused_as_data_and_rejected_by_system_prompt(
+    engine: Any,
+    execution_tripwire: tuple[list[str], Callable[[], None]],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    case = next(case for case in CORPUS if case.case_id == "P-PROMPT-1")
+    sentinel = tmp_path / "executed"
+    payload = _payload(case, sentinel)
+    evidence_id = _evidence(engine, content=payload)
+    intention = _intention(case, evidence_id, content=payload)
+    calls, install_tripwire = execution_tripwire
+    monkeypatch.setenv("MNEMOSYNE_PARALLEL_CHANNELS", "0")
+    install_tripwire()
+    engine.schedule_intention(intention)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT,
+        evaluated_at=NOW,
+        trigger_context=TRIGGER_CONTEXT,
+        operating_point=OPERATING_POINT,
+    )
+    assert fired[0].action["message"] == payload
+
+    result = engine.retrieve(payload, tenant_id=TENANT)
+    hit = next(hit for hit in result.hits if hit.id == evidence_id)
+    assert hit.text == payload
+    assert hit.provenance == [evidence_id]
+    assert hit.metadata["retrieved_text"] == {
+        "kind": "retrieved_memory_data",
+        "trust_tier": 1,
+        "instruction_authority": "none",
+        "capability_tags": list(SANITIZED_DATA_TAGS),
+        "content": payload,
+    }
+    with pytest.raises(SystemPromptSinkError):
+        assemble_system_prompt([hit], sink="system_prompt")
+    assert assemble_system_prompt([hit], sink="context") == payload
+    assert calls == []
+    assert not sentinel.exists()
+
+
 @pytest.mark.parametrize("case", [case for case in CORPUS if case.plane == "working"], ids=lambda case: case.case_id)
 def test_working_payload_is_literal_sanitized_scoped_and_replay_stable(
     engine: Any,
@@ -493,7 +538,11 @@ def test_corpus_coverage_ratchet() -> None:
     assert {case.plane for case in CORPUS if case.benign} == {"prospective", "working"}
     assert all(case.content and case.prohibited <= PROHIBITED_OUTCOMES for case in CORPUS)
     assert {engine for _, engine, _, _ in COVERAGE_MATRIX} == {"local", "sqlite"}
-    assert {surface for _, _, surface, _ in COVERAGE_MATRIX} == {"direct", "public"}
+    assert {surface for _, _, surface, _ in COVERAGE_MATRIX} == {
+        "direct",
+        "public",
+        "retrieval",
+    }
     assert {seam for _, _, _, seam in COVERAGE_MATRIX} == {
         "shared",
         "postgres-independent",
