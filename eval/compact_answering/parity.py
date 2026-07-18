@@ -7,7 +7,7 @@ import binascii
 import math
 from dataclasses import dataclass
 
-ANSWER_TYPES = frozenset({"span", "yes", "no", "null"})
+ANSWER_TYPES = frozenset({"span", "yes", "no"})
 _ROW_FIELDS = {
     "decoded_span_b64",
     "answer_type",
@@ -106,8 +106,20 @@ def parse_parity_row(document: object) -> ParityRow:
     if not isinstance(abstained, bool):
         raise ParityValidationError("abstained must be a JSON boolean")
 
+    decoded_span_bytes = _parse_span(document["decoded_span_b64"])
+    if abstained and decoded_span_bytes:
+        raise ParityValidationError("abstained rows must have empty decoded span bytes")
+    if not abstained and not decoded_span_bytes:
+        raise ParityValidationError("answered rows must have non-empty decoded span bytes")
+    if not abstained and answer_type in {"yes", "no"}:
+        expected = answer_type.encode("ascii")
+        if decoded_span_bytes != expected:
+            raise ParityValidationError(
+                f"{answer_type} rows must use canonical decoded bytes {answer_type!r}"
+            )
+
     return ParityRow(
-        decoded_span_bytes=_parse_span(document["decoded_span_b64"]),
+        decoded_span_bytes=decoded_span_bytes,
         answer_type=answer_type,
         supporting_facts=_parse_supporting_facts(document["supporting_facts"]),
         null_margin=null_margin,
@@ -120,11 +132,11 @@ def compare_parity_rows(reference: object, candidate: object) -> None:
     expected = parse_parity_row(reference)
     actual = parse_parity_row(candidate)
     for field in (
-        "decoded_span_bytes",
         "answer_type",
+        "abstained",
+        "decoded_span_bytes",
         "supporting_facts",
         "null_margin",
-        "abstained",
     ):
         if getattr(expected, field) != getattr(actual, field):
             raise ParityMismatchError(f"parity mismatch: {field}")

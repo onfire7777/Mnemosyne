@@ -3,6 +3,12 @@
   "cases": [
     {
       "id": "unicode",
+      "input": {
+        "source_utf8": "prefix naïve 東京 suffix",
+        "token_length": 64,
+        "answer_byte_segments": [[7, 20]],
+        "windows": [[0, 27]]
+      },
       "reference": {
         "decoded_span_b64": "bmHDr3ZlIOadseS6rA==",
         "answer_type": "span",
@@ -21,6 +27,14 @@
     },
     {
       "id": "repeated-answer",
+      "input": {
+        "source_utf8": "Paris then Paris again",
+        "token_length": 128,
+        "answer_byte_segments": [[11, 16]],
+        "windows": [[6, 22]],
+        "occurrences": [[0, 5], [11, 16]],
+        "selected_occurrence": 1
+      },
       "reference": {
         "decoded_span_b64": "UGFyaXM=",
         "answer_type": "span",
@@ -39,16 +53,22 @@
     },
     {
       "id": "null-answer",
+      "input": {
+        "source_utf8": "no grounded answer",
+        "token_length": 64,
+        "answer_byte_segments": [],
+        "windows": []
+      },
       "reference": {
         "decoded_span_b64": "",
-        "answer_type": "null",
+        "answer_type": "span",
         "supporting_facts": [],
         "null_margin": 4.0,
         "abstained": true
       },
       "candidate": {
         "decoded_span_b64": "",
-        "answer_type": "null",
+        "answer_type": "span",
         "supporting_facts": [],
         "null_margin": 4.0,
         "abstained": true
@@ -57,6 +77,12 @@
     },
     {
       "id": "window-boundary",
+      "input": {
+        "source_utf8": "prefix-boundary-suffix",
+        "token_length": 384,
+        "answer_byte_segments": [[7, 15]],
+        "windows": [[0, 15]]
+      },
       "reference": {
         "decoded_span_b64": "Ym91bmRhcnk=",
         "answer_type": "span",
@@ -75,6 +101,12 @@
     },
     {
       "id": "multi-window-reconstruction",
+      "input": {
+        "source_utf8": "alpha → omega",
+        "token_length": 512,
+        "answer_byte_segments": [[0, 10], [10, 15]],
+        "windows": [[0, 10], [6, 15]]
+      },
       "reference": {
         "decoded_span_b64": "YWxwaGEg4oaSIG9tZWdh",
         "answer_type": "span",
@@ -99,6 +131,12 @@
     },
     {
       "id": "explicit-mismatch",
+      "input": {
+        "source_utf8": "exact",
+        "token_length": 128,
+        "answer_byte_segments": [[0, 5]],
+        "windows": [[0, 5]]
+      },
       "reference": {
         "decoded_span_b64": "ZXhhY3Q=",
         "answer_type": "span",
