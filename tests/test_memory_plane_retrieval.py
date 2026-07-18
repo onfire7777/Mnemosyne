@@ -304,19 +304,16 @@ def test_pipeline_runs_five_routes_in_stable_order_and_sanitizes_plane_text(
     assert result.used_tokens <= result.token_budget
 
 
-def test_pipeline_reports_stable_zero_count_plane_routes(
+def test_pipeline_reports_stable_routes_without_widening_legacy_channels(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     engine = _engine()
 
     result = engine.retrieve("unmatched", TENANT, filt={}, record_access=False)
 
-    assert result.explain["channels"]["prospective_memory"] == 0
-    assert result.explain["channels"]["working_memory"] == 0
-    assert result.explain["routes"][-2:] == [
-        {"channel": "prospective_memory", "count": 0, "requested": False},
-        {"channel": "working_memory", "count": 0, "requested": False},
-    ]
+    assert "prospective_memory" not in result.explain["channels"]
+    assert "working_memory" not in result.explain["channels"]
+    assert "routes" not in result.explain
 
     intention = engine.list_intentions(TENANT)[0]
     intention.due_at = NOW + timedelta(minutes=1)
@@ -397,7 +394,9 @@ def test_plane_reads_are_non_mutating(monkeypatch: pytest.MonkeyPatch) -> None:
     assert engine.list_intentions(TENANT)[0].status == "scheduled"
 
 
-def test_volatile_routes_bypass_whole_result_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_volatile_routes_reuse_cache_at_same_evaluation_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     engine = _engine()
     _install_working(monkeypatch, engine, [_working_item()])
     monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "4")
@@ -415,8 +414,8 @@ def test_volatile_routes_bypass_whole_result_cache(monkeypatch: pytest.MonkeyPat
     engine.retrieve("Helios", TENANT, filt=_filter(), record_access=False)
     engine.retrieve("Helios", TENANT, filt=_filter(), record_access=False)
 
-    assert calls == 2
-    assert pipeline_mod._RESULT_CACHE == {}
+    assert calls == 1
+    assert len(pipeline_mod._RESULT_CACHE) == 1
 
 
 def test_working_route_exceptions_are_fail_soft_in_serial_and_parallel(
