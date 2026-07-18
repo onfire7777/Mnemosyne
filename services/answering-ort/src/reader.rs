@@ -157,7 +157,7 @@ pub struct ReaderPrediction {
     pub score: f32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ReaderAnswer {
     pub answer_type: String,
     pub answer: Option<String>,
@@ -261,11 +261,19 @@ pub fn validate_request(request: &ReaderRequest) -> Result<(), ReaderError> {
             return Err(ReaderError::InvalidWindow);
         }
         if let Some(previous) = index.checked_sub(1).map(|i| &request.windows[i]) {
-            let is_regular_stride = window.token_start == previous.token_start + WINDOW_STRIDE;
-            let is_tail_window = index + 1 == request.windows.len()
+            let is_regular_stride = previous
+                .token_start
+                .checked_add(WINDOW_STRIDE)
+                .map(|expected| window.token_start == expected)
+                .unwrap_or(false);
+            let is_tail_window = index.checked_add(1) == Some(request.windows.len())
                 && window.tokens.len() == WINDOW_TOKENS
                 && window.token_end > previous.token_end
-                && window.token_start + WINDOW_TOKENS == window.token_end;
+                && window
+                    .token_start
+                    .checked_add(WINDOW_TOKENS)
+                    .map(|expected| expected == window.token_end)
+                    .unwrap_or(false);
             if !is_regular_stride && !is_tail_window {
                 return Err(ReaderError::InvalidWindow);
             }
@@ -525,6 +533,9 @@ pub fn decode_logits(
     for (start, start_score) in logits.start_logits.iter().enumerate() {
         for (end, end_score) in logits.end_logits.iter().enumerate().skip(start) {
             let score = *start_score + *end_score;
+            if !score.is_finite() {
+                return Err(ReaderError::NonFinite);
+            }
             if score > best_pair.2
                 || (score == best_pair.2 && (start, end) < (best_pair.0, best_pair.1))
             {
@@ -532,17 +543,29 @@ pub fn decode_logits(
             }
         }
     }
+    let span_score = logits.answer_type_logits.span + best_pair.2;
+    if !span_score.is_finite() {
+        return Err(ReaderError::NonFinite);
+    }
     let type_scores = [
-        ("span", logits.answer_type_logits.span + best_pair.2),
+        ("span", span_score),
         ("yes", logits.answer_type_logits.yes),
         ("no", logits.answer_type_logits.no),
     ];
     let best_type = type_scores
         .iter()
-        .max_by(|left, right| left.1.partial_cmp(&right.1).unwrap_or(Ordering::Equal))
-        .expect("answer types are non-empty");
-    let best_non_null = best_type.1;
+        .fold(&type_scores[0], |best, candidate| {
+            if candidate.1 > best.1 {
+                candidate
+            } else {
+                best
+            }
+        });
+    let best_non_null = *best_type.1;
     let null_margin = logits.null_logit - best_non_null;
+    if !null_margin.is_finite() {
+        return Err(ReaderError::NonFinite);
+    }
     let answer_type = if null_margin >= request.null_threshold {
         "null"
     } else {
@@ -558,12 +581,15 @@ pub fn decode_logits(
     } else {
         (None, None, None, None)
     };
-    let supporting_facts = logits
+    let supporting_facts: Vec<String> = logits
         .supporting_fact_logits
         .iter()
         .enumerate()
         .filter_map(|(index, score)| (*score > 0.0).then(|| request.facts[index].fact_id.clone()))
         .collect();
+    if supporting_facts.len() > MAX_SUPPORTING_FACTS {
+        return Err(ReaderError::InvalidShape);
+    }
     Ok(ReaderPrediction {
         schema: ABI_SCHEMA.into(),
         identity: request.identity.clone(),
@@ -765,11 +791,24 @@ mod tests {
 
     #[test]
     fn expired_deadline_is_fail_closed_by_caller() {
+        let request = request();
+        let prediction = ReaderPrediction {
+            schema: ABI_SCHEMA.into(),
+            identity: identity(),
+            window_id: "window-000".into(),
+            answer_type: "yes".into(),
+            start_token: None,
+            end_token: None,
+            raw_start: None,
+            raw_end: None,
+            supporting_facts: vec![],
+            null_margin: 0.0,
+            score: 1.0,
+        };
         let deadline = Instant::now() - Duration::from_millis(1);
-        assert!(Instant::now() >= deadline);
         assert_eq!(
-            ReaderError::TimedOut.to_string(),
-            "reader validation timed out"
+            validate_prediction_with_deadline(&request, &prediction, deadline),
+            Err(ReaderError::TimedOut)
         );
     }
 }
