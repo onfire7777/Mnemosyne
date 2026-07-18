@@ -38,10 +38,10 @@ Forbidden files:
 
 ### Task 3: Adversarial review and cleanup
 
-- [ ] Review all D4 changes against the independent rejection findings and the D4/D5/D6 ownership boundary.
-- [ ] Prove import leaves engine allowlists and methods unchanged; prove unrelated same-tenant content and identical cross-tenant content remain byte-identical.
-- [ ] Prove crashes/exceptions at each synthetic saga transition return or persist an incomplete resumable state rather than a success or a stuck unrecorded operation.
-- [ ] Keep `.ralphex` control metadata ignored and untracked, document synthetic-only evidence boundaries in code/tests, and leave the worktree clean.
+- [x] Review all D4 changes against the independent rejection findings and the D4/D5/D6 ownership boundary.
+- [x] Prove import leaves engine allowlists and methods unchanged; prove unrelated same-tenant content and identical cross-tenant content remain byte-identical.
+- [x] Prove crashes/exceptions at each synthetic saga transition return or persist an incomplete resumable state rather than a success or a stuck unrecorded operation.
+- [x] Keep `.ralphex` control metadata ignored and untracked, document synthetic-only evidence boundaries in code/tests, and leave the worktree clean.
 
 Validation:
 - `python -m pytest -q tests/completion/security/test_deletion_residue.py -k 'r03 or r04 or r05 or r06 or r07 or r08 or r09 or r10 or r11 or r12 or r13 or r14 or r15 or r16 or r17 or r18 or r19 or r20 or r22 or r23 or r24 or replay_conflict or forged or import_side_effect or concurrent or probe or timeout'`

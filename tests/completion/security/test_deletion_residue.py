@@ -324,6 +324,38 @@ def test_r05_mixed_source_derived_content_is_recomputed() -> None:
     assert world.engine.get_evidence(TENANT, unrelated).content == f"unrelated literal {CANARY}"
 
 
+def test_r05_unrelated_same_tenant_records_remain_byte_identical() -> None:
+    world = _world()
+    unrelated = world.engine.append_evidence(_evidence(content=f"literal survivor {CANARY}"))
+    unrelated_before = json.dumps(
+        world.engine.get_evidence(TENANT, unrelated).to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    survivor_row = {
+        "tenant_id": TENANT,
+        "source_ref": unrelated,
+        "payload": {"literal": CANARY, "bytes": "00ff"},
+    }
+    world.stores["queue"] = FakeStore(
+        "queue",
+        rows=[
+            {"tenant_id": TENANT, "source_ref": world.source_ref, "payload": CANARY},
+            copy.deepcopy(survivor_row),
+        ],
+    )
+
+    _delete(world)
+
+    unrelated_after = json.dumps(
+        world.engine.get_evidence(TENANT, unrelated).to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    assert unrelated_after == unrelated_before
+    assert world.stores["queue"].rows == [survivor_row]
+
+
 def test_r06_assertion_history_and_vectors_are_scrubbed() -> None:
     world = _world()
     assertion = Assertion(
@@ -808,6 +840,54 @@ def test_timeout_after_commit_converges_on_retry_without_early_engine_delete() -
     _assert_complete(complete)
     assert remote.delete_calls == [(TENANT, world.source_ref), (TENANT, world.source_ref)]
     assert remote.probe_calls == [(TENANT, world.source_ref)]
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+
+
+@pytest.mark.parametrize("surface", ["manifest_store", "remote"])
+@pytest.mark.parametrize(
+    ("fault_field", "fault_value"),
+    [
+        ("delete_fault", "before_commit"),
+        ("delete_fault", "timeout_after_commit"),
+        ("probe_fault", "raise"),
+        ("probe_fault", "residue"),
+    ],
+)
+def test_each_store_transition_failure_is_recorded_and_resumable(
+    surface: str,
+    fault_field: str,
+    fault_value: str,
+) -> None:
+    """Synthetic faults are contract tests, not production deletion evidence."""
+    world = _world()
+    journal = FakeStore(
+        "journal",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "payload": CANARY}],
+    )
+    target = FakeStore(
+        surface,
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "payload": CANARY}],
+    )
+    setattr(target, fault_field, fault_value)
+    world.stores.update(journal=journal)
+    world.stores[surface] = target
+
+    incomplete = _delete(world)
+
+    receipt = _surface(incomplete, surface)
+    assert receipt["state"] == "failed"
+    assert receipt["verified_removed"] is False
+    assert receipt["attempts"] == 1
+    assert incomplete["summary"]["complete"] is False
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+    target.delete_fault = None
+    target.probe_fault = None
+    complete = _delete(world)
+
+    _assert_complete(complete)
+    assert _surface(complete, surface)["attempts"] == 2
+    assert journal.delete_calls == [(TENANT, world.source_ref)]
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
 
 
