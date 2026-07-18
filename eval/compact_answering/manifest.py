@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
 SCHEMA = "mnemosyne.compact-answering-custody.v1"
 IDENTITY_KINDS = frozenset({"code", "artifact", "configuration", "provider"})
 _DIGEST = re.compile(r"[0-9a-f]{64}", re.ASCII)
+_PROVIDER_IDENTITY = re.compile(
+    r"provider:(?:reference-python|onnx-fp32|onnx-int8):"
+    r"(?:dev-synthetic|linux-x86_64-avx2|windows-x86_64-avx2|macos-arm64):"
+    r"v[1-9][0-9]*",
+    re.ASCII,
+)
 
 
 class ManifestValidationError(ValueError):
@@ -71,6 +78,8 @@ def validate_manifest(document: object) -> dict[str, Any]:
         name = identity["identity"]
         if not isinstance(name, str) or not name or name != name.strip():
             raise ManifestValidationError(f"{kind} identity must be a non-empty exact string")
+        if kind == "provider" and _PROVIDER_IDENTITY.fullmatch(name) is None:
+            raise ManifestValidationError(f"unsupported provider identity: {name!r}")
         digest = identity["sha256"]
         if not isinstance(digest, str) or _DIGEST.fullmatch(digest) is None:
             raise ManifestValidationError(f"{kind} sha256 must be 64 lowercase hex characters")
@@ -106,26 +115,40 @@ def create_manifest(path: str | Path, document: object) -> None:
     manifest_path = Path(path)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     payload = _canonical_bytes(validated)
-
-    try:
-        descriptor = os.open(manifest_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError as exc:
-        try:
-            load_manifest(manifest_path, expected=validated)
-        except ManifestDriftError:
-            raise
-        except ManifestValidationError as invalid:
-            raise ManifestDriftError(
-                f"existing manifest is invalid at {manifest_path}"
-            ) from invalid
-        raise ManifestExistsError(f"manifest already exists at {manifest_path}") from exc
-
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=manifest_path.parent,
+        prefix=f".{manifest_path.name}.",
+    )
+    temporary_path = Path(temporary_name)
+    linked = False
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
+        try:
+            os.link(temporary_path, manifest_path)
+            linked = True
+        except FileExistsError as exc:
+            try:
+                load_manifest(manifest_path, expected=validated)
+            except ManifestDriftError:
+                raise
+            except ManifestValidationError as invalid:
+                raise ManifestDriftError(
+                    f"existing manifest is invalid at {manifest_path}"
+                ) from invalid
+            raise ManifestExistsError(f"manifest already exists at {manifest_path}") from exc
+        temporary_path.unlink()
         _fsync_directory(manifest_path.parent)
     except BaseException:
-        manifest_path.unlink(missing_ok=True)
+        # Preserve the original publication failure while independently trying
+        # both cleanups; one unlink failure must not leave the other path live.
+        for cleanup_path in (temporary_path, manifest_path if linked else None):
+            if cleanup_path is None:
+                continue
+            try:
+                cleanup_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise
