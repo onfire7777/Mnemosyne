@@ -55,6 +55,9 @@ _IDENTITY_FIELDS = frozenset(
 SELECTION_FIXTURE_PATH = (
     Path(__file__).with_name("fixtures") / "reader-train-dev.json"
 )
+EXPECTED_SELECTION_FIXTURE_SHA256 = (
+    "91f092cd591c9edb3c5c4dd98d2710d22f2efd2c25d1e350f51500a1e00c7898"
+)
 _UNMEASURED_RECEIPT_FIELDS = (
     "artifact_bytes",
     "quality",
@@ -506,6 +509,13 @@ def _validate_request_facts(context: str, facts: Iterable[SupportingFact]) -> No
 
 def _validate_request_windows(context: str, windows: tuple[ReaderWindow, ...]) -> None:
     context_bytes = context.encode("utf-8")
+    first_source_byte = len(context_bytes) - len(context.lstrip().encode("utf-8"))
+    last_source_byte = len(context.rstrip().encode("utf-8"))
+    if (
+        windows[0].raw_start != first_source_byte
+        or windows[-1].raw_end != last_source_byte
+    ):
+        raise ReaderOffsetError("reader windows must cover the full source context")
     token_count = windows[-1].token_end
     expected_starts = _expected_window_starts(token_count)
     if len(expected_starts) != len(windows):
@@ -764,7 +774,8 @@ def validate_prediction(request: ReaderRequest, prediction: ReaderPrediction) ->
     is_null = prediction.answer_type == NULL_ANSWER_TYPE
     if not is_null and not prediction.supporting_facts:
         raise ReaderValidationError("non-null answers require supporting facts")
-    if is_null != (null_margin >= _as_finite_f32(request.null_threshold, label="null_threshold")):
+    request_null_threshold = _as_finite_f32(request.null_threshold, label="null_threshold")
+    if is_null != (null_margin >= request_null_threshold):
         raise ReaderValidationError("null margin and abstention decision disagree")
     if is_null:
         if any(value is not None for value in (prediction.start_token, prediction.end_token, prediction.raw_start, prediction.raw_end)):
@@ -785,6 +796,15 @@ def validate_prediction(request: ReaderRequest, prediction: ReaderPrediction) ->
     if prediction.raw_start != expected_start or prediction.raw_end != expected_end:
         raise ReaderOffsetError("prediction raw offsets do not match token offsets")
     _validate_context_offsets(request.context, prediction.raw_start, prediction.raw_end, label="prediction span")
+    fact_ranges = {
+        fact.fact_id: (fact.raw_start, fact.raw_end) for fact in request.facts
+    }
+    if not any(
+        fact_ranges[fact_id][0] <= prediction.raw_start
+        and prediction.raw_end <= fact_ranges[fact_id][1]
+        for fact_id in prediction.supporting_facts
+    ):
+        raise ReaderOffsetError("prediction span must be contained in supporting facts")
     return prediction
 
 
@@ -797,7 +817,7 @@ def decode_prediction(request: ReaderRequest, prediction: ReaderPrediction) -> R
             None,
             None,
             prediction.supporting_facts,
-            prediction.null_margin,
+            _as_finite_f32(prediction.null_margin, label="null_margin"),
             prediction.window_id,
             True,
         )
@@ -842,6 +862,8 @@ def select_prediction(request: ReaderRequest, predictions: Iterable[ReaderPredic
         rows.append(prediction)
     if not rows:
         raise ReaderValidationError("reader predictions must be non-empty")
+    if len(rows) != len(request.windows):
+        raise ReaderValidationError("reader predictions must cover every request window")
     selected = max(
         rows,
         key=lambda row: (
@@ -1133,7 +1155,7 @@ def validate_selection_fixture(document: object, *, deadline: float | None = Non
         if not _is_clean_string(case_id) or case_id in case_ids:
             raise ReaderFixtureValidationError("reader fixture case IDs must be unique")
         case_ids.add(case_id)
-        if parsed["query"] != parsed["query"].strip() or not _is_clean_string(parsed["query"], max_chars=MAX_QUERY_CHARS):
+        if not _is_clean_string(parsed["query"], max_chars=MAX_QUERY_CHARS):
             raise ReaderFixtureValidationError(f"case {case_id} query is invalid")
         request = _case_request(identity, parsed)
         prediction = _expected_prediction(request, parsed)
@@ -1185,7 +1207,11 @@ def validate_selection_fixture(document: object, *, deadline: float | None = Non
     if selection["expected_candidate_id"] != selected:
         raise ReaderFixtureValidationError("reader selection result mismatch")
     digest = fixture["fixture_sha256"]
-    if not _is_digest(digest) or digest != fixture_digest(fixture):
+    if (
+        not _is_digest(digest)
+        or digest != EXPECTED_SELECTION_FIXTURE_SHA256
+        or digest != fixture_digest(fixture)
+    ):
         raise ReaderFixtureValidationError("reader fixture digest mismatch")
     return fixture
 
@@ -1236,9 +1262,24 @@ def run_synthetic_bakeoff(
     if timeout_ms is not None:
         if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
             raise ReaderTimeoutError("timeout_ms must be a positive finite number")
-        if not math.isfinite(float(timeout_ms)) or timeout_ms <= 0:
+        try:
+            timeout_value = float(timeout_ms)
+        except OverflowError as exc:
+            raise ReaderTimeoutError("timeout_ms must be a positive finite number") from exc
+        if not math.isfinite(timeout_value) or timeout_value <= 0:
             raise ReaderTimeoutError("timeout_ms must be a positive finite number")
-        deadline = min(deadline, time.monotonic() + timeout_ms / 1000) if deadline is not None else time.monotonic() + timeout_ms / 1000
+        if deadline is not None:
+            if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+                raise ReaderTimeoutError("reader deadline must be finite")
+            try:
+                deadline_value = float(deadline)
+            except OverflowError as exc:
+                raise ReaderTimeoutError("reader deadline must be finite") from exc
+            if not math.isfinite(deadline_value):
+                raise ReaderTimeoutError("reader deadline must be finite")
+            deadline = min(deadline_value, time.monotonic() + timeout_value / 1000)
+        else:
+            deadline = time.monotonic() + timeout_value / 1000
     fixture = validate_selection_fixture(document, deadline=deadline)
     return fixture["selection"]["expected_candidate_id"]
 
