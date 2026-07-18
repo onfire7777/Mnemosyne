@@ -14,6 +14,7 @@ from .parity import (
     ParityValidationError,
     SupportingFact,
     compare_parity_rows,
+    parse_parity_json,
     parse_parity_row,
 )
 
@@ -28,6 +29,7 @@ __all__ = [
     "compare_parity_rows",
     "create_manifest",
     "load_manifest",
+    "parse_parity_json",
     "parse_parity_row",
     "validate_manifest",
 ]
