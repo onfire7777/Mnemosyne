@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+import json
 import sqlite3
 from typing import Any
 
@@ -27,6 +28,7 @@ def _evidence(
     capability_tags: list[str] | None = None,
     sensitivity: int = 0,
     access_policy: dict[str, Any] | None = None,
+    content: str | None = None,
 ) -> str:
     return engine.append_evidence(
         Evidence(
@@ -36,7 +38,7 @@ def _evidence(
             source_type="episode",
             source_identity="sqlite-working-test",
             session_id=session_id,
-            content=f"evidence-{tenant_id}-{session_id}",
+            content=content or f"evidence-{tenant_id}-{session_id}",
             capability_tags=capability_tags or ["working-memory"],
             sensitivity=sensitivity,
             access_policy=access_policy or {"tenant": tenant_id},
@@ -89,6 +91,8 @@ def test_sqlite_schema_adds_working_memory_without_changing_core_tables(tmp_path
         for row in conn.execute("PRAGMA table_info(working_memory)")
     }
     assert {"tenant_id", "session_id", "item_id", "expires_at", "status", "evidence_ids"} <= columns
+    assert "working_memory" in engine.export_tenant(TENANT)
+    assert "working_memory" in engine.export_all()
 
 
 def test_sqlite_working_memory_is_scoped_detached_and_ttl_is_half_open(tmp_path) -> None:
@@ -220,6 +224,48 @@ def test_sqlite_working_memory_persists_restrictive_provenance_envelope(tmp_path
     assert stored.access_policy["max_sensitivity"] == 1
 
 
+def test_sqlite_expiry_persists_refreshed_provenance_envelope(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+    engine.put_working(_item(evidence_id))
+    assert engine.backfill_evidence_privacy(TENANT, evidence_id, ["email"])
+
+    engine.expire_working(TENANT, expired_at=EXPIRES_AT)
+
+    row = engine._connect(TENANT).execute(
+        "SELECT capability_tags, sensitivity, access_policy FROM working_memory WHERE item_id = ?",
+        ("item-a",),
+    ).fetchone()
+    assert json.loads(row["capability_tags"]) == ["working-memory"]
+    assert row["sensitivity"] == 3
+    assert json.loads(row["access_policy"])["max_sensitivity"] == 3
+
+
+def test_sqlite_audit_event_ids_are_idempotent(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+    engine.put_working(_item(evidence_id))
+    audit = next(
+        row for row in engine.export_tenant(TENANT)["audit_log"] if row["op"] == "put_working"
+    )
+
+    conn = engine._connect(TENANT)
+    with conn:
+        engine._audit_row(
+            conn,
+            TENANT,
+            AGENT,
+            "put_working",
+            "item-a",
+            {"status": "active"},
+            source="working_memory",
+            event_id=audit["id"],
+            occurred_at=CREATED_AT,
+        )
+
+    assert len([row for row in engine.export_tenant(TENANT)["audit_log"] if row["id"] == audit["id"]]) == 1
+
+
 def test_sqlite_working_memory_accepts_inclusive_24_hour_ttl(tmp_path) -> None:
     engine = SqliteEngine(tmp_path)
     evidence_id = _evidence(engine)
@@ -228,7 +274,7 @@ def test_sqlite_working_memory_accepts_inclusive_24_hour_ttl(tmp_path) -> None:
 
     assert engine.get_working(TENANT, SESSION, "item-a", as_of=expires_at - timedelta(microseconds=1)) is not None
     assert engine.get_working(TENANT, SESSION, "item-a", as_of=expires_at) is None
-    with pytest.raises(ValueError, match="cannot exceed 24 hours"):
+    with pytest.raises(ValueError, match="24 hours"):
         _item(
             evidence_id,
             item_id="too-long",
@@ -326,3 +372,65 @@ def test_sqlite_working_memory_normalizes_offset_instants_before_sql_comparison(
     assert engine.get_working(TENANT, SESSION, "offset", as_of=CREATED_AT + timedelta(seconds=29)) is not None
     assert engine.get_working(TENANT, SESSION, "offset", as_of=EXPIRES_AT) is None
     assert [row.item_id for row in engine.expire_working(TENANT, expired_at=EXPIRES_AT)] == ["offset"]
+
+
+def test_sqlite_forget_trims_multi_provenance_working_items(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    first = _evidence(engine)
+    second = _evidence(engine, content="second-evidence")
+    item = _item(first)
+    item.evidence_ids.append(second)
+    engine.put_working(item)
+
+    report = engine.forget(TENANT, first)
+
+    assert report["propagated"]["removed_working_items"] == []
+    assert report["propagated"]["trimmed_working_items"] == [
+        {"tenant_id": TENANT, "session_id": SESSION, "item_id": item.item_id}
+    ]
+    retained = engine.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT)
+    assert retained is not None
+    assert retained.evidence_ids == [second]
+
+
+def test_sqlite_hard_delete_redacts_prior_working_audit_custody(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+    item = _item(evidence_id)
+    engine.put_working(item)
+    original_put_id = next(
+        row["id"] for row in engine.export_tenant(TENANT)["audit_log"] if row["op"] == "put_working"
+    )
+
+    engine.forget(TENANT, evidence_id, requested_by="legal", erasure_mode="hard_delete_legal")
+
+    exported = engine.export_tenant(TENANT)
+    put_audit = next(row for row in exported["audit_log"] if row["op"] == "put_working")
+    assert "working_digest" not in put_audit["diff"]
+    assert put_audit["id"] != original_put_id
+    assert evidence_id not in str(exported)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    (("trust_tier", 4.9), ("sensitivity", 4.9), ("capability_tags", "data-only")),
+)
+def test_sqlite_rejects_malformed_evidence_security_fields(tmp_path, column, value) -> None:
+    engine = SqliteEngine(tmp_path)
+    evidence_id = _evidence(engine)
+    conn = engine._connect(TENANT)
+    stored = json.dumps(value) if column == "capability_tags" else value
+    conn.execute(f"UPDATE evidence SET {column} = ? WHERE cid = ?", (stored, evidence_id))
+    conn.commit()
+
+    with pytest.raises(ValueError):
+        engine.put_working(_item(evidence_id))
+
+
+def test_sqlite_working_memory_rejects_non_finite_json(tmp_path) -> None:
+    engine = SqliteEngine(tmp_path)
+    item = _item(_evidence(engine))
+    item.metadata["not-json"] = float("nan")
+
+    with pytest.raises(ValueError, match="finite JSON"):
+        engine.put_working(item)
