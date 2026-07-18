@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from mnemosyne import cli
 from mnemosyne.cli import build_parser
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer, _to_mcp_tool_spec
@@ -51,10 +52,41 @@ def test_tool_spec_and_cli_expose_all_working_operations() -> None:
     schemas = {item["name"]: _to_mcp_tool_spec(item)["inputSchema"] for item in TOOL_SPEC}
     assert "session_id" in schemas["working_seed"]["required"]
     parser = build_parser()
-    for command in ("working-seed", "working-query", "working-promote", "working-expire"):
-        with pytest.raises(SystemExit) as exc:
-            parser.parse_args([command])
-        assert exc.value.code == 2
+    common = [
+        "--tenant", "tenant-a", "--session-id", "session-a", "--user", "user-a",
+        "--agent-id", "agent-a", "--task-id", "task-a", "--branch", "main",
+    ]
+    commands = {
+        "working-seed": (
+            [*common, "--kind", "active_goal", "--content", "Finish", "--evidence-cid", "cid-a",
+             "--ttl-seconds", "30", "--created-at", NOW.isoformat(), "--source-trust-tier", "1"],
+            cli.cmd_working_seed,
+        ),
+        "working-query": ([*common, "--as-of", NOW.isoformat()], cli.cmd_working_query),
+        "working-promote": (
+            [*common, "--item-id", "working-a", "--as-of", NOW.isoformat(),
+             "--regression-case", '{"id":"case-a"}', "--role", "operator",
+             "--source-trust-tier", "0"],
+            cli.cmd_working_promote,
+        ),
+        "working-expire": (
+            [*common, "--expired-at", NOW.isoformat(), "--role", "operator",
+             "--source-trust-tier", "0"],
+            cli.cmd_working_expire,
+        ),
+    }
+    for command, (arguments, handler) in commands.items():
+        parsed = parser.parse_args([command, *arguments])
+        assert parsed.func is handler
+        assert cli._working_scope(parsed) == SCOPE
+
+    promote = parser.parse_args(["working-promote", *commands["working-promote"][0]])
+    promote.regression_case = ["[]"]
+    with pytest.raises(ValueError, match="JSON object"):
+        promote.func(promote)
+    promote.regression_case = ["not-json"]
+    with pytest.raises(ValueError):
+        promote.func(promote)
 
 
 def test_seed_query_ttl_scope_and_provenance_fail_closed() -> None:
@@ -145,18 +177,14 @@ def test_expire_is_authorized_deterministic_and_session_bound() -> None:
         server._bind_session_identity("working_query", {**SCOPE, "session_id": "session-b"}, identity)
 
 
-def test_expire_cannot_cross_authenticated_subject_scope() -> None:
+@pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
+def test_expire_cannot_cross_authenticated_subject_scope(selector: str) -> None:
     tools, cid = seeded_tools()
     seed(tools, cid)
-    other_scope = {
-        **SCOPE,
-        "user_id": "user-b",
-        "agent_id": "agent-b",
-        "task_id": "task-b",
-    }
+    other_scope = {**SCOPE, selector: f"{selector}-b"}
     other_cid = tools.engine.append_evidence(
         Evidence(
-            tenant_id="tenant-a", user_id="user-b", actor="user",
+            tenant_id="tenant-a", user_id=other_scope["user_id"], actor="user",
             source_type="episode", content="Preserve the other scoped task",
             session_id="session-a", trust_tier=1, access_policy={"tenant": "tenant-a"},
         )

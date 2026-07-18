@@ -335,14 +335,16 @@ def test_shared_engine_contract_working_memory_is_scoped_detached_and_non_durabl
     assert engine.list_working(tenant, "shared-session", as_of=expires_at) == []
 
 
+@pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
 def test_shared_engine_contract_working_expiry_is_subject_scoped(
     engine_bundle: tuple[Any, str, str],
+    selector: str,
 ) -> None:
     engine, tenant, user = engine_bundle
     created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
     expires_at = created_at + timedelta(minutes=10)
 
-    def add_item(item_id: str, scoped_user: str, agent: str, task: str) -> None:
+    def add_item(item_id: str, scoped_user: str, agent: str, task: str, branch: str) -> None:
         source_cid = engine.append_evidence(
             Evidence(
                 tenant_id=tenant,
@@ -368,20 +370,22 @@ def test_shared_engine_contract_working_expiry_is_subject_scoped(
                 expires_at=expires_at,
                 evidence_ids=[source_cid],
                 access_policy={"tenant": tenant},
-                metadata={"branch": "main"},
+                metadata={"branch": branch},
             )
         )
 
-    add_item("scope-a", user, "agent-a", "task-a")
-    add_item("scope-b", f"{user}-other", "agent-b", "task-b")
+    scope_a = {"user_id": user, "agent_id": "agent-a", "task_id": "task-a", "branch": "main"}
+    scope_b = {**scope_a, selector: f"{selector}-other"}
+    add_item("scope-a", scope_a["user_id"], scope_a["agent_id"], scope_a["task_id"], scope_a["branch"])
+    add_item("scope-b", scope_b["user_id"], scope_b["agent_id"], scope_b["task_id"], scope_b["branch"])
 
     expired = engine.expire_working(
         tenant,
         session_id="shared-subject-session",
-        user_id=user,
-        agent_id="agent-a",
-        task_id="task-a",
-        branch="main",
+        user_id=scope_a["user_id"],
+        agent_id=scope_a["agent_id"],
+        task_id=scope_a["task_id"],
+        branch=scope_a["branch"],
         expired_at=expires_at,
     )
 
@@ -389,10 +393,10 @@ def test_shared_engine_contract_working_expiry_is_subject_scoped(
     assert engine.expire_working(
         tenant,
         session_id="shared-subject-session",
-        user_id=user,
-        agent_id="agent-a",
-        task_id="task-a",
-        branch="main",
+        user_id=scope_a["user_id"],
+        agent_id=scope_a["agent_id"],
+        task_id=scope_a["task_id"],
+        branch=scope_a["branch"],
         expired_at=expires_at,
     ) == []
     remaining = engine.get_working(
