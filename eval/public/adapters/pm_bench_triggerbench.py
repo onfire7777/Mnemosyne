@@ -13,6 +13,7 @@ import re
 import tempfile
 from collections import Counter, defaultdict
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -128,6 +129,10 @@ def normalize(value: Mapping[str, Any]) -> dict[str, Any]:
     _unique(
         [f"{row['tenant_id']}\0{row['session_id']}" for row in cases],
         "tenant/session pairs",
+    )
+    _unique(
+        [task["action_id"] for case in cases for task in case["tasks"]],
+        "benchmark action IDs",
     )
     if benchmark == "pm-bench":
         present = {task["trigger"]["type"] for case in cases for task in case["tasks"]}
@@ -247,6 +252,18 @@ def _case(value: Any, benchmark: str, point_id: str) -> dict[str, Any]:
             _identifier(expected_action_id, "expected_action_id")
         if expected_intervene != (expected_action_id is not None):
             raise ActionProbeError("TriggerBench intervention gold is inconsistent")
+        due_action_ids = {
+            action_id
+            for step in step_rows
+            for action_id in step["expected_due_action_ids"]
+        }
+        expected_due = {expected_action_id} if expected_action_id is not None else set()
+        if expected_action_id is not None and expected_action_id not in action_ids:
+            raise ActionProbeError("TriggerBench expected_action_id is unknown")
+        if due_action_ids != expected_due:
+            raise ActionProbeError(
+                "TriggerBench intervention gold disagrees with step due actions"
+            )
         result.update(
             constraint_id=_identifier(value.get("constraint_id"), "constraint_id"),
             dimension=value["dimension"],
@@ -405,15 +422,26 @@ def run(
     )
     traces: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="mneme-action-probe-") as root:
+        action_owners: dict[str, set[tuple[str, str]]] = defaultdict(set)
+        for owner_case in benchmark["cases"]:
+            owner = (owner_case["tenant_id"], owner_case["session_id"])
+            for task in owner_case["tasks"]:
+                action_owners[task["action_id"]].add(owner)
         for case_index, case in enumerate(benchmark["cases"]):
             store = str(Path(root) / f"case-{case_index}.json")
+            canary = Path(root) / f"case-{case_index}-payload-canary"
             scope = {
                 "store": store,
                 "tenant_id": case["tenant_id"],
                 "session_id": case["session_id"],
             }
             introduced: set[str] = set()
-            for step in case["steps"]:
+            applied_updates: dict[str, str] = {}
+            due_steps: dict[str, list[int]] = defaultdict(list)
+            for due_index, due_step in enumerate(case["steps"]):
+                for action_id in due_step["expected_due_action_ids"]:
+                    due_steps[action_id].append(due_index)
+            for step_index, step in enumerate(case["steps"]):
                 for task in case["tasks"]:
                     if task["introduced_at"] == step["step_id"]:
                         _invoke(cli, "task.create", scope, _public_task(task))
@@ -424,15 +452,24 @@ def run(
                             f"case {case['case_id']} updates a task before formation"
                         )
                     _invoke(cli, "task.update", scope, update)
+                    applied_updates[update["task_id"]] = update["type"]
                 _invoke(cli, "clock.inject", scope, {"now": step["now"]})
                 for event in step["event_observations"]:
                     _invoke(cli, "event.inject", scope, event)
-                public_observations = {
+                public_observations = _replace_payload_canary({
                     "channel_observations": step["channel_observations"],
                     "narrative_observations": step["narrative_observations"],
-                }
+                }, str(canary))
                 queried = _invoke(cli, "intention.query", scope, public_observations)
+                _check_canary(canary)
                 candidates = _action_ids(queried, "query")
+                current_owner = (case["tenant_id"], case["session_id"])
+                if any(
+                    action_id in action_owners
+                    and current_owner not in action_owners[action_id]
+                    for action_id in candidates
+                ):
+                    raise ActionProbeError("candidate leaked across tenant/session scope")
                 query_channels = _string_ids(
                     queried.get("queried_channels", []), "queried_channels"
                 )
@@ -447,6 +484,7 @@ def run(
                     },
                 )
                 acted = _action_ids(selected, "selection")
+                _check_canary(canary)
                 if not set(acted) <= {
                     row["action_id"] for row in step["available_actions"]
                 }:
@@ -454,7 +492,15 @@ def run(
                 if queried.get("side_effects") or selected.get("side_effects"):
                     raise ActionProbeError("candidate reported forbidden side effects")
                 trace = _trace_row(
-                    benchmark, case, step, candidates, acted, query_channels
+                    benchmark,
+                    case,
+                    step,
+                    candidates,
+                    acted,
+                    query_channels,
+                    applied_updates,
+                    due_steps,
+                    step_index,
                 )
                 if trace["hard_failures"]:
                     raise ActionProbeError(
@@ -468,7 +514,25 @@ def run(
 
 
 def _public_task(task: Mapping[str, Any]) -> dict[str, Any]:
-    return {key: task[key] for key in task if key not in {"action_id"}}
+    return dict(task)
+
+
+def _replace_payload_canary(value: Any, canary: str) -> Any:
+    if isinstance(value, str):
+        return value.replace("{payload_canary}", canary)
+    if isinstance(value, list):
+        return [_replace_payload_canary(row, canary) for row in value]
+    if isinstance(value, Mapping):
+        return {
+            key: _replace_payload_canary(child, canary)
+            for key, child in value.items()
+        }
+    return value
+
+
+def _check_canary(canary: Path) -> None:
+    if canary.exists():
+        raise ActionProbeError("candidate executed forbidden payload text")
 
 
 def _invoke(cli: Any, command: str, *args: Mapping[str, Any]) -> dict[str, Any]:
@@ -498,17 +562,22 @@ def _trace_row(
     candidates: list[str],
     acted: list[str],
     query_channels: list[str],
+    applied_updates: Mapping[str, str],
+    due_steps: Mapping[str, list[int]],
+    step_index: int,
 ) -> dict[str, Any]:
     expected = set(step["expected_due_action_ids"])
     actual = set(acted)
     tasks = {task["action_id"]: task for task in case["tasks"]}
-    cancelled = {
-        task["action_id"] for task in case["tasks"] if task["update_class"] == "cancel"
-    }
-    stale = {
-        task["action_id"]
+    task_updates = {
+        task["action_id"]: applied_updates.get(task["task_id"])
         for task in case["tasks"]
-        if task["update_class"] in {"override", "reschedule"}
+    }
+    cancelled = {action for action, update in task_updates.items() if update == "cancel"}
+    stale = {
+        action
+        for action, update in task_updates.items()
+        if update in {"override", "reschedule"}
     }
     dependency_invalid = {
         action
@@ -517,12 +586,23 @@ def _trace_row(
     }
     available = {row["action_id"] for row in step["available_actions"]}
     duplicate_count = len(acted) - len(actual)
+    wrong_time = (actual - expected) & set(tasks) - cancelled - stale
+    early = {
+        action
+        for action in wrong_time
+        if any(due_index > step_index for due_index in due_steps.get(action, []))
+    }
+    late = {
+        action
+        for action in wrong_time
+        if any(due_index < step_index for due_index in due_steps.get(action, []))
+    }
     counts = {
         "cancelled_action": len(actual & cancelled - expected),
         "dependency_violation": len(dependency_invalid),
         "duplicate": duplicate_count,
-        "early": len((actual - expected) & available),
-        "late": 0,
+        "early": len(early & available),
+        "late": len(late & available),
         "lure": len((actual - expected) - set(tasks)),
         "miss": len(expected - actual),
         "stale_preupdate_action": len(actual & stale - expected),
@@ -541,6 +621,13 @@ def _trace_row(
     ]
     if set(step["expected_query_channels"]) != set(query_channels):
         hard.append("missing_query_channel")
+    updated_task_ids = {update["task_id"] for update in step["updates"]}
+    relevant_actions = (expected | actual | set(candidates) | available) & set(tasks)
+    relevant_tasks = [
+        task
+        for task in case["tasks"]
+        if task["action_id"] in relevant_actions or task["task_id"] in updated_task_ids
+    ]
     row = {
         "acted_action_ids": sorted(actual),
         "candidate_action_ids": candidates,
@@ -550,16 +637,14 @@ def _trace_row(
         "expected_due_action_ids": sorted(expected),
         "expected_query_channels": step["expected_query_channels"],
         "hard_failures": sorted(hard),
-        "monitoring_classes": sorted(
-            {task["monitoring_class"] for task in case["tasks"]}
-        ),
+        "monitoring_classes": sorted({task["monitoring_class"] for task in relevant_tasks}),
         "operating_point_id": benchmark["operating_point_id"],
         "queried_channels": query_channels,
-        "regularities": sorted({task["regularity"] for task in case["tasks"]}),
+        "regularities": sorted({task["regularity"] for task in relevant_tasks}),
         "step_id": step["step_id"],
-        "temporal_scopes": sorted({task["temporal_scope"] for task in case["tasks"]}),
-        "trigger_types": sorted({task["trigger"]["type"] for task in case["tasks"]}),
-        "update_classes": sorted({task["update_class"] for task in case["tasks"]}),
+        "temporal_scopes": sorted({task["temporal_scope"] for task in relevant_tasks}),
+        "trigger_types": sorted({task["trigger"]["type"] for task in relevant_tasks}),
+        "update_classes": sorted({task["update_class"] for task in relevant_tasks}),
         "utc_boundary_class": step["utc_boundary_class"],
     }
     for key in (
@@ -810,6 +895,12 @@ def _deep_keys(value: Any) -> set[str]:
 def _timestamp(value: Any, name: str) -> str:
     if not isinstance(value, str) or not _UTC.fullmatch(value):
         raise ActionProbeError(f"{name} must be a fixed whole-second UTC timestamp")
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError as error:
+        raise ActionProbeError(
+            f"{name} must be a fixed whole-second UTC timestamp"
+        ) from error
     return value
 
 
