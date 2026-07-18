@@ -286,46 +286,71 @@ class DeletionCoordinator:
         receipt = record.receipts[surface_id]
         if receipt.verified_removed:
             return True
-        if kind == "store" and receipt.attempts:
-            try:
-                if self._probe_store(self.stores[name], tenant, refs):
-                    return self._verified(receipt)
-            except Exception:
-                receipt.state = "failed"
-                receipt.error_code = "probe_failed"
-                return False
+        resuming = receipt.attempts > 0
         receipt.state = "deleting"
-        receipt.attempts += 1
         receipt.error_code = None
         try:
             if kind == "object" and self._target_object_keys(tenant, refs):
+                receipt.attempts += 1
                 return self._delete_objects(receipt, tenant, refs)
             if kind == "backup":
+                receipt.attempts += 1
                 return self._delete_backups(receipt, tenant, refs)
             if kind == "cache":
+                receipt.attempts += 1
                 del self.process_cache[name]
                 receipt.action = "invalidated"
                 return self._verified(receipt)
             store = self.stores[name]
+            probed_absent: set[str] = set()
+            destructive_attempted = False
             for ref in refs:
-                store.delete(tenant, ref)
+                if resuming:
+                    try:
+                        if self._probe_ref(store, tenant, ref):
+                            probed_absent.add(ref)
+                            continue
+                    except Exception:
+                        receipt.error_code = "probe_failed"
+                        receipt.state = "failed"
+                        return False
+                try:
+                    if not destructive_attempted:
+                        receipt.attempts += 1
+                        destructive_attempted = True
+                    store.delete(tenant, ref)
+                except TimeoutError:
+                    receipt.error_code = "delete_ambiguous"
+                    try:
+                        if self._probe_ref(store, tenant, ref):
+                            probed_absent.add(ref)
+                            continue
+                    except Exception:
+                        pass
+                    receipt.state = "failed"
+                    return False
+            if len(probed_absent) == len(refs):
+                return self._verified(receipt)
             if not self._probe_store(store, tenant, refs):
                 receipt.error_code = "probe_failed"
                 receipt.state = "failed"
                 return False
             return self._verified(receipt)
-        except TimeoutError:
-            receipt.error_code = "delete_ambiguous"
-            try:
-                if kind == "store" and self._probe_store(self.stores[name], tenant, refs):
-                    return self._verified(receipt)
-            except Exception:
-                pass
         except ConnectionError:
             receipt.error_code = "store_unavailable"
         except Exception:
             receipt.error_code = "delete_failed"
         receipt.state = "failed"
+        return False
+
+    @staticmethod
+    def _probe_ref(store: Any, tenant: str, ref: str) -> bool:
+        probe = getattr(store, "probe", None)
+        if callable(probe):
+            return probe(tenant, ref) is False
+        rows = getattr(store, "rows", None)
+        if isinstance(rows, list):
+            return not any(row.get("tenant_id") == tenant and row.get("source_ref") == ref for row in rows)
         return False
 
     @staticmethod
