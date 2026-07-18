@@ -188,6 +188,14 @@ def test_window_schedule_and_direct_request_validation_are_fail_closed() -> None
     with pytest.raises(ReaderValidationError, match="window"):
         ReaderRequest.from_mapping(undersized)
 
+    truncated_context = copy.deepcopy(request_mapping)
+    truncated_context["windows"] = truncated_context["windows"][:1]
+    truncated_context["windows"][0]["tokens"] = truncated_context["windows"][0]["tokens"][:1]
+    truncated_context["windows"][0]["token_end"] = 1
+    truncated_context["windows"][0]["raw_end"] = truncated_context["windows"][0]["tokens"][0]["raw_end"]
+    with pytest.raises(ReaderValidationError, match="full source context"):
+        ReaderRequest.from_mapping(truncated_context)
+
     sparse_tail = copy.deepcopy(request_mapping)
     sparse_tail["windows"][1]["token_start"] = 1_000
     sparse_tail["windows"][1]["token_end"] = 1_512
@@ -230,6 +238,26 @@ def test_selection_rejects_duplicate_windows_and_non_null_answers_without_facts(
     )
     with pytest.raises(ReaderValidationError, match="supporting facts"):
         validate_prediction(request, unsupported_grounding)
+
+
+def test_span_must_be_contained_in_a_supporting_fact() -> None:
+    context = "The answer is Paris."
+    request_mapping = request_for(context).as_mapping()
+    request_mapping["facts"] = [
+        {"fact_id": "fact-1", "raw_start": 0, "raw_end": 3, "text": "The"}
+    ]
+    request = ReaderRequest.from_mapping(request_mapping)
+    prediction = prediction_for(request, answer_type="span", start_token=3, end_token=4)
+    with pytest.raises(ReaderOffsetError, match="supporting facts"):
+        validate_prediction(request, prediction)
+
+
+def test_selection_requires_a_prediction_for_every_window() -> None:
+    context = " ".join(f"t{index:03d}" for index in range(700))
+    request = request_for(context)
+    prediction = prediction_for(request, answer_type="yes")
+    with pytest.raises(ReaderValidationError, match="every request window"):
+        select_prediction(request, [prediction])
 
 
 @pytest.mark.parametrize("answer_type", ["yes", "no"])
@@ -292,6 +320,12 @@ def test_drifted_split_identity_offsets_and_digests_are_rejected(fixture) -> Non
     with pytest.raises(ReaderValidationError, match="digest"):
         validate_selection_fixture(tampered)
 
+    recomputed = copy.deepcopy(fixture)
+    recomputed["cases"][0]["query"] = "a different query"
+    recomputed["fixture_sha256"] = fixture_digest(recomputed)
+    with pytest.raises(ReaderValidationError, match="digest"):
+        validate_selection_fixture(recomputed)
+
     request = request_for("The café is open.")
     prediction = prediction_for(request, answer_type="span", start_token=1, end_token=2)
     bad_offsets = ReaderPrediction(**{**prediction.__dict__, "raw_start": prediction.raw_start + 1})
@@ -306,6 +340,8 @@ def test_timeout_is_fail_closed_before_fixture_admission(fixture) -> None:
         run_synthetic_bakeoff(fixture, timeout_ms=0)
     with pytest.raises(ReaderTimeoutError, match="finite"):
         run_synthetic_bakeoff(fixture, deadline=float("nan"))
+    with pytest.raises(ReaderTimeoutError, match="positive finite"):
+        run_synthetic_bakeoff(fixture, timeout_ms=10**1_000)
 
 
 def test_logits_shape_and_finiteness_are_checked() -> None:

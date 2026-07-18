@@ -263,6 +263,18 @@ pub fn validate_request(request: &ReaderRequest) -> Result<(), ReaderError> {
     }
 
     let mut window_ids = HashSet::with_capacity(request.windows.len());
+    let first_source_byte = request.context.len() - request.context.trim_start().len();
+    let last_source_byte = request.context.trim_end().len();
+    if request.windows[0].raw_start != first_source_byte
+        || request
+            .windows
+            .last()
+            .expect("windows are non-empty")
+            .raw_end
+            != last_source_byte
+    {
+        return Err(ReaderError::InvalidOffset);
+    }
     let token_count = request
         .windows
         .last()
@@ -459,7 +471,18 @@ pub fn validate_prediction_with_deadline(
     if raw_start != window.tokens[start].raw_start || raw_end != window.tokens[end - 1].raw_end {
         return Err(ReaderError::InvalidOffset);
     }
-    validate_source_range(&request.context, raw_start, raw_end)
+    validate_source_range(&request.context, raw_start, raw_end)?;
+    if !request.facts.iter().any(|fact| {
+        prediction
+            .supporting_facts
+            .iter()
+            .any(|fact_id| fact_id == &fact.fact_id)
+            && fact.raw_start <= raw_start
+            && raw_end <= fact.raw_end
+    }) {
+        return Err(ReaderError::InvalidOffset);
+    }
+    Ok(())
 }
 
 pub fn decode_prediction(
@@ -513,7 +536,7 @@ pub fn select_prediction(
         return Err(ReaderError::InvalidShape);
     }
     validate_request(request)?;
-    if predictions.len() > request.windows.len() {
+    if predictions.len() != request.windows.len() {
         return Err(ReaderError::InvalidShape);
     }
     let mut window_ids = HashSet::with_capacity(predictions.len());
@@ -649,7 +672,7 @@ pub fn decode_logits(
     if supporting_facts.len() > MAX_SUPPORTING_FACTS {
         return Err(ReaderError::InvalidShape);
     }
-    Ok(ReaderPrediction {
+    let prediction = ReaderPrediction {
         schema: ABI_SCHEMA.into(),
         identity: request.identity.clone(),
         window_id: logits.window_id.clone(),
@@ -661,7 +684,9 @@ pub fn decode_logits(
         supporting_facts,
         null_margin,
         score: best_non_null,
-    })
+    };
+    validate_prediction(request, &prediction)?;
+    Ok(prediction)
 }
 
 fn validate_id(value: &str) -> Result<(), ReaderError> {
@@ -868,6 +893,62 @@ mod tests {
         assert_eq!(
             validate_prediction_with_deadline(&request, &prediction, deadline),
             Err(ReaderError::TimedOut)
+        );
+    }
+
+    #[test]
+    fn logits_are_validated_before_return() {
+        let request = request();
+        let logits = ReaderLogits {
+            schema: ABI_SCHEMA.into(),
+            identity: identity(),
+            window_id: "window-000".into(),
+            start_logits: vec![0.0; 4],
+            end_logits: vec![0.0; 4],
+            answer_type_logits: AnswerTypeLogits {
+                span: 0.0,
+                yes: 1.0,
+                no: 0.0,
+            },
+            supporting_fact_logits: vec![-1.0],
+            null_logit: -1.0,
+        };
+        assert_eq!(
+            decode_logits(&request, &logits),
+            Err(ReaderError::InvalidShape)
+        );
+    }
+
+    #[test]
+    fn windows_must_cover_the_full_source_context() {
+        let mut request = request();
+        request.windows[0].tokens.truncate(1);
+        request.windows[0].token_end = 1;
+        request.windows[0].raw_end = 3;
+        assert_eq!(validate_request(&request), Err(ReaderError::InvalidOffset));
+    }
+
+    #[test]
+    fn spans_must_be_grounded_in_supporting_facts() {
+        let mut request = request();
+        request.facts[0].raw_end = 3;
+        request.facts[0].text = "The".into();
+        let prediction = ReaderPrediction {
+            schema: ABI_SCHEMA.into(),
+            identity: identity(),
+            window_id: "window-000".into(),
+            answer_type: "span".into(),
+            start_token: Some(3),
+            end_token: Some(4),
+            raw_start: Some(14),
+            raw_end: Some(20),
+            supporting_facts: vec!["fact-1".into()],
+            null_margin: 0.0,
+            score: 1.0,
+        };
+        assert_eq!(
+            validate_prediction(&request, &prediction),
+            Err(ReaderError::InvalidOffset)
         );
     }
 }
