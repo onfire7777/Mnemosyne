@@ -476,6 +476,10 @@ class MnemosyneMcpServer:
             self._bind_string_claim(arguments, "user_id", identity.user_id, "user")
         if "user" in parameter_names:
             self._bind_string_claim(arguments, "user", identity.user_id, "user")
+        if "session_id" in parameter_names:
+            if not identity.session_id:
+                raise PermissionError("authenticated session has no session identifier")
+            self._bind_string_claim(arguments, "session_id", identity.session_id, "session")
         if "role" in parameter_names:
             arguments["role"] = identity.role
         if "source_trust_tier" in parameter_names:
