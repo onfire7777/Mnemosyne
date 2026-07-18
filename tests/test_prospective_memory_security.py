@@ -309,20 +309,34 @@ def test_prospective_writes_require_normal_or_stronger_source_trust() -> None:
         ("cancel", ()),
         ("evaluate", (PROSPECTIVE_SCHEDULER_CAPABILITY,)),
     ):
-        decision = policy.authorize_prospective_memory(
+        denied = policy.authorize_prospective_memory(
             operation,
             SessionIdentity(
                 tenant_id="tenant-a",
                 user_id="user-a",
                 role="operator",
-                source_trust_tier=int(TrustTier.LOW),
+                source_trust_tier=int(TrustTier.UNTRUSTED_EXTERNAL),
                 capabilities=capabilities,
             ),
             tenant_id="tenant-a",
             owner_id="user-a" if operation != "evaluate" else None,
         )
-        _assert_denied_unbound(decision)
-        assert "source trust" in decision.reason
+        _assert_denied_unbound(denied)
+        assert "source trust" in denied.reason
+
+        allowed = policy.authorize_prospective_memory(
+            operation,
+            SessionIdentity(
+                tenant_id="tenant-a",
+                user_id="user-a",
+                role="operator",
+                source_trust_tier=int(TrustTier.NORMAL),
+                capabilities=capabilities,
+            ),
+            tenant_id="tenant-a",
+            owner_id="user-a" if operation != "evaluate" else None,
+        )
+        assert allowed.allowed is True
 
 
 def test_policy_controlled_capabilities_survive_oidc_session_issuance() -> None:
@@ -379,6 +393,44 @@ def test_policy_controlled_capabilities_survive_oidc_session_issuance() -> None:
     ]
     assert issued.capabilities == (PROSPECTIVE_SCHEDULER_CAPABILITY,)
     assert signer.verify(token, now=1_900_000_100) == issued
+
+
+def test_raw_oidc_capability_claims_cannot_mint_prospective_authority() -> None:
+    policy = OidcAuthorizationPolicy.from_mapping(
+        {
+            "allowed_client_ids": ["scheduler-client"],
+            "rules": [
+                {
+                    "tenant_ids": ["tenant-a"],
+                    "role": "agent",
+                    "source_trust_tier": int(TrustTier.NORMAL),
+                }
+            ],
+        }
+    )
+
+    identity = policy.authorize(
+        {
+            "azp": "scheduler-client",
+            "capabilities": [
+                PROSPECTIVE_SCHEDULER_CAPABILITY,
+                PROSPECTIVE_TENANT_READ_CAPABILITY,
+            ],
+        },
+        tenant_id="tenant-a",
+        user_id="agent-a",
+        expires_at=2_000_000_000,
+        session_id="idp-session-a",
+    )
+
+    assert identity.capabilities == ()
+    decision = SecurityPolicy().authorize_prospective_memory(
+        "evaluate",
+        identity,
+        tenant_id="tenant-a",
+    )
+    _assert_denied_unbound(decision)
+    assert "scheduler capability" in decision.reason
 
 
 def test_capability_free_oidc_policy_preserves_schema_v1_outputs() -> None:
@@ -524,6 +576,40 @@ def test_oidc_policy_rejects_untrusted_or_ambiguous_capability_rules() -> None:
                     "rules": [{**base_rule, "capabilities": capabilities}],
                 }
             )
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "error"),
+    [
+        ("required_acr", "requires required_acr"),
+        ("required_amr", "requires required_amr"),
+        ("claim_contains", "requires a non-tenant claim matcher"),
+        ("max_auth_age_seconds", "requires max_auth_age_seconds"),
+    ],
+)
+def test_capability_bearing_agent_rules_require_elevated_controls(
+    missing_field: str,
+    error: str,
+) -> None:
+    rule = {
+        "tenant_ids": ["tenant-a"],
+        "claim_contains": {"groups": "mnemosyne-schedulers"},
+        "required_acr": "urn:mnemosyne:mfa",
+        "required_amr": "mfa",
+        "max_auth_age_seconds": 300,
+        "role": "agent",
+        "source_trust_tier": int(TrustTier.NORMAL),
+        "capabilities": [PROSPECTIVE_SCHEDULER_CAPABILITY],
+    }
+    del rule[missing_field]
+
+    with pytest.raises(SessionAuthError, match=error):
+        OidcAuthorizationPolicy.from_mapping(
+            {
+                "allowed_client_ids": ["scheduler-client"],
+                "rules": [rule],
+            }
+        )
 
 
 def test_existing_memory_plane_authorization_behavior_is_unchanged() -> None:
