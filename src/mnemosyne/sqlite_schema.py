@@ -311,6 +311,7 @@ ENSURE_STATEMENTS: list[str] = [
         content TEXT NOT NULL,
         created_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
+        trust_tier INTEGER NOT NULL DEFAULT 0 CHECK (trust_tier BETWEEN 0 AND 4),
         capability_tags TEXT NOT NULL DEFAULT '[]',
         sensitivity INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired')),
