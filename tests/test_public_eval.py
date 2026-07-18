@@ -173,9 +173,29 @@ def test_pm_trigger_simulator_is_retired_with_exact_capability_gap(
     with pytest.raises(RuntimeError) as exc:
         cli.run("intention.query", {"tenant_id": "t", "session_id": "s"})
     assert str(exc.value) == PM_TRIGGER_UNAVAILABLE_REASON
-    assert "clock" in PM_TRIGGER_UNAVAILABLE_REASON
-    assert "event" in PM_TRIGGER_UNAVAILABLE_REASON
-    assert "dependency-aware" in PM_TRIGGER_UNAVAILABLE_REASON
+    assert (
+        "schedule, cancel, evaluate, and list commands exist"
+        in PM_TRIGGER_UNAVAILABLE_REASON
+    )
+    for missing_contract in (
+        "atomic update/reschedule/override/recurring semantics",
+        "stable fixture identity and session scope or query-without-firing",
+        "explicit action selection or an approved deterministic-selection contract",
+    ):
+        assert missing_contract in PM_TRIGGER_UNAVAILABLE_REASON
+
+
+def test_action_readme_only_advertises_the_runnable_action_profile() -> None:
+    readme = (
+        Path(__file__).resolve().parents[1] / "eval/public/README.md"
+    ).read_text()
+    assert "registered\nbut non-runnable" in readme
+    command_lines = [line for line in readme.splitlines() if "eval-public --" in line]
+    assert any(
+        "--suite working-memory-action-development" in line for line in command_lines
+    )
+    assert all("--suite pm-bench-development" not in line for line in command_lines)
+    assert all("--suite triggerbench-development" not in line for line in command_lines)
 
 
 @pytest.mark.parametrize(

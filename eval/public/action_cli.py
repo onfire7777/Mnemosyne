@@ -8,9 +8,11 @@ from typing import Any, Mapping
 
 
 PM_TRIGGER_UNAVAILABLE_REASON = (
-    "PM-Bench/TriggerBench are non-runnable: MnemoCLI does not expose authenticated "
-    "public subprocess commands for the complete task create/update, clock, event, "
-    "dependency-aware intention query, and action-selection fixture contract"
+    "PM-Bench/TriggerBench are non-runnable: authenticated intention schedule, "
+    "cancel, evaluate, and list commands exist, but the production CLI does not "
+    "yet expose atomic update/reschedule/override/recurring semantics; stable "
+    "fixture identity and session scope or query-without-firing where required; "
+    "and explicit action selection or an approved deterministic-selection contract"
 )
 
 

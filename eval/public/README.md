@@ -13,14 +13,16 @@ intervals. Families are never aggregated.
 ## Deterministic action development suites
 
 The live registry exposes three repository-authored, non-publishable action
-profiles: `pm-bench-development`, `triggerbench-development`, and
-`working-memory-action-development`. Run one through the public subprocess
-path, then verify and reproduce its byte-identical bundle:
+profiles. `pm-bench-development` and `triggerbench-development` are registered
+but non-runnable until the authenticated production CLI exposes their complete
+fixture contracts. `working-memory-action-development` is the only runnable
+action profile; run it through the public subprocess path, then verify and
+reproduce its byte-identical bundle:
 
 ```
-uv run --locked mneme eval-public --suite pm-bench-development --out-dir /tmp/mneme-pm-action
-uv run --locked mneme eval-public --verify-bundle /tmp/mneme-pm-action
-uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-pm-action --out-dir /tmp/mneme-pm-action-reproduced
+uv run --locked mneme eval-public --suite working-memory-action-development --out-dir /tmp/mneme-working-action
+uv run --locked mneme eval-public --verify-bundle /tmp/mneme-working-action
+uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-working-action --out-dir /tmp/mneme-working-action-reproduced
 ```
 
 These are deterministic development probes, not official PM-Bench or
