@@ -1237,10 +1237,9 @@ class LocalMemoryEngine:
                 raise ValueError("working item user must match originating evidence")
             if evidence.session_id != item.session_id:
                 raise ValueError("working item session must match originating evidence")
-            try:
-                trust_tier = int(evidence.trust_tier)
-            except (TypeError, ValueError) as exc:
-                raise ValueError("originating evidence trust tier is invalid") from exc
+            if type(evidence.trust_tier) is not int:
+                raise ValueError("originating evidence trust tier is invalid")
+            trust_tier = evidence.trust_tier
             if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
                 raise ValueError("originating evidence trust tier is out of range")
             if trust_tier > int(self.policy.max_trust_tier):
@@ -1248,8 +1247,16 @@ class LocalMemoryEngine:
                     "originating evidence exceeds the working write trust ceiling"
                 )
             trust_tiers.append(trust_tier)
-            capability_tags.update(str(tag) for tag in evidence.capability_tags)
-            sensitivities.append(int(evidence.sensitivity))
+            if type(evidence.capability_tags) is not list or any(
+                type(tag) is not str or not tag.strip() for tag in evidence.capability_tags
+            ):
+                raise ValueError("originating evidence capability tags are invalid")
+            capability_tags.update(evidence.capability_tags)
+            if type(evidence.sensitivity) is not int or isinstance(evidence.sensitivity, bool):
+                raise ValueError("originating evidence sensitivity is invalid")
+            if evidence.sensitivity < 0:
+                raise ValueError("originating evidence sensitivity is negative")
+            sensitivities.append(evidence.sensitivity)
             source_policies.append(
                 validate_access_policy(
                     evidence.access_policy,
@@ -1308,6 +1315,14 @@ class LocalMemoryEngine:
         if sweep is not None:
             diff["sweep"] = sweep.isoformat()
         return diff
+
+    def _working_detached(self, item: WorkingMemoryItem) -> WorkingMemoryItem:
+        _, capability_tags, sensitivity, access_policy = self._working_provenance(item)
+        detached = copy.deepcopy(item)
+        detached.capability_tags = capability_tags
+        detached.sensitivity = sensitivity
+        detached.access_policy = access_policy
+        return detached
 
     def put_working(self, item: WorkingMemoryItem) -> str:
         """Store one working item under its tenant/session/item composite key."""
@@ -1378,8 +1393,7 @@ class LocalMemoryEngine:
                 or clock >= item.expires_at
             ):
                 return None
-            self._working_provenance(item)
-            return copy.deepcopy(item)
+            return self._working_detached(item)
 
     def list_working(
         self,
@@ -1399,10 +1413,8 @@ class LocalMemoryEngine:
                 and item.created_at <= clock
                 and clock < item.expires_at
             ]
-            for item in items:
-                self._working_provenance(item)
             return [
-                copy.deepcopy(item)
+                self._working_detached(item)
                 for item in sorted(
                     items, key=lambda value: (value.expires_at, value.item_id)
                 )
@@ -3241,6 +3253,82 @@ class LocalMemoryEngine:
         requested_by: str = "user",
         erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
     ) -> dict[str, Any]:
+        with self._lock:
+            before = (
+                copy.deepcopy(self.evidence),
+                copy.deepcopy(self.assertions),
+                copy.deepcopy(self.relations),
+                copy.deepcopy(self.preferences),
+                copy.deepcopy(self.entities),
+                copy.deepcopy(self.intentions),
+                copy.deepcopy(self.working_memory),
+                copy.deepcopy(self.audit_log),
+                copy.deepcopy(self.deletion_log),
+                copy.deepcopy(self.merge_log),
+                self._store_version,
+            )
+            try:
+                return self._forget_impl(
+                    tenant_id,
+                    cid,
+                    branch=branch,
+                    requested_by=requested_by,
+                    erasure_mode=erasure_mode,
+                )
+            except BaseException:
+                (
+                    self.evidence,
+                    self.assertions,
+                    self.relations,
+                    self.preferences,
+                    self.entities,
+                    self.intentions,
+                    self.working_memory,
+                    self.audit_log,
+                    self.deletion_log,
+                    self.merge_log,
+                    self._store_version,
+                ) = before
+                raise
+
+    @staticmethod
+    def _redact_working_digests(
+        value: Any, placeholder_map: dict[str, str]
+    ) -> Any:
+        redacted = redact_erased_cids(value, placeholder_map)
+        placeholders = set(placeholder_map.values())
+
+        def scrub(node: Any) -> Any:
+            if isinstance(node, dict):
+                result = {key: scrub(item) for key, item in node.items()}
+                evidence_ids = result.get("evidence_ids")
+                diff = result.get("diff")
+                diff_evidence_ids = diff.get("evidence_ids") if isinstance(diff, dict) else None
+                affected = (
+                    isinstance(evidence_ids, list) and placeholders.intersection(evidence_ids)
+                ) or (
+                    isinstance(diff_evidence_ids, list)
+                    and placeholders.intersection(diff_evidence_ids)
+                )
+                if affected:
+                    result.pop("working_digest", None)
+                    if "id" in result:
+                        result["id"] = new_id()
+                return result
+            if isinstance(node, list):
+                return [scrub(item) for item in node]
+            return node
+
+        return scrub(redacted)
+
+    def _forget_impl(
+        self,
+        tenant_id: str,
+        cid: str,
+        branch: str = "main",
+        requested_by: str = "user",
+        erasure_mode: ErasureMode | str = ErasureMode.TOMBSTONE_RECOMPUTE,
+    ) -> dict[str, Any]:
         mode = ErasureMode(erasure_mode)
         with self._lock:
             key = self._evidence_key(tenant_id, branch, cid)
@@ -3451,15 +3539,15 @@ class LocalMemoryEngine:
                 # every retained custody record, including audits emitted
                 # before this erasure was requested.
                 self.audit_log[:] = [
-                    redact_erased_cids(record, placeholder_map)
+                    self._redact_working_digests(record, placeholder_map)
                     for record in self.audit_log
                 ]
                 self.deletion_log[:] = [
-                    redact_erased_cids(record, placeholder_map)
+                    self._redact_working_digests(record, placeholder_map)
                     for record in self.deletion_log
                 ]
                 self.merge_log[:] = [
-                    redact_erased_cids(record, placeholder_map)
+                    self._redact_working_digests(record, placeholder_map)
                     for record in self.merge_log
                 ]
                 deletion_record_cid = erasure_deletion_record_id(cid, tenant_id, ev.user_id)

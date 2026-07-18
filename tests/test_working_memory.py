@@ -81,16 +81,15 @@ def _item(
 
 
 def _put(engine: LocalMemoryEngine, **kwargs: Any) -> WorkingMemoryItem:
-    evidence_id = kwargs.pop(
-        "evidence_id",
-        _evidence(
+    evidence_id = kwargs.pop("evidence_id", None)
+    if evidence_id is None:
+        evidence_id = _evidence(
             engine,
             tenant_id=kwargs.get("tenant_id", TENANT),
             user_id=kwargs.get("user_id", USER),
             session_id=kwargs.get("session_id", SESSION),
             content=kwargs.get("content", "Current task evidence"),
-        ),
-    )
+        )
     item = _item(evidence_id, **kwargs)
     assert engine.put_working(item) == item.item_id
     return item
@@ -444,6 +443,20 @@ def test_put_rejects_missing_foreign_erased_and_invalid_provenance() -> None:
     assert is_write_tainted(stored.capability_tags)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("trust_tier", 4.9), ("capability_tags", "data-only"), ("sensitivity", 4.9)),
+)
+def test_put_rejects_malformed_evidence_security_fields(field: str, value: Any) -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _evidence(engine)
+    evidence = engine.evidence[engine._evidence_key(TENANT, "main", evidence_id)]
+    setattr(evidence, field, value)
+
+    with pytest.raises(ValueError):
+        engine.put_working(_item(evidence_id))
+
+
 def test_erasure_cascades_to_working_items_and_blocks_recovery() -> None:
     for mode, requested_by in (("tombstone_recompute", "user"), ("hard_delete_legal", "legal")):
         engine = LocalMemoryEngine()
@@ -490,6 +503,90 @@ def test_stale_erased_provenance_fails_closed_before_expiry() -> None:
         engine.expire_working(TENANT, expired_at=EXPIRES_AT)
     assert engine.working_memory[(TENANT, SESSION, item.item_id)].status == "active"
     assert engine.audit_log == before
+
+
+def test_reads_refresh_effective_provenance_after_privacy_backfill() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _evidence(engine)
+    item = _put(engine, evidence_id=evidence_id)
+
+    assert item.sensitivity == 0
+    assert engine.backfill_evidence_privacy(TENANT, evidence_id, ["email"])
+
+    fetched = engine.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT)
+    listed = engine.list_working(TENANT, SESSION, as_of=CREATED_AT)
+    assert fetched is not None
+    assert fetched.sensitivity == 3
+    assert fetched.access_policy["max_sensitivity"] == 3
+    assert listed[0].sensitivity == 3
+    assert listed[0].access_policy["max_sensitivity"] == 3
+
+
+def test_forget_rolls_back_on_audit_and_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "working.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _evidence(engine)
+    _put(engine, evidence_id=evidence_id)
+    before = (
+        copy.deepcopy(engine.evidence),
+        copy.deepcopy(engine.working_memory),
+        copy.deepcopy(engine.audit_log),
+        copy.deepcopy(engine.deletion_log),
+        engine._store_version,
+        store.read_text(),
+    )
+    original_audit = engine._audit
+
+    def fail_forget_audit(*args: Any, **kwargs: Any) -> None:
+        if args[2] == "forget":
+            raise RuntimeError("audit unavailable")
+        original_audit(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "_audit", fail_forget_audit)
+    with pytest.raises(RuntimeError, match="audit unavailable"):
+        engine.forget(TENANT, evidence_id)
+    assert engine.evidence == before[0]
+    assert engine.working_memory == before[1]
+    assert engine.audit_log == before[2]
+    assert engine.deletion_log == before[3]
+    assert engine._store_version == before[4]
+    assert store.read_text() == before[5]
+
+    monkeypatch.setattr(engine, "_audit", original_audit)
+    monkeypatch.setattr(
+        engine,
+        "_persist",
+        lambda: (_ for _ in ()).throw(OSError("store unavailable")),
+    )
+    with pytest.raises(OSError, match="store unavailable"):
+        engine.forget(TENANT, evidence_id)
+    assert engine.evidence == before[0]
+    assert engine.working_memory == before[1]
+    assert engine.audit_log == before[2]
+    assert engine.deletion_log == before[3]
+    assert engine._store_version == before[4]
+    assert store.read_text() == before[5]
+
+    monkeypatch.setattr(engine, "_persist", LocalMemoryEngine._persist.__get__(engine))
+    assert engine.forget(TENANT, evidence_id)["erased"] is True
+
+
+def test_hard_delete_removes_working_digest_from_retained_audit_custody() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _evidence(engine)
+    _put(engine, evidence_id=evidence_id)
+    original_put_id = next(
+        row["id"] for row in engine.audit_log if row["op"] == "put_working"
+    )
+
+    engine.forget(TENANT, evidence_id, requested_by="legal", erasure_mode="hard_delete_legal")
+
+    put_audit = next(row for row in engine.audit_log if row["op"] == "put_working")
+    assert "working_digest" not in put_audit["diff"]
+    assert put_audit["id"] != original_put_id
+    assert evidence_id not in str(engine.audit_log)
 
 
 def test_put_rolls_back_when_audit_or_persistence_fails(monkeypatch: pytest.MonkeyPatch) -> None:
