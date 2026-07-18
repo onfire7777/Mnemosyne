@@ -663,7 +663,9 @@ def _working_payload(item: Any) -> dict[str, Any]:
         raise ValueError("working-memory expires_at must be after created_at")
     if expires_at - created_at > timedelta(hours=24):
         raise ValueError("working-memory TTL cannot exceed 24 hours")
-    status = values["status"] or "active"
+    status = values["status"]
+    if type(status) is not str:
+        raise ValueError(f"unsupported working-memory status: {status!r}")
     if status not in {"active", "expired"}:
         raise ValueError(f"unsupported working-memory status: {status!r}")
     expired_at = values["expired_at"]
@@ -1886,7 +1888,15 @@ class SqliteEngine:
         for path in self._iter_tenant_db_paths():
             conn, owned = self._borrow_conn(path)
             try:
+                available_tables = {
+                    row[0]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
                 for table in tables:
+                    if table not in available_tables:
+                        continue
                     for (tenant_id,) in conn.execute(f"SELECT DISTINCT tenant_id FROM {table}"):
                         if tenant_id and tenant_id != "*":
                             found.add(tenant_id)
@@ -3947,7 +3957,7 @@ class SqliteEngine:
                         }
                 working_rows = conn.execute(
                     "SELECT * "
-                    "FROM working_memory WHERE tenant_id = ? ORDER BY rowid",
+                    "FROM working_memory WHERE tenant_id = ? ORDER BY session_id, item_id",
                     (tenant_id,),
                 ).fetchall()
                 working_removals: list[dict[str, str]] = []
