@@ -1,0 +1,109 @@
+{
+  "schema": "mnemosyne.reranker-selection-fixture.v1",
+  "split": "TRAIN",
+  "source": "source-owned",
+  "fixture_status": "synthetic-unmeasured",
+  "query": "Which city is named by the evidence?",
+  "candidates": [
+    {
+      "evidence_id": "evidence-b",
+      "text": "Berlin is the capital of Germany."
+    },
+    {
+      "evidence_id": "evidence-a",
+      "text": "Paris is the capital of France."
+    },
+    {
+      "evidence_id": "evidence-c",
+      "text": "Rome is the capital of Italy."
+    }
+  ],
+  "rank_width": 3,
+  "variants": [
+    {
+      "id": "synthetic-anchor-a",
+      "identity": {
+        "model_id": "model:synthetic-reranker-anchor-a-v1",
+        "artifact_id": "artifact:synthetic-reranker-anchor-a-v1",
+        "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "preprocessing_id": "preprocess:synthetic-unicode-lower-v1",
+        "preprocessing_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "receipt": {
+        "schema": "mnemosyne.reranker-bakeoff-receipt.v1",
+        "candidate_id": "synthetic-anchor-a",
+        "split": "TRAIN",
+        "identity": {
+          "model_id": "model:synthetic-reranker-anchor-a-v1",
+          "artifact_id": "artifact:synthetic-reranker-anchor-a-v1",
+          "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "preprocessing_id": "preprocess:synthetic-unicode-lower-v1",
+          "preprocessing_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "identity_sha256": "8319c574bd6614e6955e92ff251f0e8e94dd1d77148fd0d4dec829652a60df0c",
+        "artifact_custody": "synthetic-fixture-no-model-artifact",
+        "status": "unmeasured",
+        "rank_width": 3,
+        "unmeasured": [
+          "artifact_bytes",
+          "quality",
+          "latency_ms",
+          "peak_memory_mib",
+          "resource_envelope"
+        ],
+        "receipt_sha256": "79cf45435346145986e01525864465eb1b01aa95d0f22984a95cdc83f5341716"
+      },
+      "scores": [
+        {"evidence_id": "evidence-b", "score": 0.9},
+        {"evidence_id": "evidence-a", "score": 0.9},
+        {"evidence_id": "evidence-c", "score": 0.2}
+      ],
+      "expected_ranking": ["evidence-a", "evidence-b", "evidence-c"]
+    },
+    {
+      "id": "synthetic-tie-b",
+      "identity": {
+        "model_id": "model:synthetic-reranker-tie-b-v1",
+        "artifact_id": "artifact:synthetic-reranker-tie-b-v1",
+        "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "preprocessing_id": "preprocess:synthetic-unicode-lower-v1",
+        "preprocessing_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "receipt": {
+        "schema": "mnemosyne.reranker-bakeoff-receipt.v1",
+        "candidate_id": "synthetic-tie-b",
+        "split": "TRAIN",
+        "identity": {
+          "model_id": "model:synthetic-reranker-tie-b-v1",
+          "artifact_id": "artifact:synthetic-reranker-tie-b-v1",
+          "artifact_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "preprocessing_id": "preprocess:synthetic-unicode-lower-v1",
+          "preprocessing_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "identity_sha256": "a7a1777dd2657b0d96b3c7fe206f33b764b0468533586e5cdbe05f13730710c7",
+        "artifact_custody": "synthetic-fixture-no-model-artifact",
+        "status": "unmeasured",
+        "rank_width": 3,
+        "unmeasured": [
+          "artifact_bytes",
+          "quality",
+          "latency_ms",
+          "peak_memory_mib",
+          "resource_envelope"
+        ],
+        "receipt_sha256": "0e109959b2918a9d997934aee25a0d0b3455d5c1e4bd7df89765ab2421d83dc7"
+      },
+      "scores": [
+        {"evidence_id": "evidence-b", "score": 0.8},
+        {"evidence_id": "evidence-a", "score": 0.8},
+        {"evidence_id": "evidence-c", "score": 0.1}
+      ],
+      "expected_ranking": ["evidence-a", "evidence-b", "evidence-c"]
+    }
+  ],
+  "selection": {
+    "method": "mean_score_then_id_v1",
+    "expected_candidate_id": "synthetic-anchor-a"
+  },
+  "fixture_sha256": "b9080ca1e8dd832e4531f40c2b67ef24ba38c1ae0e6742a9a56b7f49ae1b07ca"
+}
