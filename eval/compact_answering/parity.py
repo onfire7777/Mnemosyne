@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import math
 from dataclasses import dataclass
 
@@ -23,6 +24,19 @@ class ParityValidationError(ValueError):
 
 class ParityMismatchError(AssertionError):
     """Two valid provider rows differ on a parity field."""
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise ParityValidationError(f"duplicate parity key: {key}")
+        document[key] = value
+    return document
+
+
+def _reject_nonfinite_json(value: str) -> None:
+    raise ParityValidationError(f"unsupported JSON constant: {value}")
 
 
 @dataclass(frozen=True)
@@ -107,6 +121,8 @@ def parse_parity_row(document: object) -> ParityRow:
         raise ParityValidationError("abstained must be a JSON boolean")
 
     decoded_span_bytes = _parse_span(document["decoded_span_b64"])
+    if abstained and answer_type != "span":
+        raise ParityValidationError("abstained rows must use answer_type 'span'")
     if abstained and decoded_span_bytes:
         raise ParityValidationError("abstained rows must have empty decoded span bytes")
     if not abstained and not decoded_span_bytes:
@@ -125,6 +141,21 @@ def parse_parity_row(document: object) -> ParityRow:
         null_margin=null_margin,
         abstained=abstained,
     )
+
+
+def parse_parity_json(payload: str | bytes | bytearray) -> ParityRow:
+    """Strictly decode one provider JSON row before parity validation."""
+    if not isinstance(payload, (str, bytes, bytearray)):
+        raise ParityValidationError("parity payload must be JSON text or bytes")
+    try:
+        document = json.loads(
+            payload,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_nonfinite_json,
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ParityValidationError("parity payload must be valid JSON") from exc
+    return parse_parity_row(document)
 
 
 def compare_parity_rows(reference: object, candidate: object) -> None:

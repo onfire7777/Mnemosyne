@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import eval.compact_answering.manifest as manifest_module
 from eval.compact_answering.manifest import (
     SCHEMA,
     ManifestDriftError,
@@ -22,6 +23,7 @@ from eval.compact_answering.parity import (
     ParityMismatchError,
     ParityValidationError,
     compare_parity_rows,
+    parse_parity_json,
     parse_parity_row,
 )
 
@@ -36,7 +38,7 @@ FIXTURE_PATH = (
 
 @pytest.fixture
 def manifest() -> dict[str, object]:
-    return {
+    document = {
         "schema": SCHEMA,
         "identities": {
             kind: {"identity": f"{kind}:pinned-v1", "sha256": character * 64}
@@ -47,6 +49,10 @@ def manifest() -> dict[str, object]:
             )
         },
     }
+    document["identities"]["provider"]["identity"] = (
+        "provider:reference-python:dev-synthetic:v1"
+    )
+    return document
 
 
 def test_manifest_round_trip_is_canonical_and_private(tmp_path, manifest) -> None:
@@ -59,6 +65,7 @@ def test_manifest_round_trip_is_canonical_and_private(tmp_path, manifest) -> Non
     assert path.read_text(encoding="utf-8") == (
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
     )
+    assert list(tmp_path.iterdir()) == [path]
 
 
 @pytest.mark.parametrize("missing", ["code", "artifact", "configuration", "provider"])
@@ -98,6 +105,22 @@ def test_manifest_rejects_unsupported_schema_identity_and_fields(manifest) -> No
     for document in (unsupported_schema, unsupported_identity, unsupported_field):
         with pytest.raises(ManifestValidationError):
             validate_manifest(document)
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        "provider:unsupported-remote:dev-synthetic:v1",
+        "provider:onnx-int4:linux-x86_64-avx2:v1",
+        "provider:onnx-int8:unknown-platform:v1",
+        "provider:onnx-int8:linux-x86_64-avx2:latest",
+    ],
+)
+def test_manifest_rejects_unsupported_provider_identity(manifest, provider) -> None:
+    manifest["identities"]["provider"]["identity"] = provider
+
+    with pytest.raises(ManifestValidationError, match="unsupported provider"):
+        validate_manifest(manifest)
 
 
 def test_manifest_detects_expected_identity_drift(tmp_path, manifest) -> None:
@@ -145,6 +168,15 @@ def test_manifest_rejects_duplicate_json_keys(tmp_path, manifest) -> None:
     with pytest.raises(ManifestValidationError, match="duplicate"):
         load_manifest(path)
 
+    nested = json.dumps(manifest).replace(
+        '"identity": "code:pinned-v1"',
+        '"identity": "code:pinned-v1", "identity": "code:other"',
+        1,
+    )
+    path.write_text(nested, encoding="utf-8")
+    with pytest.raises(ManifestValidationError, match="duplicate"):
+        load_manifest(path)
+
 
 def test_manifest_creation_is_exclusive_under_concurrency(tmp_path, manifest) -> None:
     path = tmp_path / "custody.json"
@@ -179,6 +211,59 @@ def test_manifest_removes_partial_file_when_fsync_fails(tmp_path, manifest, monk
         create_manifest(path, manifest)
 
     assert not path.exists()
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_manifest_removes_publication_when_directory_fsync_fails(
+    tmp_path, manifest, monkeypatch
+) -> None:
+    path = tmp_path / "custody.json"
+
+    def fail_directory_fsync(_path: Path) -> None:
+        raise OSError("injected directory fsync failure")
+
+    monkeypatch.setattr(manifest_module, "_fsync_directory", fail_directory_fsync)
+    with pytest.raises(OSError, match="directory fsync"):
+        create_manifest(path, manifest)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_manifest_removes_temporary_file_when_link_fails(
+    tmp_path, manifest, monkeypatch
+) -> None:
+    path = tmp_path / "custody.json"
+
+    def fail_link(_source: Path, _target: Path) -> None:
+        raise OSError("injected link failure")
+
+    monkeypatch.setattr(manifest_module.os, "link", fail_link)
+    with pytest.raises(OSError, match="link failure"):
+        create_manifest(path, manifest)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_manifest_cleanup_paths_are_independent(tmp_path, manifest, monkeypatch) -> None:
+    path = tmp_path / "custody.json"
+    original_unlink = Path.unlink
+    failed_once = False
+
+    def fail_first_temporary_unlink(
+        candidate: Path, *, missing_ok: bool = False
+    ) -> None:
+        nonlocal failed_once
+        if candidate.name.startswith(".custody.json.") and not failed_once:
+            failed_once = True
+            raise OSError("injected temporary unlink failure")
+        original_unlink(candidate, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_first_temporary_unlink)
+    with pytest.raises(OSError, match="temporary unlink"):
+        create_manifest(path, manifest)
+
+    assert failed_once
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.fixture
@@ -275,6 +360,12 @@ def test_parity_rejects_every_mismatched_field(
         lambda row: row.update({"null_margin": float("nan")}),
         lambda row: row.update({"abstained": 0}),
         lambda row: row.update({"answer_type": "null", "decoded_span_b64": ""}),
+        lambda row: row.update(
+            {"answer_type": "yes", "decoded_span_b64": "", "abstained": True}
+        ),
+        lambda row: row.update(
+            {"answer_type": "no", "decoded_span_b64": "", "abstained": True}
+        ),
         lambda row: row.update({"abstained": True}),
         lambda row: row.update({"decoded_span_b64": ""}),
         lambda row: row.update({"answer_type": "yes"}),
@@ -287,6 +378,24 @@ def test_parity_fails_closed_on_malformed_rows(parity_row, mutation) -> None:
 
     with pytest.raises(ParityValidationError):
         compare_parity_rows(parity_row, malformed)
+
+
+def test_parity_json_rejects_duplicate_wire_keys(parity_row) -> None:
+    payload = json.dumps(parity_row).replace(
+        '"answer_type": "span"',
+        '"answer_type": "span", "answer_type": "yes"',
+        1,
+    )
+    with pytest.raises(ParityValidationError, match="duplicate"):
+        parse_parity_json(payload)
+
+    nested = json.dumps(parity_row).replace(
+        '"source_id": "doc-a"',
+        '"source_id": "doc-a", "source_id": "doc-b"',
+        1,
+    )
+    with pytest.raises(ParityValidationError, match="duplicate"):
+        parse_parity_json(nested)
 
 
 def test_synthetic_fixture_covers_required_edges_and_mismatch() -> None:
@@ -310,6 +419,21 @@ def test_synthetic_fixture_covers_required_edges_and_mismatch() -> None:
 
     for case in cases.values():
         fixture_input = case["input"]
+        base_tokens = fixture_input["source_utf8"].split()
+        generated_tokens = base_tokens + [
+            f"padding-{index}" for index in range(fixture_input["padding_tokens"])
+        ]
+        assert len(generated_tokens) == fixture_input["token_length"]
+
+        token_segments = fixture_input["answer_token_segments"]
+        token_windows = fixture_input["token_windows"]
+        assert len(token_segments) == len(token_windows)
+        for (start, end), (window_start, window_end) in zip(
+            token_segments, token_windows, strict=True
+        ):
+            assert 0 <= window_start <= start <= end <= window_end
+            assert window_end <= len(generated_tokens)
+
         source = fixture_input["source_utf8"].encode("utf-8")
         segments = fixture_input["answer_byte_segments"]
         windows = fixture_input["windows"]
@@ -334,8 +458,12 @@ def test_synthetic_fixture_covers_required_edges_and_mismatch() -> None:
             assert len(fixture_input["occurrences"]) > 1
         elif case["id"] == "window-boundary":
             assert segments[0][1] == windows[0][1]
+            assert token_segments[0][1] == token_windows[0][1] == 384
         elif case["id"] == "multi-window-reconstruction":
             assert len(segments) > 1
+            assert len(token_segments) > 1
+            assert token_windows == [[0, 384], [128, 512]]
+            assert token_windows[1][0] - token_windows[0][0] == 128
 
         if case["matches"]:
             compare_parity_rows(case["reference"], case["candidate"])
