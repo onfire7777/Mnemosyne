@@ -323,6 +323,20 @@ pub fn rank_by_cosine(
     query: &[f32],
     candidates: &[RankedVector],
 ) -> Result<Vec<String>, EmbedError> {
+    if candidates.is_empty() {
+        let space = match query.len() {
+            NATIVE_DIMENSIONS => EmbedSpace::Native768,
+            PADDED_DIMENSIONS => EmbedSpace::Padded1024,
+            actual => {
+                return Err(EmbedError::InvalidDimensions {
+                    expected: NATIVE_DIMENSIONS,
+                    actual,
+                })
+            }
+        };
+        validate_vector(query, space, 0)?;
+        return Ok(Vec::new());
+    }
     rank_by_cosine_with_limit(query, candidates, candidates.len())
 }
 
@@ -488,5 +502,12 @@ mod tests {
             },
         ];
         assert_eq!(rank_by_cosine(&query, &candidates).unwrap(), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn ranking_empty_candidates_returns_empty() {
+        let query = native(1.0, 0.0);
+
+        assert_eq!(rank_by_cosine(&query, &[]).unwrap(), Vec::<String>::new());
     }
 }

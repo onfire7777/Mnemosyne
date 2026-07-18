@@ -40,6 +40,11 @@ class EmbedderSelectionValidationError(EmbedderValidationError):
     """A synthetic TRAIN-only selection fixture or receipt is invalid."""
 
 
+def _is_control(character: str) -> bool:
+    codepoint = ord(character)
+    return codepoint < 0x20 or 0x7F <= codepoint <= 0x9F
+
+
 @dataclass(frozen=True)
 class EmbedderIdentity:
     artifact: str
@@ -56,7 +61,7 @@ class EmbedderIdentity:
             not isinstance(item, str)
             or not item
             or item != item.strip()
-            or any(ord(character) < 32 or ord(character) == 127 for character in item)
+            or any(_is_control(character) for character in item)
             for item in fields.values()
         ):
             raise EmbedderValidationError("identity values must be exact non-empty strings")
@@ -133,7 +138,7 @@ def _validate_space(value: object) -> str:
 
 
 def _validate_input(value: object, index: int) -> str:
-    if not isinstance(value, str) or any(character in value for character in "\r\n\t"):
+    if not isinstance(value, str) or any(_is_control(character) for character in value):
         raise EmbedderValidationError(f"invalid input at index {index}")
     return value
 
@@ -174,7 +179,10 @@ def validate_vector(vector: object, space: str, *, index: int = 0) -> tuple[floa
         raise EmbedderValidationError(f"vector {index} has wrong dimensions")
     if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in vector):
         raise EmbedderValidationError(f"vector {index} contains a non-number")
-    parsed = tuple(float(value) for value in vector)
+    try:
+        parsed = tuple(float(value) for value in vector)
+    except (OverflowError, ValueError) as exc:
+        raise EmbedderValidationError(f"vector {index} contains an invalid number") from exc
     if any(not math.isfinite(value) for value in parsed):
         raise EmbedderValidationError(f"vector {index} is non-finite")
     if not any(value != 0.0 for value in parsed):
@@ -254,7 +262,9 @@ def rank_by_cosine(
     limit: int | None = None,
 ) -> list[str]:
     """Rank by cosine, breaking equal scores by candidate ID."""
-    if limit == 0 or (limit is not None and limit < 0):
+    if limit is not None and (
+        not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0
+    ):
         raise EmbedderValidationError("rank limit must be greater than zero")
     if not isinstance(query, (list, tuple)):
         raise EmbedderValidationError("query must be a vector")
@@ -424,7 +434,7 @@ def validate_bakeoff_receipt(
         not isinstance(candidate_id, str)
         or not candidate_id
         or candidate_id != candidate_id.strip()
-        or any(ord(character) < 32 or ord(character) == 127 for character in candidate_id)
+        or any(_is_control(character) for character in candidate_id)
     ):
         raise _selection_error("receipt candidate_id must be an exact non-empty string")
     if expected_candidate_id is not None and candidate_id != expected_candidate_id:
@@ -514,7 +524,7 @@ def validate_selection_fixture(document: object) -> dict[str, Any]:
             not isinstance(candidate_id, str)
             or not candidate_id
             or candidate_id != candidate_id.strip()
-            or any(ord(character) < 32 or ord(character) == 127 for character in candidate_id)
+            or any(_is_control(character) for character in candidate_id)
         ):
             raise _selection_error("candidate IDs must be exact non-empty strings")
         if candidate_id in candidate_ids:
@@ -539,7 +549,12 @@ def validate_selection_fixture(document: object) -> dict[str, Any]:
             label=f"probe {probe_index}",
         )
         probe_id = parsed_probe["id"]
-        if not isinstance(probe_id, str) or not probe_id or probe_id in probe_ids:
+        if (
+            not isinstance(probe_id, str)
+            or not probe_id
+            or any(_is_control(character) for character in probe_id)
+            or probe_id in probe_ids
+        ):
             raise _selection_error("probe IDs must be unique non-empty strings")
         probe_ids.add(probe_id)
         query_vectors = _validate_space_vectors(parsed_probe["query"], label=f"probe {probe_id} query")

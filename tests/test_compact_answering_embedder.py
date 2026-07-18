@@ -82,6 +82,19 @@ def test_request_and_response_require_exact_custody(identity: EmbedderIdentity) 
     with pytest.raises(EmbedderValidationError, match="tokenizer"):
         validate_request(mismatched, identity)
 
+    c1_control = request(identity)
+    c1_control["inputs"] = ["query\u0085text"]
+    with pytest.raises(EmbedderValidationError):
+        validate_request(c1_control, identity)
+
+    c1_identity = request(identity)
+    c1_identity["identity"] = {
+        **identity.as_mapping(),
+        "tokenizer": "tokenizer@dev\u0085",
+    }
+    with pytest.raises(EmbedderValidationError):
+        validate_request(c1_identity, identity)
+
 
 def test_vectors_reject_nonfinite_zero_and_bad_padding(identity: EmbedderIdentity) -> None:
     parsed_request = validate_request(request(identity), identity)
@@ -103,6 +116,11 @@ def test_vectors_reject_nonfinite_zero_and_bad_padding(identity: EmbedderIdentit
     with pytest.raises(EmbedderValidationError):
         validate_response(padded_response, parsed_padded_request, identity)
 
+    huge_integer = vector(1.0)
+    huge_integer[1] = 10**1000
+    with pytest.raises(EmbedderValidationError, match="invalid number"):
+        validate_response(response(identity, [huge_integer]), parsed_request, identity)
+
 
 def test_native_and_padded_spaces_have_cosine_and_ranking_parity() -> None:
     query = vector(1.0, 2.0)
@@ -111,6 +129,10 @@ def test_native_and_padded_spaces_have_cosine_and_ranking_parity() -> None:
     padded_candidate = pad_native_to_1024(candidate)
     assert cosine_similarity(query, candidate) == cosine_similarity(padded_query, padded_candidate)
     assert rank_by_cosine(query, [("b", candidate), ("a", candidate)]) == ["a", "b"]
+
+    assert rank_by_cosine(query, []) == []
+    with pytest.raises(EmbedderValidationError):
+        rank_by_cosine(query, [], limit=0)
 
 
 def test_rust_module_unit_tests_pass_without_model_artifacts(tmp_path: Path) -> None:
