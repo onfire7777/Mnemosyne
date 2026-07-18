@@ -36,6 +36,7 @@ import os
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
@@ -52,6 +53,7 @@ from mnemosyne.retrieval import (
     query_support,
     schema_fast_path_rerank,
     semantic_entropy,
+    build_working_memory_hits,
     strip_workspace_broadcast_filter,
     workspace_broadcast_from_context,
 )
@@ -259,6 +261,123 @@ def _fast_graph_hits(hits: list[Hit], *, deep: bool) -> list[Hit]:
     ]
 
 
+def _working_route_requested(effective_filter: dict[str, Any]) -> bool:
+    return any(
+        key in effective_filter
+        for key in (
+            "session_id",
+            "working_session_id",
+            "evaluated_at",
+            "working_evaluated_at",
+        )
+    )
+
+
+def _working_session_id(effective_filter: dict[str, Any]) -> str | None:
+    raw = effective_filter.get("session_id", effective_filter.get("working_session_id"))
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return raw.strip()
+
+
+def _working_evaluation_instant(effective_filter: dict[str, Any]) -> Any | None:
+    raw = effective_filter.get("evaluated_at", effective_filter.get("working_evaluated_at"))
+    if raw is None:
+        raw = effective_filter.get("as_of")
+    if isinstance(raw, datetime):
+        evaluated_at = raw
+    elif isinstance(raw, str):
+        try:
+            evaluated_at = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if evaluated_at is None or getattr(evaluated_at, "tzinfo", None) is None:
+        return None
+    return evaluated_at.astimezone(UTC)
+
+
+def _working_memory_route(
+    ops: RetrievalPipelineOps,
+    *,
+    query: str,
+    tenant_id: str,
+    branch: str,
+    k: int,
+    effective_filter: dict[str, Any],
+    policy: OperatingPolicy,
+) -> tuple[list[Hit], dict[str, Any]]:
+    """Load the optional fourth route without widening the existing stores."""
+
+    requested = _working_route_requested(effective_filter)
+    session_id = _working_session_id(effective_filter)
+    report: dict[str, Any] = {
+        "version": "working-memory-route.v1",
+        "requested": requested,
+        "session_id_present": session_id is not None,
+        "evaluated_at": None,
+        "status": "not_requested",
+        "reason": "no_working_selector",
+        "candidate_count": 0,
+        "selected_count": 0,
+        "data_only": True,
+        "promotion_gate_required": True,
+        "used_for_ranking": False,
+    }
+    if not requested or session_id is None:
+        report["reason"] = "missing_session_selector"
+        return [], report
+    evaluated_at = _working_evaluation_instant(effective_filter)
+    if evaluated_at is None:
+        report.update(
+            {
+                "status": "rejected",
+                "reason": "explicit_evaluation_instant_required",
+            }
+        )
+        return [], report
+    report["evaluated_at"] = evaluated_at.isoformat()
+
+    try:
+        list_working = getattr(ops, "list_working", None)
+        if not callable(list_working):
+            report.update({"status": "unavailable", "reason": "working_store_not_exposed"})
+            return [], report
+        items = list_working(tenant_id, session_id, as_of=evaluated_at)
+        scoped = build_working_memory_hits(
+            list(items or []),
+            query=query,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            evaluated_at=evaluated_at,
+            branch=branch,
+            limit=k,
+            access_context=effective_filter,
+            policy_max_sensitivity=policy.max_sensitivity,
+            max_trust_tier=policy.max_trust_tier,
+        )
+    except Exception as exc:  # optional route failures must not suppress durable retrieval
+        report.update(
+            {
+                "status": "unavailable",
+                "reason": "working_store_error",
+                "error_type": type(exc).__name__,
+            }
+        )
+        return [], report
+    report.update(
+        {
+            "status": "applied",
+            "reason": "session_scoped_active_items",
+            "candidate_count": len(scoped),
+            "selected_count": len(scoped),
+            "used_for_ranking": bool(scoped),
+        }
+    )
+    return scoped, report
+
+
 class RetrievalPipelineOps(Protocol):
     """Exactly the per-engine calls the shipped retrieve() bodies make.
 
@@ -286,6 +405,9 @@ class RetrievalPipelineOps(Protocol):
         use_cache: bool = False,
         filt: dict[str, Any] | None = None,
     ) -> list[Hit]: ...
+
+    # -- optional working-memory route ---------------------------------------
+    def list_working(self, tenant_id: str, session_id: str, *, as_of: Any) -> list[Any]: ...
 
     # -- fusion / ordering / budget helpers ------------------------------------
     def _rrf(self, ranked_lists: list[list[Hit]], k: int) -> list[Hit]: ...
@@ -339,6 +461,7 @@ def run_retrieval_pipeline(
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
+    working_requested = _working_route_requested(effective_filter)
     cache_key = _result_cache_key(
         ops,
         query=query,
@@ -362,7 +485,7 @@ def run_retrieval_pipeline(
             cached.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=True, stored=False)
             return cached
     if parallel_channels_enabled():
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=4 if working_requested else 3) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
             lexical_future = pool.submit(ops.lexical_search, query, policy.rerank_width, effective_filter)
             graph_future = pool.submit(
@@ -375,9 +498,20 @@ def run_retrieval_pipeline(
                 use_cache=not deep,
                 filt=effective_filter,
             )
+            working_future = pool.submit(
+                _working_memory_route,
+                ops,
+                query=query,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=policy.rerank_width,
+                effective_filter=effective_filter,
+                policy=policy,
+            ) if working_requested else None
             dense = dense_future.result()
             lexical = lexical_future.result()
             graph = _fast_graph_hits(graph_future.result(), deep=deep)
+            working, working_explain = working_future.result() if working_future is not None else ([], {})
     else:
         dense = ops.vector_search(query, policy.rerank_width, effective_filter)
         lexical = ops.lexical_search(query, policy.rerank_width, effective_filter)
@@ -393,7 +527,23 @@ def run_retrieval_pipeline(
             ),
             deep=deep,
         )
-    fused = ops._rrf([dense, lexical, graph], k=max(k * 2, policy.rerank_width))
+        working, working_explain = (
+            _working_memory_route(
+                ops,
+                query=query,
+                tenant_id=tenant_id,
+                branch=branch,
+                k=policy.rerank_width,
+                effective_filter=effective_filter,
+                policy=policy,
+            )
+            if working_requested
+            else ([], {})
+        )
+    ranked_channels = [dense, lexical, graph]
+    if working_requested:
+        ranked_channels.append(working)
+    fused = ops._rrf(ranked_channels, k=max(k * 2, policy.rerank_width))
     reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     diversified = ops._mmr(query, reranked, k=max(k, 1))
@@ -410,6 +560,10 @@ def run_retrieval_pipeline(
     )
     budgeted, used = ops._fit_budget(ordered, policy.token_budget)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    if working_requested:
+        working_explain["selected_count"] = sum(
+            1 for hit in budgeted if hit.metadata.get("memory_type") == "working"
+        )
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access
@@ -472,6 +626,47 @@ def run_retrieval_pipeline(
     elif abstained:
         note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
     dense_key, lexical_key, graph_key = ops.retrieval_explain_channel_keys
+    channels = {
+        dense_key: len(dense),
+        lexical_key: len(lexical),
+        graph_key: len(graph),
+    }
+    if working_requested:
+        channels["working_memory"] = len(working)
+    explain = {
+        "channels": channels,
+        "rrf_k": policy.rrf_k,
+        "mmr_lambda": policy.mmr_lambda,
+        "activation": activation_explain(budgeted, policy),
+        "calibration": ops._calibration_explain(calibration, threshold),
+        "confidence": {
+            "score": confidence,
+            "answer_score": confidence,
+            "prediction_set_size": prediction_set_size,
+            "threshold": threshold,
+            "source": "conformal" if calibration else "evidence_quality",
+            "query_support": support_report,
+        },
+        "semantic_entropy": entropy,
+        "gist_support": gist_support,
+        "reality_monitoring": reality_monitoring,
+        "standing": standing_report,
+        "answer_grounding_floor": answer_grounding_floor,
+        "schema_fast_path": schema_fast_path,
+        "workspace_broadcast": workspace_broadcast,
+        "workspace_retrieval_advisory": workspace_retrieval_advisory,
+        "read_marks": read_marks,
+        "adapters": {
+            "embedding": ops.adapters.embedding.name,
+            "embedding_dims": ops.adapters.embedding.dims,
+            "reranker": ops.adapters.reranker.name,
+            "lexical_backend": ops.adapters.lexical_backend,
+            "graph_backend": ops.adapters.graph_backend,
+        },
+        "rails": policy.immutable_rails,
+    }
+    if working_requested:
+        explain["working_memory"] = working_explain
     result = RetrievalResult(
         query=query,
         hits=budgeted,
@@ -480,42 +675,7 @@ def run_retrieval_pipeline(
         uncertainty_note=note,
         token_budget=policy.token_budget,
         used_tokens=used,
-        explain={
-            "channels": {
-                dense_key: len(dense),
-                lexical_key: len(lexical),
-                graph_key: len(graph),
-            },
-            "rrf_k": policy.rrf_k,
-            "mmr_lambda": policy.mmr_lambda,
-            "activation": activation_explain(budgeted, policy),
-            "calibration": ops._calibration_explain(calibration, threshold),
-            "confidence": {
-                "score": confidence,
-                "answer_score": confidence,
-                "prediction_set_size": prediction_set_size,
-                "threshold": threshold,
-                "source": "conformal" if calibration else "evidence_quality",
-                "query_support": support_report,
-            },
-            "semantic_entropy": entropy,
-            "gist_support": gist_support,
-            "reality_monitoring": reality_monitoring,
-            "standing": standing_report,
-            "answer_grounding_floor": answer_grounding_floor,
-            "schema_fast_path": schema_fast_path,
-            "workspace_broadcast": workspace_broadcast,
-            "workspace_retrieval_advisory": workspace_retrieval_advisory,
-            "read_marks": read_marks,
-            "adapters": {
-                "embedding": ops.adapters.embedding.name,
-                "embedding_dims": ops.adapters.embedding.dims,
-                "reranker": ops.adapters.reranker.name,
-                "lexical_backend": ops.adapters.lexical_backend,
-                "graph_backend": ops.adapters.graph_backend,
-            },
-            "rails": policy.immutable_rails,
-        },
+        explain=explain,
     )
     if cache_key is not None:
         current_cache_key = _result_cache_key(

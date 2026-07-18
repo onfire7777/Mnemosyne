@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import math
 import os
 import threading
 import weakref
@@ -12,12 +13,13 @@ from collections import defaultdict
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any
+from typing import Any, Mapping
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
     AccessDecision,
     apply_relation_redactions,
+    apply_record_redactions,
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
@@ -33,18 +35,29 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
+    Intention,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+    WorkingMemoryItem,
+    _evaluate_trigger,
     _merge_relation_overlap_component,
     _normalise_privacy_tags,
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    canonicalize_intention,
+    intention_audit_context,
+    intention_audit_diff,
+    intention_fire_receipt_id,
+    validate_intention_evaluation_inputs,
+    validate_intention_provenance_claim,
 )
 from mnemosyne.erasure_ids import (
     build_erasure_placeholder_map,
     erasure_deletion_record_id,
     redact_erased_cids,
 )
-from mnemosyne.ids import evidence_cid, evidence_unscoped_cid
+from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid
 from mnemosyne.models import (
     Assertion,
     Contradiction,
@@ -89,6 +102,204 @@ class PostgresUnavailableError(RuntimeError):
 
 
 _DB_USER_ID_UNSET = object()
+
+
+_WORKING_MEMORY_KINDS = {
+    "active_goal",
+    "current_plan",
+    "active_constraint",
+    "constraint",
+    "unresolved_question",
+    "tool_result",
+    "recent_tool_result",
+    "intermediate_conclusion",
+}
+
+
+def _normalize_working_json(value: Any, *, path: str) -> Any:
+    """Accept only plain, finite JSON data at the SQL boundary."""
+
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError(f"{path} must contain finite JSON numbers")
+        return value
+    if type(value) is list:
+        return [_normalize_working_json(item, path=f"{path}[{index}]") for index, item in enumerate(value)]
+    if type(value) is dict:
+        normalized: dict[str, Any] = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise ValueError(f"{path} keys must be strings")
+            normalized[key] = _normalize_working_json(item, path=f"{path}.{key}")
+        return normalized
+    raise ValueError(f"{path} must contain JSON data only")
+
+
+_WORKING_FIELDS = (
+    "item_id",
+    "tenant_id",
+    "session_id",
+    "user_id",
+    "agent_id",
+    "kind",
+    "task_id",
+    "content",
+    "created_at",
+    "expires_at",
+    "evidence_ids",
+    "trust_tier",
+    "access_policy",
+    "metadata",
+    "capability_tags",
+    "sensitivity",
+    "status",
+    "expired_at",
+)
+
+
+def _working_datetime(value: Any, field_name: str) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        raise ValueError(f"working-memory {field_name} must be timezone-aware")
+    return value.astimezone(UTC)
+
+
+def _working_payload(item: Any) -> dict[str, Any]:
+    values = {name: getattr(item, name, None) for name in _WORKING_FIELDS}
+    for name in ("item_id", "tenant_id", "session_id", "user_id", "agent_id", "kind", "task_id", "content"):
+        if type(values[name]) is not str or not values[name].strip():
+            raise ValueError(f"working-memory {name} must be a non-empty string")
+    if values["kind"] not in _WORKING_MEMORY_KINDS:
+        raise ValueError(f"unsupported working-memory kind: {values['kind']!r}")
+    created_at = _working_datetime(values["created_at"], "created_at")
+    expires_at = _working_datetime(values["expires_at"], "expires_at")
+    if expires_at <= created_at:
+        raise ValueError("working-memory expires_at must be after created_at")
+    if expires_at - created_at > timedelta(hours=24):
+        raise ValueError("working-memory TTL cannot exceed 24 hours")
+    status = values["status"]
+    if status not in {"active", "expired"}:
+        raise ValueError(f"unsupported working-memory status: {status!r}")
+    expired_at = values["expired_at"]
+    if expired_at is not None:
+        expired_at = _working_datetime(expired_at, "expired_at")
+    if status == "active" and expired_at is not None:
+        raise ValueError("active working-memory items cannot have expired_at")
+    if status == "expired" and expired_at is None:
+        raise ValueError("expired working-memory items require expired_at")
+    evidence_ids = values["evidence_ids"]
+    if type(evidence_ids) is not list or not evidence_ids:
+        raise ValueError("working-memory evidence_ids must contain originating evidence")
+    if any(type(cid) is not str or not cid.strip() for cid in evidence_ids):
+        raise ValueError("working-memory evidence_ids must contain non-empty strings")
+    if len(set(evidence_ids)) != len(evidence_ids):
+        raise ValueError("working-memory evidence_ids must not contain duplicates")
+    trust_tier = values["trust_tier"]
+    if type(trust_tier) is not int or isinstance(trust_tier, bool):
+        raise ValueError("working-memory trust_tier must be an integer")
+    if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+        raise ValueError("working-memory trust_tier is out of range")
+    capability_tags = values["capability_tags"] or []
+    if type(capability_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in capability_tags):
+        raise ValueError("working-memory capability_tags must be a list of non-empty strings")
+    if len(set(capability_tags)) != len(capability_tags):
+        raise ValueError("working-memory capability_tags must not contain duplicates")
+    sensitivity = values["sensitivity"]
+    if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
+        raise ValueError("working-memory sensitivity must be a non-negative integer")
+    access_policy = validate_access_policy(
+        values["access_policy"], tenant_id=values["tenant_id"], location="working_memory.access_policy"
+    )
+    metadata = _normalize_working_json(values["metadata"], path="working_memory.metadata")
+    if type(metadata) is not dict:
+        raise ValueError("working-memory metadata must be a JSON object")
+    return {
+        **values,
+        "created_at": created_at,
+        "expires_at": expires_at,
+        "expired_at": expired_at,
+        "evidence_ids": _normalize_working_json(evidence_ids, path="working_memory.evidence_ids"),
+        "trust_tier": trust_tier,
+        "access_policy": _normalize_working_json(access_policy, path="working_memory.access_policy"),
+        "metadata": metadata,
+        "capability_tags": list(capability_tags),
+        "sensitivity": sensitivity,
+    }
+
+
+def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "item_id": values["item_id"],
+        "tenant_id": values["tenant_id"],
+        "session_id": values["session_id"],
+        "user_id": values["user_id"],
+        "agent_id": values["agent_id"],
+        "kind": values["kind"],
+        "task_id": values["task_id"],
+        "content": values["content"],
+        "created_at": values["created_at"].isoformat(),
+        "expires_at": values["expires_at"].isoformat(),
+        "evidence_ids": copy.deepcopy(values["evidence_ids"]),
+        "trust_tier": values["trust_tier"],
+        "access_policy": copy.deepcopy(values["access_policy"]),
+        "metadata": copy.deepcopy(values["metadata"]),
+        "capability_tags": list(values["capability_tags"]),
+        "sensitivity": values["sensitivity"],
+    }
+
+
+def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
+    diff: dict[str, Any] = {
+        "working_item_digest": content_cid("working_memory", _working_snapshot(values)),
+        "evidence_ref_digest": content_cid(
+            "working_memory_evidence_refs",
+            {
+                "tenant_id": values["tenant_id"],
+                "session_id": values["session_id"],
+                "item_id": values["item_id"],
+                "evidence_ids": list(values["evidence_ids"]),
+            },
+        ),
+        "evidence_count": len(values["evidence_ids"]),
+        "tenant_id": values["tenant_id"],
+        "session_id": values["session_id"],
+        "item_id": values["item_id"],
+        "task_id": values["task_id"],
+        "kind": values["kind"],
+        "created_at": values["created_at"].isoformat(),
+        "expires_at": values["expires_at"].isoformat(),
+        "deadline": values["expires_at"].isoformat(),
+        "status": status,
+    }
+    if sweep is not None:
+        diff["sweep"] = sweep.isoformat()
+    return diff
+
+
+def _working_event_id(values: dict[str, Any], op: str) -> str:
+    return content_cid(
+        "working_memory_audit",
+        {
+            "tenant_id": values["tenant_id"],
+            "session_id": values["session_id"],
+            "item_id": values["item_id"],
+            "op": op,
+        },
+    )
+
+
+def _working_from_values(values: dict[str, Any]) -> WorkingMemoryItem:
+    payload = _working_snapshot(values)
+    payload.update(
+        {
+            "created_at": dt_to_json(values["created_at"]),
+            "expires_at": dt_to_json(values["expires_at"]),
+            "status": values["status"],
+            "expired_at": dt_to_json(values["expired_at"]),
+        }
+    )
+    return WorkingMemoryItem.from_dict(payload)
 
 
 class _ExistingCursorConnection:
@@ -365,6 +576,14 @@ class PostgresEngine:
     @staticmethod
     def _set_tenant(cur: Any, db_tenant_id: str) -> None:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
+
+    @staticmethod
+    def _lock_working_tenant(cur: Any, tenant_id: str) -> None:
+        """Serialize evidence validation and working-memory erasure per tenant."""
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (str(tenant_id),),
+        )
 
     @staticmethod
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
@@ -1124,6 +1343,429 @@ class PostgresEngine:
             """
         )
 
+    @staticmethod
+    def _working_from_row(row: dict[str, Any]) -> WorkingMemoryItem:
+        return _working_from_values(
+            _working_payload(
+                WorkingMemoryItem(
+                    item_id=str(row["item_id"]),
+                    tenant_id=str(row.get("tenant_name") or row["tenant_id"]),
+                    session_id=str(row["external_session_id"]),
+                    user_id=str(row["external_user_id"]),
+                    agent_id=str(row["agent_id"]),
+                    kind=str(row["kind"]),
+                    task_id=str(row["task_id"]),
+                    content=str(row["content"]),
+                    created_at=row["created_at"],
+                    expires_at=row["expires_at"],
+                    evidence_ids=_bytes_list_to_cids(row.get("evidence_ids")),
+                    trust_tier=int(row["trust_tier"]),
+                    access_policy=dict(row.get("access_policy") or {}),
+                    metadata=dict(row.get("metadata") or {}),
+                    capability_tags=list(row.get("capability_tags") or []),
+                    sensitivity=int(row["sensitivity"]),
+                    status=str(row["status"]),
+                    expired_at=row.get("expired_at"),
+                )
+            )
+        )
+
+    def _working_provenance(
+        self, cur: Any, values: dict[str, Any]
+    ) -> tuple[int, list[str], int, dict[str, Any]]:
+        """Validate source ownership and derive the effective security envelope."""
+
+        trust_tiers = [values["trust_tier"]]
+        capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
+        if values["trust_tier"] > self.policy.max_trust_tier:
+            raise PermissionError("working item exceeds the working write trust ceiling")
+        sensitivities = [values["sensitivity"]]
+        access_policies = [
+            validate_access_policy(
+                values["access_policy"],
+                tenant_id=values["tenant_id"],
+                location="working_memory.access_policy",
+            )
+        ]
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        for cid in values["evidence_ids"]:
+            try:
+                cid_bytes = _cid_to_bytes(cid)
+            except ValueError as exc:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant") from exc
+            cur.execute(
+                """
+                SELECT user_id, session_id, erased, trust_tier, capability_tags,
+                       sensitivity, access_policy
+                FROM evidence
+                WHERE tenant_id = %s AND branch = 'main' AND cid = %s
+                """,
+                (db_tenant_id, cid_bytes),
+            )
+            row = cur.fetchone()
+            if row is None:
+                raise ValueError(f"evidence {cid!r} is missing or outside the working tenant")
+            if bool(row["erased"]):
+                raise ValueError(f"evidence {cid!r} is erased")
+            if str(row["user_id"]) != db_user_id:
+                raise ValueError("working item user must match originating evidence")
+            if row["session_id"] is None or str(row["session_id"]) != db_session_id:
+                raise ValueError("working item session must match originating evidence")
+            trust_tier = row["trust_tier"]
+            if type(trust_tier) is not int or not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+                raise ValueError("originating evidence trust tier is invalid")
+            if trust_tier > int(self.policy.max_trust_tier):
+                raise PermissionError("originating evidence exceeds the working write trust ceiling")
+            trust_tiers.append(trust_tier)
+            source_tags = list(row["capability_tags"] or [])
+            if type(source_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in source_tags):
+                raise ValueError("originating evidence capability tags are invalid")
+            normalized_source_tags = [tag.strip().lower() for tag in source_tags]
+            capability_tags.update(normalized_source_tags)
+            sensitivity = row["sensitivity"]
+            if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
+                raise ValueError("originating evidence sensitivity is invalid")
+            sensitivities.append(sensitivity)
+            access_policies.append(
+                validate_access_policy(
+                    dict(row["access_policy"] or {}),
+                    tenant_id=values["tenant_id"],
+                    location="evidence.access_policy",
+                )
+            )
+        effective_policy = merge_access_policies(access_policies, tenant_id=values["tenant_id"])
+        values["capability_tags"] = sorted(capability_tags)
+        values["sensitivity"] = max(sensitivities)
+        values["access_policy"] = effective_policy
+        return max(trust_tiers), values["capability_tags"], values["sensitivity"], effective_policy
+
+    def _working_read_values(
+        self, values: dict[str, Any], *, context: Mapping[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Apply caller-scoped policy before returning working-memory data."""
+
+        if context is None:
+            return copy.deepcopy(values)
+        context_tenant = str(context.get("tenant_id") or context.get("tenant") or "")
+        if context_tenant != values["tenant_id"]:
+            return None
+        context_user = str(context.get("user_id") or context.get("subject") or "")
+        if context_user != values["user_id"]:
+            return None
+        decision = may_read_item(
+            item_tenant_id=values["tenant_id"],
+            sensitivity=int(values["sensitivity"]),
+            access_policy=values["access_policy"],
+            context=context,
+            policy_max_sensitivity=self.policy.max_sensitivity,
+            status=values["status"],
+        )
+        if not decision.allowed:
+            return None
+        redacted_values = copy.deepcopy(values)
+        redacted_values["content"] = apply_text_redactions(
+            str(redacted_values["content"]), redacted_values["access_policy"], decision
+        )[0]
+        redacted_values["metadata"], _ = apply_record_redactions(
+            redacted_values["metadata"], redacted_values["access_policy"], decision
+        )
+        return redacted_values
+
+    @staticmethod
+    def _working_insert_values(
+        values: dict[str, Any], db_tenant_id: str, db_session_id: str, db_user_id: str, jsonb: Any
+    ) -> tuple[Any, ...]:
+        return (
+            db_tenant_id,
+            db_session_id,
+            values["session_id"],
+            values["item_id"],
+            db_user_id,
+            values["user_id"],
+            values["agent_id"],
+            values["kind"],
+            values["task_id"],
+            values["content"],
+            values["created_at"],
+            values["expires_at"],
+            values["trust_tier"],
+            values["capability_tags"],
+            values["sensitivity"],
+            values["status"],
+            values["expired_at"],
+            _cid_list_to_bytes(values["evidence_ids"]),
+            jsonb(values["access_policy"]),
+            jsonb(values["metadata"]),
+        )
+
+    def put_working(self, item: Any) -> str:
+        """Persist one working item and its audit receipt in one transaction."""
+
+        if not isinstance(item, WorkingMemoryItem):
+            raise TypeError("item must be a WorkingMemoryItem")
+        values = _working_payload(item)
+        if values["status"] != "active":
+            raise ValueError("put_working accepts only active working items")
+        self.ensure_tenant_and_branch(values["tenant_id"])
+        db_tenant_id = _stable_uuid("tenant", values["tenant_id"])
+        db_session_id = _stable_uuid("session", values["session_id"])
+        db_user_id = _stable_uuid("user", values["user_id"])
+        try:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    self._set_tenant(cur, db_tenant_id)
+                    self._lock_working_tenant(cur, values["tenant_id"])
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO working_memory(
+                          tenant_id, session_id, external_session_id, item_id,
+                          user_id, external_user_id, agent_id, kind, task_id, content,
+                          created_at, expires_at, trust_tier, capability_tags, sensitivity,
+                          status, expired_at, evidence_ids, access_policy, metadata
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                                  %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        self._working_insert_values(
+                            values, db_tenant_id, db_session_id, db_user_id, self._jsonb
+                        ),
+                    )
+                    audit_inserted = self._audit(
+                        cur,
+                        db_tenant_id,
+                        values["agent_id"],
+                        "put_working",
+                        values["item_id"],
+                        _working_audit_diff(values, status="active"),
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=_working_event_id(values, "put_working"),
+                        occurred_at=values["created_at"],
+                    )
+                    if not audit_inserted:
+                        raise ValueError(
+                            f"working item {values['item_id']!r} has an existing audit lifecycle"
+                        )
+        except Exception as exc:
+            if getattr(exc, "sqlstate", None) == "23505":
+                raise ValueError(f"working item {values['item_id']!r} already exists") from exc
+            raise
+        item.trust_tier = trust_tier
+        item.capability_tags = list(capability_tags)
+        item.sensitivity = sensitivity
+        item.access_policy = copy.deepcopy(access_policy)
+        return values["item_id"]
+
+    def get_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+    ) -> WorkingMemoryItem | None:
+        moment = _working_datetime(as_of, "as_of")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        db_session_id = _stable_uuid("session", session_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.session_id = %s AND w.item_id = %s
+                      AND w.status = 'active' AND w.created_at <= %s AND w.expires_at > %s
+                    """,
+                    (db_tenant_id, db_session_id, item_id, moment, moment),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    return None
+                item = self._working_from_row(row)
+                values = _working_payload(item)
+                try:
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                except (PermissionError, ValueError):
+                    return None
+                values.update(
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                    sensitivity=sensitivity,
+                    access_policy=access_policy,
+                )
+                readable = self._working_read_values(values, context=None)
+                return _working_from_values(readable) if readable is not None else None
+
+    def list_working(
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+    ) -> list[WorkingMemoryItem]:
+        moment = _working_datetime(as_of, "as_of")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        db_session_id = _stable_uuid("session", session_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.session_id = %s AND w.status = 'active'
+                      AND w.created_at <= %s AND w.expires_at > %s
+                    ORDER BY w.created_at DESC, w.item_id ASC
+                    """,
+                    (db_tenant_id, db_session_id, moment, moment),
+                )
+                items: list[WorkingMemoryItem] = []
+                for row in cur.fetchall():
+                    item = self._working_from_row(row)
+                    values = _working_payload(item)
+                    try:
+                        trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    except (PermissionError, ValueError):
+                        continue
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                    )
+                    readable = self._working_read_values(values, context=None)
+                    if readable is not None:
+                        items.append(_working_from_values(readable))
+                return items
+
+    def expire_working(
+        self,
+        tenant_id: str,
+        *,
+        expired_at: datetime,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        task_id: str | None = None,
+        branch: str | None = None,
+    ) -> list[WorkingMemoryItem]:
+        sweep = _working_datetime(expired_at, "expired_at")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
+                query = """
+                    SELECT w.*, t.name AS tenant_name
+                    FROM working_memory w
+                    JOIN tenants t ON t.id = w.tenant_id
+                    WHERE w.tenant_id = %s AND w.status = 'active' AND w.expires_at <= %s
+                """
+                params: list[Any] = [db_tenant_id, sweep]
+                if session_id is not None:
+                    query += " AND w.external_session_id = %s"
+                    params.append(session_id)
+                for column, value in (
+                    ("external_user_id", user_id),
+                    ("agent_id", agent_id),
+                    ("task_id", task_id),
+                ):
+                    if value is not None:
+                        query += f" AND w.{column} = %s"
+                        params.append(value)
+                if branch is not None:
+                    query += " AND w.metadata->>'branch' = %s"
+                    params.append(branch)
+                query += " ORDER BY w.expires_at ASC, w.external_session_id ASC, w.item_id ASC FOR UPDATE SKIP LOCKED"
+                cur.execute(query, tuple(params))
+                rows = list(cur.fetchall())
+                due_values: list[dict[str, Any]] = []
+                audit_context: list[tuple[int, list[str], int, dict[str, Any]]] = []
+                for row in rows:
+                    values = _working_payload(self._working_from_row(row))
+                    provenance = self._working_provenance(cur, values)
+                    due_values.append(values)
+                    audit_context.append(provenance)
+                expired_values: list[dict[str, Any]] = []
+                for values, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
+                    due_values, audit_context, strict=True
+                ):
+                    values.update(
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        sensitivity=sensitivity,
+                        access_policy=access_policy,
+                        status="expired",
+                        expired_at=sweep,
+                    )
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET trust_tier = %s, capability_tags = %s, sensitivity = %s,
+                            access_policy = %s, status = 'expired', expired_at = %s
+                        WHERE tenant_id = %s AND session_id = %s AND item_id = %s
+                          AND status = 'active' AND expires_at <= %s
+                        """,
+                        (
+                            trust_tier,
+                            capability_tags,
+                            sensitivity,
+                            self._jsonb(access_policy),
+                            sweep,
+                            db_tenant_id,
+                            _stable_uuid("session", values["session_id"]),
+                            values["item_id"],
+                            sweep,
+                        ),
+                    )
+                    if cur.rowcount != 1:
+                        raise RuntimeError("working-memory expiry lost its serialization claim")
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        "working_memory_sweeper",
+                        "expire_working",
+                        values["item_id"],
+                        _working_audit_diff(values, status="expired", sweep=sweep),
+                        source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=_working_event_id(values, "expire_working"),
+                        occurred_at=sweep,
+                    )
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', trust_tier = 0, capability_tags = '{}',
+                            sensitivity = 0, evidence_ids = '{}',
+                            access_policy = '{}'::jsonb, metadata = '{}'::jsonb
+                        WHERE tenant_id = %s AND session_id = %s AND item_id = %s
+                          AND status = 'expired' AND expired_at = %s
+                        """,
+                        (
+                            db_tenant_id,
+                            _stable_uuid("session", values["session_id"]),
+                            values["item_id"],
+                            sweep,
+                        ),
+                    )
+                    if cur.rowcount != 1:
+                        raise RuntimeError("working-memory expiry scrub lost its serialization claim")
+                    expired_values.append(copy.deepcopy(values))
+                return [_working_from_values(values) for values in expired_values]
+
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -1514,6 +2156,13 @@ class PostgresEngine:
     ) -> bool:
         if "access_policy" in metadata_patch:
             raise ValueError("metadata_patch.access_policy cannot shadow evidence.access_policy")
+        reserved_provenance_keys = {
+            "_external_tenant_id",
+            "_external_user_id",
+            "_external_session_id",
+        }
+        if reserved_provenance_keys.intersection(metadata_patch):
+            raise ValueError("metadata_patch cannot modify reserved provenance metadata")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -3404,6 +4053,8 @@ class PostgresEngine:
         ids_by_scope: dict[tuple[str, str], list[UUID]] = defaultdict(list)
         evidence_by_scope: dict[tuple[str, str], set[bytes]] = defaultdict(set)
         for hit in hits:
+            if hit.kind == "working":
+                continue
             if hit.kind == "evidence" and hit.id:
                 cid_bytes = _cid_bytes_or_none(hit.id)
                 if cid_bytes is not None:
@@ -4124,6 +4775,8 @@ class PostgresEngine:
             "trimmed_relations": [],
             "removed_entities": [],
             "trimmed_entities": [],
+            "expired_working_memory": [],
+            "removed_working_memory": [],
             "removed_intentions": [],
             "erased_derived_evidence": [],
             "retained_derived_evidence": [],
@@ -4132,6 +4785,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
                 cur.execute(
                     """
                     SELECT cid, source_type, trust_tier, capability_tags, metadata, user_id
@@ -4180,6 +4834,16 @@ class PostgresEngine:
                     _bytes_to_cid(item) for item in retained_metadata
                 )
                 propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                cur.execute(
+                    """
+                    SELECT item_id
+                    FROM working_memory
+                    WHERE tenant_id = %s AND evidence_ids && %s
+                    ORDER BY item_id
+                    """,
+                    (db_tenant_id, affected_cid_bytes),
+                )
+                working_item_ids = [str(row["item_id"]) for row in cur.fetchall()]
                 retained_cascade_metadata = {
                     _bytes_to_cid(retained_bytes): {
                         **dict(metadata),
@@ -4222,6 +4886,29 @@ class PostgresEngine:
                             "min_corroboration_for_delete": minimum,
                             "blocking_assertions": blocking,
                         }
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    cur.execute(
+                        """
+                        DELETE FROM working_memory
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["removed_working_memory"] = working_item_ids
+                else:
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', status = 'expired',
+                            trust_tier = 0, capability_tags = '{}', sensitivity = 0,
+                            evidence_ids = '{}', access_policy = '{}'::jsonb,
+                            metadata = '{}'::jsonb,
+                            expired_at = COALESCE(expired_at, clock_timestamp())
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["expired_working_memory"] = working_item_ids
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     cur.execute(
                         """
@@ -4351,6 +5038,22 @@ class PostgresEngine:
                     else:
                         cur.execute("DELETE FROM entities WHERE id = %s", (row["id"],))
                         propagated["removed_entities"].append(row["canonical"])
+                # Any provenance overlap invalidates the immutable intention
+                # snapshot. Remove it entirely, matching LocalMemoryEngine,
+                # rather than silently preserving a write the user erased.
+                cur.execute(
+                    """
+                    SELECT intention_id, evidence_ids FROM intentions
+                    WHERE tenant_id = %s AND evidence_ids && %s
+                    """,
+                    (db_tenant_id, affected_cid_bytes),
+                )
+                for row in cur.fetchall():
+                    cur.execute(
+                        "DELETE FROM intentions WHERE tenant_id = %s AND intention_id = %s",
+                        (db_tenant_id, row["intention_id"]),
+                    )
+                    propagated["removed_intentions"].append(row["intention_id"])
                 # Spec §7 privacy invariant 13: NO retained record for a hard delete
                 # may carry the erased cid (a salted sha256 of the content, so
                 # sha256(guess) could confirm it) — not the deletion_log evidence_cid,
@@ -4530,6 +5233,7 @@ class PostgresEngine:
                     }
                     for row in cur.fetchall()
                 ]
+                intentions = [item.to_dict() for item in self.list_intentions(tenant_id)]
         return {
             "tenant_id": tenant_id,
             "evidence": evidence,
@@ -4540,6 +5244,7 @@ class PostgresEngine:
             "entities": entities,
             "justifications": justifications,
             "contradictions": contradictions,
+            "intentions": intentions,
             "audit_log": audit,
             "deletion_log": deletion,
             "merge_log": merge_log,
@@ -5064,7 +5769,12 @@ class PostgresEngine:
         source: str | None = None,
         trust_tier: int | None = None,
         capability_tags: list[str] | None = None,
-    ) -> None:
+        event_id: str | None = None,
+        occurred_at: datetime | None = None,
+    ) -> bool:
+        event_time = occurred_at or utc_now()
+        if event_time.tzinfo is None:
+            raise ValueError("audit event time must be timezone-aware")
         target_uuid = _uuid_or_none(target_id)
         audit_diff = dict(diff)
         if target_id and not target_uuid:
@@ -5077,11 +5787,24 @@ class PostgresEngine:
             audit_diff.setdefault("capability_tags", normalized_tags)
         cur.execute(
             """
-            INSERT INTO audit_log(tenant_id, actor, op, target_id, trust_tier, capability_tags, diff)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO audit_log(
+              tenant_id, actor, op, target_id, trust_tier, capability_tags, diff, at, event_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
             """,
-            (tenant_id, actor, op, target_uuid, trust_tier, normalized_tags, self._jsonb(audit_diff)),
+            (
+                tenant_id,
+                actor,
+                op,
+                target_uuid,
+                trust_tier,
+                normalized_tags,
+                self._jsonb(audit_diff),
+                event_time.astimezone(UTC),
+                event_id,
+            ),
         )
+        return cur.rowcount == 1
 
     def record_audit_event(
         self,
@@ -5111,6 +5834,465 @@ class PostgresEngine:
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
+
+    # ------------------------------------------------------------------
+    # Prospective-memory: schedule / cancel / list / evaluate (W3 Phase 2).
+    # Exact parity with the frozen Local contract. All SQL is parameterized;
+    # audit append and state transition share one transaction; idempotency is
+    # enforced by intention_firing_receipts.
+    # ------------------------------------------------------------------
+
+    def _intention_provenance_rows(
+        self,
+        cur: Any,
+        *,
+        db_tenant_id: str,
+        intention: Intention,
+    ) -> list[dict[str, Any]]:
+        """Fetch and validate evidence provenance for an intention.
+
+        Every evidence_id must resolve to a live (non-erased) same-tenant,
+        same-user evidence row within the trust ceiling and not write-tainted.
+        Fails closed with ValueError/PermissionError before any mutation.
+        """
+
+        cid_bytes_list: list[bytes] = []
+        for cid in intention.evidence_ids:
+            try:
+                cid_bytes_list.append(_cid_to_bytes(cid))
+            except ValueError:
+                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
+        cur.execute(
+            """
+            SELECT cid, user_id,
+                   COALESCE(metadata->>'_external_user_id', user_id::text)
+                     AS external_user_id,
+                   trust_tier, capability_tags, erased
+            FROM evidence
+            WHERE tenant_id = %s AND cid = ANY(%s)
+            ORDER BY cid
+            FOR SHARE
+            """,
+            (db_tenant_id, cid_bytes_list),
+        )
+        rows = [dict(row) for row in cur.fetchall()]
+        by_cid: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            by_cid[_bytes_to_cid(row["cid"])] = row
+        provenance: list[dict[str, Any]] = []
+        for cid in intention.evidence_ids:
+            row = by_cid.get(cid)
+            if row is None or row["erased"]:
+                raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
+            validate_intention_provenance_claim(
+                intention,
+                evidence_id=cid,
+                user_id=str(row["external_user_id"]),
+                erased=bool(row["erased"]),
+                trust_tier=int(row["trust_tier"]),
+                capability_tags=list(row["capability_tags"] or []),
+                max_trust_tier=self.policy.max_trust_tier,
+            )
+            provenance.append(row)
+        return provenance
+
+    def _row_to_intention(self, row: dict[str, Any], tenant_id: str) -> Intention:
+        """Convert an intentions table row through canonical deserialization."""
+
+        due_at_val = row["due_at"]
+        if hasattr(due_at_val, "isoformat"):
+            due_at_str = due_at_val.isoformat()
+        else:
+            due_at_str = str(due_at_val)
+        return Intention.from_dict(
+            {
+                "intention_id": row["intention_id"],
+                "tenant_id": tenant_id,
+                "user_id": str(
+                    row.get("external_user_id")
+                    or row["user_id"]
+                ),
+                "agent_id": row["agent_id"],
+                "trigger_type": row["trigger_type"],
+                "trigger_expression": dict(row["trigger_expression"] or {}),
+                "action": dict(row["action"] or {}),
+                "due_at": due_at_str,
+                "status": row["status"],
+                "priority": row["priority"],
+                "dependencies": list(row["dependencies"] or []),
+                "reschedule_history": list(row["reschedule_history"] or []),
+                "cancellation_state": (
+                    dict(row["cancellation_state"])
+                    if row.get("cancellation_state")
+                    else None
+                ),
+                "evidence_ids": _bytes_list_to_cids(list(row["evidence_ids"] or [])),
+            }
+        )
+
+    def schedule_intention(self, intention: Intention) -> str:
+        """Store an intention after tenant, provenance, trust, and taint checks.
+
+        Validates all five trigger types, rejects cycles at schedule time for
+        dependency_completion, and atomically persists + audits. Duplicates
+        raise ValueError and never mutate/audit.
+        """
+
+        intention = canonicalize_intention(intention, require_scheduled=True)
+        self.ensure_tenant_and_branch(intention.tenant_id)
+        db_tenant_id = _stable_uuid("tenant", intention.tenant_id)
+        db_user_id = _stable_uuid("user", intention.user_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
+                    (db_tenant_id, intention.intention_id),
+                )
+                if cur.fetchone() is not None:
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already has a durable firing receipt"
+                    )
+                # Cycle rejection for dependency_completion: verify every
+                # dependency already exists in the same tenant (a dependency
+                # on a not-yet-scheduled intention is rejected so cycles can
+                # never form incrementally).
+                if intention.trigger_type == "dependency_completion":
+                    cur.execute(
+                        """
+                        SELECT intention_id
+                        FROM intentions
+                        WHERE tenant_id = %s AND intention_id = ANY(%s)
+                        ORDER BY intention_id
+                        FOR SHARE
+                        """,
+                        (db_tenant_id, list(intention.dependencies)),
+                    )
+                    existing_dependencies = {row["intention_id"] for row in cur.fetchall()}
+                    missing_dependencies = sorted(
+                        set(intention.dependencies) - existing_dependencies
+                    )
+                    if missing_dependencies:
+                        raise ValueError(
+                            f"dependency {missing_dependencies[0]!r} does not exist in the same tenant"
+                        )
+                provenance = self._intention_provenance_rows(
+                    cur, db_tenant_id=db_tenant_id, intention=intention
+                )
+                trust_tier, capability_tags = intention_audit_context(provenance)
+                cur.execute(
+                    """
+                    INSERT INTO intentions (
+                      tenant_id, intention_id, user_id, external_user_id, agent_id, trigger_type,
+                      trigger_expression, action, due_at, status, priority,
+                      dependencies, reschedule_history, cancellation_state,
+                      evidence_ids
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', %s, %s, %s, NULL, %s)
+                    ON CONFLICT (tenant_id, intention_id) DO NOTHING
+                    RETURNING intention_id
+                    """,
+                    (
+                        db_tenant_id,
+                        intention.intention_id,
+                        db_user_id,
+                        intention.user_id,
+                        intention.agent_id,
+                        intention.trigger_type,
+                        self._jsonb(intention.trigger_expression),
+                        self._jsonb(intention.action),
+                        intention.due_at.astimezone(UTC),
+                        intention.priority,
+                        list(intention.dependencies),
+                        self._jsonb(intention.reschedule_history),
+                        _cid_list_to_bytes(intention.evidence_ids),
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise ValueError(f"intention {intention.intention_id!r} already exists")
+                # Recheck after the conflict-aware insert. Under READ COMMITTED,
+                # this closes a fire -> forget race where the first receipt read
+                # preceded the firing commit but the insert waited for deletion.
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM intention_firing_receipts
+                    WHERE tenant_id = %s AND intention_id = %s
+                    """,
+                    (db_tenant_id, intention.intention_id),
+                )
+                if cur.fetchone() is not None:
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already has a durable firing receipt"
+                    )
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    intention.agent_id,
+                    "schedule_intention",
+                    intention.intention_id,
+                    intention_audit_diff(intention, status="scheduled"),
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+        return intention.intention_id
+
+    def cancel_intention(
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str
+    ) -> None:
+        """Cancel an intention. Missing/cross-tenant -> KeyError; non-owner ->
+        PermissionError; fired -> ValueError; already-cancelled is an
+        idempotent no-op with no second audit."""
+
+        if type(cancelled_by) is not str or not cancelled_by.strip():
+            raise ValueError("cancelled_by must be a non-empty string")
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT intention_id, user_id, external_user_id, agent_id, status, trigger_type,
+                           trigger_expression, action, due_at, priority,
+                           dependencies, reschedule_history, cancellation_state,
+                           evidence_ids
+                    FROM intentions
+                    WHERE tenant_id = %s AND intention_id = %s
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, intention_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise KeyError(intention_id)
+                status = row["status"]
+                if status == "fired":
+                    raise ValueError("a fired intention cannot be cancelled")
+                if status == "cancelled":
+                    return
+                db_user_id = str(row["user_id"])
+                agent_id = row["agent_id"]
+                external_user = _stable_uuid("user", cancelled_by)
+                # The owner is the intention's user_id or agent_id. cancelled_by
+                # is compared against the external (non-UUID) IDs the caller
+                # uses, but user_id is stored as a stable UUID. Map both: if
+                # cancelled_by uuid-matches user_id, or equals agent_id, allow.
+                owns = (
+                    str(external_user) == str(db_user_id)
+                    or cancelled_by == agent_id
+                )
+                if not owns:
+                    raise PermissionError("only the owning user or agent may cancel an intention")
+                # Reconstruct a minimal Intention for the audit diff.
+                intention = self._row_to_intention(row, tenant_id)
+                provenance = self._intention_provenance_rows(
+                    cur, db_tenant_id=db_tenant_id, intention=intention
+                )
+                trust_tier, capability_tags = intention_audit_context(provenance)
+                cur.execute(
+                    """
+                    UPDATE intentions
+                    SET status = 'cancelled', cancellation_state = %s
+                    WHERE tenant_id = %s AND intention_id = %s AND status = 'scheduled'
+                    RETURNING intention_id
+                    """,
+                    (self._jsonb({"cancelled_by": cancelled_by}), db_tenant_id, intention_id),
+                )
+                if cur.fetchone() is None:
+                    raise RuntimeError("scheduled intention was not cancelled")
+                self._audit(
+                    cur,
+                    db_tenant_id,
+                    cancelled_by,
+                    "cancel_intention",
+                    intention_id,
+                    intention_audit_diff(intention, status="cancelled"),
+                    source="prospective_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+
+    def list_intentions(self, tenant_id: str) -> list[Intention]:
+        """Return detached tenant-only copies in lexicographic intention_id order."""
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
+                           trigger_expression, action, due_at, status, priority,
+                           dependencies, reschedule_history, cancellation_state, evidence_ids
+                    FROM intentions
+                    WHERE tenant_id = %s
+                    ORDER BY intention_id
+                    """,
+                    (db_tenant_id,),
+                )
+                return [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
+
+    def evaluate_due_intentions(
+        self,
+        tenant_id: str,
+        *,
+        evaluated_at: datetime,
+        trigger_context: TriggerEvaluationContext,
+        operating_point: ProspectiveOperatingPoint,
+    ) -> list[Intention]:
+        """Fire due intentions once, ordered by (due_at UTC, intention_id).
+
+        Full Phase 2 contract: all five trigger types, infrastructure gate,
+        pre-validation of all firing candidates' provenance before any transition,
+        atomic receipt + status change + fire audit per intention, and
+        clock-independent idempotency enforced by a durable firing receipt.
+        """
+
+        evaluated_at_utc = validate_intention_evaluation_inputs(
+            tenant_id,
+            evaluated_at=evaluated_at,
+            trigger_context=trigger_context,
+            operating_point=operating_point,
+            infrastructure_error="infrastructure is not available for intention evaluation",
+        )
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                # Select all scheduled, due candidates ordered deterministically.
+                cur.execute(
+                    """
+                    SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
+                           trigger_expression, action, due_at, status, priority,
+                           dependencies, reschedule_history, cancellation_state,
+                           evidence_ids
+                    FROM intentions
+                    WHERE tenant_id = %s AND status = 'scheduled' AND due_at <= %s
+                    ORDER BY due_at, intention_id
+                    FOR UPDATE
+                    """,
+                    (db_tenant_id, evaluated_at_utc),
+                )
+                candidates = [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
+                tenant_intentions = {
+                    (tenant_id, intention.intention_id): intention
+                    for intention in candidates
+                }
+                dependency_ids = sorted(
+                    {
+                        dependency_id
+                        for intention in candidates
+                        for dependency_id in intention.dependencies
+                    }
+                )
+                if dependency_ids:
+                    cur.execute(
+                        """
+                        SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
+                               trigger_expression, action, due_at, status, priority,
+                               dependencies, reschedule_history, cancellation_state,
+                               evidence_ids
+                        FROM intentions
+                        WHERE tenant_id = %s AND intention_id = ANY(%s)
+                        ORDER BY intention_id
+                        FOR SHARE
+                        """,
+                        (db_tenant_id, dependency_ids),
+                    )
+                    for row in cur.fetchall():
+                        dependency = self._row_to_intention(row, tenant_id)
+                        tenant_intentions[(tenant_id, dependency.intention_id)] = dependency
+                # Evaluate against the frozen tenant snapshot first, matching
+                # the canonical Local contract. Only candidates that would
+                # fire require provenance validation.
+                candidate_results: list[tuple[Intention, dict[str, Any]]] = []
+                for intention in candidates:
+                    fires, matched_signal = _evaluate_trigger(
+                        intention,
+                        evaluated_at=evaluated_at_utc,
+                        context=trigger_context,
+                        operating_point=operating_point,
+                        tenant_intentions=tenant_intentions,
+                    )
+                    if fires:
+                        candidate_results.append((intention, matched_signal))
+                audit_contexts = [
+                    intention_audit_context(
+                        self._intention_provenance_rows(
+                            cur,
+                            db_tenant_id=db_tenant_id,
+                            intention=intention,
+                        )
+                    )
+                    for intention, _matched_signal in candidate_results
+                ]
+                fired: list[Intention] = []
+                for (intention, matched_signal), (trust_tier, capability_tags) in zip(
+                    candidate_results, audit_contexts, strict=True
+                ):
+                    fire_audit_diff = {
+                        **intention_audit_diff(intention, status="fired"),
+                        "evaluated_at": evaluated_at_utc.isoformat(),
+                        "operating_point": operating_point.to_dict(),
+                    }
+                    if matched_signal.get("event_id"):
+                        fire_audit_diff["matched_event_id"] = matched_signal["event_id"]
+                    if matched_signal.get("condition_id"):
+                        fire_audit_diff["matched_condition_id"] = matched_signal["condition_id"]
+                    canonical_event_id = intention_fire_receipt_id(
+                        tenant_id, intention.intention_id
+                    )
+                    fire_audit_diff["canonical_event_id"] = canonical_event_id
+                    cur.execute(
+                        """
+                        INSERT INTO intention_firing_receipts(
+                            tenant_id, intention_id, operation, canonical_event_id
+                        )
+                        VALUES (%s, %s, 'fire', %s)
+                        ON CONFLICT (tenant_id, intention_id, operation) DO NOTHING
+                        RETURNING intention_id
+                        """,
+                        (db_tenant_id, intention.intention_id, canonical_event_id),
+                    )
+                    if cur.fetchone() is None:
+                        # A concurrent or replayed operation already owns the
+                        # durable receipt. This is the only expected loser path.
+                        continue
+                    cur.execute(
+                        """
+                        UPDATE intentions
+                        SET status = 'fired'
+                        WHERE tenant_id = %s AND intention_id = %s
+                          AND status = 'scheduled'
+                        RETURNING intention_id
+                        """,
+                        (db_tenant_id, intention.intention_id),
+                    )
+                    if cur.fetchone() is None:
+                        raise RuntimeError(
+                            "firing receipt claimed without a scheduled intention"
+                        )
+                    intention.status = "fired"
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        intention.agent_id,
+                        "fire_intention",
+                        intention.intention_id,
+                        fire_audit_diff,
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                        event_id=canonical_event_id,
+                        occurred_at=evaluated_at_utc,
+                    )
+                    fired.append(copy.deepcopy(intention))
+        return fired
 
     @staticmethod
     def _mark_retrieved_text_as_data(hits: list[Hit]) -> list[Hit]:
@@ -5356,6 +6538,9 @@ def _json_safe(value: Any) -> Any:
 
 def _row_to_audit_log(row: Any) -> dict[str, Any]:
     data = _json_safe(dict(row))
+    event_id = data.pop("event_id", None)
+    if event_id is not None:
+        data["id"] = event_id
     diff = data.get("diff")
     if isinstance(diff, dict):
         if not data.get("target_id") and diff.get("target_id"):
