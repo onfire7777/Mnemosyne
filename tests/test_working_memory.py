@@ -176,6 +176,7 @@ def test_working_audit_is_deterministic_and_idempotent(tmp_path: Path) -> None:
     )
 
     assert engine.audit_log == before
+    engine.close()
     reloaded = LocalMemoryEngine(store_path=store)
     reloaded_audit = next(row for row in reloaded.audit_log if row["target_id"] == item.item_id)
     assert reloaded_audit["id"] == audit["id"]
@@ -193,6 +194,7 @@ def test_repeated_expiry_is_idempotent_and_clock_rollback_cannot_resurrect(tmp_p
     assert engine.list_working(TENANT, SESSION, as_of=earlier) == []
     assert engine.expire_working(TENANT, expired_at=earlier) == []
 
+    engine.close()
     reloaded = LocalMemoryEngine(store_path=store)
     assert reloaded.get_working(TENANT, SESSION, item.item_id, as_of=earlier) is None
     assert reloaded.expire_working(TENANT, expired_at=earlier) == []
@@ -535,6 +537,7 @@ def test_hard_delete_erasure_redacts_working_provenance_from_custody_records(tmp
         erasure_mode="hard_delete_legal",
     )
 
+    engine.close()
     reloaded = LocalMemoryEngine(store_path=store)
     exported = reloaded.export_tenant(TENANT)
     assert evidence_id not in str(exported)
@@ -702,6 +705,7 @@ def test_persistence_round_trip_preserves_working_item_and_audit(tmp_path: Path)
     store = tmp_path / "working.json"
     engine = LocalMemoryEngine(store_path=store)
     item = _put(engine)
+    engine.close()
     reloaded = LocalMemoryEngine(store_path=store)
     assert reloaded.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT) == item
     assert [row["op"] for row in reloaded.audit_log if row["target_id"] == item.item_id] == ["put_working"]
