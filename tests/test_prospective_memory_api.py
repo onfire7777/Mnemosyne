@@ -153,8 +153,15 @@ def _run_cli(
     return json.loads(capsys.readouterr().out)
 
 
-def _cli_schedule(evidence_id: str, due_at: str) -> list[str]:
-    return [
+def _cli_schedule(
+    evidence_id: str,
+    due_at: str,
+    *,
+    trigger_type: str = "exact_time",
+    trigger_expression: dict[str, Any] | None = None,
+    dependencies: list[str] | None = None,
+) -> list[str]:
+    arguments = [
         "intention-schedule",
         "--tenant",
         TENANT,
@@ -162,8 +169,10 @@ def _cli_schedule(evidence_id: str, due_at: str) -> list[str]:
         USER,
         "--agent",
         AGENT,
+        "--trigger-type",
+        trigger_type,
         "--trigger-expression",
-        json.dumps({"at": due_at}),
+        json.dumps(trigger_expression or {"at": due_at}),
         "--action",
         json.dumps(ACTION),
         "--due-at",
@@ -171,6 +180,9 @@ def _cli_schedule(evidence_id: str, due_at: str) -> list[str]:
         "--evidence-cid",
         evidence_id,
     ]
+    for dependency in dependencies or []:
+        arguments.extend(["--dependency", dependency])
+    return arguments
 
 
 def test_cli_requires_signed_identity_and_preserves_timezone(
@@ -218,6 +230,29 @@ def test_cli_evaluate_requires_scheduler_and_explicit_context(
         *evaluate,
     )
     assert [item["status"] for item in fired["intentions"]] == ["fired"]
+
+
+def test_cli_schedule_supports_dependency_completion(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    store = tmp_path / "cli-store.json"
+    evidence_id = _seed_evidence(LocalMemoryEngine(store))
+    due_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    prerequisite = _run_cli(capsys, store, _token(), *_cli_schedule(evidence_id, due_at))
+    dependent = _run_cli(
+        capsys,
+        store,
+        _token(),
+        *_cli_schedule(
+            evidence_id,
+            due_at,
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=[prerequisite["intention_id"]],
+        ),
+    )
+    assert dependent["trigger_type"] == "dependency_completion"
+    assert dependent["dependencies"] == [prerequisite["intention_id"]]
 
 
 def test_direct_api_denies_unsigned_and_reader_mutation(tmp_path: Path) -> None:

@@ -8555,6 +8555,7 @@ def cmd_intention_schedule(args: argparse.Namespace) -> None:
             due_at=args.due_at,
             evidence_ids=args.evidence_cid,
             priority=args.priority,
+            dependencies=args.dependency,
             **_intention_auth_kwargs(args),
         )
     )
@@ -19756,6 +19757,7 @@ def build_parser() -> argparse.ArgumentParser:
     intention_schedule.add_argument("--due-at", required=True)
     intention_schedule.add_argument("--evidence-cid", action="append", default=[])
     intention_schedule.add_argument("--priority", default="normal")
+    intention_schedule.add_argument("--dependency", action="append", default=[])
     intention_schedule.set_defaults(func=cmd_intention_schedule)
 
     intention_cancel = sub.add_parser("intention-cancel")

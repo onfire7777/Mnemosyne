@@ -5187,7 +5187,10 @@ class PostgresEngine:
                 raise ValueError(f"evidence {cid!r} is missing or outside the intention tenant")
         cur.execute(
             """
-            SELECT cid, user_id, external_user_id, trust_tier, capability_tags, erased
+            SELECT cid, user_id,
+                   COALESCE(metadata->>'_external_user_id', user_id::text)
+                     AS external_user_id,
+                   trust_tier, capability_tags, erased
             FROM evidence
             WHERE tenant_id = %s AND branch = 'main' AND cid = ANY(%s)
             ORDER BY cid

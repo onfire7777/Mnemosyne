@@ -3587,6 +3587,15 @@ class SqliteEngine:
             conn = self._connect(intention.tenant_id)
             conn.execute("BEGIN IMMEDIATE")
             try:
+                receipt = conn.execute(
+                    "SELECT 1 FROM intention_fire_receipts "
+                    "WHERE tenant_id = ? AND intention_id = ?",
+                    (intention.tenant_id, intention.intention_id),
+                ).fetchone()
+                if receipt is not None:
+                    raise ValueError(
+                        f"intention {intention.intention_id!r} already has a durable firing receipt"
+                    )
                 existing = conn.execute(
                     "SELECT 1 FROM intentions WHERE tenant_id = ? AND intention_id = ?",
                     (intention.tenant_id, intention.intention_id),

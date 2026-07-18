@@ -336,6 +336,10 @@ class Intention:
             type(item) is not str or not item.strip() for item in self.dependencies
         ):
             raise ValueError("dependencies must be a list of non-empty strings")
+        if self.dependencies and self.trigger_type != "dependency_completion":
+            raise ValueError(
+                "dependencies are only valid for dependency_completion triggers"
+            )
         if self.trigger_type == "dependency_completion":
             if not self.dependencies:
                 raise ValueError(
@@ -1459,6 +1463,16 @@ class LocalMemoryEngine:
 
         with self._lock:
             intention = canonicalize_intention(intention, require_scheduled=True)
+            receipt_id = intention_fire_receipt_id(
+                intention.tenant_id, intention.intention_id
+            )
+            if any(
+                row.get("op") == "fire_intention" and row.get("id") == receipt_id
+                for row in self.audit_log
+            ):
+                raise ValueError(
+                    f"intention {intention.intention_id!r} already has a durable firing receipt"
+                )
             provenance = self._intention_provenance(intention)
             key = (intention.tenant_id, intention.intention_id)
             if key in self.intentions:
