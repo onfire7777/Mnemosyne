@@ -80,7 +80,7 @@ def _install_working(monkeypatch: pytest.MonkeyPatch, engine: LocalMemoryEngine,
         assert tenant_id == TENANT
         assert session_id == SESSION
         assert as_of == NOW
-        return copy.deepcopy(items)
+        return items
 
     monkeypatch.setattr(LocalMemoryEngine, "list_working", list_working, raising=False)
 
@@ -263,6 +263,7 @@ def test_owner_session_due_and_ttl_isolation(monkeypatch: pytest.MonkeyPatch) ->
         [
             _working_item(item_id="expired", expires_at=NOW),
             _working_item(item_id="future", created_at=NOW + timedelta(seconds=1)),
+            _working_item(item_id="other-session", session_id="other-session"),
         ],
     )
     filt = {"tenant_id": TENANT, "branch": "main", **_filter()}
@@ -301,6 +302,59 @@ def test_pipeline_runs_five_routes_in_stable_order_and_sanitizes_plane_text(
     assert plane_hits
     assert all("retrieved_text" in hit.metadata for hit in plane_hits)
     assert result.used_tokens <= result.token_budget
+
+
+def test_pipeline_reports_stable_zero_count_plane_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _engine()
+
+    result = engine.retrieve("unmatched", TENANT, filt={}, record_access=False)
+
+    assert result.explain["channels"]["prospective_memory"] == 0
+    assert result.explain["channels"]["working_memory"] == 0
+    assert result.explain["routes"][-2:] == [
+        {"channel": "prospective_memory", "count": 0, "requested": False},
+        {"channel": "working_memory", "count": 0, "requested": False},
+    ]
+
+    intention = engine.list_intentions(TENANT)[0]
+    intention.due_at = NOW + timedelta(minutes=1)
+    engine.intentions[(TENANT, intention.intention_id)] = intention
+    _install_working(monkeypatch, engine, [])
+    requested_empty = engine.retrieve("unmatched", TENANT, filt=_filter(), record_access=False)
+    assert requested_empty.explain["channels"]["prospective_memory"] == 0
+    assert requested_empty.explain["channels"]["working_memory"] == 0
+    assert requested_empty.explain["routes"][-2:] == [
+        {"channel": "prospective_memory", "count": 0, "requested": True},
+        {"channel": "working_memory", "count": 0, "requested": True},
+    ]
+
+
+def test_pipeline_uses_one_instant_and_prefers_working_session_selector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _engine()
+    _install_working(monkeypatch, engine, [_working_item()])
+    monkeypatch.setattr(pipeline_mod, "utc_now", lambda: NOW)
+    filt = {
+        **_filter(),
+        "session_id": "durable-evidence-session",
+    }
+    filt.pop("as_of")
+
+    result = engine.retrieve("Helios", TENANT, filt=filt, record_access=False)
+
+    assert result.explain["working_memory"]["evaluated_at"] == NOW.isoformat()
+    assert result.explain["channels"]["working_memory"] == 1
+
+    conflicting = {
+        **filt,
+        "as_of": NOW,
+        "working_evaluated_at": NOW + timedelta(days=1),
+    }
+    result = engine.retrieve("Helios", TENANT, filt=conflicting, record_access=False)
+    assert result.explain["working_memory"]["evaluated_at"] == NOW.isoformat()
 
 
 def test_serial_parallel_results_are_byte_identical(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -36,7 +36,7 @@ import os
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
@@ -277,28 +277,10 @@ def _working_route_requested(effective_filter: dict[str, Any]) -> bool:
 
 
 def _working_session_id(effective_filter: dict[str, Any]) -> str | None:
-    raw = effective_filter.get("session_id", effective_filter.get("working_session_id"))
+    raw = effective_filter.get("working_session_id", effective_filter.get("session_id"))
     if not isinstance(raw, str) or not raw.strip():
         return None
     return raw.strip()
-
-
-def _working_evaluation_instant(effective_filter: dict[str, Any]) -> Any | None:
-    raw = effective_filter.get("evaluated_at", effective_filter.get("working_evaluated_at"))
-    if raw is None:
-        raw = effective_filter.get("as_of")
-    if isinstance(raw, datetime):
-        evaluated_at = raw
-    elif isinstance(raw, str):
-        try:
-            evaluated_at = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
-        except ValueError:
-            return None
-    else:
-        return None
-    if evaluated_at is None or getattr(evaluated_at, "tzinfo", None) is None:
-        return None
-    return evaluated_at.astimezone(UTC)
 
 
 def _working_memory_route(
@@ -310,6 +292,7 @@ def _working_memory_route(
     k: int,
     effective_filter: dict[str, Any],
     policy: OperatingPolicy,
+    evaluated_at: datetime,
 ) -> tuple[list[Hit], dict[str, Any]]:
     """Load the optional fourth route without widening the existing stores."""
 
@@ -330,15 +313,6 @@ def _working_memory_route(
     }
     if not requested or session_id is None:
         report["reason"] = "missing_session_selector"
-        return [], report
-    evaluated_at = _working_evaluation_instant(effective_filter)
-    if evaluated_at is None:
-        report.update(
-            {
-                "status": "rejected",
-                "reason": "explicit_evaluation_instant_required",
-            }
-        )
         return [], report
     report["evaluated_at"] = evaluated_at.isoformat()
 
@@ -466,7 +440,12 @@ def run_retrieval_pipeline(
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
-    retrieval_instant = parse_dt(effective_filter.get("as_of")) or utc_now()
+    retrieval_instant = (
+        parse_dt(effective_filter.get("as_of"))
+        or parse_dt(effective_filter.get("evaluated_at"))
+        or parse_dt(effective_filter.get("working_evaluated_at"))
+        or utc_now()
+    )
     prospective_requested = isinstance(effective_filter.get("prospective_owner"), dict)
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
@@ -524,6 +503,7 @@ def run_retrieval_pipeline(
                 k=policy.rerank_width,
                 effective_filter=effective_filter,
                 policy=policy,
+                evaluated_at=retrieval_instant,
             ) if working_requested else None
             dense = dense_future.result()
             lexical = lexical_future.result()
@@ -557,6 +537,7 @@ def run_retrieval_pipeline(
                 k=policy.rerank_width,
                 effective_filter=effective_filter,
                 policy=policy,
+                evaluated_at=retrieval_instant,
             )
             if working_requested
             else ([], {})
@@ -649,11 +630,9 @@ def run_retrieval_pipeline(
         dense_key: len(dense),
         lexical_key: len(lexical),
         graph_key: len(graph),
+        PROSPECTIVE_MEMORY_CHANNEL: len(prospective),
+        WORKING_MEMORY_CHANNEL: len(working),
     }
-    if prospective_requested:
-        channels[PROSPECTIVE_MEMORY_CHANNEL] = len(prospective)
-    if working_requested:
-        channels[WORKING_MEMORY_CHANNEL] = len(working)
     explain = {
         "channels": channels,
         "routes": [
