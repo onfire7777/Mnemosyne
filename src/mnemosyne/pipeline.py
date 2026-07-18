@@ -338,10 +338,10 @@ def _working_memory_route(
         hits = [hit for hit in (raw_hits or []) if isinstance(hit, Hit)]
         scoped: list[Hit] = []
         for hit in hits:
-            if hit.tenant_id != tenant_id:
+            if hit.tenant_id != tenant_id or hit.branch != branch:
                 continue
             marker = hit.metadata.get("session_id") if isinstance(hit.metadata, dict) else None
-            if marker is not None and str(marker) != session_id:
+            if not isinstance(marker, str) or marker != session_id:
                 continue
             copied = _clone_hit(hit)
             copied.metadata = {
