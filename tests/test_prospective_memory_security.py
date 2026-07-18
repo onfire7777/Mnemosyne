@@ -314,7 +314,7 @@ def test_prospective_writes_require_normal_or_stronger_source_trust() -> None:
             SessionIdentity(
                 tenant_id="tenant-a",
                 user_id="user-a",
-                role="operator",
+                role="agent" if operation in {"schedule", "cancel"} else "operator",
                 source_trust_tier=int(TrustTier.UNTRUSTED_EXTERNAL),
                 capabilities=capabilities,
             ),
@@ -337,6 +337,20 @@ def test_prospective_writes_require_normal_or_stronger_source_trust() -> None:
             owner_id="user-a" if operation != "evaluate" else None,
         )
         assert allowed.allowed is True
+
+    low_trust_scheduler = policy.authorize_prospective_memory(
+        "evaluate",
+        SessionIdentity(
+            tenant_id="tenant-a",
+            user_id="scheduler-a",
+            role="operator",
+            source_trust_tier=int(TrustTier.LOW),
+            capabilities=(PROSPECTIVE_SCHEDULER_CAPABILITY,),
+        ),
+        tenant_id="tenant-a",
+    )
+    _assert_denied_unbound(low_trust_scheduler)
+    assert "source trust" in low_trust_scheduler.reason
 
 
 def test_policy_controlled_capabilities_survive_oidc_session_issuance() -> None:
