@@ -33,13 +33,7 @@ class DeletionStore(Protocol):
     """Minimal surface contract used by the coordinator."""
 
     def delete(self, tenant: str, source_ref: str) -> dict[str, Any]: ...
-
-
-class BranchEnumerator(Protocol):
-    """Engine branch discovery contract."""
-
-    @property
-    def branches(self) -> dict[str, Any]: ...
+    def probe(self, tenant: str, source_ref: str) -> bool: ...
 
 
 @dataclass(slots=True)
@@ -130,10 +124,6 @@ def _canonical_fingerprint(request: dict[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _now() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
-
-
 class DeletionCoordinator:
     """Forward-only deletion saga over explicitly registered surfaces."""
 
@@ -190,16 +180,26 @@ class DeletionCoordinator:
         lock = getattr(self.ledger, "lock", threading.RLock())
         with lock:
             if record.manifest is not None and record.manifest["summary"]["complete"]:
+                self._persist_manifest(record.manifest, manifest_path, signing_private_key_path)
                 return deepcopy(record.manifest)
             manifest = self._run(record, request)
+            self._persist_manifest(manifest, manifest_path, signing_private_key_path)
             record.manifest = deepcopy(manifest)
-            if manifest_path is not None and manifest["summary"]["complete"]:
-                if signing_private_key_path is None:
-                    raise ValueError("signing_private_key_path is required with manifest_path")
-                path = Path(manifest_path)
-                path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
-                sign_evidence_manifest(path, Path(signing_private_key_path))
             return deepcopy(manifest)
+
+    @staticmethod
+    def _persist_manifest(
+        manifest: dict[str, Any],
+        manifest_path: str | None,
+        signing_private_key_path: str | None,
+    ) -> None:
+        if manifest_path is None or not manifest["summary"]["complete"]:
+            return
+        if signing_private_key_path is None:
+            raise ValueError("signing_private_key_path is required with manifest_path")
+        path = Path(manifest_path)
+        path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+        sign_evidence_manifest(path, Path(signing_private_key_path))
 
     def _validate_request(self, **raw: Any) -> dict[str, Any]:
         identity = self.identity
@@ -277,7 +277,7 @@ class DeletionCoordinator:
     def _surface_names(self, tenant: str, refs: list[str]) -> list[str]:
         names = [self._store_surface(name) for name in self.stores]
         names.extend(
-            key
+            f"cache:{key}"
             for key, value in self.process_cache.items()
             if isinstance(value, dict)
             and value.get("tenant_id") == tenant
@@ -307,10 +307,11 @@ class DeletionCoordinator:
                 return self._delete_objects(receipt, tenant, refs)
             if surface == "backups":
                 return self._delete_backups(receipt, tenant, refs)
+            cache_name = surface.removeprefix("cache:") if surface.startswith("cache:") else None
             cache_keys = [
                 key
                 for key, value in self.process_cache.items()
-                if key == surface
+                if key == cache_name
                 and isinstance(value, dict)
                 and value.get("tenant_id") == tenant
                 and value.get("source_ref") in refs
@@ -347,10 +348,15 @@ class DeletionCoordinator:
         return False
 
     def _target_object_keys(self, tenant: str, refs: list[str]) -> list[str]:
+        targets = {
+            f"{scheme}://{tenant}/{ref}"
+            for ref in refs
+            for scheme in ("local_encrypted", "s3_encrypted", "plain")
+        }
         return [
             key
             for key in self.object_keys
-            if any(key.startswith(f"{scheme}://{tenant}/{ref}") for ref in refs for scheme in ("local_encrypted", "s3_encrypted", "plain"))
+            if key in targets
         ]
 
     def _delete_objects(self, receipt: SurfaceReceipt, tenant: str, refs: list[str]) -> bool:
@@ -500,7 +506,6 @@ class DeletionCoordinator:
         *,
         branch: str = "main",
         capability: object | None = None,
-        fence_generation: int | None = None,
     ) -> str:
         self._require_capability(evidence.tenant_id, capability)
         return self.engine.append_evidence(evidence, branch=branch)
@@ -511,7 +516,6 @@ class DeletionCoordinator:
         tenant_id: str,
         snapshot: dict[str, Any],
         capability: object | None = None,
-        fence_generation: int | None = None,
     ) -> None:
         self._require_capability(tenant_id, capability)
         if snapshot.get("tenant_id") != tenant_id:
