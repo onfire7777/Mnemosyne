@@ -432,7 +432,10 @@ flowchart LR
         GRAPH["graph PPR<br/>(multi-hop, recursive · graph_ppr_cache)"]
     end
 
-    HYB --> RR["rerank<br/>(HttpReranker or LocalSimilarityReranker)"]
+    HYB --> FUSE["bounded channel fusion"]
+    PROS["prospective_memory<br/>authorized due intentions"] --> FUSE
+    WORKMEM["working_memory<br/>active tenant/session items"] --> FUSE
+    FUSE --> RR["rerank<br/>(HttpReranker or LocalSimilarityReranker)"]
     RR --> CALc{"calibration.py<br/>conformal threshold<br/>should_abstain?"}
     CALc -->|abstain| ABS["return abstention<br/>(thin / contested evidence)"]
     CALc -->|accept| ENF["engine read path<br/>policy.max_sensitivity ≤ 3<br/>+ access_policy JSONB<br/>+ security.sanitize_retrieved_text"]
@@ -451,6 +454,19 @@ a **`provenance`** list of supporting evidence CIDs (the underlying projection r
 (a scalar float) `/ abstained / explain`; the structured firing **channels** and **adapters** live nested
 under `explain`. *(Note: `guard.py` is **not** part of this path — it is the §25 evaluation
 anti-degradation guard; see §2.)*
+
+Prospective and working memory are separate, implemented planes on the Local, Postgres, and Sqlite
+engines. The **prospective-memory plane** stores subject-scoped intentions; retrieval can surface due
+intentions for an explicitly authorized owner without firing or mutating them. Trigger evaluation is a
+separate, explicit operation. The **working-memory plane** stores short-TTL items scoped to one tenant
+and session; retrieval considers only active items and never promotes them implicitly. Promotion into
+durable evidence is a separate, explicit operation.
+
+Both planes enter the read path through named `prospective_memory` and `working_memory` channels. Their
+hits retain provenance and security metadata, consume the common retrieval budget, and remain data-only
+through sanitization and prompt assembly; retrieved content cannot become instruction authority. This
+overview owns the cross-plane topology. `docs/ENGINE-CONTRACT.md` is the canonical source for exact
+backend method, trigger, expiry, audit, and compatibility semantics.
 
 ---
 
