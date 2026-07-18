@@ -14,7 +14,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any
+from typing import Any, Mapping
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
@@ -1502,6 +1502,32 @@ class PostgresEngine:
         values["access_policy"] = effective_policy
         return max(trust_tiers), values["capability_tags"], values["sensitivity"], effective_policy
 
+    def _working_read_values(
+        self, values: dict[str, Any], *, context: Mapping[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Apply caller-scoped policy before returning working-memory data."""
+
+        if context is None:
+            return None
+        context_tenant = str(context.get("tenant_id") or context.get("tenant") or "")
+        if context_tenant != values["tenant_id"]:
+            return None
+        decision = may_read_item(
+            item_tenant_id=values["tenant_id"],
+            sensitivity=int(values["sensitivity"]),
+            access_policy=values["access_policy"],
+            context=context,
+            policy_max_sensitivity=self.policy.max_sensitivity,
+            status=values["status"],
+        )
+        if not decision.allowed:
+            return None
+        redacted_values = copy.deepcopy(values)
+        redacted_values["content"] = apply_text_redactions(
+            str(redacted_values["content"]), redacted_values["access_policy"], decision
+        )[0]
+        return redacted_values
+
     @staticmethod
     def _working_insert_values(
         values: dict[str, Any], db_tenant_id: str, db_session_id: str, db_user_id: str, jsonb: Any
@@ -1590,7 +1616,13 @@ class PostgresEngine:
         return values["item_id"]
 
     def get_working(
-        self, tenant_id: str, session_id: str, item_id: str, *, as_of: datetime
+        self,
+        tenant_id: str,
+        session_id: str,
+        item_id: str,
+        *,
+        as_of: datetime,
+        context: Mapping[str, Any] | None = None,
     ) -> WorkingMemoryItem | None:
         moment = _working_datetime(as_of, "as_of")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1613,17 +1645,26 @@ class PostgresEngine:
                     return None
                 item = self._working_from_row(row)
                 values = _working_payload(item)
-                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                try:
+                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                except (PermissionError, ValueError):
+                    return None
                 values.update(
                     trust_tier=trust_tier,
                     capability_tags=capability_tags,
                     sensitivity=sensitivity,
                     access_policy=access_policy,
                 )
-                return _working_from_values(values)
+                readable = self._working_read_values(values, context=context)
+                return _working_from_values(readable) if readable is not None else None
 
     def list_working(
-        self, tenant_id: str, session_id: str, *, as_of: datetime
+        self,
+        tenant_id: str,
+        session_id: str,
+        *,
+        as_of: datetime,
+        context: Mapping[str, Any] | None = None,
     ) -> list[WorkingMemoryItem]:
         moment = _working_datetime(as_of, "as_of")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1646,14 +1687,19 @@ class PostgresEngine:
                 for row in cur.fetchall():
                     item = self._working_from_row(row)
                     values = _working_payload(item)
-                    trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    try:
+                        trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
+                    except (PermissionError, ValueError):
+                        continue
                     values.update(
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
                         sensitivity=sensitivity,
                         access_policy=access_policy,
                     )
-                    items.append(_working_from_values(values))
+                    readable = self._working_read_values(values, context=context)
+                    if readable is not None:
+                        items.append(_working_from_values(readable))
                 return items
 
     def expire_working(
@@ -1686,7 +1732,18 @@ class PostgresEngine:
                 for row in rows:
                     values = _working_payload(self._working_from_row(row))
                     due_values.append(values)
-                    audit_context.append(self._working_provenance(cur, values))
+                    # Expiry is a maintenance mutation. Re-reading provenance
+                    # here makes a missing/erased source abort the whole sweep;
+                    # the immutable security envelope stored on the row is the
+                    # correct audit context for this transition.
+                    audit_context.append(
+                        (
+                            values["trust_tier"],
+                            list(values["capability_tags"]),
+                            values["sensitivity"],
+                            dict(values["access_policy"]),
+                        )
+                    )
                 expired_values: list[dict[str, Any]] = []
                 for values, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
                     due_values, audit_context, strict=True
@@ -4737,6 +4794,8 @@ class PostgresEngine:
             "trimmed_relations": [],
             "removed_entities": [],
             "trimmed_entities": [],
+            "expired_working_memory": [],
+            "removed_working_memory": [],
             "removed_intentions": [],
             "erased_derived_evidence": [],
             "retained_derived_evidence": [],
@@ -4793,6 +4852,36 @@ class PostgresEngine:
                     _bytes_to_cid(item) for item in retained_metadata
                 )
                 propagated["trimmed_derived_evidence"] = list(propagated["retained_derived_evidence"])
+                cur.execute(
+                    """
+                    SELECT item_id
+                    FROM working_memory
+                    WHERE tenant_id = %s AND evidence_ids && %s
+                    ORDER BY item_id
+                    """,
+                    (db_tenant_id, affected_cid_bytes),
+                )
+                working_item_ids = [str(row["item_id"]) for row in cur.fetchall()]
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    cur.execute(
+                        """
+                        DELETE FROM working_memory
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["removed_working_memory"] = working_item_ids
+                else:
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', status = 'expired',
+                            expired_at = COALESCE(expired_at, clock_timestamp())
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["expired_working_memory"] = working_item_ids
                 retained_cascade_metadata = {
                     _bytes_to_cid(retained_bytes): {
                         **dict(metadata),
