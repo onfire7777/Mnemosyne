@@ -271,11 +271,12 @@ _PROSPECTIVE_OPERATING_POINT = ProspectiveOperatingPoint(
 
 
 def _prospective_context(
-    trigger_type: str, *, positive: bool
+    tenant_id: str, trigger_type: str, *, positive: bool
 ) -> TriggerEvaluationContext:
     if trigger_type == "event":
         return TriggerEvaluationContext(
             infrastructure_available=True,
+            tenant_id=tenant_id,
             events=[
                 {
                     "event_id": "shared-event-1",
@@ -287,6 +288,7 @@ def _prospective_context(
                         "report_id": "report-1" if positive else "other-report"
                     },
                     "confidence": 0.95 if positive else 0.1,
+                    "tenant_id": tenant_id,
                 }
             ],
             conditions={},
@@ -294,6 +296,7 @@ def _prospective_context(
     if trigger_type == "condition":
         return TriggerEvaluationContext(
             infrastructure_available=True,
+            tenant_id=tenant_id,
             events=[],
             conditions={
                 "report-ready": {
@@ -302,11 +305,13 @@ def _prospective_context(
                         _PROSPECTIVE_EVALUATED_AT - timedelta(minutes=1)
                     ).isoformat(),
                     "confidence": 0.95 if positive else 0.1,
+                    "tenant_id": tenant_id,
                 }
             },
         )
     return TriggerEvaluationContext(
         infrastructure_available=True,
+        tenant_id=tenant_id,
         events=[],
         conditions={},
     )
@@ -417,19 +422,19 @@ def test_shared_prospective_trigger_matrix(
         first = engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-            trigger_context=_prospective_context(trigger_type, positive=True),
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
         second = engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-            trigger_context=_prospective_context(trigger_type, positive=True),
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
         replay = engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-            trigger_context=_prospective_context(trigger_type, positive=True),
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
         assert [item.intention_id for item in first] == [prerequisite.intention_id]
@@ -457,7 +462,7 @@ def test_shared_prospective_trigger_matrix(
             engine.evaluate_due_intentions(
                 tenant,
                 evaluated_at=no_fire_at,
-                trigger_context=_prospective_context(trigger_type, positive=False),
+                trigger_context=_prospective_context(tenant, trigger_type, positive=False),
                 operating_point=_PROSPECTIVE_OPERATING_POINT,
             )
             == []
@@ -465,13 +470,13 @@ def test_shared_prospective_trigger_matrix(
         fired = engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-            trigger_context=_prospective_context(trigger_type, positive=True),
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
         replay = engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-            trigger_context=_prospective_context(trigger_type, positive=True),
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
         assert [item.intention_id for item in fired] == [intention.intention_id]
@@ -555,7 +560,7 @@ def test_shared_firing_receipt_survives_erasure_and_rejects_reuse(
     assert engine.evaluate_due_intentions(
         tenant,
         evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-        trigger_context=_prospective_context("exact_time", positive=True),
+        trigger_context=_prospective_context(tenant, "exact_time", positive=True),
         operating_point=_PROSPECTIVE_OPERATING_POINT,
     )
     engine.forget(
@@ -649,7 +654,7 @@ def test_shared_prospective_cancellation_is_tenant_scoped_and_idempotent(
         engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=10),
-            trigger_context=_prospective_context("exact_time", positive=True),
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
         == []
@@ -688,7 +693,7 @@ def test_shared_prospective_evaluation_requires_explicit_operating_point(
         engine.evaluate_due_intentions(
             tenant,
             evaluated_at=_PROSPECTIVE_EVALUATED_AT,
-            trigger_context=_prospective_context("exact_time", positive=True),
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
             operating_point=None,
         )
 

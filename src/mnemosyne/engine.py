@@ -184,12 +184,15 @@ class TriggerEvaluationContext:
     """
 
     infrastructure_available: bool
+    tenant_id: str
     events: list[dict[str, Any]]
     conditions: dict[str, dict[str, Any]]
 
     def __post_init__(self) -> None:
         if type(self.infrastructure_available) is not bool:
             raise ValueError("infrastructure_available must be a bool")
+        if type(self.tenant_id) is not str or not self.tenant_id.strip():
+            raise ValueError("tenant_id must be a non-empty string")
         if type(self.events) is not list:
             raise ValueError("events must be a list of JSON objects")
         if type(self.conditions) is not dict:
@@ -206,6 +209,7 @@ class TriggerEvaluationContext:
                 "occurred_at",
                 "payload",
                 "confidence",
+                "tenant_id",
             }
             if unknown_keys:
                 raise ValueError(
@@ -217,6 +221,12 @@ class TriggerEvaluationContext:
             if event_id in seen_event_ids:
                 raise ValueError(f"events[{index}].event_id must be unique within context")
             seen_event_ids.add(event_id)
+            event_tenant_id = event.get("tenant_id")
+            if type(event_tenant_id) is not str or not event_tenant_id.strip():
+                raise ValueError(f"events[{index}].tenant_id must be a non-empty string")
+            if event_tenant_id != self.tenant_id:
+                raise ValueError(f"events[{index}].tenant_id must match context tenant_id")
+            event["tenant_id"] = event_tenant_id
             event_type = event.get("event_type")
             if type(event_type) is not str or not event_type.strip():
                 raise ValueError(f"events[{index}].event_type must be a non-empty string")
@@ -233,6 +243,9 @@ class TriggerEvaluationContext:
             payload = event.get("payload")
             if type(payload) is not dict:
                 raise ValueError(f"events[{index}].payload must be a JSON object")
+            payload_tenant_id = payload.get("tenant_id")
+            if payload_tenant_id is not None and payload_tenant_id != self.tenant_id:
+                raise ValueError(f"events[{index}].payload tenant_id must match context tenant_id")
             event["payload"] = _normalize_json_value(payload, path=f"events[{index}].payload")
             confidence = event.get("confidence")
             if type(confidence) not in {int, float} or not math.isfinite(float(confidence)):
@@ -251,7 +264,7 @@ class TriggerEvaluationContext:
             observation = _normalize_json_value(
                 observation, path=f"conditions[{condition_id}]"
             )
-            unknown_keys = set(observation) - {"value", "observed_at", "confidence"}
+            unknown_keys = set(observation) - {"value", "observed_at", "confidence", "tenant_id"}
             if unknown_keys:
                 raise ValueError(
                     f"conditions[{condition_id}] contains unknown keys: "
@@ -259,6 +272,12 @@ class TriggerEvaluationContext:
                 )
             if "value" not in observation:
                 raise ValueError(f"conditions[{condition_id}].value is required")
+            observation_tenant_id = observation.get("tenant_id")
+            if type(observation_tenant_id) is not str or not observation_tenant_id.strip():
+                raise ValueError(f"conditions[{condition_id}].tenant_id must be a non-empty string")
+            if observation_tenant_id != self.tenant_id:
+                raise ValueError(f"conditions[{condition_id}].tenant_id must match context tenant_id")
+            observation["tenant_id"] = observation_tenant_id
             observed_at = observation.get("observed_at")
             if type(observed_at) is not str:
                 raise ValueError(
@@ -788,6 +807,8 @@ def validate_intention_evaluation_inputs(
         raise ValueError("evaluated_at must be timezone-aware")
     if not isinstance(trigger_context, TriggerEvaluationContext):
         raise ValueError("trigger_context must be a TriggerEvaluationContext")
+    if trigger_context.tenant_id != tenant_id:
+        raise ValueError("trigger_context tenant_id must match tenant_id")
     if not isinstance(operating_point, ProspectiveOperatingPoint):
         raise ValueError("operating_point must be a ProspectiveOperatingPoint")
     if not trigger_context.infrastructure_available:

@@ -5199,7 +5199,7 @@ class PostgresEngine:
                      AS external_user_id,
                    trust_tier, capability_tags, erased
             FROM evidence
-            WHERE tenant_id = %s AND branch = 'main' AND cid = ANY(%s)
+            WHERE tenant_id = %s AND cid = ANY(%s)
             ORDER BY cid
             FOR SHARE
             """,

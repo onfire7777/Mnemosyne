@@ -619,12 +619,13 @@ class MemoryTools:
             tenant_id=tenant_id,
             actor_id=user_id,
             owner_id=user_id,
+            agent_id=agent_id,
         )
         intention = Intention(
             intention_id=new_id(),
             tenant_id=authorization.tenant_id or tenant_id,
             user_id=authorization.owner_id or user_id,
-            agent_id=agent_id,
+            agent_id=authorization.agent_id or agent_id,
             trigger_type=trigger_type,
             trigger_expression=trigger_expression,
             action=action,
@@ -683,7 +684,12 @@ class MemoryTools:
             raise ValueError("trigger_context must be a JSON object")
         if type(operating_point) is not dict:
             raise ValueError("operating_point must be a JSON object")
-        context = TriggerEvaluationContext(**trigger_context)
+        context_tenant_id = trigger_context.get("tenant_id", authorization.tenant_id or tenant_id)
+        if context_tenant_id != (authorization.tenant_id or tenant_id):
+            raise ValueError("trigger_context tenant_id must match authenticated tenant")
+        context_arguments = dict(trigger_context)
+        context_arguments["tenant_id"] = authorization.tenant_id or tenant_id
+        context = TriggerEvaluationContext(**context_arguments)
         point = ProspectiveOperatingPoint(**operating_point)
         intentions = self.engine.evaluate_due_intentions(
             authorization.tenant_id or tenant_id,
@@ -719,6 +725,7 @@ class MemoryTools:
         tenant_id: str,
         actor_id: str | None = None,
         owner_id: str | None = None,
+        agent_id: str | None = None,
     ) -> Any:
         decision = self.security.authorize_prospective_memory(
             operation,
@@ -726,6 +733,7 @@ class MemoryTools:
             tenant_id=tenant_id,
             actor_id=actor_id,
             owner_id=owner_id,
+            agent_id=agent_id,
         )
         if not decision.allowed:
             raise PermissionError(f"{operation} intention denied: {decision.reason}")

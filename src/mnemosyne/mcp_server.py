@@ -494,6 +494,10 @@ class MnemosyneMcpServer:
                 identity.user_id,
                 "cancellation principal",
             )
+        if "agent_id" in parameter_names:
+            if not identity.agent_id:
+                raise PermissionError("session agent identity required")
+            self._bind_string_claim(arguments, "agent_id", identity.agent_id, "agent")
         if "role" in parameter_names:
             arguments["role"] = identity.role
         if "source_trust_tier" in parameter_names:

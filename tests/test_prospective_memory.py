@@ -45,11 +45,23 @@ def _context(
     infrastructure_available: bool = True,
     events: list[dict[str, Any]] | None = None,
     conditions: dict[str, dict[str, Any]] | None = None,
+    tenant_id: str = TENANT_ID,
 ) -> TriggerEvaluationContext:
+    normalized_events = [
+        {**event, "tenant_id": event.get("tenant_id", tenant_id)} for event in events or []
+    ]
+    normalized_conditions = {
+        condition_id: {
+            **observation,
+            "tenant_id": observation.get("tenant_id", tenant_id),
+        }
+        for condition_id, observation in (conditions or {}).items()
+    }
     return TriggerEvaluationContext(
         infrastructure_available=infrastructure_available,
-        events=events or [],
-        conditions=conditions or {},
+        tenant_id=tenant_id,
+        events=normalized_events,
+        conditions=normalized_conditions,
     )
 
 
@@ -347,7 +359,7 @@ def test_intention_tenant_scope_and_cancellation_ownership() -> None:
         engine.evaluate_due_intentions(
             "other-tenant",
             evaluated_at=EVALUATED_AT,
-            trigger_context=_context(),
+            trigger_context=_context(tenant_id="other-tenant"),
             operating_point=OPERATING_POINT,
         )
         == []
@@ -387,6 +399,17 @@ def test_intention_tenant_scope_and_cancellation_ownership() -> None:
     assert cancellation_audits[0]["trust_tier"] == 2
     assert cancellation_audits[0]["capability_tags"] == ["prospective-memory"]
     assert cancellation_audits[0]["diff"]["intention_digest"]
+
+
+def test_evaluation_rejects_trigger_context_from_another_tenant() -> None:
+    engine = LocalMemoryEngine()
+    with pytest.raises(ValueError, match="trigger_context tenant_id"):
+        engine.evaluate_due_intentions(
+            "other-tenant",
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1393,6 +1416,7 @@ def test_context_rejects_duplicate_event_ids() -> None:
     with pytest.raises(ValueError, match="event_id must be unique"):
         TriggerEvaluationContext(
             infrastructure_available=True,
+            tenant_id=TENANT_ID,
             events=[
                 {
                     "event_id": "evt-1",
@@ -1400,6 +1424,7 @@ def test_context_rejects_duplicate_event_ids() -> None:
                     "occurred_at": EVALUATED_AT.isoformat(),
                     "payload": {},
                     "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
                 },
                 {
                     "event_id": "evt-1",
@@ -1407,6 +1432,7 @@ def test_context_rejects_duplicate_event_ids() -> None:
                     "occurred_at": EVALUATED_AT.isoformat(),
                     "payload": {},
                     "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
                 },
             ],
             conditions={},
@@ -1417,6 +1443,7 @@ def test_context_rejects_naive_event_timestamp() -> None:
     with pytest.raises(ValueError, match="occurred_at must be timezone-aware"):
         TriggerEvaluationContext(
             infrastructure_available=True,
+            tenant_id=TENANT_ID,
             events=[
                 {
                     "event_id": "evt-1",
@@ -1424,6 +1451,7 @@ def test_context_rejects_naive_event_timestamp() -> None:
                     "occurred_at": EVALUATED_AT.replace(tzinfo=None).isoformat(),
                     "payload": {},
                     "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
                 }
             ],
             conditions={},
@@ -1434,6 +1462,7 @@ def test_context_rejects_confidence_out_of_range() -> None:
     with pytest.raises(ValueError, match="confidence must be in"):
         TriggerEvaluationContext(
             infrastructure_available=True,
+            tenant_id=TENANT_ID,
             events=[
                 {
                     "event_id": "evt-1",
@@ -1441,6 +1470,7 @@ def test_context_rejects_confidence_out_of_range() -> None:
                     "occurred_at": EVALUATED_AT.isoformat(),
                     "payload": {},
                     "confidence": 1.5,
+                    "tenant_id": TENANT_ID,
                 }
             ],
             conditions={},
@@ -1451,6 +1481,7 @@ def test_context_rejects_non_bool_infrastructure_available() -> None:
     with pytest.raises(ValueError, match="infrastructure_available must be a bool"):
         TriggerEvaluationContext(
             infrastructure_available="yes",  # type: ignore[arg-type]
+            tenant_id=TENANT_ID,
             events=[],
             conditions={},
         )
@@ -1712,6 +1743,7 @@ def test_operating_point_rejects_integer_metrics(field: str) -> None:
                     "payload": {},
                     "confidence": 0.9,
                     "tenant_id": TENANT_ID,
+                    "unexpected": TENANT_ID,
                 }
             ],
             {},
@@ -1725,6 +1757,7 @@ def test_operating_point_rejects_integer_metrics(field: str) -> None:
                     "observed_at": EVALUATED_AT.isoformat(),
                     "confidence": 0.9,
                     "tenant_id": TENANT_ID,
+                    "unexpected": TENANT_ID,
                 }
             },
             r"conditions\[condition-1\] contains unknown keys",
@@ -1739,6 +1772,7 @@ def test_context_rejects_unknown_signal_keys(
     with pytest.raises(ValueError, match=message):
         TriggerEvaluationContext(
             infrastructure_available=True,
+            tenant_id=TENANT_ID,
             events=events,
             conditions=conditions,
         )
