@@ -3447,6 +3447,21 @@ class LocalMemoryEngine:
             if mode is ErasureMode.HARD_DELETE_LEGAL:
                 placeholder_map = build_erasure_placeholder_map({cid, *derived_cids}, tenant_id)
                 stored_propagated = redact_erased_cids(propagated, placeholder_map)
+                # A legal hard delete must redact the erased provenance from
+                # every retained custody record, including audits emitted
+                # before this erasure was requested.
+                self.audit_log[:] = [
+                    redact_erased_cids(record, placeholder_map)
+                    for record in self.audit_log
+                ]
+                self.deletion_log[:] = [
+                    redact_erased_cids(record, placeholder_map)
+                    for record in self.deletion_log
+                ]
+                self.merge_log[:] = [
+                    redact_erased_cids(record, placeholder_map)
+                    for record in self.merge_log
+                ]
                 deletion_record_cid = erasure_deletion_record_id(cid, tenant_id, ev.user_id)
                 audit_target_id = placeholder_map[cid]
             else:

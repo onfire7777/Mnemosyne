@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
 from typing import Any
@@ -120,6 +120,18 @@ def test_working_item_rejects_invalid_identity_clock_ttl_and_payload() -> None:
             _item("evidence", **overrides)
 
 
+def test_working_item_accepts_inclusive_ttl_and_normalizes_aware_clocks() -> None:
+    pacific = timezone(timedelta(hours=-7))
+    item = _item(
+        "evidence",
+        created_at=CREATED_AT.astimezone(pacific),
+        expires_at=(CREATED_AT + timedelta(hours=24)).astimezone(pacific),
+    )
+
+    assert item.created_at == CREATED_AT
+    assert item.expires_at == CREATED_AT + timedelta(hours=24)
+
+
 def test_ttl_boundary_is_half_open_and_expiry_is_audited_once() -> None:
     engine = LocalMemoryEngine()
     item = _put(engine)
@@ -144,6 +156,30 @@ def test_ttl_boundary_is_half_open_and_expiry_is_audited_once() -> None:
     assert audits[1]["diff"]["deadline"] == EXPIRES_AT.isoformat()
     assert audits[1]["diff"]["sweep"] == EXPIRES_AT.isoformat()
     assert audits[1]["diff"]["status"] == "expired"
+
+
+def test_working_audit_is_deterministic_and_idempotent(tmp_path: Path) -> None:
+    store = tmp_path / "working.json"
+    engine = LocalMemoryEngine(store_path=store)
+    item = _put(engine)
+    audit = next(row for row in engine.audit_log if row["target_id"] == item.item_id)
+    before = copy.deepcopy(engine.audit_log)
+
+    engine._audit(
+        TENANT,
+        AGENT,
+        "put_working",
+        item.item_id,
+        {"status": "active"},
+        source="working_memory",
+        event_id=audit["id"],
+        occurred_at=CREATED_AT,
+    )
+
+    assert engine.audit_log == before
+    reloaded = LocalMemoryEngine(store_path=store)
+    reloaded_audit = next(row for row in reloaded.audit_log if row["target_id"] == item.item_id)
+    assert reloaded_audit["id"] == audit["id"]
 
 
 def test_repeated_expiry_is_idempotent_and_clock_rollback_cannot_resurrect(tmp_path: Path) -> None:
@@ -421,6 +457,25 @@ def test_erasure_cascades_to_working_items_and_blocks_recovery() -> None:
         assert engine.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT) is None
         assert engine.list_working(TENANT, SESSION, as_of=CREATED_AT) == []
         assert engine.expire_working(TENANT, expired_at=EXPIRES_AT) == []
+
+
+def test_hard_delete_erasure_redacts_working_provenance_from_custody_records(tmp_path: Path) -> None:
+    store = tmp_path / "working.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _evidence(engine)
+    _put(engine, evidence_id=evidence_id)
+
+    engine.forget(
+        TENANT,
+        evidence_id,
+        requested_by="legal",
+        erasure_mode="hard_delete_legal",
+    )
+
+    reloaded = LocalMemoryEngine(store_path=store)
+    exported = reloaded.export_tenant(TENANT)
+    assert evidence_id not in str(exported)
+    assert reloaded.working_memory == {}
 
 
 def test_stale_erased_provenance_fails_closed_before_expiry() -> None:
