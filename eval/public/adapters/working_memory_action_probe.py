@@ -77,8 +77,14 @@ def run(
                 or item.get("session_id") != case["session_id"]
                 for item in visible
             )
+            scoped_visible = [
+                item
+                for item in visible
+                if item.get("tenant_id") == case["tenant_id"]
+                and item.get("session_id") == case["session_id"]
+            ]
             decision = choose_action(
-                visible,
+                scoped_visible,
                 case["action_choices"],
                 threshold=normalized["operating_point"]["positive_threshold"],
             )
@@ -89,7 +95,9 @@ def run(
                     "status": "abstain" if decision is None else "action",
                     "predicted_action_id": decision,
                     "visible_item_ids": sorted(
-                        item["item_id"] for item in visible if _valid_visible_item(item)
+                        item["item_id"]
+                        for item in scoped_visible
+                        if _valid_visible_item(item)
                     ),
                     "command_log": command_log,
                     "scoring_family": "deterministic-action",
@@ -243,7 +251,15 @@ def score(
             {
                 "isolation": "tenant_session",
                 "cases": total,
-                "accuracy": _ratio(sum(row["correct"] for row in rows), total),
+                "accuracy": _ratio(
+                    sum(
+                        not trace.get("hard_gate_violations", {}).get(
+                            "foreign_scope_visible", 0
+                        )
+                        for trace in traces
+                    ),
+                    total,
+                ),
             }
         ],
         "hard_gate_violations": {
@@ -302,6 +318,8 @@ def _validate_case(value: Any) -> dict[str, Any]:
     prior_at: datetime | None = None
     for event in events:
         _validate_event(event, case, seen_events)
+        if event["item_type"] != case["category"]:
+            raise ValueError("working-action event item_type must match case category")
         at = _timestamp(event["at"], "event at")
         if prior_at is not None and at < prior_at:
             raise ValueError("working-action events must be chronological")
