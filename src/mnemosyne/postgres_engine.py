@@ -20,6 +20,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from mnemosyne.access_policy import (
     AccessDecision,
     apply_relation_redactions,
+    apply_record_redactions,
     apply_statement_redactions,
     apply_text_redactions,
     effective_max_sensitivity,
@@ -333,6 +334,16 @@ def _working_snapshot(values: dict[str, Any]) -> dict[str, Any]:
 def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime | None = None) -> dict[str, Any]:
     diff: dict[str, Any] = {
         "working_item_digest": content_cid("working_memory", _working_snapshot(values)),
+        "evidence_ref_digest": content_cid(
+            "working_memory_evidence_refs",
+            {
+                "tenant_id": values["tenant_id"],
+                "session_id": values["session_id"],
+                "item_id": values["item_id"],
+                "evidence_ids": list(values["evidence_ids"]),
+            },
+        ),
+        "evidence_count": len(values["evidence_ids"]),
         "tenant_id": values["tenant_id"],
         "session_id": values["session_id"],
         "item_id": values["item_id"],
@@ -340,7 +351,6 @@ def _working_audit_diff(values: dict[str, Any], *, status: str, sweep: datetime 
         "kind": values["kind"],
         "created_at": values["created_at"].isoformat(),
         "expires_at": values["expires_at"].isoformat(),
-        "evidence_ids": list(values["evidence_ids"]),
         "deadline": values["expires_at"].isoformat(),
         "status": status,
     }
@@ -1441,6 +1451,10 @@ class PostgresEngine:
 
         trust_tiers = [values["trust_tier"]]
         capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
+        if values["trust_tier"] > self.policy.max_trust_tier:
+            raise PermissionError("working item exceeds the working write trust ceiling")
+        if is_write_tainted(capability_tags):
+            raise PermissionError("tainted working-memory data carries no write authority")
         sensitivities = [values["sensitivity"]]
         access_policies = [
             validate_access_policy(
@@ -1484,7 +1498,10 @@ class PostgresEngine:
             source_tags = list(row["capability_tags"] or [])
             if type(source_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in source_tags):
                 raise ValueError("originating evidence capability tags are invalid")
-            capability_tags.update(tag.strip().lower() for tag in source_tags)
+            normalized_source_tags = [tag.strip().lower() for tag in source_tags]
+            if is_write_tainted(normalized_source_tags):
+                raise PermissionError("tainted originating evidence carries no write authority")
+            capability_tags.update(normalized_source_tags)
             sensitivity = row["sensitivity"]
             if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
                 raise ValueError("originating evidence sensitivity is invalid")
@@ -1512,6 +1529,9 @@ class PostgresEngine:
         context_tenant = str(context.get("tenant_id") or context.get("tenant") or "")
         if context_tenant != values["tenant_id"]:
             return None
+        context_user = str(context.get("user_id") or context.get("subject") or "")
+        if context_user != values["user_id"]:
+            return None
         decision = may_read_item(
             item_tenant_id=values["tenant_id"],
             sensitivity=int(values["sensitivity"]),
@@ -1526,6 +1546,9 @@ class PostgresEngine:
         redacted_values["content"] = apply_text_redactions(
             str(redacted_values["content"]), redacted_values["access_policy"], decision
         )[0]
+        redacted_values["metadata"], _ = apply_record_redactions(
+            redacted_values["metadata"], redacted_values["access_policy"], decision
+        )
         return redacted_values
 
     @staticmethod
@@ -4862,26 +4885,6 @@ class PostgresEngine:
                     (db_tenant_id, affected_cid_bytes),
                 )
                 working_item_ids = [str(row["item_id"]) for row in cur.fetchall()]
-                if mode is ErasureMode.HARD_DELETE_LEGAL:
-                    cur.execute(
-                        """
-                        DELETE FROM working_memory
-                        WHERE tenant_id = %s AND evidence_ids && %s
-                        """,
-                        (db_tenant_id, affected_cid_bytes),
-                    )
-                    propagated["removed_working_memory"] = working_item_ids
-                else:
-                    cur.execute(
-                        """
-                        UPDATE working_memory
-                        SET content = '', status = 'expired',
-                            expired_at = COALESCE(expired_at, clock_timestamp())
-                        WHERE tenant_id = %s AND evidence_ids && %s
-                        """,
-                        (db_tenant_id, affected_cid_bytes),
-                    )
-                    propagated["expired_working_memory"] = working_item_ids
                 retained_cascade_metadata = {
                     _bytes_to_cid(retained_bytes): {
                         **dict(metadata),
@@ -4924,6 +4927,26 @@ class PostgresEngine:
                             "min_corroboration_for_delete": minimum,
                             "blocking_assertions": blocking,
                         }
+                if mode is ErasureMode.HARD_DELETE_LEGAL:
+                    cur.execute(
+                        """
+                        DELETE FROM working_memory
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["removed_working_memory"] = working_item_ids
+                else:
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', status = 'expired',
+                            expired_at = COALESCE(expired_at, clock_timestamp())
+                        WHERE tenant_id = %s AND evidence_ids && %s
+                        """,
+                        (db_tenant_id, affected_cid_bytes),
+                    )
+                    propagated["expired_working_memory"] = working_item_ids
                 if mode is ErasureMode.HARD_DELETE_LEGAL:
                     cur.execute(
                         """

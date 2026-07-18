@@ -10,11 +10,13 @@ from uuid import uuid4
 import pytest
 
 from mnemosyne.models import Evidence
+from mnemosyne.policy import OperatingPolicy
 from mnemosyne.postgres_engine import (
     PostgresEngine,
     PostgresUnavailableError,
     WorkingMemoryItem,
     _stable_uuid,
+    _working_audit_diff,
     _working_payload,
 )
 
@@ -198,6 +200,69 @@ def test_working_payload_canonicalizes_utc_and_preserves_security_fields() -> No
 def test_working_payload_rejects_unsafe_ttl_boundaries(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         _working_payload(_item(**overrides))
+
+
+def test_working_reads_require_matching_user_context() -> None:
+    engine = PostgresEngine("postgresql://unit-test-fake", require_safe_role=False)
+    values = _working_payload(_item())
+
+    assert engine._working_read_values(values, context=_read_context("tenant-a", "user-b")) is None
+    readable = engine._working_read_values(values, context=_read_context("tenant-a", "user-a"))
+    assert readable is not None
+    assert readable["content"] == "transient task state"
+
+
+def test_working_reads_redact_metadata_fields_for_lower_roles() -> None:
+    engine = PostgresEngine("postgresql://unit-test-fake", require_safe_role=False)
+    values = _working_payload(
+        _item(
+            access_policy={
+                "tenant": "tenant-a",
+                "redact_fields": ["secret"],
+                "min_role_for_raw": "operator",
+            },
+            metadata={"secret": "do-not-leak", "public": "safe"},
+        )
+    )
+
+    readable = engine._working_read_values(values, context=_read_context("tenant-a", "user-a"))
+
+    assert readable is not None
+    assert readable["metadata"] == {"secret": "[REDACTED:secret]", "public": "safe"}
+
+
+def test_working_provenance_enforces_trust_ceiling_and_taint() -> None:
+    engine = PostgresEngine(
+        "postgresql://unit-test-fake",
+        policy=OperatingPolicy(max_trust_tier=4),
+        require_safe_role=False,
+    )
+    source_row = {
+        "user_id": _stable_uuid("user", "user-a"),
+        "session_id": _stable_uuid("session", "session-a"),
+        "erased": False,
+        "trust_tier": 0,
+        "capability_tags": [],
+        "sensitivity": 0,
+        "access_policy": {},
+    }
+    cursor = types.SimpleNamespace(execute=lambda *_args: None, fetchone=lambda: source_row)
+
+    with pytest.raises(PermissionError, match="trust ceiling"):
+        engine._working_provenance(cursor, _working_payload(_item(trust_tier=5)))
+
+    source_row["capability_tags"] = ["data-only"]
+    with pytest.raises(PermissionError, match="tainted"):
+        engine._working_provenance(cursor, _working_payload(_item()))
+
+
+def test_working_audit_diff_keeps_evidence_references_erasure_safe() -> None:
+    evidence_id = "ab" * 32
+    diff = _working_audit_diff(_working_payload(_item(evidence_ids=[evidence_id])), status="active")
+
+    assert evidence_id not in str(diff)
+    assert diff["evidence_count"] == 1
+    assert isinstance(diff["evidence_ref_digest"], str)
 
 
 def test_schema_declares_working_memory_identity_indexes_rls_and_audit_idempotency() -> None:
