@@ -16,12 +16,10 @@ import time
 from copy import deepcopy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Protocol, Sequence
 from uuid import UUID
 from weakref import WeakKeyDictionary
 
-from .evidence_signing import sign_evidence_manifest
 from .models import Evidence
 from .security import SecurityPolicy, SessionIdentity
 
@@ -53,7 +51,7 @@ class LedgerRecord:
     fingerprint: str
     tenant_id: str
     generation: int
-    receipts: dict[str, SurfaceReceipt] = field(default_factory=dict)
+    receipts: dict[tuple[str, str], SurfaceReceipt] = field(default_factory=dict)
     manifest: dict[str, Any] | None = None
 
 
@@ -161,8 +159,6 @@ class DeletionCoordinator:
         mode: str,
         requested_by_role: str,
         reason: str,
-        manifest_path: str | None = None,
-        signing_private_key_path: str | None = None,
     ) -> dict[str, Any]:
         request = self._validate_request(
             schema=schema,
@@ -180,26 +176,10 @@ class DeletionCoordinator:
         lock = getattr(self.ledger, "lock", threading.RLock())
         with lock:
             if record.manifest is not None and record.manifest["summary"]["complete"]:
-                self._persist_manifest(record.manifest, manifest_path, signing_private_key_path)
                 return deepcopy(record.manifest)
             manifest = self._run(record, request)
-            self._persist_manifest(manifest, manifest_path, signing_private_key_path)
             record.manifest = deepcopy(manifest)
             return deepcopy(manifest)
-
-    @staticmethod
-    def _persist_manifest(
-        manifest: dict[str, Any],
-        manifest_path: str | None,
-        signing_private_key_path: str | None,
-    ) -> None:
-        if manifest_path is None or not manifest["summary"]["complete"]:
-            return
-        if signing_private_key_path is None:
-            raise ValueError("signing_private_key_path is required with manifest_path")
-        path = Path(manifest_path)
-        path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
-        sign_evidence_manifest(path, Path(signing_private_key_path))
 
     def _validate_request(self, **raw: Any) -> dict[str, Any]:
         identity = self.identity
@@ -246,83 +226,87 @@ class DeletionCoordinator:
     def _run(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         tenant = request["tenant_id"]
         refs = request["source_refs"]
-        required = self._surface_names(tenant, refs)
-        for name in required:
-            record.receipts.setdefault(name, SurfaceReceipt(surface=name))
+        required = self._surface_ids(tenant, refs)
+        for surface_id in required:
+            record.receipts.setdefault(surface_id, SurfaceReceipt(surface=self._surface_label(surface_id)))
 
         # Boundary stores must be available before other external effects.  This
         # is a precondition gate, not rollback; verified deletions are never restored.
-        boundary = [name for name in ("journal", "manifest_store") if name in self.stores]
-        boundary += ["object_storage"] if (
+        boundary = [("store", name) for name in ("journal", "manifest_store") if name in self.stores]
+        boundary += [("object", "object_storage")] if (
             "object_storage" in self.stores or any(self._target_object_keys(tenant, refs))
         ) else []
-        for name in boundary:
-            if not self._attempt(record, name, tenant, refs):
+        for surface_id in boundary:
+            if not self._attempt(record, surface_id, tenant, refs):
                 return self._manifest(record, request)
 
-        for name in required:
-            if name in {"source_evidence", "sqlite", *boundary}:
+        engine_ids = {("engine", "source_evidence"), ("engine", "sqlite")}
+        for surface_id in required:
+            if surface_id in engine_ids or surface_id in boundary:
                 continue
-            self._attempt(record, name, tenant, refs)
+            self._attempt(record, surface_id, tenant, refs)
 
         externals_verified = all(
             receipt.verified_removed
-            for name, receipt in record.receipts.items()
-            if name not in {"source_evidence", "sqlite"}
+            for surface_id, receipt in record.receipts.items()
+            if surface_id not in engine_ids
         )
         if externals_verified:
             self._attempt_engine(record, request)
         return self._manifest(record, request)
 
-    def _surface_names(self, tenant: str, refs: list[str]) -> list[str]:
-        names = [self._store_surface(name) for name in self.stores]
-        names.extend(
-            f"cache:{key}"
+    def _surface_ids(self, tenant: str, refs: list[str]) -> list[tuple[str, str]]:
+        surface_ids = [("store", name) for name in self.stores]
+        surface_ids.extend(
+            ("cache", key)
             for key, value in self.process_cache.items()
             if isinstance(value, dict)
             and value.get("tenant_id") == tenant
             and value.get("source_ref") in refs
         )
         if self._target_object_keys(tenant, refs):
-            names.append("object_storage")
+            surface_ids.append(("object", "object_storage"))
         if any(row.get("tenant_id") == tenant and row.get("source_ref") in refs for row in self.backup_snapshots):
-            names.append("backups")
+            surface_ids.append(("backup", "backups"))
         engine_surface = "sqlite" if self.engine.__class__.__name__ == "SqliteEngine" else "source_evidence"
-        names.append(engine_surface)
-        return list(dict.fromkeys(names))
+        surface_ids.append(("engine", engine_surface))
+        return list(dict.fromkeys(surface_ids))
 
     @staticmethod
-    def _store_surface(name: str) -> str:
-        return "runtime_user_model" if name == "runtime_state" else name
+    def _surface_label(surface_id: tuple[str, str]) -> str:
+        kind, name = surface_id
+        if kind == "cache":
+            return f"cache:{name}"
+        if kind == "store" and name == "runtime_state":
+            return "runtime_user_model"
+        return name
 
-    def _attempt(self, record: LedgerRecord, surface: str, tenant: str, refs: list[str]) -> bool:
-        receipt = record.receipts[surface]
+    def _attempt(self, record: LedgerRecord, surface_id: tuple[str, str], tenant: str, refs: list[str]) -> bool:
+        kind, name = surface_id
+        receipt = record.receipts[surface_id]
         if receipt.verified_removed:
             return True
+        if kind == "store" and receipt.attempts:
+            try:
+                if self._probe_store(self.stores[name], tenant, refs):
+                    return self._verified(receipt)
+            except Exception:
+                receipt.state = "failed"
+                receipt.error_code = "probe_failed"
+                return False
         receipt.state = "deleting"
         receipt.attempts += 1
         receipt.error_code = None
         try:
-            if surface == "object_storage" and self._target_object_keys(tenant, refs):
+            if kind == "object" and self._target_object_keys(tenant, refs):
                 return self._delete_objects(receipt, tenant, refs)
-            if surface == "backups":
+            if kind == "backup":
                 return self._delete_backups(receipt, tenant, refs)
-            cache_name = surface.removeprefix("cache:") if surface.startswith("cache:") else None
-            cache_keys = [
-                key
-                for key, value in self.process_cache.items()
-                if key == cache_name
-                and isinstance(value, dict)
-                and value.get("tenant_id") == tenant
-                and value.get("source_ref") in refs
-            ]
-            if cache_keys:
-                for key in cache_keys:
-                    del self.process_cache[key]
+            if kind == "cache":
+                del self.process_cache[name]
                 receipt.action = "invalidated"
                 return self._verified(receipt)
-            store_name = "runtime_state" if surface == "runtime_user_model" else surface
-            store = self.stores[store_name]
+            store = self.stores[name]
             for ref in refs:
                 store.delete(tenant, ref)
             if not self._probe_store(store, tenant, refs):
@@ -330,6 +314,13 @@ class DeletionCoordinator:
                 receipt.state = "failed"
                 return False
             return self._verified(receipt)
+        except TimeoutError:
+            receipt.error_code = "delete_ambiguous"
+            try:
+                if kind == "store" and self._probe_store(self.stores[name], tenant, refs):
+                    return self._verified(receipt)
+            except Exception:
+                pass
         except ConnectionError:
             receipt.error_code = "store_unavailable"
         except Exception:
@@ -394,7 +385,7 @@ class DeletionCoordinator:
 
     def _attempt_engine(self, record: LedgerRecord, request: dict[str, Any]) -> None:
         surface = "sqlite" if self.engine.__class__.__name__ == "SqliteEngine" else "source_evidence"
-        receipt = record.receipts[surface]
+        receipt = record.receipts[("engine", surface)]
         if receipt.verified_removed:
             return
         receipt.state = "deleting"
@@ -428,16 +419,17 @@ class DeletionCoordinator:
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         rows = []
         unavailable = failed = verified = 0
-        for name, receipt in record.receipts.items():
+        for surface_id, receipt in record.receipts.items():
             unavailable += receipt.error_code == "store_unavailable"
             failed += receipt.state == "failed" and receipt.error_code != "store_unavailable"
             verified += receipt.verified_removed
             rows.append(
                 {
-                    "surface": name,
+                    "surface": receipt.surface,
+                    "surface_type": surface_id[0],
                     "backend": "synthetic",
                     "tenant_ref": _opaque("tenant", request["tenant_id"]),
-                    "object_ref": _opaque("surface", f"{record.operation_id}:{name}"),
+                    "object_ref": _opaque("surface", f"{record.operation_id}:{surface_id!r}"),
                     "action": receipt.action,
                     "state": receipt.state,
                     "attempts": receipt.attempts,
@@ -449,7 +441,8 @@ class DeletionCoordinator:
         complete = bool(rows) and verified == len(rows)
         expected = len(rows)
         retention_exceptions = []
-        if "backups" in record.receipts and not record.receipts["backups"].verified_removed:
+        backup_id = ("backup", "backups")
+        if backup_id in record.receipts and not record.receipts[backup_id].verified_removed:
             retention_exceptions.append(
                 {
                     "surface": "backups",

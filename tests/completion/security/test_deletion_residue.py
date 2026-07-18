@@ -615,8 +615,8 @@ def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
     manifest = _delete(world)
     retained = world.engine.export_tenant(TENANT)
     _assert_absent(manifest, CANARY, world.source_ref)
-    _assert_absent(retained["audit_log"], world.source_ref)
-    _assert_absent(retained["deletion_log"], world.source_ref)
+    _assert_absent(retained["audit_log"], CANARY, world.source_ref)
+    _assert_absent(retained["deletion_log"], CANARY, world.source_ref)
     assert any(row["id"] == "audit-r21" and row["op"] == "remember" for row in retained["audit_log"])
     assert any(row["id"] == "deletion-r21" for row in retained["deletion_log"])
     assert manifest["source_refs"]
@@ -830,23 +830,47 @@ def test_timeout_after_commit_converges_on_retry_without_early_engine_delete() -
     )
     world.stores["remote"] = remote
 
+    complete = _delete(world)
+
+    _assert_complete(complete)
+    assert remote.rows == []
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
+    assert remote.probe_calls == [(TENANT, world.source_ref)]
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+
+
+def test_timeout_after_commit_retry_probes_before_repeating_delete() -> None:
+    world = _world()
+    remote = FakeStore(
+        "remote",
+        delete_fault="timeout_after_commit",
+        probe_fault="raise",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.stores["remote"] = remote
+
     incomplete = _delete(world)
 
-    assert remote.rows == []
-    assert _surface(incomplete, "remote")["verified_removed"] is False
+    assert incomplete["summary"]["complete"] is False
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
     assert world.engine.get_evidence(TENANT, world.source_ref) is not None
 
+    remote.probe_fault = None
     complete = _delete(world)
+
     _assert_complete(complete)
-    assert remote.delete_calls == [(TENANT, world.source_ref), (TENANT, world.source_ref)]
-    assert remote.probe_calls == [(TENANT, world.source_ref)]
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
+    assert remote.probe_calls == [
+        (TENANT, world.source_ref),
+        (TENANT, world.source_ref),
+    ]
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
 
 
 def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
     world = _world()
-    world.stores["shared"] = FakeStore(
-        "shared",
+    world.stores["cache:shared"] = FakeStore(
+        "cache:shared",
         rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
     )
     world.process_cache["shared"] = {
@@ -858,9 +882,13 @@ def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
     manifest = _delete(world)
 
     _assert_complete(manifest)
-    assert world.stores["shared"].delete_calls == [(TENANT, world.source_ref)]
+    assert world.stores["cache:shared"].delete_calls == [(TENANT, world.source_ref)]
     assert "shared" not in world.process_cache
-    assert {row["surface"] for row in manifest["surfaces"]} >= {"shared", "cache:shared"}
+    assert [
+        (row["surface_type"], row["surface"])
+        for row in manifest["surfaces"]
+        if row["surface"] == "cache:shared"
+    ] == [("store", "cache:shared"), ("cache", "cache:shared")]
 
 
 def test_r18_object_deletion_does_not_match_source_ref_prefixes() -> None:
@@ -873,30 +901,6 @@ def test_r18_object_deletion_does_not_match_source_ref_prefixes() -> None:
 
     assert world.object_keys[target] is None
     assert world.object_keys[unrelated] == b"unrelated-key"
-
-
-def test_replay_conflict_retry_persists_manifest_after_signing_failure(tmp_path: Path) -> None:
-    world = _world()
-    private_key = tmp_path / "collector.key.pem"
-    public_key = tmp_path / "collector.pub.pem"
-    manifest_path = tmp_path / "deletion-manifest.json"
-    generate_collector_keypair(private_key, public_key)
-
-    with pytest.raises(Exception):
-        _delete(
-            world,
-            manifest_path=str(manifest_path),
-            signing_private_key_path=str(tmp_path / "missing-key.pem"),
-        )
-
-    manifest = _delete(
-        world,
-        manifest_path=str(manifest_path),
-        signing_private_key_path=str(private_key),
-    )
-
-    _assert_complete(manifest)
-    assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
 
 
 @pytest.mark.parametrize("surface", ["manifest_store", "remote"])
@@ -931,6 +935,12 @@ def test_each_store_transition_failure_is_recorded_and_resumable(
     incomplete = _delete(world)
 
     receipt = _surface(incomplete, surface)
+    if fault_field == "delete_fault" and fault_value == "timeout_after_commit":
+        _assert_complete(incomplete)
+        assert receipt["state"] == "verified"
+        assert receipt["attempts"] == 1
+        assert target.delete_calls == [(TENANT, world.source_ref)]
+        return
     assert receipt["state"] == "failed"
     assert receipt["verified_removed"] is False
     assert receipt["attempts"] == 1
@@ -942,7 +952,8 @@ def test_each_store_transition_failure_is_recorded_and_resumable(
     complete = _delete(world)
 
     _assert_complete(complete)
-    assert _surface(complete, surface)["attempts"] == 2
+    expected_attempts = 2 if fault_field == "delete_fault" else 1
+    assert _surface(complete, surface)["attempts"] == expected_attempts
     assert journal.delete_calls == [(TENANT, world.source_ref)]
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
 
@@ -1079,31 +1090,3 @@ def test_r25_complete_manifest_is_signed_then_semantically_verified(tmp_path: Pa
     verified = verify_evidence_manifest_signature(manifest_path, public_key)
     assert verified["verified"] is True
     _assert_complete(manifest)
-
-
-def test_r25_coordinator_persists_signed_complete_multi_surface_manifest(tmp_path: Path) -> None:
-    private_key = tmp_path / "collector.key.pem"
-    public_key = tmp_path / "collector.pub.pem"
-    manifest_path = tmp_path / "deletion-manifest.json"
-    generate_collector_keypair(private_key, public_key)
-    world = _world()
-    world.stores["queue"] = FakeStore(
-        "queue",
-        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref, "payload": CANARY}],
-    )
-    object_pointer = f"s3_encrypted://{TENANT}/{world.source_ref}"
-    world.object_keys[object_pointer] = b"wrapped-data-key"
-
-    manifest = _delete(
-        world,
-        manifest_path=str(manifest_path),
-        signing_private_key_path=str(private_key),
-    )
-
-    assert json.loads(manifest_path.read_text(encoding="utf-8")) == manifest
-    assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
-    discovered_surfaces = {row["surface"] for row in manifest["surfaces"]}
-    assert {"source_evidence", "queue", "object_storage"} <= discovered_surfaces
-    assert all(row["verified_removed"] is True for row in manifest["surfaces"])
-    verifier = importlib.import_module("mnemosyne.deletion_manifest")
-    assert verifier.verify_deletion_manifest(manifest) == {"complete": True, "errors": []}
