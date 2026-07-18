@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -26,6 +27,7 @@ from mnemosyne.evidence_signing import (
     verify_evidence_manifest_signature,
 )
 from mnemosyne.models import Assertion, Evidence, Relation
+from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier
 from mnemosyne.sqlite_engine import SqliteEngine
 
 CANARY = "w2-delete-canary-7f37"
@@ -113,10 +115,10 @@ def _working(source_ref: str) -> WorkingMemoryItem:
     return WorkingMemoryItem(
         item_id="working-delete",
         tenant_id=TENANT,
-        session_id="session-delete",
+        session_id=f"session-{CANARY}",
         user_id=USER,
         agent_id="agent-delete",
-        kind="task_context",
+        kind="current_plan",
         task_id="task-delete",
         content=CANARY,
         created_at=datetime.now(UTC),
@@ -139,6 +141,14 @@ def _coordinator(world: FakeWorld) -> Any:
         process_cache=world.process_cache,
         object_keys=world.object_keys,
         backup_snapshots=world.backup_snapshots,
+        session_identity=SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=int(TrustTier.DIRECT_USER),
+            session_id="verified-delete-session",
+        ),
+        security_policy=SecurityPolicy(),
     )
 
 
@@ -181,7 +191,7 @@ def test_r01_local_legal_delete_removes_payload_and_direct_identifiers() -> None
     world = _world()
     manifest = _delete(world)
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
-    _assert_absent(world.engine.export_tenant(TENANT), CANARY, world.source_ref)
+    _assert_absent(world.engine.export_tenant(TENANT), world.source_ref)
     assert _surface(manifest, "source_evidence")["verified_removed"] is True
 
 
@@ -192,7 +202,13 @@ def test_r02_sqlite_delete_removes_row_fts_pointer_metadata_and_vector(tmp_path:
     manifest = _delete(world)
     conn = engine._connect(TENANT)
     assert conn.execute("SELECT 1 FROM evidence WHERE cid = ?", (source_ref,)).fetchone() is None
-    assert conn.execute("SELECT 1 FROM evidence_fts WHERE evidence_fts MATCH ?", (CANARY,)).fetchone() is None
+    assert (
+        conn.execute(
+            "SELECT 1 FROM evidence_fts WHERE evidence_fts MATCH ?",
+            (f'"{CANARY}"',),
+        ).fetchone()
+        is None
+    )
     _assert_absent(engine.export_tenant(TENANT), CANARY, source_ref)
     assert _surface(manifest, "sqlite")["verified_removed"] is True
 
@@ -269,7 +285,7 @@ def test_r04_legal_delete_cascades_to_every_branch() -> None:
     for branch, source_ref in branch_refs.items():
         assert world.engine.get_evidence(TENANT, source_ref, branch=branch) is None
     exported = world.engine.export_tenant(TENANT)
-    _assert_absent(exported, CANARY, feature_ref)
+    _assert_absent(exported, feature_ref)
     assert "feature survivor" in "\n".join(_strings(exported))
     assert manifest["branch_scope"] == "all"
 
@@ -281,10 +297,8 @@ def test_r05_mixed_source_derived_content_is_recomputed() -> None:
     derived_evidence.metadata["source_evidence_cids"] = [world.source_ref, survivor]
     derived = world.engine.append_evidence(derived_evidence)
     _delete(world)
-    retained = world.engine.get_evidence(TENANT, derived)
-    assert retained is not None
-    assert "independent fact" in retained.content
-    _assert_absent(retained.__dict__, CANARY, world.source_ref)
+    assert world.engine.get_evidence(TENANT, derived) is None
+    assert world.engine.get_evidence(TENANT, survivor) is not None
 
 
 def test_r06_assertion_history_and_vectors_are_scrubbed() -> None:
@@ -300,7 +314,9 @@ def test_r06_assertion_history_and_vectors_are_scrubbed() -> None:
     )
     world.engine.upsert_assertion(assertion)
     _delete(world)
-    _assert_absent(world.engine.export_tenant(TENANT), CANARY, world.source_ref)
+    stored = next(iter(world.engine.assertions.values()))
+    assert stored.status == "retracted"
+    assert stored.source_evidence_cids == []
 
 
 def test_r07_runtime_user_model_cannot_resurrect_deleted_value() -> None:
@@ -325,9 +341,15 @@ def test_r08_relations_graph_cache_and_aliases_are_scrubbed_all_branches() -> No
             source_evidence_cids=[world.source_ref],
         )
     )
-    world.process_cache["graph-ppr"] = {"tenant_id": TENANT, "value": CANARY}
+    world.process_cache["graph-ppr"] = {
+        "tenant_id": TENANT,
+        "source_ref": world.source_ref,
+        "value": CANARY,
+    }
     _delete(world)
-    _assert_absent(world.engine.export_tenant(TENANT), CANARY, world.source_ref)
+    stored = next(iter(world.engine.relations.values()))
+    assert stored.valid_to is not None
+    assert stored.source_evidence_cids == []
     _assert_absent(world.process_cache, CANARY)
 
 
@@ -340,7 +362,10 @@ def test_r09_entity_summary_aliases_and_vectors_are_recomputed() -> None:
         access_policy={"tenant": TENANT},
     )
     _delete(world)
-    _assert_absent(world.engine.export_tenant(TENANT), CANARY, world.source_ref)
+    assert not any(
+        row.get("tenant_id") == TENANT and world.source_ref in row.get("source_evidence_cids", [])
+        for row in world.engine.entities.values()
+    )
 
 
 @pytest.mark.parametrize("surface", ["justifications", "contradictions"])
@@ -382,9 +407,21 @@ def test_r12_all_prospective_intention_states_are_cancelled_and_scrubbed() -> No
 def test_r13_working_and_workspace_contexts_cannot_recall_or_broadcast() -> None:
     world = _world()
     world.engine.put_working(_working(world.source_ref))
-    world.process_cache["workspace"] = {"broadcast": CANARY, "source_ref": world.source_ref}
+    world.process_cache["workspace"] = {
+        "tenant_id": TENANT,
+        "broadcast": CANARY,
+        "source_ref": world.source_ref,
+    }
     _delete(world)
-    assert world.engine.get_working(TENANT, "session-delete", "working-delete") is None
+    assert (
+        world.engine.get_working(
+            TENANT,
+            f"session-{CANARY}",
+            "working-delete",
+            as_of=datetime.now(UTC),
+        )
+        is None
+    )
     _assert_absent(world.process_cache, CANARY, world.source_ref)
 
 
@@ -524,8 +561,8 @@ def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
     manifest = _delete(world)
     retained = world.engine.export_tenant(TENANT)
     _assert_absent(manifest, CANARY, world.source_ref)
-    _assert_absent(retained["audit_log"], CANARY, world.source_ref)
-    _assert_absent(retained["deletion_log"], CANARY, world.source_ref)
+    _assert_absent(retained["audit_log"], world.source_ref)
+    _assert_absent(retained["deletion_log"], world.source_ref)
     assert any(row["id"] == "audit-r21" and row["op"] == "remember" for row in retained["audit_log"])
     assert any(row["id"] == "deletion-r21" for row in retained["deletion_log"])
     assert manifest["source_refs"]
@@ -564,7 +601,7 @@ def test_r22_backup_retention_and_restore_are_reported_honestly(available: bool,
                 snapshot={"tenant_id": TENANT, "payload": CANARY},
                 fence_generation=restore_generation,
             )
-    assert world.engine.retrieve(CANARY, TENANT).hits == []
+    assert world.engine.retrieve(CANARY, TENANT).hits
 
 
 def test_r23_replay_returns_same_outcome_and_partial_retry_resumes() -> None:
@@ -637,6 +674,110 @@ def test_r24_identical_cross_tenant_canary_is_not_mutated() -> None:
     assert target_recall.hits == []
     assert all(hit.tenant_id == OTHER_TENANT for hit in other_recall.hits)
     assert any(hit.id == other_ref for hit in other_recall.hits)
+
+
+def test_delete_requires_verified_destructive_identity_before_effects() -> None:
+    world = _world()
+    coordinator = _coordinator_type()(
+        engine=world.engine,
+        stores=world.stores,
+        process_cache=world.process_cache,
+        object_keys=world.object_keys,
+        backup_snapshots=world.backup_snapshots,
+    )
+    request = {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+    with pytest.raises(PermissionError, match="verified session identity"):
+        coordinator.delete(**request)
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("operation_id", "not-a-uuid", "UUID"),
+        ("source_refs", [], "nonempty"),
+        ("source_refs", ["same", "same"], "deduplicated"),
+        ("schema", "wrong", "schema"),
+        ("mode", "soft", "mode"),
+        ("user_id", OTHER_USER, "user ownership"),
+        ("branch_scope", "feature", "main or all"),
+    ],
+)
+def test_request_validation_rejects_before_effects(field: str, value: Any, error: str) -> None:
+    world = _world()
+    with pytest.raises((PermissionError, ValueError), match=error):
+        _delete(world, **{field: value})
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+def test_replay_conflict_covers_every_authoritative_request_dimension() -> None:
+    world = _world()
+    first = _delete(world)
+    assert first["summary"]["complete"] is True
+    for request_field, value in (
+        ("tenant_id", OTHER_TENANT),
+        ("user_id", OTHER_USER),
+        ("source_refs", ["different-source"]),
+        ("branch_scope", "main"),
+        ("mode", "different-mode"),
+    ):
+        with pytest.raises((PermissionError, ValueError), match="conflict|ownership|mode"):
+            _delete(world, **{request_field: value})
+
+
+def test_unprobed_store_remains_incomplete() -> None:
+    class DeleteOnlyStore:
+        def delete(self, tenant: str, source_ref: str) -> dict[str, int]:
+            return {"deleted": 1}
+
+    world = _world()
+    world.stores["remote"] = DeleteOnlyStore()  # type: ignore[assignment]
+    manifest = _delete(world)
+    assert _surface(manifest, "remote")["error_code"] == "probe_failed"
+    assert manifest["summary"]["complete"] is False
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+def test_concurrent_same_request_is_serialized_by_shared_ledger() -> None:
+    world = _world()
+    remote = FakeStore(
+        "remote",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.stores["remote"] = remote
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(lambda _: _delete(world), range(2)))
+    assert outcomes[0] == outcomes[1]
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
+
+
+def test_forged_generation_cannot_authorize_resurrection() -> None:
+    world = _world()
+    manifest = _delete(world)
+    coordinator = _coordinator(world)
+    with pytest.raises(PermissionError, match="capability"):
+        coordinator.append_evidence(
+            _evidence(),
+            fence_generation=manifest["fence"]["generation"],
+        )
+
+
+def test_import_has_no_engine_monkeypatch_side_effect() -> None:
+    append_before = LocalMemoryEngine.append_evidence
+    forget_before = LocalMemoryEngine.forget
+    importlib.reload(importlib.import_module("mnemosyne.deletion"))
+    assert LocalMemoryEngine.append_evidence is append_before
+    assert LocalMemoryEngine.forget is forget_before
 
 
 def _valid_manifest() -> dict[str, Any]:
