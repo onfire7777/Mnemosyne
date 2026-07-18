@@ -305,6 +305,56 @@ def test_same_session_label_does_not_bridge_users() -> None:
     assert engine.get_working(TENANT, SESSION, second.item_id, as_of=CREATED_AT).user_id == "user-b"
 
 
+def test_working_effective_security_envelope_and_audit_digest_are_derived() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _evidence(
+        engine,
+        capability_tags=["Data-Only", "source-tag"],
+        trust_tier=2,
+    )
+    item = _item(
+        evidence_id,
+        capability_tags=["Item-Tag"],
+        trust_tier=1,
+    )
+
+    engine.put_working(item)
+    stored = engine.get_working(TENANT, SESSION, item.item_id, as_of=CREATED_AT)
+    audit = next(row for row in engine.audit_log if row["op"] == "put_working")
+
+    assert stored is not None
+    assert stored.trust_tier == 2
+    assert stored.capability_tags == ["data-only", "item-tag", "source-tag"]
+    assert audit["trust_tier"] == 2
+    assert audit["capability_tags"] == stored.capability_tags
+    assert audit["diff"]["working_item_digest"]
+    assert audit["diff"]["task_id"] == item.task_id
+    assert audit["diff"]["kind"] == item.kind
+
+
+def test_working_list_orders_created_descending_then_item_id() -> None:
+    engine = LocalMemoryEngine()
+    for item_id, created_at in (
+        ("b", CREATED_AT),
+        ("a", CREATED_AT),
+        ("c", CREATED_AT + timedelta(seconds=1)),
+    ):
+        evidence_id = _evidence(engine, content=f"evidence-{item_id}")
+        _put(
+            engine,
+            evidence_id=evidence_id,
+            item_id=item_id,
+            created_at=created_at,
+            expires_at=created_at + timedelta(seconds=30),
+        )
+
+    assert [item.item_id for item in engine.list_working(TENANT, SESSION, as_of=CREATED_AT + timedelta(seconds=2))] == [
+        "c",
+        "a",
+        "b",
+    ]
+
+
 def test_working_values_are_isolated_from_caller_and_return_mutation() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _evidence(engine)
