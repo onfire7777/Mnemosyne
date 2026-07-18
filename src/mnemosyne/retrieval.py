@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import math
@@ -25,7 +26,7 @@ from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit,
 from mnemosyne.models import Hit, parse_dt, utc_now
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
-from mnemosyne.security import trust_weight
+from mnemosyne.security import sanitize_retrieved_text, trust_weight
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -40,6 +41,10 @@ WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS = (
     "workspace_retrieval_advisory_mode",
 )
 WORKSPACE_CONTROLLER_FILTER_KEYS = WORKSPACE_BROADCAST_FILTER_KEYS + WORKSPACE_RETRIEVAL_ADVISORY_FILTER_KEYS
+WORKING_MEMORY_CHANNEL = "working_memory"
+WORKING_MEMORY_ROUTE_VERSION = "working-memory-route.v1"
+WORKING_MEMORY_TASK_WEIGHT = 0.75
+WORKING_MEMORY_RECENCY_WEIGHT = 0.25
 HttpEmbeddingCacheKey = tuple[str, str, str, str, int, str, str]
 _HTTP_EMBEDDING_CACHE: OrderedDict[HttpEmbeddingCacheKey, tuple[float, ...]] = OrderedDict()
 _HTTP_EMBEDDING_CACHE_LOCK = RLock()
@@ -2208,6 +2213,221 @@ def build_channel_hits(
             )
         )
     return sorted(hits, key=lambda item: item.score, reverse=True)
+
+
+def _working_field(item: object, name: str, default: object = None) -> object:
+    if isinstance(item, Mapping):
+        return item.get(name, default)
+    return getattr(item, name, default)
+
+
+def _working_datetime(value: object, *, field: str) -> datetime:
+    parsed = value if isinstance(value, datetime) else parse_dt(value if isinstance(value, str) else None)
+    if parsed is None or parsed.tzinfo is None:
+        raise ValueError(f"working-memory {field} must be timezone-aware")
+    return parsed.astimezone(UTC)
+
+
+def _working_text(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _working_json_object(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {str(key): value for key, value in value.items()}
+
+
+def _working_task_text(*, task_id: str, kind: str, metadata: Mapping[str, Any]) -> str:
+    values = [task_id, kind]
+    for key in ("task", "task_description", "goal", "query", "topic", "task_terms"):
+        value = metadata.get(key)
+        if isinstance(value, (list, tuple, set)):
+            values.extend(str(item) for item in value)
+        elif value is not None:
+            values.append(str(value))
+    # Working-item identifiers commonly use task-foo / task_foo / task/foo.
+    # Treat those separators as words for deterministic task matching.
+    return re.sub(r"[_:/.-]+", " ", " ".join(values))
+
+
+def working_memory_hits(
+    items: Sequence[object],
+    *,
+    query: str,
+    tenant_id: str,
+    session_id: str | None,
+    evaluated_at: datetime | str,
+    branch: str = "main",
+    limit: int | None = None,
+) -> list[Hit]:
+    """Rank active working items for one tenant/session at an explicit instant.
+
+    The store owns authorization and provenance validation; this read-side
+    adapter still repeats the tenant/session and half-open TTL checks so a
+    caller cannot accidentally widen a working-memory read. Expired rows are
+    ignored without mutation. Task relevance is deliberately weighted above
+    content relevance, then blended with TTL-relative recency. Every result is
+    copied into a ``Hit`` and marked as data so working text cannot become
+    instruction authority downstream.
+    """
+
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        return []
+    if not isinstance(session_id, str) or not session_id.strip():
+        return []
+    clock = _working_datetime(evaluated_at, field="evaluated_at")
+    candidates: list[dict[str, Any]] = []
+    for item in items:
+        item_tenant = _working_text(_working_field(item, "tenant_id"))
+        item_session = _working_text(_working_field(item, "session_id"))
+        if item_tenant != tenant_id or item_session != session_id:
+            continue
+        if _working_text(_working_field(item, "status", "active")) != "active":
+            continue
+        try:
+            created_at = _working_datetime(_working_field(item, "created_at"), field="created_at")
+            expires_at = _working_datetime(_working_field(item, "expires_at"), field="expires_at")
+        except ValueError:
+            # A malformed row is not allowed to widen a read; the owning store
+            # is responsible for surfacing its write-time validation error.
+            continue
+        if created_at > clock or clock >= expires_at:
+            continue
+        item_id = _working_text(_working_field(item, "item_id", _working_field(item, "id")))
+        kind = _working_text(_working_field(item, "kind"))
+        content = _working_text(_working_field(item, "content", _working_field(item, "text")))
+        task_id = _working_text(_working_field(item, "task_id"))
+        if not item_id or not kind or not content or not task_id:
+            continue
+        metadata = copy.deepcopy(_working_json_object(_working_field(item, "metadata", {})))
+        evidence_ids = _working_field(item, "evidence_ids", _working_field(item, "provenance", []))
+        if not isinstance(evidence_ids, (list, tuple)):
+            evidence_ids = []
+        provenance = [str(value) for value in evidence_ids if str(value).strip()]
+        trust_value = _working_field(item, "trust_tier", metadata.get("trust_tier", 0))
+        sensitivity_value = _working_field(item, "sensitivity", metadata.get("sensitivity", 0))
+        if isinstance(trust_value, bool) or isinstance(sensitivity_value, bool):
+            continue
+        try:
+            trust_tier = int(trust_value)
+            sensitivity = int(sensitivity_value)
+        except (TypeError, ValueError):
+            continue
+        access_policy = _working_field(item, "access_policy", metadata.get("access_policy", {}))
+        if isinstance(access_policy, Mapping):
+            metadata["access_policy"] = copy.deepcopy(
+                {str(key): value for key, value in access_policy.items()}
+            )
+        for field_name in ("reality_class", "source_type", "source_identity"):
+            field_value = _working_field(item, field_name)
+            if field_value is not None:
+                metadata.setdefault(field_name, field_value)
+        task_text = _working_task_text(task_id=task_id, kind=kind, metadata=metadata)
+        task_raw = lexical_score(query, task_text)
+        content_raw = lexical_score(query, content)
+        ttl_seconds = max((expires_at - created_at).total_seconds(), 1.0)
+        age_seconds = max((clock - created_at).total_seconds(), 0.0)
+        recency = max(0.0, min(1.0, 1.0 - (age_seconds / ttl_seconds)))
+        candidates.append(
+            {
+                "item": item,
+                "item_id": item_id,
+                "kind": kind,
+                "content": content,
+                "task_id": task_id,
+                "metadata": metadata,
+                "provenance": provenance,
+                "trust_tier": trust_tier,
+                "sensitivity": sensitivity,
+                "created_at": created_at,
+                "expires_at": expires_at,
+                "task_raw": task_raw,
+                "content_raw": content_raw,
+                "recency": recency,
+            }
+        )
+
+    max_task = max((float(row["task_raw"]) for row in candidates), default=0.0)
+    max_content = max((float(row["content_raw"]) for row in candidates), default=0.0)
+    ranked: list[Hit] = []
+    for row in candidates:
+        task_relevance = min(1.0, float(row["task_raw"]) / max(max_task, 1.0))
+        content_relevance = min(1.0, float(row["content_raw"]) / max(max_content, 1.0))
+        relevance = 0.8 * task_relevance + 0.2 * content_relevance
+        score = WORKING_MEMORY_TASK_WEIGHT * relevance + WORKING_MEMORY_RECENCY_WEIGHT * row["recency"]
+        metadata = dict(row["metadata"])
+        metadata.update(
+            {
+                "memory_type": "working",
+                "session_id": session_id,
+                "task_id": row["task_id"],
+                "working_memory_route": WORKING_MEMORY_ROUTE_VERSION,
+                "working_memory": {
+                    "task_relevance": round(task_relevance, 6),
+                    "content_relevance": round(content_relevance, 6),
+                    "relevance": round(relevance, 6),
+                    "recency": round(row["recency"], 6),
+                    "evaluated_at": clock.isoformat(),
+                    "created_at": row["created_at"].isoformat(),
+                    "expires_at": row["expires_at"].isoformat(),
+                    "data_only": True,
+                    "promotion_gate_required": True,
+                },
+            }
+        )
+        metadata["retrieved_text"] = sanitize_retrieved_text(row["content"], row["trust_tier"])
+        ranked.append(
+            Hit(
+                id=row["item_id"],
+                kind="evidence",
+                tenant_id=tenant_id,
+                branch=branch,
+                text=row["content"],
+                score=round(score, 12),
+                channel=WORKING_MEMORY_CHANNEL,
+                provenance=list(row["provenance"]),
+                trust_tier=row["trust_tier"],
+                sensitivity=row["sensitivity"],
+                metadata=metadata,
+            )
+        )
+    ranked.sort(
+        key=lambda hit: (
+            -hit.score,
+            -float(hit.metadata["working_memory"]["task_relevance"]),
+            -float(hit.metadata["working_memory"]["recency"]),
+            hit.id,
+        )
+    )
+    if limit is not None:
+        return ranked[: max(0, int(limit))]
+    return ranked
+
+
+def build_working_memory_hits(
+    items: Sequence[object],
+    *,
+    query: str,
+    tenant_id: str,
+    session_id: str | None,
+    evaluated_at: datetime | str,
+    branch: str = "main",
+    limit: int | None = None,
+) -> list[Hit]:
+    """Named adapter alias used by engine lanes and retrieval tests."""
+
+    return working_memory_hits(
+        items,
+        query=query,
+        tenant_id=tenant_id,
+        session_id=session_id,
+        evaluated_at=evaluated_at,
+        branch=branch,
+        limit=limit,
+    )
 
 
 def _recency_score(value: object, now: datetime, decay: float) -> float:
