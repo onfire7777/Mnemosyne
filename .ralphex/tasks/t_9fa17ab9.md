@@ -26,8 +26,8 @@ Validation commands:
 - [x] Add exact working-memory methods to `MemoryEngine` and `LocalMemoryEngine`.
 
 ### Task 2: Implement rails and lifecycle
-- [ ] Add provenance validation, effective trust/capability/sensitivity/access-policy derivation, deterministic TTL visibility/expiry, audit custody, and rollback.
-- [ ] Integrate working-item erasure cascade without changing the existing durable-memory contract.
+- [x] Add provenance validation, effective trust/capability/sensitivity/access-policy derivation, deterministic TTL visibility/expiry, audit custody, and rollback.
+- [x] Integrate working-item erasure cascade without changing the existing durable-memory contract.
 
 ### Task 3: Verify focused behavior
 - [ ] Add focused regression tests covering model validation, TTL boundaries, isolation, detached values, audit idempotency, rollback, erasure, and no auto-promotion.

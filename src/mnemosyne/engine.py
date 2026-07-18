@@ -346,6 +346,11 @@ class WorkingMemoryItem:
             if type(value) is not dict:
                 raise ValueError(f"{name} must be a JSON object")
             setattr(self, name, _normalize_json_value(value, path=name))
+        self.access_policy = validate_access_policy(
+            self.access_policy,
+            tenant_id=self.tenant_id,
+            location="working_memory.access_policy",
+        )
         if type(self.capability_tags) is not list or any(
             type(tag) is not str or not tag.strip() for tag in self.capability_tags
         ):
@@ -980,6 +985,10 @@ class LocalMemoryEngine:
             audit_diff.setdefault("trust_tier", trust_tier)
         if normalized_tags:
             audit_diff.setdefault("capability_tags", normalized_tags)
+        if event_id is not None and any(
+            row.get("id") == event_id for row in self.audit_log
+        ):
+            return
         self.audit_log.append(
             {
                 "id": event_id or new_id(),
@@ -1196,11 +1205,117 @@ class LocalMemoryEngine:
             raise ValueError(f"{name} must be timezone-aware")
         return value.astimezone(UTC)
 
+    def _working_provenance(
+        self, item: WorkingMemoryItem
+    ) -> tuple[int, list[str], int, dict[str, Any]]:
+        """Validate backing evidence and derive the effective security envelope.
+
+        Working memory is a transient view over evidence, but it still has to
+        carry the evidence ownership and security rails with it.  The most
+        restrictive trust, capability, sensitivity, and access-policy values
+        therefore win across the item and every originating evidence row.
+        """
+
+        access_policy = validate_access_policy(
+            item.access_policy,
+            tenant_id=item.tenant_id,
+            location="working_memory.access_policy",
+        )
+        trust_tiers: list[int] = []
+        capability_tags = {str(tag) for tag in item.capability_tags}
+        sensitivities = [int(item.sensitivity)]
+        source_policies: list[dict[str, Any]] = [access_policy]
+        for cid in item.evidence_ids:
+            evidence = self.evidence.get(self._evidence_key(item.tenant_id, "main", cid))
+            if evidence is None:
+                raise ValueError(
+                    f"evidence {cid!r} is missing or outside the working tenant"
+                )
+            if evidence.erased:
+                raise ValueError(f"evidence {cid!r} is erased")
+            if evidence.user_id != item.user_id:
+                raise ValueError("working item user must match originating evidence")
+            if evidence.session_id != item.session_id:
+                raise ValueError("working item session must match originating evidence")
+            try:
+                trust_tier = int(evidence.trust_tier)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("originating evidence trust tier is invalid") from exc
+            if not int(TrustTier.DIRECT_USER) <= trust_tier <= int(TrustTier.UNTRUSTED_EXTERNAL):
+                raise ValueError("originating evidence trust tier is out of range")
+            if trust_tier > int(self.policy.max_trust_tier):
+                raise PermissionError(
+                    "originating evidence exceeds the working write trust ceiling"
+                )
+            trust_tiers.append(trust_tier)
+            capability_tags.update(str(tag) for tag in evidence.capability_tags)
+            sensitivities.append(int(evidence.sensitivity))
+            source_policies.append(
+                validate_access_policy(
+                    evidence.access_policy,
+                    tenant_id=item.tenant_id,
+                    location="evidence.access_policy",
+                )
+            )
+        effective_policy = merge_access_policies(
+            source_policies,
+            tenant_id=item.tenant_id,
+        )
+        return (
+            max(trust_tiers),
+            sorted(capability_tags),
+            max(sensitivities),
+            effective_policy,
+        )
+
+    @staticmethod
+    def _working_snapshot(item: WorkingMemoryItem) -> dict[str, Any]:
+        return {
+            "item_id": item.item_id,
+            "tenant_id": item.tenant_id,
+            "session_id": item.session_id,
+            "user_id": item.user_id,
+            "agent_id": item.agent_id,
+            "kind": item.kind,
+            "task_id": item.task_id,
+            "content": item.content,
+            "created_at": item.created_at.isoformat(),
+            "expires_at": item.expires_at.isoformat(),
+            "evidence_ids": list(item.evidence_ids),
+            "access_policy": copy.deepcopy(item.access_policy),
+            "metadata": copy.deepcopy(item.metadata),
+            "capability_tags": list(item.capability_tags),
+            "sensitivity": item.sensitivity,
+        }
+
+    @classmethod
+    def _working_audit_diff(
+        cls,
+        item: WorkingMemoryItem,
+        *,
+        status: str,
+        sweep: datetime | None = None,
+    ) -> dict[str, Any]:
+        diff: dict[str, Any] = {
+            "working_digest": content_cid("working_memory", cls._working_snapshot(item)),
+            "tenant_id": item.tenant_id,
+            "session_id": item.session_id,
+            "item_id": item.item_id,
+            "evidence_ids": list(item.evidence_ids),
+            "deadline": item.expires_at.isoformat(),
+            "status": status,
+        }
+        if sweep is not None:
+            diff["sweep"] = sweep.isoformat()
+        return diff
+
     def put_working(self, item: WorkingMemoryItem) -> str:
         """Store one working item under its tenant/session/item composite key."""
 
         if not isinstance(item, WorkingMemoryItem):
             raise TypeError("item must be a WorkingMemoryItem")
+        if item.status != "active":
+            raise ValueError("put_working accepts only active working items")
         with self._lock:
             key = self._working_key(item.tenant_id, item.session_id, item.item_id)
             if key in self.working_memory:
@@ -1212,28 +1327,23 @@ class LocalMemoryEngine:
             )
             stored = copy.deepcopy(item)
             try:
+                trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(stored)
+                stored.capability_tags = capability_tags
+                stored.sensitivity = sensitivity
+                stored.access_policy = access_policy
                 self.working_memory[key] = stored
                 self._audit(
                     stored.tenant_id,
                     stored.agent_id,
                     "put_working",
                     stored.item_id,
-                    {
-                        "session_id": stored.session_id,
-                        "task_id": stored.task_id,
-                        "kind": stored.kind,
-                        "status": stored.status,
-                        "deadline": stored.expires_at.isoformat(),
-                    },
+                    self._working_audit_diff(stored, status=stored.status),
                     source="working_memory",
+                    trust_tier=trust_tier,
+                    capability_tags=capability_tags,
                     event_id=content_cid(
                         "put_working",
-                        {
-                            "tenant_id": stored.tenant_id,
-                            "session_id": stored.session_id,
-                            "item_id": stored.item_id,
-                            "deadline": stored.expires_at.isoformat(),
-                        },
+                        self._working_snapshot(stored),
                     ),
                     occurred_at=stored.created_at,
                 )
@@ -1241,6 +1351,11 @@ class LocalMemoryEngine:
             except BaseException:
                 self.working_memory, self.audit_log, self._store_version = before
                 raise
+            # Expose the canonical derived envelope to the caller while the
+            # stored record remains detached from all caller-owned containers.
+            item.capability_tags = list(stored.capability_tags)
+            item.sensitivity = stored.sensitivity
+            item.access_policy = copy.deepcopy(stored.access_policy)
             return stored.item_id
 
     def get_working(
@@ -1256,8 +1371,14 @@ class LocalMemoryEngine:
             item = self.working_memory.get(
                 self._working_key(tenant_id, session_id, item_id)
             )
-            if item is None or item.status != "active" or clock >= item.expires_at:
+            if (
+                item is None
+                or item.status != "active"
+                or clock < item.created_at
+                or clock >= item.expires_at
+            ):
                 return None
+            self._working_provenance(item)
             return copy.deepcopy(item)
 
     def list_working(
@@ -1275,12 +1396,15 @@ class LocalMemoryEngine:
                 if item_tenant == tenant_id
                 and item_session == session_id
                 and item.status == "active"
+                and item.created_at <= clock
                 and clock < item.expires_at
             ]
+            for item in items:
+                self._working_provenance(item)
             return [
                 copy.deepcopy(item)
                 for item in sorted(
-                    items, key=lambda value: (value.created_at, value.item_id)
+                    items, key=lambda value: (value.expires_at, value.item_id)
                 )
             ]
 
@@ -1306,6 +1430,7 @@ class LocalMemoryEngine:
             )
             if not due:
                 return []
+            provenance = [self._working_provenance(item) for item in due]
             before = (
                 copy.deepcopy(self.working_memory),
                 copy.deepcopy(self.audit_log),
@@ -1313,21 +1438,23 @@ class LocalMemoryEngine:
             )
             expired: list[WorkingMemoryItem] = []
             try:
-                for item in due:
+                for item, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
+                    due, provenance, strict=True
+                ):
+                    item.capability_tags = capability_tags
+                    item.sensitivity = sensitivity
+                    item.access_policy = access_policy
                     item.status = "expired"
-                    item.expired_at = item.expires_at
+                    item.expired_at = sweep
                     self._audit(
                         item.tenant_id,
                         item.agent_id,
                         "expire_working",
                         item.item_id,
-                        {
-                            "session_id": item.session_id,
-                            "deadline": item.expires_at.isoformat(),
-                            "sweep": sweep.isoformat(),
-                            "status": item.status,
-                        },
+                        self._working_audit_diff(item, status=item.status, sweep=sweep),
                         source="working_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
                         event_id=content_cid(
                             "expire_working",
                             {
@@ -1335,9 +1462,10 @@ class LocalMemoryEngine:
                                 "session_id": item.session_id,
                                 "item_id": item.item_id,
                                 "deadline": item.expires_at.isoformat(),
+                                "sweep": sweep.isoformat(),
                             },
                         ),
-                        occurred_at=item.expires_at,
+                        occurred_at=sweep,
                     )
                     expired.append(copy.deepcopy(item))
                 self._persist()
@@ -3181,6 +3309,23 @@ class LocalMemoryEngine:
                 }
                 for retained_cid, metadata in retained_derived.items()
             }
+            working_removals: list[tuple[tuple[str, str, str], dict[str, str]]] = []
+            working_trims: list[tuple[tuple[str, str, str], list[str]]] = []
+            for working_key, item in sorted(self.working_memory.items()):
+                if item.tenant_id != tenant_id:
+                    continue
+                surviving = [cid for cid in item.evidence_ids if cid not in affected_cids]
+                if len(surviving) == len(item.evidence_ids):
+                    continue
+                descriptor = {
+                    "tenant_id": item.tenant_id,
+                    "session_id": item.session_id,
+                    "item_id": item.item_id,
+                }
+                if surviving:
+                    working_trims.append((working_key, surviving))
+                else:
+                    working_removals.append((working_key, descriptor))
             propagated: dict[str, Any] = {
                 "retracted_assertions": [],
                 "trimmed_assertions": [],
@@ -3194,6 +3339,17 @@ class LocalMemoryEngine:
                 "erased_derived_evidence": derived_cids,
                 "retained_derived_evidence": sorted(retained_derived),
                 "trimmed_derived_evidence": sorted(retained_derived),
+                "removed_working_items": [
+                    descriptor for _, descriptor in working_removals
+                ],
+                "trimmed_working_items": [
+                    {
+                        "tenant_id": self.working_memory[key].tenant_id,
+                        "session_id": self.working_memory[key].session_id,
+                        "item_id": self.working_memory[key].item_id,
+                    }
+                    for key, _ in working_trims
+                ],
             }
             for intention_key, intention in list(self.intentions.items()):
                 if intention.tenant_id != tenant_id:
@@ -3265,6 +3421,17 @@ class LocalMemoryEngine:
                 else:
                     self.entities.pop(key, None)
                     propagated["removed_entities"].append(entity["canonical"])
+            for working_key, surviving in working_trims:
+                working = self.working_memory.get(working_key)
+                if working is None:
+                    continue
+                working.evidence_ids = surviving
+                _, capability_tags, sensitivity, access_policy = self._working_provenance(working)
+                working.capability_tags = capability_tags
+                working.sensitivity = sensitivity
+                working.access_policy = access_policy
+            for working_key, _ in working_removals:
+                self.working_memory.pop(working_key, None)
             # Spec §7 privacy invariant 13: a hard delete is unrecoverable, so NO
             # retained record may carry the erased cid — not the deletion_log
             # evidence_cid, not the provenance arrays / standing-cascade refs inside

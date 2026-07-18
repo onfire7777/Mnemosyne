@@ -81,7 +81,16 @@ def _item(
 
 
 def _put(engine: LocalMemoryEngine, **kwargs: Any) -> WorkingMemoryItem:
-    evidence_id = kwargs.pop("evidence_id", _evidence(engine))
+    evidence_id = kwargs.pop(
+        "evidence_id",
+        _evidence(
+            engine,
+            tenant_id=kwargs.get("tenant_id", TENANT),
+            user_id=kwargs.get("user_id", USER),
+            session_id=kwargs.get("session_id", SESSION),
+            content=kwargs.get("content", "Current task evidence"),
+        ),
+    )
     item = _item(evidence_id, **kwargs)
     assert engine.put_working(item) == item.item_id
     return item
@@ -225,7 +234,19 @@ def test_tenant_and_session_are_both_hard_scope_keys() -> None:
     engine = LocalMemoryEngine()
     a1 = _put(engine, item_id="same", session_id="s1", content="tenant A session 1")
     a2 = _put(engine, item_id="same", session_id="s2", content="tenant A session 2")
-    b1 = _put(engine, item_id="same", tenant_id="tenant-b", session_id="s1", content="tenant B session 1", evidence_id=_evidence(engine, tenant_id="tenant-b"))
+    b1 = _put(
+        engine,
+        item_id="same",
+        tenant_id="tenant-b",
+        session_id="s1",
+        content="tenant B session 1",
+        evidence_id=_evidence(
+            engine,
+            tenant_id="tenant-b",
+            session_id="s1",
+            content="tenant B session 1",
+        ),
+    )
 
     assert engine.get_working(TENANT, "s1", "same", as_of=CREATED_AT).content == a1.content
     assert engine.get_working(TENANT, "s2", "same", as_of=CREATED_AT).content == a2.content
@@ -284,7 +305,7 @@ def test_explicit_promotion_gate_approval_preserves_working_item() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _evidence(engine, content="The task evidence is grounded.")
     item = _put(engine, evidence_id=evidence_id, content="Transient working note")
-    candidate = Candidate("candidate-working", "fact", "grounded task", "working promotion", "main", [evidence_id])
+    candidate = Candidate("candidate-working", "fact", "grounded task", "working promotion", "working-canary", [evidence_id])
     gate = PromotionGate(
         engine,
         [RegressionCase("protected-working", "grounded", "grounded", "grounded", protected=True)],
@@ -324,7 +345,7 @@ def test_promotion_regression_failure_does_not_mutate_working_or_durable_state()
     evidence_id = _evidence(engine)
     item = _put(engine, evidence_id=evidence_id)
     before = copy.deepcopy(engine.assertions)
-    candidate = Candidate("candidate-denied", "fact", "protected", "working denial", "main", [evidence_id])
+    candidate = Candidate("candidate-denied", "fact", "protected", "working denial", "working-denied", [evidence_id])
     gate = PromotionGate(
         engine,
         [RegressionCase("protected-working", "protected", "never-present", "missing", protected=True)],
@@ -375,7 +396,11 @@ def test_put_rejects_missing_foreign_erased_and_invalid_provenance() -> None:
     with pytest.raises(ValueError):
         engine.put_working(_item(erased))
 
-    tainted = _evidence(engine, capability_tags=["data-only", "no-write-authority"])
+    tainted = _evidence(
+        engine,
+        content="Tainted working-memory evidence",
+        capability_tags=["data-only", "no-write-authority"],
+    )
     tainted_item = _item(tainted, item_id="tainted")
     engine.put_working(tainted_item)
     stored = engine.get_working(TENANT, SESSION, "tainted", as_of=CREATED_AT)
