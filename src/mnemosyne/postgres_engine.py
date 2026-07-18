@@ -660,6 +660,14 @@ class PostgresEngine:
         cur.execute("SELECT set_config('mnemosyne.tenant_id', %s, true)", (str(db_tenant_id),))
 
     @staticmethod
+    def _lock_working_tenant(cur: Any, tenant_id: str) -> None:
+        """Serialize evidence validation and working-memory erasure per tenant."""
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (str(tenant_id),),
+        )
+
+    @staticmethod
     def _set_pgvector_hnsw_query_settings(cur: Any, filt: dict[str, Any]) -> None:
         cur.execute("SELECT set_config('hnsw.ef_search', %s, true)", (str(_pgvector_hnsw_ef_search(filt)),))
         cur.execute("SELECT set_config('hnsw.iterative_scan', %s, true)", (_PGVECTOR_HNSW_ITERATIVE_SCAN,))
@@ -1594,6 +1602,7 @@ class PostgresEngine:
             with self.connect() as conn:
                 with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                     self._set_tenant(cur, db_tenant_id)
+                    self._lock_working_tenant(cur, values["tenant_id"])
                     trust_tier, capability_tags, sensitivity, access_policy = self._working_provenance(cur, values)
                     values.update(
                         trust_tier=trust_tier,
@@ -1615,7 +1624,7 @@ class PostgresEngine:
                             values, db_tenant_id, db_session_id, db_user_id, self._jsonb
                         ),
                     )
-                    self._audit(
+                    audit_inserted = self._audit(
                         cur,
                         db_tenant_id,
                         values["agent_id"],
@@ -1628,6 +1637,10 @@ class PostgresEngine:
                         event_id=_working_event_id(values, "put_working"),
                         occurred_at=values["created_at"],
                     )
+                    if not audit_inserted:
+                        raise ValueError(
+                            f"working item {values['item_id']!r} has an existing audit lifecycle"
+                        )
         except Exception as exc:
             if getattr(exc, "sqlstate", None) == "23505":
                 raise ValueError(f"working item {values['item_id']!r} already exists") from exc
@@ -1731,12 +1744,16 @@ class PostgresEngine:
         *,
         expired_at: datetime,
         session_id: str | None = None,
+        context: Mapping[str, Any] | None = None,
     ) -> list[WorkingMemoryItem]:
         sweep = _working_datetime(expired_at, "expired_at")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
+                if context is None:
+                    raise PermissionError("working-memory expiry requires caller context")
                 query = """
                     SELECT w.*, t.name AS tenant_name
                     FROM working_memory w
@@ -1779,6 +1796,7 @@ class PostgresEngine:
                         status="expired",
                         expired_at=sweep,
                     )
+                    readable = self._working_read_values(values, context=context)
                     cur.execute(
                         """
                         UPDATE working_memory
@@ -1814,7 +1832,26 @@ class PostgresEngine:
                         event_id=_working_event_id(values, "expire_working"),
                         occurred_at=sweep,
                     )
-                    expired_values.append(values)
+                    cur.execute(
+                        """
+                        UPDATE working_memory
+                        SET content = '', trust_tier = 0, capability_tags = '{}',
+                            sensitivity = 0, evidence_ids = '{}',
+                            access_policy = '{}'::jsonb, metadata = '{}'::jsonb
+                        WHERE tenant_id = %s AND session_id = %s AND item_id = %s
+                          AND status = 'expired' AND expired_at = %s
+                        """,
+                        (
+                            db_tenant_id,
+                            _stable_uuid("session", values["session_id"]),
+                            values["item_id"],
+                            sweep,
+                        ),
+                    )
+                    if cur.rowcount != 1:
+                        raise RuntimeError("working-memory expiry scrub lost its serialization claim")
+                    if readable is not None:
+                        expired_values.append(readable)
                 return [_working_from_values(values) for values in expired_values]
 
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
@@ -4827,6 +4864,7 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
+                self._lock_working_tenant(cur, tenant_id)
                 cur.execute(
                     """
                     SELECT cid, source_type, trust_tier, capability_tags, metadata, user_id
@@ -4941,6 +4979,9 @@ class PostgresEngine:
                         """
                         UPDATE working_memory
                         SET content = '', status = 'expired',
+                            trust_tier = 0, capability_tags = '{}', sensitivity = 0,
+                            evidence_ids = '{}', access_policy = '{}'::jsonb,
+                            metadata = '{}'::jsonb,
                             expired_at = COALESCE(expired_at, clock_timestamp())
                         WHERE tenant_id = %s AND evidence_ids && %s
                         """,
@@ -5791,7 +5832,7 @@ class PostgresEngine:
         capability_tags: list[str] | None = None,
         event_id: str | None = None,
         occurred_at: datetime | None = None,
-    ) -> None:
+    ) -> bool:
         event_time = occurred_at or utc_now()
         if event_time.tzinfo is None:
             raise ValueError("audit event time must be timezone-aware")
@@ -5824,6 +5865,7 @@ class PostgresEngine:
                 event_id,
             ),
         )
+        return cur.rowcount == 1
 
     def record_audit_event(
         self,
