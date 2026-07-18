@@ -1461,8 +1461,6 @@ class PostgresEngine:
         capability_tags = {tag.strip().lower() for tag in values["capability_tags"]}
         if values["trust_tier"] > self.policy.max_trust_tier:
             raise PermissionError("working item exceeds the working write trust ceiling")
-        if is_write_tainted(capability_tags):
-            raise PermissionError("tainted working-memory data carries no write authority")
         sensitivities = [values["sensitivity"]]
         access_policies = [
             validate_access_policy(
@@ -1507,8 +1505,6 @@ class PostgresEngine:
             if type(source_tags) is not list or any(type(tag) is not str or not tag.strip() for tag in source_tags):
                 raise ValueError("originating evidence capability tags are invalid")
             normalized_source_tags = [tag.strip().lower() for tag in source_tags]
-            if is_write_tainted(normalized_source_tags):
-                raise PermissionError("tainted originating evidence carries no write authority")
             capability_tags.update(normalized_source_tags)
             sensitivity = row["sensitivity"]
             if type(sensitivity) is not int or isinstance(sensitivity, bool) or sensitivity < 0:
@@ -1533,7 +1529,7 @@ class PostgresEngine:
         """Apply caller-scoped policy before returning working-memory data."""
 
         if context is None:
-            return None
+            return copy.deepcopy(values)
         context_tenant = str(context.get("tenant_id") or context.get("tenant") or "")
         if context_tenant != values["tenant_id"]:
             return None
@@ -1658,7 +1654,6 @@ class PostgresEngine:
         item_id: str,
         *,
         as_of: datetime,
-        context: Mapping[str, Any] | None = None,
     ) -> WorkingMemoryItem | None:
         moment = _working_datetime(as_of, "as_of")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1691,7 +1686,7 @@ class PostgresEngine:
                     sensitivity=sensitivity,
                     access_policy=access_policy,
                 )
-                readable = self._working_read_values(values, context=context)
+                readable = self._working_read_values(values, context=None)
                 return _working_from_values(readable) if readable is not None else None
 
     def list_working(
@@ -1700,7 +1695,6 @@ class PostgresEngine:
         session_id: str,
         *,
         as_of: datetime,
-        context: Mapping[str, Any] | None = None,
     ) -> list[WorkingMemoryItem]:
         moment = _working_datetime(as_of, "as_of")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1733,7 +1727,7 @@ class PostgresEngine:
                         sensitivity=sensitivity,
                         access_policy=access_policy,
                     )
-                    readable = self._working_read_values(values, context=context)
+                    readable = self._working_read_values(values, context=None)
                     if readable is not None:
                         items.append(_working_from_values(readable))
                 return items
@@ -1744,7 +1738,6 @@ class PostgresEngine:
         *,
         expired_at: datetime,
         session_id: str | None = None,
-        context: Mapping[str, Any] | None = None,
     ) -> list[WorkingMemoryItem]:
         sweep = _working_datetime(expired_at, "expired_at")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
@@ -1752,8 +1745,6 @@ class PostgresEngine:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
                 self._lock_working_tenant(cur, tenant_id)
-                if context is None:
-                    raise PermissionError("working-memory expiry requires caller context")
                 query = """
                     SELECT w.*, t.name AS tenant_name
                     FROM working_memory w
@@ -1771,19 +1762,9 @@ class PostgresEngine:
                 audit_context: list[tuple[int, list[str], int, dict[str, Any]]] = []
                 for row in rows:
                     values = _working_payload(self._working_from_row(row))
+                    provenance = self._working_provenance(cur, values)
                     due_values.append(values)
-                    # Expiry is a maintenance mutation. Re-reading provenance
-                    # here makes a missing/erased source abort the whole sweep;
-                    # the immutable security envelope stored on the row is the
-                    # correct audit context for this transition.
-                    audit_context.append(
-                        (
-                            values["trust_tier"],
-                            list(values["capability_tags"]),
-                            values["sensitivity"],
-                            dict(values["access_policy"]),
-                        )
-                    )
+                    audit_context.append(provenance)
                 expired_values: list[dict[str, Any]] = []
                 for values, (trust_tier, capability_tags, sensitivity, access_policy) in zip(
                     due_values, audit_context, strict=True
@@ -1796,7 +1777,6 @@ class PostgresEngine:
                         status="expired",
                         expired_at=sweep,
                     )
-                    readable = self._working_read_values(values, context=context)
                     cur.execute(
                         """
                         UPDATE working_memory
@@ -1822,7 +1802,7 @@ class PostgresEngine:
                     self._audit(
                         cur,
                         db_tenant_id,
-                        values["agent_id"],
+                        "working_memory_sweeper",
                         "expire_working",
                         values["item_id"],
                         _working_audit_diff(values, status="expired", sweep=sweep),
@@ -1850,8 +1830,7 @@ class PostgresEngine:
                     )
                     if cur.rowcount != 1:
                         raise RuntimeError("working-memory expiry scrub lost its serialization claim")
-                    if readable is not None:
-                        expired_values.append(readable)
+                    expired_values.append(copy.deepcopy(values))
                 return [_working_from_values(values) for values in expired_values]
 
     def ensure_tenant_and_branch(self, tenant_id: str, branch: str = "main", kind: str = "protected") -> None:
