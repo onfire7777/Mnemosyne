@@ -54,6 +54,21 @@ class CompactProtocolError(ValueError):
 JsonTransport = Callable[[str, bytes, Mapping[str, str], float, int], bytes]
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep a validated loopback request from being redirected off-host."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: object,
+        newurl: str,
+    ) -> None:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class CompactProviderIdentity:
     """Operator-configured custody identity for one compact sidecar build."""
@@ -134,6 +149,8 @@ def _parse_endpoint(endpoint: str) -> _Endpoint:
     if parsed.username or parsed.password or parsed.fragment:
         raise ValueError("compact Unix endpoint contains unsupported authority data")
     if parsed.scheme == "http+unix":
+        if parsed.query:
+            raise ValueError("compact HTTP-over-Unix endpoint must not contain a query")
         socket_path = urllib.parse.unquote(parsed.netloc)
         request_path = parsed.path or "/"
     else:
@@ -146,7 +163,9 @@ def _parse_endpoint(endpoint: str) -> _Endpoint:
             request_path = query["path"][0] or "/"
     if not socket_path.startswith("/") or "\x00" in socket_path:
         raise ValueError("compact Unix endpoint must use an absolute socket path")
-    if not request_path.startswith("/") or "\x00" in request_path:
+    if not request_path.startswith("/") or any(
+        character in request_path for character in "\x00\r\n"
+    ):
         raise ValueError("compact Unix request path is invalid")
     return _Endpoint("unix", socket_path, request_path)
 
@@ -268,6 +287,20 @@ def _vector(value: object, *, dims: int, label: str) -> list[float]:
     return [item / norm for item in vector]
 
 
+def _utf8_slice(value: str, start: int, end: int, *, label: str) -> str:
+    """Decode one exact half-open UTF-8 byte span on character boundaries."""
+
+    encoded = value.encode("utf-8")
+    if start < 0 or start >= end or end > len(encoded):
+        raise CompactProtocolError(f"{label} is outside evidence")
+    try:
+        return encoded[start:end].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise CompactProtocolError(
+            f"{label} does not align to UTF-8 character boundaries"
+        ) from exc
+
+
 def _default_transport(
     endpoint: str,
     body: bytes,
@@ -284,7 +317,8 @@ def _default_transport(
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            opener = urllib.request.build_opener(_NoRedirectHandler)
+            with opener.open(request, timeout=timeout) as response:
                 content_length = response.headers.get("Content-Length")
                 if content_length is not None:
                     try:
@@ -589,10 +623,7 @@ class CompactAnsweringProvider:
                 or isinstance(end, bool)
                 or not isinstance(start, int)
                 or not isinstance(end, int)
-                or start < 0
-                or start >= end
                 or cid not in contents
-                or end > len(contents[cid])
             ):
                 raise CompactProtocolError("grounded reader span is outside evidence")
             if any(
@@ -601,7 +632,9 @@ class CompactAnsweringProvider:
             ):
                 raise CompactProtocolError("grounded reader spans overlap")
             occupied[cid].append((start, end))
-            quote = contents[cid][start:end]
+            quote = _utf8_slice(
+                contents[cid], start, end, label="grounded reader span"
+            )
             if not quote:
                 raise CompactProtocolError("grounded reader span is empty")
             claims.append({"spans": [{"cid": cid, "quote": quote}]})
