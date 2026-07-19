@@ -110,6 +110,60 @@ def _intention(*, evidence_id: str, due_at: datetime, **overrides: Any) -> Inten
     return Intention(**values)
 
 
+def test_update_intention_is_session_bound_atomic_and_detached() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    original = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    )
+    engine.schedule_intention(original)
+    new_due = EVALUATED_AT + timedelta(hours=2)
+
+    updated = engine.update_intention(
+        TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=new_due,
+        action={"type": "remind", "message": "Updated."},
+        recurrence_policy={"type": "interval", "interval_seconds": 3600, "max_occurrences": 3},
+    )
+    updated.action["message"] = "mutated detached result"
+
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.action["message"] == "Updated."
+    assert stored.due_at == new_due
+    assert stored.reschedule_history == [{"from": original.due_at.isoformat(), "to": new_due.isoformat()}]
+    assert stored.recurrence_state == {"occurrence": 0}
+    assert [row["op"] for row in engine.audit_log if row["target_id"] == original.intention_id] == [
+        "schedule_intention", "update_intention"
+    ]
+
+
+def test_update_intention_rejects_wrong_binding_terminal_and_invalid_recurrence() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    original = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    )
+    engine.schedule_intention(original)
+    with pytest.raises(PermissionError, match="session"):
+        engine.update_intention(
+            TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-b", action={"type": "noop"},
+        )
+    with pytest.raises(ValueError, match="interval_seconds"):
+        engine.update_intention(
+            TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", recurrence_policy={"type": "interval", "interval_seconds": 0},
+        )
+    engine.cancel_intention(TENANT_ID, original.intention_id, cancelled_by=USER_ID)
+    with pytest.raises(ValueError, match="scheduled"):
+        engine.update_intention(
+            TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+
+
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)

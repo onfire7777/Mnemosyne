@@ -45,6 +45,7 @@ from mnemosyne.engine import (
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    _updated_intention,
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
@@ -5927,6 +5928,9 @@ class PostgresEngine:
                     else None
                 ),
                 "evidence_ids": _bytes_list_to_cids(list(row["evidence_ids"] or [])),
+                "session_id": row.get("session_id"),
+                "recurrence_policy": dict(row.get("recurrence_policy") or {"type": "none"}),
+                "recurrence_state": dict(row.get("recurrence_state") or {"occurrence": 0}),
             }
         )
 
@@ -5990,9 +5994,9 @@ class PostgresEngine:
                       tenant_id, intention_id, user_id, external_user_id, agent_id, trigger_type,
                       trigger_expression, action, due_at, status, priority,
                       dependencies, reschedule_history, cancellation_state,
-                      evidence_ids
+                      evidence_ids, session_id, recurrence_policy, recurrence_state
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', %s, %s, %s, NULL, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'scheduled', %s, %s, %s, NULL, %s, %s, %s, %s)
                     ON CONFLICT (tenant_id, intention_id) DO NOTHING
                     RETURNING intention_id
                     """,
@@ -6010,6 +6014,9 @@ class PostgresEngine:
                         list(intention.dependencies),
                         self._jsonb(intention.reschedule_history),
                         _cid_list_to_bytes(intention.evidence_ids),
+                        intention.session_id,
+                        self._jsonb(intention.recurrence_policy),
+                        self._jsonb(intention.recurrence_state),
                     ),
                 )
                 if cur.fetchone() is None:
@@ -6060,7 +6067,7 @@ class PostgresEngine:
                     SELECT intention_id, user_id, external_user_id, agent_id, status, trigger_type,
                            trigger_expression, action, due_at, priority,
                            dependencies, reschedule_history, cancellation_state,
-                           evidence_ids
+                           evidence_ids, session_id, recurrence_policy, recurrence_state
                     FROM intentions
                     WHERE tenant_id = %s AND intention_id = %s
                     FOR UPDATE
@@ -6128,7 +6135,8 @@ class PostgresEngine:
                     """
                     SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
                            trigger_expression, action, due_at, status, priority,
-                           dependencies, reschedule_history, cancellation_state, evidence_ids
+                           dependencies, reschedule_history, cancellation_state, evidence_ids,
+                           session_id, recurrence_policy, recurrence_state
                     FROM intentions
                     WHERE tenant_id = %s
                     ORDER BY intention_id
@@ -6136,6 +6144,55 @@ class PostgresEngine:
                     (db_tenant_id,),
                 )
                 return [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
+
+    def update_intention(
+        self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
+        session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+    ) -> Intention:
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    "SELECT * FROM intentions WHERE tenant_id = %s AND intention_id = %s FOR UPDATE",
+                    (db_tenant_id, intention_id),
+                )
+                row = cur.fetchone()
+                if row is None:
+                    raise KeyError(intention_id)
+                updated = _updated_intention(
+                    self._row_to_intention(row, tenant_id), user_id=user_id, agent_id=agent_id,
+                    session_id=session_id, due_at=due_at, action=action,
+                    recurrence_policy=recurrence_policy,
+                )
+                provenance = self._intention_provenance_rows(
+                    cur, db_tenant_id=db_tenant_id, intention=updated
+                )
+                trust_tier, capability_tags = intention_audit_context(provenance)
+                cur.execute(
+                    """
+                    UPDATE intentions
+                    SET action = %s, due_at = %s, reschedule_history = %s,
+                        session_id = %s, recurrence_policy = %s, recurrence_state = %s
+                    WHERE tenant_id = %s AND intention_id = %s AND status = 'scheduled'
+                    RETURNING intention_id
+                    """,
+                    (
+                        self._jsonb(updated.action), updated.due_at, self._jsonb(updated.reschedule_history),
+                        updated.session_id, self._jsonb(updated.recurrence_policy),
+                        self._jsonb(updated.recurrence_state), db_tenant_id, intention_id,
+                    ),
+                )
+                if cur.fetchone() is None:
+                    raise RuntimeError("intention update lost its scheduled transition")
+                self._audit(
+                    cur, db_tenant_id, user_id, "update_intention", intention_id,
+                    intention_audit_diff(updated, status="scheduled"),
+                    source="prospective_memory", trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+                return copy.deepcopy(updated)
 
     def evaluate_due_intentions(
         self,
@@ -6170,7 +6227,7 @@ class PostgresEngine:
                     SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
                            trigger_expression, action, due_at, status, priority,
                            dependencies, reschedule_history, cancellation_state,
-                           evidence_ids
+                           evidence_ids, session_id, recurrence_policy, recurrence_state
                     FROM intentions
                     WHERE tenant_id = %s AND status = 'scheduled' AND due_at <= %s
                     ORDER BY due_at, intention_id
@@ -6196,7 +6253,7 @@ class PostgresEngine:
                         SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
                                trigger_expression, action, due_at, status, priority,
                                dependencies, reschedule_history, cancellation_state,
-                               evidence_ids
+                               evidence_ids, session_id, recurrence_policy, recurrence_state
                         FROM intentions
                         WHERE tenant_id = %s AND intention_id = ANY(%s)
                         ORDER BY intention_id

@@ -93,6 +93,7 @@ from mnemosyne.engine import (
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    _updated_intention,
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
@@ -4334,6 +4335,47 @@ class SqliteEngine:
                     capability_tags=capability_tags,
                 )
                 conn.commit()
+            except BaseException:
+                conn.rollback()
+                raise
+
+    def update_intention(
+        self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
+        session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+    ) -> Intention:
+        with self._lock:
+            conn = self._connect(tenant_id)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT record FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+                    (tenant_id, intention_id),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(intention_id)
+                updated = _updated_intention(
+                    Intention.from_dict(json.loads(row["record"])), user_id=user_id,
+                    agent_id=agent_id, session_id=session_id, due_at=due_at, action=action,
+                    recurrence_policy=recurrence_policy,
+                )
+                provenance = self._intention_provenance_rows(conn, updated)
+                trust_tier, capability_tags = intention_audit_context(provenance)
+                cursor = conn.execute(
+                    "UPDATE intentions SET due_at = ?, record = ? "
+                    "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
+                    (dt_to_json(updated.due_at), json_text(updated.to_dict()), tenant_id, intention_id),
+                )
+                if cursor.rowcount != 1:
+                    raise RuntimeError("intention update lost its scheduled transition")
+                self._audit_row(
+                    conn, tenant_id, user_id, "update_intention", intention_id,
+                    intention_audit_diff(updated, status="scheduled"),
+                    source="prospective_memory", trust_tier=trust_tier,
+                    capability_tags=capability_tags,
+                )
+                conn.commit()
+                return copy.deepcopy(updated)
             except BaseException:
                 conn.rollback()
                 raise

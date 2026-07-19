@@ -794,6 +794,7 @@ class MemoryTools:
         priority: str = "normal",
         dependencies: list[str] | None = None,
         reschedule_history: list[dict[str, Any]] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
         session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         authorization = self._authorize_prospective(
@@ -817,9 +818,39 @@ class MemoryTools:
             dependencies=dependencies or [],
             reschedule_history=reschedule_history or [],
             evidence_ids=evidence_ids,
+            session_id=session_identity.session_id,
+            recurrence_policy=recurrence_policy or {"type": "none"},
         )
         self.engine.schedule_intention(intention)
         return intention.to_dict()
+
+    def update_intention(
+        self,
+        tenant_id: str,
+        intention_id: str,
+        user_id: str,
+        agent_id: str,
+        due_at: str | None = None,
+        action: dict[str, Any] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "update", session_identity, tenant_id=tenant_id, actor_id=user_id,
+            owner_id=user_id, agent_id=agent_id,
+        )
+        assert isinstance(session_identity, SessionIdentity)
+        if not session_identity.session_id:
+            raise PermissionError("update intention denied: authenticated session identifier is required")
+        updated = self.engine.update_intention(
+            authorization.tenant_id or tenant_id, intention_id,
+            user_id=authorization.owner_id or user_id,
+            agent_id=authorization.agent_id or agent_id,
+            session_id=session_identity.session_id,
+            due_at=(_parse_prospective_datetime(due_at, field="due_at") if due_at is not None else None),
+            action=action, recurrence_policy=recurrence_policy,
+        )
+        return updated.to_dict()
 
     def cancel_intention(
         self,
@@ -910,8 +941,9 @@ class MemoryTools:
         owner_id: str | None = None,
         agent_id: str | None = None,
     ) -> Any:
+        policy_operation = "schedule" if operation == "update" else operation
         decision = self.security.authorize_prospective_memory(
-            operation,
+            policy_operation,
             identity,  # type: ignore[arg-type]
             tenant_id=tenant_id,
             actor_id=actor_id,
