@@ -1251,7 +1251,16 @@ def test_store_crash_after_commit_resumes_by_probe_without_repeating_delete(tmp_
     _assert_absent(manifest, CANARY, world.source_ref)
 
 
-def test_cache_crash_after_invalidation_resumes_without_probe_failure(tmp_path: Path) -> None:
+def test_cache_crash_after_invalidation_fails_closed_without_the_marker(tmp_path: Path) -> None:
+    """A crash between the eviction and its marker costs a re-attempt, not a false receipt.
+
+    The eviction really happened here, so resuming as "invalidated" would be
+    *correct* for this world -- but the resume cannot tell this world from a
+    coordinator rebuilt without the cache registry, where the payload is still
+    live.  Both present an absent key with state="deleting", so the only safe
+    reading of an unmarked absence is the fail-closed one.  This mirrors the
+    backup splice, which pays the same re-attempt cost for the same reason.
+    """
     deletion = importlib.import_module("mnemosyne.deletion")
 
     class CrashingCache(dict):
@@ -1304,12 +1313,16 @@ def test_cache_crash_after_invalidation_resumes_without_probe_failure(tmp_path: 
         ledger=deletion.SQLiteDeletionLedger(journal_path),
     ).delete(**request)
 
-    _assert_complete(manifest)
     cache_rows = [row for row in manifest["surfaces"] if row["surface_type"] == "cache"]
     assert len(cache_rows) == 1
-    assert cache_rows[0]["action"] == "invalidated"
+    assert cache_rows[0]["verified_removed"] is False
+    assert cache_rows[0]["error_code"] == "probe_failed"
     assert cache_rows[0]["attempts"] == 2
-    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+    assert manifest["summary"]["complete"] is False
+    assert deletion_manifest.verify_deletion_manifest(manifest)["complete"] is False
+    # Fail closed before the engine: the cache surface is unverified, so the
+    # evidence row must survive rather than be forgotten under a false receipt.
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
 
 
 def test_sqlite_ledger_replay_conflict_generation_and_checkpoint_cas(tmp_path: Path) -> None:
@@ -2632,11 +2645,15 @@ def test_resume_without_registry_never_attests_untouched_surface(
 
 
 @pytest.mark.parametrize(
-    ("registry", "surface_name"),
-    [("object_keys", "object_storage"), ("backup_snapshots", "backups")],
+    ("registry", "surface_type", "method"),
+    [
+        ("object_keys", "object", "_delete_objects"),
+        ("backup_snapshots", "backup", "_delete_backups"),
+        ("process_cache", "cache", "_invalidate_cache"),
+    ],
 )
 def test_crash_mid_destruction_never_attests_an_unreachable_registry(
-    tmp_path: Path, registry: str, surface_name: str
+    tmp_path: Path, registry: str, surface_type: str, method: str
 ) -> None:
     """A crash *inside* the destructive step must not resume into a false receipt.
 
@@ -2651,6 +2668,11 @@ def test_crash_mid_destruction_never_attests_an_unreachable_registry(
     world.backup_snapshots.append(
         {"tenant_id": TENANT, "source_ref": world.source_ref, "snapshot": CANARY}
     )
+    world.process_cache["prefetch"] = {
+        "tenant_id": TENANT,
+        "source_ref": world.source_ref,
+        "payload": CANARY,
+    }
     journal_path = tmp_path / "deletion-journal.sqlite"
     request = _durable_request(world)
     identity = _durable_identity()
@@ -2658,13 +2680,12 @@ def test_crash_mid_destruction_never_attests_an_unreachable_registry(
     # KeyboardInterrupt, not Exception: the surface handler catches Exception
     # and records a *failed* receipt, which is a completed fail-closed outcome
     # rather than the mid-attempt crash this test needs.
-    target = "_delete_objects" if surface_name == "object_storage" else "_delete_backups"
-    original = getattr(deletion.DeletionCoordinator, target)
+    original = getattr(deletion.DeletionCoordinator, method)
 
     def crash(*args: Any, **kwargs: Any) -> Any:
         raise KeyboardInterrupt("synthetic crash mid-destruction")
 
-    setattr(deletion.DeletionCoordinator, target, crash)
+    setattr(deletion.DeletionCoordinator, method, crash)
     try:
         with pytest.raises(KeyboardInterrupt):
             deletion.DeletionCoordinator(
@@ -2672,15 +2693,17 @@ def test_crash_mid_destruction_never_attests_an_unreachable_registry(
                 stores=world.stores,
                 object_keys=world.object_keys,
                 backup_snapshots=world.backup_snapshots,
+                process_cache=world.process_cache,
                 session_identity=identity,
                 ledger=deletion.SQLiteDeletionLedger(journal_path),
             ).delete(**request)
     finally:
-        setattr(deletion.DeletionCoordinator, target, original)
+        setattr(deletion.DeletionCoordinator, method, original)
 
     registries: dict[str, Any] = {
         "object_keys": world.object_keys,
         "backup_snapshots": world.backup_snapshots,
+        "process_cache": world.process_cache,
     }
     registries[registry] = type(getattr(world, registry))()
     manifest = deletion.DeletionCoordinator(
@@ -2691,17 +2714,21 @@ def test_crash_mid_destruction_never_attests_an_unreachable_registry(
         **registries,
     ).delete(**request)
 
-    surface = _surface(manifest, surface_name)
+    surfaces = [row for row in manifest["surfaces"] if row["surface_type"] == surface_type]
+    assert len(surfaces) == 1
+    surface = surfaces[0]
     assert surface["verified_removed"] is False
     assert surface["error_code"] == "probe_failed"
     assert manifest["summary"]["complete"] is False
     assert deletion_manifest.verify_deletion_manifest(manifest)["complete"] is False
     # The surface whose registry the resume could not reach survives untouched.
-    # (The other surface is genuinely reachable and is legitimately cleared.)
+    # (The others are genuinely reachable and are legitimately cleared.)
     if registry == "object_keys":
         assert world.object_keys[object_key] == b"key-material"
-    else:
+    elif registry == "backup_snapshots":
         assert world.backup_snapshots != []
+    else:
+        assert world.process_cache["prefetch"]["payload"] == CANARY
     # Fail closed before the engine: externals are unverified, so the evidence
     # row must survive rather than be forgotten under a false receipt.
     assert world.engine.get_evidence(TENANT, world.source_ref) is not None
@@ -2715,19 +2742,29 @@ def test_backup_resume_after_a_completed_splice_verifies_without_the_registry() 
     coordinator = _coordinator(_world())
 
     # No snapshots visible, but the marker proves this operation spliced them.
-    assert coordinator._delete_backups(
-        deletion.LedgerRecord(
-            operation_id=OPERATION_ID,
-            fingerprint="fingerprint",
-            tenant_id=TENANT,
-            generation=1,
-            receipts={("backup", "backups"): receipt},
-        ),
-        receipt,
-        TENANT,
-        ["missing-ref"],
-    )
-    assert receipt.verified_removed is True
+    assert coordinator._delete_backups(receipt, TENANT, ["missing-ref"])
+
+
+def test_cache_resume_without_the_marker_refuses_to_attest_invalidation() -> None:
+    """A crash-resume alone must not stand in for a persisted eviction marker.
+
+    A coordinator rebuilt without the cache registry resumes with exactly the
+    same state="deleting"/attempts>0 shape as a genuine mid-eviction crash.
+    Only the marker separates them; without it the payload may still be live.
+    """
+    deletion = importlib.import_module("mnemosyne.deletion")
+    coordinator = _coordinator(_world())
+    receipt = deletion.SurfaceReceipt(surface="cache", attempts=1, state="deleting")
+
+    assert coordinator._invalidate_cache(receipt, "opaque:absent") is False
+    assert receipt.error_code == "probe_failed"
+    assert receipt.state == "failed"
+    assert receipt.verified_removed is False
+
+    # With the marker, the same absent lookup is a proven prior eviction.
+    receipt.destructive_done = True
+    assert coordinator._invalidate_cache(receipt, "opaque:absent") is True
+    assert receipt.action == "invalidated"
 
 
 def test_engine_retry_after_failure_restamps_a_new_destructive_attempt() -> None:
