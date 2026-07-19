@@ -1253,13 +1253,34 @@ class MemoryTools:
         )
         proposal_branch = branch or self._find_candidate_branch(id, tenant_id)
         report = self._engine_merge(proposal_branch, into, tenant_id=tenant_id)
+        confirmed_id = self._resolve_confirmed_id(id, report)
         return {
+            # Preserve the submitted id for backward compatibility, and ADD the
+            # explicit source/confirmed identity resolved from the merge's
+            # assertion_id_map (never a forced physical-id equality).
             "id": id,
+            "source_id": id,
+            "confirmed_id": confirmed_id,
             "branch": proposal_branch,
             "into": into,
             "merge": report.to_dict(),
             "security": decision,
         }
+
+    @staticmethod
+    def _resolve_confirmed_id(source_id: str, report: Any) -> str:
+        """Resolve the authoritative destination id for ``source_id``.
+
+        Fails closed when the merge produced no unique, non-blank string mapping
+        for the requested source rather than fabricating an identity id.
+        """
+        id_map = getattr(report, "assertion_id_map", None) or {}
+        confirmed_id = id_map.get(source_id)
+        if not isinstance(confirmed_id, str) or not confirmed_id:
+            raise KeyError(
+                f"confirm: no authoritative destination mapping for source assertion {source_id!r}"
+            )
+        return confirmed_id
 
     def supersede(
         self,

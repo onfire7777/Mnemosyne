@@ -3434,16 +3434,34 @@ class SqliteEngine:
                 "SELECT * FROM assertions WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                 (tenant_id, frm),
             ).fetchall()
+            # Phase 1: replay each source assertion, recording its real
+            # destination id (identity when preserved, the existing peer's id
+            # under semantic absorption). One complete entry per source.
+            assertion_id_map: dict[str, str] = {}
             for row in a_rows:
                 cloned = copy.deepcopy(_assertion_from_row(row))
+                source_id = cloned.id
                 cloned.branch = into
                 before = self._count_assertions(conn, tenant_id, into)
-                self.upsert_assertion(cloned, branch=into)
+                assertion_id_map[source_id] = self.upsert_assertion(cloned, branch=into)
                 after = self._count_assertions(conn, tenant_id, into)
                 if after > before:
                     report.assertions_added += 1
                 else:
                     report.assertions_merged += 1
+            # Phase 2: repoint superseded_by chains that still reference a source
+            # id onto its actual destination id. Runs after the whole map is
+            # known so remapping is correct regardless of iteration order.
+            with conn:
+                for source_id, dest_id in assertion_id_map.items():
+                    if source_id == dest_id:
+                        continue
+                    conn.execute(
+                        "UPDATE assertions SET superseded_by = ? "
+                        "WHERE tenant_id = ? AND branch = ? AND superseded_by = ?",
+                        (dest_id, tenant_id, into, source_id),
+                    )
+            report.assertion_id_map = assertion_id_map
             rel_rows = conn.execute(
                 "SELECT * FROM relations WHERE tenant_id = ? AND branch = ? ORDER BY rowid",
                 (tenant_id, frm),

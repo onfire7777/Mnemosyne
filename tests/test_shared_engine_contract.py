@@ -3545,13 +3545,20 @@ def test_shared_engine_contract_memory_tools_propose_confirm_facades(
         tenant_id=tenant,
     )
     exported = engine.export_tenant(tenant)
+    # No physical-id equality is forced, and the lookup is NOT weakened to
+    # subject/predicate/object matching: the authoritative destination id comes
+    # from the merge's assertion_id_map, surfaced by confirm as confirmed_id.
+    id_map = confirmed["merge"]["assertion_id_map"]
+    assert id_map[proposal["id"]] == confirmed["confirmed_id"]
     main_assertion = next(
         item
         for item in exported["assertions"]
-        if item["id"] == proposal["id"] and item["branch"] == "main"
+        if item["id"] == confirmed["confirmed_id"] and item["branch"] == "main"
     )
 
     assert confirmed["id"] == proposal["id"]
+    assert confirmed["source_id"] == proposal["id"]
+    assert isinstance(confirmed["confirmed_id"], str) and confirmed["confirmed_id"]
     assert confirmed["branch"] == proposal["branch"]
     assert confirmed["into"] == "main"
     assert confirmed["security"]["allowed"] is True
@@ -4763,6 +4770,166 @@ def test_shared_engine_contract_repeated_merge_converges_and_resolves_supersessi
     for item in second:
         if item.get("superseded_by"):
             assert item["superseded_by"] in first_ids
+
+
+def _idmap_assertion(tenant: str, user: str, subject: str, obj: str, cid: str, **kw: Any) -> Assertion:
+    return Assertion(
+        tenant_id=tenant,
+        user_id=user,
+        subject=subject,
+        predicate="idmaps",
+        object=obj,
+        confidence=kw.pop("confidence", 0.8),
+        source_evidence_cids=[cid],
+        status="active",
+        trust_tier=0,
+        access_policy={"tenant": tenant},
+        **kw,
+    )
+
+
+def _main_idmap_rows(engine: Any, tenant: str, subject: str) -> dict[str, dict[str, Any]]:
+    return {
+        item["id"]: item
+        for item in engine.export_tenant(tenant)["assertions"]
+        if item["branch"] == "main" and item["subject"] == subject
+    }
+
+
+def test_shared_engine_contract_merge_assertion_id_map_records_destination(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-nopeer-{uuid4()}"
+    subject = f"idmap nopeer subject {uuid4()}"
+    _branch(engine, branch, tenant)
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "destination", "a" * 64), branch=branch
+    )
+
+    report = _merge(engine, branch, tenant)
+    id_map = report.assertion_id_map
+
+    # Complete: exactly one source assertion → exactly one non-blank string entry.
+    assert set(id_map) == {source_id}
+    dest_id = id_map[source_id]
+    assert isinstance(dest_id, str) and dest_id
+    # The mapped destination id is the assertion actually stored on main.
+    main_rows = _main_idmap_rows(engine, tenant, subject)
+    assert set(main_rows) == {dest_id}
+    # PostgreSQL derives a deterministic destination clone id (source != dest);
+    # Local/SQLite preserve the source id (identity mapping). Both keep a
+    # complete, correct entry — the map never omits identity mappings.
+    if "live_db" in engine_capabilities(engine):
+        assert dest_id != source_id
+    else:
+        assert dest_id == source_id
+
+
+def test_shared_engine_contract_merge_assertion_id_map_absorbs_into_existing_peer(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    subject = f"idmap absorb subject {uuid4()}"
+    branch = f"shared-idmap-absorb-{uuid4()}"
+    # Branch off EMPTY main so the branch does not inherit the peer; the peer is
+    # created on main afterward and the branch assertion gets a distinct id.
+    _branch(engine, branch, tenant)
+    main_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "shared object", "b" * 64, confidence=0.7)
+    )
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "shared object", "c" * 64, confidence=0.95),
+        branch=branch,
+    )
+    assert source_id != main_id
+
+    report = _merge(engine, branch, tenant)
+    id_map = report.assertion_id_map
+
+    # Semantic absorption maps the source to the ACTUAL existing peer, not the
+    # source id and not a fresh clone id.
+    assert id_map[source_id] == main_id
+    assert report.assertions_merged >= 1
+    main_rows = _main_idmap_rows(engine, tenant, subject)
+    assert set(main_rows) == {main_id}
+
+
+def test_shared_engine_contract_merge_assertion_id_map_replay_stable(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-replay-{uuid4()}"
+    subject = f"idmap replay subject {uuid4()}"
+    _branch(engine, branch, tenant)
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "stable", "d" * 64), branch=branch
+    )
+
+    first = _merge(engine, branch, tenant)
+    first_rows = _main_idmap_rows(engine, tenant, subject)
+    second = _merge(engine, branch, tenant)
+    second_rows = _main_idmap_rows(engine, tenant, subject)
+
+    # Replay returns the SAME map and never mints a duplicate destination row.
+    assert second.assertion_id_map == first.assertion_id_map
+    assert set(second.assertion_id_map) == {source_id}
+    assert set(second_rows) == set(first_rows)
+    assert len(second_rows) == 1
+
+
+def test_shared_engine_contract_merge_assertion_id_map_remaps_superseded_chain(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-chain-{uuid4()}"
+    subject = f"idmap chain subject {uuid4()}"
+    base = datetime(2026, 3, 1, tzinfo=UTC)
+    _branch(engine, branch, tenant)
+    older = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "chain v1", "e" * 64, valid_from=base),
+        branch=branch,
+    )
+    newer = engine.upsert_assertion(
+        _idmap_assertion(
+            tenant, user, subject, "chain v2", "f" * 64, valid_from=base + timedelta(days=1)
+        ),
+        branch=branch,
+    )
+
+    report = _merge(engine, branch, tenant)
+    id_map = report.assertion_id_map
+
+    assert set(id_map) == {older, newer}
+    main_rows = _main_idmap_rows(engine, tenant, subject)
+    # Both source assertions land on main under their mapped destination ids.
+    assert set(main_rows) == {id_map[older], id_map[newer]}
+    superseded = [row for row in main_rows.values() if row.get("superseded_by")]
+    assert len(superseded) == 1
+    # The superseded chain is remapped to the ACTUAL destination id of the
+    # superseding assertion (regardless of iteration order / engine id scheme).
+    assert superseded[0]["id"] == id_map[older]
+    assert superseded[0]["superseded_by"] == id_map[newer]
+
+
+def test_shared_engine_contract_merge_assertion_id_map_retained_in_audit_export(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-export-{uuid4()}"
+    subject = f"idmap export subject {uuid4()}"
+    _branch(engine, branch, tenant)
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "retained", "1" * 64), branch=branch
+    )
+
+    report = _merge(engine, branch, tenant)
+    assert report.assertion_id_map
+    exported = engine.export_tenant(tenant)
+    merge_entry = exported["merge_log"][-1]
+    # Merge audit/export retains the complete map verbatim.
+    assert merge_entry["assertion_id_map"] == report.assertion_id_map
+    assert source_id in merge_entry["assertion_id_map"]
 
 
 def test_shared_engine_contract_relation_merge_reinforces_overlapping_fact(

@@ -683,10 +683,14 @@ def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
     main_assertion = next(
         item
         for item in exported["assertions"]
-        if item["id"] == proposal["id"] and item["branch"] == "main"
+        if item["id"] == confirmed["confirmed_id"] and item["branch"] == "main"
     )
 
     assert confirmed["id"] == proposal["id"]
+    assert confirmed["source_id"] == proposal["id"]
+    # Local preserves the source id, so confirmed_id resolves to it here, but the
+    # lookup goes through the authoritative map, never a forced id equality.
+    assert confirmed["confirmed_id"] == confirmed["merge"]["assertion_id_map"][proposal["id"]]
     assert confirmed["branch"] == proposal["branch"]
     assert confirmed["into"] == "main"
     assert confirmed["security"]["allowed"] is True
@@ -696,6 +700,81 @@ def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
     assert main_assertion["subject"] == "Direct confirm"
     assert main_assertion["object"] == "proposal branch"
     assert main_assertion["source_evidence_cids"] == [cid]
+
+
+def test_memory_tools_confirm_fails_closed_without_authoritative_mapping() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    # A candidate branch that carries NO assertion for the requested id: the
+    # merge produces an empty assertion_id_map for that source, so confirm must
+    # fail closed rather than fabricate a confirmed_id.
+    tools.branch("empty-candidate", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    with pytest.raises(KeyError):
+        tools.confirm(
+            "assertion-with-no-mapping",
+            role="operator",
+            source_trust_tier=0,
+            tenant_id=TENANT,
+            branch="empty-candidate",
+        )
+
+
+def test_merge_assertion_id_map_persists_across_local_reopen(tmp_path: Path) -> None:
+    store = tmp_path / "idmap-local-store.json"
+    engine = LocalMemoryEngine(store_path=store)
+    engine.branch("idmap-candidate", frm="main", tenant_id=TENANT)
+    source_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="local reopen idmap",
+            predicate="persists",
+            object="across reopen",
+            confidence=0.8,
+            source_evidence_cids=["a" * 64],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="idmap-candidate",
+    )
+    report = engine.merge("idmap-candidate", into="main", tenant_id=TENANT)
+    assert report.assertion_id_map == {source_id: source_id}
+
+    reopened = LocalMemoryEngine(store_path=store, read_only=True)
+    merge_log = reopened.export_tenant(TENANT)["merge_log"]
+    assert len(merge_log) == 1
+    assert merge_log[0]["assertion_id_map"] == {source_id: source_id}
+
+
+def test_memory_tools_mcp_confirm_exposes_confirmed_id(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+    proposed = mcp_call(
+        server,
+        "propose",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "subject": "mcp confirm subject",
+            "predicate": "promotes",
+            "object_value": "mcp candidate",
+            "trust_tier": 1,
+            **PARAMETRIC_AUTH,
+        },
+    )
+    confirmed = mcp_call(
+        server,
+        "confirm",
+        {"id": proposed["id"], "tenant_id": TENANT, **PARAMETRIC_AUTH},
+    )
+
+    # The MCP structured envelope carries the source/confirmed identity resolved
+    # from the merge map, backward-compatibly alongside the submitted id.
+    assert confirmed["id"] == proposed["id"]
+    assert confirmed["source_id"] == proposed["id"]
+    confirmed_id = confirmed["confirmed_id"]
+    assert isinstance(confirmed_id, str) and confirmed_id
+    assert confirmed["merge"]["assertion_id_map"][proposed["id"]] == confirmed_id
 
 
 def test_memory_tools_direct_branch_merge_discard_facades() -> None:
