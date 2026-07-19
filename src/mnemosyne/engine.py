@@ -552,6 +552,11 @@ class Intention:
         return record
 
 
+# Bounds due-date arithmetic (~31.7 years) so one oversized interval cannot
+# overflow datetime math during firing and poison tenant-wide evaluation.
+_MAX_RECURRENCE_INTERVAL_SECONDS = 10**9
+
+
 def _normalize_recurrence_policy(value: Any) -> dict[str, Any]:
     if type(value) is not dict:
         raise ValueError("recurrence_policy must be a JSON object")
@@ -566,6 +571,11 @@ def _normalize_recurrence_policy(value: Any) -> dict[str, Any]:
     seconds = normalized.get("interval_seconds")
     if type(seconds) is not int or seconds <= 0:
         raise ValueError("recurrence_policy.interval_seconds must be a positive integer")
+    if seconds > _MAX_RECURRENCE_INTERVAL_SECONDS:
+        raise ValueError(
+            "recurrence_policy.interval_seconds must not exceed "
+            f"{_MAX_RECURRENCE_INTERVAL_SECONDS}"
+        )
     maximum = normalized.get("max_occurrences")
     if maximum is not None and (type(maximum) is not int or maximum <= 0):
         raise ValueError("recurrence_policy.max_occurrences must be a positive integer")
@@ -785,7 +795,16 @@ def _advance_intention_after_fire(
     fired.recurrence_state = copy.deepcopy(next_state)
     if maximum is not None and occurrence + 1 >= maximum:
         return copy.deepcopy(fired), fired
-    next_due = intention.due_at + timedelta(seconds=policy["interval_seconds"])
+    try:
+        next_due = intention.due_at + timedelta(seconds=policy["interval_seconds"])
+        if intention.trigger_type == "time_window":
+            end = _parse_aware_iso(intention.trigger_expression["end"], field="time_window.end")
+            next_end = next_due + (end - intention.due_at)
+    except OverflowError:
+        # The next occurrence is beyond the representable datetime range; end
+        # the recurrence at this final fired occurrence instead of aborting
+        # (and thereby permanently poisoning) tenant-wide evaluation.
+        return copy.deepcopy(fired), fired
     row = intention.to_dict()
     row["due_at"] = next_due.isoformat()
     next_state["occurrence"] = occurrence + 1
@@ -802,10 +821,8 @@ def _advance_intention_after_fire(
     if intention.trigger_type == "exact_time":
         row["trigger_expression"]["at"] = next_due.isoformat()
     elif intention.trigger_type == "time_window":
-        end = _parse_aware_iso(intention.trigger_expression["end"], field="time_window.end")
-        duration = end - intention.due_at
         row["trigger_expression"]["start"] = next_due.isoformat()
-        row["trigger_expression"]["end"] = (next_due + duration).isoformat()
+        row["trigger_expression"]["end"] = next_end.isoformat()
     return fired, Intention.from_dict(row)
 
 

@@ -22,6 +22,7 @@ from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier, protected_suite_is_gating, protected_suite_report
+from mnemosyne.postgres_engine import _stable_uuid as _postgres_stable_uuid
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
@@ -911,9 +912,13 @@ class MemoryTools:
             current is not None
             and cancelled_by != session_identity.user_id
             and current.user_id != session_identity.user_id
+            and current.user_id != _postgres_stable_uuid("user", session_identity.user_id)
         ):
             # A shared agent identity must not reach across users: the agent
             # principal only cancels intentions the authenticated user owns.
+            # Pre-backfill Postgres rows expose the internal user UUID as
+            # their external user id, so the authenticated user must also be
+            # matched through the same stable-UUID mapping the engine applies.
             raise PermissionError(
                 "cancel intention denied: agent principal may only cancel the authenticated user's intentions"
             )

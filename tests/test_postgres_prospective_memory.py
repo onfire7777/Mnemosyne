@@ -27,9 +27,11 @@ from mnemosyne.engine import (
     TriggerEvaluationContext,
 )
 from mnemosyne.ids import content_cid
+from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Evidence
 from mnemosyne.postgres_engine import PostgresEngine, _cid_to_bytes, _stable_uuid
 from mnemosyne.privacy import ErasureMode
+from mnemosyne.security import SessionIdentity, TrustTier
 
 psycopg = pytest.importorskip("psycopg")
 psycopg_sql = pytest.importorskip("psycopg.sql")
@@ -446,6 +448,48 @@ def test_update_accepts_owner_external_id_on_pre_backfill_rows(
     assert stored == updated
     assert stored.due_at == moved
     assert len(stored.reschedule_history) == 1
+
+
+def test_tools_cancel_agent_principal_accepts_owner_on_pre_backfill_rows(
+    engine, tenant_user_agent
+) -> None:
+    tid, uid, aid = tenant_user_agent
+    evidence_id = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+    due = _EVALUATED_AT + timedelta(hours=1)
+    intention = _make_intention(
+        tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=evidence_id,
+        trigger_type="exact_time", trigger_expression={"at": due.isoformat()},
+        due_at=due,
+    )
+    engine.schedule_intention(intention)
+    db_tenant_id = _stable_uuid("tenant", tid)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)
+            # Simulate pre-backfill rows: external_user_id holds the internal
+            # user UUID text exactly as the schema backfill produces it, and
+            # pre-migration evidence has no _external_user_id metadata.
+            cur.execute(
+                "UPDATE intentions SET external_user_id = user_id::text "
+                "WHERE tenant_id = %s AND intention_id = %s",
+                (db_tenant_id, intention.intention_id),
+            )
+            cur.execute(
+                "UPDATE evidence SET metadata = metadata - '_external_user_id' "
+                "WHERE tenant_id = %s AND cid = %s",
+                (db_tenant_id, _cid_to_bytes(evidence_id)),
+            )
+    tools = MemoryTools(engine)
+    identity = SessionIdentity(
+        tenant_id=tid, user_id=uid, agent_id=aid, role="agent",
+        source_trust_tier=int(TrustTier.NORMAL), capabilities=(),
+        session_id="session-a",
+    )
+    cancelled = tools.cancel_intention(
+        tid, intention.intention_id, cancelled_by=aid, session_identity=identity
+    )
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["cancellation_state"] == {"cancelled_by": aid}
 
 
 class TestUpdateAndRecurrence:
