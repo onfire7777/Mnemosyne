@@ -398,6 +398,7 @@ class DeletionCoordinator:
         self.policy = security_policy or SecurityPolicy()
         self.ledger = ledger or _shared_ledger(engine)
         self._capabilities: dict[str, tuple[str, int]] = {}
+        self._capabilities_lock = threading.Lock()
 
     def delete(
         self,
@@ -590,7 +591,9 @@ class DeletionCoordinator:
             # (the verifier rejects duplicate labels); opaque the alias instead.
             if name == "runtime_state" and "runtime_user_model" not in self.stores:
                 return "runtime_user_model"
-        return name if is_safe_surface_label(name) else _opaque("surface-label", name)
+        # Ledger-keyed like every other opaque reference, so an unsafe store
+        # name renders to the same label across a restart.
+        return name if is_safe_surface_label(name) else self.ledger.opaque_name("surface-label", name)
 
     def _cache_surface_name(self, key: str) -> str:
         # Keyed by the ledger so a manifest holder cannot confirm a guessed cache
@@ -613,10 +616,6 @@ class DeletionCoordinator:
         receipt = record.receipts[surface_id]
         if receipt.verified_removed:
             return True
-        # A persisted "deleting" state is a crash mid-attempt; a persisted
-        # "failed" state is a completed fail-closed outcome that a plain retry
-        # must not soften into a resume.
-        crash_resuming = receipt.attempts > 0 and receipt.state == "deleting"
         resuming = receipt.attempts > 0
         receipt.state = "deleting"
         receipt.error_code = None
@@ -628,27 +627,30 @@ class DeletionCoordinator:
             self.ledger.checkpoint(record)
             try:
                 if kind == "object":
-                    return self._delete_objects(receipt, tenant, refs)
-                if kind == "backup":
-                    return self._delete_backups(record, receipt, tenant, refs)
-                cache_key = next(
-                    (key for key in self.process_cache if self._cache_surface_name(key) == name),
-                    None,
-                )
-                if cache_key is not None:
-                    del self.process_cache[cache_key]
-                elif not crash_resuming:
-                    receipt.error_code = "probe_failed"
-                    receipt.state = "failed"
-                    return False
-                receipt.action = "invalidated"
-                return self._verified(receipt)
+                    destroyed = self._delete_objects(receipt, tenant, refs)
+                elif kind == "backup":
+                    destroyed = self._delete_backups(receipt, tenant, refs)
+                else:
+                    destroyed = self._invalidate_cache(receipt, name)
             except ConnectionError:
                 receipt.error_code = "store_unavailable"
+                receipt.state = "failed"
+                return False
             except Exception:
                 receipt.error_code = "delete_failed"
-            receipt.state = "failed"
-            return False
+                receipt.state = "failed"
+                return False
+            if not destroyed:
+                return False
+            # Persist the destructive marker before attesting, so a crash here
+            # resumes as "already destroyed" rather than as an unreachable
+            # registry.  This checkpoint sits *outside* the handler above for
+            # the same reason as the pre-side-effect one: a journal fault is
+            # infrastructure failure and must propagate, not be rewritten into
+            # a retryable surface `delete_failed`.
+            if receipt.destructive_done:
+                self.ledger.checkpoint(record)
+            return self._verified(receipt)
         store_name = self._store_for_surface(name)
         if store_name is None:
             receipt.error_code = "store_unavailable"
@@ -780,10 +782,31 @@ class DeletionCoordinator:
         for key in keys:
             self.object_keys[key] = None
         receipt.action = "crypto_shredded"
-        return self._verified(receipt)
+        return True
+
+    def _invalidate_cache(self, receipt: SurfaceReceipt, name: str) -> bool:
+        cache_key = next(
+            (key for key in self.process_cache if self._cache_surface_name(key) == name),
+            None,
+        )
+        if cache_key is None and not receipt.destructive_done:
+            # Same ambiguity as the backup splice: the eviction removes its own
+            # target, so an empty lookup cannot distinguish "already evicted"
+            # from "registry unreachable".  A crash-resume is not evidence of
+            # eviction either -- a coordinator rebuilt without the cache
+            # registry also resumes with state "deleting" -- so only the
+            # persisted marker licenses attesting over an absent target.
+            receipt.error_code = "probe_failed"
+            receipt.state = "failed"
+            return False
+        if cache_key is not None:
+            del self.process_cache[cache_key]
+            receipt.destructive_done = True
+        receipt.action = "invalidated"
+        return True
 
     def _delete_backups(
-        self, record: LedgerRecord, receipt: SurfaceReceipt, tenant: str, refs: list[str]
+        self, receipt: SurfaceReceipt, tenant: str, refs: list[str]
     ) -> bool:
         targets = [row for row in self.backup_snapshots if row.get("tenant_id") == tenant and row.get("source_ref") in refs]
         if not targets and not receipt.destructive_done:
@@ -802,12 +825,8 @@ class DeletionCoordinator:
             receipt.state = "failed"
             return False
         self.backup_snapshots[:] = [row for row in self.backup_snapshots if row not in targets]
-        # Persist the marker before attesting so a crash between the splice and
-        # the verified checkpoint resumes as "already spliced" rather than as an
-        # unreachable registry.
         receipt.destructive_done = True
-        self.ledger.checkpoint(record)
-        return self._verified(receipt)
+        return True
 
     @staticmethod
     def _verified(receipt: SurfaceReceipt) -> bool:
@@ -935,13 +954,16 @@ class DeletionCoordinator:
             }
         return set()
 
-    @classmethod
-    def _scrub_value(cls, value: Any, sensitive: set[str], sensitive_keys: set[str]) -> Any:
+    def _scrub_value(self, value: Any, sensitive: set[str], sensitive_keys: set[str]) -> Any:
+        # Ledger-keyed rather than per-process: a durable ledger persists its
+        # key, so rows scrubbed before and after a restart still opaque a given
+        # value identically and stay correlatable -- which is the whole point of
+        # retaining the custody row instead of deleting it.
         if isinstance(value, str) and any(
             needle and (value == needle or (len(needle) >= 8 and needle in value))
             for needle in sensitive
         ):
-            return _opaque("retained-audit", value)
+            return self.ledger.opaque_name("retained-audit", value)
         if isinstance(value, dict):
             scrubbed = {}
             for key, item in value.items():
@@ -955,12 +977,12 @@ class DeletionCoordinator:
                     scrubbed[key] = item
                     continue
                 scrubbed_key = (
-                    _opaque("retained-audit-key", key)
+                    self.ledger.opaque_name("retained-audit-key", key)
                     if isinstance(key, str) and key in sensitive_keys
-                    else cls._scrub_value(key, sensitive, sensitive_keys)
+                    else self._scrub_value(key, sensitive, sensitive_keys)
                 )
                 if scrubbed_key in scrubbed:
-                    scrubbed_key = _opaque("retained-audit-key", repr(key))
+                    scrubbed_key = self.ledger.opaque_name("retained-audit-key", repr(key))
                 if scrubbed_key in scrubbed:
                     # Both the scrubbed key and its disambiguated form are
                     # occupied (a planted audit row can hold either).  Dropping
@@ -969,12 +991,12 @@ class DeletionCoordinator:
                     # _attempt_engine turns this into a delete_failed receipt
                     # before any destructive forget call.
                     raise ValueError("retained-history scrub key collision")
-                scrubbed[scrubbed_key] = cls._scrub_value(item, sensitive, sensitive_keys)
+                scrubbed[scrubbed_key] = self._scrub_value(item, sensitive, sensitive_keys)
             return scrubbed
         if isinstance(value, list):
-            return [cls._scrub_value(item, sensitive, sensitive_keys) for item in value]
+            return [self._scrub_value(item, sensitive, sensitive_keys) for item in value]
         if isinstance(value, tuple):
-            return tuple(cls._scrub_value(item, sensitive, sensitive_keys) for item in value)
+            return tuple(self._scrub_value(item, sensitive, sensitive_keys) for item in value)
         return value
 
     def _scrub_retained_history(
@@ -982,9 +1004,13 @@ class DeletionCoordinator:
     ) -> int:
         """Retain custody events while removing payload and correlatable references.
 
-        Returns the number of rows actually rewritten that are not attributed to
-        this tenant, so the manifest can report a measured cross-tenant mutation
-        count instead of asserting zero.
+        Returns the number of rewritten rows attributed to another tenant, which
+        both branches hold at zero *structurally*: the selection filter below
+        skips every owner outside {tenant_id, "*", None} before any rewrite, and
+        wildcard/merge rows are this tenant's own custody rather than a foreign
+        mutation.  The count is returned rather than hardcoded at the call site
+        so widening that filter forces this accounting to be revisited alongside
+        the verifier's ``cross_tenant_mutations == 0`` requirement.
         """
         cross_tenant = 0
         if self._is_sqlite_engine():
@@ -1003,26 +1029,20 @@ class DeletionCoordinator:
                             f"SELECT seq, tenant_id, record FROM {table}"
                         ).fetchall()
                         for row in rows:
-                            record = json.loads(row["record"])
                             # Merge records embed no tenant_id and engine merges
                             # may audit under the "*" wildcard; both are custody
                             # rows of this tenant's own database and must scrub.
+                            # Any other owner is a different tenant's row and is
+                            # skipped *before* the rewrite -- which is what keeps
+                            # cross_tenant at zero.  Scrubbing such a row and
+                            # counting it instead would be a real cross-tenant
+                            # mutation and would leave the manifest unsignable.
                             if row["tenant_id"] not in (tenant_id, "*", None):
                                 continue
+                            record = json.loads(row["record"])
                             scrubbed = self._scrub_value(record, sensitive, sensitive_keys)
                             if scrubbed == record:
                                 continue
-                            # Rows reaching here passed the selection filter, so
-                            # they are this tenant's own custody -- its rows, its
-                            # merge rows, its wildcard audits.  Count only a
-                            # genuinely foreign owner so the manifest reports a
-                            # measured zero instead of an asserted one; counting
-                            # the wildcard/merge rows here would make every
-                            # deletion of a tenant with merge history fail the
-                            # verifier's cross_tenant_mutations == 0 requirement
-                            # and become permanently unsignable.
-                            if row["tenant_id"] is not None and row["tenant_id"] not in (tenant_id, "*"):
-                                cross_tenant += 1
                             connection.execute(
                                 f"UPDATE {table} SET record = ? WHERE seq = ?",
                                 (json.dumps(scrubbed, sort_keys=True), row["seq"]),
@@ -1043,47 +1063,46 @@ class DeletionCoordinator:
                                 (json.dumps(scrubbed, sort_keys=True), row["rowid"]),
                             )
             return cross_tenant
-        logs = [
-            getattr(self.engine, attribute, None)
-            for attribute in ("audit_log", "deletion_log", "merge_log")
-        ]
-        assertions = getattr(self.engine, "assertions", None)
-        if (
-            not all(isinstance(rows, list) for rows in logs)
-            or not isinstance(assertions, dict)
-            or not isinstance(getattr(self.engine, "evidence", None), dict)
-        ):
-            # Fail closed: an engine whose custody history this scrub cannot
-            # reach (e.g. a PostgreSQL backend keeping logs in server-side
-            # tables) must fail the engine receipt rather than let the
-            # manifest attest a scrub that never happened.  PostgreSQL
-            # retained-history support is a recorded D5B/D6 obligation.
-            raise TypeError(
-                "retained-history scrub supports only SqliteEngine or "
-                f"in-memory engines, not {type(self.engine).__name__}"
-            )
         # Hold the engine lock for the same reason the SQLite branch does: the
         # engine guards all its own writes with it and in places rebinds
-        # audit_log wholesale, so an unlocked scrub can miss a row appended
-        # mid-scan (while the manifest still attests zero residue) or be undone
-        # by a rollback restoring pre-scrub contents.
+        # audit_log wholesale.  The attribute *reads* belong inside the lock
+        # too -- capturing them first would let a concurrent rollback rebind
+        # audit_log between the read and the mutation, leaving the scrub to
+        # rewrite a detached list while the live log keeps the unscrubbed row
+        # and the manifest still attests zero residue.
         lock = getattr(self.engine, "_lock", nullcontext())
         with lock:
+            logs = [
+                getattr(self.engine, attribute, None)
+                for attribute in ("audit_log", "deletion_log", "merge_log")
+            ]
+            assertions = getattr(self.engine, "assertions", None)
+            if (
+                not all(isinstance(rows, list) for rows in logs)
+                or not isinstance(assertions, dict)
+                or not isinstance(getattr(self.engine, "evidence", None), dict)
+            ):
+                # Fail closed: an engine whose custody history this scrub cannot
+                # reach (e.g. a PostgreSQL backend keeping logs in server-side
+                # tables) must fail the engine receipt rather than let the
+                # manifest attest a scrub that never happened.  PostgreSQL
+                # retained-history support is a recorded D5B/D6 obligation.
+                raise TypeError(
+                    "retained-history scrub supports only SqliteEngine or "
+                    f"in-memory engines, not {type(self.engine).__name__}"
+                )
             for rows in logs:
                 # Rows attributed to another tenant stay byte-identical; merge
                 # rows (no tenant_id) and "*" wildcard audits are unattributable
                 # shared custody and must scrub by needle.
                 for index, row in enumerate(rows):
-                    owner = row.get("tenant_id")
-                    if owner not in (tenant_id, "*", None):
+                    # See the SQLite branch: foreign owners are skipped before
+                    # any rewrite, which is what holds cross_tenant at zero.
+                    if row.get("tenant_id") not in (tenant_id, "*", None):
                         continue
                     scrubbed = self._scrub_value(row, sensitive, sensitive_keys)
                     if scrubbed == row:
                         continue
-                    # See the SQLite branch: wildcard and merge rows are this
-                    # tenant's own custody, not another tenant's mutation.
-                    if owner is not None and owner not in (tenant_id, "*"):
-                        cross_tenant += 1
                     rows[index] = scrubbed
             for assertion in assertions.values():
                 if getattr(assertion, "tenant_id", None) == tenant_id:
@@ -1104,8 +1123,10 @@ class DeletionCoordinator:
                     "surface": receipt.surface,
                     "surface_type": surface_id[0],
                     "backend": "synthetic",
-                    "tenant_ref": _opaque("tenant", request["tenant_id"]),
-                    "object_ref": _opaque("surface", f"{record.operation_id}:{surface_id!r}"),
+                    "tenant_ref": self.ledger.opaque_name("tenant", request["tenant_id"]),
+                    "object_ref": self.ledger.opaque_name(
+                        "surface", f"{record.operation_id}:{surface_id!r}"
+                    ),
                     "action": receipt.action,
                     "precondition_present": True,
                     "attempted_at": receipt.attempted_at,
@@ -1140,11 +1161,17 @@ class DeletionCoordinator:
             "completed_at": datetime.now(UTC).isoformat() if complete else None,
             "mode": request["mode"],
             "requested_by_role": request["requested_by_role"],
-            "reason": _opaque("reason", request["reason"]),
-            "tenant_ref": _opaque("tenant", request["tenant_id"]),
-            "user_scope": _opaque("user", request["user_id"]),
+            # Keyed by the ledger, not by a per-process key: a durable ledger
+            # persists its key, so two manifests for the same tenant produced
+            # across a restart still carry the same tenant_ref and an auditor
+            # can correlate them (and the retained custody rows) at all.
+            "reason": self.ledger.opaque_name("reason", request["reason"]),
+            "tenant_ref": self.ledger.opaque_name("tenant", request["tenant_id"]),
+            "user_scope": self.ledger.opaque_name("user", request["user_id"]),
             "branch_scope": request["branch_scope"],
-            "source_refs": [_opaque("source", ref) for ref in request["source_refs"]],
+            "source_refs": [
+                self.ledger.opaque_name("source", ref) for ref in request["source_refs"]
+            ],
             "policy": {
                 "version": "w2",
                 "required_surfaces": [
@@ -1189,13 +1216,24 @@ class DeletionCoordinator:
         if not decision.allowed:
             raise PermissionError(decision.reason)
         token = secrets.token_urlsafe(32)
-        self._capabilities[token] = (tenant_id, self.ledger.current_generation(tenant_id))
+        generation = self.ledger.current_generation(tenant_id)
+        with self._capabilities_lock:
+            # Tokens below the tenant's current generation can never validate
+            # again, so drop them here rather than letting the map grow without
+            # bound for the lifetime of a long-lived coordinator.
+            self._capabilities = {
+                issued_token: issued
+                for issued_token, issued in self._capabilities.items()
+                if issued[1] >= self.ledger.current_generation(issued[0])
+            }
+            self._capabilities[token] = (tenant_id, generation)
         return _FenceCapability(token)
 
     def _require_capability(self, tenant_id: str, capability: object | None) -> None:
         if not isinstance(capability, _FenceCapability):
             raise PermissionError("deletion fence capability required")
-        issued = self._capabilities.get(capability.token)
+        with self._capabilities_lock:
+            issued = self._capabilities.get(capability.token)
         current = self.ledger.current_generation(tenant_id)
         if issued != (tenant_id, current):
             raise PermissionError("deletion fence capability is stale or forged")
