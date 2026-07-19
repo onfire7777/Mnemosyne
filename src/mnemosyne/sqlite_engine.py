@@ -93,6 +93,8 @@ from mnemosyne.engine import (
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    _advance_intention_after_fire,
+    _is_replayed_evaluation,
     _updated_intention,
     canonicalize_intention,
     intention_audit_context,
@@ -4354,12 +4356,16 @@ class SqliteEngine:
                 ).fetchone()
                 if row is None:
                     raise KeyError(intention_id)
+                current = Intention.from_dict(json.loads(row["record"]))
                 updated = _updated_intention(
-                    Intention.from_dict(json.loads(row["record"])), user_id=user_id,
+                    current, user_id=user_id,
                     agent_id=agent_id, session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
                 )
                 provenance = self._intention_provenance_rows(conn, updated)
+                if updated == current:
+                    conn.commit()
+                    return copy.deepcopy(current)
                 trust_tier, capability_tags = intention_audit_context(provenance)
                 cursor = conn.execute(
                     "UPDATE intentions SET due_at = ?, record = ? "
@@ -4403,7 +4409,9 @@ class SqliteEngine:
                 evaluated_at_utc = evaluated_at
                 candidate_results: list[tuple[Intention, dict[str, Any]]] = []
                 for intention in tenant_intentions.values():
-                    if intention.status != "scheduled":
+                    if intention.status != "scheduled" or _is_replayed_evaluation(
+                        intention, evaluated_at_utc
+                    ):
                         continue
                     fires, signal = _evaluate_trigger(
                         intention,
@@ -4427,16 +4435,19 @@ class SqliteEngine:
                 for (intention, signal), (trust_tier, capability_tags) in zip(
                     candidate_results, audit_contexts, strict=True
                 ):
-                    intention.status = "fired"
+                    occurrence = intention.recurrence_state["occurrence"]
+                    fired_occurrence, stored = _advance_intention_after_fire(
+                        intention, evaluated_at=evaluated_at_utc
+                    )
                     event_id = intention_fire_receipt_id(
-                        tenant_id, intention.intention_id
+                        tenant_id, intention.intention_id, occurrence
                     )
                     cursor = conn.execute(
                         "UPDATE intentions SET status = ?, record = ? "
                         "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
                         (
-                            intention.status,
-                            json_text(intention.to_dict()),
+                            stored.status,
+                            json_text(stored.to_dict()),
                             tenant_id,
                             intention.intention_id,
                         ),
@@ -4454,9 +4465,10 @@ class SqliteEngine:
                         ),
                     )
                     fire_diff = {
-                        **intention_audit_diff(intention, status="fired"),
+                        **intention_audit_diff(fired_occurrence, status="fired"),
                         "evaluated_at": evaluated_at_utc.isoformat(),
                         "operating_point": operating_point.to_dict(),
+                        "occurrence": occurrence,
                     }
                     if "event_id" in signal:
                         fire_diff["matched_event_id"] = signal["event_id"]
@@ -4475,7 +4487,7 @@ class SqliteEngine:
                         event_id=event_id,
                         occurred_at=evaluated_at_utc,
                     )
-                    fired.append(copy.deepcopy(intention))
+                    fired.append(fired_occurrence)
                 conn.commit()
             except BaseException:
                 conn.rollback()

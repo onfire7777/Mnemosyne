@@ -119,6 +119,15 @@ TOOL_SPEC: list[dict[str, Any]] = [
             "priority",
             "dependencies",
             "reschedule_history",
+            "recurrence_policy",
+        ],
+    },
+    {
+        "name": "update_intention",
+        "description": "Reschedule or replace the data-only action for an authenticated subject intention.",
+        "arguments": [
+            "tenant_id", "intention_id", "user_id", "agent_id", "due_at",
+            "action", "recurrence_policy",
         ],
     },
     {
@@ -805,6 +814,11 @@ class MemoryTools:
             owner_id=user_id,
             agent_id=agent_id,
         )
+        assert isinstance(session_identity, SessionIdentity)
+        if not session_identity.session_id:
+            raise PermissionError(
+                "schedule intention denied: authenticated session identifier is required"
+            )
         intention = Intention(
             intention_id=new_id(),
             tenant_id=authorization.tenant_id or tenant_id,

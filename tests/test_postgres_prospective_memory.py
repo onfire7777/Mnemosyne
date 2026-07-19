@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
+from pathlib import Path
 from threading import Barrier, Event
 from typing import Any
 from uuid import uuid4
@@ -77,6 +78,8 @@ def _make_intention(
     intention_id: str | None = None,
     dependencies: list[str] | None = None,
     action: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    recurrence_policy: dict[str, Any] | None = None,
 ) -> Intention:
     """Construct an intention through the canonical public contract."""
 
@@ -91,6 +94,8 @@ def _make_intention(
         due_at=due_at.astimezone(UTC),
         dependencies=list(dependencies or []),
         evidence_ids=[evidence_id],
+        session_id=session_id,
+        recurrence_policy=recurrence_policy or {"type": "none"},
     )
 
 
@@ -182,6 +187,85 @@ def tenant_user_agent():
     uid = f"user-pm-{uuid4().hex[:8]}"
     aid = f"agent-pm-{uuid4().hex[:8]}"
     return tid, uid, aid
+
+
+def test_postgres_schema_and_update_contract_are_occurrence_aware() -> None:
+    schema = Path("sql/schema.sql").read_text()
+    source = Path("src/mnemosyne/postgres_engine.py").read_text()
+    assert "PRIMARY KEY (tenant_id, intention_id, operation, occurrence)" in schema
+    assert "SET trigger_expression = %s, action = %s, due_at = %s" in source
+    assert "ON CONFLICT (tenant_id, intention_id, operation, occurrence) DO NOTHING" in source
+
+
+class TestUpdateAndRecurrence:
+    @pytest.mark.parametrize("trigger_type", ["exact_time", "time_window"])
+    def test_update_rewrites_trigger_persists_and_replay_is_zero_mutation(
+        self, engine, tenant_user_agent, trigger_type
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT + timedelta(hours=1)
+        expression = {"at": due.isoformat()} if trigger_type == "exact_time" else {
+            "start": due.isoformat(), "end": (due + timedelta(minutes=30)).isoformat()
+        }
+        intention = _make_intention(
+            tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=eid,
+            trigger_type=trigger_type, trigger_expression=expression, due_at=due,
+            session_id="session-a",
+        )
+        engine.schedule_intention(intention)
+        moved = due + timedelta(hours=1)
+        updated = engine.update_intention(
+            tid, intention.intention_id, user_id=uid, agent_id=aid,
+            session_id="session-a", due_at=moved,
+        )
+        replay = engine.update_intention(
+            tid, intention.intention_id, user_id=uid, agent_id=aid,
+            session_id="session-a", due_at=moved,
+        )
+        stored = engine.list_intentions(tid)[0]
+        key = "at" if trigger_type == "exact_time" else "start"
+        assert stored.trigger_expression[key] == moved.isoformat()
+        assert stored == updated == replay
+        assert len(stored.reschedule_history) == 1
+        assert engine.evaluate_due_intentions(
+            tid, evaluated_at=moved, trigger_context=_ctx(tenant_id=tid),
+            operating_point=_OP,
+        )[0].intention_id == intention.intention_id
+
+    def test_recurrence_has_per_occurrence_receipts_and_terminal_max(
+        self, engine, tenant_user_agent
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT
+        intention = _make_intention(
+            tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=eid,
+            trigger_type="exact_time", trigger_expression={"at": due.isoformat()},
+            due_at=due, session_id="session-a",
+            recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 2},
+        )
+        engine.schedule_intention(intention)
+        for index in range(2):
+            evaluated = due + timedelta(minutes=index)
+            assert len(engine.evaluate_due_intentions(
+                tid, evaluated_at=evaluated, trigger_context=_ctx(tenant_id=tid),
+                operating_point=_OP,
+            )) == 1
+            assert engine.evaluate_due_intentions(
+                tid, evaluated_at=evaluated, trigger_context=_ctx(tenant_id=tid),
+                operating_point=_OP,
+            ) == []
+        assert engine.list_intentions(tid)[0].status == "fired"
+        with engine.connect() as conn:
+            with conn.cursor() as cur:
+                engine._set_tenant(cur, _stable_uuid("tenant", tid))
+                cur.execute(
+                    "SELECT occurrence FROM intention_firing_receipts "
+                    "WHERE tenant_id = %s AND intention_id = %s ORDER BY occurrence",
+                    (_stable_uuid("tenant", tid), intention.intention_id),
+                )
+                assert [row[0] for row in cur.fetchall()] == [0, 1]
 
 
 class TestExactTime:

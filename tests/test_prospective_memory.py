@@ -164,6 +164,76 @@ def test_update_intention_rejects_wrong_binding_terminal_and_invalid_recurrence(
         )
 
 
+def test_identical_update_replay_is_a_zero_mutation() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT + timedelta(hours=1)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a"
+    ))
+    action = {"type": "remind", "message": "Submit the report."}
+    first = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=due, action=action,
+        recurrence_policy={"type": "none"},
+    )
+    audit_count = len(engine.audit_log)
+    second = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=due, action=action,
+        recurrence_policy={"type": "none"},
+    )
+    assert first == second
+    assert second.reschedule_history == []
+    assert len(engine.audit_log) == audit_count
+
+
+def test_legacy_sessionless_row_binds_once_on_first_update() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1)
+    ))
+    bound = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", action={"type": "remind", "message": "Bound."},
+    )
+    assert bound.session_id == "session-a"
+    with pytest.raises(PermissionError, match="session"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-b", action={"type": "remind", "message": "Other."},
+        )
+
+
+def test_interval_recurrence_advances_once_per_occurrence_and_terminates() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 3},
+    ))
+    occurrences: list[int] = []
+    for index in range(3):
+        evaluated = due + timedelta(minutes=index)
+        fired = engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=evaluated, trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+        occurrences.append(fired[0].recurrence_state["occurrence"])
+        assert engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=evaluated, trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        ) == []
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert occurrences == [0, 1, 2]
+    assert stored.status == "fired"
+    assert stored.recurrence_state["occurrence"] == 2
+    receipts = [row["id"] for row in engine.audit_log if row["op"] == "fire_intention"]
+    assert len(receipts) == len(set(receipts)) == 3
+
+
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)

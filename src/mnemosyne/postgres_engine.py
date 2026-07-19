@@ -45,6 +45,8 @@ from mnemosyne.engine import (
     _privacy_backfill_access_policy,
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
+    _advance_intention_after_fire,
+    _is_replayed_evaluation,
     _updated_intention,
     canonicalize_intention,
     intention_audit_context,
@@ -6161,25 +6163,29 @@ class PostgresEngine:
                 row = cur.fetchone()
                 if row is None:
                     raise KeyError(intention_id)
+                current = self._row_to_intention(row, tenant_id)
                 updated = _updated_intention(
-                    self._row_to_intention(row, tenant_id), user_id=user_id, agent_id=agent_id,
+                    current, user_id=user_id, agent_id=agent_id,
                     session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
                 )
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=updated
                 )
+                if updated == current:
+                    return copy.deepcopy(current)
                 trust_tier, capability_tags = intention_audit_context(provenance)
                 cur.execute(
                     """
                     UPDATE intentions
-                    SET action = %s, due_at = %s, reschedule_history = %s,
+                    SET trigger_expression = %s, action = %s, due_at = %s, reschedule_history = %s,
                         session_id = %s, recurrence_policy = %s, recurrence_state = %s
                     WHERE tenant_id = %s AND intention_id = %s AND status = 'scheduled'
                     RETURNING intention_id
                     """,
                     (
-                        self._jsonb(updated.action), updated.due_at, self._jsonb(updated.reschedule_history),
+                        self._jsonb(updated.trigger_expression), self._jsonb(updated.action),
+                        updated.due_at, self._jsonb(updated.reschedule_history),
                         updated.session_id, self._jsonb(updated.recurrence_policy),
                         self._jsonb(updated.recurrence_state), db_tenant_id, intention_id,
                     ),
@@ -6269,6 +6275,8 @@ class PostgresEngine:
                 # fire require provenance validation.
                 candidate_results: list[tuple[Intention, dict[str, Any]]] = []
                 for intention in candidates:
+                    if _is_replayed_evaluation(intention, evaluated_at_utc):
+                        continue
                     fires, matched_signal = _evaluate_trigger(
                         intention,
                         evaluated_at=evaluated_at_utc,
@@ -6292,29 +6300,34 @@ class PostgresEngine:
                 for (intention, matched_signal), (trust_tier, capability_tags) in zip(
                     candidate_results, audit_contexts, strict=True
                 ):
+                    occurrence = intention.recurrence_state["occurrence"]
+                    fired_occurrence, stored = _advance_intention_after_fire(
+                        intention, evaluated_at=evaluated_at_utc
+                    )
                     fire_audit_diff = {
-                        **intention_audit_diff(intention, status="fired"),
+                        **intention_audit_diff(fired_occurrence, status="fired"),
                         "evaluated_at": evaluated_at_utc.isoformat(),
                         "operating_point": operating_point.to_dict(),
+                        "occurrence": occurrence,
                     }
                     if matched_signal.get("event_id"):
                         fire_audit_diff["matched_event_id"] = matched_signal["event_id"]
                     if matched_signal.get("condition_id"):
                         fire_audit_diff["matched_condition_id"] = matched_signal["condition_id"]
                     canonical_event_id = intention_fire_receipt_id(
-                        tenant_id, intention.intention_id
+                        tenant_id, intention.intention_id, occurrence
                     )
                     fire_audit_diff["canonical_event_id"] = canonical_event_id
                     cur.execute(
                         """
                         INSERT INTO intention_firing_receipts(
-                            tenant_id, intention_id, operation, canonical_event_id
+                            tenant_id, intention_id, operation, occurrence, canonical_event_id
                         )
-                        VALUES (%s, %s, 'fire', %s)
-                        ON CONFLICT (tenant_id, intention_id, operation) DO NOTHING
+                        VALUES (%s, %s, 'fire', %s, %s)
+                        ON CONFLICT (tenant_id, intention_id, operation, occurrence) DO NOTHING
                         RETURNING intention_id
                         """,
-                        (db_tenant_id, intention.intention_id, canonical_event_id),
+                        (db_tenant_id, intention.intention_id, occurrence, canonical_event_id),
                     )
                     if cur.fetchone() is None:
                         # A concurrent or replayed operation already owns the
@@ -6323,18 +6336,22 @@ class PostgresEngine:
                     cur.execute(
                         """
                         UPDATE intentions
-                        SET status = 'fired'
+                        SET status = %s, trigger_expression = %s, due_at = %s,
+                            reschedule_history = %s, recurrence_state = %s
                         WHERE tenant_id = %s AND intention_id = %s
                           AND status = 'scheduled'
                         RETURNING intention_id
                         """,
-                        (db_tenant_id, intention.intention_id),
+                        (
+                            stored.status, self._jsonb(stored.trigger_expression), stored.due_at,
+                            self._jsonb(stored.reschedule_history), self._jsonb(stored.recurrence_state),
+                            db_tenant_id, intention.intention_id,
+                        ),
                     )
                     if cur.fetchone() is None:
                         raise RuntimeError(
                             "firing receipt claimed without a scheduled intention"
                         )
-                    intention.status = "fired"
                     self._audit(
                         cur,
                         db_tenant_id,
@@ -6348,7 +6365,7 @@ class PostgresEngine:
                         event_id=canonical_event_id,
                         occurred_at=evaluated_at_utc,
                     )
-                    fired.append(copy.deepcopy(intention))
+                    fired.append(fired_occurrence)
         return fired
 
     @staticmethod

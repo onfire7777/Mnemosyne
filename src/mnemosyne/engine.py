@@ -395,6 +395,9 @@ class Intention:
             raise ValueError("session_id must be a non-empty string when provided")
         self.recurrence_policy = _normalize_recurrence_policy(self.recurrence_policy)
         self.recurrence_state = _normalize_recurrence_state(self.recurrence_state)
+        maximum = self.recurrence_policy.get("max_occurrences")
+        if maximum is not None and self.recurrence_state["occurrence"] >= maximum:
+            raise ValueError("recurrence_state.occurrence must be below max_occurrences")
 
     def _validate_trigger_expression(self, due_at: datetime) -> None:
         expr = self.trigger_expression
@@ -567,12 +570,20 @@ def _normalize_recurrence_policy(value: Any) -> dict[str, Any]:
 
 
 def _normalize_recurrence_state(value: Any) -> dict[str, Any]:
-    if type(value) is not dict or set(value) != {"occurrence"}:
-        raise ValueError("recurrence_state must contain only occurrence")
+    if type(value) is not dict or set(value) - {"occurrence", "last_evaluated_at"}:
+        raise ValueError("recurrence_state contains unsupported fields")
     occurrence = value.get("occurrence")
     if type(occurrence) is not int or occurrence < 0:
         raise ValueError("recurrence_state.occurrence must be a non-negative integer")
-    return {"occurrence": occurrence}
+    normalized: dict[str, Any] = {"occurrence": occurrence}
+    last_evaluated_at = value.get("last_evaluated_at")
+    if last_evaluated_at is not None:
+        if type(last_evaluated_at) is not str:
+            raise ValueError("recurrence_state.last_evaluated_at must be ISO-8601")
+        normalized["last_evaluated_at"] = _parse_aware_iso(
+            last_evaluated_at, field="recurrence_state.last_evaluated_at"
+        ).isoformat()
+    return normalized
 
 
 def _updated_intention(
@@ -603,7 +614,7 @@ def _updated_intention(
     row = current.to_dict()
     row["status"] = "scheduled"
     row["session_id"] = session_id
-    if due_at is not None:
+    if due_at is not None and due_at.astimezone(UTC) != current.due_at:
         normalized_due = due_at.astimezone(UTC)
         row["reschedule_history"] = [
             *current.reschedule_history,
@@ -624,6 +635,53 @@ def _updated_intention(
     if recurrence_policy is not None:
         row["recurrence_policy"] = copy.deepcopy(recurrence_policy)
     return Intention.from_dict(row)
+
+
+def _advance_intention_after_fire(
+    intention: Intention, *, evaluated_at: datetime
+) -> tuple[Intention, Intention]:
+    """Return the detached fired occurrence and atomically stored next state."""
+    fired = copy.deepcopy(intention)
+    fired.status = "fired"
+    policy = intention.recurrence_policy
+    if policy["type"] == "none":
+        return fired, copy.deepcopy(fired)
+    occurrence = intention.recurrence_state["occurrence"]
+    maximum = policy.get("max_occurrences")
+    if maximum is not None and occurrence + 1 >= maximum:
+        fired.recurrence_state = {
+            "occurrence": occurrence,
+            "last_evaluated_at": evaluated_at.isoformat(),
+        }
+        return copy.deepcopy(fired), fired
+    next_due = intention.due_at + timedelta(seconds=policy["interval_seconds"])
+    row = intention.to_dict()
+    row["due_at"] = next_due.isoformat()
+    row["recurrence_state"] = {
+        "occurrence": occurrence + 1,
+        "last_evaluated_at": evaluated_at.isoformat(),
+    }
+    row["reschedule_history"] = [
+        *intention.reschedule_history,
+        {
+            "from": intention.due_at.isoformat(),
+            "to": next_due.isoformat(),
+            "reason": "recurrence",
+            "occurrence": occurrence + 1,
+        },
+    ]
+    if intention.trigger_type == "exact_time":
+        row["trigger_expression"]["at"] = next_due.isoformat()
+    elif intention.trigger_type == "time_window":
+        end = _parse_aware_iso(intention.trigger_expression["end"], field="time_window.end")
+        duration = end - intention.due_at
+        row["trigger_expression"]["start"] = next_due.isoformat()
+        row["trigger_expression"]["end"] = (next_due + duration).isoformat()
+    return fired, Intention.from_dict(row)
+
+
+def _is_replayed_evaluation(intention: Intention, evaluated_at: datetime) -> bool:
+    return intention.recurrence_state.get("last_evaluated_at") == evaluated_at.isoformat()
 
 
 def _json_deep_contains(haystack: Any, needle: Any) -> bool:
@@ -991,6 +1049,9 @@ def intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]
         "dependencies": intention.dependencies,
         "reschedule_history": intention.reschedule_history,
         "evidence_ids": intention.evidence_ids,
+        "session_id": intention.session_id,
+        "recurrence_policy": intention.recurrence_policy,
+        "recurrence_state": intention.recurrence_state,
     }
     return {
         "intention_digest": content_cid("prospective_intention", immutable_snapshot),
@@ -1001,13 +1062,19 @@ def intention_audit_diff(intention: Intention, *, status: str) -> dict[str, Any]
     }
 
 
-def intention_fire_receipt_id(tenant_id: str, intention_id: str) -> str:
+def intention_fire_receipt_id(
+    tenant_id: str, intention_id: str, occurrence: int = 0
+) -> str:
     """Return the single canonical identity for a logical fire transition."""
 
-    return content_cid(
-        "fire_intention",
-        {"tenant_id": tenant_id, "intention_id": intention_id, "op": "fire"},
-    )
+    identity: dict[str, Any] = {
+        "tenant_id": tenant_id,
+        "intention_id": intention_id,
+        "op": "fire",
+    }
+    if occurrence:
+        identity["occurrence"] = occurrence
+    return content_cid("fire_intention", identity)
 
 
 def validate_intention_dependencies(
@@ -1872,6 +1939,8 @@ class LocalMemoryEngine:
                                          session_id=session_id, due_at=due_at, action=action,
                                          recurrence_policy=recurrence_policy)
             provenance = self._intention_provenance(updated)
+            if updated == current:
+                return copy.deepcopy(current)
             trust_tier, capability_tags = intention_audit_context(provenance)
             with self._prospective_transaction():
                 self.intentions[key] = updated
@@ -1916,7 +1985,7 @@ class LocalMemoryEngine:
             frozen_intentions = copy.deepcopy(self.intentions)
             candidate_results: list[tuple[Intention, dict[str, Any]]] = []
             for item in tenant_items.values():
-                if item.status != "scheduled":
+                if item.status != "scheduled" or _is_replayed_evaluation(item, evaluated_utc):
                     continue
                 fires, signal = _evaluate_trigger(
                     item,
@@ -1939,11 +2008,16 @@ class LocalMemoryEngine:
                 for (intention, signal), (trust_tier, capability_tags) in zip(
                     candidate_results, audit_contexts, strict=True
                 ):
-                    intention.status = "fired"
+                    occurrence = intention.recurrence_state["occurrence"]
+                    fired_occurrence, stored = _advance_intention_after_fire(
+                        intention, evaluated_at=evaluated_utc
+                    )
+                    self.intentions[(tenant_id, intention.intention_id)] = stored
                     fire_diff = {
-                        **intention_audit_diff(intention, status="fired"),
+                        **intention_audit_diff(fired_occurrence, status="fired"),
                         "evaluated_at": evaluated_utc.isoformat(),
                         "operating_point": operating_point.to_dict(),
+                        "occurrence": occurrence,
                     }
                     if "event_id" in signal:
                         fire_diff["matched_event_id"] = signal["event_id"]
@@ -1959,11 +2033,11 @@ class LocalMemoryEngine:
                         trust_tier=trust_tier,
                         capability_tags=capability_tags,
                         event_id=intention_fire_receipt_id(
-                            tenant_id, intention.intention_id
+                            tenant_id, intention.intention_id, occurrence
                         ),
                         occurred_at=evaluated_utc,
                     )
-                    fired.append(copy.deepcopy(intention))
+                    fired.append(fired_occurrence)
                 if fired:
                     self._persist()
             return fired
