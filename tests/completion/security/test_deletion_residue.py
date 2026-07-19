@@ -488,7 +488,9 @@ def test_r14_process_caches_are_synchronously_invalidated(cache: str) -> None:
     world.process_cache[cache] = {"tenant_id": TENANT, "source_ref": world.source_ref, "hit": CANARY}
     manifest = _delete(world)
     _assert_absent(world.process_cache, CANARY, world.source_ref)
-    assert _surface(manifest, f"cache:{cache}")["action"] == "invalidated"
+    assert next(row for row in manifest["surfaces"] if row["surface_type"] == "cache")[
+        "action"
+    ] == "invalidated"
 
 
 def test_r15_provider_purge_failure_never_reports_success() -> None:
@@ -918,11 +920,14 @@ def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
     _assert_complete(manifest)
     assert world.stores["cache:shared"].delete_calls == [(TENANT, world.source_ref)]
     assert "shared" not in world.process_cache
-    assert [
+    colliding = [
         (row["surface_type"], row["surface"])
         for row in manifest["surfaces"]
-        if row["surface"] == "cache:shared"
-    ] == [("store", "cache:shared"), ("cache", "cache:shared")]
+        if row["surface_type"] == "cache" or row["surface"] == "cache:shared"
+    ]
+    assert colliding[0] == ("store", "cache:shared")
+    assert colliding[1][0] == "cache"
+    assert colliding[1][1].startswith("cache:opaque:")
     durable_manifest = copy.deepcopy(manifest)
     durable_manifest["fence"]["durable"] = True
     assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(durable_manifest) == {
@@ -1310,6 +1315,60 @@ def test_r23_durable_journal_replays_after_coordinator_restart(tmp_path: Path) -
         "complete": True,
         "errors": [],
     }
+
+
+def test_r23_durable_journal_never_persists_sensitive_cache_key(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    cache_key = f"{CANARY}:{world.source_ref}"
+    world.process_cache[cache_key] = {
+        "tenant_id": TENANT,
+        "source_ref": world.source_ref,
+        "payload": CANARY,
+    }
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    coordinator = deletion.DeletionCoordinator(
+        engine=world.engine,
+        process_cache=world.process_cache,
+        session_identity=SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=int(TrustTier.DIRECT_USER),
+            session_id="verified-delete-session",
+        ),
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    )
+    manifest = coordinator.delete(
+        schema=SCHEMA,
+        operation_id=OPERATION_ID,
+        tenant_id=TENANT,
+        user_id=USER,
+        source_refs=[world.source_ref],
+        branch_scope="all",
+        mode="hard_delete_legal",
+        requested_by_role="legal",
+        reason="synthetic W2 contract",
+    )
+    journal_bytes = journal_path.read_bytes()
+    assert cache_key.encode() not in journal_bytes
+    _assert_absent(manifest, CANARY, world.source_ref)
+
+
+def test_r21_retained_history_preserves_unrelated_schema_keys_and_short_values() -> None:
+    world = _world()
+    world.engine.audit_log.append(
+        {
+            "id": "audit-schema-r21",
+            "tenant_id": TENANT,
+            "source_type": "source_type",
+            "reality_class": "source_type-adjacent",
+        }
+    )
+    _delete(world)
+    retained = next(row for row in world.engine.audit_log if row["id"] == "audit-schema-r21")
+    assert retained["source_type"] == "source_type"
+    assert retained["reality_class"] == "source_type-adjacent"
 
 
 def test_r25_signed_deletion_manifest_helper_requires_semantic_completeness(tmp_path: Path) -> None:

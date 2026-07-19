@@ -427,7 +427,7 @@ class DeletionCoordinator:
     def _surface_ids(self, tenant: str, refs: list[str]) -> list[tuple[str, str]]:
         surface_ids = [("store", name) for name in self.stores]
         surface_ids.extend(
-            ("cache", key)
+            ("cache", self._cache_surface_name(key))
             for key, value in self.process_cache.items()
             if isinstance(value, dict)
             and value.get("tenant_id") == tenant
@@ -450,6 +450,11 @@ class DeletionCoordinator:
             return "runtime_user_model"
         return name
 
+    @staticmethod
+    def _cache_surface_name(key: str) -> str:
+        digest = hashlib.sha256(f"cache-surface\0{key}".encode()).hexdigest()
+        return f"opaque:{digest}"
+
     def _attempt(self, record: LedgerRecord, surface_id: tuple[str, str], tenant: str, refs: list[str]) -> bool:
         kind, name = surface_id
         receipt = record.receipts[surface_id]
@@ -470,8 +475,12 @@ class DeletionCoordinator:
             if kind == "cache":
                 receipt.attempts += 1
                 self.ledger.checkpoint(record)
-                if name in self.process_cache:
-                    del self.process_cache[name]
+                cache_key = next(
+                    (key for key in self.process_cache if self._cache_surface_name(key) == name),
+                    None,
+                )
+                if cache_key is not None:
+                    del self.process_cache[cache_key]
                 elif not resuming:
                     receipt.error_code = "probe_failed"
                     receipt.state = "failed"
@@ -616,7 +625,7 @@ class DeletionCoordinator:
                             )
                         )
                     )
-                    sensitive.update(self._strings(evidence.metadata, include_keys=True))
+                    sensitive.update(self._strings(evidence.metadata))
         sensitive.update(hashlib.sha256(value.encode()).hexdigest() for value in tuple(sensitive) if value)
         try:
             # Scrub while the evidence still exists so a crash after forget cannot
@@ -679,7 +688,10 @@ class DeletionCoordinator:
 
     @classmethod
     def _scrub_value(cls, value: Any, sensitive: set[str]) -> Any:
-        if isinstance(value, str) and any(needle and needle in value for needle in sensitive):
+        if isinstance(value, str) and any(
+            needle and (value == needle or (len(needle) >= 8 and needle in value))
+            for needle in sensitive
+        ):
             return _opaque("retained-audit", value)
         if isinstance(value, dict):
             scrubbed = {}
