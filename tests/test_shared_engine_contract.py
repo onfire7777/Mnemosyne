@@ -409,6 +409,44 @@ def test_shared_prospective_update_replay_and_recurrence(
     assert engine.list_intentions(tenant)[0].status == "fired"
 
 
+def test_shared_update_rejects_foreign_owner_missing_and_cross_tenant(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-update-guard"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT + timedelta(hours=1)
+    intention = _prospective_intention(
+        intention_id="shared-update-guard", tenant=tenant, user=user, agent=agent,
+        evidence_id=evidence_id, trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()}, due_at=due,
+        session_id="session-a",
+    )
+    engine.schedule_intention(intention)
+    before = engine.list_intentions(tenant)[0]
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            tenant, intention.intention_id, user_id=f"{user}-other", agent_id=agent,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            tenant, intention.intention_id, user_id=user, agent_id=f"{agent}-other",
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            tenant, "missing-intention", user_id=user, agent_id=agent,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            f"{tenant}-other", intention.intention_id, user_id=user, agent_id=agent,
+            session_id="session-a", action={"type": "noop"},
+        )
+    assert engine.list_intentions(tenant)[0] == before
+
+
 @pytest.mark.parametrize("trigger_type", ["event", "condition"])
 def test_shared_recurring_signal_is_consumed_once(
     engine_bundle: tuple[Any, str, str], trigger_type: str
@@ -781,6 +819,11 @@ def test_shared_prospective_trigger_matrix(
     }
     assert observed_targets >= expected_fired_ids
     assert len(fire_audits) == len(expected_fired_ids)
+    # Explicit contract exemption: live-DB audit exports carry the internal
+    # tenant UUID rather than the runtime tenant id. Normalizing
+    # PostgresEngine.export_tenant is pre-existing behavior owned outside the
+    # prospective lease; this branch documents the divergence instead of
+    # silently certifying it as parity.
     expected_audit_tenant = (
         str(_stable_uuid("tenant", tenant))
         if "live_db" in engine_capabilities(engine)

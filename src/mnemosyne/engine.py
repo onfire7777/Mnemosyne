@@ -720,12 +720,47 @@ def _cancelled_intention(
         raise PermissionError("intention session does not match authenticated session")
     if current.status == "fired":
         raise ValueError("a fired intention cannot be cancelled")
+    if current.status == "cancelled":
+        # Idempotent no-op: a terminal record never rebinds its session.
+        return copy.deepcopy(current)
     row = current.to_dict()
     row["session_id"] = session_id
-    if current.status == "scheduled":
-        row["status"] = "cancelled"
-        row["cancellation_state"] = {"cancelled_by": cancelled_by}
+    row["status"] = "cancelled"
+    row["cancellation_state"] = {"cancelled_by": cancelled_by}
     return Intention.from_dict(row)
+
+
+_RECURRENCE_HISTORY_LIMIT = 50
+
+
+def _bounded_reschedule_history(
+    history: list[dict[str, Any]], entry: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Append one recurrence entry, keeping only the newest recurrence entries.
+
+    Infinite recurrences would otherwise grow the stored record (and every
+    audit diff embedding it) without bound. Caller-driven reschedule entries
+    are never dropped; each surviving recurrence entry keeps its occurrence
+    number, so trimmed prefixes stay reconstructible.
+    """
+    combined = [*history, entry]
+    surplus = (
+        sum(
+            1
+            for item in combined
+            if isinstance(item, dict) and item.get("reason") == "recurrence"
+        )
+        - _RECURRENCE_HISTORY_LIMIT
+    )
+    if surplus <= 0:
+        return combined
+    bounded: list[dict[str, Any]] = []
+    for item in combined:
+        if surplus and isinstance(item, dict) and item.get("reason") == "recurrence":
+            surplus -= 1
+            continue
+        bounded.append(item)
+    return bounded
 
 
 def _advance_intention_after_fire(
@@ -743,26 +778,27 @@ def _advance_intention_after_fire(
         "occurrence": occurrence,
         "last_evaluated_at": evaluated_at.isoformat(),
     }
-    consumed_signal = matched_signal or intention.recurrence_state.get("consumed_signal")
-    if consumed_signal:
-        next_state["consumed_signal"] = copy.deepcopy(consumed_signal)
+    if matched_signal:
+        next_state["consumed_signal"] = copy.deepcopy(matched_signal)
+    # Every fired occurrence snapshot carries the same recurrence_state shape:
+    # this evaluation's watermark at the occurrence that fired.
+    fired.recurrence_state = copy.deepcopy(next_state)
     if maximum is not None and occurrence + 1 >= maximum:
-        fired.recurrence_state = next_state
         return copy.deepcopy(fired), fired
     next_due = intention.due_at + timedelta(seconds=policy["interval_seconds"])
     row = intention.to_dict()
     row["due_at"] = next_due.isoformat()
     next_state["occurrence"] = occurrence + 1
     row["recurrence_state"] = next_state
-    row["reschedule_history"] = [
-        *intention.reschedule_history,
+    row["reschedule_history"] = _bounded_reschedule_history(
+        intention.reschedule_history,
         {
             "from": intention.due_at.isoformat(),
             "to": next_due.isoformat(),
             "reason": "recurrence",
             "occurrence": occurrence + 1,
         },
-    ]
+    )
     if intention.trigger_type == "exact_time":
         row["trigger_expression"]["at"] = next_due.isoformat()
     elif intention.trigger_type == "time_window":

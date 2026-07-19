@@ -3728,17 +3728,25 @@ def test_mcp_cancel_binding_accepts_only_authenticated_user_or_agent(tmp_path: P
     )
     token = mcp_session_token(agent_id="owning-agent")
 
-    def cancel(cancelled_by: str | None) -> dict[str, Any]:
+    def cancel(**overrides: Any) -> dict[str, Any]:
         arguments: dict[str, Any] = {"session_token": token, "intention_id": "missing-intention"}
-        if cancelled_by is not None:
-            arguments["cancelled_by"] = cancelled_by
+        arguments.update(overrides)
         return server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                               "params": {"name": "cancel_intention", "arguments": arguments}})
 
-    for accepted in (cancel(None), cancel(USER), cancel("owning-agent")):
+    accepted_cases = (
+        cancel(),
+        cancel(cancelled_by=USER),
+        cancel(cancelled_by="owning-agent"),
+        cancel(cancelled_by=None),
+        cancel(cancelled_by=""),
+    )
+    for accepted in accepted_cases:
         assert accepted["result"]["isError"] is True
-        assert "cancellation principal mismatch" not in accepted["result"]["content"][0]["text"]
-    foreign = cancel("foreign-agent")
+        # An accepted principal must reach the engine and fail only on the
+        # missing intention, proving no binding or principal denial fired.
+        assert "missing-intention" in accepted["result"]["content"][0]["text"]
+    foreign = cancel(cancelled_by="foreign-agent")
     assert "session cancellation principal mismatch" in foreign["result"]["content"][0]["text"]
 
 
@@ -3764,6 +3772,36 @@ def test_memory_tools_cancel_authorizes_user_owner_then_selected_agent() -> None
         TENANT, "agent-cancellable", "owning-agent", session_identity=identity,
     )
     assert cancelled["cancellation_state"] == {"cancelled_by": "owning-agent"}
+
+
+def test_memory_tools_cancel_agent_principal_cannot_reach_other_users() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    evidence_id = seed_grounded_gate_evidence(
+        engine, "Agent principal stays user-scoped.", user_id="other-user"
+    )
+    due = dt.datetime(2026, 7, 18, 12, tzinfo=dt.timezone.utc)
+    engine.schedule_intention(Intention(
+        intention_id="other-users-intention", tenant_id=TENANT, user_id="other-user",
+        agent_id="owning-agent", trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()},
+        action={"type": "remind", "message": "Other user's reminder."}, due_at=due,
+        evidence_ids=[evidence_id],
+    ))
+    identity = SessionIdentity(
+        tenant_id=TENANT, user_id=USER, agent_id="owning-agent", role="operator",
+        source_trust_tier=0, session_id="mcp-test-session",
+    )
+    with pytest.raises(PermissionError, match="authenticated user's intentions"):
+        tools.cancel_intention(
+            TENANT, "other-users-intention", "owning-agent", session_identity=identity,
+        )
+    stored = next(
+        intention for intention in engine.list_intentions(TENANT)
+        if intention.intention_id == "other-users-intention"
+    )
+    assert stored.status == "scheduled"
+    assert stored.session_id is None
 
 
 def test_mcp_server_accepts_keyring_sessions_and_rejects_revoked_session_ids(tmp_path: Path) -> None:

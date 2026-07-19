@@ -907,6 +907,16 @@ class MemoryTools:
             raise PermissionError(
                 "cancel intention denied: intention session does not match authenticated session"
             )
+        if (
+            current is not None
+            and cancelled_by != session_identity.user_id
+            and current.user_id != session_identity.user_id
+        ):
+            # A shared agent identity must not reach across users: the agent
+            # principal only cancels intentions the authenticated user owns.
+            raise PermissionError(
+                "cancel intention denied: agent principal may only cancel the authenticated user's intentions"
+            )
         self.engine.cancel_intention(
             authorized_tenant,
             intention_id,
@@ -983,6 +993,9 @@ class MemoryTools:
         owner_id: str | None = None,
         agent_id: str | None = None,
     ) -> Any:
+        # Updates are policy-equivalent to schedule: the Task 5 lease forbids
+        # broadening SecurityPolicy, while the denial message below keeps the
+        # real operation name.
         policy_operation = "schedule" if operation == "update" else operation
         decision = self.security.authorize_prospective_memory(
             policy_operation,
