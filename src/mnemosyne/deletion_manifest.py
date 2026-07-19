@@ -138,9 +138,10 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     errors.extend(_custody_errors(manifest))
     for field in ("tenant_ref", "user_scope", "reason"):
         _opaque_field(manifest, field, errors)
+    raw_operation_id = manifest.get("operation_id", "")
     try:
-        operation_id = UUID(manifest.get("operation_id", ""))
-    except (TypeError, ValueError):
+        operation_id = UUID(raw_operation_id) if isinstance(raw_operation_id, str) else None
+    except ValueError:
         operation_id = None
     if operation_id is None or manifest.get("request_id") != str(operation_id):
         errors.append("operation and request identifiers must name the same UUID")

@@ -1183,6 +1183,7 @@ def _valid_manifest() -> dict[str, Any]:
 @pytest.mark.parametrize(
     "mutate",
     [
+        lambda manifest: manifest.update(operation_id={"unexpected": "object"}),
         lambda manifest: manifest["surfaces"].clear(),
         lambda manifest: manifest["stores"][0].update(available=False),
         lambda manifest: manifest["summary"].update(recoverable_residue_count=1),
