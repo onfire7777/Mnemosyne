@@ -27,7 +27,7 @@ from mnemosyne.evidence_signing import (
     sign_evidence_manifest,
     verify_evidence_manifest_signature,
 )
-from mnemosyne.models import Assertion, Evidence, Relation
+from mnemosyne.models import Assertion, Evidence, MergeReport, Relation
 from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier
 from mnemosyne.sqlite_engine import SqliteEngine
 
@@ -1668,6 +1668,24 @@ def test_r25_custody_scan_rejects_direct_material(
     assert any(expected_error in error for error in result["errors"])
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda m: m["policy"]["required_surfaces"][0].update(note="user-jake@example-corp"),
+        lambda m: m["policy"]["required_surfaces"][0].update({CANARY: "x"}),
+        lambda m: m["policy"]["required_surfaces"][0].pop("surface_type"),
+    ],
+)
+def test_r25_verifier_rejects_custody_in_required_surface_rows(
+    mutate: Callable[[dict[str, Any]], Any],
+) -> None:
+    manifest = _valid_manifest()
+    mutate(manifest)
+    result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert result["errors"]
+
+
 def test_r25_verifier_fails_closed_for_non_object_manifests() -> None:
     verifier = importlib.import_module("mnemosyne.deletion_manifest")
     for manifest in (None, "manifest", 7, ["surfaces"]):
@@ -1704,6 +1722,12 @@ def test_r25_signed_verification_fails_closed_on_tamper_and_malformed_bytes(tmp_
     assert any("signature" in error for error in result["errors"])
 
     manifest_path.write_text("not-json", encoding="utf-8")
+    result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
+    assert result["complete"] is False
+    assert result["errors"]
+
+    # Hostile nesting must fail closed at parse time, not crash the verifier.
+    manifest_path.write_text("[" * 100_000 + "]" * 100_000, encoding="utf-8")
     result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
     assert result["complete"] is False
     assert result["errors"]
@@ -1797,6 +1821,52 @@ def test_r23_durable_journal_never_persists_sensitive_cache_key(tmp_path: Path) 
     _assert_absent(manifest, CANARY, world.source_ref)
 
 
+def test_r23_durable_journal_never_persists_sensitive_store_name(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    store_name = f"user-{CANARY}@example.com"
+    world.stores[store_name] = FakeStore(
+        store_name,
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    coordinator = deletion.DeletionCoordinator(
+        engine=world.engine,
+        stores=world.stores,
+        session_identity=SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=int(TrustTier.DIRECT_USER),
+            session_id="verified-delete-session",
+        ),
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    )
+    manifest = coordinator.delete(
+        schema=SCHEMA,
+        operation_id=OPERATION_ID,
+        tenant_id=TENANT,
+        user_id=USER,
+        source_refs=[world.source_ref],
+        branch_scope="all",
+        mode="hard_delete_legal",
+        requested_by_role="legal",
+        reason="synthetic W2 contract",
+    )
+    _assert_complete(manifest)
+    journal_bytes = journal_path.read_bytes()
+    for suffix in ("-wal", "-shm"):
+        sidecar = journal_path.with_name(journal_path.name + suffix)
+        if sidecar.exists():
+            journal_bytes += sidecar.read_bytes()
+    for needle in (store_name, CANARY, world.source_ref, TENANT, USER):
+        assert needle.encode() not in journal_bytes
+    # An unkeyed digest of the store name would be a dictionary-attack oracle.
+    unkeyed_digest = hashlib.sha256(f"store-surface\0{store_name}".encode()).hexdigest()
+    assert unkeyed_digest.encode() not in journal_bytes
+    _assert_absent(manifest, store_name)
+
+
 def test_r21_retained_history_preserves_unrelated_schema_keys_and_short_values() -> None:
     world = _world()
     evidence = _evidence(content="ordinary payload")
@@ -1847,6 +1917,88 @@ def test_r21_retained_history_scrubs_deleted_metadata_keys() -> None:
     )
     _assert_absent(retained, metadata_key)
     assert retained["details"]
+
+
+def test_r21_merge_log_and_wildcard_audit_history_is_scrubbed() -> None:
+    world = _world()
+    # Real merge rows are MergeReport.to_dict() and embed no tenant_id; merges
+    # audited without a tenant use the "*" wildcard. Neither may keep payload.
+    world.engine.merge_log.append(
+        MergeReport(
+            from_branch=f"branch-{CANARY}",
+            into_branch="main",
+            evidence_added=1,
+            assertions_added=0,
+            assertions_merged=0,
+            relations_added=0,
+            conflicts=[{"detail": CANARY, "source_ref": world.source_ref}],
+        ).to_dict()
+    )
+    world.engine.audit_log.append(
+        {
+            "id": "audit-merge-wildcard",
+            "tenant_id": "*",
+            "op": "merge",
+            "target_id": f"branch-{CANARY}",
+            "details": {"content": CANARY, "source_ref": world.source_ref},
+        }
+    )
+    other_audit = {
+        "id": "audit-other-tenant",
+        "tenant_id": OTHER_TENANT,
+        "op": "remember",
+        "details": {"content": CANARY},
+    }
+    world.engine.audit_log.append(copy.deepcopy(other_audit))
+
+    _delete(world)
+
+    _assert_absent(world.engine.merge_log, CANARY, world.source_ref)
+    assert world.engine.merge_log[0]["evidence_added"] == 1
+    scrubbed_wildcard = next(
+        row for row in world.engine.audit_log if row.get("id") == "audit-merge-wildcard"
+    )
+    _assert_absent(scrubbed_wildcard, CANARY, world.source_ref)
+    assert scrubbed_wildcard["op"] == "merge"
+    # Rows attributed to another tenant stay byte-identical.
+    assert other_audit in world.engine.audit_log
+    _assert_absent(world.engine.export_tenant(TENANT)["merge_log"], CANARY, world.source_ref)
+
+
+def test_r21_sqlite_merge_log_rows_are_scrubbed(tmp_path: Path) -> None:
+    engine = SqliteEngine(tmp_path)
+    source_ref = engine.append_evidence(_evidence())
+    conn = engine._connect(TENANT)
+    with engine._lock, conn:
+        conn.execute(
+            "INSERT INTO merge_log(tenant_id, record) VALUES (?, ?)",
+            (
+                TENANT,
+                json.dumps(
+                    MergeReport(
+                        from_branch=f"branch-{CANARY}",
+                        into_branch="main",
+                        evidence_added=1,
+                        assertions_added=0,
+                        assertions_merged=0,
+                        relations_added=0,
+                        conflicts=[{"detail": CANARY, "source_ref": source_ref}],
+                    ).to_dict(),
+                    sort_keys=True,
+                ),
+            ),
+        )
+    world = FakeWorld(engine=engine, source_ref=source_ref)  # type: ignore[arg-type]
+
+    manifest = _delete(world)
+
+    _assert_complete(manifest)
+    rows = [
+        json.loads(row["record"])
+        for row in conn.execute("SELECT record FROM merge_log").fetchall()
+    ]
+    assert rows and rows[0]["evidence_added"] == 1
+    _assert_absent(rows, CANARY, source_ref)
 
 
 def test_r25_coordinator_opaques_identifier_bearing_store_labels() -> None:
