@@ -574,6 +574,7 @@ def _normalize_recurrence_state(value: Any) -> dict[str, Any]:
         "occurrence",
         "last_evaluated_at",
         "consumed_signal",
+        "consumed_signals",
     }:
         raise ValueError("recurrence_state contains unsupported fields")
     occurrence = value.get("occurrence")
@@ -587,8 +588,14 @@ def _normalize_recurrence_state(value: Any) -> dict[str, Any]:
         normalized["last_evaluated_at"] = _parse_aware_iso(
             last_evaluated_at, field="recurrence_state.last_evaluated_at"
         ).isoformat()
-    consumed_signal = value.get("consumed_signal")
-    if consumed_signal is not None:
+    consumed_signals = value.get("consumed_signals", [])
+    if type(consumed_signals) is not list:
+        raise ValueError("recurrence_state.consumed_signals must be a JSON array")
+    legacy_signal = value.get("consumed_signal")
+    if legacy_signal is not None:
+        consumed_signals = [*consumed_signals, legacy_signal]
+    normalized_signals: list[dict[str, Any]] = []
+    for consumed_signal in consumed_signals:
         if type(consumed_signal) is not dict or set(consumed_signal) not in (
             {"event_id"},
             {"condition_id", "observed_at"},
@@ -614,7 +621,10 @@ def _normalize_recurrence_state(value: Any) -> dict[str, Any]:
                 normalized_signal["observed_at"],
                 field="recurrence_state.consumed_signal.observed_at",
             ).isoformat()
-        normalized["consumed_signal"] = normalized_signal
+        if normalized_signal not in normalized_signals:
+            normalized_signals.append(normalized_signal)
+    if normalized_signals:
+        normalized["consumed_signals"] = normalized_signals
     return normalized
 
 
@@ -706,8 +716,14 @@ def _advance_intention_after_fire(
         "occurrence": occurrence,
         "last_evaluated_at": evaluated_at.isoformat(),
     }
+    consumed_signals = copy.deepcopy(
+        intention.recurrence_state.get("consumed_signals", [])
+    )
     if matched_signal:
-        next_state["consumed_signal"] = copy.deepcopy(matched_signal)
+        if matched_signal not in consumed_signals:
+            consumed_signals.append(copy.deepcopy(matched_signal))
+    if consumed_signals:
+        next_state["consumed_signals"] = consumed_signals
     if maximum is not None and occurrence + 1 >= maximum:
         fired.recurrence_state = next_state
         return copy.deepcopy(fired), fired
@@ -980,13 +996,13 @@ def _evaluate_trigger(
         match = expr.get("match", {})
         threshold = operating_point.threshold
         candidates = []
-        consumed_signal = intention.recurrence_state.get("consumed_signal")
+        consumed_signals = intention.recurrence_state.get("consumed_signals", [])
         for event in context.events:
             if event["event_type"] != event_type:
                 continue
             if event["confidence"] < threshold:
                 continue
-            if consumed_signal == {"event_id": event["event_id"]}:
+            if {"event_id": event["event_id"]} in consumed_signals:
                 continue
             occurred = _parse_aware_iso(
                 event["occurred_at"], field="event.occurred_at"
@@ -1024,7 +1040,7 @@ def _evaluate_trigger(
             "condition_id": condition_id,
             "observed_at": observed_at.isoformat(),
         }
-        if intention.recurrence_state.get("consumed_signal") == matched_signal:
+        if matched_signal in intention.recurrence_state.get("consumed_signals", []):
             return False, {}
         if not (due_utc <= observed_at <= evaluated_utc):
             return False, {}
