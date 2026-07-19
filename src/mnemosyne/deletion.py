@@ -336,9 +336,7 @@ class DeletionCoordinator:
             reason=reason,
         )
         fingerprint = _canonical_fingerprint(request)
-        lock = getattr(self.ledger, "operation_lock", None)
-        operation_lock = lock() if callable(lock) else getattr(self.ledger, "lock", threading.RLock())
-        with operation_lock:
+        with self.ledger.operation_lock():
             record = self.ledger.begin(operation_id, fingerprint, tenant_id)
             if record.manifest is not None and record.manifest["summary"]["complete"]:
                 return deepcopy(record.manifest)

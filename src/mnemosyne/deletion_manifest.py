@@ -13,6 +13,7 @@ from .evidence_signing import sign_evidence_manifest, verify_evidence_manifest_s
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _RAW_HASH = re.compile(r"^[0-9a-fA-F]{32,}$")
+_OPAQUE_REF = re.compile(r"^opaque:[0-9a-f]{64}$")
 _FORBIDDEN_KEYS = {
     "payload", "content", "content_pointer", "source_uri", "uri", "hash",
     "tenant_id", "user_id", "source_ref", "evidence_cid", "source_identity",
@@ -97,7 +98,7 @@ def _custody_errors(value: Any, *, path: str = "manifest") -> list[str]:
 
 def _opaque_field(manifest: dict[str, Any], key: str, errors: list[str]) -> None:
     value = manifest.get(key)
-    if not isinstance(value, str) or not value.startswith("opaque:"):
+    if not isinstance(value, str) or _OPAQUE_REF.fullmatch(value) is None:
         errors.append(f"{key} must be opaque")
 
 
@@ -109,6 +110,20 @@ def _timestamp(value: Any) -> datetime | None:
         return parsed if parsed.tzinfo is not None else None
     except ValueError:
         return None
+
+
+def _receipt_timestamps_valid(
+    row: dict[str, Any], requested_at: datetime | None, completed_at: datetime | None
+) -> bool:
+    attempted_at = _timestamp(row.get("attempted_at"))
+    verified_at = _timestamp(row.get("verified_at"))
+    return (
+        requested_at is not None
+        and attempted_at is not None
+        and verified_at is not None
+        and completed_at is not None
+        and requested_at <= attempted_at <= verified_at <= completed_at
+    )
 
 
 def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
@@ -207,8 +222,7 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         or row.get("state") != "verified"
         or row.get("precondition_present") is not True
         or row.get("verification_method") != "direct_and_public_probe"
-        or _timestamp(row.get("attempted_at")) is None
-        or _timestamp(row.get("verified_at")) is None
+        or not _receipt_timestamps_valid(row, requested_at, completed_at)
         or type(row.get("attempts")) is not int
         or row["attempts"] < 1
         or not row.get("checkpoint")
@@ -222,9 +236,9 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         errors.append("one or more surfaces lack verified durable removal")
     if any(
         not isinstance(row.get("tenant_ref"), str)
-        or not row["tenant_ref"].startswith("opaque:")
+        or _OPAQUE_REF.fullmatch(row["tenant_ref"]) is None
         or not isinstance(row.get("object_ref"), str)
-        or not row["object_ref"].startswith("opaque:")
+        or _OPAQUE_REF.fullmatch(row["object_ref"]) is None
         for row in surfaces
         if isinstance(row, dict)
     ):
@@ -257,7 +271,7 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     if manifest.get("retention_exceptions") != []:
         errors.append("retention exceptions remain")
     if not manifest.get("source_refs") or any(
-        not isinstance(ref, str) or not ref.startswith("opaque:")
+        not isinstance(ref, str) or _OPAQUE_REF.fullmatch(ref) is None
         for ref in manifest.get("source_refs", [])
     ):
         errors.append("source references must be nonempty and opaque")

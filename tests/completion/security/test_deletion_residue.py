@@ -976,7 +976,22 @@ def test_engine_crash_after_commit_resumes_by_probe_without_repeating_forget(tmp
     with pytest.raises(SystemExit, match="synthetic crash"):
         coordinator.delete(**request)
 
-    manifest = coordinator.delete(**request)
+    restarted_ledger = importlib.import_module("mnemosyne.deletion").SQLiteDeletionLedger(
+        tmp_path / "deletion.db"
+    )
+    restarted_coordinator = _coordinator_type()(
+        engine=engine,
+        session_identity=SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=int(TrustTier.DIRECT_USER),
+            session_id="verified-delete-session",
+        ),
+        security_policy=SecurityPolicy(),
+        ledger=restarted_ledger,
+    )
+    manifest = restarted_coordinator.delete(**request)
     _assert_complete(manifest)
     assert engine.forget_calls == 1
 
@@ -1081,6 +1096,7 @@ def test_import_has_no_engine_monkeypatch_side_effect() -> None:
 
 
 def _valid_manifest() -> dict[str, Any]:
+    opaque = "opaque:" + "0" * 64
     return {
         "schema": SCHEMA,
         "operation_id": OPERATION_ID,
@@ -1089,11 +1105,11 @@ def _valid_manifest() -> dict[str, Any]:
         "completed_at": "2026-07-18T00:00:01Z",
         "mode": "hard_delete_legal",
         "requested_by_role": "legal",
-        "reason": "opaque:reason",
-        "tenant_ref": "opaque:tenant",
-        "user_scope": "opaque:user",
+        "reason": opaque,
+        "tenant_ref": opaque,
+        "user_scope": opaque,
         "branch_scope": "all",
-        "source_refs": ["opaque:source"],
+        "source_refs": [opaque],
         "policy": {
             "version": "w2",
             "required_surfaces": [{"surface_type": "engine", "surface": "source_evidence"}],
@@ -1104,8 +1120,8 @@ def _valid_manifest() -> dict[str, Any]:
                 "surface": "source_evidence",
                 "surface_type": "engine",
                 "backend": "local",
-                "tenant_ref": "opaque:tenant",
-                "object_ref": "opaque:source",
+                "tenant_ref": opaque,
+                "object_ref": opaque,
                 "action": "deleted",
                 "precondition_present": True,
                 "attempted_at": "2026-07-18T00:00:00Z",
@@ -1190,6 +1206,16 @@ def test_r25_semantic_verifier_rejects_signed_but_incomplete_manifest(
         lambda manifest: manifest["surfaces"][0].update(verification_method="none"),
         lambda manifest: manifest["surfaces"][0].pop("attempted_at"),
         lambda manifest: manifest["surfaces"][0].pop("verified_at"),
+        lambda manifest: manifest["surfaces"][0].update(
+            attempted_at="2026-07-18T00:00:01Z",
+            verified_at="2026-07-18T00:00:00Z",
+        ),
+        lambda manifest: manifest["surfaces"][0].update(
+            attempted_at="2026-07-18T00:00:02Z",
+            verified_at="2026-07-18T00:00:03Z",
+        ),
+        lambda manifest: manifest.update(tenant_ref="opaque:tenant-direct"),
+        lambda manifest: manifest.update(source_refs=["opaque:" + "A" * 64]),
     ],
 )
 def test_r25_semantic_verifier_requires_identity_policy_and_receipt_semantics(
