@@ -5842,7 +5842,7 @@ class PostgresEngine:
     # Prospective-memory: schedule / cancel / list / evaluate (W3 Phase 2).
     # Exact parity with the frozen Local contract. All SQL is parameterized;
     # audit append and state transition share one transaction; idempotency is
-    # enforced by intention_firing_receipts.
+    # enforced by the legacy and occurrence-aware firing-receipt ledgers.
     # ------------------------------------------------------------------
 
     def _intention_provenance_rows(
@@ -5953,11 +5953,19 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT 1
-                    FROM intention_firing_receipts
-                    WHERE tenant_id = %s AND intention_id = %s
+                    SELECT 1 FROM (
+                      SELECT intention_id FROM intention_firing_receipts
+                      WHERE tenant_id = %s AND intention_id = %s
+                      UNION ALL
+                      SELECT intention_id FROM intention_firing_receipts_v2
+                      WHERE tenant_id = %s AND intention_id = %s
+                    ) AS durable_receipts
+                    LIMIT 1
                     """,
-                    (db_tenant_id, intention.intention_id),
+                    (
+                        db_tenant_id, intention.intention_id,
+                        db_tenant_id, intention.intention_id,
+                    ),
                 )
                 if cur.fetchone() is not None:
                     raise ValueError(
@@ -6028,11 +6036,19 @@ class PostgresEngine:
                 # preceded the firing commit but the insert waited for deletion.
                 cur.execute(
                     """
-                    SELECT 1
-                    FROM intention_firing_receipts
-                    WHERE tenant_id = %s AND intention_id = %s
+                    SELECT 1 FROM (
+                      SELECT intention_id FROM intention_firing_receipts
+                      WHERE tenant_id = %s AND intention_id = %s
+                      UNION ALL
+                      SELECT intention_id FROM intention_firing_receipts_v2
+                      WHERE tenant_id = %s AND intention_id = %s
+                    ) AS durable_receipts
+                    LIMIT 1
                     """,
-                    (db_tenant_id, intention.intention_id),
+                    (
+                        db_tenant_id, intention.intention_id,
+                        db_tenant_id, intention.intention_id,
+                    ),
                 )
                 if cur.fetchone() is not None:
                     raise ValueError(
@@ -6320,7 +6336,7 @@ class PostgresEngine:
                     fire_audit_diff["canonical_event_id"] = canonical_event_id
                     cur.execute(
                         """
-                        INSERT INTO intention_firing_receipts(
+                        INSERT INTO intention_firing_receipts_v2(
                             tenant_id, intention_id, operation, occurrence, canonical_event_id
                         )
                         VALUES (%s, %s, 'fire', %s, %s)

@@ -47,7 +47,10 @@ _OP = ProspectiveOperatingPoint(
 )
 
 
-def _ctx(infra: bool = True, events=None, conditions=None, tenant_id: str = TENANT_ID) -> TriggerEvaluationContext:
+def _ctx(
+    infra: bool = True, events=None, conditions=None, tenant_id: str | None = None
+) -> TriggerEvaluationContext:
+    tenant_id = tenant_id or TENANT_ID
     normalized_events = [
         {**event, "tenant_id": event.get("tenant_id", tenant_id)} for event in events or []
     ]
@@ -172,8 +175,9 @@ def _require_rls_test_role(engine: PostgresEngine) -> None:
                 """
                 SELECT has_table_privilege(%s, 'intentions', 'SELECT')
                    AND has_table_privilege(%s, 'intention_firing_receipts', 'SELECT')
+                   AND has_table_privilege(%s, 'intention_firing_receipts_v2', 'SELECT')
                 """,
-                (_RLS_TEST_ROLE, _RLS_TEST_ROLE),
+                (_RLS_TEST_ROLE, _RLS_TEST_ROLE, _RLS_TEST_ROLE),
             )
             if cur.fetchone() != (True,):
                 pytest.skip(
@@ -183,7 +187,9 @@ def _require_rls_test_role(engine: PostgresEngine) -> None:
 
 @pytest.fixture
 def tenant_user_agent():
+    global TENANT_ID
     tid = f"tenant-pm-{uuid4().hex[:8]}"
+    TENANT_ID = tid
     uid = f"user-pm-{uuid4().hex[:8]}"
     aid = f"agent-pm-{uuid4().hex[:8]}"
     return tid, uid, aid
@@ -192,9 +198,152 @@ def tenant_user_agent():
 def test_postgres_schema_and_update_contract_are_occurrence_aware() -> None:
     schema = Path("sql/schema.sql").read_text()
     source = Path("src/mnemosyne/postgres_engine.py").read_text()
+    assert "CREATE TABLE IF NOT EXISTS intention_firing_receipts_v2" in schema
     assert "PRIMARY KEY (tenant_id, intention_id, operation, occurrence)" in schema
+    assert "DROP CONSTRAINT IF EXISTS intention_firing_receipts_pkey" not in schema
     assert "SET trigger_expression = %s, action = %s, due_at = %s" in source
     assert "ON CONFLICT (tenant_id, intention_id, operation, occurrence) DO NOTHING" in source
+
+
+def test_live_schema_upgrade_preserves_legacy_receipts_and_adds_v2() -> None:
+    if not _DSN:
+        pytest.skip("MNEMOSYNE_POSTGRES_DSN is not set")
+    schema_name = f"p5_receipt_upgrade_{uuid4().hex}"
+    runtime_tenant = f"upgrade-{uuid4().hex}"
+    legacy_tenant = _stable_uuid("tenant", runtime_tenant)
+    legacy_event = f"legacy-event-{uuid4().hex}"
+    schema_sql = Path("sql/schema.sql").read_text()
+    isolated_dsn = psycopg.conninfo.make_conninfo(
+        _DSN, options=f"-csearch_path={schema_name},public"
+    )
+    engine = None
+    with psycopg.connect(_DSN, autocommit=True) as admin:
+        try:
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg_sql.SQL("CREATE SCHEMA {}").format(
+                        psycopg_sql.Identifier(schema_name)
+                    )
+                )
+                cur.execute(
+                    psycopg_sql.SQL("SET search_path TO {}, public").format(
+                        psycopg_sql.Identifier(schema_name)
+                    )
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE intention_firing_receipts (
+                      tenant_id UUID NOT NULL,
+                      intention_id TEXT NOT NULL,
+                      operation TEXT NOT NULL CHECK (operation = 'fire'),
+                      canonical_event_id TEXT NOT NULL,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                      PRIMARY KEY (tenant_id, intention_id, operation)
+                    )
+                    """
+                )
+                cur.execute(
+                    "INSERT INTO intention_firing_receipts "
+                    "(tenant_id, intention_id, operation, canonical_event_id) "
+                    "VALUES (%s, 'legacy-intention', 'fire', %s)",
+                    (legacy_tenant, legacy_event),
+                )
+                cur.execute(
+                    """
+                    SELECT c.oid, con.oid, pg_get_constraintdef(con.oid)
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    JOIN pg_constraint con ON con.conrelid = c.oid
+                    WHERE n.nspname = %s AND c.relname = 'intention_firing_receipts'
+                      AND con.contype = 'p'
+                    """,
+                    (schema_name,),
+                )
+                legacy_identity = cur.fetchone()
+                for _ in range(2):
+                    cur.execute(schema_sql, prepare=False)
+                cur.execute(
+                    """
+                    SELECT c.oid, con.oid, pg_get_constraintdef(con.oid)
+                    FROM pg_class c
+                    JOIN pg_namespace n ON n.oid = c.relnamespace
+                    JOIN pg_constraint con ON con.conrelid = c.oid
+                    WHERE n.nspname = %s AND c.relname = 'intention_firing_receipts'
+                      AND con.contype = 'p'
+                    """,
+                    (schema_name,),
+                )
+                assert cur.fetchone() == legacy_identity
+                cur.execute(
+                    "SELECT canonical_event_id FROM intention_firing_receipts "
+                    "WHERE tenant_id = %s AND intention_id = 'legacy-intention'",
+                    (legacy_tenant,),
+                )
+                assert cur.fetchone() == (legacy_event,)
+
+            engine = PostgresEngine(isolated_dsn, require_safe_role=False)
+            engine._prospective_test_tenants = set()
+            tenant = runtime_tenant
+            user = "upgrade-user"
+            agent = "upgrade-agent"
+            evidence_id = _append_evidence(
+                engine, tenant_id=tenant, user_id=user, agent_id=agent
+            )
+            due = _EVALUATED_AT
+            legacy_collision = _make_intention(
+                tenant_id=tenant, user_id=user, agent_id=agent,
+                evidence_id=evidence_id, trigger_type="exact_time",
+                trigger_expression={"at": due.isoformat()}, due_at=due,
+                intention_id="legacy-intention", session_id="upgrade-session",
+            )
+            with pytest.raises(ValueError, match="durable firing receipt"):
+                engine.schedule_intention(legacy_collision)
+            intention = _make_intention(
+                tenant_id=tenant, user_id=user, agent_id=agent,
+                evidence_id=evidence_id, trigger_type="exact_time",
+                trigger_expression={"at": due.isoformat()}, due_at=due,
+                intention_id="upgrade-recurrence", session_id="upgrade-session",
+                recurrence_policy={
+                    "type": "interval", "interval_seconds": 60, "max_occurrences": 2
+                },
+            )
+            engine.schedule_intention(intention)
+            for index in range(2):
+                evaluated = due + timedelta(minutes=index)
+                assert len(engine.evaluate_due_intentions(
+                    tenant, evaluated_at=evaluated,
+                    trigger_context=_ctx(tenant_id=tenant), operating_point=_OP,
+                )) == 1
+            engine.close_connections()
+            engine = None
+
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg_sql.SQL("SET search_path TO {}, public").format(
+                        psycopg_sql.Identifier(schema_name)
+                    )
+                )
+                cur.execute(schema_sql, prepare=False)
+                cur.execute(
+                    "SELECT canonical_event_id FROM intention_firing_receipts "
+                    "WHERE tenant_id = %s AND intention_id = 'legacy-intention'",
+                    (legacy_tenant,),
+                )
+                assert cur.fetchone() == (legacy_event,)
+                cur.execute(
+                    "SELECT occurrence FROM intention_firing_receipts_v2 "
+                    "WHERE intention_id = 'upgrade-recurrence' ORDER BY occurrence"
+                )
+                assert cur.fetchall() == [(0,), (1,)]
+        finally:
+            if engine is not None:
+                engine.close_connections()
+            with admin.cursor() as cur:
+                cur.execute(
+                    psycopg_sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(
+                        psycopg_sql.Identifier(schema_name)
+                    )
+                )
 
 
 class TestUpdateAndRecurrence:
@@ -261,7 +410,7 @@ class TestUpdateAndRecurrence:
             with conn.cursor() as cur:
                 engine._set_tenant(cur, _stable_uuid("tenant", tid))
                 cur.execute(
-                    "SELECT occurrence FROM intention_firing_receipts "
+                    "SELECT occurrence FROM intention_firing_receipts_v2 "
                     "WHERE tenant_id = %s AND intention_id = %s ORDER BY occurrence",
                     (_stable_uuid("tenant", tid), intention.intention_id),
                 )
@@ -890,7 +1039,10 @@ class TestTenantIsolation:
             due_at=due,
         )
         engine.schedule_intention(intention)
-        assert engine.evaluate_due_intentions("other-tenant", evaluated_at=_EVALUATED_AT, trigger_context=_ctx(), operating_point=_OP) == []
+        assert engine.evaluate_due_intentions(
+            "other-tenant", evaluated_at=_EVALUATED_AT,
+            trigger_context=_ctx(tenant_id="other-tenant"), operating_point=_OP,
+        ) == []
 
     def test_cancel_cross_tenant_raises_keyerror(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
@@ -946,7 +1098,7 @@ class TestTenantIsolation:
             fired = engine.evaluate_due_intentions(
                 tenant_id,
                 evaluated_at=_EVALUATED_AT,
-                trigger_context=_ctx(),
+                trigger_context=_ctx(tenant_id=tenant_id),
                 operating_point=_OP,
             )
             assert len(fired) == 1
@@ -964,7 +1116,7 @@ class TestTenantIsolation:
                 )
                 assert cur.fetchall() == [("visible-intention", uid, aid)]
                 cur.execute(
-                    "SELECT intention_id FROM intention_firing_receipts"
+                    "SELECT intention_id FROM intention_firing_receipts_v2"
                 )
                 assert cur.fetchall() == [("visible-intention",)]
 
@@ -1023,7 +1175,7 @@ class TestIdempotency:
                 cur.execute(
                     """
                     SELECT count(*)
-                    FROM intention_firing_receipts
+                    FROM intention_firing_receipts_v2
                     WHERE tenant_id = %s AND intention_id = %s
                     """,
                     (_stable_uuid("tenant", tid), "two-connection-race"),
@@ -1067,7 +1219,7 @@ class TestIdempotency:
                 cur.execute(
                     """
                     SELECT operation, canonical_event_id
-                    FROM intention_firing_receipts
+                    FROM intention_firing_receipts_v2
                     WHERE tenant_id = %s AND intention_id = %s
                     """,
                     (db_tenant_id, intention.intention_id),
@@ -1111,7 +1263,7 @@ class TestIdempotency:
                 cur.execute(
                     """
                     SELECT count(*)
-                    FROM intention_firing_receipts
+                    FROM intention_firing_receipts_v2
                     WHERE tenant_id = %s AND intention_id = %s
                     """,
                     (db_tenant_id, intention.intention_id),
@@ -1609,7 +1761,7 @@ class TestForget:
                 cur.execute(
                     """
                     SELECT canonical_event_id
-                    FROM intention_firing_receipts
+                    FROM intention_firing_receipts_v2
                     WHERE tenant_id = %s AND intention_id = %s
                     """,
                     (_stable_uuid("tenant", tid), intention.intention_id),
@@ -1669,9 +1821,9 @@ class TestForget:
         db_tenant_id = _stable_uuid("tenant", tid)
 
         for statement in (
-            "UPDATE intention_firing_receipts SET canonical_event_id = 'changed' "
+            "UPDATE intention_firing_receipts_v2 SET canonical_event_id = 'changed' "
             "WHERE tenant_id = %s AND intention_id = %s",
-            "DELETE FROM intention_firing_receipts "
+            "DELETE FROM intention_firing_receipts_v2 "
             "WHERE tenant_id = %s AND intention_id = %s",
         ):
             with pytest.raises(psycopg.errors.InsufficientPrivilege):

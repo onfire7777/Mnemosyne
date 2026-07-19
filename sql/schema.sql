@@ -616,19 +616,10 @@ CREATE TABLE IF NOT EXISTS intention_firing_receipts (
   tenant_id UUID NOT NULL,
   intention_id TEXT NOT NULL,
   operation TEXT NOT NULL CHECK (operation = 'fire'),
-  occurrence INTEGER NOT NULL DEFAULT 0 CHECK (occurrence >= 0),
   canonical_event_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (tenant_id, intention_id, operation, occurrence)
+  PRIMARY KEY (tenant_id, intention_id, operation)
 );
-
-ALTER TABLE intention_firing_receipts
-  ADD COLUMN IF NOT EXISTS occurrence INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE intention_firing_receipts
-  DROP CONSTRAINT IF EXISTS intention_firing_receipts_pkey;
-ALTER TABLE intention_firing_receipts
-  ADD CONSTRAINT intention_firing_receipts_pkey
-  PRIMARY KEY (tenant_id, intention_id, operation, occurrence);
 
 -- Receipts outlive intention erasure and are immutable idempotency evidence.
 -- The named constraint is PostgreSQL's deterministic name for the historical
@@ -659,6 +650,44 @@ DROP POLICY IF EXISTS intention_firing_receipts_tenant_isolation
   ON intention_firing_receipts;
 CREATE POLICY intention_firing_receipts_tenant_isolation
   ON intention_firing_receipts
+  USING (tenant_id = mnemosyne_current_tenant())
+  WITH CHECK (tenant_id = mnemosyne_current_tenant());
+
+-- Occurrence-aware receipts are additive: the legacy table, primary key, and
+-- rows above remain untouched for upgraded deployments.
+CREATE TABLE IF NOT EXISTS intention_firing_receipts_v2 (
+  tenant_id UUID NOT NULL,
+  intention_id TEXT NOT NULL,
+  operation TEXT NOT NULL CHECK (operation = 'fire'),
+  occurrence INTEGER NOT NULL CHECK (occurrence >= 0),
+  canonical_event_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, intention_id, operation, occurrence)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS intention_firing_receipts_v2_event_id_unique
+  ON intention_firing_receipts_v2 (canonical_event_id);
+
+CREATE OR REPLACE FUNCTION mnemosyne_intention_receipts_v2_append_only()
+RETURNS trigger AS $$
+BEGIN
+  RAISE EXCEPTION 'intention_firing_receipts_v2 is append-only; % is not allowed', TG_OP
+    USING ERRCODE = '42501';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS intention_firing_receipts_v2_append_only
+  ON intention_firing_receipts_v2;
+CREATE TRIGGER intention_firing_receipts_v2_append_only
+  BEFORE UPDATE OR DELETE ON intention_firing_receipts_v2
+  FOR EACH ROW EXECUTE FUNCTION mnemosyne_intention_receipts_v2_append_only();
+
+ALTER TABLE intention_firing_receipts_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE intention_firing_receipts_v2 FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS intention_firing_receipts_v2_tenant_isolation
+  ON intention_firing_receipts_v2;
+CREATE POLICY intention_firing_receipts_v2_tenant_isolation
+  ON intention_firing_receipts_v2
   USING (tenant_id = mnemosyne_current_tenant())
   WITH CHECK (tenant_id = mnemosyne_current_tenant());
 
