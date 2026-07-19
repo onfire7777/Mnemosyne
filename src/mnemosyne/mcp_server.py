@@ -979,10 +979,11 @@ class _FacadeClosingHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer whose server_close also releases the MCP facade.
 
     Handler threads are non-daemon so server_close joins in-flight requests
-    before the facade is released. The facade is adopted before binding, so a
-    bind/activate failure inside __init__ also releases it, and the reference
-    is dropped before closing it, so repeated server_close calls close the
-    facade's resources exactly once.
+    before the facade is released. The facade is adopted before the socket
+    exists, so any construction failure — socket creation as well as
+    bind/activate — releases it, and the reference is dropped before closing
+    it, so repeated server_close calls close the facade's resources exactly
+    once.
     """
 
     daemon_threads = False
@@ -995,7 +996,17 @@ class _FacadeClosingHTTPServer(ThreadingHTTPServer):
         facade: MnemosyneMcpServer,
     ) -> None:
         self.mnemosyne_facade = facade
-        super().__init__(server_address, handler_class)
+        try:
+            super().__init__(server_address, handler_class)
+        except BaseException:
+            # TCPServer.__init__ only reaches server_close for bind/activate
+            # failures; a socket-creation failure would leak the facade, and
+            # server_close cannot run here because self.socket may not exist.
+            facade_ref = self.mnemosyne_facade
+            self.mnemosyne_facade = None
+            if facade_ref is not None:
+                facade_ref.close()
+            raise
 
     def server_close(self) -> None:
         try:

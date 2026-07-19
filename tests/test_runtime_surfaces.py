@@ -6,6 +6,7 @@ import datetime as dt
 import ipaddress
 import inspect
 import json
+import os
 import shlex
 import socket
 import ssl
@@ -2523,6 +2524,11 @@ def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pyt
 
 def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
     auth_token = "mcp-cli-self-test-auth-token"
+    # The subprocess must import this checkout's mnemosyne regardless of what
+    # the interpreter's installed copy resolves to.
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (src_dir, env.get("PYTHONPATH"))))
     result = subprocess.run(
         [
             sys.executable,
@@ -2540,6 +2546,7 @@ def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     report = json.loads(result.stdout)
     encoded = json.dumps(report)
@@ -3611,6 +3618,30 @@ def test_mcp_http_server_build_failure_closes_facade(
             )
     finally:
         blocker.close()
+
+    assert close_calls == [1]
+
+
+def test_mcp_http_server_socket_creation_failure_closes_facade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_calls: list[int] = []
+    original_close = MnemosyneMcpServer.close
+
+    def counting_close(self: MnemosyneMcpServer) -> None:
+        close_calls.append(1)
+        original_close(self)
+
+    monkeypatch.setattr(MnemosyneMcpServer, "close", counting_close)
+    # An unsupported address family makes socket.socket() itself fail, before
+    # TCPServer.__init__ reaches its own bind/activate server_close guard.
+    monkeypatch.setattr(mcp_server._FacadeClosingHTTPServer, "address_family", 999999)
+    with pytest.raises(OSError):
+        build_http_server(
+            host="127.0.0.1",
+            port=0,
+            store_path=tmp_path / "store.json",
+        )
 
     assert close_calls == [1]
 
