@@ -3742,12 +3742,33 @@ def test_mcp_sdk_streamable_http_build_failure_closes_facade(tmp_path: Path) -> 
 def test_mcp_server_build_tools_failure_releases_engine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from mnemosyne import engine as engine_module
+
     monkeypatch.delenv("MNEMOSYNE_POSTGRES_DSN", raising=False)
     store = tmp_path / "store.json"
+
+    # Capture the engine instance built during the failed construction so the
+    # release can be asserted synchronously; a plain successor open would pass
+    # even with the release deleted because __del__ frees the writer on GC.
+    built: list[LocalMemoryEngine] = []
+
+    class _RecordingEngine(engine_module.LocalMemoryEngine):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(engine_module, "LocalMemoryEngine", _RecordingEngine)
+
     with pytest.raises(ValueError, match="queue backend requires"):
         MnemosyneMcpServer(store_path=store, queue_backend="postgres")
+
     # The engine claimed the writer before queue construction failed; the
-    # partial bundle must be released without waiting for GC.
+    # partial bundle must be released without waiting for GC. Holding a strong
+    # reference to the constructed engine keeps __del__ from masking a missing
+    # explicit release, so the writer ownership check is deterministic.
+    assert built, "expected the local engine to be constructed before the failure"
+    partial_engine = built[0]
+    assert partial_engine._writer_path_key is None
     with LocalMemoryEngine(store_path=store) as successor:
         assert successor.store_path == store
 
