@@ -189,6 +189,48 @@ def test_identical_update_replay_is_a_zero_mutation() -> None:
     assert len(engine.audit_log) == audit_count
 
 
+def test_explicit_null_max_occurrences_normalizes_to_absent_key() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    ))
+    first = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    )
+    audit_count = len(engine.audit_log)
+    second = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a",
+        recurrence_policy={
+            "type": "interval", "interval_seconds": 60, "max_occurrences": None,
+        },
+    )
+    assert first == second
+    assert second.recurrence_policy == {"type": "interval", "interval_seconds": 60}
+    assert len(engine.audit_log) == audit_count
+
+
+def test_time_window_reschedule_beyond_datetime_range_raises_value_error() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT + timedelta(hours=1)
+    end = datetime(9999, 12, 31, tzinfo=timezone.utc)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="time_window",
+        trigger_expression={"start": due.isoformat(), "end": end.isoformat()},
+        session_id="session-a",
+    ))
+    with pytest.raises(ValueError, match="representable datetime range"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", due_at=due + timedelta(days=365),
+        )
+
+
 def test_legacy_sessionless_row_binds_once_on_first_update() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)
