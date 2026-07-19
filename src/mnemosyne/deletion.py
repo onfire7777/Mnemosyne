@@ -190,7 +190,17 @@ class SQLiteDeletionLedger:
 
         self._fcntl = fcntl
         self.path = Path(path)
+        parent_created = not self.path.parent.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if parent_created:
+            self.path.parent.chmod(0o700)
+        # The ledger persists the opaque-name HMAC key; the DB (whose mode the
+        # WAL/SHM sidecars inherit) and the lock file must stay owner-only or
+        # any local reader gets the key plus the digests and can run the
+        # offline dictionary attack the keyed opaquing exists to prevent.
+        for artifact in (self.path, self.path.with_suffix(self.path.suffix + ".lock")):
+            artifact.touch(mode=0o600, exist_ok=True)
+            artifact.chmod(0o600)
         # Concurrent constructions (threads or other processes) race the initial
         # WAL conversion and schema/key bootstrap; serialize them under the same
         # cross-process lock that serializes operations.
@@ -937,25 +947,40 @@ class DeletionCoordinator:
                                 (json.dumps(scrubbed, sort_keys=True), row["rowid"]),
                             )
             return
-        for attribute in ("audit_log", "deletion_log", "merge_log"):
-            rows = getattr(self.engine, attribute, None)
-            if isinstance(rows, list):
-                # Rows attributed to another tenant stay byte-identical; merge
-                # rows (no tenant_id) and "*" wildcard audits are unattributable
-                # shared custody and must scrub by needle.
-                rows[:] = [
-                    self._scrub_value(row, sensitive, sensitive_keys)
-                    if row.get("tenant_id") in (tenant_id, "*", None)
-                    else row
-                    for row in rows
-                ]
+        logs = [
+            getattr(self.engine, attribute, None)
+            for attribute in ("audit_log", "deletion_log", "merge_log")
+        ]
         assertions = getattr(self.engine, "assertions", None)
-        if isinstance(assertions, dict):
-            for assertion in assertions.values():
-                if getattr(assertion, "tenant_id", None) == tenant_id:
-                    assertion.calibration = self._scrub_value(
-                        assertion.calibration, sensitive, sensitive_keys
-                    )
+        if (
+            not all(isinstance(rows, list) for rows in logs)
+            or not isinstance(assertions, dict)
+            or not isinstance(getattr(self.engine, "evidence", None), dict)
+        ):
+            # Fail closed: an engine whose custody history this scrub cannot
+            # reach (e.g. a PostgreSQL backend keeping logs in server-side
+            # tables) must fail the engine receipt rather than let the
+            # manifest attest a scrub that never happened.  PostgreSQL
+            # retained-history support is a recorded D5B/D6 obligation.
+            raise TypeError(
+                "retained-history scrub supports only SqliteEngine or "
+                f"in-memory engines, not {type(self.engine).__name__}"
+            )
+        for rows in logs:
+            # Rows attributed to another tenant stay byte-identical; merge
+            # rows (no tenant_id) and "*" wildcard audits are unattributable
+            # shared custody and must scrub by needle.
+            rows[:] = [
+                self._scrub_value(row, sensitive, sensitive_keys)
+                if row.get("tenant_id") in (tenant_id, "*", None)
+                else row
+                for row in rows
+            ]
+        for assertion in assertions.values():
+            if getattr(assertion, "tenant_id", None) == tenant_id:
+                assertion.calibration = self._scrub_value(
+                    assertion.calibration, sensitive, sensitive_keys
+                )
 
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         rows = []

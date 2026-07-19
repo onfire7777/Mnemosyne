@@ -2447,3 +2447,48 @@ def test_runtime_state_alias_disambiguates_when_both_stores_registered() -> None
         "complete": True,
         "errors": [],
     }
+
+
+def test_ledger_artifacts_are_owner_only(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    db_path = tmp_path / "ledger" / "deletion.db"
+    deletion.SQLiteDeletionLedger(db_path)
+    # The ledger persists the opaque-name HMAC key; a world-readable DB or
+    # lock file hands any local reader the key plus the digests needed for
+    # the offline dictionary attack the keyed opaquing exists to prevent.
+    assert (db_path.parent.stat().st_mode & 0o777) == 0o700
+    assert (db_path.stat().st_mode & 0o777) == 0o600
+    lock_path = db_path.with_suffix(db_path.suffix + ".lock")
+    assert (lock_path.stat().st_mode & 0o777) == 0o600
+    for sidecar in (Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+        if sidecar.exists():
+            assert (sidecar.stat().st_mode & 0o777) == 0o600
+
+
+def test_unrecognized_engine_scrub_fails_closed_without_forgetting() -> None:
+    class ServerSideCustodyEngine:
+        """Protocol-complete engine whose custody logs live out of process."""
+
+        _SERVER_SIDE = frozenset(
+            {"audit_log", "deletion_log", "merge_log", "assertions", "evidence"}
+        )
+
+        def __init__(self, inner: LocalMemoryEngine) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> Any:
+            if name in type(self)._SERVER_SIDE:
+                raise AttributeError(name)
+            return getattr(self._inner, name)
+
+    inner = LocalMemoryEngine()
+    source_ref = inner.append_evidence(_evidence())
+    world = FakeWorld(engine=ServerSideCustodyEngine(inner), source_ref=source_ref)  # type: ignore[arg-type]
+    manifest = _delete(world)
+    surface = _surface(manifest, "source_evidence")
+    assert surface["error_code"] == "delete_failed"
+    assert surface["verified_removed"] is False
+    assert manifest["summary"]["complete"] is False
+    # Fail closed means fail early: the retained-history scrub refused before
+    # any destructive engine call, so the evidence row must still exist.
+    assert inner.get_evidence(TENANT, source_ref) is not None
