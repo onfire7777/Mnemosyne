@@ -184,7 +184,8 @@ class MnemosyneMcpServer:
         transactions so those bundles are never closed mid-tool-call; postgres
         and stateful tool calls take no transaction lock, so callers must
         quiesce in-flight calls before close. A stateless facade may keep
-        serving after close by rebuilding bundles on demand.
+        serving after close by rebuilding bundles on demand; a stateful one is
+        terminal and rejects later tool calls.
         """
 
         errors: list[Exception] = []
@@ -241,12 +242,12 @@ class MnemosyneMcpServer:
         self,
         queue_tenant: str | None,
         arguments: dict[str, Any],
-    ) -> tuple[tuple[Any, Any, Any, Any], tuple[Any, ...]]:
+    ) -> tuple[Any, Any, Any, Any]:
         key = self._stateless_tools_cache_key(queue_tenant, arguments)
         with self._stateless_tools_cache_lock:
             cached = self._stateless_tools_cache.get(key)
             if cached is not None:
-                return cached, key
+                return cached
             # On the single-store backends, evict-then-close the previous
             # scope's bundle before building, so one store never holds two
             # live writers. Eviction keeps this cache at size one on those
@@ -260,16 +261,7 @@ class MnemosyneMcpServer:
                     self._close_bundle(old_bundle)
             bundle = self._build_tools(queue_tenant)
             self._stateless_tools_cache[key] = bundle
-            return bundle, key
-
-    def _refresh_stateless_tools_cache(
-        self,
-        key: tuple[Any, ...],
-        bundle: tuple[Any, Any, Any, Any],
-    ) -> None:
-        with self._stateless_tools_cache_lock:
-            if key in self._stateless_tools_cache:
-                self._stateless_tools_cache[key] = bundle
+            return bundle
 
     def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, Any, MemoryTools]:
         from mnemosyne.engine import LocalMemoryEngine
@@ -607,14 +599,17 @@ class MnemosyneMcpServer:
                 else nullcontext()
             )
             with transaction:
-                bundle, cache_key = self._stateless_tools_for(
+                _, queue, runtime_state, tools = self._stateless_tools_for(
                     self._queue_tenant_from_arguments(arguments), arguments
                 )
-                _, queue, runtime_state, tools = bundle
                 result = getattr(tools, name)(**arguments)
                 self._save_queue(runtime_state, queue)
-                self._refresh_stateless_tools_cache(cache_key, bundle)
                 return result
+        if self._stateful_tools_closed:
+            # The stateful bundle is single-shot: its resources are already
+            # released, so serving on would raise an opaque backend error on
+            # sqlite and silently return stale in-memory reads on local.
+            raise RuntimeError("MCP server is closed")
         result = getattr(self.tools, name)(**arguments)
         self._save_queue(self.runtime_state, self.queue)
         return result
