@@ -409,6 +409,95 @@ def test_shared_prospective_update_replay_and_recurrence(
     assert engine.list_intentions(tenant)[0].status == "fired"
 
 
+@pytest.mark.parametrize("trigger_type", ["event", "condition"])
+def test_shared_recurring_signal_is_consumed_once(
+    engine_bundle: tuple[Any, str, str], trigger_type: str
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = f"agent-shared-consumed-{trigger_type}"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    expression = (
+        {"event_type": "report.submitted", "match": {"report_id": "report-1"}}
+        if trigger_type == "event"
+        else {"condition_id": "report-ready", "operator": "gt", "value": 30}
+    )
+    engine.schedule_intention(
+        _prospective_intention(
+            intention_id=f"shared-consumed-{trigger_type}",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type=trigger_type,
+            trigger_expression=expression,
+            due_at=due,
+            recurrence_policy={
+                "type": "interval",
+                "interval_seconds": 60,
+                "max_occurrences": 3,
+            },
+        )
+    )
+
+    late_signal_at = due + timedelta(minutes=10)
+
+    def context(observed_at: datetime) -> TriggerEvaluationContext:
+        if trigger_type == "event":
+            return TriggerEvaluationContext(
+                infrastructure_available=True,
+                tenant_id=tenant,
+                events=[
+                    {
+                        "event_id": f"event-{observed_at.isoformat()}",
+                        "event_type": "report.submitted",
+                        "occurred_at": observed_at.isoformat(),
+                        "payload": {"report_id": "report-1"},
+                        "confidence": 0.95,
+                        "tenant_id": tenant,
+                    }
+                ],
+                conditions={},
+            )
+        return TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=tenant,
+            events=[],
+            conditions={
+                "report-ready": {
+                    "value": 35,
+                    "observed_at": observed_at.isoformat(),
+                    "confidence": 0.95,
+                    "tenant_id": tenant,
+                }
+            },
+        )
+
+    first_context = context(late_signal_at)
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=late_signal_at,
+            trigger_context=first_context,
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=late_signal_at + timedelta(minutes=1),
+        trigger_context=first_context,
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    ) == []
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=late_signal_at + timedelta(minutes=2),
+            trigger_context=context(late_signal_at + timedelta(minutes=2)),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+
+
 @pytest.mark.parametrize(
     "trigger_type",
     ["exact_time", "time_window", "event", "condition", "dependency_completion"],
