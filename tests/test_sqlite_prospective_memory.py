@@ -122,6 +122,28 @@ def _intention(*, evidence_id: str, due_at: datetime, **overrides: Any) -> Inten
     return Intention(**values)
 
 
+def test_sqlite_update_intention_matches_local_and_persists_session(tmp_path: Path) -> None:
+    sqlite = SqliteEngine(tmp_path / "sqlite")
+    local = LocalMemoryEngine()
+    for engine in (sqlite, local):
+        evidence_id = _originating_episode(engine)
+        engine.schedule_intention(_intention(
+            evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+            session_id="session-a",
+        ))
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", due_at=EVALUATED_AT + timedelta(hours=2),
+            action={"type": "remind", "message": "Updated."},
+        )
+    assert sqlite.list_intentions(TENANT_ID) == local.list_intentions(TENANT_ID)
+    sqlite_update = next(row for row in _audit_log(sqlite) if row["op"] == "update_intention")
+    local_update = next(row for row in local.audit_log if row["op"] == "update_intention")
+    assert sqlite_update["diff"] == local_update["diff"]
+    assert sqlite_update["trust_tier"] == local_update["trust_tier"]
+    assert sqlite_update["capability_tags"] == local_update["capability_tags"]
+
+
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit(
     tmp_path: Path,
 ) -> None:

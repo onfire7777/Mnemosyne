@@ -589,6 +589,9 @@ CREATE TABLE IF NOT EXISTS intentions (
   reschedule_history JSONB NOT NULL DEFAULT '[]'::jsonb,
   cancellation_state JSONB,
   evidence_ids BYTEA[] NOT NULL DEFAULT '{}',
+  session_id TEXT,
+  recurrence_policy JSONB NOT NULL DEFAULT '{"type":"none"}'::jsonb,
+  recurrence_state JSONB NOT NULL DEFAULT '{"occurrence":0}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, intention_id)
 );
@@ -702,6 +705,9 @@ ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by UUID;
 -- UUID used for relational ownership checks. Existing deployments predate the
 -- external identifier; preserve their usable identity with the UUID text.
 ALTER TABLE intentions ADD COLUMN IF NOT EXISTS external_user_id TEXT;
+ALTER TABLE intentions ADD COLUMN IF NOT EXISTS session_id TEXT;
+ALTER TABLE intentions ADD COLUMN IF NOT EXISTS recurrence_policy JSONB NOT NULL DEFAULT '{"type":"none"}'::jsonb;
+ALTER TABLE intentions ADD COLUMN IF NOT EXISTS recurrence_state JSONB NOT NULL DEFAULT '{"occurrence":0}'::jsonb;
 UPDATE intentions
 SET external_user_id = user_id::text
 WHERE external_user_id IS NULL;

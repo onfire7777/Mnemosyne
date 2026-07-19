@@ -352,6 +352,7 @@ def _require_authorization_context(args: argparse.Namespace) -> None:
     command = getattr(args, "command", None)
     if command in {
         "intention-schedule",
+        "intention-update",
         "intention-cancel",
         "intention-evaluate",
         "intention-list",
@@ -8635,6 +8636,18 @@ def cmd_intention_cancel(args: argparse.Namespace) -> None:
             **_intention_auth_kwargs(args),
         )
     )
+
+
+def cmd_intention_update(args: argparse.Namespace) -> None:
+    tools = load_tools(args)
+    emit(tools.update_intention(
+        tenant_id=args.tenant, intention_id=args.intention_id, user_id=args.user,
+        agent_id=args.agent, due_at=args.due_at,
+        action=parse_json_arg(args.action, None) if args.action is not None else None,
+        recurrence_policy=(parse_json_arg(args.recurrence_policy, None)
+                           if args.recurrence_policy is not None else None),
+        **_intention_auth_kwargs(args),
+    ))
 
 
 def cmd_intention_evaluate(args: argparse.Namespace) -> None:
@@ -19870,6 +19883,16 @@ def build_parser() -> argparse.ArgumentParser:
     intention_cancel.add_argument("--intention-id", required=True)
     intention_cancel.add_argument("--cancelled-by")
     intention_cancel.set_defaults(func=cmd_intention_cancel)
+
+    intention_update = sub.add_parser("intention-update")
+    intention_update.add_argument("--tenant", required=True)
+    intention_update.add_argument("--intention-id", required=True)
+    intention_update.add_argument("--user", required=True)
+    intention_update.add_argument("--agent", required=True)
+    intention_update.add_argument("--due-at")
+    intention_update.add_argument("--action")
+    intention_update.add_argument("--recurrence-policy")
+    intention_update.set_defaults(func=cmd_intention_update)
 
     intention_evaluate = sub.add_parser("intention-evaluate")
     intention_evaluate.add_argument("--tenant", required=True)

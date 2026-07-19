@@ -324,6 +324,9 @@ class Intention:
     reschedule_history: list[dict[str, Any]] = field(default_factory=list)
     cancellation_state: dict[str, Any] | None = None
     evidence_ids: list[str] = field(default_factory=list)
+    session_id: str | None = None
+    recurrence_policy: dict[str, Any] = field(default_factory=lambda: {"type": "none"})
+    recurrence_state: dict[str, Any] = field(default_factory=lambda: {"occurrence": 0})
 
     def __post_init__(self) -> None:
         for name in ("intention_id", "tenant_id", "user_id", "agent_id"):
@@ -386,6 +389,12 @@ class Intention:
             raise ValueError("evidence_ids must contain non-empty strings")
         if len(set(self.evidence_ids)) != len(self.evidence_ids):
             raise ValueError("evidence_ids must not contain duplicates")
+        if self.session_id is not None and (
+            type(self.session_id) is not str or not self.session_id.strip()
+        ):
+            raise ValueError("session_id must be a non-empty string when provided")
+        self.recurrence_policy = _normalize_recurrence_policy(self.recurrence_policy)
+        self.recurrence_state = _normalize_recurrence_state(self.recurrence_state)
 
     def _validate_trigger_expression(self, due_at: datetime) -> None:
         expr = self.trigger_expression
@@ -470,6 +479,9 @@ class Intention:
             "reschedule_history": copy.deepcopy(self.reschedule_history),
             "cancellation_state": copy.deepcopy(self.cancellation_state),
             "evidence_ids": list(self.evidence_ids),
+            "session_id": self.session_id,
+            "recurrence_policy": copy.deepcopy(self.recurrence_policy),
+            "recurrence_state": copy.deepcopy(self.recurrence_state),
         }
 
     @classmethod
@@ -507,6 +519,9 @@ class Intention:
             reschedule_history=copy.deepcopy(reschedule_history),
             cancellation_state=None,
             evidence_ids=copy.deepcopy(evidence_ids),
+            session_id=row.get("session_id"),
+            recurrence_policy=copy.deepcopy(row.get("recurrence_policy", {"type": "none"})),
+            recurrence_state=copy.deepcopy(row.get("recurrence_state", {"occurrence": 0})),
         )
         record.status = status
         if status == "cancelled":
@@ -527,6 +542,88 @@ class Intention:
         elif cancellation_state is not None:
             raise ValueError("only cancelled intentions may carry cancellation state")
         return record
+
+
+def _normalize_recurrence_policy(value: Any) -> dict[str, Any]:
+    if type(value) is not dict:
+        raise ValueError("recurrence_policy must be a JSON object")
+    normalized = _normalize_json_value(value, path="recurrence_policy")
+    recurrence_type = normalized.get("type", "none")
+    if recurrence_type == "none":
+        if set(normalized) - {"type"}:
+            raise ValueError("non-recurring policy only accepts type")
+        return {"type": "none"}
+    if recurrence_type != "interval":
+        raise ValueError("recurrence_policy.type must be 'none' or 'interval'")
+    seconds = normalized.get("interval_seconds")
+    if type(seconds) is not int or seconds <= 0:
+        raise ValueError("recurrence_policy.interval_seconds must be a positive integer")
+    maximum = normalized.get("max_occurrences")
+    if maximum is not None and (type(maximum) is not int or maximum <= 0):
+        raise ValueError("recurrence_policy.max_occurrences must be a positive integer")
+    if set(normalized) - {"type", "interval_seconds", "max_occurrences"}:
+        raise ValueError("recurrence_policy contains unsupported fields")
+    return normalized
+
+
+def _normalize_recurrence_state(value: Any) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != {"occurrence"}:
+        raise ValueError("recurrence_state must contain only occurrence")
+    occurrence = value.get("occurrence")
+    if type(occurrence) is not int or occurrence < 0:
+        raise ValueError("recurrence_state.occurrence must be a non-negative integer")
+    return {"occurrence": occurrence}
+
+
+def _updated_intention(
+    current: Intention,
+    *,
+    user_id: str,
+    agent_id: str,
+    session_id: str,
+    due_at: datetime | None,
+    action: dict[str, Any] | None,
+    recurrence_policy: dict[str, Any] | None,
+) -> Intention:
+    """Validate and build one detached scheduled-intention mutation."""
+    if current.status != "scheduled":
+        raise ValueError("only scheduled intentions may be updated")
+    if user_id != current.user_id or agent_id != current.agent_id:
+        raise PermissionError("only the owning user and agent may update an intention")
+    if type(session_id) is not str or not session_id.strip():
+        raise ValueError("session_id must be a non-empty string")
+    if current.session_id is not None and session_id != current.session_id:
+        raise PermissionError("intention session does not match authenticated session")
+    if due_at is None and action is None and recurrence_policy is None:
+        raise ValueError("an intention update requires at least one change")
+    if due_at is not None and (not isinstance(due_at, datetime) or due_at.tzinfo is None):
+        raise ValueError("due_at must be timezone-aware")
+    if action is not None and type(action) is not dict:
+        raise ValueError("action must be a JSON object")
+    row = current.to_dict()
+    row["status"] = "scheduled"
+    row["session_id"] = session_id
+    if due_at is not None:
+        normalized_due = due_at.astimezone(UTC)
+        row["reschedule_history"] = [
+            *current.reschedule_history,
+            {"from": current.due_at.isoformat(), "to": normalized_due.isoformat()},
+        ]
+        row["due_at"] = normalized_due.isoformat()
+        if current.trigger_type == "exact_time":
+            row["trigger_expression"]["at"] = normalized_due.isoformat()
+        elif current.trigger_type == "time_window":
+            old_end = _parse_aware_iso(
+                current.trigger_expression["end"], field="time_window.end"
+            )
+            duration = old_end - current.due_at
+            row["trigger_expression"]["start"] = normalized_due.isoformat()
+            row["trigger_expression"]["end"] = (normalized_due + duration).isoformat()
+    if action is not None:
+        row["action"] = copy.deepcopy(action)
+    if recurrence_policy is not None:
+        row["recurrence_policy"] = copy.deepcopy(recurrence_policy)
+    return Intention.from_dict(row)
 
 
 def _json_deep_contains(haystack: Any, needle: Any) -> bool:
@@ -1379,6 +1476,20 @@ class MemoryEngine(Protocol):
     ) -> None:
         raise NotImplementedError
 
+    def update_intention(
+        self,
+        tenant_id: str,
+        intention_id: str,
+        *,
+        user_id: str,
+        agent_id: str,
+        session_id: str,
+        due_at: datetime | None = None,
+        action: dict[str, Any] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+    ) -> Intention:
+        raise NotImplementedError
+
     def evaluate_due_intentions(
         self,
         tenant_id: str,
@@ -1746,6 +1857,30 @@ class LocalMemoryEngine:
                     capability_tags=capability_tags,
                 )
                 self._persist()
+
+    def update_intention(
+        self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
+        session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+    ) -> Intention:
+        with self._lock:
+            key = (tenant_id, intention_id)
+            current = self.intentions.get(key)
+            if current is None:
+                raise KeyError(intention_id)
+            updated = _updated_intention(current, user_id=user_id, agent_id=agent_id,
+                                         session_id=session_id, due_at=due_at, action=action,
+                                         recurrence_policy=recurrence_policy)
+            provenance = self._intention_provenance(updated)
+            trust_tier, capability_tags = intention_audit_context(provenance)
+            with self._prospective_transaction():
+                self.intentions[key] = updated
+                self._audit(tenant_id, user_id, "update_intention", intention_id,
+                            intention_audit_diff(updated, status="scheduled"),
+                            source="prospective_memory", trust_tier=trust_tier,
+                            capability_tags=capability_tags)
+                self._persist()
+            return copy.deepcopy(updated)
 
     def evaluate_due_intentions(
         self,
