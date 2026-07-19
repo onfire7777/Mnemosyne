@@ -375,6 +375,10 @@ class TestUpdateAndRecurrence:
         stored = engine.list_intentions(tid)[0]
         key = "at" if trigger_type == "exact_time" else "start"
         assert stored.trigger_expression[key] == moved.isoformat()
+        if trigger_type == "time_window":
+            assert stored.trigger_expression["end"] == (
+                moved + timedelta(minutes=30)
+            ).isoformat()
         assert stored == updated == replay
         assert len(stored.reschedule_history) == 1
         assert engine.evaluate_due_intentions(
@@ -1299,6 +1303,98 @@ class TestTenantIsolation:
 
 
 class TestIdempotency:
+    @pytest.mark.parametrize("terminal_operation", ["fire", "cancel"])
+    def test_update_races_terminal_transition_without_stale_overwrite(
+        self, engine, tenant_user_agent, terminal_operation
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        intention = _make_intention(
+            tenant_id=tid,
+            user_id=uid,
+            agent_id=aid,
+            evidence_id=eid,
+            trigger_type="exact_time",
+            trigger_expression={"at": _EVALUATED_AT.isoformat()},
+            due_at=_EVALUATED_AT,
+            intention_id=f"update-{terminal_operation}-race",
+        )
+        engine.schedule_intention(intention)
+        contenders = [
+            PostgresEngine(_DSN, require_safe_role=False),
+            PostgresEngine(_DSN, require_safe_role=False),
+        ]
+        start = Barrier(2)
+
+        def update() -> tuple[str, Any]:
+            start.wait(timeout=5)
+            try:
+                return (
+                    "update",
+                    contenders[0].update_intention(
+                        tid,
+                        intention.intention_id,
+                        user_id=uid,
+                        agent_id=aid,
+                        session_id="session-a",
+                        due_at=_EVALUATED_AT + timedelta(hours=1),
+                    ),
+                )
+            except Exception as exc:
+                return ("update-error", exc)
+
+        def terminate() -> tuple[str, Any]:
+            start.wait(timeout=5)
+            try:
+                if terminal_operation == "fire":
+                    return (
+                        "fire",
+                        contenders[1].evaluate_due_intentions(
+                            tid,
+                            evaluated_at=_EVALUATED_AT,
+                            trigger_context=_ctx(tenant_id=tid),
+                            operating_point=_OP,
+                        ),
+                    )
+                contenders[1].cancel_intention(
+                    tid,
+                    intention.intention_id,
+                    cancelled_by=uid,
+                    session_id="session-a",
+                )
+                return ("cancel", None)
+            except Exception as exc:
+                return (f"{terminal_operation}-error", exc)
+
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                update_future = executor.submit(update)
+                terminal_future = executor.submit(terminate)
+                update_result = update_future.result(timeout=15)
+                terminal_result = terminal_future.result(timeout=15)
+        finally:
+            for contender in contenders:
+                contender.close_connections()
+
+        stored = engine.list_intentions(tid)[0]
+        if terminal_operation == "cancel":
+            assert terminal_result == ("cancel", None)
+            assert stored.status == "cancelled"
+        elif update_result[0] == "update":
+            assert stored.status == "scheduled"
+            assert terminal_result == ("fire", [])
+        else:
+            assert stored.status == "fired"
+        if update_result[0] == "update-error":
+            assert isinstance(update_result[1], ValueError)
+        operations = [item["op"] for item in engine.export_tenant(tid)["audit_log"]]
+        assert operations.count("update_intention") == (
+            1 if update_result[0] == "update" else 0
+        )
+        assert operations.count(f"{terminal_operation}_intention") == (
+            1 if terminal_operation == "cancel" or stored.status == "fired" else 0
+        )
+
     def test_two_connections_race_to_one_durable_firing(
         self, engine, tenant_user_agent
     ):

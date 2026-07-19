@@ -164,6 +164,7 @@ def _cli_schedule(
     trigger_type: str = "exact_time",
     trigger_expression: dict[str, Any] | None = None,
     dependencies: list[str] | None = None,
+    recurrence_policy: dict[str, Any] | None = None,
 ) -> list[str]:
     arguments = [
         "intention-schedule",
@@ -186,6 +187,8 @@ def _cli_schedule(
     ]
     for dependency in dependencies or []:
         arguments.extend(["--dependency", dependency])
+    if recurrence_policy is not None:
+        arguments.extend(["--recurrence-policy", json.dumps(recurrence_policy)])
     return arguments
 
 
@@ -204,6 +207,32 @@ def test_cli_requires_signed_identity_and_preserves_timezone(
     )
     assert datetime.fromisoformat(scheduled["due_at"]) == datetime.fromisoformat(due_at)
     assert listed["intentions"] == [scheduled]
+
+
+def test_cli_schedule_forwards_recurrence_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "cli-recurring-store.json"
+    evidence_id = _seed_evidence(LocalMemoryEngine(store))
+    due_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    recurrence_policy = {
+        "type": "interval",
+        "interval_seconds": 300,
+        "max_occurrences": 2,
+    }
+
+    scheduled = _run_cli(
+        capsys,
+        store,
+        _token(),
+        *_cli_schedule(
+            evidence_id,
+            due_at,
+            recurrence_policy=recurrence_policy,
+        ),
+    )
+
+    assert scheduled["recurrence_policy"] == recurrence_policy
 
 
 def test_schedule_requires_session_and_update_is_bound_across_mcp_and_cli(
