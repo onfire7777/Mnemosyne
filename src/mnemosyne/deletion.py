@@ -401,7 +401,11 @@ class DeletionCoordinator:
         # is a precondition gate, not rollback; verified deletions are never restored.
         # The object surface joins the boundary only when a receipt exists for it,
         # i.e. under the same condition _surface_ids uses.
-        boundary = [("store", name) for name in ("journal", "manifest_store") if name in self.stores]
+        boundary = [
+            ("store", self._store_surface_name(name))
+            for name in ("journal", "manifest_store")
+            if name in self.stores
+        ]
         if self._target_object_keys(tenant, refs):
             boundary.append(("object", "object_storage"))
         for surface_id in boundary:
@@ -428,7 +432,7 @@ class DeletionCoordinator:
         return self._manifest(record, request)
 
     def _surface_ids(self, tenant: str, refs: list[str]) -> list[tuple[str, str]]:
-        surface_ids = [("store", name) for name in self.stores]
+        surface_ids = [("store", self._store_surface_name(name)) for name in self.stores]
         surface_ids.extend(
             ("cache", self._cache_surface_name(key))
             for key, value in self.process_cache.items()
@@ -444,19 +448,31 @@ class DeletionCoordinator:
         surface_ids.append(("engine", engine_surface))
         return list(dict.fromkeys(surface_ids))
 
-    @staticmethod
-    def _surface_label(surface_id: tuple[str, str]) -> str:
+    def _surface_label(self, surface_id: tuple[str, str]) -> str:
         kind, name = surface_id
         if kind == "cache":
             return f"cache:{name}"
-        if kind == "store" and name == "runtime_state":
-            return "runtime_user_model"
+        if kind == "store":
+            name = self._store_for_surface(name) or name
+            if name == "runtime_state":
+                return "runtime_user_model"
         return name if is_safe_surface_label(name) else _opaque("surface-label", name)
 
     def _cache_surface_name(self, key: str) -> str:
         # Keyed by the ledger so a manifest holder cannot confirm a guessed cache
         # key offline; the durable ledger persists its key, keeping resume stable.
         return self.ledger.opaque_name("cache-surface", key)
+
+    def _store_surface_name(self, name: str) -> str:
+        # Store names are caller-registered and may carry identifiers; only the
+        # ledger-keyed opaque name may reach the durable journal.
+        return self.ledger.opaque_name("store-surface", name)
+
+    def _store_for_surface(self, surface_name: str) -> str | None:
+        return next(
+            (name for name in self.stores if self._store_surface_name(name) == surface_name),
+            None,
+        )
 
     def _attempt(self, record: LedgerRecord, surface_id: tuple[str, str], tenant: str, refs: list[str]) -> bool:
         kind, name = surface_id
@@ -490,7 +506,12 @@ class DeletionCoordinator:
                     return False
                 receipt.action = "invalidated"
                 return self._verified(receipt)
-            store = self.stores[name]
+            store_name = self._store_for_surface(name)
+            if store_name is None:
+                receipt.error_code = "store_unavailable"
+                receipt.state = "failed"
+                return False
+            store = self.stores[store_name]
             probed_absent: set[str] = set()
             destructive_attempted = False
             for ref in refs:
@@ -741,7 +762,10 @@ class DeletionCoordinator:
                     for table in ("audit_log", "deletion_log", "merge_log"):
                         for row in connection.execute(f"SELECT seq, record FROM {table}").fetchall():
                             record = json.loads(row["record"])
-                            if record.get("tenant_id") != tenant_id:
+                            # Merge records embed no tenant_id and engine merges
+                            # may audit under the "*" wildcard; both are custody
+                            # rows of this tenant's own database and must scrub.
+                            if record.get("tenant_id") not in (tenant_id, "*", None):
                                 continue
                             connection.execute(
                                 f"UPDATE {table} SET record = ? WHERE seq = ?",
@@ -757,9 +781,12 @@ class DeletionCoordinator:
         for attribute in ("audit_log", "deletion_log", "merge_log"):
             rows = getattr(self.engine, attribute, None)
             if isinstance(rows, list):
+                # Rows attributed to another tenant stay byte-identical; merge
+                # rows (no tenant_id) and "*" wildcard audits are unattributable
+                # shared custody and must scrub by needle.
                 rows[:] = [
                     self._scrub_value(row, sensitive, sensitive_keys)
-                    if row.get("tenant_id") == tenant_id
+                    if row.get("tenant_id") in (tenant_id, "*", None)
                     else row
                     for row in rows
                 ]

@@ -39,6 +39,7 @@ _ALLOWED_KEYS = {
         "retention_exceptions", "summary",
     },
     "policy": {"version", "required_surfaces"},
+    "required_surface": {"surface_type", "surface"},
     "fence": {"generation", "ledger_position", "durable"},
     "surface": {
         "surface", "surface_type", "backend", "tenant_ref", "object_ref", "action",
@@ -86,6 +87,11 @@ def _schema_errors(manifest: dict[str, Any]) -> list[str]:
         if isinstance(rows, list):
             for index, row in enumerate(rows):
                 check(row, kind, f"manifest.{field}[{index}]")
+    policy = manifest.get("policy")
+    required = policy.get("required_surfaces") if isinstance(policy, dict) else None
+    if isinstance(required, list):
+        for index, row in enumerate(required):
+            check(row, "required_surface", f"manifest.policy.required_surfaces[{index}]")
     return errors
 
 
@@ -98,6 +104,8 @@ def _custody_errors(value: Any, *, path: str = "manifest", depth: int = 0) -> li
         for key, item in value.items():
             if isinstance(key, str) and key.lower() in _FORBIDDEN_KEYS:
                 errors.append(f"{path}.{key} is a forbidden direct-custody field")
+            # Custody material can hide in a field name, not just a value.
+            errors.extend(_custody_errors(key, path=f"{path}.{key}", depth=depth + 1))
             errors.extend(_custody_errors(item, path=f"{path}.{key}", depth=depth + 1))
     elif isinstance(value, list):
         for index, item in enumerate(value):
@@ -324,7 +332,7 @@ def verify_signed_deletion_manifest(
     manifest: Any = None
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         errors.append(f"manifest file is not readable JSON: {exc}")
     semantic = verify_deletion_manifest(manifest)
     complete = semantic["complete"] and signature.get("verified") is True and not errors
