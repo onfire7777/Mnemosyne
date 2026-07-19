@@ -616,10 +616,19 @@ CREATE TABLE IF NOT EXISTS intention_firing_receipts (
   tenant_id UUID NOT NULL,
   intention_id TEXT NOT NULL,
   operation TEXT NOT NULL CHECK (operation = 'fire'),
+  occurrence INTEGER NOT NULL DEFAULT 0 CHECK (occurrence >= 0),
   canonical_event_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (tenant_id, intention_id, operation)
+  PRIMARY KEY (tenant_id, intention_id, operation, occurrence)
 );
+
+ALTER TABLE intention_firing_receipts
+  ADD COLUMN IF NOT EXISTS occurrence INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE intention_firing_receipts
+  DROP CONSTRAINT IF EXISTS intention_firing_receipts_pkey;
+ALTER TABLE intention_firing_receipts
+  ADD CONSTRAINT intention_firing_receipts_pkey
+  PRIMARY KEY (tenant_id, intention_id, operation, occurrence);
 
 -- Receipts outlive intention erasure and are immutable idempotency evidence.
 -- The named constraint is PostgreSQL's deterministic name for the historical

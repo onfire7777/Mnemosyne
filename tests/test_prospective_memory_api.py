@@ -46,6 +46,7 @@ def _identity(
     agent_id: str = AGENT,
     role: WriteRole = "agent",
     capabilities: tuple[str, ...] = (),
+    session_id: str | None = "session-a",
 ) -> SessionIdentity:
     return SessionIdentity(
         tenant_id=TENANT,
@@ -54,6 +55,7 @@ def _identity(
         role=role,
         source_trust_tier=int(TrustTier.NORMAL),
         capabilities=capabilities,
+        session_id=session_id,
     )
 
 
@@ -202,6 +204,74 @@ def test_cli_requires_signed_identity_and_preserves_timezone(
     )
     assert datetime.fromisoformat(scheduled["due_at"]) == datetime.fromisoformat(due_at)
     assert listed["intentions"] == [scheduled]
+
+
+def test_schedule_requires_session_and_update_is_bound_across_mcp_and_cli(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    server = _server(tmp_path)
+    evidence_id = _seed_evidence(server.engine)
+    due = datetime.now(UTC) + timedelta(hours=1)
+    denied = _mcp_call(
+        server, "schedule_intention", _schedule_arguments(evidence_id, due.isoformat()),
+        token=_token(session_id=None),
+    )
+    assert denied["isError"] is True
+    assert "session identifier" in denied["content"][0]["text"]
+
+    scheduled = _mcp_call(
+        server, "schedule_intention", _schedule_arguments(evidence_id, due.isoformat())
+    )["structuredContent"]
+    update = {
+        "tenant_id": TENANT,
+        "intention_id": scheduled["intention_id"],
+        "user_id": USER,
+        "agent_id": AGENT,
+        "action": {"kind": "notify", "message": "Updated"},
+    }
+    updated = _mcp_call(server, "update_intention", update)
+    assert updated["isError"] is False, updated
+    assert _mcp_call(
+        server, "update_intention", update, token=_token(session_id="session-b")
+    )["isError"] is True
+    assert _mcp_call(
+        server, "update_intention", update, token=_token(role="reader")
+    )["isError"] is True
+    assert _mcp_call(
+        server, "update_intention", update, token=_token(agent_id="agent-b")
+    )["isError"] is True
+
+    store = tmp_path / "cli-update.json"
+    cli_evidence = _seed_evidence(LocalMemoryEngine(store))
+    cli_scheduled = _run_cli(
+        capsys, store, _token(), *_cli_schedule(cli_evidence, due.isoformat())
+    )
+    cli_updated = _run_cli(
+        capsys, store, _token(), "intention-update", "--tenant", TENANT,
+        "--intention-id", cli_scheduled["intention_id"], "--user", USER,
+        "--agent", AGENT, "--action", json.dumps({"kind": "notify", "message": "CLI"}),
+    )
+    assert cli_updated["action"]["message"] == "CLI"
+    cli_update_args = [
+        "intention-update", "--tenant", TENANT, "--intention-id",
+        cli_scheduled["intention_id"], "--user", USER, "--agent", AGENT,
+        "--action", json.dumps({"kind": "notify", "message": "Denied"}),
+    ]
+    with pytest.raises(PermissionError, match="session"):
+        cli.main([
+            "--store", str(store), *_cli_auth(_token(session_id="session-b")),
+            *cli_update_args,
+        ])
+    with pytest.raises(PermissionError, match="reader"):
+        cli.main([
+            "--store", str(store), *_cli_auth(_token(role="reader")),
+            *cli_update_args,
+        ])
+    with pytest.raises(PermissionError, match="agent"):
+        cli.main([
+            "--store", str(store), *_cli_auth(_token(agent_id="agent-b")),
+            *cli_update_args,
+        ])
 
 
 def test_cli_evaluate_requires_scheduler_and_explicit_context(

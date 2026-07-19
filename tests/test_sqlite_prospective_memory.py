@@ -144,6 +144,47 @@ def test_sqlite_update_intention_matches_local_and_persists_session(tmp_path: Pa
     assert sqlite_update["capability_tags"] == local_update["capability_tags"]
 
 
+def test_sqlite_recurrence_and_update_replay_match_local(tmp_path: Path) -> None:
+    engines = [SqliteEngine(tmp_path / "sqlite-recurrence"), LocalMemoryEngine()]
+    for engine in engines:
+        evidence_id = _originating_episode(engine)
+        due = EVALUATED_AT
+        engine.schedule_intention(_intention(
+            evidence_id=evidence_id, due_at=due, session_id="session-a",
+            recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 2},
+        ))
+        for index in range(2):
+            assert len(_evaluate(engine, TENANT_ID, evaluated_at=due + timedelta(minutes=index))) == 1
+        terminal = engine.list_intentions(TENANT_ID)[0]
+        assert terminal.status == "fired"
+        assert terminal.recurrence_state["occurrence"] == 1
+
+    for engine in engines:
+        evidence_id = _originating_episode(
+            engine, tenant_id="tenant-replay", user_id=USER_ID, agent_id=AGENT_ID
+        )
+        due = EVALUATED_AT + timedelta(hours=1)
+        engine.schedule_intention(_intention(
+            evidence_id=evidence_id, due_at=due, tenant_id="tenant-replay",
+            intention_id="replay", session_id="session-a",
+        ))
+        engine.update_intention(
+            "tenant-replay", "replay", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "remind", "message": "Same."},
+        )
+        before = len(engine.audit_log) if isinstance(engine, LocalMemoryEngine) else len(
+            _audit_log(engine, "tenant-replay")
+        )
+        engine.update_intention(
+            "tenant-replay", "replay", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "remind", "message": "Same."},
+        )
+        after = len(engine.audit_log) if isinstance(engine, LocalMemoryEngine) else len(
+            _audit_log(engine, "tenant-replay")
+        )
+        assert after == before
+
+
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit(
     tmp_path: Path,
 ) -> None:

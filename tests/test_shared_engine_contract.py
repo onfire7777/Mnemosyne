@@ -345,6 +345,8 @@ def _prospective_intention(
     trigger_expression: dict[str, Any],
     due_at: datetime,
     dependencies: list[str] | None = None,
+    session_id: str | None = None,
+    recurrence_policy: dict[str, Any] | None = None,
 ) -> Intention:
     return Intention(
         intention_id=intention_id,
@@ -357,11 +359,54 @@ def _prospective_intention(
         due_at=due_at,
         dependencies=list(dependencies or []),
         evidence_ids=[evidence_id],
+        session_id=session_id,
+        recurrence_policy=recurrence_policy or {"type": "none"},
     )
 
 
 def _prospective_audit_log(engine: Any, tenant: str) -> list[dict[str, Any]]:
     return engine.export_tenant(tenant)["audit_log"]
+
+
+def test_shared_prospective_update_replay_and_recurrence(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-recurrence"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    intention = _prospective_intention(
+        intention_id="shared-recurrence", tenant=tenant, user=user, agent=agent,
+        evidence_id=evidence_id, trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()}, due_at=due,
+        session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 2},
+    )
+    engine.schedule_intention(intention)
+    updated = engine.update_intention(
+        tenant, intention.intention_id, user_id=user, agent_id=agent,
+        session_id="session-a", action={"type": "remind", "message": "Updated."},
+    )
+    audit_count = len(_prospective_audit_log(engine, tenant))
+    replay = engine.update_intention(
+        tenant, intention.intention_id, user_id=user, agent_id=agent,
+        session_id="session-a", action={"type": "remind", "message": "Updated."},
+    )
+    assert replay == updated
+    assert len(_prospective_audit_log(engine, tenant)) == audit_count
+    for index in range(2):
+        evaluated = due + timedelta(minutes=index)
+        assert len(engine.evaluate_due_intentions(
+            tenant, evaluated_at=evaluated,
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )) == 1
+        assert engine.evaluate_due_intentions(
+            tenant, evaluated_at=evaluated,
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        ) == []
+    assert engine.list_intentions(tenant)[0].status == "fired"
 
 
 @pytest.mark.parametrize(
