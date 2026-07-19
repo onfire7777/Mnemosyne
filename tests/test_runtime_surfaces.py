@@ -3570,6 +3570,15 @@ def test_mcp_server_stateful_close_is_idempotent_and_closes_engine_exactly_once(
         assert successor.store_path == store
 
 
+def test_mcp_server_stateful_tool_call_after_close_is_rejected(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store)
+    server.close()
+
+    with pytest.raises(RuntimeError, match="MCP server is closed"):
+        server.call_tool("residency_policy", {})
+
+
 def test_mcp_close_bundle_releases_every_resource_when_one_closer_fails() -> None:
     closed: list[str] = []
 
