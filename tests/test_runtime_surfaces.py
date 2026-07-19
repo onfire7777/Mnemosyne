@@ -842,7 +842,8 @@ def test_memory_tools_denied_auth_decision_persists_audit_only_event(tmp_path: P
     with pytest.raises(PermissionError, match="branch writes require normal-or-stronger source trust"):
         tools.branch("denied-persistent-branch", role="agent", source_trust_tier=4, tenant_id=TENANT)
 
-    reloaded = LocalMemoryEngine(store_path=store_path)
+    engine.close()
+    reloaded = LocalMemoryEngine(store_path=store_path, read_only=True)
     audit = [
         item
         for item in reloaded.audit_log
@@ -852,6 +853,54 @@ def test_memory_tools_denied_auth_decision_persists_audit_only_event(tmp_path: P
     assert audit[0]["source"] == "mcp_tools"
     assert audit[0]["capability_tags"] == ["authz", "denied"]
     assert audit[0]["diff"]["allowed"] is False
+
+
+def test_local_engine_close_is_idempotent_and_hands_off_sequential_ownership(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    engine = LocalMemoryEngine(store_path=store)
+    first_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Writer lifecycle evidence before handoff.",
+            trust_tier=3,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.close()
+    engine.close()
+
+    with pytest.raises(RuntimeError, match="does not own its writable store"):
+        engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Write after close must fail.",
+                trust_tier=3,
+                access_policy={"tenant": TENANT},
+            )
+        )
+
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert f"{TENANT}:main:{first_cid}" in successor.evidence
+        successor_cid = successor.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Successor writes after sequential handoff.",
+                trust_tier=3,
+                access_policy={"tenant": TENANT},
+            )
+        )
+
+    observer = LocalMemoryEngine(store_path=store, read_only=True)
+    assert {f"{TENANT}:main:{first_cid}", f"{TENANT}:main:{successor_cid}"} <= set(observer.evidence)
 
 
 def test_memory_tools_direct_assert_fact_and_preference_write_paths() -> None:
@@ -2577,14 +2626,15 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
     assert capture_status == 200
     assert captured is not None
     captured_content = captured["result"]["structuredContent"]  # type: ignore[index]
-    summary_run = ConsolidationWorker(LocalMemoryEngine(store_path=store), gate_cases=[]).run_queue_payload(
-        {
-            "tenant_id": TENANT,
-            "branch": "main",
-            "source_evidence_cids": [captured_content["cid"]],
-            "passes": ["summarizer"],
-        }
-    )
+    with LocalMemoryEngine(store_path=store) as consolidation_engine:
+        summary_run = ConsolidationWorker(consolidation_engine, gate_cases=[]).run_queue_payload(
+            {
+                "tenant_id": TENANT,
+                "branch": "main",
+                "source_evidence_cids": [captured_content["cid"]],
+                "passes": ["summarizer"],
+            }
+        )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
     server, thread, base = start_mcp_http_server(store_path=store)
@@ -2619,37 +2669,37 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
 def test_mcp_http_transport_suppresses_gist_derived_graph_without_source(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     source_key = "hosted-http-deep-gist-source"
-    engine = LocalMemoryEngine(store_path=store)
-    summary_cid = engine.append_evidence(
-        Evidence(
-            tenant_id=TENANT,
-            user_id=USER,
-            actor="system",
-            source_type="consolidation-summary",
-            source_identity="consolidation-summary:http-deep-gist",
-            content="Hosted MCP HTTP deep search generated summary support requires source inspection.",
-            metadata={
-                "summary": {
-                    "kind": "abstractive_gist",
-                    "source_evidence_cids": [source_key],
-                    "confabulation_risk": True,
-                }
-            },
-            trust_tier=2,
-            capability_tags=["consolidation-gist", "derived-summary"],
-            access_policy={"tenant": TENANT},
+    with LocalMemoryEngine(store_path=store) as engine:
+        summary_cid = engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="system",
+                source_type="consolidation-summary",
+                source_identity="consolidation-summary:http-deep-gist",
+                content="Hosted MCP HTTP deep search generated summary support requires source inspection.",
+                metadata={
+                    "summary": {
+                        "kind": "abstractive_gist",
+                        "source_evidence_cids": [source_key],
+                        "confabulation_risk": True,
+                    }
+                },
+                trust_tier=2,
+                capability_tags=["consolidation-gist", "derived-summary"],
+                access_policy={"tenant": TENANT},
+            )
         )
-    )
-    engine.add_relation(
-        Relation(
-            tenant_id=TENANT,
-            source=source_key,
-            predicate="summary-derived-gist",
-            target=summary_cid,
-            source_evidence_cids=[source_key],
-            access_policy={"tenant": TENANT},
+        engine.add_relation(
+            Relation(
+                tenant_id=TENANT,
+                source=source_key,
+                predicate="summary-derived-gist",
+                target=summary_cid,
+                source_evidence_cids=[source_key],
+                access_policy={"tenant": TENANT},
+            )
         )
-    )
 
     server, thread, base = start_mcp_http_server(store_path=store)
     try:
@@ -3223,6 +3273,19 @@ def test_mcp_http_transport_stateless_mode_reloads_durable_state(tmp_path: Path)
     assert hits[0]["provenance"] == [captured_content["cid"]]
 
 
+def test_mcp_http_server_close_releases_facade_and_is_idempotent(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server, thread, base = start_mcp_http_server(store_path=store)
+    try:
+        with pytest.raises(RuntimeError, match="already has a writer"):
+            LocalMemoryEngine(store_path=store)
+    finally:
+        stop_mcp_http_server(server, thread)
+    server.server_close()
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
 def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     writer = MnemosyneMcpServer(store_path=store, stateless=True)
@@ -3274,6 +3337,7 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
             "source_trust_tier": 0,
         },
     )
+    writer.close()
     reader = MnemosyneMcpServer(store_path=store, stateless=True)
 
     search = mcp_call(reader, "search", {"tenant_id": TENANT, "query": "stateless durable evidence"})
@@ -3316,11 +3380,13 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
             "source_trust_tier": 0,
         },
     )
-    after_retire = mcp_call(
-        MnemosyneMcpServer(store_path=store, stateless=True),
-        "profile_context",
-        {"tenant_id": TENANT, "user_id": USER, "scope": {"surface": "mcp"}},
-    )
+    reader.close()
+    with MnemosyneMcpServer(store_path=store, stateless=True) as observer:
+        after_retire = mcp_call(
+            observer,
+            "profile_context",
+            {"tenant_id": TENANT, "user_id": USER, "scope": {"surface": "mcp"}},
+        )
 
     assert denied_retire["result"]["isError"] is True
     assert "outside the requested tenant/user scope" in denied_retire["result"]["content"][0]["text"]
@@ -3367,23 +3433,86 @@ def test_mcp_server_stateless_warm_tools_reload_after_external_store_write(
 
     query = {"tenant_id": TENANT, "query": "externally written warm bundle evidence"}
     assert mcp_call(reader, "search", query)["hits"] == []
-    time.sleep(0.01)
-    captured = mcp_call(
-        MnemosyneMcpServer(store_path=store, stateless=True),
+    reader.close()
+    with MnemosyneMcpServer(store_path=store, stateless=True) as external_writer:
+        captured = mcp_call(
+            external_writer,
+            "capture",
+            {
+                "tenant_id": TENANT,
+                "user_id": USER,
+                "actor": "user",
+                "source_type": "chat",
+                "content": "Externally written warm bundle evidence.",
+                "trust_tier": 3,
+            },
+        )
+    refreshed = mcp_call(reader, "search", query)
+
+    assert build_calls == 2
+    assert refreshed["hits"][0]["provenance"] == [captured["cid"]]
+
+
+def test_mcp_server_close_releases_cached_stateless_bundles_exactly_once(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store, stateless=True)
+    mcp_call(
+        server,
         "capture",
         {
             "tenant_id": TENANT,
             "user_id": USER,
             "actor": "user",
             "source_type": "chat",
-            "content": "Externally written warm bundle evidence.",
+            "content": "Warm bundle closed exactly once on facade close.",
             "trust_tier": 3,
         },
     )
-    refreshed = mcp_call(reader, "search", query)
+    ((_stamp, bundle),) = server._stateless_tools_cache.values()
+    engine = bundle[0]
+    close_calls: list[int] = []
+    original_close = engine.close
 
-    assert build_calls == 2
-    assert refreshed["hits"][0]["provenance"] == [captured["cid"]]
+    def counting_close() -> None:
+        close_calls.append(1)
+        original_close()
+
+    engine.close = counting_close
+    server.close()
+    server.close()
+
+    assert close_calls == [1]
+    assert server._stateless_tools_cache == {}
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.evidence
+
+
+def test_mcp_server_stateless_scope_replacement_closes_previous_bundle(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    with MnemosyneMcpServer(store_path=store, stateless=True) as server:
+        mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+        ((_stamp, first_bundle),) = server._stateless_tools_cache.values()
+        first_engine = first_bundle[0]
+
+        mcp_call(server, "profile_context", {"tenant_id": "tenant-other", "user_id": USER})
+
+        assert len(server._stateless_tools_cache) == 1
+        with pytest.raises(RuntimeError, match="does not own its writable store"):
+            first_engine.append_evidence(
+                Evidence(
+                    tenant_id=TENANT,
+                    user_id=USER,
+                    actor="user",
+                    source_type="chat",
+                    content="Evicted bundle must not write the shared store.",
+                    trust_tier=3,
+                    access_policy={"tenant": TENANT},
+                )
+            )
+        with pytest.raises(RuntimeError, match="already has a writer"):
+            LocalMemoryEngine(store_path=store)
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
 
 
 def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:

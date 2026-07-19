@@ -11,7 +11,7 @@ import os
 import ssl
 import sys
 import threading
-from contextlib import nullcontext
+from contextlib import asynccontextmanager, nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
@@ -175,8 +175,40 @@ class MnemosyneMcpServer:
         ] = {}
         self._stateless_tools_cache_lock = threading.Lock()
         self._stateless_transaction_lock = threading.Lock()
+        self._stateful_tools_closed = False
         if not self.stateless:
             self.engine, self.queue, self.runtime_state, self.tools = self._build_tools()
+
+    def close(self) -> None:
+        """Release MCP-owned engines, queues, and cached stateless bundles.
+
+        Idempotent: every owned bundle is evicted before it is closed, so each
+        one is closed exactly once. A stateless facade may keep serving after
+        close by rebuilding bundles on demand.
+        """
+
+        with self._stateless_tools_cache_lock:
+            stale = [bundle for _stamp, bundle in self._stateless_tools_cache.values()]
+            self._stateless_tools_cache.clear()
+        for bundle in stale:
+            self._close_bundle(bundle)
+        if not self.stateless and not self._stateful_tools_closed:
+            self._stateful_tools_closed = True
+            self._close_bundle((self.engine, self.queue, self.runtime_state, self.tools))
+
+    def __enter__(self) -> MnemosyneMcpServer:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
+
+    @staticmethod
+    def _close_bundle(bundle: tuple[Any, Any, Any, Any]) -> None:
+        engine, queue, runtime_state, _tools = bundle
+        for resource in (engine, queue, runtime_state):
+            closer = getattr(resource, "close", None) or getattr(resource, "close_connections", None)
+            if callable(closer):
+                closer()
 
     def _stateless_tools_cache_key(
         self,
@@ -212,6 +244,18 @@ class MnemosyneMcpServer:
                 self.backend in {"local", "sqlite"} or cached[0] == stamp
             ):
                 return cached[1], key
+            # A miss replaces cached bundles: evict-then-close the stale
+            # same-key bundle, and on the single-store backends every other
+            # scope's bundle too, so one store never holds two live writers.
+            stale = []
+            if cached is not None:
+                stale.append(cached[1])
+                del self._stateless_tools_cache[key]
+            if self.backend in {"local", "sqlite"}:
+                stale.extend(entry[1] for entry in self._stateless_tools_cache.values())
+                self._stateless_tools_cache.clear()
+            for old_bundle in stale:
+                self._close_bundle(old_bundle)
             bundle = self._build_tools(queue_tenant)
             self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
             return bundle, key
@@ -779,6 +823,7 @@ def build_sdk_server(**kwargs: Any) -> Any:
         except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
             return _sdk_tool_error(types, str(exc))
 
+    server.mnemosyne_mcp_facade = facade
     return server
 
 
@@ -845,12 +890,22 @@ def build_sdk_streamable_http_app(
             }
         )
 
+    @asynccontextmanager
+    async def lifespan(_app: Any) -> Any:
+        try:
+            async with session_manager.run():
+                yield
+        finally:
+            facade = getattr(sdk_server, "mnemosyne_mcp_facade", None)
+            if facade is not None:
+                facade.close()
+
     app = Starlette(
         routes=[
             Route(_normalize_http_path(streamable_http_path), endpoint=streamable_app),
             Route(_normalize_http_path(health_path), endpoint=health, methods=["GET"]),
         ],
-        lifespan=lambda _app: session_manager.run(),
+        lifespan=lifespan,
     )
     app.state.mnemosyne_streamable_http_manager = session_manager
     return app
@@ -878,6 +933,25 @@ def serve_sdk_streamable_http(
         **kwargs,
     )
     uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+class _FacadeClosingHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer whose server_close also releases the MCP facade.
+
+    The facade reference is dropped before closing it, so repeated
+    server_close calls close the facade's resources exactly once.
+    """
+
+    mnemosyne_facade: MnemosyneMcpServer | None = None
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            facade = self.mnemosyne_facade
+            self.mnemosyne_facade = None
+            if facade is not None:
+                facade.close()
 
 
 def build_http_server(
@@ -1139,7 +1213,8 @@ def build_http_server(
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
             return
 
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd = _FacadeClosingHTTPServer((host, port), Handler)
+    httpd.mnemosyne_facade = facade
     if tls_cert_file or tls_key_file or tls_client_ca_file or tls_require_client_cert:
         if not tls_cert_file or not tls_key_file:
             httpd.server_close()
