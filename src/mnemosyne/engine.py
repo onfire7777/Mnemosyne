@@ -581,6 +581,10 @@ def _normalize_recurrence_policy(value: Any) -> dict[str, Any]:
         raise ValueError("recurrence_policy.max_occurrences must be a positive integer")
     if set(normalized) - {"type", "interval_seconds", "max_occurrences"}:
         raise ValueError("recurrence_policy contains unsupported fields")
+    if maximum is None:
+        # An explicit null and an absent key are the same policy; keep one
+        # canonical shape so audit digests and no-op detection stay stable.
+        normalized.pop("max_occurrences", None)
     return normalized
 
 
@@ -707,8 +711,14 @@ def _updated_intention(
                 current.trigger_expression["end"], field="time_window.end"
             )
             duration = old_end - current.due_at
+            try:
+                new_end = (normalized_due + duration).isoformat()
+            except OverflowError:
+                raise ValueError(
+                    "rescheduled time_window exceeds the representable datetime range"
+                ) from None
             row["trigger_expression"]["start"] = normalized_due.isoformat()
-            row["trigger_expression"]["end"] = (normalized_due + duration).isoformat()
+            row["trigger_expression"]["end"] = new_end
     if action is not None:
         row["action"] = copy.deepcopy(action)
     if recurrence_policy is not None:
