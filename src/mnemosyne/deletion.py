@@ -620,9 +620,9 @@ class DeletionCoordinator:
             self.ledger.checkpoint(record)
             try:
                 if kind == "object":
-                    return self._delete_objects(receipt, tenant, refs)
+                    return self._delete_objects(receipt, tenant, refs, crash_resuming)
                 if kind == "backup":
-                    return self._delete_backups(receipt, tenant, refs)
+                    return self._delete_backups(receipt, tenant, refs, crash_resuming)
                 cache_key = next(
                     (key for key in self.process_cache if self._cache_surface_name(key) == name),
                     None,
@@ -735,8 +735,19 @@ class DeletionCoordinator:
             if key in targets
         ]
 
-    def _delete_objects(self, receipt: SurfaceReceipt, tenant: str, refs: list[str]) -> bool:
+    def _delete_objects(
+        self, receipt: SurfaceReceipt, tenant: str, refs: list[str], crash_resuming: bool
+    ) -> bool:
         keys = self._target_object_keys(tenant, refs)
+        if not keys and not crash_resuming:
+            # A receipt for this surface exists, so targets were enumerated when
+            # the operation began.  Finding none now means this coordinator was
+            # rebuilt without the object registry (a durable resume in a fresh
+            # process), not that the shred succeeded -- crypto-shredding nothing
+            # must never attest that the keys are gone.
+            receipt.error_code = "probe_failed"
+            receipt.state = "failed"
+            return False
         if any(key.startswith("plain://") for key in keys):
             receipt.error_code = "not_crypto_shreddable"
             receipt.state = "failed"
@@ -751,8 +762,17 @@ class DeletionCoordinator:
         receipt.action = "crypto_shredded"
         return self._verified(receipt)
 
-    def _delete_backups(self, receipt: SurfaceReceipt, tenant: str, refs: list[str]) -> bool:
+    def _delete_backups(
+        self, receipt: SurfaceReceipt, tenant: str, refs: list[str], crash_resuming: bool
+    ) -> bool:
         targets = [row for row in self.backup_snapshots if row.get("tenant_id") == tenant and row.get("source_ref") in refs]
+        if not targets and not crash_resuming:
+            # See _delete_objects: an unverified backup receipt with no visible
+            # snapshots means the registry is missing, not that the snapshots
+            # were removed.  A crash mid-splice is the only benign empty set.
+            receipt.error_code = "probe_failed"
+            receipt.state = "failed"
+            return False
         if any(not row.get("available", True) or row.get("immutable", False) for row in targets):
             receipt.error_code = "retention_exception"
             receipt.state = "failed"
@@ -776,7 +796,12 @@ class DeletionCoordinator:
         receipt = record.receipts[("engine", surface)]
         if receipt.verified_removed:
             return
+        # Any prior attempt means targets may already be gone, so probe before
+        # re-forgetting.  But only a persisted "deleting" state is a crash
+        # mid-attempt; a completed "failed" outcome retried here is a *new*
+        # destructive pass and must re-stamp and re-checkpoint like the first.
         resuming = receipt.attempts > 0
+        crash_resuming = resuming and receipt.state == "deleting"
         receipt.state = "deleting"
         branches = ["main"]
         if request["branch_scope"] == "all":
@@ -814,7 +839,7 @@ class DeletionCoordinator:
             receipt.error_code = "delete_failed"
             receipt.state = "failed"
             return
-        if not resuming:
+        if not crash_resuming:
             receipt.attempts += 1
             receipt.attempted_at = datetime.now(UTC).isoformat()
             # Persist the ambiguous state before the engine side effect. A
@@ -894,6 +919,14 @@ class DeletionCoordinator:
                 )
                 if scrubbed_key in scrubbed:
                     scrubbed_key = _opaque("retained-audit-key", repr(key))
+                if scrubbed_key in scrubbed:
+                    # Both the scrubbed key and its disambiguated form are
+                    # occupied (a planted audit row can hold either).  Dropping
+                    # one would silently delete a field from the custody record
+                    # this scrub must preserve, so fail closed instead;
+                    # _attempt_engine turns this into a delete_failed receipt
+                    # before any destructive forget call.
+                    raise ValueError("retained-history scrub key collision")
                 scrubbed[scrubbed_key] = cls._scrub_value(item, sensitive, sensitive_keys)
             return scrubbed
         if isinstance(value, list):

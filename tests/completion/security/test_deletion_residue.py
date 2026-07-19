@@ -14,6 +14,7 @@ import hashlib
 import importlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -2492,3 +2493,282 @@ def test_unrecognized_engine_scrub_fails_closed_without_forgetting() -> None:
     # Fail closed means fail early: the retained-history scrub refused before
     # any destructive engine call, so the evidence row must still exist.
     assert inner.get_evidence(TENANT, source_ref) is not None
+
+
+def _durable_request(world: FakeWorld) -> dict[str, Any]:
+    return {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+
+
+def _durable_identity() -> SessionIdentity:
+    return SessionIdentity(
+        tenant_id=TENANT,
+        user_id=USER,
+        role="operator",
+        source_trust_tier=int(TrustTier.DIRECT_USER),
+        session_id="verified-delete-session",
+    )
+
+
+@pytest.mark.parametrize(
+    ("registry", "surface_name"),
+    [("object_keys", "object_storage"), ("backup_snapshots", "backups")],
+)
+def test_resume_without_registry_never_attests_untouched_surface(
+    tmp_path: Path, registry: str, surface_name: str
+) -> None:
+    """A durable resume that cannot see its targets must fail, not attest."""
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    world.object_keys[f"s3_encrypted://{TENANT}/{world.source_ref}"] = b"key-material"
+    world.backup_snapshots.append(
+        {"tenant_id": TENANT, "source_ref": world.source_ref, "snapshot": CANARY}
+    )
+    # The journal store fails, so the boundary gate stops the saga with the
+    # object and backup receipts persisted but unattempted.
+    world.stores["journal"] = FakeStore(name="journal", available=False)
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    request = _durable_request(world)
+    identity = _durable_identity()
+
+    deletion.DeletionCoordinator(
+        engine=world.engine,
+        stores=world.stores,
+        object_keys=world.object_keys,
+        backup_snapshots=world.backup_snapshots,
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    ).delete(**request)
+
+    # Resume in a coordinator rebuilt without that registry, as a fresh
+    # process would be.  The surface receipt survives in the durable journal.
+    world.stores["journal"].available = True
+    manifest = deletion.DeletionCoordinator(
+        engine=world.engine,
+        stores=world.stores,
+        **{registry: type(getattr(world, registry))()},
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    ).delete(**request)
+
+    surface = _surface(manifest, surface_name)
+    assert surface["verified_removed"] is False
+    assert surface["error_code"] == "probe_failed"
+    assert surface["residue_probe"] == 1
+    assert manifest["summary"]["complete"] is False
+    # Fail closed before the engine: externals are unverified, so the
+    # evidence row must survive rather than be shredded under a false receipt.
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+def test_engine_retry_after_failure_restamps_a_new_destructive_attempt() -> None:
+    """A retried engine pass is new destruction, not a crash resume."""
+    world = _world()
+    world.engine.audit_log.append(
+        {"id": "audit-retry", "tenant_id": TENANT, "details": {"note": CANARY}}
+    )
+    calls: list[str] = []
+    real_forget = world.engine.forget
+
+    def flaky_forget(*args: Any, **kwargs: Any) -> Any:
+        calls.append("forget")
+        if len(calls) == 1:
+            raise RuntimeError("synthetic engine fault")
+        return real_forget(*args, **kwargs)
+
+    world.engine.forget = flaky_forget  # type: ignore[method-assign]
+    failed = _delete(world)
+    surface = _surface(failed, "source_evidence")
+    assert surface["error_code"] == "delete_failed"
+    assert surface["attempts"] == 1
+    first_attempted_at = surface["attempted_at"]
+
+    retried = _surface(_delete(world), "source_evidence")
+    assert retried["verified_removed"] is True
+    # The failed receipt is a completed outcome; retrying it is a second
+    # destructive pass and must be counted and re-stamped as one.
+    assert retried["attempts"] == 2
+    assert retried["attempted_at"] != first_attempted_at
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+
+
+def test_incomplete_manifest_reports_no_completion_or_phantom_visits() -> None:
+    world = _world()
+    world.stores["replica"] = FakeStore(name="replica", available=False)
+    manifest = _delete(world)
+    assert manifest["summary"]["complete"] is False
+    # An incomplete deletion must never carry a completion timestamp, and an
+    # unattempted store must never be reported as visited.
+    assert manifest["completed_at"] is None
+    unavailable = [row for row in manifest["stores"] if row["available"] is False]
+    assert len(unavailable) == 1
+    engine_store = next(
+        row for row in manifest["stores"] if row["surface_type"] == "engine"
+    )
+    assert engine_store["visited"] == 0
+
+
+def test_nested_metadata_keys_are_scrubbed_from_retained_history() -> None:
+    world = _world()
+    nested_key = f"nested-{CANARY}-key"
+    listed_key = f"listed-{CANARY}-key"
+    evidence = _evidence(content="ordinary payload")
+    evidence.metadata = {
+        "outer": {nested_key: "safe"},
+        "items": [{listed_key: "safe"}],
+    }
+    source_ref = world.engine.append_evidence(evidence)
+    world.engine.audit_log.append(
+        {
+            "id": "audit-nested-r21",
+            "tenant_id": TENANT,
+            "details": {nested_key: "first", listed_key: "second"},
+        }
+    )
+    _delete(world, source_refs=[source_ref])
+    retained = next(
+        row for row in world.engine.audit_log if row["id"] == "audit-nested-r21"
+    )
+    # Custody-bearing key names nested inside metadata are as correlatable as
+    # top-level ones; the retained row keeps its fields but not those names.
+    assert set(retained["details"].values()) == {"first", "second"}
+    _assert_absent(retained, nested_key, listed_key)
+
+
+def test_ledger_sidecars_are_owner_only_while_open(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    db_path = tmp_path / "deletion.db"
+    ledger = deletion.SQLiteDeletionLedger(db_path)
+    ledger.begin(OPERATION_ID, "fingerprint-modes", TENANT)
+    # WAL/SHM inherit the DB mode, but only while a connection holds them
+    # open -- assert unconditionally rather than skipping when absent.
+    with sqlite3.connect(db_path) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("SELECT count(*) FROM deletion_operations").fetchone()
+        for sidecar in (Path(f"{db_path}-wal"), Path(f"{db_path}-shm")):
+            assert sidecar.exists()
+            assert (sidecar.stat().st_mode & 0o777) == 0o600
+
+
+@pytest.mark.parametrize(
+    "hostile_key",
+    [f"user-{CANARY}@example-corp", "s3://bucket/evidence-path", 7],
+)
+def test_r25_verifier_errors_never_echo_hostile_key_names(hostile_key: Any) -> None:
+    """A rejected manifest must not copy custody-bearing field names into logs."""
+    manifest = _valid_manifest()
+    manifest["surfaces"][0][hostile_key] = "x"
+    result = deletion_manifest.verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert result["errors"]
+    # The key is unknown vocabulary, so it is rendered positionally instead.
+    assert any("<field " in error for error in result["errors"])
+    _assert_absent(result["errors"], str(hostile_key))
+
+
+@pytest.mark.parametrize("backend", ["memory", "sqlite"])
+def test_tombstoned_evidence_is_shredded_and_its_columns_scrubbed(
+    tmp_path: Path, backend: str
+) -> None:
+    """A soft-erased row keeps every column but content; legal delete must reach it."""
+    if backend == "sqlite":
+        engine: Any = SqliteEngine(tmp_path / "tombstone.sqlite")
+    else:
+        engine = LocalMemoryEngine()
+    evidence = _evidence(content="ordinary payload")
+    session_id = f"session-{CANARY}-tombstone"
+    evidence.session_id = session_id
+    evidence.metadata = {"case-note": f"matter-{CANARY}-42"}
+    source_ref = engine.append_evidence(evidence)
+    engine.forget(
+        TENANT, source_ref, requested_by="user", erasure_mode="tombstone_recompute"
+    )
+    # The tombstone is masked from reads but the row survives with its
+    # correlatable columns intact -- exactly the residue the shred must remove.
+    assert engine.get_evidence(TENANT, source_ref) is None
+    assert engine.evidence_is_erased(TENANT, source_ref) is True
+
+    world = FakeWorld(engine=engine, source_ref=source_ref)
+    manifest = _delete(world)
+
+    _assert_complete(manifest)
+    assert engine.evidence_is_erased(TENANT, source_ref) is False
+    assert engine.get_evidence(TENANT, source_ref) is None
+    # The tombstone's surviving columns fed the scrub needles, so retained
+    # custody history keeps no correlatable reference to them.
+    _assert_absent(manifest, CANARY, source_ref, session_id)
+    if backend == "sqlite":
+        rows = engine._connect(TENANT).execute(
+            "SELECT record FROM audit_log"
+        ).fetchall()
+        _assert_absent([row[0] for row in rows], CANARY, session_id)
+    else:
+        _assert_absent(engine.audit_log, CANARY, session_id)
+
+
+def test_forget_that_only_tombstones_is_reported_as_residue() -> None:
+    """A retained-but-hidden row is recoverable residue, not a verified shred."""
+    engine = LocalMemoryEngine()
+    source_ref = engine.append_evidence(_evidence())
+
+    def soft_forget(*args: Any, **kwargs: Any) -> Any:
+        return LocalMemoryEngine.forget(
+            engine, *args, **{**kwargs, "erasure_mode": "tombstone_recompute"}
+        )
+
+    engine.forget = soft_forget  # type: ignore[method-assign]
+    world = FakeWorld(engine=engine, source_ref=source_ref)
+    manifest = _delete(world)
+
+    # get_evidence masks the tombstone, so a presence check that trusted it
+    # would attest zero residue over a row that still holds every column.
+    assert engine.get_evidence(TENANT, source_ref) is None
+    assert engine.evidence_is_erased(TENANT, source_ref) is True
+    surface = _surface(manifest, "source_evidence")
+    assert surface["error_code"] == "probe_failed"
+    assert surface["verified_removed"] is False
+    assert manifest["summary"]["complete"] is False
+
+
+def test_custody_rows_written_by_forget_itself_are_scrubbed() -> None:
+    """The destructive call emits its own custody rows; they need scrubbing too."""
+    world = _world()
+    real_forget = world.engine.forget
+
+    def forget_with_custody_audit(*args: Any, **kwargs: Any) -> Any:
+        result = real_forget(*args, **kwargs)
+        # Today's engines record only content-derived cids here, so the
+        # pre-forget scrub is sufficient by accident.  Pin the guarantee
+        # against an engine whose forget audit payload embeds the subject.
+        world.engine.audit_log.append(
+            {
+                "id": "audit-generated-by-forget",
+                "tenant_id": TENANT,
+                "op": "forget",
+                "details": {"erased_ref": world.source_ref, "erased_content": CANARY},
+            }
+        )
+        return result
+
+    world.engine.forget = forget_with_custody_audit  # type: ignore[method-assign]
+    manifest = _delete(world)
+    _assert_complete(manifest)
+
+    generated = next(
+        row for row in world.engine.audit_log if row["id"] == "audit-generated-by-forget"
+    )
+    # Custody is retained -- the row still records that a legal forget happened...
+    assert generated["op"] == "forget"
+    assert set(generated["details"]) == {"erased_ref", "erased_content"}
+    # ...but rows the destructive call itself wrote carry no correlatable
+    # reference, which only the post-forget scrub pass can ensure.
+    _assert_absent(generated["details"], CANARY, world.source_ref)
