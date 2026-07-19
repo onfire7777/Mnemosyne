@@ -1,8 +1,9 @@
 """Synthetic deletion orchestration with fail-closed, resumable receipts.
 
 This module coordinates existing engine erasure and explicitly registered
-synthetic surfaces.  Its in-memory ledger is intentionally not durable; D5
-owns the durable SQLite ledger and production semantic verifier.
+synthetic surfaces.  The in-memory ledger is non-durable (tests/dev);
+``SQLiteDeletionLedger`` is the durable resumable operation journal, and
+``deletion_manifest`` provides the fail-closed semantic verifier.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import secrets
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -48,6 +49,8 @@ class SurfaceReceipt:
     error_code: str | None = None
     verified_removed: bool = False
     action: str = "deleted"
+    attempted_at: str | None = None
+    verified_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -121,8 +124,10 @@ class SQLiteDeletionLedger:
         self._fcntl = fcntl
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
-        with self._connection() as connection:
+        # Concurrent constructions (threads or other processes) race the initial
+        # WAL conversion and schema/key bootstrap; serialize them under the same
+        # cross-process lock that serializes operations.
+        with self.operation_lock(), self._connection() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS deletion_operations (
@@ -207,7 +212,7 @@ class SQLiteDeletionLedger:
     def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord:
         stored_fingerprint = self.opaque_name("request", fingerprint)
         stored_tenant = self.opaque_name("tenant", tenant_id)
-        with self._lock, self._connection() as connection:
+        with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT operation_id, fingerprint, tenant_id, generation, requested_at, "
@@ -232,7 +237,7 @@ class SQLiteDeletionLedger:
             return LedgerRecord(operation_id, fingerprint, tenant_id, generation, requested_at)
 
     def checkpoint(self, record: LedgerRecord) -> None:
-        with self._lock, self._connection() as connection:
+        with self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE deletion_operations SET receipts_json = ?, manifest_json = ?, "
                 "revision = revision + 1 WHERE operation_id = ? AND fingerprint = ? AND revision = ?",
@@ -249,7 +254,7 @@ class SQLiteDeletionLedger:
             record.revision += 1
 
     def current_generation(self, tenant_id: str) -> int:
-        with self._lock, self._connection() as connection:
+        with self._connection() as connection:
             return connection.execute(
                 "SELECT COALESCE(MAX(generation), 0) FROM deletion_operations WHERE tenant_id = ?",
                 (self.opaque_name("tenant", tenant_id),),
@@ -431,6 +436,14 @@ class DeletionCoordinator:
             self.ledger.checkpoint(record)
         return self._manifest(record, request)
 
+    def _is_sqlite_engine(self) -> bool:
+        # Lazy import keeps this module light; isinstance (not class-name text)
+        # keeps SqliteEngine subclasses on the SQL scrub path instead of silently
+        # falling through to the in-memory attribute scan.
+        from .sqlite_engine import SqliteEngine
+
+        return isinstance(self.engine, SqliteEngine)
+
     def _surface_ids(self, tenant: str, refs: list[str]) -> list[tuple[str, str]]:
         surface_ids = [("store", self._store_surface_name(name)) for name in self.stores]
         surface_ids.extend(
@@ -444,7 +457,7 @@ class DeletionCoordinator:
             surface_ids.append(("object", "object_storage"))
         if any(row.get("tenant_id") == tenant and row.get("source_ref") in refs for row in self.backup_snapshots):
             surface_ids.append(("backup", "backups"))
-        engine_surface = "sqlite" if self.engine.__class__.__name__ == "SqliteEngine" else "source_evidence"
+        engine_surface = "sqlite" if self._is_sqlite_engine() else "source_evidence"
         surface_ids.append(("engine", engine_surface))
         return list(dict.fromkeys(surface_ids))
 
@@ -454,7 +467,10 @@ class DeletionCoordinator:
             return f"cache:{name}"
         if kind == "store":
             name = self._store_for_surface(name) or name
-            if name == "runtime_state":
+            # The alias would collide with a real runtime_user_model store and
+            # make an otherwise complete deletion permanently unattestable
+            # (the verifier rejects duplicate labels); opaque the alias instead.
+            if name == "runtime_state" and "runtime_user_model" not in self.stores:
                 return "runtime_user_model"
         return name if is_safe_surface_label(name) else _opaque("surface-label", name)
 
@@ -479,82 +495,103 @@ class DeletionCoordinator:
         receipt = record.receipts[surface_id]
         if receipt.verified_removed:
             return True
+        # A persisted "deleting" state is a crash mid-attempt; a persisted
+        # "failed" state is a completed fail-closed outcome that a plain retry
+        # must not soften into a resume.
+        crash_resuming = receipt.attempts > 0 and receipt.state == "deleting"
         resuming = receipt.attempts > 0
         receipt.state = "deleting"
         receipt.error_code = None
-        try:
-            if kind == "object":
-                receipt.attempts += 1
-                self.ledger.checkpoint(record)
-                return self._delete_objects(receipt, tenant, refs)
-            if kind == "backup":
-                receipt.attempts += 1
-                self.ledger.checkpoint(record)
-                return self._delete_backups(receipt, tenant, refs)
-            if kind == "cache":
-                receipt.attempts += 1
-                self.ledger.checkpoint(record)
+        if kind in {"object", "backup", "cache"}:
+            receipt.attempts += 1
+            receipt.attempted_at = datetime.now(UTC).isoformat()
+            # Ledger checkpoint faults are journal infrastructure failures and
+            # propagate; only surface interactions are recorded on the receipt.
+            self.ledger.checkpoint(record)
+            try:
+                if kind == "object":
+                    return self._delete_objects(receipt, tenant, refs)
+                if kind == "backup":
+                    return self._delete_backups(receipt, tenant, refs)
                 cache_key = next(
                     (key for key in self.process_cache if self._cache_surface_name(key) == name),
                     None,
                 )
                 if cache_key is not None:
                     del self.process_cache[cache_key]
-                elif not resuming:
+                elif not crash_resuming:
                     receipt.error_code = "probe_failed"
                     receipt.state = "failed"
                     return False
                 receipt.action = "invalidated"
                 return self._verified(receipt)
-            store_name = self._store_for_surface(name)
-            if store_name is None:
+            except ConnectionError:
+                receipt.error_code = "store_unavailable"
+            except Exception:
+                receipt.error_code = "delete_failed"
+            receipt.state = "failed"
+            return False
+        store_name = self._store_for_surface(name)
+        if store_name is None:
+            receipt.error_code = "store_unavailable"
+            receipt.state = "failed"
+            return False
+        store = self.stores[store_name]
+        probed_absent: set[str] = set()
+        destructive_attempted = False
+        for ref in refs:
+            if resuming:
+                try:
+                    if self._probe_ref(store, tenant, ref):
+                        probed_absent.add(ref)
+                        continue
+                except Exception:
+                    receipt.error_code = "probe_failed"
+                    receipt.state = "failed"
+                    return False
+            if not destructive_attempted:
+                receipt.attempts += 1
+                destructive_attempted = True
+                receipt.attempted_at = datetime.now(UTC).isoformat()
+                # Persist ambiguity before the external side effect.  A crash
+                # after commit therefore resumes by probing every reference.
+                self.ledger.checkpoint(record)
+            try:
+                store.delete(tenant, ref)
+            except TimeoutError:
+                receipt.error_code = "delete_ambiguous"
+                try:
+                    if self._probe_ref(store, tenant, ref):
+                        probed_absent.add(ref)
+                        continue
+                except Exception:
+                    pass
+                receipt.state = "failed"
+                return False
+            except ConnectionError:
                 receipt.error_code = "store_unavailable"
                 receipt.state = "failed"
                 return False
-            store = self.stores[store_name]
-            probed_absent: set[str] = set()
-            destructive_attempted = False
-            for ref in refs:
-                if resuming:
-                    try:
-                        if self._probe_ref(store, tenant, ref):
-                            probed_absent.add(ref)
-                            continue
-                    except Exception:
-                        receipt.error_code = "probe_failed"
-                        receipt.state = "failed"
-                        return False
-                try:
-                    if not destructive_attempted:
-                        receipt.attempts += 1
-                        destructive_attempted = True
-                        # Persist ambiguity before the external side effect.  A crash
-                        # after commit therefore resumes by probing every reference.
-                        self.ledger.checkpoint(record)
-                    store.delete(tenant, ref)
-                except TimeoutError:
-                    receipt.error_code = "delete_ambiguous"
-                    try:
-                        if self._probe_ref(store, tenant, ref):
-                            probed_absent.add(ref)
-                            continue
-                    except Exception:
-                        pass
-                    receipt.state = "failed"
-                    return False
-            if len(probed_absent) == len(refs):
-                return self._verified(receipt)
+            except Exception:
+                receipt.error_code = "delete_failed"
+                receipt.state = "failed"
+                return False
+        if len(probed_absent) == len(refs):
+            return self._verified(receipt)
+        try:
             if not self._probe_store(store, tenant, refs):
                 receipt.error_code = "probe_failed"
                 receipt.state = "failed"
                 return False
-            return self._verified(receipt)
         except ConnectionError:
             receipt.error_code = "store_unavailable"
+            receipt.state = "failed"
+            return False
         except Exception:
             receipt.error_code = "delete_failed"
-        receipt.state = "failed"
-        return False
+            receipt.state = "failed"
+            return False
+        return self._verified(receipt)
 
     @staticmethod
     def _probe_ref(store: Any, tenant: str, ref: str) -> bool:
@@ -620,11 +657,12 @@ class DeletionCoordinator:
         # transient error code; a verified surface must not carry one.
         receipt.error_code = None
         receipt.verified_removed = True
+        receipt.verified_at = datetime.now(UTC).isoformat()
         receipt.checkpoint = secrets.token_hex(8)
         return True
 
     def _attempt_engine(self, record: LedgerRecord, request: dict[str, Any]) -> None:
-        surface = "sqlite" if self.engine.__class__.__name__ == "SqliteEngine" else "source_evidence"
+        surface = "sqlite" if self._is_sqlite_engine() else "source_evidence"
         receipt = record.receipts[("engine", surface)]
         if receipt.verified_removed:
             return
@@ -662,12 +700,19 @@ class DeletionCoordinator:
             # destroy the only copy of payload-derived scrub inputs. Replay can
             # always scrub the new forget custody rows from request-owned refs.
             self._scrub_retained_history(request["tenant_id"], sensitive, sensitive_keys)
-            if not resuming:
-                receipt.attempts += 1
-                # Persist the ambiguous state before the engine side effect. A
-                # restarted operation probes each target before deciding whether
-                # another destructive call is necessary.
-                self.ledger.checkpoint(record)
+        except Exception:
+            receipt.error_code = "delete_failed"
+            receipt.state = "failed"
+            return
+        if not resuming:
+            receipt.attempts += 1
+            receipt.attempted_at = datetime.now(UTC).isoformat()
+            # Persist the ambiguous state before the engine side effect. A
+            # restarted operation probes each target before deciding whether
+            # another destructive call is necessary.  Ledger checkpoint faults
+            # are journal infrastructure failures and propagate.
+            self.ledger.checkpoint(record)
+        try:
             for branch in branches:
                 for ref in request["source_refs"]:
                     if resuming and self.engine.get_evidence(
@@ -751,13 +796,12 @@ class DeletionCoordinator:
         self, tenant_id: str, sensitive: set[str], sensitive_keys: set[str]
     ) -> None:
         """Retain custody events while removing payload and correlatable references."""
-        connect = getattr(self.engine, "_connect", None)
-        if callable(connect) and self.engine.__class__.__name__ == "SqliteEngine":
+        if self._is_sqlite_engine():
             # The engine shares one cached connection per tenant and serializes all
             # access through its lock; hold it so this scrub transaction cannot
             # interleave with (or commit/roll back) another thread's engine write.
-            with getattr(self.engine, "_lock", None) or nullcontext():
-                connection = connect(tenant_id)
+            with self.engine._lock:
+                connection = self.engine._connect(tenant_id)
                 with connection:
                     for table in ("audit_log", "deletion_log", "merge_log"):
                         for row in connection.execute(f"SELECT seq, record FROM {table}").fetchall():
@@ -776,6 +820,21 @@ class DeletionCoordinator:
                                     ),
                                     row["seq"],
                                 ),
+                            )
+                    # Retracted/trimmed assertions survive forget with their
+                    # calibration JSON; scrub it exactly like the in-memory
+                    # engine's assertions below.  Untouched rows keep their
+                    # canonical bytes (json_text sorts keys the same way).
+                    for row in connection.execute(
+                        "SELECT rowid, calibration FROM assertions WHERE tenant_id = ?",
+                        (tenant_id,),
+                    ).fetchall():
+                        calibration = json.loads(row["calibration"])
+                        scrubbed = self._scrub_value(calibration, sensitive, sensitive_keys)
+                        if scrubbed != calibration:
+                            connection.execute(
+                                "UPDATE assertions SET calibration = ? WHERE rowid = ?",
+                                (json.dumps(scrubbed, sort_keys=True), row["rowid"]),
                             )
             return
         for attribute in ("audit_log", "deletion_log", "merge_log"):
@@ -814,8 +873,8 @@ class DeletionCoordinator:
                     "object_ref": _opaque("surface", f"{record.operation_id}:{surface_id!r}"),
                     "action": receipt.action,
                     "precondition_present": True,
-                    "attempted_at": record.requested_at,
-                    "verified_at": datetime.now(UTC).isoformat() if receipt.verified_removed else None,
+                    "attempted_at": receipt.attempted_at,
+                    "verified_at": receipt.verified_at if receipt.verified_removed else None,
                     "verification_method": "direct_and_public_probe",
                     "state": receipt.state,
                     "attempts": receipt.attempts,
