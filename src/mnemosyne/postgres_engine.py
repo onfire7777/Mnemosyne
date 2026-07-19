@@ -46,6 +46,7 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
     _advance_intention_after_fire,
+    _cancelled_intention,
     _is_replayed_evaluation,
     _updated_intention,
     canonicalize_intention,
@@ -6068,14 +6069,12 @@ class PostgresEngine:
         return intention.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
     ) -> None:
         """Cancel an intention. Missing/cross-tenant -> KeyError; non-owner ->
         PermissionError; fired -> ValueError; already-cancelled is an
         idempotent no-op with no second audit."""
 
-        if type(cancelled_by) is not str or not cancelled_by.strip():
-            raise ValueError("cancelled_by must be a non-empty string")
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
@@ -6095,26 +6094,13 @@ class PostgresEngine:
                 row = cur.fetchone()
                 if row is None:
                     raise KeyError(intention_id)
-                status = row["status"]
-                if status == "fired":
-                    raise ValueError("a fired intention cannot be cancelled")
-                if status == "cancelled":
-                    return
-                db_user_id = str(row["user_id"])
-                agent_id = row["agent_id"]
-                external_user = _stable_uuid("user", cancelled_by)
-                # The owner is the intention's user_id or agent_id. cancelled_by
-                # is compared against the external (non-UUID) IDs the caller
-                # uses, but user_id is stored as a stable UUID. Map both: if
-                # cancelled_by uuid-matches user_id, or equals agent_id, allow.
-                owns = (
-                    str(external_user) == str(db_user_id)
-                    or cancelled_by == agent_id
+                current = self._row_to_intention(row, tenant_id)
+                intention = _cancelled_intention(
+                    current, cancelled_by=cancelled_by, session_id=session_id
                 )
-                if not owns:
-                    raise PermissionError("only the owning user or agent may cancel an intention")
-                # Reconstruct a minimal Intention for the audit diff.
-                intention = self._row_to_intention(row, tenant_id)
+                if intention == current:
+                    return
+                was_scheduled = current.status == "scheduled"
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=intention
                 )
@@ -6122,25 +6108,33 @@ class PostgresEngine:
                 cur.execute(
                     """
                     UPDATE intentions
-                    SET status = 'cancelled', cancellation_state = %s
-                    WHERE tenant_id = %s AND intention_id = %s AND status = 'scheduled'
+                    SET status = %s, cancellation_state = %s, session_id = %s
+                    WHERE tenant_id = %s AND intention_id = %s AND status = %s
                     RETURNING intention_id
                     """,
-                    (self._jsonb({"cancelled_by": cancelled_by}), db_tenant_id, intention_id),
+                    (
+                        intention.status,
+                        self._jsonb(intention.cancellation_state),
+                        intention.session_id,
+                        db_tenant_id,
+                        intention_id,
+                        current.status,
+                    ),
                 )
                 if cur.fetchone() is None:
-                    raise RuntimeError("scheduled intention was not cancelled")
-                self._audit(
-                    cur,
-                    db_tenant_id,
-                    cancelled_by,
-                    "cancel_intention",
-                    intention_id,
-                    intention_audit_diff(intention, status="cancelled"),
-                    source="prospective_memory",
-                    trust_tier=trust_tier,
-                    capability_tags=capability_tags,
-                )
+                    raise RuntimeError("intention cancellation lost its state transition")
+                if was_scheduled:
+                    self._audit(
+                        cur,
+                        db_tenant_id,
+                        cancelled_by,
+                        "cancel_intention",
+                        intention_id,
+                        intention_audit_diff(intention, status="cancelled"),
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                    )
 
     def list_intentions(self, tenant_id: str) -> list[Intention]:
         """Return detached tenant-only copies in lexicographic intention_id order."""

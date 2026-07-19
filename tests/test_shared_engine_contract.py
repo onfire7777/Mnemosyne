@@ -689,18 +689,54 @@ def test_shared_prospective_cancellation_is_tenant_scoped_and_idempotent(
             "at": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=5)).isoformat()
         },
         due_at=_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=5),
+        session_id="session-a",
     )
     engine.schedule_intention(intention)
 
     assert engine.list_intentions(f"{tenant}-other") == []
     with pytest.raises(KeyError):
-        engine.cancel_intention(f"{tenant}-other", intention.intention_id, cancelled_by=user)
+        engine.cancel_intention(f"{tenant}-other", intention.intention_id, cancelled_by=user, session_id="session-a")
     with pytest.raises(PermissionError):
-        engine.cancel_intention(tenant, intention.intention_id, cancelled_by=f"{user}-other")
+        engine.cancel_intention(tenant, intention.intention_id, cancelled_by=f"{user}-other", session_id="session-a")
+    with pytest.raises(ValueError, match="session_id"):
+        engine.cancel_intention(
+            tenant, intention.intention_id, cancelled_by=user, session_id=""
+        )
+    with pytest.raises(PermissionError, match="session"):
+        engine.cancel_intention(
+            tenant, intention.intention_id, cancelled_by=user, session_id="session-b"
+        )
 
-    engine.cancel_intention(tenant, intention.intention_id, cancelled_by=user)
-    engine.cancel_intention(tenant, intention.intention_id, cancelled_by=user)
+    engine.cancel_intention(tenant, intention.intention_id, cancelled_by=user, session_id="session-a")
+    engine.cancel_intention(tenant, intention.intention_id, cancelled_by=user, session_id="session-a")
+    with pytest.raises(PermissionError, match="session"):
+        engine.cancel_intention(
+            tenant, intention.intention_id, cancelled_by=user, session_id="session-b"
+        )
     assert engine.list_intentions(tenant)[0].status == "cancelled"
+
+    legacy = _prospective_intention(
+        intention_id="shared-cancelled-legacy",
+        tenant=tenant,
+        user=user,
+        agent=agent,
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={
+            "at": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=6)).isoformat()
+        },
+        due_at=_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=6),
+    )
+    engine.schedule_intention(legacy)
+    engine.cancel_intention(
+        tenant, legacy.intention_id, cancelled_by=user, session_id="session-a"
+    )
+    stored_legacy = next(
+        item for item in engine.list_intentions(tenant)
+        if item.intention_id == legacy.intention_id
+    )
+    assert stored_legacy.status == "cancelled"
+    assert stored_legacy.session_id == "session-a"
     assert (
         engine.evaluate_due_intentions(
             tenant,
@@ -715,10 +751,14 @@ def test_shared_prospective_cancellation_is_tenant_scoped_and_idempotent(
         for row in _prospective_audit_log(engine, tenant)
         if row["op"] == "cancel_intention"
     ]
-    assert len(cancellation_audits) == 1
-    assert cancellation_audits[0]["actor"] == user
-    assert cancellation_audits[0]["diff"]["status"] == "cancelled"
-    assert cancellation_audits[0]["diff"]["evidence_ids"] == [evidence_id]
+    assert len(cancellation_audits) == 2
+    assert {row["target_id"] for row in cancellation_audits} == {
+        intention.intention_id,
+        legacy.intention_id,
+    }
+    assert all(row["actor"] == user for row in cancellation_audits)
+    assert all(row["diff"]["status"] == "cancelled" for row in cancellation_audits)
+    assert all(row["diff"]["evidence_ids"] == [evidence_id] for row in cancellation_audits)
 
 
 def test_shared_prospective_evaluation_requires_explicit_operating_point(

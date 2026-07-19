@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from mnemosyne import cli
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import Intention, LocalMemoryEngine
 from mnemosyne.mcp_server import MnemosyneMcpServer
 from mnemosyne.mcp_tools import TOOL_SPEC, MemoryTools
 from mnemosyne.models import Evidence
@@ -272,6 +272,47 @@ def test_schedule_requires_session_and_update_is_bound_across_mcp_and_cli(
             "--store", str(store), *_cli_auth(_token(agent_id="agent-b")),
             *cli_update_args,
         ])
+
+
+def test_mcp_cancel_requires_bound_session_and_allows_legacy_sessionless_row(
+    tmp_path: Path,
+) -> None:
+    server = _server(tmp_path)
+    evidence_id = _seed_evidence(server.engine)
+    due = datetime.now(UTC) + timedelta(hours=1)
+    scheduled = _mcp_call(
+        server, "schedule_intention", _schedule_arguments(evidence_id, due.isoformat())
+    )["structuredContent"]
+    cancel = {
+        "tenant_id": TENANT,
+        "intention_id": scheduled["intention_id"],
+        "cancelled_by": USER,
+    }
+
+    missing = _mcp_call(
+        server, "cancel_intention", cancel, token=_token(session_id=None)
+    )
+    assert missing["isError"] is True
+    assert "session identifier" in missing["content"][0]["text"]
+    denied = _mcp_call(
+        server, "cancel_intention", cancel, token=_token(session_id="session-b")
+    )
+    assert denied["isError"] is True
+    assert "session" in denied["content"][0]["text"]
+    assert server.engine.list_intentions(TENANT)[0].status == "scheduled"
+
+    legacy = server.engine.list_intentions(TENANT)[0].to_dict()
+    legacy["intention_id"] = "legacy-sessionless"
+    legacy["session_id"] = None
+    server.engine.schedule_intention(Intention.from_dict(legacy))
+    allowed = _mcp_call(
+        server,
+        "cancel_intention",
+        {**cancel, "intention_id": "legacy-sessionless"},
+        token=_token(session_id="session-b"),
+    )
+    assert allowed["isError"] is False
+    assert allowed["structuredContent"]["status"] == "cancelled"
 
 
 def test_cli_evaluate_requires_scheduler_and_explicit_context(

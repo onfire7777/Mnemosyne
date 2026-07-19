@@ -185,6 +185,85 @@ def test_sqlite_recurrence_and_update_replay_match_local(tmp_path: Path) -> None
         assert after == before
 
 
+def test_sqlite_legacy_sessionless_update_binds_persists_and_rejects_rebinding(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "legacy-session"
+    engine = SqliteEngine(root)
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT + timedelta(hours=1)
+    engine.schedule_intention(_intention(evidence_id=evidence_id, due_at=due))
+    bound = engine.update_intention(
+        TENANT_ID,
+        "intention-submit-report",
+        user_id=USER_ID,
+        agent_id=AGENT_ID,
+        session_id="session-a",
+        action={"type": "remind", "message": "Bound."},
+    )
+    assert bound.session_id == "session-a"
+    engine.close()
+
+    reopened = SqliteEngine(root)
+    before = reopened.list_intentions(TENANT_ID)[0]
+    audit_before = list(_audit_log(reopened))
+    assert before.session_id == "session-a"
+    with pytest.raises(PermissionError, match="session"):
+        reopened.update_intention(
+            TENANT_ID,
+            before.intention_id,
+            user_id=USER_ID,
+            agent_id=AGENT_ID,
+            session_id="session-b",
+            action={"type": "remind", "message": "Denied."},
+        )
+    assert reopened.list_intentions(TENANT_ID)[0] == before
+    assert _audit_log(reopened) == audit_before
+    reopened.close()
+
+
+def test_sqlite_legacy_sessionless_cancel_binds_persists_and_stays_session_bound(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "legacy-cancel-session"
+    engine = SqliteEngine(root)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1)
+    )
+    engine.schedule_intention(intention)
+    engine.cancel_intention(
+        TENANT_ID,
+        intention.intention_id,
+        cancelled_by=USER_ID,
+        session_id="session-a",
+    )
+    assert len([row for row in _audit_log(engine) if row["op"] == "cancel_intention"]) == 1
+    engine.close()
+
+    reopened = SqliteEngine(root)
+    before = reopened.list_intentions(TENANT_ID)[0]
+    audit_before = list(_audit_log(reopened))
+    assert before.status == "cancelled"
+    assert before.session_id == "session-a"
+    with pytest.raises(PermissionError, match="session"):
+        reopened.cancel_intention(
+            TENANT_ID,
+            intention.intention_id,
+            cancelled_by=USER_ID,
+            session_id="session-b",
+        )
+    reopened.cancel_intention(
+        TENANT_ID,
+        intention.intention_id,
+        cancelled_by=USER_ID,
+        session_id="session-a",
+    )
+    assert reopened.list_intentions(TENANT_ID)[0] == before
+    assert _audit_log(reopened) == audit_before
+    reopened.close()
+
+
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit(
     tmp_path: Path,
 ) -> None:
@@ -272,7 +351,7 @@ def test_cancelled_intention_never_fires(tmp_path: Path) -> None:
     )
 
     engine.schedule_intention(intention)
-    engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID)
+    engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a")
 
     assert _evaluate(engine, TENANT_ID, evaluated_at=EVALUATED_AT) == []
     stored = engine.list_intentions(TENANT_ID)[0]
@@ -421,24 +500,24 @@ def test_intention_tenant_scope_and_cancellation_ownership(tmp_path: Path) -> No
         engine.cancel_intention(
             "other-tenant",
             intention.intention_id,
-            cancelled_by=USER_ID,
+            cancelled_by=USER_ID, session_id="session-a",
         )
     with pytest.raises(PermissionError, match="owning user or agent"):
         engine.cancel_intention(
             TENANT_ID,
             intention.intention_id,
-            cancelled_by="other-user",
+            cancelled_by="other-user", session_id="session-a",
         )
 
     engine.cancel_intention(
         TENANT_ID,
         intention.intention_id,
-        cancelled_by=AGENT_ID,
+        cancelled_by=AGENT_ID, session_id="session-a",
     )
     engine.cancel_intention(
         TENANT_ID,
         intention.intention_id,
-        cancelled_by=AGENT_ID,
+        cancelled_by=AGENT_ID, session_id="session-a",
     )
 
     cancellation_audits = [
@@ -704,7 +783,7 @@ def test_cancel_fired_intention_raises(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="fired intention cannot be cancelled"):
         engine.cancel_intention(
-            TENANT_ID, intention.intention_id, cancelled_by=USER_ID
+            TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a"
         )
 
 
@@ -879,7 +958,7 @@ def test_separate_connection_cancel_and_fire_have_one_winner(tmp_path: Path) -> 
         barrier.wait()
         try:
             engine_b.cancel_intention(
-                TENANT_ID, intention.intention_id, cancelled_by=USER_ID
+                TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a"
             )
             return ("cancel", None)
         except Exception as exc:
@@ -921,3 +1000,48 @@ def test_fire_transaction_rolls_back_status_audit_and_receipt(tmp_path: Path, mo
     assert engine._connect(TENANT_ID).execute(
         "SELECT COUNT(*) FROM intention_fire_receipts"
     ).fetchone()[0] == 0
+
+
+def test_update_transaction_rolls_back_state_history_audit_and_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = SqliteEngine(tmp_path / "update-rollback")
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT + timedelta(hours=1)
+    intention = _intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a"
+    )
+    engine.schedule_intention(intention)
+    before = engine.list_intentions(TENANT_ID)[0]
+    audit_before = list(_audit_log(engine))
+    moved = due + timedelta(hours=1)
+    original_audit = engine._audit_row
+
+    def fail_audit(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("synthetic update audit failure")
+
+    monkeypatch.setattr(engine, "_audit_row", fail_audit)
+    with pytest.raises(RuntimeError, match="synthetic update audit failure"):
+        engine.update_intention(
+            TENANT_ID,
+            intention.intention_id,
+            user_id=USER_ID,
+            agent_id=AGENT_ID,
+            session_id="session-a",
+            due_at=moved,
+        )
+    assert engine.list_intentions(TENANT_ID)[0] == before
+    assert _audit_log(engine) == audit_before
+
+    monkeypatch.setattr(engine, "_audit_row", original_audit)
+    retried = engine.update_intention(
+        TENANT_ID,
+        intention.intention_id,
+        user_id=USER_ID,
+        agent_id=AGENT_ID,
+        session_id="session-a",
+        due_at=moved,
+    )
+    assert retried.due_at == moved
+    assert len(retried.reschedule_history) == 1
+    assert len(_audit_log(engine)) == len(audit_before) + 1

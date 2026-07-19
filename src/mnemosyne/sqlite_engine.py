@@ -94,6 +94,7 @@ from mnemosyne.engine import (
     _privacy_backfill_controls,
     _privacy_backfill_metadata,
     _advance_intention_after_fire,
+    _cancelled_intention,
     _is_replayed_evaluation,
     _updated_intention,
     canonicalize_intention,
@@ -4285,10 +4286,8 @@ class SqliteEngine:
             return intention.intention_id
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
     ) -> None:
-        if type(cancelled_by) is not str or not cancelled_by.strip():
-            raise ValueError("cancelled_by must be a non-empty string")
         with self._lock:
             conn = self._connect(tenant_id)
             conn.execute("BEGIN IMMEDIATE")
@@ -4299,43 +4298,41 @@ class SqliteEngine:
                 ).fetchone()
                 if row is None:
                     raise KeyError(intention_id)
-                intention = Intention.from_dict(json.loads(row["record"]))
-                if intention.status == "fired":
-                    raise ValueError("a fired intention cannot be cancelled")
-                if intention.status == "cancelled":
+                current = Intention.from_dict(json.loads(row["record"]))
+                intention = _cancelled_intention(
+                    current, cancelled_by=cancelled_by, session_id=session_id
+                )
+                if intention == current:
                     conn.commit()
                     return
-                if cancelled_by not in {intention.user_id, intention.agent_id}:
-                    raise PermissionError(
-                        "only the owning user or agent may cancel an intention"
-                    )
+                was_scheduled = current.status == "scheduled"
                 provenance = self._intention_provenance_rows(conn, intention)
                 trust_tier, capability_tags = intention_audit_context(provenance)
-                intention.status = "cancelled"
-                intention.cancellation_state = {"cancelled_by": cancelled_by}
                 cursor = conn.execute(
                     "UPDATE intentions SET status = ?, record = ? "
-                    "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
+                    "WHERE tenant_id = ? AND intention_id = ? AND status = ?",
                     (
                         intention.status,
                         json_text(intention.to_dict()),
                         tenant_id,
                         intention_id,
+                        current.status,
                     ),
                 )
                 if cursor.rowcount != 1:
-                    raise RuntimeError("intention cancellation lost its scheduled transition")
-                self._audit_row(
-                    conn,
-                    tenant_id,
-                    cancelled_by,
-                    "cancel_intention",
-                    intention_id,
-                    intention_audit_diff(intention, status="cancelled"),
-                    source="prospective_memory",
-                    trust_tier=trust_tier,
-                    capability_tags=capability_tags,
-                )
+                    raise RuntimeError("intention cancellation lost its state transition")
+                if was_scheduled:
+                    self._audit_row(
+                        conn,
+                        tenant_id,
+                        cancelled_by,
+                        "cancel_intention",
+                        intention_id,
+                        intention_audit_diff(intention, status="cancelled"),
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                    )
                 conn.commit()
             except BaseException:
                 conn.rollback()

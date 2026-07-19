@@ -156,7 +156,7 @@ def test_update_intention_rejects_wrong_binding_terminal_and_invalid_recurrence(
             TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
             session_id="session-a", recurrence_policy={"type": "interval", "interval_seconds": 0},
         )
-    engine.cancel_intention(TENANT_ID, original.intention_id, cancelled_by=USER_ID)
+    engine.cancel_intention(TENANT_ID, original.intention_id, cancelled_by=USER_ID, session_id="session-a")
     with pytest.raises(ValueError, match="scheduled"):
         engine.update_intention(
             TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
@@ -301,7 +301,7 @@ def test_cancelled_intention_never_fires() -> None:
     )
 
     engine.schedule_intention(intention)
-    engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID)
+    engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a")
 
     assert (
         engine.evaluate_due_intentions(
@@ -492,24 +492,24 @@ def test_intention_tenant_scope_and_cancellation_ownership() -> None:
         engine.cancel_intention(
             "other-tenant",
             intention.intention_id,
-            cancelled_by=USER_ID,
+            cancelled_by=USER_ID, session_id="session-a",
         )
     with pytest.raises(PermissionError, match="owning user or agent"):
         engine.cancel_intention(
             TENANT_ID,
             intention.intention_id,
-            cancelled_by="other-user",
+            cancelled_by="other-user", session_id="session-a",
         )
 
     engine.cancel_intention(
         TENANT_ID,
         intention.intention_id,
-        cancelled_by=AGENT_ID,
+        cancelled_by=AGENT_ID, session_id="session-a",
     )
     engine.cancel_intention(
         TENANT_ID,
         intention.intention_id,
-        cancelled_by=AGENT_ID,
+        cancelled_by=AGENT_ID, session_id="session-a",
     )
 
     cancellation_audits = [
@@ -1787,7 +1787,7 @@ def test_cancel_rolls_back_memory_audit_and_store_on_persistence_failure(
     original_replace = _inject_replace_failure(monkeypatch)
 
     with pytest.raises(OSError, match="injected persistence failure"):
-        engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID)
+        engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a")
 
     assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
     assert engine.audit_log == audit_before
@@ -1796,6 +1796,53 @@ def test_cancel_rolls_back_memory_audit_and_store_on_persistence_failure(
     reloaded = LocalMemoryEngine(store_path=store)
     assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
     assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_update_rolls_back_memory_history_audit_and_retries_after_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(
+        evidence_id=evidence_id,
+        due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    )
+    engine.schedule_intention(intention)
+    before = engine.list_intentions(TENANT_ID)[0]
+    audit_before = list(engine.audit_log)
+    moved = before.due_at + timedelta(hours=1)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.update_intention(
+            TENANT_ID,
+            intention.intention_id,
+            user_id=USER_ID,
+            agent_id=AGENT_ID,
+            session_id="session-a",
+            due_at=moved,
+        )
+
+    assert engine.list_intentions(TENANT_ID)[0] == before
+    assert engine.audit_log == audit_before
+    monkeypatch.setattr(Path, "replace", original_replace)
+    retried = engine.update_intention(
+        TENANT_ID,
+        intention.intention_id,
+        user_id=USER_ID,
+        agent_id=AGENT_ID,
+        session_id="session-a",
+        due_at=moved,
+    )
+    assert retried.due_at == moved
+    assert len(retried.reschedule_history) == 1
+    assert len(engine.audit_log) == len(audit_before) + 1
+    engine.close()
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID)[0] == retried
     reloaded.close()
 
 
