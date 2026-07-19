@@ -416,6 +416,40 @@ class TestUpdateAndRecurrence:
                 )
                 assert [row[0] for row in cur.fetchall()] == [0, 1]
 
+    def test_event_watermark_survives_fresh_engine_reload(self, engine, tenant_user_agent):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT
+        intention = _make_intention(
+            tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=eid,
+            trigger_type="event",
+            trigger_expression={"event_type": "report.submitted", "match": {}},
+            due_at=due,
+            recurrence_policy={"type": "interval", "interval_seconds": 60},
+        )
+        engine.schedule_intention(intention)
+        first = due + timedelta(minutes=1)
+        context = _ctx(events=[{
+            "event_id": "event-1", "event_type": "report.submitted",
+            "occurred_at": first.isoformat(), "payload": {}, "confidence": 0.99,
+        }], tenant_id=tid)
+        assert len(engine.evaluate_due_intentions(
+            tid, evaluated_at=first, trigger_context=context, operating_point=_OP,
+        )) == 1
+        reloaded = PostgresEngine(_DSN, require_safe_role=False)
+        try:
+            state = reloaded.list_intentions(tid)[0].recurrence_state
+            assert state["consumed_signal"] == {
+                "event_id": "event-1", "occurred_at": first.isoformat(),
+            }
+            assert "consumed_signals" not in state
+            assert reloaded.evaluate_due_intentions(
+                tid, evaluated_at=first + timedelta(minutes=1),
+                trigger_context=context, operating_point=_OP,
+            ) == []
+        finally:
+            reloaded.close_connections()
+
     def test_legacy_sessionless_update_binds_survives_reload_and_rejects_rebinding(
         self, engine, tenant_user_agent
     ):

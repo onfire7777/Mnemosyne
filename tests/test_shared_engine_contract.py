@@ -559,6 +559,12 @@ def test_shared_recurring_events_never_cycle_consumed_signals(
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
     ) == 1
+    state = engine.list_intentions(tenant)[0].recurrence_state
+    assert "consumed_signals" not in state
+    assert state["consumed_signal"] == {
+        "event_id": "event-1",
+        "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+    }
     assert engine.evaluate_due_intentions(
         tenant,
         evaluated_at=due + timedelta(minutes=3),
@@ -629,6 +635,12 @@ def test_shared_recurring_conditions_never_cycle_consumed_signals(
             operating_point=_PROSPECTIVE_OPERATING_POINT,
         )
     ) == 1
+    state = engine.list_intentions(tenant)[0].recurrence_state
+    assert "consumed_signals" not in state
+    assert state["consumed_signal"] == {
+        "condition_id": "report-ready",
+        "observed_at": second.isoformat(),
+    }
     assert engine.evaluate_due_intentions(
         tenant,
         evaluated_at=due + timedelta(minutes=3),

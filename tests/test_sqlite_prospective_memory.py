@@ -222,6 +222,47 @@ def test_sqlite_legacy_sessionless_update_binds_persists_and_rejects_rebinding(
     reopened.close()
 
 
+def test_sqlite_recurring_event_watermark_survives_reload(tmp_path: Path) -> None:
+    root = tmp_path / "recurrence-watermark"
+    due = EVALUATED_AT
+    engine = SqliteEngine(root)
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+
+    def context(event_id: str, occurred_at: datetime) -> TriggerEvaluationContext:
+        return TriggerEvaluationContext(
+            infrastructure_available=True, tenant_id=TENANT_ID,
+            events=[{"event_id": event_id, "event_type": "report.submitted",
+                     "occurred_at": occurred_at.isoformat(), "payload": {},
+                     "confidence": 0.99, "tenant_id": TENANT_ID}], conditions={},
+        )
+
+    first = due + timedelta(minutes=1)
+    assert len(engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=first, trigger_context=context("event-1", first),
+        operating_point=OPERATING_POINT,
+    )) == 1
+    engine.close()
+    reopened = SqliteEngine(root)
+    state = reopened.list_intentions(TENANT_ID)[0].recurrence_state
+    assert state["consumed_signal"] == {"event_id": "event-1", "occurred_at": first.isoformat()}
+    assert "consumed_signals" not in state
+    second = due + timedelta(minutes=2)
+    assert reopened.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=second, trigger_context=context("event-1", first),
+        operating_point=OPERATING_POINT,
+    ) == []
+    assert len(reopened.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=second + timedelta(seconds=1),
+        trigger_context=context("event-2", second), operating_point=OPERATING_POINT,
+    )) == 1
+    reopened.close()
+
+
 def test_sqlite_legacy_sessionless_cancel_binds_persists_and_stays_session_bound(
     tmp_path: Path,
 ) -> None:
