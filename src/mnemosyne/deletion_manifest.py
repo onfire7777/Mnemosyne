@@ -32,7 +32,7 @@ _ALLOWED_KEYS = {
         "state", "attempts", "checkpoint", "verified_removed", "residue_probe",
         "durability_checkpoint", "error_code",
     },
-    "store": {"store", "expected", "discovered", "visited", "available", "checkpoint"},
+    "store": {"store", "surface_type", "expected", "discovered", "visited", "available", "checkpoint"},
     "retention_exception": {"surface", "restore_block_fence", "deadline"},
     "summary": {
         "expected", "visited", "verified", "failed", "unavailable", "cascade_percent",
@@ -163,22 +163,37 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     elif fence.get("durable") is not True:
         errors.append("fence is not durable")
 
-    surface_values = [row.get("surface") for row in surfaces if isinstance(row, dict)]
-    store_values = [row.get("store") for row in stores if isinstance(row, dict)]
+    surface_values = [
+        (row.get("surface_type"), row.get("surface"))
+        for row in surfaces
+        if isinstance(row, dict)
+    ]
+    store_values = [
+        (row.get("surface_type"), row.get("store"))
+        for row in stores
+        if isinstance(row, dict)
+    ]
     required = policy.get("required_surfaces") if isinstance(policy, dict) else None
+    required_values = [
+        (row.get("surface_type"), row.get("surface"))
+        for row in required or []
+        if isinstance(row, dict)
+    ]
     names_are_valid = all(
-        isinstance(value, str) and bool(value.strip())
-        for values in (surface_values, store_values, required or [])
-        for value in values
+        isinstance(kind, str) and bool(kind.strip())
+        and isinstance(name, str) and bool(name.strip())
+        for values in (surface_values, store_values, required_values)
+        for kind, name in values
     )
     if not names_are_valid:
         errors.append("surface and store names must be nonempty strings")
     surface_names = set(surface_values) if names_are_valid else set()
     store_names = set(store_values) if names_are_valid else set()
-    required_names = set(required) if isinstance(required, list) and names_are_valid else set()
+    required_names = set(required_values) if isinstance(required, list) and names_are_valid else set()
     if (
         not isinstance(required, list)
         or not required
+        or len(required_values) != len(required)
         or len(required) != len(required_names)
         or len(surface_values) != len(surface_names)
         or len(store_values) != len(store_names)

@@ -595,8 +595,8 @@ class DeletionCoordinator:
         receipt = record.receipts[("engine", surface)]
         if receipt.verified_removed:
             return
+        resuming = receipt.attempts > 0
         receipt.state = "deleting"
-        receipt.attempts += 1
         branches = ["main"]
         if request["branch_scope"] == "all":
             branches = list(getattr(self.engine, "branches", {"main": {}}))
@@ -625,8 +625,18 @@ class DeletionCoordinator:
             # destroy the only copy of payload-derived scrub inputs. Replay can
             # always scrub the new forget custody rows from request-owned refs.
             self._scrub_retained_history(request["tenant_id"], sensitive)
+            if not resuming:
+                receipt.attempts += 1
+                # Persist the ambiguous state before the engine side effect. A
+                # restarted operation probes each target before deciding whether
+                # another destructive call is necessary.
+                self.ledger.checkpoint(record)
             for branch in branches:
                 for ref in request["source_refs"]:
+                    if resuming and self.engine.get_evidence(
+                        request["tenant_id"], ref, branch=branch
+                    ) is None:
+                        continue
                     self.engine.forget(
                         request["tenant_id"],
                         ref,
@@ -710,6 +720,11 @@ class DeletionCoordinator:
                     self._scrub_value(row, sensitive) if row.get("tenant_id") == tenant_id else row
                     for row in rows
                 ]
+        assertions = getattr(self.engine, "assertions", None)
+        if isinstance(assertions, dict):
+            for assertion in assertions.values():
+                if getattr(assertion, "tenant_id", None) == tenant_id:
+                    assertion.calibration = self._scrub_value(assertion.calibration, sensitive)
 
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         rows = []
@@ -766,20 +781,24 @@ class DeletionCoordinator:
             "source_refs": [_opaque("source", ref) for ref in request["source_refs"]],
             "policy": {
                 "version": "w2",
-                "required_surfaces": [receipt.surface for receipt in record.receipts.values()],
+                "required_surfaces": [
+                    {"surface_type": surface_id[0], "surface": receipt.surface}
+                    for surface_id, receipt in record.receipts.items()
+                ],
             },
             "fence": {"generation": record.generation, "ledger_position": record.generation, "durable": self.ledger.durable},
             "surfaces": rows,
             "stores": [
                 {
                     "store": receipt.surface,
+                    "surface_type": surface_id[0],
                     "expected": 1,
                     "discovered": 1,
                     "visited": int(receipt.attempts > 0),
                     "available": receipt.error_code != "store_unavailable",
                     "checkpoint": receipt.checkpoint,
                 }
-                for receipt in record.receipts.values()
+                for surface_id, receipt in record.receipts.items()
             ],
             "retention_exceptions": retention_exceptions,
             "summary": {

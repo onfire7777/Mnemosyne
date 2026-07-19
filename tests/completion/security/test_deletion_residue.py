@@ -923,6 +923,62 @@ def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
         for row in manifest["surfaces"]
         if row["surface"] == "cache:shared"
     ] == [("store", "cache:shared"), ("cache", "cache:shared")]
+    durable_manifest = copy.deepcopy(manifest)
+    durable_manifest["fence"]["durable"] = True
+    assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(durable_manifest) == {
+        "complete": True,
+        "errors": [],
+    }
+
+
+def test_engine_crash_after_commit_resumes_by_probe_without_repeating_forget(tmp_path: Path) -> None:
+    class CrashAfterCommitEngine(LocalMemoryEngine):
+        def __init__(self) -> None:
+            super().__init__()
+            self.forget_calls = 0
+            self.crash_after_commit = True
+
+        def forget(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            result = super().forget(*args, **kwargs)
+            self.forget_calls += 1
+            if self.crash_after_commit:
+                self.crash_after_commit = False
+                raise SystemExit("synthetic crash after engine commit")
+            return result
+
+    engine = CrashAfterCommitEngine()
+    world = FakeWorld(engine=engine, source_ref=engine.append_evidence(_evidence()))
+    ledger = importlib.import_module("mnemosyne.deletion").SQLiteDeletionLedger(tmp_path / "deletion.db")
+    coordinator = _coordinator_type()(
+        engine=engine,
+        session_identity=SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="operator",
+            source_trust_tier=int(TrustTier.DIRECT_USER),
+            session_id="verified-delete-session",
+        ),
+        security_policy=SecurityPolicy(),
+        ledger=ledger,
+    )
+    request = {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+
+    with pytest.raises(SystemExit, match="synthetic crash"):
+        coordinator.delete(**request)
+
+    manifest = coordinator.delete(**request)
+    _assert_complete(manifest)
+    assert engine.forget_calls == 1
 
 
 def test_r18_object_deletion_does_not_match_source_ref_prefixes() -> None:
@@ -1038,7 +1094,10 @@ def _valid_manifest() -> dict[str, Any]:
         "user_scope": "opaque:user",
         "branch_scope": "all",
         "source_refs": ["opaque:source"],
-        "policy": {"version": "w2", "required_surfaces": ["source_evidence"]},
+        "policy": {
+            "version": "w2",
+            "required_surfaces": [{"surface_type": "engine", "surface": "source_evidence"}],
+        },
         "fence": {"generation": 1, "ledger_position": 1, "durable": True},
         "surfaces": [
             {
@@ -1064,6 +1123,7 @@ def _valid_manifest() -> dict[str, Any]:
         "stores": [
             {
                 "store": "source_evidence",
+                "surface_type": "engine",
                 "expected": 1,
                 "discovered": 1,
                 "visited": 1,
