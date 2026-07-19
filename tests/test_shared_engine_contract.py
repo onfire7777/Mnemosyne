@@ -323,7 +323,7 @@ def _prospective_evidence(engine: Any, tenant: str, user: str, agent: str) -> st
         Evidence(
             tenant_id=tenant,
             user_id=user,
-            actor=agent,
+            actor="assistant",
             source_type="episode",
             source_identity="conversation:shared-prospective-memory-contract",
             content="Remind me to submit the report.",
@@ -541,8 +541,13 @@ def test_shared_prospective_trigger_matrix(
     }
     assert observed_targets >= expected_fired_ids
     assert len(fire_audits) == len(expected_fired_ids)
+    expected_audit_tenant = (
+        str(_stable_uuid("tenant", tenant))
+        if "live_db" in engine_capabilities(engine)
+        else tenant
+    )
     for row in fire_audits:
-        assert row["tenant_id"] == tenant
+        assert row["tenant_id"] == expected_audit_tenant
         assert row["source"] == "prospective_memory"
         assert row["trust_tier"] == 2
         assert row["capability_tags"] == ["prospective-memory"]
