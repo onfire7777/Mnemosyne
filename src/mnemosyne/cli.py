@@ -8621,6 +8621,11 @@ def cmd_intention_schedule(args: argparse.Namespace) -> None:
             evidence_ids=args.evidence_cid,
             priority=args.priority,
             dependencies=args.dependency,
+            recurrence_policy=(
+                parse_json_arg(args.recurrence_policy, None)
+                if args.recurrence_policy is not None
+                else None
+            ),
             **_intention_auth_kwargs(args),
         )
     )
@@ -8632,7 +8637,7 @@ def cmd_intention_cancel(args: argparse.Namespace) -> None:
         tools.cancel_intention(
             tenant_id=args.tenant,
             intention_id=args.intention_id,
-            cancelled_by=args.cancelled_by,
+            cancelled_by=args.cancelled_by or args.session_identity.user_id,
             **_intention_auth_kwargs(args),
         )
     )
@@ -19876,6 +19881,7 @@ def build_parser() -> argparse.ArgumentParser:
     intention_schedule.add_argument("--evidence-cid", action="append", default=[])
     intention_schedule.add_argument("--priority", default="normal")
     intention_schedule.add_argument("--dependency", action="append", default=[])
+    intention_schedule.add_argument("--recurrence-policy")
     intention_schedule.set_defaults(func=cmd_intention_schedule)
 
     intention_cancel = sub.add_parser("intention-cancel")

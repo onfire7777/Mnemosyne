@@ -1022,6 +1022,76 @@ def test_separate_connection_cancel_and_fire_have_one_winner(tmp_path: Path) -> 
     assert operations.count("fire_intention") + operations.count("cancel_intention") == 1
 
 
+@pytest.mark.parametrize("terminal_operation", ["fire", "cancel"])
+def test_separate_connection_update_and_terminal_transition_have_one_winner(
+    tmp_path: Path, terminal_operation: str
+) -> None:
+    root = tmp_path / "root"
+    engine_a = SqliteEngine(root)
+    engine_b = SqliteEngine(root)
+    evidence_id = _originating_episode(engine_a)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine_a.schedule_intention(intention)
+    barrier = Barrier(2)
+
+    def update() -> tuple[str, Any]:
+        barrier.wait()
+        try:
+            updated = engine_a.update_intention(
+                TENANT_ID,
+                intention.intention_id,
+                user_id=USER_ID,
+                agent_id=AGENT_ID,
+                session_id="session-a",
+                due_at=EVALUATED_AT + timedelta(hours=1),
+            )
+            return ("update", updated)
+        except Exception as exc:
+            return ("update-error", exc)
+
+    def terminate() -> tuple[str, Any]:
+        barrier.wait()
+        try:
+            if terminal_operation == "fire":
+                return (
+                    "fire",
+                    _evaluate(engine_b, TENANT_ID, evaluated_at=EVALUATED_AT),
+                )
+            engine_b.cancel_intention(
+                TENANT_ID,
+                intention.intention_id,
+                cancelled_by=USER_ID,
+                session_id="session-a",
+            )
+            return ("cancel", None)
+        except Exception as exc:
+            return (f"{terminal_operation}-error", exc)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        update_result, terminal_result = executor.map(lambda fn: fn(), (update, terminate))
+
+    stored = engine_a.list_intentions(TENANT_ID)[0]
+    if terminal_operation == "cancel":
+        assert terminal_result == ("cancel", None)
+        assert stored.status == "cancelled"
+        assert update_result[0] in {"update", "update-error"}
+        if update_result[0] == "update-error":
+            assert isinstance(update_result[1], ValueError)
+    elif update_result[0] == "update":
+        assert stored.status == "scheduled"
+        assert stored.due_at == EVALUATED_AT + timedelta(hours=1)
+        if terminal_operation == "fire":
+            assert terminal_result == ("fire", [])
+    else:
+        assert isinstance(update_result[1], ValueError)
+        assert stored.status == ("fired" if terminal_operation == "fire" else "cancelled")
+    operations = [row["op"] for row in _audit_log(engine_a)]
+    assert operations.count(f"{terminal_operation}_intention") == (
+        1 if terminal_operation == "cancel" or stored.status == "fired" else 0
+    )
+    assert operations.count("update_intention") == (1 if update_result[0] == "update" else 0)
+
+
 def test_fire_transaction_rolls_back_status_audit_and_receipt(tmp_path: Path, monkeypatch):
     engine = SqliteEngine(tmp_path / "root")
     evidence_id = _originating_episode(engine)
