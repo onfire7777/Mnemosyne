@@ -709,7 +709,7 @@ def test_memory_tools_confirm_fails_closed_without_authoritative_mapping() -> No
     # merge produces an empty assertion_id_map for that source, so confirm must
     # fail closed rather than fabricate a confirmed_id.
     tools.branch("empty-candidate", role="operator", source_trust_tier=0, tenant_id=TENANT)
-    with pytest.raises(KeyError):
+    with pytest.raises(KeyError, match="no authoritative destination mapping"):
         tools.confirm(
             "assertion-with-no-mapping",
             role="operator",
@@ -717,6 +717,81 @@ def test_memory_tools_confirm_fails_closed_without_authoritative_mapping() -> No
             tenant_id=TENANT,
             branch="empty-candidate",
         )
+
+
+def test_memory_tools_confirm_fails_closed_when_id_absent_from_populated_map() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    # The candidate branch carries a real (unrelated) assertion, so the merge
+    # produces a NON-empty assertion_id_map — but with no entry for the requested
+    # source id. confirm must still fail closed instead of returning an unrelated
+    # id (exercises the populated-map lookup miss, not just the empty-map path).
+    tools.branch("populated-candidate", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="unrelated candidate fact",
+            predicate="present on",
+            object="populated candidate branch",
+            confidence=0.8,
+            source_evidence_cids=["b" * 64],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="populated-candidate",
+    )
+    with pytest.raises(KeyError, match="no authoritative destination mapping"):
+        tools.confirm(
+            "assertion-with-no-mapping",
+            role="operator",
+            source_trust_tier=0,
+            tenant_id=TENANT,
+            branch="populated-candidate",
+        )
+
+
+def test_memory_tools_confirm_fails_closed_on_ambiguous_candidate_branch() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    # An assertion created on main is copied into two scratch branches (Local's
+    # branch() preserves the assertion id), so auto-discovery cannot pick a single
+    # authoritative candidate. confirm without an explicit branch must fail closed
+    # rather than silently promote whichever branch is enumerated first.
+    shared_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="ambiguous fact",
+            predicate="lives in",
+            object="two branches",
+            confidence=0.8,
+            source_evidence_cids=["a" * 64],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ),
+    )
+    tools.branch("candidate-one", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    tools.branch("candidate-two", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    with pytest.raises(KeyError, match="ambiguous candidate branches"):
+        tools.confirm(
+            shared_id,
+            role="operator",
+            source_trust_tier=0,
+            tenant_id=TENANT,
+        )
+    # An explicit branch disambiguates and confirms successfully.
+    confirmed = tools.confirm(
+        shared_id,
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+        branch="candidate-one",
+    )
+    assert confirmed["confirmed_id"] == shared_id
+    assert confirmed["source_id"] == shared_id
 
 
 def test_merge_assertion_id_map_persists_across_local_reopen(tmp_path: Path) -> None:
