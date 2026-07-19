@@ -488,12 +488,13 @@ class MnemosyneMcpServer:
         if "user" in parameter_names:
             self._bind_string_claim(arguments, "user", identity.user_id, "user")
         if "cancelled_by" in parameter_names:
-            self._bind_string_claim(
-                arguments,
-                "cancelled_by",
-                identity.user_id,
-                "cancellation principal",
-            )
+            selected = arguments.get("cancelled_by", identity.user_id)
+            allowed = {identity.user_id}
+            if identity.agent_id:
+                allowed.add(identity.agent_id)
+            if selected not in allowed:
+                raise PermissionError("session cancellation principal mismatch")
+            arguments["cancelled_by"] = selected
         # Working-memory agent_id is an explicitly authorized subject scope;
         # prospective writes instead bind the authenticated agent principal.
         if "agent_id" in parameter_names and not name.startswith("working_"):

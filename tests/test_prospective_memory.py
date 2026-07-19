@@ -7,6 +7,7 @@ from threading import Barrier
 from typing import Any
 
 import pytest
+import copy
 
 from mnemosyne.audit_chain import (
     build_audit_chain,
@@ -232,6 +233,103 @@ def test_interval_recurrence_advances_once_per_occurrence_and_terminates() -> No
     assert stored.recurrence_state["occurrence"] == 2
     receipts = [row["id"] for row in engine.audit_log if row["op"] == "fire_intention"]
     assert len(receipts) == len(set(receipts)) == 3
+
+
+def test_infinite_event_recurrence_uses_one_monotonic_signal_watermark() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+    for index in range(20):
+        occurred = due + timedelta(minutes=index)
+        context = TriggerEvaluationContext(
+            infrastructure_available=True, tenant_id=TENANT_ID,
+            events=[{"event_id": f"event-{index:02d}", "event_type": "report.submitted",
+                     "occurred_at": occurred.isoformat(), "payload": {}, "confidence": 0.99,
+                     "tenant_id": TENANT_ID}], conditions={},
+        )
+        assert len(engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=occurred, trigger_context=context,
+            operating_point=OPERATING_POINT,
+        )) == 1
+        state = engine.list_intentions(TENANT_ID)[0].recurrence_state
+        assert set(state) == {"occurrence", "last_evaluated_at", "consumed_signal"}
+        assert state["consumed_signal"] == {
+            "event_id": f"event-{index:02d}", "occurred_at": occurred.isoformat(),
+        }
+
+
+def test_event_watermark_orders_replay_and_legacy_state_fail_closed() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+    first = due + timedelta(minutes=1)
+    events = [{"event_id": event_id, "event_type": "report.submitted",
+               "occurred_at": occurred.isoformat(), "payload": {}, "confidence": 0.99,
+               "tenant_id": TENANT_ID}
+              for event_id, occurred in (("z", first), ("a", first), ("future", first + timedelta(minutes=2)))]
+    context = TriggerEvaluationContext(
+        infrastructure_available=True, tenant_id=TENANT_ID, events=events, conditions={}
+    )
+    assert len(engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=first, trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )) == 1
+    assert engine.list_intentions(TENANT_ID)[0].recurrence_state["consumed_signal"] == {
+        "event_id": "a", "occurred_at": first.isoformat(),
+    }
+    with pytest.raises(ValueError, match="backwards"):
+        engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=due, trigger_context=context,
+            operating_point=OPERATING_POINT,
+        )
+
+    base = _intention(
+        evidence_id="cidv1:legacy-watermark", due_at=due, trigger_type="condition",
+        trigger_expression={"condition_id": "ready", "operator": "eq", "value": True},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ).to_dict()
+    last = due + timedelta(minutes=2)
+    base["recurrence_state"] = {
+        "occurrence": 2, "last_evaluated_at": last.isoformat(),
+        "consumed_signals": [
+            {"condition_id": "ready", "observed_at": due.isoformat()},
+            {"condition_id": "ready", "observed_at": last.isoformat()},
+        ],
+    }
+    normalized = Intention.from_dict(base).recurrence_state
+    assert normalized["consumed_signal"] == {
+        "condition_id": "ready", "observed_at": last.isoformat(),
+    }
+    assert "consumed_signals" not in normalized
+    mixed = copy.deepcopy(base)
+    mixed["recurrence_state"]["consumed_signal"] = {
+        "condition_id": "ready", "observed_at": last.isoformat(),
+    }
+    with pytest.raises(ValueError, match="mixed"):
+        Intention.from_dict(mixed)
+    legacy_event = copy.deepcopy(base)
+    legacy_event["trigger_type"] = "event"
+    legacy_event["trigger_expression"] = {"event_type": "report.submitted", "match": {}}
+    legacy_event["recurrence_state"] = {
+        "occurrence": 2, "last_evaluated_at": last.isoformat(),
+        "consumed_signals": [{"event_id": "a"}, {"event_id": "z"}],
+    }
+    assert Intention.from_dict(legacy_event).recurrence_state["consumed_signal"] == {
+        "event_id": "z", "occurred_at": last.isoformat(),
+    }
+    del legacy_event["recurrence_state"]["last_evaluated_at"]
+    with pytest.raises(ValueError, match="last_evaluated_at"):
+        Intention.from_dict(legacy_event)
 
 
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit() -> None:

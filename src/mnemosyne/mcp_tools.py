@@ -877,10 +877,15 @@ class MemoryTools:
             "cancel",
             session_identity,
             tenant_id=tenant_id,
-            actor_id=cancelled_by,
-            owner_id=cancelled_by,
+            actor_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
+            owner_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
         )
         assert isinstance(session_identity, SessionIdentity)
+        allowed_principals = {session_identity.user_id}
+        if session_identity.agent_id:
+            allowed_principals.add(session_identity.agent_id)
+        if cancelled_by not in allowed_principals:
+            raise PermissionError("cancel intention denied: cancellation principal is not authenticated")
         if not session_identity.session_id:
             raise PermissionError(
                 "cancel intention denied: authenticated session identifier is required"
@@ -905,7 +910,7 @@ class MemoryTools:
         self.engine.cancel_intention(
             authorized_tenant,
             intention_id,
-            cancelled_by=authorization.actor_id or cancelled_by,
+            cancelled_by=cancelled_by,
             session_id=session_identity.session_id,
         )
         return next(
