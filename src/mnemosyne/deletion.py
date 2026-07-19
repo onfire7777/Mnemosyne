@@ -14,7 +14,7 @@ import secrets
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -69,6 +69,7 @@ class DeletionLedger(Protocol):
     def current_generation(self, tenant_id: str) -> int: ...
     def checkpoint(self, record: LedgerRecord) -> None: ...
     def operation_lock(self) -> Any: ...
+    def opaque_name(self, kind: str, value: str) -> str: ...
 
 
 class InMemoryDeletionLedger:
@@ -81,9 +82,8 @@ class InMemoryDeletionLedger:
         self._records: dict[str, LedgerRecord] = {}
         self._generations: dict[str, int] = {}
 
-    @property
-    def lock(self) -> threading.RLock:
-        return self._lock
+    def opaque_name(self, kind: str, value: str) -> str:
+        return _opaque(kind, value)
 
     def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord:
         with self._lock:
@@ -115,10 +115,14 @@ class SQLiteDeletionLedger:
     durable = True
 
     def __init__(self, path: str | Path) -> None:
+        # Fail at construction, not mid-saga, on platforms without POSIX flock.
+        import fcntl
+
+        self._fcntl = fcntl
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS deletion_operations (
@@ -148,40 +152,32 @@ class SQLiteDeletionLedger:
                     "SELECT value FROM deletion_ledger_metadata WHERE key = 'opaque_key'"
                 ).fetchone()[0]
             )
-            columns = {
-                row[1] for row in connection.execute("PRAGMA table_info(deletion_operations)")
-            }
-            if "revision" not in columns:
-                connection.execute(
-                    "ALTER TABLE deletion_operations ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
-                )
 
-    @property
-    def lock(self) -> threading.RLock:
-        return self._lock
-
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connection(self) -> Any:
         connection = sqlite3.connect(self.path, timeout=30)
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=FULL")
-        return connection
+        try:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute("PRAGMA synchronous=FULL")
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
-    def _opaque(self, kind: str, value: str) -> str:
+    def opaque_name(self, kind: str, value: str) -> str:
         digest = hmac.new(self._opaque_key, f"{kind}\0{value}".encode(), hashlib.sha256).hexdigest()
         return f"opaque:{digest}"
 
     @contextmanager
     def operation_lock(self) -> Any:
         """Serialize coordinators sharing this ledger, including other processes."""
-        import fcntl
-
         lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         with lock_path.open("a+b") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            self._fcntl.flock(lock_file.fileno(), self._fcntl.LOCK_EX)
             try:
                 yield
             finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+                self._fcntl.flock(lock_file.fileno(), self._fcntl.LOCK_UN)
 
     @staticmethod
     def _receipts(record: LedgerRecord) -> str:
@@ -209,9 +205,9 @@ class SQLiteDeletionLedger:
         )
 
     def begin(self, operation_id: str, fingerprint: str, tenant_id: str) -> LedgerRecord:
-        stored_fingerprint = self._opaque("request", fingerprint)
-        stored_tenant = self._opaque("tenant", tenant_id)
-        with self._lock, self._connect() as connection:
+        stored_fingerprint = self.opaque_name("request", fingerprint)
+        stored_tenant = self.opaque_name("tenant", tenant_id)
+        with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 "SELECT operation_id, fingerprint, tenant_id, generation, requested_at, "
@@ -236,7 +232,7 @@ class SQLiteDeletionLedger:
             return LedgerRecord(operation_id, fingerprint, tenant_id, generation, requested_at)
 
     def checkpoint(self, record: LedgerRecord) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock, self._connection() as connection:
             cursor = connection.execute(
                 "UPDATE deletion_operations SET receipts_json = ?, manifest_json = ?, "
                 "revision = revision + 1 WHERE operation_id = ? AND fingerprint = ? AND revision = ?",
@@ -244,7 +240,7 @@ class SQLiteDeletionLedger:
                     self._receipts(record),
                     json.dumps(record.manifest, sort_keys=True) if record.manifest is not None else None,
                     record.operation_id,
-                    self._opaque("request", record.fingerprint),
+                    self.opaque_name("request", record.fingerprint),
                     record.revision,
                 ),
             )
@@ -253,10 +249,10 @@ class SQLiteDeletionLedger:
             record.revision += 1
 
     def current_generation(self, tenant_id: str) -> int:
-        with self._lock, self._connect() as connection:
+        with self._lock, self._connection() as connection:
             return connection.execute(
                 "SELECT COALESCE(MAX(generation), 0) FROM deletion_operations WHERE tenant_id = ?",
-                (self._opaque("tenant", tenant_id),),
+                (self.opaque_name("tenant", tenant_id),),
             ).fetchone()[0]
 
 
@@ -403,15 +399,16 @@ class DeletionCoordinator:
 
         # Boundary stores must be available before other external effects.  This
         # is a precondition gate, not rollback; verified deletions are never restored.
+        # The object surface joins the boundary only when a receipt exists for it,
+        # i.e. under the same condition _surface_ids uses.
         boundary = [("store", name) for name in ("journal", "manifest_store") if name in self.stores]
-        boundary += [("object", "object_storage")] if (
-            "object_storage" in self.stores or any(self._target_object_keys(tenant, refs))
-        ) else []
+        if self._target_object_keys(tenant, refs):
+            boundary.append(("object", "object_storage"))
         for surface_id in boundary:
-            if not self._attempt(record, surface_id, tenant, refs):
-                self.ledger.checkpoint(record)
-                return self._manifest(record, request)
+            attempted = self._attempt(record, surface_id, tenant, refs)
             self.ledger.checkpoint(record)
+            if not attempted:
+                return self._manifest(record, request)
 
         engine_ids = {("engine", "source_evidence"), ("engine", "sqlite")}
         for surface_id in required:
@@ -456,10 +453,10 @@ class DeletionCoordinator:
             return "runtime_user_model"
         return name if is_safe_surface_label(name) else _opaque("surface-label", name)
 
-    @staticmethod
-    def _cache_surface_name(key: str) -> str:
-        digest = hashlib.sha256(f"cache-surface\0{key}".encode()).hexdigest()
-        return f"opaque:{digest}"
+    def _cache_surface_name(self, key: str) -> str:
+        # Keyed by the ledger so a manifest holder cannot confirm a guessed cache
+        # key offline; the durable ledger persists its key, keeping resume stable.
+        return self.ledger.opaque_name("cache-surface", key)
 
     def _attempt(self, record: LedgerRecord, surface_id: tuple[str, str], tenant: str, refs: list[str]) -> bool:
         kind, name = surface_id
@@ -597,8 +594,10 @@ class DeletionCoordinator:
 
     @staticmethod
     def _verified(receipt: SurfaceReceipt) -> bool:
-        receipt.state = "deleted"
         receipt.state = "verified"
+        # Recovery paths (e.g. timeout confirmed absent by probe) may have set a
+        # transient error code; a verified surface must not carry one.
+        receipt.error_code = None
         receipt.verified_removed = True
         receipt.checkpoint = secrets.token_hex(8)
         return True
@@ -676,24 +675,13 @@ class DeletionCoordinator:
             receipt.state = "failed"
 
     @classmethod
-    def _strings(cls, value: Any, *, include_keys: bool = False) -> set[str]:
+    def _strings(cls, value: Any) -> set[str]:
         if isinstance(value, str):
             return {value}
         if isinstance(value, dict):
-            strings = {
-                item
-                for nested in value.values()
-                for item in cls._strings(nested, include_keys=include_keys)
-            }
-            if include_keys:
-                strings.update(key for key in value if isinstance(key, str))
-            return strings
+            return {item for nested in value.values() for item in cls._strings(nested)}
         if isinstance(value, (list, tuple, set)):
-            return {
-                item
-                for nested in value
-                for item in cls._strings(nested, include_keys=include_keys)
-            }
+            return {item for nested in value for item in cls._strings(nested)}
         return set()
 
     @classmethod
@@ -744,23 +732,27 @@ class DeletionCoordinator:
         """Retain custody events while removing payload and correlatable references."""
         connect = getattr(self.engine, "_connect", None)
         if callable(connect) and self.engine.__class__.__name__ == "SqliteEngine":
-            connection = connect(tenant_id)
-            with connection:
-                for table in ("audit_log", "deletion_log", "merge_log"):
-                    for row in connection.execute(f"SELECT seq, record FROM {table}").fetchall():
-                        record = json.loads(row["record"])
-                        if record.get("tenant_id") != tenant_id:
-                            continue
-                        connection.execute(
-                            f"UPDATE {table} SET record = ? WHERE seq = ?",
-                            (
-                                json.dumps(
-                                    self._scrub_value(record, sensitive, sensitive_keys),
-                                    sort_keys=True,
+            # The engine shares one cached connection per tenant and serializes all
+            # access through its lock; hold it so this scrub transaction cannot
+            # interleave with (or commit/roll back) another thread's engine write.
+            with getattr(self.engine, "_lock", None) or nullcontext():
+                connection = connect(tenant_id)
+                with connection:
+                    for table in ("audit_log", "deletion_log", "merge_log"):
+                        for row in connection.execute(f"SELECT seq, record FROM {table}").fetchall():
+                            record = json.loads(row["record"])
+                            if record.get("tenant_id") != tenant_id:
+                                continue
+                            connection.execute(
+                                f"UPDATE {table} SET record = ? WHERE seq = ?",
+                                (
+                                    json.dumps(
+                                        self._scrub_value(record, sensitive, sensitive_keys),
+                                        sort_keys=True,
+                                    ),
+                                    row["seq"],
                                 ),
-                                row["seq"],
-                            ),
-                        )
+                            )
             return
         for attribute in ("audit_log", "deletion_log", "merge_log"):
             rows = getattr(self.engine, attribute, None)

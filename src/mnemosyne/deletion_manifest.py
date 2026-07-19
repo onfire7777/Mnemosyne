@@ -9,12 +9,18 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from .evidence_signing import sign_evidence_manifest, verify_evidence_manifest_signature
+from .evidence_signing import (
+    EvidenceSignatureError,
+    sign_evidence_manifest,
+    verify_evidence_manifest_signature,
+)
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _RAW_HASH = re.compile(r"^[0-9a-fA-F]{32,}$")
 _OPAQUE_REF = re.compile(r"^opaque:[0-9a-f]{64}$")
 _CHECKPOINT = re.compile(r"^(?:[0-9a-f]{16}|local:[1-9][0-9]*)$")
+_SAFE_SURFACE_KINDS = {"store", "cache", "object", "backup", "engine"}
+_MAX_CUSTODY_DEPTH = 32
 _SAFE_SURFACE_LABELS = {
     "backups", "cache:shared", "embedding_provider", "intentions", "journal",
     "kms", "lexical_index", "manifest_store", "object_storage", "postgres",
@@ -47,16 +53,6 @@ _ALLOWED_KEYS = {
         "recoverable_residue_count", "cross_tenant_mutations", "complete",
     },
 }
-_REQUIRED_KEYS = {
-    "manifest": _ALLOWED_KEYS["manifest"],
-    "policy": _ALLOWED_KEYS["policy"],
-    "fence": _ALLOWED_KEYS["fence"],
-    "surface": _ALLOWED_KEYS["surface"],
-    "store": _ALLOWED_KEYS["store"],
-    "summary": _ALLOWED_KEYS["summary"],
-}
-
-
 def is_safe_surface_label(value: Any) -> bool:
     """Return whether a public surface label cannot carry caller custody data."""
     return isinstance(value, str) and (
@@ -75,7 +71,9 @@ def _schema_errors(manifest: dict[str, Any]) -> list[str]:
         unknown = set(value) - _ALLOWED_KEYS[kind]
         if unknown:
             errors.append(f"{path} contains unknown fields: {', '.join(sorted(map(str, unknown)))}")
-        required = _REQUIRED_KEYS.get(kind, set())
+        # Every field is required except on retention exceptions, which are only
+        # ever checked for shape when present.
+        required = _ALLOWED_KEYS[kind] if kind != "retention_exception" else set()
         missing = required - set(value)
         if missing:
             errors.append(f"{path} lacks required fields: {', '.join(sorted(missing))}")
@@ -91,23 +89,26 @@ def _schema_errors(manifest: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _custody_errors(value: Any, *, path: str = "manifest") -> list[str]:
+def _custody_errors(value: Any, *, path: str = "manifest", depth: int = 0) -> list[str]:
+    if depth > _MAX_CUSTODY_DEPTH:
+        # Fail closed instead of letting hostile nesting exhaust the stack.
+        return [f"{path} nests deeper than the custody scan bound"]
     errors: list[str] = []
     if isinstance(value, dict):
         for key, item in value.items():
             if isinstance(key, str) and key.lower() in _FORBIDDEN_KEYS:
                 errors.append(f"{path}.{key} is a forbidden direct-custody field")
-            errors.extend(_custody_errors(item, path=f"{path}.{key}"))
+            errors.extend(_custody_errors(item, path=f"{path}.{key}", depth=depth + 1))
     elif isinstance(value, list):
         for index, item in enumerate(value):
-            errors.extend(_custody_errors(item, path=f"{path}[{index}]"))
+            errors.extend(_custody_errors(item, path=f"{path}[{index}]", depth=depth + 1))
     elif isinstance(value, str):
         lowered = value.lower()
         if "canary" in lowered:
             errors.append(f"{path} contains canary material")
         if "://" in value:
             errors.append(f"{path} contains a source URI")
-        if _RAW_HASH.fullmatch(value) and not value.startswith("opaque:"):
+        if _RAW_HASH.fullmatch(value):
             errors.append(f"{path} contains a direct hash")
     return errors
 
@@ -122,7 +123,7 @@ def _timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value)
         return parsed if parsed.tzinfo is not None else None
     except ValueError:
         return None
@@ -212,13 +213,12 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         if isinstance(row, dict)
     ]
     names_are_valid = all(
-        isinstance(kind, str) and bool(kind.strip())
-        and is_safe_surface_label(name)
+        kind in _SAFE_SURFACE_KINDS and is_safe_surface_label(name)
         for values in (surface_values, store_values, required_values)
         for kind, name in values
     )
     if not names_are_valid:
-        errors.append("surface and store names must be nonempty strings")
+        errors.append("surface and store identifiers must use the safe deletion vocabulary")
     surface_names = set(surface_values) if names_are_valid else set()
     store_names = set(store_values) if names_are_valid else set()
     required_names = set(required_values) if isinstance(required, list) and names_are_valid else set()
@@ -315,11 +315,18 @@ def verify_signed_deletion_manifest(
     manifest_path: Path, public_key_path: Path
 ) -> dict[str, Any]:
     """Require both a valid collector signature and complete deletion semantics."""
-    signature = verify_evidence_manifest_signature(manifest_path, public_key_path)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    errors: list[str] = []
+    signature: dict[str, Any] = {"verified": False}
+    try:
+        signature = verify_evidence_manifest_signature(manifest_path, public_key_path)
+    except EvidenceSignatureError as exc:
+        errors.append(f"manifest signature is invalid: {exc}")
+    manifest: Any = None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        errors.append(f"manifest file is not readable JSON: {exc}")
     semantic = verify_deletion_manifest(manifest)
-    signature_verified = signature.get("verified") is True
-    errors = list(semantic["errors"])
-    if not signature_verified:
-        errors.append("manifest signature is invalid")
-    return {"complete": semantic["complete"] and signature_verified, "errors": errors, "signature": signature}
+    complete = semantic["complete"] and signature.get("verified") is True and not errors
+    errors.extend(semantic["errors"])
+    return {"complete": complete, "errors": errors, "signature": signature}
