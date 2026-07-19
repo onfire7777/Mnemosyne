@@ -357,7 +357,9 @@ def verify_signed_deletion_manifest(
         # between the two reads fails closed instead of pairing an old-bytes
         # signature with new-bytes semantics.
         digest = "sha256:" + sha256(manifest_bytes).hexdigest()
-        if signature.get("manifest_sha256") not in (None, digest):
+        # Fail closed: a verified signature that carries no digest cannot be
+        # bound to these bytes, so it must not silently pass the TOCTOU check.
+        if signature.get("verified") and signature.get("manifest_sha256") != digest:
             errors.append("manifest bytes changed during signed verification")
         try:
             manifest = json.loads(manifest_bytes.decode("utf-8"))

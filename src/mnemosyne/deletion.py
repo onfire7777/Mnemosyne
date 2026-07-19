@@ -30,6 +30,9 @@ from .security import SecurityPolicy, SessionIdentity
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _OPAQUE_KEY = secrets.token_bytes(32)
+# Object schemes whose keys are envelope-encrypted, so dropping the key really
+# does render the object unrecoverable.  Everything else fails closed.
+_CRYPTO_SHREDDABLE_SCHEMES = frozenset({"local_encrypted", "s3_encrypted"})
 # Structural vocabulary of retained custody records: audit/deletion/merge rows,
 # the evidence fields their diffs embed, working-memory descriptors, and forget
 # propagation summaries. A deleted metadata key that collides with one of these
@@ -118,6 +121,7 @@ class SurfaceReceipt:
     action: str = "deleted"
     attempted_at: str | None = None
     verified_at: str | None = None
+    cross_tenant_mutations: int = 0
 
 
 @dataclass(slots=True)
@@ -724,15 +728,16 @@ class DeletionCoordinator:
         return False
 
     def _target_object_keys(self, tenant: str, refs: list[str]) -> list[str]:
-        targets = {
-            f"{scheme}://{tenant}/{ref}"
-            for ref in refs
-            for scheme in ("local_encrypted", "s3_encrypted", "plain")
-        }
+        # Enumerate by tenant/ref path, not by a scheme allow-list: a key stored
+        # under an unrecognised scheme is still this tenant's object and must
+        # surface as an un-shreddable target.  Filtering it out here would drop
+        # the object_storage surface entirely and let the manifest attest 100%
+        # cascade with zero residue while the object survives intact.
+        targets = {f"{tenant}/{ref}" for ref in refs}
         return [
             key
             for key in self.object_keys
-            if key in targets
+            if key.partition("://")[1] and key.partition("://")[2] in targets
         ]
 
     def _delete_objects(
@@ -748,7 +753,10 @@ class DeletionCoordinator:
             receipt.error_code = "probe_failed"
             receipt.state = "failed"
             return False
-        if any(key.startswith("plain://") for key in keys):
+        if any(key.partition("://")[0] not in _CRYPTO_SHREDDABLE_SCHEMES for key in keys):
+            # Fail closed on "plain://" and on any scheme this coordinator has no
+            # shred procedure for; dropping the key to None only destroys a
+            # reference, so attesting removal would be false.
             receipt.error_code = "not_crypto_shreddable"
             receipt.state = "failed"
             return False
@@ -834,7 +842,9 @@ class DeletionCoordinator:
             # Scrub while the evidence still exists so a crash after forget cannot
             # destroy the only copy of payload-derived scrub inputs. Replay can
             # always scrub the new forget custody rows from request-owned refs.
-            self._scrub_retained_history(request["tenant_id"], sensitive, sensitive_keys)
+            receipt.cross_tenant_mutations = self._scrub_retained_history(
+                request["tenant_id"], sensitive, sensitive_keys
+            )
         except Exception:
             receipt.error_code = "delete_failed"
             receipt.state = "failed"
@@ -861,7 +871,9 @@ class DeletionCoordinator:
                         requested_by="legal",
                         erasure_mode="hard_delete_legal",
                     )
-            self._scrub_retained_history(request["tenant_id"], sensitive, sensitive_keys)
+            receipt.cross_tenant_mutations += self._scrub_retained_history(
+                request["tenant_id"], sensitive, sensitive_keys
+            )
             if any(
                 self._evidence_present(request["tenant_id"], ref, branch)
                 for branch in branches
@@ -912,6 +924,15 @@ class DeletionCoordinator:
         if isinstance(value, dict):
             scrubbed = {}
             for key, item in value.items():
+                if key == "tenant_id":
+                    # Tenant attribution is structural custody, not payload: both
+                    # scrub paths select rows by it, so opaquing it would hide the
+                    # row from every later deletion while the manifest still
+                    # attests zero residue.  Deleted metadata may *contain* the
+                    # tenant id (or an >=8-char substring of it) and would
+                    # otherwise seed a needle that rewrites this field.
+                    scrubbed[key] = item
+                    continue
                 scrubbed_key = (
                     _opaque("retained-audit-key", key)
                     if isinstance(key, str) and key in sensitive_keys
@@ -937,8 +958,14 @@ class DeletionCoordinator:
 
     def _scrub_retained_history(
         self, tenant_id: str, sensitive: set[str], sensitive_keys: set[str]
-    ) -> None:
-        """Retain custody events while removing payload and correlatable references."""
+    ) -> int:
+        """Retain custody events while removing payload and correlatable references.
+
+        Returns the number of rows actually rewritten that are not attributed to
+        this tenant, so the manifest can report a measured cross-tenant mutation
+        count instead of asserting zero.
+        """
+        cross_tenant = 0
         if self._is_sqlite_engine():
             # The engine shares one cached connection per tenant and serializes all
             # access through its lock; hold it so this scrub transaction cannot
@@ -947,22 +974,28 @@ class DeletionCoordinator:
                 connection = self.engine._connect(tenant_id)
                 with connection:
                     for table in ("audit_log", "deletion_log", "merge_log"):
-                        for row in connection.execute(f"SELECT seq, record FROM {table}").fetchall():
+                        # Select on the tenant_id *column*, which this scrub never
+                        # rewrites.  Gating on the JSON copy would let a scrubbed
+                        # attribution field permanently hide the row from later
+                        # deletions of the same tenant.
+                        rows = connection.execute(
+                            f"SELECT seq, tenant_id, record FROM {table}"
+                        ).fetchall()
+                        for row in rows:
                             record = json.loads(row["record"])
                             # Merge records embed no tenant_id and engine merges
                             # may audit under the "*" wildcard; both are custody
                             # rows of this tenant's own database and must scrub.
-                            if record.get("tenant_id") not in (tenant_id, "*", None):
+                            if row["tenant_id"] not in (tenant_id, "*", None):
                                 continue
+                            scrubbed = self._scrub_value(record, sensitive, sensitive_keys)
+                            if scrubbed == record:
+                                continue
+                            if row["tenant_id"] != tenant_id:
+                                cross_tenant += 1
                             connection.execute(
                                 f"UPDATE {table} SET record = ? WHERE seq = ?",
-                                (
-                                    json.dumps(
-                                        self._scrub_value(record, sensitive, sensitive_keys),
-                                        sort_keys=True,
-                                    ),
-                                    row["seq"],
-                                ),
+                                (json.dumps(scrubbed, sort_keys=True), row["seq"]),
                             )
                     # Retracted/trimmed assertions survive forget with their
                     # calibration JSON; scrub it exactly like the in-memory
@@ -979,7 +1012,7 @@ class DeletionCoordinator:
                                 "UPDATE assertions SET calibration = ? WHERE rowid = ?",
                                 (json.dumps(scrubbed, sort_keys=True), row["rowid"]),
                             )
-            return
+            return cross_tenant
         logs = [
             getattr(self.engine, attribute, None)
             for attribute in ("audit_log", "deletion_log", "merge_log")
@@ -1003,17 +1036,22 @@ class DeletionCoordinator:
             # Rows attributed to another tenant stay byte-identical; merge
             # rows (no tenant_id) and "*" wildcard audits are unattributable
             # shared custody and must scrub by needle.
-            rows[:] = [
-                self._scrub_value(row, sensitive, sensitive_keys)
-                if row.get("tenant_id") in (tenant_id, "*", None)
-                else row
-                for row in rows
-            ]
+            for index, row in enumerate(rows):
+                owner = row.get("tenant_id")
+                if owner not in (tenant_id, "*", None):
+                    continue
+                scrubbed = self._scrub_value(row, sensitive, sensitive_keys)
+                if scrubbed == row:
+                    continue
+                if owner != tenant_id:
+                    cross_tenant += 1
+                rows[index] = scrubbed
         for assertion in assertions.values():
             if getattr(assertion, "tenant_id", None) == tenant_id:
                 assertion.calibration = self._scrub_value(
                     assertion.calibration, sensitive, sensitive_keys
                 )
+        return cross_tenant
 
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         rows = []
@@ -1098,7 +1136,9 @@ class DeletionCoordinator:
                 "unavailable": unavailable,
                 "cascade_percent": 100 if complete else int(verified * 100 / expected) if expected else 0,
                 "recoverable_residue_count": expected - verified,
-                "cross_tenant_mutations": 0,
+                "cross_tenant_mutations": sum(
+                    receipt.cross_tenant_mutations for receipt in record.receipts.values()
+                ),
                 "complete": complete,
             },
         }
