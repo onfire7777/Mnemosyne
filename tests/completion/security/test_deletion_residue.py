@@ -10,6 +10,7 @@ RED evidence for the repair DAG.
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -100,6 +101,9 @@ class FakeStore:
         if self.delete_fault == "timeout_after_commit":
             self.delete_fault = None
             raise TimeoutError(f"{self.name} timed out after commit")
+        if self.delete_fault == "crash_after_commit":
+            self.delete_fault = None
+            raise SystemExit(f"{self.name} crashed after commit")
         return {"deleted": before - len(self.rows)}
 
     def probe(self, tenant: str, source_ref: str) -> bool:
@@ -218,8 +222,12 @@ def test_r01_local_legal_delete_removes_payload_and_direct_identifiers() -> None
 def test_r02_sqlite_delete_removes_row_fts_pointer_metadata_and_vector(tmp_path: Path) -> None:
     engine = SqliteEngine(tmp_path)
     source_ref = engine.append_evidence(_evidence())
+    other_ref = engine.append_evidence(_evidence(OTHER_TENANT, user=OTHER_USER))
+    other_before = copy.deepcopy(engine.export_tenant(OTHER_TENANT))
     world = FakeWorld(engine=engine, source_ref=source_ref)  # type: ignore[arg-type]
     manifest = _delete(world)
+    assert engine.export_tenant(OTHER_TENANT) == other_before
+    assert engine.get_evidence(OTHER_TENANT, other_ref) is not None
     conn = engine._connect(TENANT)
     assert conn.execute("SELECT 1 FROM evidence WHERE cid = ?", (source_ref,)).fetchone() is None
     assert (
@@ -374,6 +382,47 @@ def test_r06_assertion_history_and_vectors_are_scrubbed() -> None:
     stored = next(iter(world.engine.assertions.values()))
     assert stored.status == "retracted"
     assert stored.source_evidence_cids == []
+
+
+def test_r06_assertion_calibration_is_scrubbed() -> None:
+    world = _world()
+    assertion = Assertion(
+        tenant_id=TENANT,
+        user_id=USER,
+        subject="calibration-subject",
+        predicate="is",
+        object="secret",
+        confidence=1.0,
+        source_evidence_cids=[world.source_ref],
+        calibration={"note": CANARY, "pair": (CANARY, "kept-sample")},
+    )
+    world.engine.upsert_assertion(assertion)
+    _delete(world)
+    stored = next(iter(world.engine.assertions.values()))
+    _assert_absent(stored.calibration, CANARY, world.source_ref)
+    assert stored.calibration["pair"][1] == "kept-sample"
+
+
+def test_r21_scrubbed_key_collision_never_drops_audit_data() -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    metadata_key = "colliding-metadata-key"
+    evidence = _evidence(content="ordinary payload")
+    evidence.metadata = {metadata_key: "safe"}
+    source_ref = world.engine.append_evidence(evidence)
+    occupied = deletion._opaque("retained-audit-key", metadata_key)
+    world.engine.audit_log.append(
+        {
+            "id": "audit-collision-r21",
+            "tenant_id": TENANT,
+            "details": {metadata_key: "first", occupied: "second"},
+        }
+    )
+    _delete(world, source_refs=[source_ref])
+    retained = next(row for row in world.engine.audit_log if row["id"] == "audit-collision-r21")
+    assert len(retained["details"]) == 2
+    assert set(retained["details"].values()) == {"first", "second"}
+    assert metadata_key not in retained["details"]
 
 
 def test_r07_runtime_user_model_cannot_resurrect_deleted_value() -> None:
@@ -599,6 +648,7 @@ def test_r20_verified_boundary_deletion_is_forward_only_and_retry_resumes() -> N
 
 def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
     world = _world()
+    canary_digest = hashlib.sha256(CANARY.encode()).hexdigest()
     world.engine.audit_log.append(
         {
             "id": "audit-r21",
@@ -608,6 +658,7 @@ def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
             "details": {
                 "content": CANARY,
                 "source_ref": world.source_ref,
+                "digest": canary_digest,
                 f"{CANARY}:{world.source_ref}": "sensitive-key",
             },
         }
@@ -622,8 +673,8 @@ def test_r21_retained_audit_history_contains_only_opaque_refs() -> None:
     )
     manifest = _delete(world)
     retained = world.engine.export_tenant(TENANT)
-    _assert_absent(manifest, CANARY, world.source_ref)
-    _assert_absent(retained["audit_log"], CANARY, world.source_ref)
+    _assert_absent(manifest, CANARY, world.source_ref, canary_digest)
+    _assert_absent(retained["audit_log"], CANARY, world.source_ref, canary_digest)
     _assert_absent(retained["deletion_log"], CANARY, world.source_ref)
     assert any(row["id"] == "audit-r21" and row["op"] == "remember" for row in retained["audit_log"])
     assert any(row["id"] == "deletion-r21" for row in retained["deletion_log"])
@@ -787,6 +838,8 @@ def test_request_validation_canonicalizes_uuid_before_deletion() -> None:
     manifest = _delete(world, operation_id=f"{{{OPERATION_ID.upper()}}}")
     assert manifest["operation_id"] == OPERATION_ID
     assert manifest["request_id"] == OPERATION_ID
+    replay = _delete(world, operation_id=OPERATION_ID)
+    assert replay == manifest
     durable_manifest = copy.deepcopy(manifest)
     durable_manifest["fence"]["durable"] = True
     assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(durable_manifest) == {
@@ -858,6 +911,13 @@ def test_timeout_after_commit_converges_on_retry_without_early_engine_delete() -
     assert remote.delete_calls == [(TENANT, world.source_ref)]
     assert remote.probe_calls == [(TENANT, world.source_ref)]
     assert world.engine.get_evidence(TENANT, world.source_ref) is None
+    assert _surface(complete, "remote")["error_code"] is None
+    durable = copy.deepcopy(complete)
+    durable["fence"]["durable"] = True
+    assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(durable) == {
+        "complete": True,
+        "errors": [],
+    }
 
 
 def test_timeout_after_commit_retry_probes_before_repeating_delete() -> None:
@@ -938,9 +998,10 @@ def test_r14_cache_name_collision_cannot_hide_store_residue() -> None:
         for row in manifest["surfaces"]
         if row["surface_type"] == "cache" or row["surface"] == "cache:shared"
     ]
-    assert colliding[0] == ("store", "cache:shared")
-    assert colliding[1][0] == "cache"
-    assert colliding[1][1].startswith("cache:opaque:")
+    assert [pair for pair in colliding if pair[0] == "store"] == [("store", "cache:shared")]
+    cache_pairs = [pair for pair in colliding if pair[0] == "cache"]
+    assert len(cache_pairs) == 1
+    assert cache_pairs[0][1].startswith("cache:opaque:")
     durable_manifest = copy.deepcopy(manifest)
     durable_manifest["fence"]["durable"] = True
     assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(durable_manifest) == {
@@ -1012,6 +1073,213 @@ def test_engine_crash_after_commit_resumes_by_probe_without_repeating_forget(tmp
     manifest = restarted_coordinator.delete(**request)
     _assert_complete(manifest)
     assert engine.forget_calls == 1
+    # The crash window must not leave residue in retained history or the journal.
+    _assert_absent(world.engine.export_tenant(TENANT), CANARY, world.source_ref)
+    journal_bytes = (tmp_path / "deletion.db").read_bytes()
+    for suffix in ("-wal", "-shm"):
+        sidecar = tmp_path / f"deletion.db{suffix}"
+        if sidecar.exists():
+            journal_bytes += sidecar.read_bytes()
+    for needle in (CANARY, world.source_ref, TENANT, USER):
+        assert needle.encode() not in journal_bytes
+    assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest) == {
+        "complete": True,
+        "errors": [],
+    }
+
+
+def test_store_crash_after_commit_resumes_by_probe_without_repeating_delete(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    remote = FakeStore(
+        "remote",
+        delete_fault="crash_after_commit",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.stores["remote"] = remote
+    world.process_cache["prefetch"] = {
+        "tenant_id": TENANT,
+        "source_ref": world.source_ref,
+        "hit": CANARY,
+    }
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    identity = SessionIdentity(
+        tenant_id=TENANT,
+        user_id=USER,
+        role="operator",
+        source_trust_tier=int(TrustTier.DIRECT_USER),
+        session_id="verified-delete-session",
+    )
+    request = {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+
+    with pytest.raises(SystemExit, match="crashed after commit"):
+        deletion.DeletionCoordinator(
+            engine=world.engine,
+            stores=world.stores,
+            process_cache=world.process_cache,
+            session_identity=identity,
+            ledger=deletion.SQLiteDeletionLedger(journal_path),
+        ).delete(**request)
+
+    manifest = deletion.DeletionCoordinator(
+        engine=world.engine,
+        stores=world.stores,
+        process_cache=world.process_cache,
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    ).delete(**request)
+
+    _assert_complete(manifest)
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
+    assert _surface(manifest, "remote")["attempts"] == 1
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+    # The cache surface persisted before the crash resumes under the same
+    # ledger-keyed name instead of duplicating.
+    cache_rows = [row for row in manifest["surfaces"] if row["surface_type"] == "cache"]
+    assert len(cache_rows) == 1
+    assert cache_rows[0]["verified_removed"] is True
+    _assert_absent(manifest, CANARY, world.source_ref)
+
+
+def test_cache_crash_after_invalidation_resumes_without_probe_failure(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+
+    class CrashingCache(dict):
+        def __init__(self) -> None:
+            super().__init__()
+            self.crash = True
+
+        def __delitem__(self, key: str) -> None:
+            super().__delitem__(key)
+            if self.crash:
+                self.crash = False
+                raise SystemExit("synthetic crash after cache invalidation")
+
+    world = _world()
+    cache = CrashingCache()
+    cache["prefetch"] = {"tenant_id": TENANT, "source_ref": world.source_ref, "hit": CANARY}
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    identity = SessionIdentity(
+        tenant_id=TENANT,
+        user_id=USER,
+        role="operator",
+        source_trust_tier=int(TrustTier.DIRECT_USER),
+        session_id="verified-delete-session",
+    )
+    request = {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+
+    with pytest.raises(SystemExit, match="cache invalidation"):
+        deletion.DeletionCoordinator(
+            engine=world.engine,
+            process_cache=cache,
+            session_identity=identity,
+            ledger=deletion.SQLiteDeletionLedger(journal_path),
+        ).delete(**request)
+    assert "prefetch" not in cache
+
+    manifest = deletion.DeletionCoordinator(
+        engine=world.engine,
+        process_cache=cache,
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+    ).delete(**request)
+
+    _assert_complete(manifest)
+    cache_rows = [row for row in manifest["surfaces"] if row["surface_type"] == "cache"]
+    assert len(cache_rows) == 1
+    assert cache_rows[0]["action"] == "invalidated"
+    assert cache_rows[0]["attempts"] == 2
+    assert world.engine.get_evidence(TENANT, world.source_ref) is None
+
+
+def test_sqlite_ledger_replay_conflict_generation_and_checkpoint_cas(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    ledger = deletion.SQLiteDeletionLedger(tmp_path / "ledger.sqlite")
+    record = ledger.begin(OPERATION_ID, "fingerprint-a", TENANT)
+    assert ledger.current_generation(TENANT) == 1
+    assert ledger.current_generation(OTHER_TENANT) == 0
+    with pytest.raises(ValueError, match="replay conflicts"):
+        ledger.begin(OPERATION_ID, "fingerprint-b", TENANT)
+    stale = deletion.SQLiteDeletionLedger(tmp_path / "ledger.sqlite").begin(
+        OPERATION_ID, "fingerprint-a", TENANT
+    )
+    ledger.checkpoint(record)
+    with pytest.raises(RuntimeError, match="checkpoint conflict"):
+        ledger.checkpoint(stale)
+
+
+def test_concurrent_durable_ledgers_serialize_same_request(tmp_path: Path) -> None:
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    remote = FakeStore(
+        "remote",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    world.stores["remote"] = remote
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    identity = SessionIdentity(
+        tenant_id=TENANT,
+        user_id=USER,
+        role="operator",
+        source_trust_tier=int(TrustTier.DIRECT_USER),
+        session_id="verified-delete-session",
+    )
+    request = {
+        "schema": SCHEMA,
+        "operation_id": OPERATION_ID,
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "source_refs": [world.source_ref],
+        "branch_scope": "all",
+        "mode": "hard_delete_legal",
+        "requested_by_role": "legal",
+        "reason": "synthetic W2 contract",
+    }
+
+    def run(_: int) -> dict[str, Any]:
+        return deletion.DeletionCoordinator(
+            engine=world.engine,
+            stores=world.stores,
+            session_identity=identity,
+            ledger=deletion.SQLiteDeletionLedger(journal_path),
+        ).delete(**request)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(run, range(2)))
+    assert outcomes[0] == outcomes[1]
+    assert remote.delete_calls == [(TENANT, world.source_ref)]
+
+
+def test_store_named_object_storage_without_object_keys_does_not_crash() -> None:
+    world = _world()
+    world.stores["object_storage"] = FakeStore(
+        "object_storage",
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+    manifest = _delete(world)
+    _assert_complete(manifest)
+    assert world.stores["object_storage"].rows == []
+    assert _surface(manifest, "object_storage")["surface_type"] == "store"
 
 
 def test_r18_object_deletion_does_not_match_source_ref_prefixes() -> None:
@@ -1235,6 +1503,21 @@ def test_r25_semantic_verifier_rejects_signed_but_incomplete_manifest(
         ),
         lambda manifest: manifest.update(tenant_ref="opaque:tenant-direct"),
         lambda manifest: manifest.update(source_refs=["opaque:" + "A" * 64]),
+        lambda manifest: manifest.update(schema="mnemosyne.deletion_manifest.v0"),
+        lambda manifest: manifest.update(branch_scope="feature"),
+        lambda manifest: manifest["fence"].update(durable=False),
+        lambda manifest: manifest["surfaces"][0].update(residue_probe=1),
+        lambda manifest: manifest["surfaces"][0].update(verified_removed=False),
+        lambda manifest: manifest["surfaces"][0].update(attempts=0),
+        lambda manifest: manifest["surfaces"][0].update(attempts=True),
+        lambda manifest: manifest["surfaces"][0].update(durability_checkpoint="local:2"),
+        lambda manifest: manifest["stores"][0].update(visited=0),
+        lambda manifest: manifest["stores"][0].update(discovered=0),
+        lambda manifest: manifest["stores"][0].update(expected=True),
+        lambda manifest: manifest["surfaces"].append(copy.deepcopy(manifest["surfaces"][0])),
+        lambda manifest: manifest["retention_exceptions"].append(
+            {"surface": "backups", "restore_block_fence": 1, "deadline": "2026-08-17T00:00:00Z"}
+        ),
     ],
 )
 def test_r25_semantic_verifier_requires_identity_policy_and_receipt_semantics(
@@ -1332,6 +1615,100 @@ def test_r25_semantic_verifier_rejects_unknown_custody_fields(field: str) -> Non
     assert result["errors"]
 
 
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest["surfaces"][0].update(surface_type="user-jake@example-corp"),
+        lambda manifest: manifest["stores"][0].update(surface_type="user-jake@example-corp"),
+        lambda manifest: manifest["policy"]["required_surfaces"][0].update(
+            surface_type="user-jake@example-corp"
+        ),
+    ],
+)
+def test_r25_verifier_rejects_identifier_bearing_surface_types(
+    tmp_path: Path, mutate: Callable[[dict[str, Any]], Any]
+) -> None:
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    generate_collector_keypair(private_key, public_key)
+    manifest = _valid_manifest()
+    mutate(manifest)
+    result = verifier.verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert any("safe deletion vocabulary" in error for error in result["errors"])
+    manifest_path = tmp_path / "deletion-manifest.json"
+    with pytest.raises(ValueError, match="semantically incomplete"):
+        verifier.write_signed_deletion_manifest(manifest, manifest_path, private_key)
+    assert not manifest_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_error"),
+    [
+        (lambda m: m["surfaces"][0].update(surface=f"{CANARY}-surface"), "canary material"),
+        (lambda m: m["surfaces"][0].update(surface="s3://bucket/evidence"), "source URI"),
+        (
+            lambda m: m["surfaces"][0].update(checkpoint="a" * 64, durability_checkpoint="a" * 64),
+            "direct hash",
+        ),
+        (
+            lambda m: m["policy"]["required_surfaces"][0].update(tenant_id="tenant-direct"),
+            "forbidden direct-custody field",
+        ),
+    ],
+)
+def test_r25_custody_scan_rejects_direct_material(
+    mutate: Callable[[dict[str, Any]], Any], expected_error: str
+) -> None:
+    manifest = _valid_manifest()
+    mutate(manifest)
+    result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert any(expected_error in error for error in result["errors"])
+
+
+def test_r25_verifier_fails_closed_for_non_object_manifests() -> None:
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    for manifest in (None, "manifest", 7, ["surfaces"]):
+        result = verifier.verify_deletion_manifest(manifest)
+        assert result == {"complete": False, "errors": ["manifest must be an object"]}
+
+
+def test_r25_verifier_fails_closed_for_hostile_nesting_depth() -> None:
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    manifest = _valid_manifest()
+    hostile: dict[str, Any] = {"deep": "leaf"}
+    for _ in range(3000):
+        hostile = {"deep": hostile}
+    manifest["summary"] = hostile
+    result = verifier.verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert any("custody scan" in error for error in result["errors"])
+
+
+def test_r25_signed_verification_fails_closed_on_tamper_and_malformed_bytes(tmp_path: Path) -> None:
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    generate_collector_keypair(private_key, public_key)
+    manifest = _valid_manifest()
+    manifest_path = tmp_path / "deletion-manifest.json"
+    verifier.write_signed_deletion_manifest(manifest, manifest_path, private_key)
+
+    # Semantically complete but tampered after signing: only the signature fails.
+    tampered = dict(manifest, reason="opaque:" + "1" * 64)
+    manifest_path.write_text(json.dumps(tampered, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
+    assert result["complete"] is False
+    assert any("signature" in error for error in result["errors"])
+
+    manifest_path.write_text("not-json", encoding="utf-8")
+    result = verifier.verify_signed_deletion_manifest(manifest_path, public_key)
+    assert result["complete"] is False
+    assert result["errors"]
+
+
 def test_r23_durable_journal_replays_after_coordinator_restart(tmp_path: Path) -> None:
     deletion = importlib.import_module("mnemosyne.deletion")
     world = _world()
@@ -1406,24 +1783,47 @@ def test_r23_durable_journal_never_persists_sensitive_cache_key(tmp_path: Path) 
         reason="synthetic W2 contract",
     )
     journal_bytes = journal_path.read_bytes()
-    assert cache_key.encode() not in journal_bytes
+    for suffix in ("-wal", "-shm"):
+        sidecar = journal_path.with_name(journal_path.name + suffix)
+        if sidecar.exists():
+            journal_bytes += sidecar.read_bytes()
+    for needle in (cache_key, CANARY, world.source_ref, TENANT, USER):
+        assert needle.encode() not in journal_bytes
+    # An unkeyed digest of the cache key would be a dictionary-attack oracle; the
+    # persisted surface name must be keyed by the ledger instead.
+    unkeyed_digest = hashlib.sha256(f"cache-surface\0{cache_key}".encode()).hexdigest()
+    assert unkeyed_digest.encode() not in journal_bytes
+    assert unkeyed_digest not in json.dumps(manifest)
     _assert_absent(manifest, CANARY, world.source_ref)
 
 
 def test_r21_retained_history_preserves_unrelated_schema_keys_and_short_values() -> None:
     world = _world()
+    evidence = _evidence(content="ordinary payload")
+    evidence.metadata = {"reality_class": "shared-taxonomy", "private-key-r21": "sv7"}
+    source_ref = world.engine.append_evidence(evidence)
     world.engine.audit_log.append(
         {
             "id": "audit-schema-r21",
             "tenant_id": TENANT,
             "source_type": "source_type",
             "reality_class": "source_type-adjacent",
+            "private-key-r21": "kept-value",
+            "short_exact": "sv7",
+            "short_context": "prefix sv7 suffix",
         }
     )
-    _delete(world)
+    _delete(world, source_refs=[source_ref])
     retained = next(row for row in world.engine.audit_log if row["id"] == "audit-schema-r21")
+    # Schema keys shared with deleted metadata survive; ad-hoc deleted metadata
+    # keys are opaqued.
     assert retained["source_type"] == "source_type"
     assert retained["reality_class"] == "source_type-adjacent"
+    assert "private-key-r21" not in retained
+    assert "kept-value" in retained.values()
+    # Short (<8 char) sensitive values scrub only on exact match, never as substrings.
+    assert retained["short_exact"].startswith("opaque:")
+    assert retained["short_context"] == "prefix sv7 suffix"
 
 
 def test_r21_retained_history_scrubs_deleted_metadata_keys() -> None:
