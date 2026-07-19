@@ -6185,8 +6185,19 @@ class PostgresEngine:
                 if row is None:
                     raise KeyError(intention_id)
                 current = self._row_to_intention(row, tenant_id)
+                principal_user_id = user_id
+                if (
+                    isinstance(user_id, str)
+                    and user_id.strip()
+                    and principal_user_id != current.user_id
+                    and str(_stable_uuid("user", user_id)) == str(row["user_id"])
+                ):
+                    # Pre-backfill rows expose the internal user UUID as their
+                    # external user id; keep accepting the owner's real
+                    # external principal by mapping it through the stable UUID.
+                    principal_user_id = current.user_id
                 updated = _updated_intention(
-                    current, user_id=user_id, agent_id=agent_id,
+                    current, user_id=principal_user_id, agent_id=agent_id,
                     session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
                 )

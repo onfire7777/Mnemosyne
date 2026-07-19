@@ -408,6 +408,46 @@ def test_cancel_accepts_owner_external_id_on_pre_backfill_rows(
     assert stored.cancellation_state is not None
 
 
+def test_update_accepts_owner_external_id_on_pre_backfill_rows(
+    engine, tenant_user_agent
+) -> None:
+    tid, uid, aid = tenant_user_agent
+    evidence_id = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+    due = _EVALUATED_AT + timedelta(hours=1)
+    intention = _make_intention(
+        tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=evidence_id,
+        trigger_type="exact_time", trigger_expression={"at": due.isoformat()},
+        due_at=due,
+    )
+    engine.schedule_intention(intention)
+    db_tenant_id = _stable_uuid("tenant", tid)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)
+            # Simulate pre-backfill rows: external_user_id holds the internal
+            # user UUID text exactly as the schema backfill produces it, and
+            # pre-migration evidence has no _external_user_id metadata.
+            cur.execute(
+                "UPDATE intentions SET external_user_id = user_id::text "
+                "WHERE tenant_id = %s AND intention_id = %s",
+                (db_tenant_id, intention.intention_id),
+            )
+            cur.execute(
+                "UPDATE evidence SET metadata = metadata - '_external_user_id' "
+                "WHERE tenant_id = %s AND cid = %s",
+                (db_tenant_id, _cid_to_bytes(evidence_id)),
+            )
+    moved = due + timedelta(hours=1)
+    updated = engine.update_intention(
+        tid, intention.intention_id, user_id=uid, agent_id=aid,
+        session_id="session-a", due_at=moved,
+    )
+    stored = engine.list_intentions(tid)[0]
+    assert stored == updated
+    assert stored.due_at == moved
+    assert len(stored.reschedule_history) == 1
+
+
 class TestUpdateAndRecurrence:
     @pytest.mark.parametrize("trigger_type", ["exact_time", "time_window"])
     def test_update_rewrites_trigger_persists_and_replay_is_zero_mutation(

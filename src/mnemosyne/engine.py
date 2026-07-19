@@ -666,14 +666,14 @@ def _updated_intention(
     recurrence_policy: dict[str, Any] | None,
 ) -> Intention:
     """Validate and build one detached scheduled-intention mutation."""
-    if current.status != "scheduled":
-        raise ValueError("only scheduled intentions may be updated")
-    if user_id != current.user_id or agent_id != current.agent_id:
-        raise PermissionError("only the owning user and agent may update an intention")
     if type(session_id) is not str or not session_id.strip():
         raise ValueError("session_id must be a non-empty string")
+    if user_id != current.user_id or agent_id != current.agent_id:
+        raise PermissionError("only the owning user and agent may update an intention")
     if current.session_id is not None and session_id != current.session_id:
         raise PermissionError("intention session does not match authenticated session")
+    if current.status != "scheduled":
+        raise ValueError("only scheduled intentions may be updated")
     if due_at is None and action is None and recurrence_policy is None:
         raise ValueError("an intention update requires at least one change")
     if due_at is not None and (not isinstance(due_at, datetime) or due_at.tzinfo is None):

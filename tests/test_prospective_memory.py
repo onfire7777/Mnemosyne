@@ -284,6 +284,14 @@ def test_update_intention_rejects_fired_state_and_invalid_arguments() -> None:
             TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
             session_id="session-a", action={"type": "noop"},
         )
+    # Ownership is checked before terminal state, matching cancellation: a
+    # foreign principal probing a fired intention cannot learn its status
+    # from the exception type.
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=f"{USER_ID}-other",
+            agent_id=AGENT_ID, session_id="session-a", action={"type": "noop"},
+        )
 
 
 def test_recancelling_a_cancelled_sessionless_intention_stays_sessionless() -> None:
