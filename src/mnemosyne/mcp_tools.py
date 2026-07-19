@@ -1445,9 +1445,23 @@ class MemoryTools:
             return id
         if tenant_id:
             exported = self.engine.export_tenant(tenant_id)
-            for item in exported.get("assertions", []):
-                if item.get("id") == id and item.get("branch") != "main":
-                    return str(item["branch"])
+            candidates = sorted(
+                {
+                    str(item["branch"])
+                    for item in exported.get("assertions", [])
+                    if item.get("id") == id and item.get("branch") != "main"
+                }
+            )
+            if len(candidates) > 1:
+                # Fail closed: auto-discovery is ambiguous. Refuse to silently
+                # promote whichever branch happens to be enumerated first; the
+                # caller must pass an explicit branch to disambiguate.
+                raise KeyError(
+                    f"confirm: ambiguous candidate branches {candidates!r} for {id!r}; "
+                    "pass an explicit branch to disambiguate"
+                )
+            if candidates:
+                return candidates[0]
         if id.startswith("proposal-"):
             return id
         raise KeyError(f"proposal branch not found for {id}")
