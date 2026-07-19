@@ -5485,6 +5485,11 @@ class PostgresEngine:
                             "WHERE tenant_id = %s AND branch = %s AND superseded_by = %s",
                             (actual_id, db_tenant_id, into, planned_id),
                         )
+                    # Publish the complete source -> actual-destination map. On
+                    # PostgreSQL the destination is a deterministic clone id
+                    # (source != dest) unless an existing peer absorbed it, in
+                    # which case it is that peer's id.
+                    report.assertion_id_map = dict(actual_assertion_ids)
                     cur.execute(
                         "SELECT * FROM relations WHERE tenant_id = %s AND branch = %s "
                         "ORDER BY valid_from, id",

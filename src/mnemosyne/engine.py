@@ -4710,19 +4710,35 @@ class LocalMemoryEngine:
                     cloned.branch = into
                     self.evidence[target_key] = cloned
                     report.evidence_added += 1
-            for assertion in [
+            source_assertions = [
                 item
                 for item in self.assertions.values()
                 if item.branch == frm and (tenant_id is None or item.tenant_id == tenant_id)
-            ]:
+            ]
+            # Phase 1: replay each source assertion, recording its real
+            # destination id (identity when preserved, the existing peer's id
+            # under semantic absorption). One complete entry per source.
+            assertion_id_map: dict[str, str] = {}
+            for assertion in source_assertions:
                 before_count = len(self.assertions)
                 cloned = copy.deepcopy(assertion)
                 cloned.branch = into
-                self.upsert_assertion(cloned, branch=into)
+                actual_id = self.upsert_assertion(cloned, branch=into)
+                assertion_id_map[assertion.id] = actual_id
                 if len(self.assertions) > before_count:
                     report.assertions_added += 1
                 else:
                     report.assertions_merged += 1
+            # Phase 2: repoint any superseded_by chain that still references a
+            # source id onto its actual destination id. Runs after the whole map
+            # is known so remapping is correct regardless of iteration order.
+            for assertion in source_assertions:
+                dest = self.assertions.get(
+                    self._branch_key(assertion.tenant_id, into, assertion_id_map[assertion.id])
+                )
+                if dest is not None and dest.superseded_by in assertion_id_map:
+                    dest.superseded_by = assertion_id_map[dest.superseded_by]
+            report.assertion_id_map = assertion_id_map
             for rel in [
                 item
                 for item in self.relations.values()
