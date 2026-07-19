@@ -169,10 +169,7 @@ class MnemosyneMcpServer:
         self.tool_names = {item["name"] for item in TOOL_SPEC}
         self.tool_specs = [_to_mcp_tool_spec(item) for item in TOOL_SPEC]
         self.tool_schemas_by_name = {item["name"]: item["inputSchema"] for item in self.tool_specs}
-        self._stateless_tools_cache: dict[
-            tuple[Any, ...],
-            tuple[tuple[tuple[str, int | None], ...], tuple[Any, Any, Any, Any]],
-        ] = {}
+        self._stateless_tools_cache: dict[tuple[Any, ...], tuple[Any, Any, Any, Any]] = {}
         self._stateless_tools_cache_lock = threading.Lock()
         self._stateless_transaction_lock = threading.Lock()
         self._stateful_tools_closed = False
@@ -192,7 +189,7 @@ class MnemosyneMcpServer:
 
         errors: list[Exception] = []
         with self._stateless_transaction_lock, self._stateless_tools_cache_lock:
-            stale = [bundle for _stamp, bundle in self._stateless_tools_cache.values()]
+            stale = list(self._stateless_tools_cache.values())
             self._stateless_tools_cache.clear()
             if not self.stateless and not self._stateful_tools_closed:
                 self._stateful_tools_closed = True
@@ -240,37 +237,29 @@ class MnemosyneMcpServer:
             arguments.get("session_id") or arguments.get("source_identity"),
         )
 
-    def _stateless_tools_stamp(self) -> tuple[tuple[str, int | None], ...]:
-        if self.backend == "postgres" or not self.store_path:
-            return ()
-        store = Path(self.store_path).expanduser()
-        paths = (store, store.with_suffix(store.suffix + ".runtime.json"))
-        return tuple((str(path), path.stat().st_mtime_ns if path.exists() else None) for path in paths)
-
     def _stateless_tools_for(
         self,
         queue_tenant: str | None,
         arguments: dict[str, Any],
     ) -> tuple[tuple[Any, Any, Any, Any], tuple[Any, ...]]:
         key = self._stateless_tools_cache_key(queue_tenant, arguments)
-        stamp = self._stateless_tools_stamp()
         with self._stateless_tools_cache_lock:
             cached = self._stateless_tools_cache.get(key)
-            if cached and (
-                self.backend in {"local", "sqlite"} or cached[0] == stamp
-            ):
-                return cached[1], key
-            # A miss can only happen with no cached bundle for this key (the
-            # hit check above returns every cached entry). On the single-store
-            # backends, evict-then-close every other scope's bundle before
-            # building, so one store never holds two live writers.
+            if cached is not None:
+                return cached, key
+            # On the single-store backends, evict-then-close the previous
+            # scope's bundle before building, so one store never holds two
+            # live writers. Eviction keeps this cache at size one on those
+            # backends, so there is at most one stale bundle to release, and
+            # _close_bundle already releases every resource within it before
+            # reporting a failure.
             if self.backend in {"local", "sqlite"}:
-                stale = [entry[1] for entry in self._stateless_tools_cache.values()]
+                stale = list(self._stateless_tools_cache.values())
                 self._stateless_tools_cache.clear()
                 for old_bundle in stale:
                     self._close_bundle(old_bundle)
             bundle = self._build_tools(queue_tenant)
-            self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
+            self._stateless_tools_cache[key] = bundle
             return bundle, key
 
     def _refresh_stateless_tools_cache(
@@ -280,7 +269,7 @@ class MnemosyneMcpServer:
     ) -> None:
         with self._stateless_tools_cache_lock:
             if key in self._stateless_tools_cache:
-                self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
+                self._stateless_tools_cache[key] = bundle
 
     def _build_tools(self, queue_tenant: str | None = None) -> tuple[Any, Any, Any, MemoryTools]:
         from mnemosyne.engine import LocalMemoryEngine
@@ -850,7 +839,9 @@ def build_sdk_server(**kwargs: Any) -> Any:
 
         server.mnemosyne_mcp_facade = facade
     except BaseException:
-        facade.close()
+        # Release without masking the construction error.
+        with suppress(Exception):
+            facade.close()
         raise
     return server
 
@@ -941,7 +932,9 @@ def build_sdk_streamable_http_app(
         app.state.mnemosyne_streamable_http_manager = session_manager
         app.state.mnemosyne_mcp_facade = sdk_server.mnemosyne_mcp_facade
     except BaseException:
-        sdk_server.mnemosyne_mcp_facade.close()
+        # Release without masking the construction error.
+        with suppress(Exception):
+            sdk_server.mnemosyne_mcp_facade.close()
         raise
     return app
 
@@ -1005,7 +998,9 @@ class _FacadeClosingHTTPServer(ThreadingHTTPServer):
             facade_ref = self.mnemosyne_facade
             self.mnemosyne_facade = None
             if facade_ref is not None:
-                facade_ref.close()
+                # Release without masking the construction error.
+                with suppress(Exception):
+                    facade_ref.close()
             raise
 
     def server_close(self) -> None:
@@ -1106,14 +1101,21 @@ def build_http_server(
                 ),
             )
     except BaseException:
-        facade.close()
+        # Release without masking the construction error.
+        with suppress(Exception):
+            facade.close()
         raise
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MnemosyneMcpHTTP/0.1"
-        # Handler threads are non-daemon so server_close joins them; a socket
-        # timeout bounds that join when a client connects but never sends a
-        # request (handle_one_request treats the timeout as end-of-connection).
+        # Handler threads are non-daemon so server_close joins them before the
+        # facade is released. This is a per-recv socket timeout, not a request
+        # deadline: it reclaims a connection that opens and then goes silent
+        # (handle_one_request treats the timeout as end-of-connection), but a
+        # client that keeps trickling bytes resets it on every read, so a slow
+        # peer can extend the join past this value. Shutdown is therefore
+        # ordered and drain-safe, not time-bounded — size operator grace
+        # periods for the slowest expected request, not for this timeout.
         timeout = 30
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
@@ -1394,15 +1396,32 @@ def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
             record("read_only_tool_call", read_only.get("isError") is False)
 
         if sdk:
-            # Release the store writer first so the SDK facade build can claim it.
-            server.close()
+            # Release the store writer first so the SDK facade build can claim
+            # it. A close failure is reported as a check rather than raised so
+            # the self-test still returns a structured report.
+            try:
+                server.close()
+            except Exception as exc:  # noqa: BLE001 - self-test reports close failures structurally.
+                record("release_primary_facade", False, error=_redact_self_test_error(str(exc), kwargs, server))
+            else:
+                record("release_primary_facade", True)
             try:
                 sdk_server = build_sdk_server(**kwargs)
             except Exception as exc:  # noqa: BLE001 - optional SDK readiness is a deployment check.
                 record("sdk_build", False, error=_redact_self_test_error(str(exc), kwargs, server))
             else:
                 record("sdk_build", True)
-                sdk_server.mnemosyne_mcp_facade.close()
+                with suppress(Exception):
+                    sdk_server.mnemosyne_mcp_facade.close()
+
+        # Release before computing the verdict so a close failure lands in the
+        # report instead of escaping the finally and discarding it.
+        try:
+            server.close()
+        except Exception as exc:  # noqa: BLE001 - self-test reports close failures structurally.
+            record("release_facade", False, error=_redact_self_test_error(str(exc), kwargs, server))
+        else:
+            record("release_facade", True)
 
         ok = initialized and schemas_ok and session_config_ok and all(item["ok"] for item in checks)
         return {
@@ -1416,7 +1435,10 @@ def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
             "checks": checks,
         }
     finally:
-        server.close()
+        # Backstop for the error paths above; close() is idempotent and any
+        # failure on the success path was already recorded as a check.
+        with suppress(Exception):
+            server.close()
 
 
 def _redact_self_test_error(message: str, kwargs: dict[str, Any], server: MnemosyneMcpServer) -> str:
