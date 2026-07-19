@@ -4442,10 +4442,11 @@ class SqliteEngine:
                         tenant_id, intention.intention_id, occurrence
                     )
                     cursor = conn.execute(
-                        "UPDATE intentions SET status = ?, record = ? "
+                        "UPDATE intentions SET status = ?, due_at = ?, record = ? "
                         "WHERE tenant_id = ? AND intention_id = ? AND status = 'scheduled'",
                         (
                             stored.status,
+                            dt_to_json(stored.due_at),
                             json_text(stored.to_dict()),
                             tenant_id,
                             intention.intention_id,

@@ -185,6 +185,27 @@ def test_sqlite_recurrence_and_update_replay_match_local(tmp_path: Path) -> None
         assert after == before
 
 
+def test_sqlite_recurring_fire_keeps_due_at_column_in_sync(tmp_path: Path) -> None:
+    from mnemosyne.models import dt_to_json
+
+    engine = SqliteEngine(tmp_path / "due-column")
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 3600},
+    ))
+    assert len(_evaluate(engine, TENANT_ID, evaluated_at=due)) == 1
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.due_at == due + timedelta(seconds=3600)
+    row = engine._connect(TENANT_ID).execute(
+        "SELECT due_at FROM intentions WHERE tenant_id = ? AND intention_id = ?",
+        (TENANT_ID, stored.intention_id),
+    ).fetchone()
+    assert row["due_at"] == dt_to_json(stored.due_at)
+    engine.close()
+
+
 def test_sqlite_legacy_sessionless_update_binds_persists_and_rejects_rebinding(
     tmp_path: Path,
 ) -> None:

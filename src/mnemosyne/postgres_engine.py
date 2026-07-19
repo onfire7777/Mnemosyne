@@ -6095,8 +6095,19 @@ class PostgresEngine:
                 if row is None:
                     raise KeyError(intention_id)
                 current = self._row_to_intention(row, tenant_id)
+                principal = cancelled_by
+                if (
+                    isinstance(cancelled_by, str)
+                    and cancelled_by.strip()
+                    and principal not in {current.user_id, current.agent_id}
+                    and str(_stable_uuid("user", cancelled_by)) == str(row["user_id"])
+                ):
+                    # Pre-backfill rows expose the internal user UUID as their
+                    # external user id; keep accepting the owner's real
+                    # external principal by mapping it through the stable UUID.
+                    principal = current.user_id
                 intention = _cancelled_intention(
-                    current, cancelled_by=cancelled_by, session_id=session_id
+                    current, cancelled_by=principal, session_id=session_id
                 )
                 if intention == current:
                     return
@@ -6237,7 +6248,10 @@ class PostgresEngine:
         with self.connect() as conn:
             with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
                 self._set_tenant(cur, db_tenant_id)
-                # Select all scheduled, due candidates ordered deterministically.
+                # Select ALL scheduled intentions, not only due ones: the
+                # replay/backwards-clock guard must see every scheduled
+                # intention exactly as Local and SQLite do, and trigger
+                # evaluation itself decides due-ness.
                 cur.execute(
                     """
                     SELECT intention_id, user_id, external_user_id, agent_id, trigger_type,
@@ -6245,11 +6259,11 @@ class PostgresEngine:
                            dependencies, reschedule_history, cancellation_state,
                            evidence_ids, session_id, recurrence_policy, recurrence_state
                     FROM intentions
-                    WHERE tenant_id = %s AND status = 'scheduled' AND due_at <= %s
+                    WHERE tenant_id = %s AND status = 'scheduled'
                     ORDER BY due_at, intention_id
                     FOR UPDATE
                     """,
-                    (db_tenant_id, evaluated_at_utc),
+                    (db_tenant_id,),
                 )
                 candidates = [self._row_to_intention(row, tenant_id) for row in cur.fetchall()]
                 tenant_intentions = {

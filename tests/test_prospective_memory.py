@@ -207,6 +207,110 @@ def test_legacy_sessionless_row_binds_once_on_first_update() -> None:
         )
 
 
+def test_update_intention_rejects_foreign_user_and_foreign_agent() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    ))
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id="other-user", agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id="other-agent",
+            session_id="session-a", action={"type": "noop"},
+        )
+    assert engine.list_intentions(TENANT_ID)[0].action == {
+        "type": "remind", "message": "Submit the report.",
+    }
+
+
+def test_update_intention_missing_and_cross_tenant_raise_keyerror() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    ))
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            TENANT_ID, "no-such-intention", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            "other-tenant", "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+
+
+def test_update_intention_rejects_fired_state_and_invalid_arguments() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT, session_id="session-a",
+    ))
+    with pytest.raises(ValueError, match="at least one change"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a",
+        )
+    with pytest.raises(ValueError, match="due_at must be timezone-aware"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", due_at=EVALUATED_AT.replace(tzinfo=None),
+        )
+    with pytest.raises(ValueError, match="action must be a JSON object"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action=["not-an-object"],  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="session_id must be a non-empty string"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="", action={"type": "noop"},
+        )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=EVALUATED_AT, trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert len(fired) == 1
+    with pytest.raises(ValueError, match="only scheduled intentions may be updated"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+
+
+def test_recancelling_a_cancelled_sessionless_intention_stays_sessionless() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    row = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1)
+    ).to_dict()
+    row["status"] = "cancelled"
+    row["cancellation_state"] = {"cancelled_by": USER_ID}
+    legacy = Intention.from_dict(row)
+    engine.intentions[(TENANT_ID, legacy.intention_id)] = legacy
+    audit_count = len(engine.audit_log)
+
+    engine.cancel_intention(
+        TENANT_ID, legacy.intention_id, cancelled_by=USER_ID, session_id="session-a"
+    )
+    engine.cancel_intention(
+        TENANT_ID, legacy.intention_id, cancelled_by=USER_ID, session_id="session-b"
+    )
+
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.status == "cancelled"
+    assert stored.session_id is None
+    assert len(engine.audit_log) == audit_count
+
+
 def test_interval_recurrence_advances_once_per_occurrence_and_terminates() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)
@@ -330,6 +434,179 @@ def test_event_watermark_orders_replay_and_legacy_state_fail_closed() -> None:
     del legacy_event["recurrence_state"]["last_evaluated_at"]
     with pytest.raises(ValueError, match="last_evaluated_at"):
         Intention.from_dict(legacy_event)
+
+
+def test_time_window_recurrence_shifts_window_with_preserved_duration() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    end = due + timedelta(minutes=10)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="time_window",
+        trigger_expression={"start": due.isoformat(), "end": end.isoformat()},
+        recurrence_policy={"type": "interval", "interval_seconds": 3600},
+    ))
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=due + timedelta(minutes=1),
+        trigger_context=_context(), operating_point=OPERATING_POINT,
+    )
+    assert len(fired) == 1
+    stored = engine.list_intentions(TENANT_ID)[0]
+    next_due = due + timedelta(seconds=3600)
+    assert stored.status == "scheduled"
+    assert stored.due_at == next_due
+    assert stored.trigger_expression["start"] == next_due.isoformat()
+    assert stored.trigger_expression["end"] == (
+        next_due + timedelta(minutes=10)
+    ).isoformat()
+    fired_again = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=next_due + timedelta(minutes=1),
+        trigger_context=_context(), operating_point=OPERATING_POINT,
+    )
+    assert len(fired_again) == 1
+
+
+_RECURRENCE_STATE_LAST = (EVALUATED_AT + timedelta(minutes=5)).isoformat()
+
+
+@pytest.mark.parametrize(
+    ("policy", "state", "message"),
+    [
+        ("interval", None, "recurrence_policy must be a JSON object"),
+        ({"type": "cron"}, None, "recurrence_policy.type must be 'none' or 'interval'"),
+        ({"type": "none", "interval_seconds": 60}, None, "non-recurring policy only accepts type"),
+        ({"type": "interval"}, None, "interval_seconds must be a positive integer"),
+        (
+            {"type": "interval", "interval_seconds": 60, "max_occurrences": 0},
+            None,
+            "max_occurrences must be a positive integer",
+        ),
+        (
+            {"type": "interval", "interval_seconds": 60, "jitter": 5},
+            None,
+            "recurrence_policy contains unsupported fields",
+        ),
+        (None, {"occurrence": -1}, "occurrence must be a non-negative integer"),
+        (None, {"occurrence": "1"}, "occurrence must be a non-negative integer"),
+        (None, {"occurrence": 0, "unknown": True}, "recurrence_state contains unsupported fields"),
+        (None, {"occurrence": 0, "last_evaluated_at": 12}, "last_evaluated_at must be ISO-8601"),
+        (
+            None,
+            {"occurrence": 0, "consumed_signals": "not-a-list"},
+            "consumed_signals must be a JSON array",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": _RECURRENCE_STATE_LAST,
+                "consumed_signal": {"bogus": 1},
+            },
+            "consumed_signal is invalid",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": _RECURRENCE_STATE_LAST,
+                "consumed_signal": {"event_id": ""},
+            },
+            "consumed_signal.event_id is invalid",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "consumed_signal": {
+                    "event_id": "event-1",
+                    "occurred_at": _RECURRENCE_STATE_LAST,
+                },
+            },
+            "consumed signal requires last_evaluated_at",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": EVALUATED_AT.isoformat(),
+                "consumed_signal": {
+                    "event_id": "event-1",
+                    "occurred_at": _RECURRENCE_STATE_LAST,
+                },
+            },
+            "consumed signal is after last_evaluated_at",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": _RECURRENCE_STATE_LAST,
+                "consumed_signals": [
+                    {"event_id": "a"},
+                    {"event_id": "b", "occurred_at": _RECURRENCE_STATE_LAST},
+                ],
+            },
+            "consumed signal history is ambiguous",
+        ),
+        (None, {"occurrence": 3}, "occurrence must be below max_occurrences"),
+    ],
+)
+def test_intention_rejects_invalid_recurrence_policy_and_state(
+    policy: Any, state: Any, message: str
+) -> None:
+    base = _intention(
+        evidence_id="evidence", due_at=EVALUATED_AT, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 3},
+    ).to_dict()
+    if policy is not None:
+        base["recurrence_policy"] = policy
+    if state is not None:
+        base["recurrence_state"] = state
+    with pytest.raises(ValueError, match=message):
+        Intention.from_dict(base)
+
+
+def test_consumed_signal_must_match_trigger_type() -> None:
+    base = _intention(
+        evidence_id="evidence", due_at=EVALUATED_AT,
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ).to_dict()
+    base["recurrence_state"] = {
+        "occurrence": 1,
+        "last_evaluated_at": _RECURRENCE_STATE_LAST,
+        "consumed_signal": {"event_id": "event-1", "occurred_at": _RECURRENCE_STATE_LAST},
+    }
+    with pytest.raises(ValueError, match="does not match trigger_type"):
+        Intention.from_dict(base)
+
+
+def test_recurrence_reschedule_history_stays_bounded() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+    manual_due = due + timedelta(seconds=30)
+    engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=manual_due,
+    )
+    for index in range(55):
+        fired = engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=manual_due + timedelta(minutes=index),
+            trigger_context=_context(), operating_point=OPERATING_POINT,
+        )
+        assert len(fired) == 1
+    history = engine.list_intentions(TENANT_ID)[0].reschedule_history
+    recurrence_entries = [
+        entry for entry in history if entry.get("reason") == "recurrence"
+    ]
+    assert len(recurrence_entries) == 50
+    assert recurrence_entries[-1]["occurrence"] == 55
+    assert history[0] == {"from": due.isoformat(), "to": manual_due.isoformat()}
 
 
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit() -> None:

@@ -488,7 +488,8 @@ class MnemosyneMcpServer:
         if "user" in parameter_names:
             self._bind_string_claim(arguments, "user", identity.user_id, "user")
         if "cancelled_by" in parameter_names:
-            selected = arguments.get("cancelled_by", identity.user_id)
+            # Explicit null/empty means "unset" exactly like an absent key.
+            selected = arguments.get("cancelled_by") or identity.user_id
             allowed = {identity.user_id}
             if identity.agent_id:
                 allowed.add(identity.agent_id)

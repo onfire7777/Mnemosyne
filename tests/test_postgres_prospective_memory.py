@@ -188,21 +188,20 @@ def _require_rls_test_role(engine: PostgresEngine) -> None:
 @pytest.fixture
 def tenant_user_agent():
     global TENANT_ID
+    original = TENANT_ID
     tid = f"tenant-pm-{uuid4().hex[:8]}"
     TENANT_ID = tid
     uid = f"user-pm-{uuid4().hex[:8]}"
     aid = f"agent-pm-{uuid4().hex[:8]}"
-    return tid, uid, aid
+    yield tid, uid, aid
+    TENANT_ID = original
 
 
-def test_postgres_schema_and_update_contract_are_occurrence_aware() -> None:
-    schema = Path("sql/schema.sql").read_text()
-    source = Path("src/mnemosyne/postgres_engine.py").read_text()
+def test_postgres_schema_migration_is_additive_and_occurrence_aware() -> None:
+    schema = (Path(__file__).parent.parent / "sql" / "schema.sql").read_text()
     assert "CREATE TABLE IF NOT EXISTS intention_firing_receipts_v2" in schema
     assert "PRIMARY KEY (tenant_id, intention_id, operation, occurrence)" in schema
     assert "DROP CONSTRAINT IF EXISTS intention_firing_receipts_pkey" not in schema
-    assert "SET trigger_expression = %s, action = %s, due_at = %s" in source
-    assert "ON CONFLICT (tenant_id, intention_id, operation, occurrence) DO NOTHING" in source
 
 
 def test_live_schema_upgrade_preserves_legacy_receipts_and_adds_v2() -> None:
@@ -212,7 +211,7 @@ def test_live_schema_upgrade_preserves_legacy_receipts_and_adds_v2() -> None:
     runtime_tenant = f"upgrade-{uuid4().hex}"
     legacy_tenant = _stable_uuid("tenant", runtime_tenant)
     legacy_event = f"legacy-event-{uuid4().hex}"
-    schema_sql = Path("sql/schema.sql").read_text()
+    schema_sql = (Path(__file__).parent.parent / "sql" / "schema.sql").read_text()
     isolated_dsn = psycopg.conninfo.make_conninfo(
         _DSN, options=f"-csearch_path={schema_name},public"
     )
@@ -344,6 +343,69 @@ def test_live_schema_upgrade_preserves_legacy_receipts_and_adds_v2() -> None:
                         psycopg_sql.Identifier(schema_name)
                     )
                 )
+
+
+def test_backwards_evaluation_raises_even_after_recurrence_advance(
+    engine, tenant_user_agent
+) -> None:
+    tid, uid, aid = tenant_user_agent
+    evidence_id = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+    due = _EVALUATED_AT
+    engine.schedule_intention(_make_intention(
+        tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=evidence_id,
+        trigger_type="exact_time", trigger_expression={"at": due.isoformat()},
+        due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 3600},
+    ))
+    assert len(engine.evaluate_due_intentions(
+        tid, evaluated_at=due, trigger_context=_ctx(tenant_id=tid),
+        operating_point=_OP,
+    )) == 1
+    # The recurrence advanced due_at past the next evaluation clock; the
+    # backwards-clock guard must still raise exactly as Local and SQLite do
+    # instead of silently skipping the no-longer-due candidate.
+    with pytest.raises(ValueError, match="evaluated_at cannot move backwards"):
+        engine.evaluate_due_intentions(
+            tid, evaluated_at=due - timedelta(minutes=1),
+            trigger_context=_ctx(tenant_id=tid), operating_point=_OP,
+        )
+
+
+def test_cancel_accepts_owner_external_id_on_pre_backfill_rows(
+    engine, tenant_user_agent
+) -> None:
+    tid, uid, aid = tenant_user_agent
+    evidence_id = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+    due = _EVALUATED_AT + timedelta(hours=1)
+    intention = _make_intention(
+        tenant_id=tid, user_id=uid, agent_id=aid, evidence_id=evidence_id,
+        trigger_type="exact_time", trigger_expression={"at": due.isoformat()},
+        due_at=due,
+    )
+    engine.schedule_intention(intention)
+    db_tenant_id = _stable_uuid("tenant", tid)
+    with engine.connect() as conn:
+        with conn.cursor() as cur:
+            engine._set_tenant(cur, db_tenant_id)
+            # Simulate pre-backfill rows: external_user_id holds the internal
+            # user UUID text exactly as the schema backfill produces it, and
+            # pre-migration evidence has no _external_user_id metadata.
+            cur.execute(
+                "UPDATE intentions SET external_user_id = user_id::text "
+                "WHERE tenant_id = %s AND intention_id = %s",
+                (db_tenant_id, intention.intention_id),
+            )
+            cur.execute(
+                "UPDATE evidence SET metadata = metadata - '_external_user_id' "
+                "WHERE tenant_id = %s AND cid = %s",
+                (db_tenant_id, _cid_to_bytes(evidence_id)),
+            )
+    engine.cancel_intention(
+        tid, intention.intention_id, cancelled_by=uid, session_id="session-a"
+    )
+    stored = engine.list_intentions(tid)[0]
+    assert stored.status == "cancelled"
+    assert stored.cancellation_state is not None
 
 
 class TestUpdateAndRecurrence:

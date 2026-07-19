@@ -263,7 +263,18 @@ def apply_session_identity(args: argparse.Namespace) -> None:
             raise SystemExit(f"session token denied: {exc}") from exc
         _bind_session_claim(args, "tenant", identity.tenant_id)
         _bind_session_claim(args, "user", identity.user_id)
-        _bind_session_claim(args, "cancelled_by", identity.user_id)
+        if hasattr(args, "cancelled_by"):
+            # Mirror the MCP surface: the cancellation principal is the
+            # authenticated user (default) or the authenticated agent.
+            selected = args.cancelled_by or identity.user_id
+            allowed = {identity.user_id}
+            if identity.agent_id:
+                allowed.add(identity.agent_id)
+            if selected not in allowed:
+                raise SystemExit(
+                    "session cancelled_by mismatch: CLI value does not match authenticated session"
+                )
+            args.cancelled_by = selected
         if getattr(args, "command", "").startswith("working-"):
             if not identity.agent_id:
                 raise SystemExit("working memory requires an authenticated agent identity")
@@ -8637,7 +8648,7 @@ def cmd_intention_cancel(args: argparse.Namespace) -> None:
         tools.cancel_intention(
             tenant_id=args.tenant,
             intention_id=args.intention_id,
-            cancelled_by=args.cancelled_by or args.session_identity.user_id,
+            cancelled_by=args.cancelled_by,
             **_intention_auth_kwargs(args),
         )
     )

@@ -260,15 +260,21 @@ def test_schedule_requires_session_and_update_is_bound_across_mcp_and_cli(
     }
     updated = _mcp_call(server, "update_intention", update)
     assert updated["isError"] is False, updated
-    assert _mcp_call(
+    session_denied = _mcp_call(
         server, "update_intention", update, token=_token(session_id="session-b")
-    )["isError"] is True
-    assert _mcp_call(
+    )
+    assert session_denied["isError"] is True
+    assert "session" in session_denied["content"][0]["text"]
+    role_denied = _mcp_call(
         server, "update_intention", update, token=_token(role="reader")
-    )["isError"] is True
-    assert _mcp_call(
+    )
+    assert role_denied["isError"] is True
+    assert "reader" in role_denied["content"][0]["text"]
+    agent_denied = _mcp_call(
         server, "update_intention", update, token=_token(agent_id="agent-b")
-    )["isError"] is True
+    )
+    assert agent_denied["isError"] is True
+    assert "agent" in agent_denied["content"][0]["text"]
 
     store = tmp_path / "cli-update.json"
     cli_evidence = _seed_evidence(LocalMemoryEngine(store))
@@ -394,6 +400,59 @@ def test_cli_cancellation_uses_signed_identity_when_principal_is_omitted(
     )
 
     assert cancelled["cancellation_state"] == {"cancelled_by": USER}
+
+
+def test_cli_cancellation_accepts_the_authenticated_agent_principal(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "cli-store.json"
+    evidence_id = _seed_evidence(LocalMemoryEngine(store))
+    due_at = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    scheduled = _run_cli(capsys, store, _token(), *_cli_schedule(evidence_id, due_at))
+
+    cancelled = _run_cli(
+        capsys, store, _token(),
+        "intention-cancel", "--tenant", TENANT,
+        "--intention-id", scheduled["intention_id"],
+        "--cancelled-by", AGENT,
+    )
+    assert cancelled["cancellation_state"] == {"cancelled_by": AGENT}
+
+    second = _run_cli(capsys, store, _token(), *_cli_schedule(evidence_id, due_at))
+    with pytest.raises(SystemExit, match="cancelled_by mismatch"):
+        cli.main([
+            "--store", str(store), *_cli_auth(_token()),
+            "intention-cancel", "--tenant", TENANT,
+            "--intention-id", second["intention_id"],
+            "--cancelled-by", "foreign-agent",
+        ])
+
+
+def test_cli_update_forwards_due_at_and_recurrence_policy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "cli-store.json"
+    evidence_id = _seed_evidence(LocalMemoryEngine(store))
+    due_at = datetime.now(UTC) + timedelta(hours=1)
+    scheduled = _run_cli(
+        capsys, store, _token(), *_cli_schedule(evidence_id, due_at.isoformat())
+    )
+    moved = due_at + timedelta(hours=2)
+    recurrence_policy = {"type": "interval", "interval_seconds": 600, "max_occurrences": 4}
+
+    updated = _run_cli(
+        capsys, store, _token(),
+        "intention-update", "--tenant", TENANT,
+        "--intention-id", scheduled["intention_id"],
+        "--user", USER, "--agent", AGENT,
+        "--due-at", moved.isoformat(),
+        "--recurrence-policy", json.dumps(recurrence_policy),
+    )
+    assert datetime.fromisoformat(updated["due_at"]) == moved
+    assert updated["recurrence_policy"] == recurrence_policy
+    assert updated["reschedule_history"] == [
+        {"from": scheduled["due_at"], "to": moved.isoformat()}
+    ]
 
 
 def test_cli_schedule_supports_dependency_completion(
