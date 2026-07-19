@@ -880,14 +880,37 @@ class MemoryTools:
             actor_id=cancelled_by,
             owner_id=cancelled_by,
         )
+        assert isinstance(session_identity, SessionIdentity)
+        if not session_identity.session_id:
+            raise PermissionError(
+                "cancel intention denied: authenticated session identifier is required"
+            )
+        authorized_tenant = authorization.tenant_id or tenant_id
+        current = next(
+            (
+                intention
+                for intention in self.engine.list_intentions(authorized_tenant)
+                if intention.intention_id == intention_id
+            ),
+            None,
+        )
+        if (
+            current is not None
+            and current.session_id is not None
+            and current.session_id != session_identity.session_id
+        ):
+            raise PermissionError(
+                "cancel intention denied: intention session does not match authenticated session"
+            )
         self.engine.cancel_intention(
-            authorization.tenant_id or tenant_id,
+            authorized_tenant,
             intention_id,
             cancelled_by=authorization.actor_id or cancelled_by,
+            session_id=session_identity.session_id,
         )
         return next(
             intention.to_dict()
-            for intention in self.engine.list_intentions(tenant_id)
+            for intention in self.engine.list_intentions(authorized_tenant)
             if intention.intention_id == intention_id
         )
 

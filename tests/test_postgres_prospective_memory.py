@@ -416,6 +416,102 @@ class TestUpdateAndRecurrence:
                 )
                 assert [row[0] for row in cur.fetchall()] == [0, 1]
 
+    def test_legacy_sessionless_update_binds_survives_reload_and_rejects_rebinding(
+        self, engine, tenant_user_agent
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT + timedelta(hours=1)
+        intention = _make_intention(
+            tenant_id=tid,
+            user_id=uid,
+            agent_id=aid,
+            evidence_id=eid,
+            trigger_type="exact_time",
+            trigger_expression={"at": due.isoformat()},
+            due_at=due,
+        )
+        engine.schedule_intention(intention)
+        bound = engine.update_intention(
+            tid,
+            intention.intention_id,
+            user_id=uid,
+            agent_id=aid,
+            session_id="session-a",
+            action={"type": "remind", "message": "Bound."},
+        )
+        assert bound.session_id == "session-a"
+
+        reloaded = PostgresEngine(_DSN, require_safe_role=False)
+        try:
+            before = reloaded.list_intentions(tid)[0]
+            audit_before = list(reloaded.export_tenant(tid)["audit_log"])
+            assert before.session_id == "session-a"
+            with pytest.raises(PermissionError, match="session"):
+                reloaded.update_intention(
+                    tid,
+                    intention.intention_id,
+                    user_id=uid,
+                    agent_id=aid,
+                    session_id="session-b",
+                    action={"type": "remind", "message": "Denied."},
+                )
+            assert reloaded.list_intentions(tid)[0] == before
+            assert reloaded.export_tenant(tid)["audit_log"] == audit_before
+        finally:
+            reloaded.close_connections()
+
+    def test_update_audit_failure_rolls_back_state_history_and_retries(
+        self, engine, tenant_user_agent, monkeypatch
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT + timedelta(hours=1)
+        intention = _make_intention(
+            tenant_id=tid,
+            user_id=uid,
+            agent_id=aid,
+            evidence_id=eid,
+            trigger_type="exact_time",
+            trigger_expression={"at": due.isoformat()},
+            due_at=due,
+            session_id="session-a",
+        )
+        engine.schedule_intention(intention)
+        before = engine.list_intentions(tid)[0]
+        audit_before = list(engine.export_tenant(tid)["audit_log"])
+        moved = due + timedelta(hours=1)
+        original_audit = engine._audit
+
+        def fail_audit(*_args, **_kwargs):
+            raise RuntimeError("injected update audit failure")
+
+        monkeypatch.setattr(engine, "_audit", fail_audit)
+        with pytest.raises(RuntimeError, match="injected update audit failure"):
+            engine.update_intention(
+                tid,
+                intention.intention_id,
+                user_id=uid,
+                agent_id=aid,
+                session_id="session-a",
+                due_at=moved,
+            )
+        assert engine.list_intentions(tid)[0] == before
+        assert engine.export_tenant(tid)["audit_log"] == audit_before
+
+        monkeypatch.setattr(engine, "_audit", original_audit)
+        retried = engine.update_intention(
+            tid,
+            intention.intention_id,
+            user_id=uid,
+            agent_id=aid,
+            session_id="session-a",
+            due_at=moved,
+        )
+        assert retried.due_at == moved
+        assert len(retried.reschedule_history) == 1
+        assert len(engine.export_tenant(tid)["audit_log"]) == len(audit_before) + 1
+
 
 class TestExactTime:
     def test_due_exact_time_fires_once_with_audit(self, engine, tenant_user_agent):
@@ -813,6 +909,53 @@ class TestProvenanceFailClosed:
 
 
 class TestCancel:
+    def test_legacy_sessionless_cancel_binds_survives_reload_and_rejects_rebinding(
+        self, engine, tenant_user_agent
+    ):
+        tid, uid, aid = tenant_user_agent
+        eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
+        due = _EVALUATED_AT + timedelta(hours=1)
+        intention = _make_intention(
+            tenant_id=tid,
+            user_id=uid,
+            agent_id=aid,
+            evidence_id=eid,
+            trigger_type="exact_time",
+            trigger_expression={"at": due.isoformat()},
+            due_at=due,
+        )
+        engine.schedule_intention(intention)
+        engine.cancel_intention(
+            tid,
+            intention.intention_id,
+            cancelled_by=uid,
+            session_id="session-a",
+        )
+
+        reloaded = PostgresEngine(_DSN, require_safe_role=False)
+        try:
+            before = reloaded.list_intentions(tid)[0]
+            audit_before = list(reloaded.export_tenant(tid)["audit_log"])
+            assert before.status == "cancelled"
+            assert before.session_id == "session-a"
+            with pytest.raises(PermissionError, match="session"):
+                reloaded.cancel_intention(
+                    tid,
+                    intention.intention_id,
+                    cancelled_by=uid,
+                    session_id="session-b",
+                )
+            reloaded.cancel_intention(
+                tid,
+                intention.intention_id,
+                cancelled_by=uid,
+                session_id="session-a",
+            )
+            assert reloaded.list_intentions(tid)[0] == before
+            assert reloaded.export_tenant(tid)["audit_log"] == audit_before
+        finally:
+            reloaded.close_connections()
+
     def test_cancel_by_owner_user(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
         eid = _append_evidence(engine, tenant_id=tid, user_id=uid, agent_id=aid)
@@ -824,7 +967,7 @@ class TestCancel:
             due_at=due,
         )
         engine.schedule_intention(intention)
-        engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid)
+        engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid, session_id="session-a")
         stored = engine.list_intentions(tid)[0]
         assert stored.status == "cancelled"
         assert stored.cancellation_state is not None
@@ -840,7 +983,7 @@ class TestCancel:
             due_at=due,
         )
         engine.schedule_intention(intention)
-        engine.cancel_intention(tid, intention.intention_id, cancelled_by=aid)
+        engine.cancel_intention(tid, intention.intention_id, cancelled_by=aid, session_id="session-a")
         assert engine.list_intentions(tid)[0].status == "cancelled"
 
     def test_cancel_by_non_owner_raises(self, engine, tenant_user_agent):
@@ -855,12 +998,12 @@ class TestCancel:
         )
         engine.schedule_intention(intention)
         with pytest.raises(PermissionError, match="owning user or agent"):
-            engine.cancel_intention(tid, intention.intention_id, cancelled_by="other-user")
+            engine.cancel_intention(tid, intention.intention_id, cancelled_by="other-user", session_id="session-a")
 
     def test_cancel_missing_raises_keyerror(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
         with pytest.raises(KeyError):
-            engine.cancel_intention(tid, "nonexistent", cancelled_by=uid)
+            engine.cancel_intention(tid, "nonexistent", cancelled_by=uid, session_id="session-a")
 
     def test_cancel_fired_raises_valueerror(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
@@ -875,7 +1018,7 @@ class TestCancel:
         engine.schedule_intention(intention)
         engine.evaluate_due_intentions(tid, evaluated_at=_EVALUATED_AT, trigger_context=_ctx(), operating_point=_OP)
         with pytest.raises(ValueError, match="cannot be cancelled"):
-            engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid)
+            engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid, session_id="session-a")
 
     def test_cancel_already_cancelled_is_noop(self, engine, tenant_user_agent):
         tid, uid, aid = tenant_user_agent
@@ -888,8 +1031,8 @@ class TestCancel:
             due_at=due,
         )
         engine.schedule_intention(intention)
-        engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid)
-        engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid)
+        engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid, session_id="session-a")
+        engine.cancel_intention(tid, intention.intention_id, cancelled_by=uid, session_id="session-a")
         assert engine.list_intentions(tid)[0].status == "cancelled"
         audits = [
             item
@@ -921,7 +1064,7 @@ class TestCancel:
 
         def cancel(contender: PostgresEngine) -> None:
             start.wait(timeout=5)
-            contender.cancel_intention(tid, intention.intention_id, cancelled_by=uid)
+            contender.cancel_intention(tid, intention.intention_id, cancelled_by=uid, session_id="session-a")
 
         try:
             with ThreadPoolExecutor(max_workers=2) as executor:
@@ -965,7 +1108,7 @@ class TestCancel:
             start.wait(timeout=5)
             try:
                 cancel_engine.cancel_intention(
-                    tid, intention.intention_id, cancelled_by=uid
+                    tid, intention.intention_id, cancelled_by=uid, session_id="session-a"
                 )
             except ValueError as exc:
                 assert "cannot be cancelled" in str(exc)
@@ -1056,7 +1199,7 @@ class TestTenantIsolation:
         )
         engine.schedule_intention(intention)
         with pytest.raises(KeyError):
-            engine.cancel_intention("other-tenant", intention.intention_id, cancelled_by=uid)
+            engine.cancel_intention("other-tenant", intention.intention_id, cancelled_by=uid, session_id="session-a")
 
     def test_rls_and_owner_ids_are_isolated(self, engine, tenant_user_agent):
         _require_rls_test_role(engine)
@@ -1090,9 +1233,9 @@ class TestTenantIsolation:
             )
 
         with pytest.raises(PermissionError, match="owning user or agent"):
-            engine.cancel_intention(tid, "visible-intention", cancelled_by=other_uid)
+            engine.cancel_intention(tid, "visible-intention", cancelled_by=other_uid, session_id="session-a")
         with pytest.raises(PermissionError, match="owning user or agent"):
-            engine.cancel_intention(tid, "visible-intention", cancelled_by=other_aid)
+            engine.cancel_intention(tid, "visible-intention", cancelled_by=other_aid, session_id="session-a")
 
         for tenant_id in (tid, other_tid):
             fired = engine.evaluate_due_intentions(

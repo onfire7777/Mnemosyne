@@ -637,6 +637,28 @@ def _updated_intention(
     return Intention.from_dict(row)
 
 
+def _cancelled_intention(
+    current: Intention, *, cancelled_by: str, session_id: str
+) -> Intention:
+    """Validate and build one detached intention cancellation."""
+    if type(cancelled_by) is not str or not cancelled_by.strip():
+        raise ValueError("cancelled_by must be a non-empty string")
+    if type(session_id) is not str or not session_id.strip():
+        raise ValueError("session_id must be a non-empty string")
+    if cancelled_by not in {current.user_id, current.agent_id}:
+        raise PermissionError("only the owning user or agent may cancel an intention")
+    if current.session_id is not None and session_id != current.session_id:
+        raise PermissionError("intention session does not match authenticated session")
+    if current.status == "fired":
+        raise ValueError("a fired intention cannot be cancelled")
+    row = current.to_dict()
+    row["session_id"] = session_id
+    if current.status == "scheduled":
+        row["status"] = "cancelled"
+        row["cancellation_state"] = {"cancelled_by": cancelled_by}
+    return Intention.from_dict(row)
+
+
 def _advance_intention_after_fire(
     intention: Intention, *, evaluated_at: datetime
 ) -> tuple[Intention, Intention]:
@@ -1539,7 +1561,7 @@ class MemoryEngine(Protocol):
         raise NotImplementedError
 
     def cancel_intention(
-        self, tenant_id: str, intention_id: str, *, cancelled_by: str
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
     ) -> None:
         raise NotImplementedError
 
@@ -1892,37 +1914,35 @@ class LocalMemoryEngine:
                 self._persist()
             return stored.intention_id
 
-    def cancel_intention(self, tenant_id: str, intention_id: str, *, cancelled_by: str) -> None:
+    def cancel_intention(
+        self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
+    ) -> None:
         with self._lock:
-            if type(cancelled_by) is not str or not cancelled_by.strip():
-                raise ValueError("cancelled_by must be a non-empty string")
             key = (tenant_id, intention_id)
-            intention = self.intentions.get(key)
-            if intention is None:
+            current = self.intentions.get(key)
+            if current is None:
                 raise KeyError(intention_id)
-            if intention.status == "fired":
-                raise ValueError("a fired intention cannot be cancelled")
-            if intention.status == "cancelled":
+            intention = _cancelled_intention(
+                current, cancelled_by=cancelled_by, session_id=session_id
+            )
+            if intention == current:
                 return
-            if cancelled_by not in {intention.user_id, intention.agent_id}:
-                raise PermissionError(
-                    "only the owning user or agent may cancel an intention"
-                )
+            was_scheduled = current.status == "scheduled"
             provenance = self._intention_provenance(intention)
             trust_tier, capability_tags = intention_audit_context(provenance)
             with self._prospective_transaction():
-                intention.status = "cancelled"
-                intention.cancellation_state = {"cancelled_by": cancelled_by}
-                self._audit(
-                    tenant_id,
-                    cancelled_by,
-                    "cancel_intention",
-                    intention_id,
-                    intention_audit_diff(intention, status="cancelled"),
-                    source="prospective_memory",
-                    trust_tier=trust_tier,
-                    capability_tags=capability_tags,
-                )
+                self.intentions[key] = intention
+                if was_scheduled:
+                    self._audit(
+                        tenant_id,
+                        cancelled_by,
+                        "cancel_intention",
+                        intention_id,
+                        intention_audit_diff(intention, status="cancelled"),
+                        source="prospective_memory",
+                        trust_tier=trust_tier,
+                        capability_tags=capability_tags,
+                    )
                 self._persist()
 
     def update_intention(
