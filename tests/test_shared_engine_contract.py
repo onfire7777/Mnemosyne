@@ -498,6 +498,145 @@ def test_shared_recurring_signal_is_consumed_once(
     ) == 1
 
 
+def test_shared_recurring_events_never_cycle_consumed_signals(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-consumed-history"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    engine.schedule_intention(
+        _prospective_intention(
+            intention_id="shared-consumed-history",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type="event",
+            trigger_expression={
+                "event_type": "report.submitted",
+                "match": {"report_id": "report-1"},
+            },
+            due_at=due,
+            recurrence_policy={
+                "type": "interval",
+                "interval_seconds": 60,
+                "max_occurrences": 3,
+            },
+        )
+    )
+    events = [
+        {
+            "event_id": f"event-{index}",
+            "event_type": "report.submitted",
+            "occurred_at": (due + timedelta(minutes=index)).isoformat(),
+            "payload": {"report_id": "report-1"},
+            "confidence": 0.95,
+            "tenant_id": tenant,
+        }
+        for index in range(2)
+    ]
+    context = TriggerEvaluationContext(
+        infrastructure_available=True,
+        tenant_id=tenant,
+        events=events,
+        conditions={},
+    )
+
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=due + timedelta(minutes=1),
+            trigger_context=context,
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=due + timedelta(minutes=2),
+            trigger_context=context,
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=due + timedelta(minutes=3),
+        trigger_context=context,
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    ) == []
+
+
+def test_shared_recurring_conditions_never_cycle_consumed_signals(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-consumed-condition-history"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    engine.schedule_intention(
+        _prospective_intention(
+            intention_id="shared-consumed-condition-history",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type="condition",
+            trigger_expression={
+                "condition_id": "report-ready",
+                "operator": "gt",
+                "value": 30,
+            },
+            due_at=due,
+            recurrence_policy={
+                "type": "interval",
+                "interval_seconds": 60,
+                "max_occurrences": 3,
+            },
+        )
+    )
+
+    def context(observed_at: datetime) -> TriggerEvaluationContext:
+        return TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=tenant,
+            events=[],
+            conditions={
+                "report-ready": {
+                    "value": 35,
+                    "observed_at": observed_at.isoformat(),
+                    "confidence": 0.95,
+                    "tenant_id": tenant,
+                }
+            },
+        )
+
+    first = due + timedelta(minutes=1)
+    second = due + timedelta(minutes=2)
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=first,
+            trigger_context=context(first),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=second,
+            trigger_context=context(second),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=due + timedelta(minutes=3),
+        trigger_context=context(first),
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    ) == []
+
+
 @pytest.mark.parametrize(
     "trigger_type",
     ["exact_time", "time_window", "event", "condition", "dependency_completion"],
