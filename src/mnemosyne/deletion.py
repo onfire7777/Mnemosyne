@@ -30,7 +30,74 @@ from .security import SecurityPolicy, SessionIdentity
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _OPAQUE_KEY = secrets.token_bytes(32)
-_RETAINED_SCHEMA_KEYS = {"embedding_partition", "reality_class"}
+# Structural vocabulary of retained custody records: audit/deletion/merge rows,
+# the evidence fields their diffs embed, working-memory descriptors, and forget
+# propagation summaries. A deleted metadata key that collides with one of these
+# generic schema words is not custody-bearing, and opaquing it would rename the
+# retained rows' own keys — structurally corrupting the custody history the
+# scrub is required to preserve. Colliding *values* still scrub by needle.
+_RETAINED_SCHEMA_KEYS = {
+    "access_policy",
+    "actor",
+    "assertions_added",
+    "assertions_merged",
+    "at",
+    "blocking_assertions",
+    "branch",
+    "capability_tags",
+    "cid",
+    "conflicts",
+    "content",
+    "content_pointer",
+    "created_at",
+    "diff",
+    "embedding",
+    "embedding_partition",
+    "erased",
+    "erased_derived_evidence",
+    "erasure_mode",
+    "evidence_added",
+    "evidence_cid",
+    "evidence_ids",
+    "expired_relations",
+    "from_branch",
+    "id",
+    "into_branch",
+    "item_id",
+    "metadata",
+    "min_corroboration_for_delete",
+    "modality",
+    "op",
+    "propagated",
+    "reality_class",
+    "reason",
+    "relations_added",
+    "removed_entities",
+    "removed_intentions",
+    "removed_working_items",
+    "requested_by",
+    "retained_derived_evidence",
+    "retracted_assertions",
+    "retracted_preferences",
+    "sensitivity",
+    "session_id",
+    "signed_provenance",
+    "source",
+    "source_identity",
+    "source_type",
+    "target_id",
+    "tenant_id",
+    "trimmed_assertions",
+    "trimmed_derived_evidence",
+    "trimmed_entities",
+    "trimmed_preferences",
+    "trimmed_relations",
+    "trimmed_working_items",
+    "trust_tier",
+    "user_id",
+    "working_digest",
+    "working_item_digest",
+}
 
 
 class DeletionStore(Protocol):
@@ -444,6 +511,39 @@ class DeletionCoordinator:
 
         return isinstance(self.engine, SqliteEngine)
 
+    def _evidence_present(self, tenant_id: str, ref: str, branch: str) -> bool:
+        # ``get_evidence`` masks erased tombstones, but a tombstone row still
+        # holds every column except content and must count as present until the
+        # legal shred removes it — otherwise a resume skips it and the manifest
+        # attests zero residue over a recoverable row.
+        return (
+            self.engine.get_evidence(tenant_id, ref, branch=branch) is not None
+            or self.engine.evidence_is_erased(tenant_id, ref, branch=branch)
+        )
+
+    def _fetch_evidence_unmasked(self, tenant_id: str, ref: str, branch: str) -> Evidence | None:
+        """Store-core row fetch feeding the scrub needles.
+
+        A previously tombstoned target is invisible to ``get_evidence`` yet its
+        surviving columns (metadata, source_identity, session_id,
+        content_pointer) are exactly the custody values the retained-history
+        scrub must opaque before the legal shred destroys the only copy.
+        """
+        evidence = self.engine.get_evidence(tenant_id, ref, branch=branch)
+        if evidence is not None:
+            return evidence
+        if not self.engine.evidence_is_erased(tenant_id, ref, branch=branch):
+            return None
+        if self._is_sqlite_engine():
+            with self.engine._lock:
+                return self.engine._fetch_evidence(tenant_id, ref, branch)
+        rows = getattr(self.engine, "evidence", None)
+        if isinstance(rows, dict):
+            with self.engine._lock:
+                row = rows.get(self.engine._evidence_key(tenant_id, branch, ref))
+                return deepcopy(row) if row is not None else None
+        return None
+
     def _surface_ids(self, tenant: str, refs: list[str]) -> list[tuple[str, str]]:
         surface_ids = [("store", self._store_surface_name(name)) for name in self.stores]
         surface_ids.extend(
@@ -678,7 +778,7 @@ class DeletionCoordinator:
         sensitive_keys: set[str] = set()
         for branch in branches:
             for ref in request["source_refs"]:
-                evidence = self.engine.get_evidence(request["tenant_id"], ref, branch=branch)
+                evidence = self._fetch_evidence_unmasked(request["tenant_id"], ref, branch)
                 if evidence is not None:
                     sensitive.update(
                         self._strings(
@@ -715,9 +815,9 @@ class DeletionCoordinator:
         try:
             for branch in branches:
                 for ref in request["source_refs"]:
-                    if resuming and self.engine.get_evidence(
-                        request["tenant_id"], ref, branch=branch
-                    ) is None:
+                    if resuming and not self._evidence_present(
+                        request["tenant_id"], ref, branch
+                    ):
                         continue
                     self.engine.forget(
                         request["tenant_id"],
@@ -728,7 +828,7 @@ class DeletionCoordinator:
                     )
             self._scrub_retained_history(request["tenant_id"], sensitive, sensitive_keys)
             if any(
-                self.engine.get_evidence(request["tenant_id"], ref, branch=branch) is not None
+                self._evidence_present(request["tenant_id"], ref, branch)
                 for branch in branches
                 for ref in request["source_refs"]
             ):
