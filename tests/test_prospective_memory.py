@@ -347,6 +347,29 @@ def test_interval_recurrence_advances_once_per_occurrence_and_terminates() -> No
     assert len(receipts) == len(set(receipts)) == 3
 
 
+def test_recurrence_overflow_terminates_as_final_fire_instead_of_poisoning() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = datetime(9999, 12, 31, 23, 30, tzinfo=timezone.utc)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 3600},
+    ))
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=due, trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert len(fired) == 1
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.status == "fired"
+    assert stored.recurrence_state["occurrence"] == 0
+    # The tenant evaluation loop must keep working after the terminal fire.
+    assert engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=due, trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    ) == []
+
+
 def test_infinite_event_recurrence_uses_one_monotonic_signal_watermark() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)
@@ -484,6 +507,11 @@ _RECURRENCE_STATE_LAST = (EVALUATED_AT + timedelta(minutes=5)).isoformat()
         ({"type": "cron"}, None, "recurrence_policy.type must be 'none' or 'interval'"),
         ({"type": "none", "interval_seconds": 60}, None, "non-recurring policy only accepts type"),
         ({"type": "interval"}, None, "interval_seconds must be a positive integer"),
+        (
+            {"type": "interval", "interval_seconds": 10**15},
+            None,
+            "interval_seconds must not exceed",
+        ),
         (
             {"type": "interval", "interval_seconds": 60, "max_occurrences": 0},
             None,

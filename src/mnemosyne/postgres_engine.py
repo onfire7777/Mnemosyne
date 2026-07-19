@@ -6071,9 +6071,10 @@ class PostgresEngine:
     def cancel_intention(
         self, tenant_id: str, intention_id: str, *, cancelled_by: str, session_id: str
     ) -> None:
-        """Cancel an intention. Missing/cross-tenant -> KeyError; non-owner ->
-        PermissionError; fired -> ValueError; already-cancelled is an
-        idempotent no-op with no second audit."""
+        """Cancel an intention. Missing/cross-tenant -> KeyError; non-owner or
+        wrong bound session -> PermissionError; fired -> ValueError; repeating
+        a cancellation from its bound session is an idempotent no-op with no
+        second audit."""
 
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
