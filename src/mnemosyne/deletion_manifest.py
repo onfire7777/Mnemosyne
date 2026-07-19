@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -18,7 +19,7 @@ from .evidence_signing import (
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _RAW_HASH = re.compile(r"^[0-9a-fA-F]{32,}$")
 _OPAQUE_REF = re.compile(r"^opaque:[0-9a-f]{64}$")
-_CHECKPOINT = re.compile(r"^(?:[0-9a-f]{16}|local:[1-9][0-9]*)$")
+_CHECKPOINT = re.compile(r"^[0-9a-f]{16}$")
 _SAFE_SURFACE_KINDS = {"store", "cache", "object", "backup", "engine"}
 _MAX_CUSTODY_DEPTH = 32
 _SAFE_SURFACE_LABELS = {
@@ -54,6 +55,16 @@ _ALLOWED_KEYS = {
         "recoverable_residue_count", "cross_tenant_mutations", "complete",
     },
 }
+_SAFE_ERROR_KEYS = frozenset().union(*_ALLOWED_KEYS.values()) | _FORBIDDEN_KEYS
+
+
+def _key_label(key: Any, index: int) -> str:
+    """Echo only vocabulary key names into errors; unknown keys may carry custody."""
+    if isinstance(key, str) and (key in _SAFE_ERROR_KEYS or key.lower() in _FORBIDDEN_KEYS):
+        return key
+    return f"<field {index}>"
+
+
 def is_safe_surface_label(value: Any) -> bool:
     """Return whether a public surface label cannot carry caller custody data."""
     return isinstance(value, str) and (
@@ -69,9 +80,10 @@ def _schema_errors(manifest: dict[str, Any]) -> list[str]:
     def check(value: Any, kind: str, path: str) -> None:
         if not isinstance(value, dict):
             return
-        unknown = set(value) - _ALLOWED_KEYS[kind]
+        unknown = sorted(set(value) - _ALLOWED_KEYS[kind], key=str)
         if unknown:
-            errors.append(f"{path} contains unknown fields: {', '.join(sorted(map(str, unknown)))}")
+            labels = ", ".join(_key_label(key, index) for index, key in enumerate(unknown))
+            errors.append(f"{path} contains unknown fields: {labels}")
         # Every field is required except on retention exceptions, which are only
         # ever checked for shape when present.
         required = _ALLOWED_KEYS[kind] if kind != "retention_exception" else set()
@@ -101,12 +113,16 @@ def _custody_errors(value: Any, *, path: str = "manifest", depth: int = 0) -> li
         return [f"{path} nests deeper than the custody scan bound"]
     errors: list[str] = []
     if isinstance(value, dict):
-        for key, item in value.items():
+        for index, (key, item) in enumerate(value.items()):
+            # Error paths echo only vocabulary key names; a hostile key would
+            # otherwise copy the very custody material this scan polices into
+            # exceptions and logs.
+            label = _key_label(key, index)
             if isinstance(key, str) and key.lower() in _FORBIDDEN_KEYS:
-                errors.append(f"{path}.{key} is a forbidden direct-custody field")
+                errors.append(f"{path}.{label} is a forbidden direct-custody field")
             # Custody material can hide in a field name, not just a value.
-            errors.extend(_custody_errors(key, path=f"{path}.{key}", depth=depth + 1))
-            errors.extend(_custody_errors(item, path=f"{path}.{key}", depth=depth + 1))
+            errors.extend(_custody_errors(key, path=f"{path}.{label}", depth=depth + 1))
+            errors.extend(_custody_errors(item, path=f"{path}.{label}", depth=depth + 1))
     elif isinstance(value, list):
         for index, item in enumerate(value):
             errors.extend(_custody_errors(item, path=f"{path}[{index}]", depth=depth + 1))
@@ -257,7 +273,7 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         or not isinstance(row.get("durability_checkpoint"), str)
         or _CHECKPOINT.fullmatch(row["durability_checkpoint"]) is None
         or row.get("durability_checkpoint") != row.get("checkpoint")
-        or row.get("backend") not in {"local", "synthetic"}
+        or row.get("backend") != "synthetic"
         or row.get("error_code") is not None
         for row in surfaces
     ):
@@ -325,15 +341,28 @@ def verify_signed_deletion_manifest(
     """Require both a valid collector signature and complete deletion semantics."""
     errors: list[str] = []
     signature: dict[str, Any] = {"verified": False}
+    manifest_bytes: bytes | None = None
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+    except OSError as exc:
+        errors.append(f"manifest file is not readable JSON: {exc}")
     try:
         signature = verify_evidence_manifest_signature(manifest_path, public_key_path)
     except EvidenceSignatureError as exc:
         errors.append(f"manifest signature is invalid: {exc}")
     manifest: Any = None
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, RecursionError) as exc:
-        errors.append(f"manifest file is not readable JSON: {exc}")
+    if manifest_bytes is not None:
+        # The signature helper reads the file independently; bind its digest to
+        # the exact bytes being semantically verified so a concurrent rewrite
+        # between the two reads fails closed instead of pairing an old-bytes
+        # signature with new-bytes semantics.
+        digest = "sha256:" + sha256(manifest_bytes).hexdigest()
+        if signature.get("manifest_sha256") not in (None, digest):
+            errors.append("manifest bytes changed during signed verification")
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except (ValueError, RecursionError) as exc:
+            errors.append(f"manifest file is not readable JSON: {exc}")
     semantic = verify_deletion_manifest(manifest)
     complete = semantic["complete"] and signature.get("verified") is True and not errors
     errors.extend(semantic["errors"])
