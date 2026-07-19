@@ -14,6 +14,7 @@ from .evidence_signing import sign_evidence_manifest, verify_evidence_manifest_s
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _RAW_HASH = re.compile(r"^[0-9a-fA-F]{32,}$")
 _OPAQUE_REF = re.compile(r"^opaque:[0-9a-f]{64}$")
+_CHECKPOINT = re.compile(r"^(?:[0-9a-f]{16}|local:[1-9][0-9]*)$")
 _FORBIDDEN_KEYS = {
     "payload", "content", "content_pointer", "source_uri", "uri", "hash",
     "tenant_id", "user_id", "source_ref", "evidence_cid", "source_identity",
@@ -225,11 +226,14 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         or not _receipt_timestamps_valid(row, requested_at, completed_at)
         or type(row.get("attempts")) is not int
         or row["attempts"] < 1
-        or not row.get("checkpoint")
+        or not isinstance(row.get("checkpoint"), str)
+        or _CHECKPOINT.fullmatch(row["checkpoint"]) is None
         or row.get("verified_removed") is not True
         or row.get("residue_probe") != 0
-        or not row.get("durability_checkpoint")
+        or not isinstance(row.get("durability_checkpoint"), str)
+        or _CHECKPOINT.fullmatch(row["durability_checkpoint"]) is None
         or row.get("durability_checkpoint") != row.get("checkpoint")
+        or row.get("backend") not in {"local", "synthetic"}
         or row.get("error_code") is not None
         for row in surfaces
     ):
@@ -249,7 +253,8 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
         or row.get("available") is not True
         or row.get("visited") != row.get("expected")
         or row.get("discovered") != row.get("expected")
-        or not row.get("checkpoint")
+        or not isinstance(row.get("checkpoint"), str)
+        or _CHECKPOINT.fullmatch(row["checkpoint"]) is None
         for row in stores
     ):
         errors.append("one or more stores are incomplete or unavailable")
