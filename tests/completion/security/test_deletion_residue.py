@@ -782,6 +782,19 @@ def test_request_validation_rejects_before_effects(field: str, value: Any, error
     assert world.engine.get_evidence(TENANT, world.source_ref) is not None
 
 
+def test_request_validation_canonicalizes_uuid_before_deletion() -> None:
+    world = _world()
+    manifest = _delete(world, operation_id=f"{{{OPERATION_ID.upper()}}}")
+    assert manifest["operation_id"] == OPERATION_ID
+    assert manifest["request_id"] == OPERATION_ID
+    durable_manifest = copy.deepcopy(manifest)
+    durable_manifest["fence"]["durable"] = True
+    assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(durable_manifest) == {
+        "complete": True,
+        "errors": [],
+    }
+
+
 def test_replay_conflict_covers_every_authoritative_request_dimension() -> None:
     world = _world()
     first = _delete(world)
@@ -1259,6 +1272,27 @@ def test_r25_complete_manifest_is_signed_then_semantically_verified(tmp_path: Pa
     ],
 )
 def test_r25_semantic_verifier_fails_closed_for_malformed_names_and_fences(
+    mutate: Callable[[dict[str, Any]], None],
+) -> None:
+    manifest = _valid_manifest()
+    mutate(manifest)
+    result = importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(manifest)
+    assert result["complete"] is False
+    assert result["errors"]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda manifest: manifest["surfaces"][0].update(
+            checkpoint="direct-user-identifier",
+            durability_checkpoint="direct-user-identifier",
+        ),
+        lambda manifest: manifest["stores"][0].update(checkpoint="direct-user-identifier"),
+        lambda manifest: manifest["surfaces"][0].update(backend="direct-user-identifier"),
+    ],
+)
+def test_r25_semantic_verifier_rejects_custody_in_receipt_tokens(
     mutate: Callable[[dict[str, Any]], None],
 ) -> None:
     manifest = _valid_manifest()

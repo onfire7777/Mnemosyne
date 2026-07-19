@@ -337,7 +337,7 @@ class DeletionCoordinator:
         )
         fingerprint = _canonical_fingerprint(request)
         with self.ledger.operation_lock():
-            record = self.ledger.begin(operation_id, fingerprint, tenant_id)
+            record = self.ledger.begin(request["operation_id"], fingerprint, tenant_id)
             if record.manifest is not None and record.manifest["summary"]["complete"]:
                 return deepcopy(record.manifest)
             manifest = self._run(record, request)
@@ -385,7 +385,11 @@ class DeletionCoordinator:
             raise ValueError("unsupported deletion mode")
         if not isinstance(raw["reason"], str) or not raw["reason"].strip():
             raise ValueError("reason is required")
-        return {**raw, "source_refs": normalized_refs}
+        return {
+            **raw,
+            "operation_id": str(parsed),
+            "source_refs": normalized_refs,
+        }
 
     def _run(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         tenant = request["tenant_id"]
