@@ -183,18 +183,25 @@ class MnemosyneMcpServer:
         """Release MCP-owned engines, queues, and cached stateless bundles.
 
         Idempotent: every owned bundle is evicted before it is closed, so each
-        one is closed exactly once. A stateless facade may keep serving after
-        close by rebuilding bundles on demand.
+        one is closed exactly once. Serialized against stateless transactions
+        so a bundle is never closed mid-tool-call. A stateless facade may keep
+        serving after close by rebuilding bundles on demand.
         """
 
-        with self._stateless_tools_cache_lock:
+        errors: list[Exception] = []
+        with self._stateless_transaction_lock, self._stateless_tools_cache_lock:
             stale = [bundle for _stamp, bundle in self._stateless_tools_cache.values()]
             self._stateless_tools_cache.clear()
-        for bundle in stale:
-            self._close_bundle(bundle)
-        if not self.stateless and not self._stateful_tools_closed:
-            self._stateful_tools_closed = True
-            self._close_bundle((self.engine, self.queue, self.runtime_state, self.tools))
+            if not self.stateless and not self._stateful_tools_closed:
+                self._stateful_tools_closed = True
+                stale.append((self.engine, self.queue, self.runtime_state, self.tools))
+            for bundle in stale:
+                try:
+                    self._close_bundle(bundle)
+                except Exception as exc:  # noqa: BLE001 - release every bundle before reporting.
+                    errors.append(exc)
+        if errors:
+            raise errors[0]
 
     def __enter__(self) -> MnemosyneMcpServer:
         return self
@@ -205,10 +212,17 @@ class MnemosyneMcpServer:
     @staticmethod
     def _close_bundle(bundle: tuple[Any, Any, Any, Any]) -> None:
         engine, queue, runtime_state, _tools = bundle
+        errors: list[Exception] = []
         for resource in (engine, queue, runtime_state):
             closer = getattr(resource, "close", None) or getattr(resource, "close_connections", None)
-            if callable(closer):
+            if not callable(closer):
+                continue
+            try:
                 closer()
+            except Exception as exc:  # noqa: BLE001 - release every resource before reporting.
+                errors.append(exc)
+        if errors:
+            raise errors[0]
 
     def _stateless_tools_cache_key(
         self,
@@ -244,18 +258,15 @@ class MnemosyneMcpServer:
                 self.backend in {"local", "sqlite"} or cached[0] == stamp
             ):
                 return cached[1], key
-            # A miss replaces cached bundles: evict-then-close the stale
-            # same-key bundle, and on the single-store backends every other
-            # scope's bundle too, so one store never holds two live writers.
-            stale = []
-            if cached is not None:
-                stale.append(cached[1])
-                del self._stateless_tools_cache[key]
+            # A miss can only happen with no cached bundle for this key (the
+            # hit check above returns every cached entry). On the single-store
+            # backends, evict-then-close every other scope's bundle before
+            # building, so one store never holds two live writers.
             if self.backend in {"local", "sqlite"}:
-                stale.extend(entry[1] for entry in self._stateless_tools_cache.values())
+                stale = [entry[1] for entry in self._stateless_tools_cache.values()]
                 self._stateless_tools_cache.clear()
-            for old_bundle in stale:
-                self._close_bundle(old_bundle)
+                for old_bundle in stale:
+                    self._close_bundle(old_bundle)
             bundle = self._build_tools(queue_tenant)
             self._stateless_tools_cache[key] = (self._stateless_tools_stamp(), bundle)
             return bundle, key
@@ -845,7 +856,11 @@ async def _serve_sdk_stdio(server: Any) -> None:
 
 
 def serve_sdk_stdio(**kwargs: Any) -> None:
-    asyncio.run(_serve_sdk_stdio(build_sdk_server(**kwargs)))
+    server = build_sdk_server(**kwargs)
+    try:
+        asyncio.run(_serve_sdk_stdio(server))
+    finally:
+        server.mnemosyne_mcp_facade.close()
 
 
 def build_sdk_streamable_http_app(
@@ -896,9 +911,7 @@ def build_sdk_streamable_http_app(
             async with session_manager.run():
                 yield
         finally:
-            facade = getattr(sdk_server, "mnemosyne_mcp_facade", None)
-            if facade is not None:
-                facade.close()
+            sdk_server.mnemosyne_mcp_facade.close()
 
     app = Starlette(
         routes=[
@@ -938,11 +951,24 @@ def serve_sdk_streamable_http(
 class _FacadeClosingHTTPServer(ThreadingHTTPServer):
     """ThreadingHTTPServer whose server_close also releases the MCP facade.
 
-    The facade reference is dropped before closing it, so repeated
-    server_close calls close the facade's resources exactly once.
+    Handler threads are non-daemon so server_close joins in-flight requests
+    before the facade is released. The facade is adopted before binding, so a
+    bind/activate failure inside __init__ also releases it, and the reference
+    is dropped before closing it, so repeated server_close calls close the
+    facade's resources exactly once.
     """
 
+    daemon_threads = False
     mnemosyne_facade: MnemosyneMcpServer | None = None
+
+    def __init__(
+        self,
+        server_address: tuple[str, int],
+        handler_class: type[BaseHTTPRequestHandler],
+        facade: MnemosyneMcpServer,
+    ) -> None:
+        self.mnemosyne_facade = facade
+        super().__init__(server_address, handler_class)
 
     def server_close(self) -> None:
         try:
@@ -996,50 +1022,54 @@ def build_http_server(
 
     facade = MnemosyneMcpServer(**kwargs)
     facade_lock = threading.RLock()
-    rpc_path = _normalize_http_path(rpc_path)
-    health_path = _normalize_http_path(health_path)
-    session_exchange_path = _normalize_http_path(session_exchange_path)
-    max_body_bytes = int(max_body_bytes)
-    if max_body_bytes <= 0:
-        raise ValueError("HTTP MCP max body bytes must be positive")
-    idp_verifier: OidcJwtVerifier | None = None
-    if idp_issuer or idp_audience or idp_jwks or idp_jwks_file or idp_jwks_url or idp_authz_policy or idp_authz_policy_file:
-        if not idp_issuer or not idp_audience:
-            raise ValueError("HTTP MCP session exchange requires idp issuer and audience")
-        idp_verifier = OidcJwtVerifier(
-            load_oidc_jwks(
-                jwks=idp_jwks,
-                jwks_file=idp_jwks_file,
-                jwks_url=idp_jwks_url,
-                allow_insecure_url=idp_allow_insecure_jwks_url,
-                timeout=idp_timeout,
-                max_bytes=idp_jwks_max_bytes,
-            ),
-            issuer=idp_issuer,
-            audience=idp_audience,
-            tenant_claim=idp_tenant_claim,
-            user_claim=idp_user_claim,
-            role_claim=idp_role_claim,
-            trust_claim=idp_trust_claim,
-            session_id_claim=idp_session_id_claim,
-            allowed_algorithms=tuple(item for item in idp_algorithms if item),
-            leeway_seconds=idp_leeway_seconds,
-            jwks_loader=oidc_jwks_loader(
-                jwks=idp_jwks,
-                jwks_file=idp_jwks_file,
-                jwks_url=idp_jwks_url,
-                allow_insecure_url=idp_allow_insecure_jwks_url,
-                timeout=idp_timeout,
-                max_bytes=idp_jwks_max_bytes,
-            ),
-            jwks_cache_ttl_seconds=idp_jwks_cache_ttl_seconds,
-            refresh_on_unknown_kid=idp_refresh_on_unknown_kid,
-            expected_kid_sha256=tuple(item for item in idp_expected_kid_sha256 if item),
-            authorization_policy=load_oidc_authorization_policy(
-                policy=idp_authz_policy,
-                policy_file=idp_authz_policy_file,
-            ),
-        )
+    try:
+        rpc_path = _normalize_http_path(rpc_path)
+        health_path = _normalize_http_path(health_path)
+        session_exchange_path = _normalize_http_path(session_exchange_path)
+        max_body_bytes = int(max_body_bytes)
+        if max_body_bytes <= 0:
+            raise ValueError("HTTP MCP max body bytes must be positive")
+        idp_verifier: OidcJwtVerifier | None = None
+        if idp_issuer or idp_audience or idp_jwks or idp_jwks_file or idp_jwks_url or idp_authz_policy or idp_authz_policy_file:
+            if not idp_issuer or not idp_audience:
+                raise ValueError("HTTP MCP session exchange requires idp issuer and audience")
+            idp_verifier = OidcJwtVerifier(
+                load_oidc_jwks(
+                    jwks=idp_jwks,
+                    jwks_file=idp_jwks_file,
+                    jwks_url=idp_jwks_url,
+                    allow_insecure_url=idp_allow_insecure_jwks_url,
+                    timeout=idp_timeout,
+                    max_bytes=idp_jwks_max_bytes,
+                ),
+                issuer=idp_issuer,
+                audience=idp_audience,
+                tenant_claim=idp_tenant_claim,
+                user_claim=idp_user_claim,
+                role_claim=idp_role_claim,
+                trust_claim=idp_trust_claim,
+                session_id_claim=idp_session_id_claim,
+                allowed_algorithms=tuple(item for item in idp_algorithms if item),
+                leeway_seconds=idp_leeway_seconds,
+                jwks_loader=oidc_jwks_loader(
+                    jwks=idp_jwks,
+                    jwks_file=idp_jwks_file,
+                    jwks_url=idp_jwks_url,
+                    allow_insecure_url=idp_allow_insecure_jwks_url,
+                    timeout=idp_timeout,
+                    max_bytes=idp_jwks_max_bytes,
+                ),
+                jwks_cache_ttl_seconds=idp_jwks_cache_ttl_seconds,
+                refresh_on_unknown_kid=idp_refresh_on_unknown_kid,
+                expected_kid_sha256=tuple(item for item in idp_expected_kid_sha256 if item),
+                authorization_policy=load_oidc_authorization_policy(
+                    policy=idp_authz_policy,
+                    policy_file=idp_authz_policy_file,
+                ),
+            )
+    except BaseException:
+        facade.close()
+        raise
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MnemosyneMcpHTTP/0.1"
@@ -1213,22 +1243,23 @@ def build_http_server(
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - stdlib signature.
             return
 
-    httpd = _FacadeClosingHTTPServer((host, port), Handler)
-    httpd.mnemosyne_facade = facade
+    httpd = _FacadeClosingHTTPServer((host, port), Handler, facade)
     if tls_cert_file or tls_key_file or tls_client_ca_file or tls_require_client_cert:
-        if not tls_cert_file or not tls_key_file:
+        try:
+            if not tls_cert_file or not tls_key_file:
+                raise ValueError("HTTP MCP TLS requires both tls_cert_file and tls_key_file")
+            if tls_require_client_cert and not tls_client_ca_file:
+                raise ValueError("HTTP MCP client certificate enforcement requires tls_client_ca_file")
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
+            context.load_cert_chain(certfile=tls_cert_file, keyfile=tls_key_file)
+            if tls_client_ca_file:
+                context.load_verify_locations(cafile=tls_client_ca_file)
+            context.verify_mode = ssl.CERT_REQUIRED if tls_require_client_cert else ssl.CERT_NONE
+            httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+        except BaseException:
             httpd.server_close()
-            raise ValueError("HTTP MCP TLS requires both tls_cert_file and tls_key_file")
-        if tls_require_client_cert and not tls_client_ca_file:
-            httpd.server_close()
-            raise ValueError("HTTP MCP client certificate enforcement requires tls_client_ca_file")
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(certfile=tls_cert_file, keyfile=tls_key_file)
-        if tls_client_ca_file:
-            context.load_verify_locations(cafile=tls_client_ca_file)
-        context.verify_mode = ssl.CERT_REQUIRED if tls_require_client_cert else ssl.CERT_NONE
-        httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+            raise
     return httpd
 
 
@@ -1274,69 +1305,76 @@ def run_self_test(*, sdk: bool = False, **kwargs: Any) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001 - self-test reports structured config failures.
         return {"ok": False, "checks": [{"name": "construct", "ok": False, "error": str(exc)}]}
 
-    initialize = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
-    initialized = initialize.get("result", {}).get("protocolVersion") == PROTOCOL_VERSION
-    record("initialize", initialized, protocol=initialize.get("result", {}).get("protocolVersion"))
+    try:
+        initialize = server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+        initialized = initialize.get("result", {}).get("protocolVersion") == PROTOCOL_VERSION
+        record("initialize", initialized, protocol=initialize.get("result", {}).get("protocolVersion"))
 
-    tools_list = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
-    tools = tools_list.get("result", {}).get("tools", [])
-    schemas_ok = bool(tools) and all(
-        item.get("inputSchema", {}).get("type") == "object"
-        and item.get("inputSchema", {}).get("additionalProperties") is False
-        for item in tools
-    )
-    record("tools_list", schemas_ok, tool_count=len(tools))
-
-    auth_params = _self_test_auth_params(server, include_session=False)
-    if server.auth_token:
-        unauthorized = _self_test_tool_call(server, "residency_policy", {})
-        record("auth_token_rejects_missing_token", unauthorized.get("isError") is True)
-    else:
-        record("auth_token_rejects_missing_token", True, skipped=True, reason="auth token not configured")
-
-    session_token = _self_test_session_token(server)
-    if server.require_session:
-        missing_session = _self_test_tool_call(server, "residency_policy", {}, auth_params=auth_params)
-        record("session_rejects_missing_token", missing_session.get("isError") is True)
-        session_config_ok = session_token is not None
-        record("session_signing_configured", session_config_ok)
-    else:
-        record("session_rejects_missing_token", True, skipped=True, reason="signed session not required")
-        session_config_ok = True
-
-    authorized_params = _self_test_auth_params(server, include_session=True)
-    if server.require_session and session_token is None:
-        record("schema_rejects_invalid_arguments", False, error="session token is required but no verifier is configured")
-        record("read_only_tool_call", False, error="session token is required but no verifier is configured")
-    else:
-        invalid_schema = _self_test_tool_call(
-            server,
-            "residency_policy",
-            {"unexpected": True},
-            auth_params=authorized_params,
+        tools_list = server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+        tools = tools_list.get("result", {}).get("tools", [])
+        schemas_ok = bool(tools) and all(
+            item.get("inputSchema", {}).get("type") == "object"
+            and item.get("inputSchema", {}).get("additionalProperties") is False
+            for item in tools
         )
-        record("schema_rejects_invalid_arguments", invalid_schema.get("isError") is True)
-        read_only = _self_test_tool_call(server, "residency_policy", {}, auth_params=authorized_params)
-        record("read_only_tool_call", read_only.get("isError") is False)
+        record("tools_list", schemas_ok, tool_count=len(tools))
 
-    if sdk:
-        try:
-            build_sdk_server(**kwargs)
-            record("sdk_build", True)
-        except Exception as exc:  # noqa: BLE001 - optional SDK readiness is a deployment check.
-            record("sdk_build", False, error=_redact_self_test_error(str(exc), kwargs, server))
+        auth_params = _self_test_auth_params(server, include_session=False)
+        if server.auth_token:
+            unauthorized = _self_test_tool_call(server, "residency_policy", {})
+            record("auth_token_rejects_missing_token", unauthorized.get("isError") is True)
+        else:
+            record("auth_token_rejects_missing_token", True, skipped=True, reason="auth token not configured")
 
-    ok = initialized and schemas_ok and session_config_ok and all(item["ok"] for item in checks)
-    return {
-        "ok": ok,
-        "backend": server.backend,
-        "stateless": server.stateless,
-        "production_profile": bool(server.production_profile),
-        "object_store_encryption": server.object_store_encryption,
-        "auth_token_required": bool(server.auth_token),
-        "session_required": bool(server.require_session),
-        "checks": checks,
-    }
+        session_token = _self_test_session_token(server)
+        if server.require_session:
+            missing_session = _self_test_tool_call(server, "residency_policy", {}, auth_params=auth_params)
+            record("session_rejects_missing_token", missing_session.get("isError") is True)
+            session_config_ok = session_token is not None
+            record("session_signing_configured", session_config_ok)
+        else:
+            record("session_rejects_missing_token", True, skipped=True, reason="signed session not required")
+            session_config_ok = True
+
+        authorized_params = _self_test_auth_params(server, include_session=True)
+        if server.require_session and session_token is None:
+            record("schema_rejects_invalid_arguments", False, error="session token is required but no verifier is configured")
+            record("read_only_tool_call", False, error="session token is required but no verifier is configured")
+        else:
+            invalid_schema = _self_test_tool_call(
+                server,
+                "residency_policy",
+                {"unexpected": True},
+                auth_params=authorized_params,
+            )
+            record("schema_rejects_invalid_arguments", invalid_schema.get("isError") is True)
+            read_only = _self_test_tool_call(server, "residency_policy", {}, auth_params=authorized_params)
+            record("read_only_tool_call", read_only.get("isError") is False)
+
+        if sdk:
+            # Release the store writer first so the SDK facade build can claim it.
+            server.close()
+            try:
+                sdk_server = build_sdk_server(**kwargs)
+            except Exception as exc:  # noqa: BLE001 - optional SDK readiness is a deployment check.
+                record("sdk_build", False, error=_redact_self_test_error(str(exc), kwargs, server))
+            else:
+                record("sdk_build", True)
+                sdk_server.mnemosyne_mcp_facade.close()
+
+        ok = initialized and schemas_ok and session_config_ok and all(item["ok"] for item in checks)
+        return {
+            "ok": ok,
+            "backend": server.backend,
+            "stateless": server.stateless,
+            "production_profile": bool(server.production_profile),
+            "object_store_encryption": server.object_store_encryption,
+            "auth_token_required": bool(server.auth_token),
+            "session_required": bool(server.require_session),
+            "checks": checks,
+        }
+    finally:
+        server.close()
 
 
 def _redact_self_test_error(message: str, kwargs: dict[str, Any], server: MnemosyneMcpServer) -> str:
@@ -1858,7 +1896,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.sdk:
         serve_sdk_stdio(**config)
     else:
-        MnemosyneMcpServer(**config).serve()
+        with MnemosyneMcpServer(**config) as facade:
+            facade.serve()
 
 
 if __name__ == "__main__":

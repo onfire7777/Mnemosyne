@@ -7,6 +7,7 @@ import ipaddress
 import inspect
 import json
 import shlex
+import socket
 import ssl
 import subprocess
 import sys
@@ -1960,6 +1961,12 @@ def test_mcp_server_main_dispatches_serving_modes(tmp_path: Path, monkeypatch: p
         def __init__(self, **kwargs: object) -> None:
             calls.append(("stdio_init", dict(kwargs)))
 
+        def __enter__(self) -> DummyServer:
+            return self
+
+        def __exit__(self, *_exc_info: object) -> None:
+            calls.append(("stdio_close", {}))
+
         def serve(self) -> None:
             calls.append(("stdio_serve", {}))
 
@@ -2029,6 +2036,7 @@ def test_mcp_server_main_dispatches_serving_modes(tmp_path: Path, monkeypatch: p
     calls_by_name = {name: kwargs for name, kwargs in calls if name != "stdio_serve"}
     assert calls[0][0] == "stdio_init"
     assert calls[1] == ("stdio_serve", {})
+    assert calls[2] == ("stdio_close", {})
     assert calls_by_name["stdio_init"]["store_path"] == str(tmp_path / "stdio.json")
     assert calls_by_name["stdio_init"]["auth_token"] == "entrypoint-token"
     assert calls_by_name["stdio_init"]["require_session"] is True
@@ -2446,10 +2454,19 @@ def test_mcp_self_test_fails_when_session_required_without_verifier(tmp_path: Pa
 
 def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sdk_calls: list[dict[str, object]] = []
+    facade_close_calls: list[int] = []
+
+    class FakeSdkFacade:
+        def close(self) -> None:
+            facade_close_calls.append(1)
+
+    class FakeSdkServer:
+        def __init__(self) -> None:
+            self.mnemosyne_mcp_facade = FakeSdkFacade()
 
     def sdk_success(**kwargs: object) -> object:
         sdk_calls.append(dict(kwargs))
-        return object()
+        return FakeSdkServer()
 
     monkeypatch.setattr(mcp_server, "build_sdk_server", sdk_success)
     report = run_self_test(store_path=tmp_path / "sdk-ok.json", sdk=True, stateless=True)
@@ -2458,6 +2475,7 @@ def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pyt
     assert report["ok"] is True
     assert report["stateless"] is True
     assert checks["sdk_build"]["ok"] is True
+    assert facade_close_calls == [1]
     assert sdk_calls[0]["store_path"] == tmp_path / "sdk-ok.json"
     assert sdk_calls[0]["stateless"] is True
 
@@ -2799,10 +2817,21 @@ def test_mcp_http_transport_requires_client_certificate(tmp_path: Path) -> None:
     assert health["tls_client_cert_required"] is True
 
 
-def test_mcp_http_transport_rejects_incomplete_tls_config(tmp_path: Path) -> None:
+def test_mcp_http_transport_rejects_incomplete_tls_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_calls: list[int] = []
+    original_close = MnemosyneMcpServer.close
+
+    def counting_close(self: MnemosyneMcpServer) -> None:
+        close_calls.append(1)
+        original_close(self)
+
+    monkeypatch.setattr(MnemosyneMcpServer, "close", counting_close)
     tls = make_tls_material(tmp_path)
     with pytest.raises(ValueError, match="both tls_cert_file and tls_key_file"):
         build_http_server(host="127.0.0.1", port=0, tls_cert_file=str(tls["server_cert"]))
+    assert close_calls == [1]
     with pytest.raises(ValueError, match="client certificate enforcement requires tls_client_ca_file"):
         build_http_server(
             host="127.0.0.1",
@@ -2811,6 +2840,7 @@ def test_mcp_http_transport_rejects_incomplete_tls_config(tmp_path: Path) -> Non
             tls_key_file=str(tls["server_key"]),
             tls_require_client_cert=True,
         )
+    assert close_calls == [1, 1]
 
 
 def test_mcp_http_transport_enforces_auth_session_and_schema(tmp_path: Path) -> None:
@@ -3416,7 +3446,7 @@ def test_mcp_server_stateless_mode_reuses_warm_tools_for_same_scope(
     assert build_calls == [TENANT, "tenant-other"]
 
 
-def test_mcp_server_stateless_warm_tools_reload_after_external_store_write(
+def test_mcp_server_stateless_reader_rebuilds_after_close_and_sees_external_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = tmp_path / "store.json"
@@ -3485,6 +3515,110 @@ def test_mcp_server_close_releases_cached_stateless_bundles_exactly_once(tmp_pat
     assert server._stateless_tools_cache == {}
     with LocalMemoryEngine(store_path=store) as successor:
         assert successor.evidence
+
+
+def test_mcp_server_stateful_close_is_idempotent_and_closes_engine_exactly_once(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store)
+    close_calls: list[int] = []
+    original_close = server.engine.close
+
+    def counting_close() -> None:
+        close_calls.append(1)
+        original_close()
+
+    server.engine.close = counting_close
+    server.close()
+    server.close()
+
+    assert close_calls == [1]
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_close_bundle_releases_every_resource_when_one_closer_fails() -> None:
+    closed: list[str] = []
+
+    class FailingEngine:
+        def close(self) -> None:
+            closed.append("engine")
+            raise RuntimeError("engine close failed")
+
+    class ClosableQueue:
+        def close(self) -> None:
+            closed.append("queue")
+
+    class ConnectionsOnlyRuntimeState:
+        def close_connections(self) -> None:
+            closed.append("runtime_state")
+
+    with pytest.raises(RuntimeError, match="engine close failed"):
+        MnemosyneMcpServer._close_bundle(
+            (FailingEngine(), ClosableQueue(), ConnectionsOnlyRuntimeState(), None)
+        )
+
+    assert closed == ["engine", "queue", "runtime_state"]
+
+
+def test_mcp_server_close_waits_for_in_flight_stateless_transaction(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store, stateless=True)
+    mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+
+    closer = threading.Thread(target=server.close)
+    with server._stateless_transaction_lock:
+        closer.start()
+        closer.join(timeout=0.2)
+        assert closer.is_alive(), "close() must wait for the in-flight stateless transaction"
+    closer.join(timeout=5)
+    assert not closer.is_alive()
+    assert server._stateless_tools_cache == {}
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_http_server_build_failure_closes_facade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_calls: list[int] = []
+    original_close = MnemosyneMcpServer.close
+
+    def counting_close(self: MnemosyneMcpServer) -> None:
+        close_calls.append(1)
+        original_close(self)
+
+    monkeypatch.setattr(MnemosyneMcpServer, "close", counting_close)
+    blocker = socket.socket()
+    try:
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        with pytest.raises(OSError):
+            build_http_server(
+                host="127.0.0.1",
+                port=blocker.getsockname()[1],
+                store_path=tmp_path / "store.json",
+            )
+    finally:
+        blocker.close()
+
+    assert close_calls == [1]
+
+
+def test_mcp_sdk_streamable_http_lifespan_closes_facade_on_exit(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    store = tmp_path / "streamable-lifespan-store.json"
+    app = build_sdk_streamable_http_app(store_path=store, stateless=False)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            with pytest.raises(RuntimeError, match="already has a writer"):
+                LocalMemoryEngine(store_path=store)
+
+    asyncio.run(exercise())
+    # The app (and thus the SDK facade) is still referenced, so only the
+    # lifespan's deterministic close can have released the writer.
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
 
 
 def test_mcp_server_stateless_scope_replacement_closes_previous_bundle(tmp_path: Path) -> None:
