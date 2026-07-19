@@ -23,11 +23,13 @@ from typing import Any, Protocol, Sequence
 from uuid import UUID
 from weakref import WeakKeyDictionary
 
+from .deletion_manifest import is_safe_surface_label
 from .models import Evidence
 from .security import SecurityPolicy, SessionIdentity
 
 SCHEMA = "mnemosyne.deletion_manifest.v1"
 _OPAQUE_KEY = secrets.token_bytes(32)
+_RETAINED_SCHEMA_KEYS = {"embedding_partition", "reality_class"}
 
 
 class DeletionStore(Protocol):
@@ -452,7 +454,7 @@ class DeletionCoordinator:
             return f"cache:{name}"
         if kind == "store" and name == "runtime_state":
             return "runtime_user_model"
-        return name
+        return name if is_safe_surface_label(name) else _opaque("surface-label", name)
 
     @staticmethod
     def _cache_surface_name(key: str) -> str:
@@ -615,6 +617,7 @@ class DeletionCoordinator:
         # discoverable by their owning tenant; the durable journal stores only
         # a keyed opaque tenant reference.
         sensitive = {request["user_id"], *request["source_refs"]}
+        sensitive_keys: set[str] = set()
         for branch in branches:
             for ref in request["source_refs"]:
                 evidence = self.engine.get_evidence(request["tenant_id"], ref, branch=branch)
@@ -630,12 +633,15 @@ class DeletionCoordinator:
                         )
                     )
                     sensitive.update(self._strings(evidence.metadata))
+                    sensitive_keys.update(
+                        self._mapping_keys(evidence.metadata) - _RETAINED_SCHEMA_KEYS
+                    )
         sensitive.update(hashlib.sha256(value.encode()).hexdigest() for value in tuple(sensitive) if value)
         try:
             # Scrub while the evidence still exists so a crash after forget cannot
             # destroy the only copy of payload-derived scrub inputs. Replay can
             # always scrub the new forget custody rows from request-owned refs.
-            self._scrub_retained_history(request["tenant_id"], sensitive)
+            self._scrub_retained_history(request["tenant_id"], sensitive, sensitive_keys)
             if not resuming:
                 receipt.attempts += 1
                 # Persist the ambiguous state before the engine side effect. A
@@ -655,7 +661,7 @@ class DeletionCoordinator:
                         requested_by="legal",
                         erasure_mode="hard_delete_legal",
                     )
-            self._scrub_retained_history(request["tenant_id"], sensitive)
+            self._scrub_retained_history(request["tenant_id"], sensitive, sensitive_keys)
             if any(
                 self.engine.get_evidence(request["tenant_id"], ref, branch=branch) is not None
                 for branch in branches
@@ -691,7 +697,24 @@ class DeletionCoordinator:
         return set()
 
     @classmethod
-    def _scrub_value(cls, value: Any, sensitive: set[str]) -> Any:
+    def _mapping_keys(cls, value: Any) -> set[str]:
+        if isinstance(value, dict):
+            return {
+                *[key for key in value if isinstance(key, str)],
+                *[
+                    key
+                    for nested in value.values()
+                    for key in cls._mapping_keys(nested)
+                ],
+            }
+        if isinstance(value, (list, tuple, set)):
+            return {
+                key for nested in value for key in cls._mapping_keys(nested)
+            }
+        return set()
+
+    @classmethod
+    def _scrub_value(cls, value: Any, sensitive: set[str], sensitive_keys: set[str]) -> Any:
         if isinstance(value, str) and any(
             needle and (value == needle or (len(needle) >= 8 and needle in value))
             for needle in sensitive
@@ -700,18 +723,24 @@ class DeletionCoordinator:
         if isinstance(value, dict):
             scrubbed = {}
             for key, item in value.items():
-                scrubbed_key = cls._scrub_value(key, sensitive)
+                scrubbed_key = (
+                    _opaque("retained-audit-key", key)
+                    if isinstance(key, str) and key in sensitive_keys
+                    else cls._scrub_value(key, sensitive, sensitive_keys)
+                )
                 if scrubbed_key in scrubbed:
                     scrubbed_key = _opaque("retained-audit-key", repr(key))
-                scrubbed[scrubbed_key] = cls._scrub_value(item, sensitive)
+                scrubbed[scrubbed_key] = cls._scrub_value(item, sensitive, sensitive_keys)
             return scrubbed
         if isinstance(value, list):
-            return [cls._scrub_value(item, sensitive) for item in value]
+            return [cls._scrub_value(item, sensitive, sensitive_keys) for item in value]
         if isinstance(value, tuple):
-            return tuple(cls._scrub_value(item, sensitive) for item in value)
+            return tuple(cls._scrub_value(item, sensitive, sensitive_keys) for item in value)
         return value
 
-    def _scrub_retained_history(self, tenant_id: str, sensitive: set[str]) -> None:
+    def _scrub_retained_history(
+        self, tenant_id: str, sensitive: set[str], sensitive_keys: set[str]
+    ) -> None:
         """Retain custody events while removing payload and correlatable references."""
         connect = getattr(self.engine, "_connect", None)
         if callable(connect) and self.engine.__class__.__name__ == "SqliteEngine":
@@ -724,21 +753,31 @@ class DeletionCoordinator:
                             continue
                         connection.execute(
                             f"UPDATE {table} SET record = ? WHERE seq = ?",
-                            (json.dumps(self._scrub_value(record, sensitive), sort_keys=True), row["seq"]),
+                            (
+                                json.dumps(
+                                    self._scrub_value(record, sensitive, sensitive_keys),
+                                    sort_keys=True,
+                                ),
+                                row["seq"],
+                            ),
                         )
             return
         for attribute in ("audit_log", "deletion_log", "merge_log"):
             rows = getattr(self.engine, attribute, None)
             if isinstance(rows, list):
                 rows[:] = [
-                    self._scrub_value(row, sensitive) if row.get("tenant_id") == tenant_id else row
+                    self._scrub_value(row, sensitive, sensitive_keys)
+                    if row.get("tenant_id") == tenant_id
+                    else row
                     for row in rows
                 ]
         assertions = getattr(self.engine, "assertions", None)
         if isinstance(assertions, dict):
             for assertion in assertions.values():
                 if getattr(assertion, "tenant_id", None) == tenant_id:
-                    assertion.calibration = self._scrub_value(assertion.calibration, sensitive)
+                    assertion.calibration = self._scrub_value(
+                        assertion.calibration, sensitive, sensitive_keys
+                    )
 
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
         rows = []

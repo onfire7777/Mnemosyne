@@ -15,6 +15,12 @@ SCHEMA = "mnemosyne.deletion_manifest.v1"
 _RAW_HASH = re.compile(r"^[0-9a-fA-F]{32,}$")
 _OPAQUE_REF = re.compile(r"^opaque:[0-9a-f]{64}$")
 _CHECKPOINT = re.compile(r"^(?:[0-9a-f]{16}|local:[1-9][0-9]*)$")
+_SAFE_SURFACE_LABELS = {
+    "backups", "cache:shared", "embedding_provider", "intentions", "journal",
+    "kms", "lexical_index", "manifest_store", "object_storage", "postgres",
+    "lessons", "procedures", "queue", "remote", "resources", "runtime_user_model",
+    "source_evidence", "sqlite", "trajectories",
+}
 _FORBIDDEN_KEYS = {
     "payload", "content", "content_pointer", "source_uri", "uri", "hash",
     "tenant_id", "user_id", "source_ref", "evidence_cid", "source_identity",
@@ -49,6 +55,15 @@ _REQUIRED_KEYS = {
     "store": _ALLOWED_KEYS["store"],
     "summary": _ALLOWED_KEYS["summary"],
 }
+
+
+def is_safe_surface_label(value: Any) -> bool:
+    """Return whether a public surface label cannot carry caller custody data."""
+    return isinstance(value, str) and (
+        value in _SAFE_SURFACE_LABELS
+        or _OPAQUE_REF.fullmatch(value) is not None
+        or (value.startswith("cache:") and _OPAQUE_REF.fullmatch(value[6:]) is not None)
+    )
 
 
 def _schema_errors(manifest: dict[str, Any]) -> list[str]:
@@ -198,7 +213,7 @@ def verify_deletion_manifest(manifest: Any) -> dict[str, Any]:
     ]
     names_are_valid = all(
         isinstance(kind, str) and bool(kind.strip())
-        and isinstance(name, str) and bool(name.strip())
+        and is_safe_surface_label(name)
         for values in (surface_values, store_values, required_values)
         for kind, name in values
     )

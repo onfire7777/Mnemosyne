@@ -1282,6 +1282,26 @@ def test_r25_semantic_verifier_fails_closed_for_malformed_names_and_fences(
     assert result["errors"]
 
 
+@pytest.mark.parametrize("label", ["user@example.com", "tenant/customer-123"])
+def test_r25_signed_manifest_rejects_identifier_bearing_surface_labels(
+    tmp_path: Path, label: str
+) -> None:
+    verifier = importlib.import_module("mnemosyne.deletion_manifest")
+    private_key = tmp_path / "collector.key.pem"
+    public_key = tmp_path / "collector.pub.pem"
+    generate_collector_keypair(private_key, public_key)
+    manifest = _valid_manifest()
+    manifest["surfaces"][0]["surface"] = label
+    manifest["stores"][0]["store"] = label
+    manifest["policy"]["required_surfaces"][0]["surface"] = label
+    manifest_path = tmp_path / "deletion-manifest.json"
+
+    with pytest.raises(ValueError, match="semantically incomplete"):
+        verifier.write_signed_deletion_manifest(manifest, manifest_path, private_key)
+
+    assert not manifest_path.exists()
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -1404,6 +1424,48 @@ def test_r21_retained_history_preserves_unrelated_schema_keys_and_short_values()
     retained = next(row for row in world.engine.audit_log if row["id"] == "audit-schema-r21")
     assert retained["source_type"] == "source_type"
     assert retained["reality_class"] == "source_type-adjacent"
+
+
+def test_r21_retained_history_scrubs_deleted_metadata_keys() -> None:
+    world = _world()
+    metadata_key = "private-metadata-key-unique"
+    evidence = _evidence(content="ordinary payload")
+    evidence.metadata = {metadata_key: "safe"}
+    source_ref = world.engine.append_evidence(evidence)
+    world.engine.audit_log.append(
+        {
+            "id": "audit-metadata-key-r21",
+            "tenant_id": TENANT,
+            "details": {metadata_key: "safe"},
+        }
+    )
+
+    _delete(world, source_refs=[source_ref])
+
+    retained = next(
+        row for row in world.engine.audit_log if row["id"] == "audit-metadata-key-r21"
+    )
+    _assert_absent(retained, metadata_key)
+    assert retained["details"]
+
+
+def test_r25_coordinator_opaques_identifier_bearing_store_labels() -> None:
+    world = _world()
+    unsafe_label = "user@example.com"
+    world.stores[unsafe_label] = FakeStore(
+        unsafe_label,
+        rows=[{"tenant_id": TENANT, "source_ref": world.source_ref}],
+    )
+
+    manifest = _delete(world)
+
+    _assert_absent(manifest, unsafe_label)
+    store = next(row for row in manifest["stores"] if row["store"].startswith("opaque:"))
+    assert store["store"] == _surface(manifest, store["store"])["surface"]
+    manifest["fence"]["durable"] = True
+    assert importlib.import_module("mnemosyne.deletion_manifest").verify_deletion_manifest(
+        manifest
+    ) == {"complete": True, "errors": []}
 
 
 def test_r25_signed_deletion_manifest_helper_requires_semantic_completeness(tmp_path: Path) -> None:
