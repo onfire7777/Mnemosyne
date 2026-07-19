@@ -11,7 +11,7 @@ import os
 import ssl
 import sys
 import threading
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager, nullcontext, suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
@@ -183,8 +183,10 @@ class MnemosyneMcpServer:
         """Release MCP-owned engines, queues, and cached stateless bundles.
 
         Idempotent: every owned bundle is evicted before it is closed, so each
-        one is closed exactly once. Serialized against stateless transactions
-        so a bundle is never closed mid-tool-call. A stateless facade may keep
+        one is closed exactly once. Serialized against local/sqlite stateless
+        transactions so those bundles are never closed mid-tool-call; postgres
+        and stateful tool calls take no transaction lock, so callers must
+        quiesce in-flight calls before close. A stateless facade may keep
         serving after close by rebuilding bundles on demand.
         """
 
@@ -290,68 +292,79 @@ class MnemosyneMcpServer:
         from mnemosyne.queue import InProcessQueue, PostgresQueue, SqliteQueue
         from mnemosyne.runtime_state import RuntimeState
 
-        if self.backend == "postgres":
-            dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
-            if not dsn:
-                raise ValueError("Postgres MCP backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
-            try:
-                from mnemosyne.postgres_engine import PostgresEngine
-            except ImportError as exc:  # pragma: no cover - defensive for broken installs.
-                raise ValueError("Postgres MCP backend requires mnemosyne-memory[postgres].") from exc
-            runtime_tenant = queue_tenant or self.queue_tenant
-            require_safe_role = self.production_profile or postgres_safe_role_required()
-            engine = PostgresEngine(dsn, require_safe_role=require_safe_role)
-            runtime_state = PostgresRuntimeState(dsn, tenant_id=runtime_tenant, require_safe_role=require_safe_role)
-        elif self.backend == "sqlite":
-            from mnemosyne.sqlite_engine import SqliteEngine
+        engine: Any = None
+        queue: Any = None
+        runtime_state: Any = None
+        try:
+            if self.backend == "postgres":
+                dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+                if not dsn:
+                    raise ValueError("Postgres MCP backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
+                try:
+                    from mnemosyne.postgres_engine import PostgresEngine
+                except ImportError as exc:  # pragma: no cover - defensive for broken installs.
+                    raise ValueError("Postgres MCP backend requires mnemosyne-memory[postgres].") from exc
+                runtime_tenant = queue_tenant or self.queue_tenant
+                require_safe_role = self.production_profile or postgres_safe_role_required()
+                engine = PostgresEngine(dsn, require_safe_role=require_safe_role)
+                runtime_state = PostgresRuntimeState(dsn, tenant_id=runtime_tenant, require_safe_role=require_safe_role)
+            elif self.backend == "sqlite":
+                from mnemosyne.sqlite_engine import SqliteEngine
 
-            # store_path doubles as the per-tenant SQLite root (enforced non-None
-            # in __init__); runtime state stays the file-based JSON lane.
-            engine = SqliteEngine(self.store_path)
-            runtime_state = RuntimeState.from_store_path(self.store_path)
-        else:
-            engine = LocalMemoryEngine(store_path=self.store_path)
-            runtime_state = RuntimeState.from_store_path(self.store_path)
-        if self.queue_backend == "postgres":
-            dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
-            if not dsn:
-                raise ValueError("Postgres MCP queue backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
-            require_safe_role = self.production_profile or postgres_safe_role_required()
-            queue = PostgresQueue(
-                dsn,
-                tenant_id=queue_tenant or self.queue_tenant,
-                require_safe_role=require_safe_role,
+                # store_path doubles as the per-tenant SQLite root (enforced non-None
+                # in __init__); runtime state stays the file-based JSON lane.
+                engine = SqliteEngine(self.store_path)
+                runtime_state = RuntimeState.from_store_path(self.store_path)
+            else:
+                engine = LocalMemoryEngine(store_path=self.store_path)
+                runtime_state = RuntimeState.from_store_path(self.store_path)
+            if self.queue_backend == "postgres":
+                dsn = self.postgres_dsn or os.environ.get("MNEMOSYNE_POSTGRES_DSN")
+                if not dsn:
+                    raise ValueError("Postgres MCP queue backend requires postgres_dsn or MNEMOSYNE_POSTGRES_DSN.")
+                require_safe_role = self.production_profile or postgres_safe_role_required()
+                queue = PostgresQueue(
+                    dsn,
+                    tenant_id=queue_tenant or self.queue_tenant,
+                    require_safe_role=require_safe_role,
+                )
+            elif self.queue_backend == "sqlite":
+                queue = SqliteQueue(self.store_path, tenant_id=queue_tenant or self.queue_tenant)
+            else:
+                queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
+            ingestion = IngestionPipeline(
+                engine,
+                object_store=_load_object_store(
+                    self.object_store,
+                    self.object_store_encryption,
+                    self.object_key_store,
+                    self.object_key_provider,
+                    self.object_key_command,
+                    self.object_key_timeout,
+                ),
+                queue=queue,
+                allowed_residencies=self.allowed_residencies,
+                runtime_residency=self.runtime_residency,
+                allowed_residency_transfers=self.allowed_residency_transfers,
+                require_runtime_residency=self.require_runtime_residency,
             )
-        elif self.queue_backend == "sqlite":
-            queue = SqliteQueue(self.store_path, tenant_id=queue_tenant or self.queue_tenant)
-        else:
-            queue = runtime_state.load_queue() if runtime_state else InProcessQueue()
-        ingestion = IngestionPipeline(
-            engine,
-            object_store=_load_object_store(
-                self.object_store,
-                self.object_store_encryption,
-                self.object_key_store,
-                self.object_key_provider,
-                self.object_key_command,
-                self.object_key_timeout,
-            ),
-            queue=queue,
-            allowed_residencies=self.allowed_residencies,
-            runtime_residency=self.runtime_residency,
-            allowed_residency_transfers=self.allowed_residency_transfers,
-            require_runtime_residency=self.require_runtime_residency,
-        )
-        parametric = ParametricTier(
-            ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store)),
-            trainer=_load_parametric_trainer(
-                self.parametric_provider,
-                self.parametric_command,
-                self.parametric_adapter_kind,
-                self.parametric_timeout,
-            ),
-        )
-        tools = MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
+            parametric = ParametricTier(
+                ParametricArtifactStore(_parametric_store_path(self.store_path, self.parametric_artifact_store)),
+                trainer=_load_parametric_trainer(
+                    self.parametric_provider,
+                    self.parametric_command,
+                    self.parametric_adapter_kind,
+                    self.parametric_timeout,
+                ),
+            )
+            tools = MemoryTools(engine, ingestion=ingestion, runtime_state=runtime_state, parametric=parametric)
+        except BaseException:
+            # A partially built bundle is never returned, so close() cannot
+            # release it; release the already-claimed resources here without
+            # masking the construction error.
+            with suppress(Exception):
+                self._close_bundle((engine, queue, runtime_state, None))
+            raise
         return engine, queue, runtime_state, tools
 
     def _enforce_production_profile(self) -> None:
@@ -797,44 +810,48 @@ def build_sdk_server(**kwargs: Any) -> Any:
         raise RuntimeError("Official MCP SDK mode requires `mnemosyne-memory[mcp]`.") from exc
 
     facade = MnemosyneMcpServer(**kwargs)
-    tool_specs = facade.tool_specs
-    schemas_by_name = {item["name"]: item["inputSchema"] for item in tool_specs}
-    server = Server("mnemosyne-memory", version="0.1.0")
+    try:
+        tool_specs = facade.tool_specs
+        schemas_by_name = {item["name"]: item["inputSchema"] for item in tool_specs}
+        server = Server("mnemosyne-memory", version="0.1.0")
 
-    @server.list_tools()
-    async def list_tools() -> list[Any]:
-        return [types.Tool(**item) for item in tool_specs]
+        @server.list_tools()
+        async def list_tools() -> list[Any]:
+            return [types.Tool(**item) for item in tool_specs]
 
-    @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any] | Any:
-        raw_arguments = dict(arguments or {})
-        auth_params: dict[str, Any] = {}
-        if "auth_token" in raw_arguments:
-            auth_params["auth_token"] = raw_arguments.pop("auth_token")
-        if "session_token" in raw_arguments:
-            auth_params["session_token"] = raw_arguments.pop("session_token")
-        meta = raw_arguments.pop("_meta", None)
-        if isinstance(meta, dict):
-            auth_params["_meta"] = meta
-        if not facade._authorized(auth_params):
-            return _sdk_tool_error(types, "unauthorized: valid MCP auth token required")
-        schema = schemas_by_name.get(name)
-        if schema is None:
-            return _sdk_tool_error(types, f"Unknown tool: {name}")
-        try:
-            raw_arguments = facade.prepare_tool_arguments(name, auth_params, raw_arguments)
-        except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
-            return _sdk_tool_error(types, str(exc))
-        try:
-            _validate_tool_arguments(name, raw_arguments, schemas_by_name)
-        except ValueError as exc:
-            return _sdk_tool_error(types, str(exc))
-        try:
-            return facade.call_tool(name, raw_arguments)
-        except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
-            return _sdk_tool_error(types, str(exc))
+        @server.call_tool(validate_input=False)
+        async def call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any] | Any:
+            raw_arguments = dict(arguments or {})
+            auth_params: dict[str, Any] = {}
+            if "auth_token" in raw_arguments:
+                auth_params["auth_token"] = raw_arguments.pop("auth_token")
+            if "session_token" in raw_arguments:
+                auth_params["session_token"] = raw_arguments.pop("session_token")
+            meta = raw_arguments.pop("_meta", None)
+            if isinstance(meta, dict):
+                auth_params["_meta"] = meta
+            if not facade._authorized(auth_params):
+                return _sdk_tool_error(types, "unauthorized: valid MCP auth token required")
+            schema = schemas_by_name.get(name)
+            if schema is None:
+                return _sdk_tool_error(types, f"Unknown tool: {name}")
+            try:
+                raw_arguments = facade.prepare_tool_arguments(name, auth_params, raw_arguments)
+            except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
+                return _sdk_tool_error(types, str(exc))
+            try:
+                _validate_tool_arguments(name, raw_arguments, schemas_by_name)
+            except ValueError as exc:
+                return _sdk_tool_error(types, str(exc))
+            try:
+                return facade.call_tool(name, raw_arguments)
+            except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
+                return _sdk_tool_error(types, str(exc))
 
-    server.mnemosyne_mcp_facade = facade
+        server.mnemosyne_mcp_facade = facade
+    except BaseException:
+        facade.close()
+        raise
     return server
 
 
@@ -886,41 +903,46 @@ def build_sdk_streamable_http_app(
     sdk_kwargs = dict(kwargs)
     sdk_kwargs["stateless"] = stateless
     sdk_server = build_sdk_server(**sdk_kwargs)
-    session_manager = StreamableHTTPSessionManager(
-        app=sdk_server,
-        event_store=None,
-        json_response=True,
-        stateless=manager_stateless,
-        security_settings=None,
-    )
-    streamable_app = StreamableHTTPASGIApp(session_manager)
-
-    async def health(_request: Any) -> Any:
-        return JSONResponse(
-            {
-                "ok": True,
-                "transport": "mcp-sdk-streamable-http",
-                "rpc_path": _normalize_http_path(streamable_http_path),
-                "stateless": bool(manager_stateless),
-            }
+    try:
+        session_manager = StreamableHTTPSessionManager(
+            app=sdk_server,
+            event_store=None,
+            json_response=True,
+            stateless=manager_stateless,
+            security_settings=None,
         )
+        streamable_app = StreamableHTTPASGIApp(session_manager)
 
-    @asynccontextmanager
-    async def lifespan(_app: Any) -> Any:
-        try:
-            async with session_manager.run():
-                yield
-        finally:
-            sdk_server.mnemosyne_mcp_facade.close()
+        async def health(_request: Any) -> Any:
+            return JSONResponse(
+                {
+                    "ok": True,
+                    "transport": "mcp-sdk-streamable-http",
+                    "rpc_path": _normalize_http_path(streamable_http_path),
+                    "stateless": bool(manager_stateless),
+                }
+            )
 
-    app = Starlette(
-        routes=[
-            Route(_normalize_http_path(streamable_http_path), endpoint=streamable_app),
-            Route(_normalize_http_path(health_path), endpoint=health, methods=["GET"]),
-        ],
-        lifespan=lifespan,
-    )
-    app.state.mnemosyne_streamable_http_manager = session_manager
+        @asynccontextmanager
+        async def lifespan(_app: Any) -> Any:
+            try:
+                async with session_manager.run():
+                    yield
+            finally:
+                sdk_server.mnemosyne_mcp_facade.close()
+
+        app = Starlette(
+            routes=[
+                Route(_normalize_http_path(streamable_http_path), endpoint=streamable_app),
+                Route(_normalize_http_path(health_path), endpoint=health, methods=["GET"]),
+            ],
+            lifespan=lifespan,
+        )
+        app.state.mnemosyne_streamable_http_manager = session_manager
+        app.state.mnemosyne_mcp_facade = sdk_server.mnemosyne_mcp_facade
+    except BaseException:
+        sdk_server.mnemosyne_mcp_facade.close()
+        raise
     return app
 
 
@@ -945,7 +967,12 @@ def serve_sdk_streamable_http(
         transport_stateless=transport_stateless,
         **kwargs,
     )
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="info")
+    finally:
+        # The lifespan closes the facade on a clean run; this backstop covers
+        # uvicorn failing before lifespan startup (close() is idempotent).
+        app.state.mnemosyne_mcp_facade.close()
 
 
 class _FacadeClosingHTTPServer(ThreadingHTTPServer):
@@ -1073,6 +1100,10 @@ def build_http_server(
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MnemosyneMcpHTTP/0.1"
+        # Handler threads are non-daemon so server_close joins them; a socket
+        # timeout bounds that join when a client connects but never sends a
+        # request (handle_one_request treats the timeout as end-of-connection).
+        timeout = 30
 
         def do_GET(self) -> None:  # noqa: N802 - stdlib callback name.
             path = urlsplit(self.path).path

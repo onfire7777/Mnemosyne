@@ -2137,18 +2137,29 @@ def test_sdk_streamable_builder_preserves_facade_stateless_mode(
     monkeypatch.setitem(sys.modules, "starlette.responses", starlette_responses)
     monkeypatch.setitem(sys.modules, "starlette.routing", starlette_routing)
 
+    class FakeFacade:
+        def close(self) -> None:
+            captured["facade_closed"] = True
+
+    class FakeSdkServer:
+        mnemosyne_mcp_facade = FakeFacade()
+
+    fake_sdk_server = FakeSdkServer()
+
     def fake_build_sdk_server(**kwargs: object) -> object:
         captured["sdk_kwargs"] = dict(kwargs)
-        return "sdk-server"
+        return fake_sdk_server
 
     monkeypatch.setattr(mcp_server, "build_sdk_server", fake_build_sdk_server)
 
     app = build_sdk_streamable_http_app(stateless=True, store_path=tmp_path / "store.json")
 
     assert captured["sdk_kwargs"] == {"store_path": tmp_path / "store.json", "stateless": True}
-    assert captured["manager_app"] == "sdk-server"
+    assert captured["manager_app"] is fake_sdk_server
     assert captured["manager_stateless"] is True
     assert getattr(app.state, "mnemosyne_streamable_http_manager")
+    assert app.state.mnemosyne_mcp_facade is fake_sdk_server.mnemosyne_mcp_facade
+    assert "facade_closed" not in captured
 
 
 def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
@@ -3617,6 +3628,50 @@ def test_mcp_sdk_streamable_http_lifespan_closes_facade_on_exit(tmp_path: Path) 
     asyncio.run(exercise())
     # The app (and thus the SDK facade) is still referenced, so only the
     # lifespan's deterministic close can have released the writer.
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_http_server_close_bounded_despite_idle_connection(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    httpd = build_http_server(host="127.0.0.1", port=0, store_path=store)
+    assert httpd.RequestHandlerClass.timeout is not None
+    httpd.RequestHandlerClass.timeout = 1  # keep the bounded-join check fast
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    idle = socket.create_connection(("127.0.0.1", httpd.server_port))
+    try:
+        time.sleep(0.2)  # let a non-daemon handler thread block on the idle socket
+        httpd.shutdown()
+        thread.join(timeout=5)
+        closer = threading.Thread(target=httpd.server_close, daemon=True)
+        closer.start()
+        closer.join(timeout=5)
+        assert not closer.is_alive(), "server_close must not hang on an idle connection"
+    finally:
+        idle.close()
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_sdk_streamable_http_build_failure_closes_facade(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    store = tmp_path / "streamable-build-failure-store.json"
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        build_sdk_streamable_http_app(streamable_http_path="", stateless=False, store_path=store)
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_server_build_tools_failure_releases_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("MNEMOSYNE_POSTGRES_DSN", raising=False)
+    store = tmp_path / "store.json"
+    with pytest.raises(ValueError, match="queue backend requires"):
+        MnemosyneMcpServer(store_path=store, queue_backend="postgres")
+    # The engine claimed the writer before queue construction failed; the
+    # partial bundle must be released without waiting for GC.
     with LocalMemoryEngine(store_path=store) as successor:
         assert successor.store_path == store
 
