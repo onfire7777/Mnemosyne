@@ -3324,12 +3324,28 @@ def test_mcp_http_transport_stateless_mode_reloads_durable_state(tmp_path: Path)
 def test_mcp_http_server_close_releases_facade_and_is_idempotent(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     server, thread, base = start_mcp_http_server(store_path=store)
+    facade = server.mnemosyne_facade
+    assert facade is not None
+    close_calls: list[int] = []
+    original_close = facade.close
+
+    def counting_close() -> None:
+        close_calls.append(1)
+        original_close()
+
+    facade.close = counting_close  # type: ignore[method-assign]
     try:
         with pytest.raises(RuntimeError, match="already has a writer"):
             LocalMemoryEngine(store_path=store)
     finally:
         stop_mcp_http_server(server, thread)
+    # stop_mcp_http_server already called server_close; a second call must not
+    # close the facade again. Counting here (rather than only observing that a
+    # successor can open the store) is what makes the drop-the-reference guard
+    # in server_close observable — MnemosyneMcpServer.close is independently
+    # idempotent, so a successor opens fine either way.
     server.server_close()
+    assert close_calls == [1]
     with LocalMemoryEngine(store_path=store) as successor:
         assert successor.store_path == store
 
@@ -3516,7 +3532,7 @@ def test_mcp_server_close_releases_cached_stateless_bundles_exactly_once(tmp_pat
             "trust_tier": 3,
         },
     )
-    ((_stamp, bundle),) = server._stateless_tools_cache.values()
+    (bundle,) = server._stateless_tools_cache.values()
     engine = bundle[0]
     close_calls: list[int] = []
     original_close = engine.close
@@ -3663,10 +3679,30 @@ def test_mcp_sdk_streamable_http_lifespan_closes_facade_on_exit(tmp_path: Path) 
         assert successor.store_path == store
 
 
+def test_mcp_self_test_reports_close_failure_instead_of_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "self-test-close-failure.json"
+
+    def failing_close_bundle(_bundle: tuple[Any, Any, Any, Any]) -> None:
+        raise RuntimeError("close exploded")
+
+    monkeypatch.setattr(MnemosyneMcpServer, "_close_bundle", staticmethod(failing_close_bundle))
+    report = run_self_test(store_path=store)
+
+    # A misbehaving closer must not turn the health check into a traceback.
+    checks = {check["name"]: check for check in report["checks"]}
+    assert report["ok"] is False
+    assert checks["release_facade"]["ok"] is False
+    assert "close exploded" in checks["release_facade"]["error"]
+
+
 def test_mcp_http_server_close_bounded_despite_idle_connection(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     httpd = build_http_server(host="127.0.0.1", port=0, store_path=store)
-    assert httpd.RequestHandlerClass.timeout is not None
+    # Pin the shipped default: server_close joins non-daemon handler threads,
+    # so a drift to a much larger value would silently stall shutdown.
+    assert httpd.RequestHandlerClass.timeout == 30
     httpd.RequestHandlerClass.timeout = 1  # keep the bounded-join check fast
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
@@ -3711,7 +3747,7 @@ def test_mcp_server_stateless_scope_replacement_closes_previous_bundle(tmp_path:
     store = tmp_path / "store.json"
     with MnemosyneMcpServer(store_path=store, stateless=True) as server:
         mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
-        ((_stamp, first_bundle),) = server._stateless_tools_cache.values()
+        (first_bundle,) = server._stateless_tools_cache.values()
         first_engine = first_bundle[0]
 
         mcp_call(server, "profile_context", {"tenant_id": "tenant-other", "user_id": USER})
