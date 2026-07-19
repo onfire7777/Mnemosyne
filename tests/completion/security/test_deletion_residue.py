@@ -800,12 +800,19 @@ def test_r23_replay_returns_same_outcome_and_partial_retry_resumes() -> None:
 
 
 def test_r23_deletion_fence_blocks_racing_resurrection() -> None:
+    """A capability issued before a deletion is stale for every write after it."""
     world = _world()
-    manifest = _delete(world)
-    stale_generation = manifest["fence"]["generation"] - 1
+    _delete(world)
     coordinator = _coordinator(world)
-    with pytest.raises(PermissionError, match="deletion fence"):
-        coordinator.append_evidence(_evidence(), capability=stale_generation)
+    # A real capability, not a bare generation int: an int is rejected by the
+    # type check before the generation comparison is ever evaluated, so it
+    # cannot prove the fence advances.
+    capability = coordinator.issue_write_capability(
+        identity=coordinator.identity, tenant_id=TENANT
+    )
+    _delete(world, operation_id="00000000-0000-4000-8000-000000000031")
+    with pytest.raises(PermissionError, match="stale or forged"):
+        coordinator.append_evidence(_evidence(), capability=capability)
     assert world.engine.retrieve(CANARY, TENANT).hits == []
 
 
@@ -1456,14 +1463,25 @@ def test_concurrent_same_request_is_serialized_by_shared_ledger() -> None:
 
 
 def test_forged_generation_cannot_authorize_resurrection() -> None:
+    """A well-formed capability holding an unissued token is rejected."""
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    _delete(world)
+    coordinator = _coordinator(world)
+    forged = deletion._FenceCapability("forged-token")
+    with pytest.raises(PermissionError, match="stale or forged"):
+        coordinator.append_evidence(_evidence(), capability=forged)
+    assert world.engine.retrieve(CANARY, TENANT).hits == []
+
+
+def test_non_capability_object_cannot_authorize_resurrection() -> None:
+    """A bare generation number is not a capability, whatever its value."""
     world = _world()
     manifest = _delete(world)
     coordinator = _coordinator(world)
-    with pytest.raises(PermissionError, match="capability"):
-        coordinator.append_evidence(
-            _evidence(),
-            capability=manifest["fence"]["generation"],
-        )
+    for generation in (manifest["fence"]["generation"], manifest["fence"]["generation"] - 1):
+        with pytest.raises(PermissionError, match="deletion fence capability required"):
+            coordinator.append_evidence(_evidence(), capability=generation)
 
 
 def test_import_has_no_engine_monkeypatch_side_effect() -> None:
@@ -1577,8 +1595,10 @@ def test_r25_semantic_verifier_rejects_signed_but_incomplete_manifest(
     manifest_path.write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
     sign_evidence_manifest(manifest_path, private_key)
     assert verify_evidence_manifest_signature(manifest_path, public_key)["verified"] is True
-    verifier = deletion_manifest
-    result = verifier.verify_deletion_manifest(manifest)
+    # Go through the combined path, not the in-memory dict: the threat this
+    # guards is a genuinely valid signature laundering incomplete semantics.
+    result = deletion_manifest.verify_signed_deletion_manifest(manifest_path, public_key)
+    assert result["signature"]["verified"] is True
     assert result["complete"] is False
     assert result["errors"]
 
@@ -2075,6 +2095,47 @@ def test_r21_merge_log_and_wildcard_audit_history_is_scrubbed() -> None:
     _assert_absent(world.engine.export_tenant(TENANT)["merge_log"], CANARY, world.source_ref)
 
 
+def test_r21_scrubbing_own_merge_and_wildcard_history_stays_attestable() -> None:
+    """Scrubbing this tenant's own shared-custody rows is not a cross-tenant mutation.
+
+    Merge rows carry no tenant_id and engine merges may audit under "*"; both are
+    custody of this tenant's own database.  Counting them as cross-tenant would
+    trip the verifier's cross_tenant_mutations == 0 requirement, so every tenant
+    with merge history would produce a complete-but-unsignable manifest.
+    """
+    world = _world()
+    world.engine.merge_log.append(
+        MergeReport(
+            from_branch=f"branch-{CANARY}",
+            into_branch="main",
+            evidence_added=1,
+            assertions_added=0,
+            assertions_merged=0,
+            relations_added=0,
+            conflicts=[{"detail": CANARY, "source_ref": world.source_ref}],
+        ).to_dict()
+    )
+    world.engine.audit_log.append(
+        {
+            "id": "audit-merge-wildcard",
+            "tenant_id": "*",
+            "op": "merge",
+            "details": {"content": CANARY, "source_ref": world.source_ref},
+        }
+    )
+
+    manifest = _delete(world)
+
+    # The rows really were rewritten...
+    _assert_absent(world.engine.merge_log, CANARY, world.source_ref)
+    # ...and the manifest still attests a complete zero-residue deletion.
+    assert manifest["summary"]["cross_tenant_mutations"] == 0
+    _assert_complete(manifest)
+    assert "summary does not prove complete zero-residue deletion" not in (
+        deletion_manifest.verify_deletion_manifest(manifest)["errors"]
+    )
+
+
 def test_r21_sqlite_merge_log_rows_are_scrubbed(tmp_path: Path) -> None:
     engine = SqliteEngine(tmp_path)
     source_ref = engine.append_evidence(_evidence())
@@ -2568,6 +2629,105 @@ def test_resume_without_registry_never_attests_untouched_surface(
     # Fail closed before the engine: externals are unverified, so the
     # evidence row must survive rather than be shredded under a false receipt.
     assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+@pytest.mark.parametrize(
+    ("registry", "surface_name"),
+    [("object_keys", "object_storage"), ("backup_snapshots", "backups")],
+)
+def test_crash_mid_destruction_never_attests_an_unreachable_registry(
+    tmp_path: Path, registry: str, surface_name: str
+) -> None:
+    """A crash *inside* the destructive step must not resume into a false receipt.
+
+    The crash persists state="deleting" with attempts>0.  A resume in a fresh
+    process rebuilt without the registry then sees an empty target set, which
+    means the registry is unreachable -- never that the removal succeeded.
+    """
+    deletion = importlib.import_module("mnemosyne.deletion")
+    world = _world()
+    object_key = f"s3_encrypted://{TENANT}/{world.source_ref}"
+    world.object_keys[object_key] = b"key-material"
+    world.backup_snapshots.append(
+        {"tenant_id": TENANT, "source_ref": world.source_ref, "snapshot": CANARY}
+    )
+    journal_path = tmp_path / "deletion-journal.sqlite"
+    request = _durable_request(world)
+    identity = _durable_identity()
+
+    # KeyboardInterrupt, not Exception: the surface handler catches Exception
+    # and records a *failed* receipt, which is a completed fail-closed outcome
+    # rather than the mid-attempt crash this test needs.
+    target = "_delete_objects" if surface_name == "object_storage" else "_delete_backups"
+    original = getattr(deletion.DeletionCoordinator, target)
+
+    def crash(*args: Any, **kwargs: Any) -> Any:
+        raise KeyboardInterrupt("synthetic crash mid-destruction")
+
+    setattr(deletion.DeletionCoordinator, target, crash)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            deletion.DeletionCoordinator(
+                engine=world.engine,
+                stores=world.stores,
+                object_keys=world.object_keys,
+                backup_snapshots=world.backup_snapshots,
+                session_identity=identity,
+                ledger=deletion.SQLiteDeletionLedger(journal_path),
+            ).delete(**request)
+    finally:
+        setattr(deletion.DeletionCoordinator, target, original)
+
+    registries: dict[str, Any] = {
+        "object_keys": world.object_keys,
+        "backup_snapshots": world.backup_snapshots,
+    }
+    registries[registry] = type(getattr(world, registry))()
+    manifest = deletion.DeletionCoordinator(
+        engine=world.engine,
+        stores=world.stores,
+        session_identity=identity,
+        ledger=deletion.SQLiteDeletionLedger(journal_path),
+        **registries,
+    ).delete(**request)
+
+    surface = _surface(manifest, surface_name)
+    assert surface["verified_removed"] is False
+    assert surface["error_code"] == "probe_failed"
+    assert manifest["summary"]["complete"] is False
+    assert deletion_manifest.verify_deletion_manifest(manifest)["complete"] is False
+    # The surface whose registry the resume could not reach survives untouched.
+    # (The other surface is genuinely reachable and is legitimately cleared.)
+    if registry == "object_keys":
+        assert world.object_keys[object_key] == b"key-material"
+    else:
+        assert world.backup_snapshots != []
+    # Fail closed before the engine: externals are unverified, so the evidence
+    # row must survive rather than be forgotten under a false receipt.
+    assert world.engine.get_evidence(TENANT, world.source_ref) is not None
+
+
+def test_backup_resume_after_a_completed_splice_verifies_without_the_registry() -> None:
+    """The persisted destructive marker distinguishes "already spliced" from "missing"."""
+    deletion = importlib.import_module("mnemosyne.deletion")
+    receipt = deletion.SurfaceReceipt(surface="backups", attempts=1, state="deleting")
+    receipt.destructive_done = True
+    coordinator = _coordinator(_world())
+
+    # No snapshots visible, but the marker proves this operation spliced them.
+    assert coordinator._delete_backups(
+        deletion.LedgerRecord(
+            operation_id=OPERATION_ID,
+            fingerprint="fingerprint",
+            tenant_id=TENANT,
+            generation=1,
+            receipts={("backup", "backups"): receipt},
+        ),
+        receipt,
+        TENANT,
+        ["missing-ref"],
+    )
+    assert receipt.verified_removed is True
 
 
 def test_engine_retry_after_failure_restamps_a_new_destructive_attempt() -> None:

@@ -15,7 +15,7 @@ import secrets
 import sqlite3
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -122,6 +122,10 @@ class SurfaceReceipt:
     attempted_at: str | None = None
     verified_at: str | None = None
     cross_tenant_mutations: int = 0
+    # Persisted proof that this surface's destructive step actually ran.  Only
+    # surfaces whose removal erases the target from its own registry need it, to
+    # tell "already spliced" from "registry unreachable" on a crash resume.
+    destructive_done: bool = False
 
 
 @dataclass(slots=True)
@@ -624,9 +628,9 @@ class DeletionCoordinator:
             self.ledger.checkpoint(record)
             try:
                 if kind == "object":
-                    return self._delete_objects(receipt, tenant, refs, crash_resuming)
+                    return self._delete_objects(receipt, tenant, refs)
                 if kind == "backup":
-                    return self._delete_backups(receipt, tenant, refs, crash_resuming)
+                    return self._delete_backups(record, receipt, tenant, refs)
                 cache_key = next(
                     (key for key in self.process_cache if self._cache_surface_name(key) == name),
                     None,
@@ -717,15 +721,15 @@ class DeletionCoordinator:
             return not any(row.get("tenant_id") == tenant and row.get("source_ref") == ref for row in rows)
         return False
 
-    @staticmethod
-    def _probe_store(store: Any, tenant: str, refs: list[str]) -> bool:
-        probe = getattr(store, "probe", None)
-        if callable(probe):
-            return all(probe(tenant, ref) is False for ref in refs)
-        rows = getattr(store, "rows", None)
-        if isinstance(rows, list):
-            return not any(row.get("tenant_id") == tenant and row.get("source_ref") in refs for row in rows)
-        return False
+    @classmethod
+    def _probe_store(cls, store: Any, tenant: str, refs: list[str]) -> bool:
+        # Absence of every ref is exactly the conjunction of the per-ref probe,
+        # for both backend shapes.  Deriving it keeps one duck-typing ladder, so
+        # a third backend shape cannot be taught to _probe_ref alone and leave
+        # this one silently reporting "not absent" for it.  `refs` is guarded
+        # because an empty conjunction is vacuously true, and this probe must
+        # fail closed rather than attest absence it never observed.
+        return bool(refs) and all(cls._probe_ref(store, tenant, ref) for ref in refs)
 
     def _target_object_keys(self, tenant: str, refs: list[str]) -> list[str]:
         # Enumerate by tenant/ref path, not by a scheme allow-list: a key stored
@@ -741,15 +745,23 @@ class DeletionCoordinator:
         ]
 
     def _delete_objects(
-        self, receipt: SurfaceReceipt, tenant: str, refs: list[str], crash_resuming: bool
+        self, receipt: SurfaceReceipt, tenant: str, refs: list[str]
     ) -> bool:
         keys = self._target_object_keys(tenant, refs)
-        if not keys and not crash_resuming:
+        if not keys:
             # A receipt for this surface exists, so targets were enumerated when
             # the operation began.  Finding none now means this coordinator was
             # rebuilt without the object registry (a durable resume in a fresh
             # process), not that the shred succeeded -- crypto-shredding nothing
             # must never attest that the keys are gone.
+            #
+            # There is deliberately no crash-resume exemption here: the shred
+            # blanks the key's *value* and leaves the registry entry in place,
+            # and _target_object_keys matches on the tenant/ref path alone, so a
+            # successfully shredded key is still enumerated on a re-attempt.  An
+            # empty set is therefore always an unreachable registry, and
+            # exempting a resume would let a crash mid-shred attest
+            # crypto_shredded over key material that survives intact.
             receipt.error_code = "probe_failed"
             receipt.state = "failed"
             return False
@@ -771,13 +783,17 @@ class DeletionCoordinator:
         return self._verified(receipt)
 
     def _delete_backups(
-        self, receipt: SurfaceReceipt, tenant: str, refs: list[str], crash_resuming: bool
+        self, record: LedgerRecord, receipt: SurfaceReceipt, tenant: str, refs: list[str]
     ) -> bool:
         targets = [row for row in self.backup_snapshots if row.get("tenant_id") == tenant and row.get("source_ref") in refs]
-        if not targets and not crash_resuming:
-            # See _delete_objects: an unverified backup receipt with no visible
-            # snapshots means the registry is missing, not that the snapshots
-            # were removed.  A crash mid-splice is the only benign empty set.
+        if not targets and not receipt.destructive_done:
+            # Unlike the object shred, the splice removes its targets from the
+            # registry, so an empty set is genuinely ambiguous: either the
+            # snapshots were already spliced or the registry is unreachable.
+            # Only the persisted destructive_done marker distinguishes them.
+            # Without it, fail closed -- a crash before the marker was
+            # checkpointed costs a re-attempt, whereas trusting the empty set
+            # would attest a removal this coordinator never made.
             receipt.error_code = "probe_failed"
             receipt.state = "failed"
             return False
@@ -786,6 +802,11 @@ class DeletionCoordinator:
             receipt.state = "failed"
             return False
         self.backup_snapshots[:] = [row for row in self.backup_snapshots if row not in targets]
+        # Persist the marker before attesting so a crash between the splice and
+        # the verified checkpoint resumes as "already spliced" rather than as an
+        # unreachable registry.
+        receipt.destructive_done = True
+        self.ledger.checkpoint(record)
         return self._verified(receipt)
 
     @staticmethod
@@ -991,7 +1012,16 @@ class DeletionCoordinator:
                             scrubbed = self._scrub_value(record, sensitive, sensitive_keys)
                             if scrubbed == record:
                                 continue
-                            if row["tenant_id"] != tenant_id:
+                            # Rows reaching here passed the selection filter, so
+                            # they are this tenant's own custody -- its rows, its
+                            # merge rows, its wildcard audits.  Count only a
+                            # genuinely foreign owner so the manifest reports a
+                            # measured zero instead of an asserted one; counting
+                            # the wildcard/merge rows here would make every
+                            # deletion of a tenant with merge history fail the
+                            # verifier's cross_tenant_mutations == 0 requirement
+                            # and become permanently unsignable.
+                            if row["tenant_id"] is not None and row["tenant_id"] not in (tenant_id, "*"):
                                 cross_tenant += 1
                             connection.execute(
                                 f"UPDATE {table} SET record = ? WHERE seq = ?",
@@ -1032,25 +1062,34 @@ class DeletionCoordinator:
                 "retained-history scrub supports only SqliteEngine or "
                 f"in-memory engines, not {type(self.engine).__name__}"
             )
-        for rows in logs:
-            # Rows attributed to another tenant stay byte-identical; merge
-            # rows (no tenant_id) and "*" wildcard audits are unattributable
-            # shared custody and must scrub by needle.
-            for index, row in enumerate(rows):
-                owner = row.get("tenant_id")
-                if owner not in (tenant_id, "*", None):
-                    continue
-                scrubbed = self._scrub_value(row, sensitive, sensitive_keys)
-                if scrubbed == row:
-                    continue
-                if owner != tenant_id:
-                    cross_tenant += 1
-                rows[index] = scrubbed
-        for assertion in assertions.values():
-            if getattr(assertion, "tenant_id", None) == tenant_id:
-                assertion.calibration = self._scrub_value(
-                    assertion.calibration, sensitive, sensitive_keys
-                )
+        # Hold the engine lock for the same reason the SQLite branch does: the
+        # engine guards all its own writes with it and in places rebinds
+        # audit_log wholesale, so an unlocked scrub can miss a row appended
+        # mid-scan (while the manifest still attests zero residue) or be undone
+        # by a rollback restoring pre-scrub contents.
+        lock = getattr(self.engine, "_lock", nullcontext())
+        with lock:
+            for rows in logs:
+                # Rows attributed to another tenant stay byte-identical; merge
+                # rows (no tenant_id) and "*" wildcard audits are unattributable
+                # shared custody and must scrub by needle.
+                for index, row in enumerate(rows):
+                    owner = row.get("tenant_id")
+                    if owner not in (tenant_id, "*", None):
+                        continue
+                    scrubbed = self._scrub_value(row, sensitive, sensitive_keys)
+                    if scrubbed == row:
+                        continue
+                    # See the SQLite branch: wildcard and merge rows are this
+                    # tenant's own custody, not another tenant's mutation.
+                    if owner is not None and owner not in (tenant_id, "*"):
+                        cross_tenant += 1
+                    rows[index] = scrubbed
+            for assertion in assertions.values():
+                if getattr(assertion, "tenant_id", None) == tenant_id:
+                    assertion.calibration = self._scrub_value(
+                        assertion.calibration, sensitive, sensitive_keys
+                    )
         return cross_tenant
 
     def _manifest(self, record: LedgerRecord, request: dict[str, Any]) -> dict[str, Any]:
