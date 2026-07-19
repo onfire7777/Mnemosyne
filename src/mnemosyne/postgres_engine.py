@@ -6312,7 +6312,9 @@ class PostgresEngine:
                 ):
                     occurrence = intention.recurrence_state["occurrence"]
                     fired_occurrence, stored = _advance_intention_after_fire(
-                        intention, evaluated_at=evaluated_at_utc
+                        intention,
+                        evaluated_at=evaluated_at_utc,
+                        matched_signal=matched_signal,
                     )
                     fire_audit_diff = {
                         **intention_audit_diff(fired_occurrence, status="fired"),

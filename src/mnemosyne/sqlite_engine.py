@@ -4434,7 +4434,9 @@ class SqliteEngine:
                 ):
                     occurrence = intention.recurrence_state["occurrence"]
                     fired_occurrence, stored = _advance_intention_after_fire(
-                        intention, evaluated_at=evaluated_at_utc
+                        intention,
+                        evaluated_at=evaluated_at_utc,
+                        matched_signal=signal,
                     )
                     event_id = intention_fire_receipt_id(
                         tenant_id, intention.intention_id, occurrence
