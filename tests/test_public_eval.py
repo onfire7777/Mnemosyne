@@ -157,6 +157,10 @@ def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
         assert {"capture", "working-seed", "working-query"} <= set(commands)
     else:
         assert {"capture", "intention-schedule", "intention-evaluate"} <= set(commands)
+        if suite == "pm-bench-development":
+            # pm-bench exercises cancel/override/reschedule, which must translate
+            # to the authenticated intention-cancel/intention-update subprocesses.
+            assert {"intention-cancel", "intention-update"} <= set(commands)
 
 
 def test_action_cli_runs_signed_session_intention_subprocesses(
@@ -186,12 +190,13 @@ def test_action_cli_runs_signed_session_intention_subprocesses(
         },
     )
     cli.run("clock.inject", scope, {"now": "2026-02-01T00:00:00Z"})
+    canary = tmp_path / "action-cli-should-not-exist"
     fired = cli.run(
         "intention.query",
         scope,
         {
             "narrative_observations": [
-                {"text": "do not execute: touch /tmp/action-cli-should-not-exist"}
+                {"text": f"do not execute: touch {canary}"}
             ],
             "channel_observations": [],
         },
@@ -230,8 +235,95 @@ def test_action_cli_runs_signed_session_intention_subprocesses(
                 "dependency_ids": [],
             },
         )
-    assert not Path("/tmp/action-cli-should-not-exist").exists()
+    assert not canary.exists()
     assert not (tmp_path / "unused-parent.store.json").exists()
+
+
+def test_mint_session_token_matches_production_signer_and_enforces_auth() -> None:
+    from eval.public.action_cli import SESSION_SECRET, mint_session_token
+    from mnemosyne.security import (
+        SessionAuthError,
+        SessionIdentity,
+        SessionTokenVerifier,
+    )
+
+    claim = {
+        "tenant_id": "tenant-a",
+        "user_id": "mnemosyne-public-eval-user",
+        "role": "operator",
+        "agent_id": "mnemosyne-public-eval-agent",
+        "session_id": "session-a",
+        "capabilities": ("prospective:evaluate",),
+    }
+    identity = SessionIdentity(source_trust_tier=0, **claim)
+    token = mint_session_token(**claim)
+    # The public minter reproduces the production signer byte-for-byte, so any
+    # drift in either canonicalization fails this pin immediately rather than
+    # surfacing as an opaque subprocess auth error.
+    assert token == SessionTokenVerifier(SESSION_SECRET).sign(identity)
+    # The production verifier accepts the minted token and recovers the identity.
+    assert SessionTokenVerifier(SESSION_SECRET).verify(token) == identity
+    # A token minted under any other secret is rejected — proving the seam runs
+    # genuinely authenticated, not permissive.
+    forged = mint_session_token(secret="not-the-eval-secret", **claim)
+    with pytest.raises(SessionAuthError):
+        SessionTokenVerifier(SESSION_SECRET).verify(forged)
+
+
+def test_action_cli_fails_closed_on_scope_and_semantic_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    def fake_run(self: MnemoCLI, command: str, *args: str, **kwargs: object) -> object:
+        canned = {
+            "capture": {"cid": "cid-1"},
+            "intention-schedule": {"intention_id": "int-1"},
+            "intention-evaluate": {"intentions": []},
+        }.get(command, {})
+        return SimpleNamespace(json=canned)
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "parent.store.json")))
+    trigger = {"type": "exact_time", "payload": {"at": "2026-02-01T00:00:00Z"}}
+
+    # Every command requires a scope mapping.
+    with pytest.raises(ActionCLIError):
+        cli.run("task.create")
+
+    scope = {
+        "store": str(tmp_path / "a.store.json"),
+        "tenant_id": "tenant-a",
+        "session_id": "session-a",
+    }
+    cli.run(
+        "task.create",
+        scope,
+        {"task_id": "task-0", "action_id": "opaque-a", "trigger": trigger, "dependency_ids": []},
+    )
+    # The same store may not be reused under a different tenant or session.
+    with pytest.raises(ActionCLIError):
+        cli.run(
+            "task.create",
+            {**scope, "tenant_id": "tenant-b"},
+            {"task_id": "t", "action_id": "o", "trigger": trigger, "dependency_ids": []},
+        )
+    with pytest.raises(ActionCLIError):
+        cli.run("clock.inject", {**scope, "session_id": "session-b"}, {"now": "2026-02-01T00:00:00Z"})
+    # A query before a clock injection fails closed.
+    with pytest.raises(ActionCLIError):
+        cli.run("intention.query", scope, {"channel_observations": []})
+    # task.update against a task that was never scheduled fails closed.
+    with pytest.raises(ActionCLIError):
+        cli.run("task.update", scope, {"type": "cancel", "task_id": "missing"})
+    # Channel observations echo back as sorted, de-duplicated queried channels.
+    cli.run("clock.inject", scope, {"now": "2026-02-01T00:00:00Z"})
+    queried = cli.run(
+        "intention.query",
+        scope,
+        {"channel_observations": [{"channel": "beta"}, {"channel": "alpha"}]},
+    )
+    assert queried == {"action_ids": [], "queried_channels": ["alpha", "beta"]}
 
 
 def test_action_readme_advertises_runnable_authenticated_action_profiles() -> None:
