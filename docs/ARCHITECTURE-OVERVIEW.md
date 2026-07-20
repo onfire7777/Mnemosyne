@@ -38,7 +38,7 @@ flowchart TB
         direction TB
         CLI["CLI · <b>mneme</b><br/>91 subcommands"]
         MCP["MCP Server · <b>mneme-mcp</b><br/>48 tools · 4 transports"]
-        ENGINE["<b>Memory Engine</b><br/>MemoryEngine Protocol<br/>Local ⟷ Postgres backend"]
+        ENGINE["<b>Memory Engine</b><br/>MemoryEngine Protocol<br/>Local ⟷ Postgres ⟷ Sqlite backend"]
         WORK["<b>Background Workers</b><br/>consolidation · lifecycle<br/>calibration · eval"]
         CLI --> ENGINE
         MCP --> ENGINE
@@ -83,6 +83,7 @@ flowchart TB
     subgraph CORE["② Engine core"]
         eng["engine.py · MemoryEngine Protocol<br/>+ LocalMemoryEngine · route() · RoutePlan"]
         pg["postgres_engine.py · PostgresEngine<br/>RLS · FTS · pgvector · recursive PPR · as_of()"]
+        sqlite["sqlite_engine.py · SqliteEngine<br/>one file per tenant · FTS5 · as_of()"]
         models["models.py · Evidence / Assertion / Relation / Hit"]
         ids["ids.py · evidence_cid() · content_cid()<br/>bytes_cid() · canonical_json()"]
         text["text.py · tokenize · lexical_score · hashing_embedding"]
@@ -141,13 +142,14 @@ flowchart TB
     PIPE --> EVAL
     CORE --> STORE
     eng -. swappable .- pg
+    eng -. swappable .- sqlite
     ret --> prov2
 ```
 
 **Reading the layers**
 
 1. **Interface** — the only surfaces a caller touches. CLI for humans/ops, MCP for agents. Both call the same engine.
-2. **Engine core** — `MemoryEngine` is a `typing.Protocol` (interface). `LocalMemoryEngine` (ephemeral, in-memory, dev/test) and `PostgresEngine` (ACID, multi-tenant, auditable) are interchangeable implementations chosen at deploy time; parity tests (`tests/test_parity_*.py`, `test_shared_engine_contract.py`) prove behavioural equivalence. The router `route()` and its `RoutePlan` dataclass are defined **in `engine.py`** (not `retrieval.py`).
+2. **Engine core** — `MemoryEngine` is a `typing.Protocol` (interface). `LocalMemoryEngine` (ephemeral, in-memory, dev/test), `PostgresEngine` (ACID, multi-tenant, auditable), and `SqliteEngine` (one file per tenant) are interchangeable implementations chosen at deploy time; parity tests (`tests/test_parity_*.py`, `test_shared_engine_contract.py`) prove behavioural equivalence. The router `route()` and its `RoutePlan` dataclass are defined **in `engine.py`** (not `retrieval.py`).
 3. **Pipelines** — the write path (ingestion → consolidation → belief) and read path (retrieval → graph).
 4. **Background/learning** — durable job queue + lifecycle/forgetting + induction of lessons/skills + shadow-mode tuning.
 5. **Eval/calibration** — turns confidence into calibrated abstention and measures the SLOs. `guard.py` lives here: it is the **§25 evaluation anti-degradation guard** (`no_degradation_guard` + `LongHorizonNoDegradationTracker`), proving memory-augmented scores stay non-inferior to a no-memory baseline. *It has no read/confidentiality, sensitivity, role, or `access_policy` logic* — read-side enforcement lives on the engine read path (§5).
@@ -432,7 +434,10 @@ flowchart LR
         GRAPH["graph PPR<br/>(multi-hop, recursive · graph_ppr_cache)"]
     end
 
-    HYB --> RR["rerank<br/>(HttpReranker or LocalSimilarityReranker)"]
+    HYB --> FUSE["bounded channel fusion"]
+    PROS["prospective_memory<br/>authorized due intentions"] --> FUSE
+    WORKMEM["working_memory<br/>active tenant/session items"] --> FUSE
+    FUSE --> RR["rerank<br/>(HttpReranker or LocalSimilarityReranker)"]
     RR --> CALc{"calibration.py<br/>conformal threshold<br/>should_abstain?"}
     CALc -->|abstain| ABS["return abstention<br/>(thin / contested evidence)"]
     CALc -->|accept| ENF["engine read path<br/>policy.max_sensitivity ≤ 3<br/>+ access_policy JSONB<br/>+ security.sanitize_retrieved_text"]
@@ -445,12 +450,25 @@ the **engine read path** (`engine.py` / `postgres_engine.py`) against `policy.ma
 ceiling **3**) and each row's `access_policy` JSONB; untrusted retrieved text is sanitized to **data-only**
 via `security.sanitize_retrieved_text` so it can never be executed as an instruction (R6).
 
-Each retrieval **`Hit`** (`models.py`) has `kind ∈ {evidence, assertion, relation, preference}` and carries
+Each retrieval **`Hit`** (`models.py`) has `kind ∈ {evidence, assertion, relation, preference, intention, working}` and carries
 a **`provenance`** list of supporting evidence CIDs (the underlying projection rows separately carry
 `source_evidence_cids`). The `RetrievalResult.to_dict()` exposes top-level `query / hits / confidence`
 (a scalar float) `/ abstained / explain`; the structured firing **channels** and **adapters** live nested
 under `explain`. *(Note: `guard.py` is **not** part of this path — it is the §25 evaluation
 anti-degradation guard; see §2.)*
+
+Prospective and working memory are separate, implemented planes on the Local, Postgres, and Sqlite
+engines. The **prospective-memory plane** stores subject-scoped intentions; retrieval can surface due
+intentions for an explicitly authorized owner without firing or mutating them. Trigger evaluation is a
+separate, explicit operation. The **working-memory plane** stores short-TTL items scoped to one tenant
+and session; retrieval considers only active items and never promotes them implicitly. Promotion into
+durable evidence is a separate, explicit operation.
+
+Both planes enter the read path through named `prospective_memory` and `working_memory` channels. Their
+hits retain provenance and security metadata, consume the common retrieval budget, and remain data-only
+through sanitization and prompt assembly; retrieved content cannot become instruction authority. This
+overview owns the cross-plane topology. `docs/ENGINE-CONTRACT.md` is the canonical source for exact
+backend method, trigger, expiry, audit, and compatibility semantics.
 
 ---
 

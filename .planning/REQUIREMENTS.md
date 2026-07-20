@@ -29,6 +29,8 @@
 | [ ] CAP-009 | The per-tenant cartridge research path has a bounded latency/throughput A/B and a documented go/no-go without adding a model dependency to core. | Plan A S2.5 | Planned |
 | [ ] CAP-010 | Activation-space memory research produces the J-lens tripwire, persona-drift metric, and explicit go/no-go artifact under the same provenance/capability rails as text writes. | Plan A S5 | Planned |
 | [ ] CAP-011 | The compact grounded-QA stack passes the physical 8 GiB Windows/Linux acceptance contract without lowering CAP-003, deterministic retrieval, §31, or §33 gates and without adding an ML dependency to Python core. | Plan A S4.5 | Planned |
+| [x] CAP-012 | Prospective memory persists subject-scoped intentions and evaluates supported triggers deterministically and idempotently with provenance and audit records across Local, Postgres, and Sqlite engines. | W3 P1/P4 | Complete |
+| [x] CAP-013 | Working memory provides tenant/session-scoped short-TTL storage, explicit promotion, deterministic expiry, and a distinct retrieval route across Local, Postgres, and Sqlite engines. | W3 P3/P4 | Complete |
 
 ## Neutral Governance and Leaderboard
 
@@ -57,5 +59,5 @@
 | 12 | CAP-001, CAP-002, CAP-003, BENCH-005 (reader-produced EM/F1 closure), RAIL-001..004 |
 | 13 | BENCH-006, BENCH-007, RAIL-001..004 |
 | 14 | REPRO-001, REPRO-002, RAIL-003, RAIL-004 |
-| 15 | CAP-004..010, RAIL-001..004 |
+| 15 | CAP-004..010, CAP-012, CAP-013, RAIL-001..004 |
 | 16 | LEAD-001, LEAD-002, LEAD-003, GOV-001, RAIL-003, RAIL-004 |

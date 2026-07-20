@@ -6,7 +6,9 @@ import datetime as dt
 import ipaddress
 import inspect
 import json
+import os
 import shlex
+import socket
 import ssl
 import subprocess
 import sys
@@ -16,6 +18,7 @@ import tomllib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import StringIO
 from pathlib import Path
+from typing import Any
 from urllib import error as urlerror, request as urlrequest
 
 import pytest
@@ -34,7 +37,7 @@ from mnemosyne.mcp_server import (
     run_self_test,
 )
 from mnemosyne.consolidation import ConsolidationWorker
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import Intention, LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC
 from mnemosyne.models import Assertion, Evidence, Hit, Relation
@@ -104,6 +107,7 @@ def mcp_session_token(
     role: str = "operator",
     source_trust_tier: int = 0,
     session_id: str = "mcp-test-session",
+    agent_id: str | None = None,
 ) -> str:
     return SessionTokenVerifier(MCP_SESSION_SECRET).sign(
         SessionIdentity(
@@ -112,6 +116,7 @@ def mcp_session_token(
             role=role,  # type: ignore[arg-type]
             source_trust_tier=source_trust_tier,
             session_id=session_id,
+            agent_id=agent_id,
         )
     )
 
@@ -678,10 +683,14 @@ def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
     main_assertion = next(
         item
         for item in exported["assertions"]
-        if item["id"] == proposal["id"] and item["branch"] == "main"
+        if item["id"] == confirmed["confirmed_id"] and item["branch"] == "main"
     )
 
     assert confirmed["id"] == proposal["id"]
+    assert confirmed["source_id"] == proposal["id"]
+    # Local preserves the source id, so confirmed_id resolves to it here, but the
+    # lookup goes through the authoritative map, never a forced id equality.
+    assert confirmed["confirmed_id"] == confirmed["merge"]["assertion_id_map"][proposal["id"]]
     assert confirmed["branch"] == proposal["branch"]
     assert confirmed["into"] == "main"
     assert confirmed["security"]["allowed"] is True
@@ -691,6 +700,156 @@ def test_memory_tools_direct_confirm_promotes_proposal_branch() -> None:
     assert main_assertion["subject"] == "Direct confirm"
     assert main_assertion["object"] == "proposal branch"
     assert main_assertion["source_evidence_cids"] == [cid]
+
+
+def test_memory_tools_confirm_fails_closed_without_authoritative_mapping() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    # A candidate branch that carries NO assertion for the requested id: the
+    # merge produces an empty assertion_id_map for that source, so confirm must
+    # fail closed rather than fabricate a confirmed_id.
+    tools.branch("empty-candidate", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    with pytest.raises(KeyError, match="no authoritative destination mapping"):
+        tools.confirm(
+            "assertion-with-no-mapping",
+            role="operator",
+            source_trust_tier=0,
+            tenant_id=TENANT,
+            branch="empty-candidate",
+        )
+
+
+def test_memory_tools_confirm_fails_closed_when_id_absent_from_populated_map() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    # The candidate branch carries a real (unrelated) assertion, so the merge
+    # produces a NON-empty assertion_id_map — but with no entry for the requested
+    # source id. confirm must still fail closed instead of returning an unrelated
+    # id (exercises the populated-map lookup miss, not just the empty-map path).
+    tools.branch("populated-candidate", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="unrelated candidate fact",
+            predicate="present on",
+            object="populated candidate branch",
+            confidence=0.8,
+            source_evidence_cids=["b" * 64],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="populated-candidate",
+    )
+    with pytest.raises(KeyError, match="no authoritative destination mapping"):
+        tools.confirm(
+            "assertion-with-no-mapping",
+            role="operator",
+            source_trust_tier=0,
+            tenant_id=TENANT,
+            branch="populated-candidate",
+        )
+
+
+def test_memory_tools_confirm_fails_closed_on_ambiguous_candidate_branch() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    # An assertion created on main is copied into two scratch branches (Local's
+    # branch() preserves the assertion id), so auto-discovery cannot pick a single
+    # authoritative candidate. confirm without an explicit branch must fail closed
+    # rather than silently promote whichever branch is enumerated first.
+    shared_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="ambiguous fact",
+            predicate="lives in",
+            object="two branches",
+            confidence=0.8,
+            source_evidence_cids=["a" * 64],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ),
+    )
+    tools.branch("candidate-one", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    tools.branch("candidate-two", role="operator", source_trust_tier=0, tenant_id=TENANT)
+    with pytest.raises(KeyError, match="ambiguous candidate branches"):
+        tools.confirm(
+            shared_id,
+            role="operator",
+            source_trust_tier=0,
+            tenant_id=TENANT,
+        )
+    # An explicit branch disambiguates and confirms successfully.
+    confirmed = tools.confirm(
+        shared_id,
+        role="operator",
+        source_trust_tier=0,
+        tenant_id=TENANT,
+        branch="candidate-one",
+    )
+    assert confirmed["confirmed_id"] == shared_id
+    assert confirmed["source_id"] == shared_id
+
+
+def test_merge_assertion_id_map_persists_across_local_reopen(tmp_path: Path) -> None:
+    store = tmp_path / "idmap-local-store.json"
+    engine = LocalMemoryEngine(store_path=store)
+    engine.branch("idmap-candidate", frm="main", tenant_id=TENANT)
+    source_id = engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="local reopen idmap",
+            predicate="persists",
+            object="across reopen",
+            confidence=0.8,
+            source_evidence_cids=["a" * 64],
+            status="active",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        ),
+        branch="idmap-candidate",
+    )
+    report = engine.merge("idmap-candidate", into="main", tenant_id=TENANT)
+    assert report.assertion_id_map == {source_id: source_id}
+
+    reopened = LocalMemoryEngine(store_path=store, read_only=True)
+    merge_log = reopened.export_tenant(TENANT)["merge_log"]
+    assert len(merge_log) == 1
+    assert merge_log[0]["assertion_id_map"] == {source_id: source_id}
+
+
+def test_memory_tools_mcp_confirm_exposes_confirmed_id(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json")
+    proposed = mcp_call(
+        server,
+        "propose",
+        {
+            "tenant_id": TENANT,
+            "user_id": USER,
+            "subject": "mcp confirm subject",
+            "predicate": "promotes",
+            "object_value": "mcp candidate",
+            "trust_tier": 1,
+            **PARAMETRIC_AUTH,
+        },
+    )
+    confirmed = mcp_call(
+        server,
+        "confirm",
+        {"id": proposed["id"], "tenant_id": TENANT, **PARAMETRIC_AUTH},
+    )
+
+    # The MCP structured envelope carries the source/confirmed identity resolved
+    # from the merge map, backward-compatibly alongside the submitted id.
+    assert confirmed["id"] == proposed["id"]
+    assert confirmed["source_id"] == proposed["id"]
+    confirmed_id = confirmed["confirmed_id"]
+    assert isinstance(confirmed_id, str) and confirmed_id
+    assert confirmed["merge"]["assertion_id_map"][proposed["id"]] == confirmed_id
 
 
 def test_memory_tools_direct_branch_merge_discard_facades() -> None:
@@ -839,7 +998,8 @@ def test_memory_tools_denied_auth_decision_persists_audit_only_event(tmp_path: P
     with pytest.raises(PermissionError, match="branch writes require normal-or-stronger source trust"):
         tools.branch("denied-persistent-branch", role="agent", source_trust_tier=4, tenant_id=TENANT)
 
-    reloaded = LocalMemoryEngine(store_path=store_path)
+    engine.close()
+    reloaded = LocalMemoryEngine(store_path=store_path, read_only=True)
     audit = [
         item
         for item in reloaded.audit_log
@@ -849,6 +1009,54 @@ def test_memory_tools_denied_auth_decision_persists_audit_only_event(tmp_path: P
     assert audit[0]["source"] == "mcp_tools"
     assert audit[0]["capability_tags"] == ["authz", "denied"]
     assert audit[0]["diff"]["allowed"] is False
+
+
+def test_local_engine_close_is_idempotent_and_hands_off_sequential_ownership(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    engine = LocalMemoryEngine(store_path=store)
+    first_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Writer lifecycle evidence before handoff.",
+            trust_tier=3,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.close()
+    engine.close()
+
+    with pytest.raises(RuntimeError, match="does not own its writable store"):
+        engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Write after close must fail.",
+                trust_tier=3,
+                access_policy={"tenant": TENANT},
+            )
+        )
+
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert f"{TENANT}:main:{first_cid}" in successor.evidence
+        successor_cid = successor.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content="Successor writes after sequential handoff.",
+                trust_tier=3,
+                access_policy={"tenant": TENANT},
+            )
+        )
+
+    observer = LocalMemoryEngine(store_path=store, read_only=True)
+    assert {f"{TENANT}:main:{first_cid}", f"{TENANT}:main:{successor_cid}"} <= set(observer.evidence)
 
 
 def test_memory_tools_direct_assert_fact_and_preference_write_paths() -> None:
@@ -1908,6 +2116,12 @@ def test_mcp_server_main_dispatches_serving_modes(tmp_path: Path, monkeypatch: p
         def __init__(self, **kwargs: object) -> None:
             calls.append(("stdio_init", dict(kwargs)))
 
+        def __enter__(self) -> DummyServer:
+            return self
+
+        def __exit__(self, *_exc_info: object) -> None:
+            calls.append(("stdio_close", {}))
+
         def serve(self) -> None:
             calls.append(("stdio_serve", {}))
 
@@ -1977,6 +2191,7 @@ def test_mcp_server_main_dispatches_serving_modes(tmp_path: Path, monkeypatch: p
     calls_by_name = {name: kwargs for name, kwargs in calls if name != "stdio_serve"}
     assert calls[0][0] == "stdio_init"
     assert calls[1] == ("stdio_serve", {})
+    assert calls[2] == ("stdio_close", {})
     assert calls_by_name["stdio_init"]["store_path"] == str(tmp_path / "stdio.json")
     assert calls_by_name["stdio_init"]["auth_token"] == "entrypoint-token"
     assert calls_by_name["stdio_init"]["require_session"] is True
@@ -2077,18 +2292,29 @@ def test_sdk_streamable_builder_preserves_facade_stateless_mode(
     monkeypatch.setitem(sys.modules, "starlette.responses", starlette_responses)
     monkeypatch.setitem(sys.modules, "starlette.routing", starlette_routing)
 
+    class FakeFacade:
+        def close(self) -> None:
+            captured["facade_closed"] = True
+
+    class FakeSdkServer:
+        mnemosyne_mcp_facade = FakeFacade()
+
+    fake_sdk_server = FakeSdkServer()
+
     def fake_build_sdk_server(**kwargs: object) -> object:
         captured["sdk_kwargs"] = dict(kwargs)
-        return "sdk-server"
+        return fake_sdk_server
 
     monkeypatch.setattr(mcp_server, "build_sdk_server", fake_build_sdk_server)
 
     app = build_sdk_streamable_http_app(stateless=True, store_path=tmp_path / "store.json")
 
     assert captured["sdk_kwargs"] == {"store_path": tmp_path / "store.json", "stateless": True}
-    assert captured["manager_app"] == "sdk-server"
+    assert captured["manager_app"] is fake_sdk_server
     assert captured["manager_stateless"] is True
     assert getattr(app.state, "mnemosyne_streamable_http_manager")
+    assert app.state.mnemosyne_mcp_facade is fake_sdk_server.mnemosyne_mcp_facade
+    assert "facade_closed" not in captured
 
 
 def test_mcp_server_can_use_command_key_provider_for_encrypted_objects(tmp_path: Path) -> None:
@@ -2394,10 +2620,19 @@ def test_mcp_self_test_fails_when_session_required_without_verifier(tmp_path: Pa
 
 def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sdk_calls: list[dict[str, object]] = []
+    facade_close_calls: list[int] = []
+
+    class FakeSdkFacade:
+        def close(self) -> None:
+            facade_close_calls.append(1)
+
+    class FakeSdkServer:
+        def __init__(self) -> None:
+            self.mnemosyne_mcp_facade = FakeSdkFacade()
 
     def sdk_success(**kwargs: object) -> object:
         sdk_calls.append(dict(kwargs))
-        return object()
+        return FakeSdkServer()
 
     monkeypatch.setattr(mcp_server, "build_sdk_server", sdk_success)
     report = run_self_test(store_path=tmp_path / "sdk-ok.json", sdk=True, stateless=True)
@@ -2406,6 +2641,7 @@ def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pyt
     assert report["ok"] is True
     assert report["stateless"] is True
     assert checks["sdk_build"]["ok"] is True
+    assert facade_close_calls == [1]
     assert sdk_calls[0]["store_path"] == tmp_path / "sdk-ok.json"
     assert sdk_calls[0]["stateless"] is True
 
@@ -2442,6 +2678,11 @@ def test_mcp_self_test_records_sdk_build_status(tmp_path: Path, monkeypatch: pyt
 
 def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
     auth_token = "mcp-cli-self-test-auth-token"
+    # The subprocess must import this checkout's mnemosyne regardless of what
+    # the interpreter's installed copy resolves to.
+    src_dir = str(Path(__file__).resolve().parents[1] / "src")
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(filter(None, (src_dir, env.get("PYTHONPATH"))))
     result = subprocess.run(
         [
             sys.executable,
@@ -2459,6 +2700,7 @@ def test_mcp_cli_self_test_reports_deployment_health(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     )
     report = json.loads(result.stdout)
     encoded = json.dumps(report)
@@ -2574,14 +2816,15 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
     assert capture_status == 200
     assert captured is not None
     captured_content = captured["result"]["structuredContent"]  # type: ignore[index]
-    summary_run = ConsolidationWorker(LocalMemoryEngine(store_path=store), gate_cases=[]).run_queue_payload(
-        {
-            "tenant_id": TENANT,
-            "branch": "main",
-            "source_evidence_cids": [captured_content["cid"]],
-            "passes": ["summarizer"],
-        }
-    )
+    with LocalMemoryEngine(store_path=store) as consolidation_engine:
+        summary_run = ConsolidationWorker(consolidation_engine, gate_cases=[]).run_queue_payload(
+            {
+                "tenant_id": TENANT,
+                "branch": "main",
+                "source_evidence_cids": [captured_content["cid"]],
+                "passes": ["summarizer"],
+            }
+        )
     summary = next(item for item in summary_run.pass_results if item["name"] == "summarizer")["details"]
 
     server, thread, base = start_mcp_http_server(store_path=store)
@@ -2616,37 +2859,37 @@ def test_mcp_http_transport_surfaces_gist_only_abstention(tmp_path: Path) -> Non
 def test_mcp_http_transport_suppresses_gist_derived_graph_without_source(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     source_key = "hosted-http-deep-gist-source"
-    engine = LocalMemoryEngine(store_path=store)
-    summary_cid = engine.append_evidence(
-        Evidence(
-            tenant_id=TENANT,
-            user_id=USER,
-            actor="system",
-            source_type="consolidation-summary",
-            source_identity="consolidation-summary:http-deep-gist",
-            content="Hosted MCP HTTP deep search generated summary support requires source inspection.",
-            metadata={
-                "summary": {
-                    "kind": "abstractive_gist",
-                    "source_evidence_cids": [source_key],
-                    "confabulation_risk": True,
-                }
-            },
-            trust_tier=2,
-            capability_tags=["consolidation-gist", "derived-summary"],
-            access_policy={"tenant": TENANT},
+    with LocalMemoryEngine(store_path=store) as engine:
+        summary_cid = engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="system",
+                source_type="consolidation-summary",
+                source_identity="consolidation-summary:http-deep-gist",
+                content="Hosted MCP HTTP deep search generated summary support requires source inspection.",
+                metadata={
+                    "summary": {
+                        "kind": "abstractive_gist",
+                        "source_evidence_cids": [source_key],
+                        "confabulation_risk": True,
+                    }
+                },
+                trust_tier=2,
+                capability_tags=["consolidation-gist", "derived-summary"],
+                access_policy={"tenant": TENANT},
+            )
         )
-    )
-    engine.add_relation(
-        Relation(
-            tenant_id=TENANT,
-            source=source_key,
-            predicate="summary-derived-gist",
-            target=summary_cid,
-            source_evidence_cids=[source_key],
-            access_policy={"tenant": TENANT},
+        engine.add_relation(
+            Relation(
+                tenant_id=TENANT,
+                source=source_key,
+                predicate="summary-derived-gist",
+                target=summary_cid,
+                source_evidence_cids=[source_key],
+                access_policy={"tenant": TENANT},
+            )
         )
-    )
 
     server, thread, base = start_mcp_http_server(store_path=store)
     try:
@@ -2746,10 +2989,21 @@ def test_mcp_http_transport_requires_client_certificate(tmp_path: Path) -> None:
     assert health["tls_client_cert_required"] is True
 
 
-def test_mcp_http_transport_rejects_incomplete_tls_config(tmp_path: Path) -> None:
+def test_mcp_http_transport_rejects_incomplete_tls_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_calls: list[int] = []
+    original_close = MnemosyneMcpServer.close
+
+    def counting_close(self: MnemosyneMcpServer) -> None:
+        close_calls.append(1)
+        original_close(self)
+
+    monkeypatch.setattr(MnemosyneMcpServer, "close", counting_close)
     tls = make_tls_material(tmp_path)
     with pytest.raises(ValueError, match="both tls_cert_file and tls_key_file"):
         build_http_server(host="127.0.0.1", port=0, tls_cert_file=str(tls["server_cert"]))
+    assert close_calls == [1]
     with pytest.raises(ValueError, match="client certificate enforcement requires tls_client_ca_file"):
         build_http_server(
             host="127.0.0.1",
@@ -2758,6 +3012,7 @@ def test_mcp_http_transport_rejects_incomplete_tls_config(tmp_path: Path) -> Non
             tls_key_file=str(tls["server_key"]),
             tls_require_client_cert=True,
         )
+    assert close_calls == [1, 1]
 
 
 def test_mcp_http_transport_enforces_auth_session_and_schema(tmp_path: Path) -> None:
@@ -3220,6 +3475,35 @@ def test_mcp_http_transport_stateless_mode_reloads_durable_state(tmp_path: Path)
     assert hits[0]["provenance"] == [captured_content["cid"]]
 
 
+def test_mcp_http_server_close_releases_facade_and_is_idempotent(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server, thread, base = start_mcp_http_server(store_path=store)
+    facade = server.mnemosyne_facade
+    assert facade is not None
+    close_calls: list[int] = []
+    original_close = facade.close
+
+    def counting_close() -> None:
+        close_calls.append(1)
+        original_close()
+
+    facade.close = counting_close  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RuntimeError, match="already has a writer"):
+            LocalMemoryEngine(store_path=store)
+    finally:
+        stop_mcp_http_server(server, thread)
+    # stop_mcp_http_server already called server_close; a second call must not
+    # close the facade again. Counting here (rather than only observing that a
+    # successor can open the store) is what makes the drop-the-reference guard
+    # in server_close observable — MnemosyneMcpServer.close is independently
+    # idempotent, so a successor opens fine either way.
+    server.server_close()
+    assert close_calls == [1]
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
 def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_path: Path) -> None:
     store = tmp_path / "store.json"
     writer = MnemosyneMcpServer(store_path=store, stateless=True)
@@ -3271,6 +3555,7 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
             "source_trust_tier": 0,
         },
     )
+    writer.close()
     reader = MnemosyneMcpServer(store_path=store, stateless=True)
 
     search = mcp_call(reader, "search", {"tenant_id": TENANT, "query": "stateless durable evidence"})
@@ -3313,11 +3598,13 @@ def test_mcp_server_stateless_mode_reloads_durable_engine_and_runtime_state(tmp_
             "source_trust_tier": 0,
         },
     )
-    after_retire = mcp_call(
-        MnemosyneMcpServer(store_path=store, stateless=True),
-        "profile_context",
-        {"tenant_id": TENANT, "user_id": USER, "scope": {"surface": "mcp"}},
-    )
+    reader.close()
+    with MnemosyneMcpServer(store_path=store, stateless=True) as observer:
+        after_retire = mcp_call(
+            observer,
+            "profile_context",
+            {"tenant_id": TENANT, "user_id": USER, "scope": {"surface": "mcp"}},
+        )
 
     assert denied_retire["result"]["isError"] is True
     assert "outside the requested tenant/user scope" in denied_retire["result"]["content"][0]["text"]
@@ -3347,7 +3634,7 @@ def test_mcp_server_stateless_mode_reuses_warm_tools_for_same_scope(
     assert build_calls == [TENANT, "tenant-other"]
 
 
-def test_mcp_server_stateless_warm_tools_reload_after_external_store_write(
+def test_mcp_server_stateless_reader_rebuilds_after_close_and_sees_external_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = tmp_path / "store.json"
@@ -3364,23 +3651,308 @@ def test_mcp_server_stateless_warm_tools_reload_after_external_store_write(
 
     query = {"tenant_id": TENANT, "query": "externally written warm bundle evidence"}
     assert mcp_call(reader, "search", query)["hits"] == []
-    time.sleep(0.01)
-    captured = mcp_call(
-        MnemosyneMcpServer(store_path=store, stateless=True),
+    reader.close()
+    with MnemosyneMcpServer(store_path=store, stateless=True) as external_writer:
+        captured = mcp_call(
+            external_writer,
+            "capture",
+            {
+                "tenant_id": TENANT,
+                "user_id": USER,
+                "actor": "user",
+                "source_type": "chat",
+                "content": "Externally written warm bundle evidence.",
+                "trust_tier": 3,
+            },
+        )
+    refreshed = mcp_call(reader, "search", query)
+
+    assert build_calls == 2
+    assert refreshed["hits"][0]["provenance"] == [captured["cid"]]
+
+
+def test_mcp_server_close_releases_cached_stateless_bundles_exactly_once(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store, stateless=True)
+    mcp_call(
+        server,
         "capture",
         {
             "tenant_id": TENANT,
             "user_id": USER,
             "actor": "user",
             "source_type": "chat",
-            "content": "Externally written warm bundle evidence.",
+            "content": "Warm bundle closed exactly once on facade close.",
             "trust_tier": 3,
         },
     )
-    refreshed = mcp_call(reader, "search", query)
+    (bundle,) = server._stateless_tools_cache.values()
+    engine = bundle[0]
+    close_calls: list[int] = []
+    original_close = engine.close
 
-    assert build_calls == 2
-    assert refreshed["hits"][0]["provenance"] == [captured["cid"]]
+    def counting_close() -> None:
+        close_calls.append(1)
+        original_close()
+
+    engine.close = counting_close
+    server.close()
+    server.close()
+
+    assert close_calls == [1]
+    assert server._stateless_tools_cache == {}
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.evidence
+
+
+def test_mcp_server_stateful_close_is_idempotent_and_closes_engine_exactly_once(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store)
+    close_calls: list[int] = []
+    original_close = server.engine.close
+
+    def counting_close() -> None:
+        close_calls.append(1)
+        original_close()
+
+    server.engine.close = counting_close
+    server.close()
+    server.close()
+
+    assert close_calls == [1]
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_server_stateful_tool_call_after_close_is_rejected(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store)
+    server.close()
+
+    with pytest.raises(RuntimeError, match="MCP server is closed"):
+        server.call_tool("residency_policy", {})
+
+
+def test_mcp_close_bundle_releases_every_resource_when_one_closer_fails() -> None:
+    closed: list[str] = []
+
+    class FailingEngine:
+        def close(self) -> None:
+            closed.append("engine")
+            raise RuntimeError("engine close failed")
+
+    class ClosableQueue:
+        def close(self) -> None:
+            closed.append("queue")
+
+    class ConnectionsOnlyRuntimeState:
+        def close_connections(self) -> None:
+            closed.append("runtime_state")
+
+    with pytest.raises(RuntimeError, match="engine close failed"):
+        MnemosyneMcpServer._close_bundle(
+            (FailingEngine(), ClosableQueue(), ConnectionsOnlyRuntimeState(), None)
+        )
+
+    assert closed == ["engine", "queue", "runtime_state"]
+
+
+def test_mcp_server_close_waits_for_in_flight_stateless_transaction(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    server = MnemosyneMcpServer(store_path=store, stateless=True)
+    mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+
+    closer = threading.Thread(target=server.close)
+    with server._stateless_transaction_lock:
+        closer.start()
+        closer.join(timeout=0.2)
+        assert closer.is_alive(), "close() must wait for the in-flight stateless transaction"
+    closer.join(timeout=5)
+    assert not closer.is_alive()
+    assert server._stateless_tools_cache == {}
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_http_server_build_failure_closes_facade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_calls: list[int] = []
+    original_close = MnemosyneMcpServer.close
+
+    def counting_close(self: MnemosyneMcpServer) -> None:
+        close_calls.append(1)
+        original_close(self)
+
+    monkeypatch.setattr(MnemosyneMcpServer, "close", counting_close)
+    blocker = socket.socket()
+    try:
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        with pytest.raises(OSError):
+            build_http_server(
+                host="127.0.0.1",
+                port=blocker.getsockname()[1],
+                store_path=tmp_path / "store.json",
+            )
+    finally:
+        blocker.close()
+
+    assert close_calls == [1]
+
+
+def test_mcp_http_server_socket_creation_failure_closes_facade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    close_calls: list[int] = []
+    original_close = MnemosyneMcpServer.close
+
+    def counting_close(self: MnemosyneMcpServer) -> None:
+        close_calls.append(1)
+        original_close(self)
+
+    monkeypatch.setattr(MnemosyneMcpServer, "close", counting_close)
+    # An unsupported address family makes socket.socket() itself fail, before
+    # TCPServer.__init__ reaches its own bind/activate server_close guard.
+    monkeypatch.setattr(mcp_server._FacadeClosingHTTPServer, "address_family", 999999)
+    with pytest.raises(OSError):
+        build_http_server(
+            host="127.0.0.1",
+            port=0,
+            store_path=tmp_path / "store.json",
+        )
+
+    assert close_calls == [1]
+
+
+def test_mcp_sdk_streamable_http_lifespan_closes_facade_on_exit(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    store = tmp_path / "streamable-lifespan-store.json"
+    app = build_sdk_streamable_http_app(store_path=store, stateless=False)
+
+    async def exercise() -> None:
+        async with app.router.lifespan_context(app):
+            with pytest.raises(RuntimeError, match="already has a writer"):
+                LocalMemoryEngine(store_path=store)
+
+    asyncio.run(exercise())
+    # The app (and thus the SDK facade) is still referenced, so only the
+    # lifespan's deterministic close can have released the writer.
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_self_test_reports_close_failure_instead_of_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "self-test-close-failure.json"
+
+    def failing_close_bundle(_bundle: tuple[Any, Any, Any, Any]) -> None:
+        raise RuntimeError("close exploded")
+
+    monkeypatch.setattr(MnemosyneMcpServer, "_close_bundle", staticmethod(failing_close_bundle))
+    report = run_self_test(store_path=store)
+
+    # A misbehaving closer must not turn the health check into a traceback.
+    checks = {check["name"]: check for check in report["checks"]}
+    assert report["ok"] is False
+    assert checks["release_facade"]["ok"] is False
+    assert "close exploded" in checks["release_facade"]["error"]
+
+
+def test_mcp_http_server_close_bounded_despite_idle_connection(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    httpd = build_http_server(host="127.0.0.1", port=0, store_path=store)
+    # Pin the shipped default: server_close joins non-daemon handler threads,
+    # so a drift to a much larger value would silently stall shutdown.
+    assert httpd.RequestHandlerClass.timeout == 30
+    httpd.RequestHandlerClass.timeout = 1  # keep the bounded-join check fast
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    idle = socket.create_connection(("127.0.0.1", httpd.server_port))
+    try:
+        time.sleep(0.2)  # let a non-daemon handler thread block on the idle socket
+        httpd.shutdown()
+        thread.join(timeout=5)
+        closer = threading.Thread(target=httpd.server_close, daemon=True)
+        closer.start()
+        closer.join(timeout=5)
+        assert not closer.is_alive(), "server_close must not hang on an idle connection"
+    finally:
+        idle.close()
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_sdk_streamable_http_build_failure_closes_facade(tmp_path: Path) -> None:
+    pytest.importorskip("mcp")
+    store = tmp_path / "streamable-build-failure-store.json"
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        build_sdk_streamable_http_app(streamable_http_path="", stateless=False, store_path=store)
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_server_build_tools_failure_releases_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mnemosyne import engine as engine_module
+
+    monkeypatch.delenv("MNEMOSYNE_POSTGRES_DSN", raising=False)
+    store = tmp_path / "store.json"
+
+    # Capture the engine instance built during the failed construction so the
+    # release can be asserted synchronously; a plain successor open would pass
+    # even with the release deleted because __del__ frees the writer on GC.
+    built: list[LocalMemoryEngine] = []
+
+    class _RecordingEngine(engine_module.LocalMemoryEngine):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(engine_module, "LocalMemoryEngine", _RecordingEngine)
+
+    with pytest.raises(ValueError, match="queue backend requires"):
+        MnemosyneMcpServer(store_path=store, queue_backend="postgres")
+
+    # The engine claimed the writer before queue construction failed; the
+    # partial bundle must be released without waiting for GC. Holding a strong
+    # reference to the constructed engine keeps __del__ from masking a missing
+    # explicit release, so the writer ownership check is deterministic.
+    assert built, "expected the local engine to be constructed before the failure"
+    partial_engine = built[0]
+    assert partial_engine._writer_path_key is None
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
+
+
+def test_mcp_server_stateless_scope_replacement_closes_previous_bundle(tmp_path: Path) -> None:
+    store = tmp_path / "store.json"
+    with MnemosyneMcpServer(store_path=store, stateless=True) as server:
+        mcp_call(server, "profile_context", {"tenant_id": TENANT, "user_id": USER})
+        (first_bundle,) = server._stateless_tools_cache.values()
+        first_engine = first_bundle[0]
+
+        mcp_call(server, "profile_context", {"tenant_id": "tenant-other", "user_id": USER})
+
+        assert len(server._stateless_tools_cache) == 1
+        with pytest.raises(RuntimeError, match="does not own its writable store"):
+            first_engine.append_evidence(
+                Evidence(
+                    tenant_id=TENANT,
+                    user_id=USER,
+                    actor="user",
+                    source_type="chat",
+                    content="Evicted bundle must not write the shared store.",
+                    trust_tier=3,
+                    access_policy={"tenant": TENANT},
+                )
+            )
+        with pytest.raises(RuntimeError, match="already has a writer"):
+            LocalMemoryEngine(store_path=store)
+    with LocalMemoryEngine(store_path=store) as successor:
+        assert successor.store_path == store
 
 
 def test_mcp_server_persists_parametric_artifacts_and_rolls_back(tmp_path: Path) -> None:
@@ -3716,6 +4288,89 @@ def test_mcp_server_binds_signed_session_and_rejects_tenant_mismatch(tmp_path: P
     assert "session tenant mismatch" in mismatch["result"]["content"][0]["text"]
     assert captured["cid"]
     assert searched["hits"][0]["provenance"] == [captured["cid"]]
+
+
+def test_mcp_cancel_binding_accepts_only_authenticated_user_or_agent(tmp_path: Path) -> None:
+    server = MnemosyneMcpServer(
+        store_path=tmp_path / "store.json", session_secret=MCP_SESSION_SECRET,
+        require_session=True,
+    )
+    token = mcp_session_token(agent_id="owning-agent")
+
+    def cancel(**overrides: Any) -> dict[str, Any]:
+        arguments: dict[str, Any] = {"session_token": token, "intention_id": "missing-intention"}
+        arguments.update(overrides)
+        return server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                              "params": {"name": "cancel_intention", "arguments": arguments}})
+
+    accepted_cases = (
+        cancel(),
+        cancel(cancelled_by=USER),
+        cancel(cancelled_by="owning-agent"),
+        cancel(cancelled_by=None),
+        cancel(cancelled_by=""),
+    )
+    for accepted in accepted_cases:
+        assert accepted["result"]["isError"] is True
+        # An accepted principal must reach the engine and fail only on the
+        # missing intention, proving no binding or principal denial fired.
+        assert "missing-intention" in accepted["result"]["content"][0]["text"]
+    foreign = cancel(cancelled_by="foreign-agent")
+    assert "session cancellation principal mismatch" in foreign["result"]["content"][0]["text"]
+
+
+def test_memory_tools_cancel_authorizes_user_owner_then_selected_agent() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    evidence_id = seed_grounded_gate_evidence(engine, "Cancel through owning agent.")
+    due = dt.datetime(2026, 7, 18, 12, tzinfo=dt.timezone.utc)
+    engine.schedule_intention(Intention(
+        intention_id="agent-cancellable", tenant_id=TENANT, user_id=USER,
+        agent_id="owning-agent", trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()},
+        action={"type": "remind", "message": "Agent cancellation."}, due_at=due,
+        evidence_ids=[evidence_id], session_id="mcp-test-session",
+    ))
+    identity = SessionIdentity(
+        tenant_id=TENANT, user_id=USER, agent_id="owning-agent", role="operator",
+        source_trust_tier=0, session_id="mcp-test-session",
+    )
+    with pytest.raises(PermissionError, match="not authenticated"):
+        tools.cancel_intention(TENANT, "agent-cancellable", "foreign-agent", session_identity=identity)
+    cancelled = tools.cancel_intention(
+        TENANT, "agent-cancellable", "owning-agent", session_identity=identity,
+    )
+    assert cancelled["cancellation_state"] == {"cancelled_by": "owning-agent"}
+
+
+def test_memory_tools_cancel_agent_principal_cannot_reach_other_users() -> None:
+    engine = LocalMemoryEngine()
+    tools = MemoryTools(engine)
+    evidence_id = seed_grounded_gate_evidence(
+        engine, "Agent principal stays user-scoped.", user_id="other-user"
+    )
+    due = dt.datetime(2026, 7, 18, 12, tzinfo=dt.timezone.utc)
+    engine.schedule_intention(Intention(
+        intention_id="other-users-intention", tenant_id=TENANT, user_id="other-user",
+        agent_id="owning-agent", trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()},
+        action={"type": "remind", "message": "Other user's reminder."}, due_at=due,
+        evidence_ids=[evidence_id],
+    ))
+    identity = SessionIdentity(
+        tenant_id=TENANT, user_id=USER, agent_id="owning-agent", role="operator",
+        source_trust_tier=0, session_id="mcp-test-session",
+    )
+    with pytest.raises(PermissionError, match="authenticated user's intentions"):
+        tools.cancel_intention(
+            TENANT, "other-users-intention", "owning-agent", session_identity=identity,
+        )
+    stored = next(
+        intention for intention in engine.list_intentions(TENANT)
+        if intention.intention_id == "other-users-intention"
+    )
+    assert stored.status == "scheduled"
+    assert stored.session_id is None
 
 
 def test_mcp_server_accepts_keyring_sessions_and_rejects_revoked_session_ids(tmp_path: Path) -> None:
