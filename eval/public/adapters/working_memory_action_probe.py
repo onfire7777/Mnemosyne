@@ -16,6 +16,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from eval.harness.cli_driver import MnemoCLI
+from eval.public.action_cli import SESSION_SECRET, mint_session_token
+
+# Working memory writes require an authenticated first-party operator session.
+_WORKING_MEMORY_ROLE = "operator"
 
 SCHEMA_VERSION = 1
 SUITE = "working-memory-action-v1"
@@ -372,13 +376,36 @@ def _validate_event(event: Any, case: dict[str, Any], seen: set[str]) -> None:
             _string(event[name], name)
 
 
+def _signed(cli: Any, event: Mapping[str, Any]) -> Any:
+    """Bind an authenticated operator session for a working-memory write.
+
+    The token carries the event's exact tenant/user/agent/session scope so the
+    production CLI binds and enforces it; a non-``MnemoCLI`` seam (the unit
+    ``FakeCLI``) is returned unchanged so its command log stays untouched.
+    """
+    if not isinstance(cli, MnemoCLI):
+        return cli
+    token = mint_session_token(
+        tenant_id=event["tenant_id"],
+        user_id=event["user_id"],
+        agent_id=event["agent_id"],
+        session_id=event["session_id"],
+        role=_WORKING_MEMORY_ROLE,
+    )
+    return replace(
+        cli,
+        global_flags=[*cli.global_flags, "--session-token", token],
+        env={**cli.env, "MNEMOSYNE_SESSION_SECRET": SESSION_SECRET},
+    )
+
+
 def _execute_case(case: dict[str, Any], cli: Any) -> tuple[list[dict[str, Any]], list[str]]:
     command_log: list[str] = []
     for event_index, event in enumerate(case["events"]):
         operation = event["operation"]
         if operation in {"put", "replace"}:
             if operation == "replace":
-                cli.run(
+                _signed(cli, event).run(
                     "working-expire", *_scope_args(event), "--expired-at", event["at"],
                     "--role", "operator", "--source-trust-tier", "0",
                 )
@@ -394,7 +421,7 @@ def _execute_case(case: dict[str, Any], cli: Any) -> tuple[list[dict[str, Any]],
             if not isinstance(cid, str) or not cid:
                 raise ValueError("working-action capture omitted evidence CID")
             ttl = _ttl_seconds(event["at"], event.get("expires_at"))
-            cli.run(
+            _signed(cli, event).run(
                 "working-seed", *_scope_args(event), "--kind", _PUBLIC_KIND.get(
                     event["item_type"], event["item_type"]
                 ),
@@ -404,14 +431,16 @@ def _execute_case(case: dict[str, Any], cli: Any) -> tuple[list[dict[str, Any]],
             )
             command_log.extend(["capture", "working-seed"])
         elif operation in {"resolve", "expire"}:
-            cli.run(
+            _signed(cli, event).run(
                 "working-expire", *_scope_args(event), "--expired-at", event["at"],
                 "--role", "operator", "--source-trust-tier", "0",
             )
             command_log.append("working-expire")
         else:
             command_log.append("observe")
-    query = cli.run("working-query", *_scope_args(case["events"][-1]), "--as-of", case["now"]).json
+    query = _signed(cli, case["events"][-1]).run(
+        "working-query", *_scope_args(case["events"][-1]), "--as-of", case["now"]
+    ).json
     command_log.append("working-query")
     items = query.get("items") if isinstance(query, Mapping) else None
     if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):

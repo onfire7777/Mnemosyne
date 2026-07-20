@@ -486,6 +486,7 @@ def test_memory_tools_prospective_payload_remains_literal_and_scoped(
         agent_id=AGENT,
         role="agent",
         source_trust_tier=int(TrustTier.NORMAL),
+        session_id=SESSION,
     )
     scheduler = SessionIdentity(
         tenant_id=TENANT,
@@ -494,6 +495,7 @@ def test_memory_tools_prospective_payload_remains_literal_and_scoped(
         role="operator",
         source_trust_tier=int(TrustTier.NORMAL),
         capabilities=(PROSPECTIVE_SCHEDULER_CAPABILITY,),
+        session_id=SESSION,
     )
     calls, install_tripwire = execution_tripwire
     install_tripwire()
