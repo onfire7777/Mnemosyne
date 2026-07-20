@@ -596,15 +596,17 @@ flowchart TB
   object key via `storage.ObjectStore.shred`.
 - **Signed deletion manifest (W2 D5):** a *distinct*, library-level subsystem from the `forget` path above.
   `deletion.py` (`DeletionCoordinator`) + `deletion_manifest.py` implement a fail-closed, resumable
-  **signed-deletion saga**. `DeletionCoordinator.delete(...)` requires a verified `SessionIdentity`, the
-  `legal` write role, and `hard_delete_legal` mode; it drives a forward-only cascade over boundary stores,
+  **signed-deletion saga**. `DeletionCoordinator.delete(...)` requires a verified `SessionIdentity`, an
+  authorized destructive write role (`policy.authorize_write("deletion.hard_delete_legal", identity.role, …)`,
+  so one of the four `WriteRole`s), a `requested_by_role == "legal"` request field, and `hard_delete_legal`
+  mode; it drives a forward-only cascade over boundary stores,
   synthetic surfaces, then the engine, journalling durable per-surface receipts through an
   `SQLiteDeletionLedger` (WAL + `synchronous=FULL` + POSIX `flock` + CAS `revision`) so a crashed run resumes
   without re-deleting. It emits a `mnemosyne.deletion_manifest.v1` manifest in which every custody-bearing
   value (tenant/user/reason/source refs) is replaced by a keyed-HMAC `opaque:<hex>` token. **Verify
   contract:** `verify_deletion_manifest(manifest)` is a *semantic* check (returns `{complete, errors}`, never
   raises) that enforces schema shape, opaque-custody / no-canary / no-raw-hash scanning,
-  `operation_id == request_id` identity linkage, ordered timestamps, legal mode + `legal` role, a durable
+  `operation_id == request_id` identity linkage, ordered timestamps, legal mode + `requested_by_role == "legal"`, a durable
   positive fence, full `surfaces ⇄ stores ⇄ policy.required_surfaces` coverage set-equality, per-surface
   `verified_removed` with `residue_probe == 0`, and a zero-residue summary. `verify_signed_deletion_manifest(...)`
   additionally requires a valid detached **Ed25519** collector signature (`evidence_signing.py`) *and* rebinds

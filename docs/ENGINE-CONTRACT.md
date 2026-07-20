@@ -168,7 +168,9 @@ by the CLI/MCP `forget` surface); the signed manifest has no CLI subcommand or M
 tool.
 
 `DeletionCoordinator.delete(...)` is idempotent on `operation_id`, requires a
-verified `SessionIdentity`, tenant/user ownership, the `legal` write role, and
+verified `SessionIdentity`, tenant/user ownership, an authorized destructive write
+role (`policy.authorize_write("deletion.hard_delete_legal", identity.role, …)`, one
+of the four `WriteRole`s) carrying a `requested_by_role == "legal"` request field, and
 `hard_delete_legal` mode, and drives a forward-only, resumable saga whose durable
 per-surface receipts are journalled by an `SQLiteDeletionLedger` (WAL +
 `synchronous=FULL` + POSIX `flock` + CAS `revision`). Custody-bearing values are
