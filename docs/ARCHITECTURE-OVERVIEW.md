@@ -12,12 +12,13 @@
 > (core dep = `cryptography`); Postgres, an embedding/reranker service, Keycloak, Vault and
 > C2PA are *optional real-provider* upgrades, each with a deterministic local fallback.
 >
-> **Status (2026-06-25):** `main` · **6/6 headline SLOs proven** · ~**82%** blended
+> **Status (2026-07-20):** `main` @ `0784340` · W3 prospective-/working-memory planes + W2
+> signed deletion manifest merged (PR #39) · **6/6 headline SLOs proven** · ~**82%** blended
 > complete. Remaining ~18% = Tier-B *real-infrastructure operational evidence*, not code.
 
 - **Package:** `mnemosyne-memory` v0.1.0 · Python ≥3.12 · Apache-2.0
-- **Entry points:** `mneme` (CLI, 91 subcommands) · `mneme-mcp` (MCP server, 48 tools)
-- **Source:** ~35,283 lines across 41 `.py` files in `src/mnemosyne/` (40 top-level modules + the `providers/` subpackage `__init__.py`)
+- **Entry points:** `mneme` (CLI, 119 subcommands) · `mneme-mcp` (MCP server, 59 tools)
+- **Source:** ~71,822 lines across 73 `.py` files in `src/mnemosyne/` (including the `providers/` subpackage)
 - **Wiki:** [Home](https://github.com/onfire7777/Mnemosyne/wiki) ·
   [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) ·
   [Consolidation](https://github.com/onfire7777/Mnemosyne/wiki/Memory-Pipelines) ·
@@ -36,8 +37,8 @@ flowchart TB
 
     subgraph mneme["Mnemosyne (single process, local-first)"]
         direction TB
-        CLI["CLI · <b>mneme</b><br/>91 subcommands"]
-        MCP["MCP Server · <b>mneme-mcp</b><br/>48 tools · 4 transports"]
+        CLI["CLI · <b>mneme</b><br/>119 subcommands"]
+        MCP["MCP Server · <b>mneme-mcp</b><br/>59 tools · 4 transports"]
         ENGINE["<b>Memory Engine</b><br/>MemoryEngine Protocol<br/>Local ⟷ Postgres ⟷ Sqlite backend"]
         WORK["<b>Background Workers</b><br/>consolidation · lifecycle<br/>calibration · eval"]
         CLI --> ENGINE
@@ -75,9 +76,9 @@ pins no server version, so the engine is not restricted to PG16.
 ```mermaid
 flowchart TB
     subgraph IF["① Interface layer"]
-        cli["cli.py · mneme CLI (91 cmds)"]
+        cli["cli.py · mneme CLI (119 cmds)"]
         mcps["mcp_server.py · 4 transports<br/>(stdio shim · SDK stdio · SDK<br/>StreamableHTTP · hosted HTTP)"]
-        mcpt["mcp_tools.py · 48 MCP tools facade"]
+        mcpt["mcp_tools.py · 59 MCP tools facade"]
     end
 
     subgraph CORE["② Engine core"]
@@ -149,7 +150,7 @@ flowchart TB
 **Reading the layers**
 
 1. **Interface** — the only surfaces a caller touches. CLI for humans/ops, MCP for agents. Both call the same engine.
-2. **Engine core** — `MemoryEngine` is a `typing.Protocol` (interface). `LocalMemoryEngine` (ephemeral, in-memory, dev/test), `PostgresEngine` (ACID, multi-tenant, auditable), and `SqliteEngine` (one file per tenant) are interchangeable implementations chosen at deploy time; parity tests (`tests/test_parity_*.py`, `test_shared_engine_contract.py`) prove behavioural equivalence. The router `route()` and its `RoutePlan` dataclass are defined **in `engine.py`** (not `retrieval.py`).
+2. **Engine core** — `MemoryEngine` is a `typing.Protocol` (interface). `LocalMemoryEngine` (ephemeral, in-memory, dev/test), `PostgresEngine` (ACID, multi-tenant, auditable), and `SqliteEngine` (one file per tenant) are interchangeable implementations chosen at deploy time; parity tests (`tests/test_parity_*.py`, `test_shared_engine_contract.py`) prove behavioural equivalence. The router `route()` and its `RoutePlan` dataclass are defined **in `engine.py`** (not `retrieval.py`). All three engines also expose the **prospective-** and **working-memory** planes (§5) and a **cross-engine assertion-identity map**: each engine's `merge()` returns a `MergeReport` (`models.py`) whose `assertion_id_map: dict[str, str]` maps every promoted source assertion id to the *actual* durable destination id — identity-preserved on Local/Sqlite, a deterministic `uuid5` clone id minted by `postgres_engine._merge_clone_assertion_id` on Postgres. The MCP `confirm` tool surfaces that durable id to callers as `confirmed_id` (fail-closed: it raises rather than fabricate a mapping), so a caller learns the same stable assertion identity regardless of backend.
 3. **Pipelines** — the write path (ingestion → consolidation → belief) and read path (retrieval → graph).
 4. **Background/learning** — durable job queue + lifecycle/forgetting + induction of lessons/skills + shadow-mode tuning.
 5. **Eval/calibration** — turns confidence into calibrated abstention and measures the SLOs. `guard.py` lives here: it is the **§25 evaluation anti-degradation guard** (`no_degradation_guard` + `LongHorizonNoDegradationTracker`), proving memory-augmented scores stay non-inferior to a no-memory baseline. *It has no read/confidentiality, sensitivity, role, or `access_policy` logic* — read-side enforcement lives on the engine read path (§5).
@@ -161,14 +162,17 @@ flowchart TB
 ## 3. Data Model — the canonical schema (`sql/schema.sql`)
 
 PostgreSQL + `pgcrypto` + `vector` (pgvector); the dev compose image is `pgvector/pgvector:pg16`. The schema
-defines **24 distinct tables**. Every **tenant-scoped** table (all tables except the `tenants` registry,
+defines **28 distinct tables** (24 core + the four W3/W2 memory-plane tables — `working_memory`,
+`intentions`, `intention_firing_receipts`, `intention_firing_receipts_v2`; `config/drift-baseline.toml`
+`[schema].required_tables` pins the same 28 and `tests/test_config_drift.py` enforces set-equality).
+Every **tenant-scoped** table (all tables except the `tenants` registry,
 which has no `tenant_id` column) carries **Row-Level Security**; all but one use the policy
-`tenant_id = mnemosyne_current_tenant()`. The exception is **`audit_log`**, whose policy is
+`tenant_id = mnemosyne_current_tenant()` (the four new memory-plane tables included). The exception is **`audit_log`**, whose policy is
 `tenant_id IS NULL OR tenant_id = mnemosyne_current_tenant()` so **system-level (NULL-tenant) audit rows
 remain visible**. Embeddings are `VECTOR(1024)`; both `evidence.embedding` and `assertions.embedding`
 carry an **HNSW** cosine index, and `assertions.lexeme` (a `TSVECTOR`) has a GIN index.
 
-> **The ERD below is a partial view** (the 12 most load-bearing tables). The full 24-table catalogue
+> **The ERD below is a partial view** (the 12 most load-bearing tables). The full 28-table catalogue
 > follows it. Columns shown are verbatim from `sql/schema.sql`.
 
 ```mermaid
@@ -288,7 +292,7 @@ erDiagram
     }
 ```
 
-### Full table catalogue (24 tables)
+### Full table catalogue (28 tables)
 
 | Table | Purpose | Notable columns (verbatim) |
 |---|---|---|
@@ -316,6 +320,10 @@ erDiagram
 | **audit_log** | Immutable mutation trail (NULL-tenant rows visible) | `actor`, `op`, `target_id`, `trust_tier`, `capability_tags[]`, `diff`, `at` |
 | **runtime_jobs** | Durable async job queue | `kind`, `payload`, `status` (`queued\|running\|retry\|complete\|dead`), `attempts`, `max_attempts`, `last_error`, `result` |
 | **runtime_state** | Durable runtime KV state | PK `(tenant_id, key)`, `payload` (JSONB) |
+| **working_memory** | **Working-memory plane** — short-TTL session items, never in the durable ledger | PK `(tenant_id, session_id, item_id)`, `external_session_id`, `user_id`, `external_user_id`, `agent_id`, `kind`, `task_id`, `content`, `created_at`, `expires_at` (CHECK `> created_at` **and** `≤ created_at + 24h`), `trust_tier`, `capability_tags[]`, `sensitivity`, `status` (`active\|expired`), `expired_at`, `evidence_ids[]`, `access_policy`, `metadata` |
+| **intentions** | **Prospective-memory plane** — scheduled intentions (W3 Phase 2) | PK `(tenant_id, intention_id)`, `user_id`, `external_user_id`, `agent_id`, `trigger_type` (`exact_time\|time_window\|event\|condition\|dependency_completion`), `trigger_expression`, `action`, `due_at`, `status` (`scheduled\|cancelled\|fired`), `priority`, `dependencies[]`, `reschedule_history`, `cancellation_state`, `evidence_ids[]`, `session_id`, `recurrence_policy`, `recurrence_state`, `created_at` |
+| **intention_firing_receipts** | Durable, clock-independent fire-idempotency receipts (append-only trigger + RLS) | PK `(tenant_id, intention_id, operation)`, `operation` (`= 'fire'`), `canonical_event_id` (unique), `created_at` |
+| **intention_firing_receipts_v2** | Occurrence-aware fire receipts (additive to the above; append-only + RLS) | PK `(tenant_id, intention_id, operation, occurrence)`, `occurrence` (`≥ 0`), `canonical_event_id` (unique), `created_at` |
 
 **Cross-cutting design**
 
@@ -514,6 +522,19 @@ flowchart TB
   `self_optimization.py` searches policy variants (retrieval weights, consolidation cadence, calibration
   thresholds, demotion threshold) in **shadow mode**, gated by `within_invariant_rails(...)`;
   `parametric.py` proposes a learned promotion boundary with rollback rails.
+- **Writer lifecycle.** There is no single "writer lease" abstraction by that literal name; two concrete
+  mechanisms govern who may mutate durable state. **(1) Single-writer ownership** — `LocalMemoryEngine`
+  registers path-keyed ownership in a process-local `_writer_owners` `WeakValueDictionary`: a second
+  *writable* engine on the same on-disk store raises
+  `RuntimeError("local memory store already has a writer: …")`, and ownership is released on `close()` (or
+  garbage collection). It is **process-local only** — no timeout, heartbeat, renewal, epoch, or fencing token
+  — and read-only engines register nothing, so many readers coexist; on the Postgres/Sqlite lanes
+  single-writer discipline is delegated to the database. All local mutators funnel through the single
+  `_persist()` write choke point (which bumps `_store_version`). **(2) Durable job leases** — the
+  `queued → running → retry → complete → dead` lease state machine in `queue.py` (`InProcessQueue` /
+  `PostgresQueue` via `FOR UPDATE SKIP LOCKED` / `SqliteQueue` via `BEGIN IMMEDIATE`, one shared
+  `enqueue`/`lease`/`complete`/`fail` surface). The leased unit is a *job*, not a writer, and there is
+  deliberately **no lease timeout / visibility reclaim** on any of the three queues.
 
 ---
 
@@ -567,9 +588,29 @@ flowchart TB
 - **Taint:** content tagged `data-only` / `no-write-authority` / `sanitize-as-data` / `quarantined` is
   stripped of write authority (`security.is_write_tainted`) — data can never author a write regardless of
   role or trust (I11).
-- **Erasure:** `privacy.ErasureMode` has exactly two members — `TOMBSTONE_RECOMPUTE` (reversible logical
-  erasure) and `HARD_DELETE_LEGAL` (one-way) — implemented as crypto-shred via Vault transit (destroying the
-  key) with propagation logged in `deletion_log`.
+- **Erasure (`forget` path):** `privacy.ErasureMode` has exactly two members — `TOMBSTONE_RECOMPUTE`
+  (reversible logical erasure) and `HARD_DELETE_LEGAL` (one-way) — implemented as crypto-shred via Vault
+  transit (destroying the key) with propagation logged in `deletion_log`. This is the user-facing surface:
+  the CLI `forget` subcommand and MCP `forget` tool both call `engine.forget(...)` (identical signature on
+  Local/Postgres/Sqlite), and a `HARD_DELETE_LEGAL` on an externalized payload additionally shreds the
+  object key via `storage.ObjectStore.shred`.
+- **Signed deletion manifest (W2 D5):** a *distinct*, library-level subsystem from the `forget` path above.
+  `deletion.py` (`DeletionCoordinator`) + `deletion_manifest.py` implement a fail-closed, resumable
+  **signed-deletion saga**. `DeletionCoordinator.delete(...)` requires a verified `SessionIdentity`, the
+  `legal` write role, and `hard_delete_legal` mode; it drives a forward-only cascade over boundary stores,
+  synthetic surfaces, then the engine, journalling durable per-surface receipts through an
+  `SQLiteDeletionLedger` (WAL + `synchronous=FULL` + POSIX `flock` + CAS `revision`) so a crashed run resumes
+  without re-deleting. It emits a `mnemosyne.deletion_manifest.v1` manifest in which every custody-bearing
+  value (tenant/user/reason/source refs) is replaced by a keyed-HMAC `opaque:<hex>` token. **Verify
+  contract:** `verify_deletion_manifest(manifest)` is a *semantic* check (returns `{complete, errors}`, never
+  raises) that enforces schema shape, opaque-custody / no-canary / no-raw-hash scanning,
+  `operation_id == request_id` identity linkage, ordered timestamps, legal mode + `legal` role, a durable
+  positive fence, full `surfaces ⇄ stores ⇄ policy.required_surfaces` coverage set-equality, per-surface
+  `verified_removed` with `residue_probe == 0`, and a zero-residue summary. `verify_signed_deletion_manifest(...)`
+  additionally requires a valid detached **Ed25519** collector signature (`evidence_signing.py`) *and* rebinds
+  it to the exact bytes it semantically verifies via a `manifest_sha256` TOCTOU check; `write_signed_deletion_manifest`
+  refuses to sign a semantically incomplete manifest. This subsystem is exercised by
+  `tests/completion/security/test_deletion_residue.py`; it is **not** yet wired to a CLI subcommand or MCP tool.
 - **Chain of custody:** every evidence item can carry `signed_provenance` (manifest + signer + signature +
   timestamp), verified by `provenance.SignedProvenanceVerifier`; media is verified via C2PA
   (`provenance.C2paToolVerifier` → `c2patool`); keys are wrapped by Vault transit through
@@ -714,7 +755,7 @@ capture handoff.
 
 ## 12. MCP transport surface
 
-`mneme-mcp` exposes the same 48 tools over **four** transports (plus a legacy SSE shim):
+`mneme-mcp` exposes the same 59 tools over **four** transports (plus a legacy SSE shim):
 
 | Transport | Flag | Endpoints | Notes |
 |---|---|---|---|
@@ -724,9 +765,12 @@ capture handoff.
 | Hosted HTTP JSON-RPC | `--http` | `/mcp` + `/healthz` + `POST /session/exchange` | `serve_http` |
 | Legacy SSE | — | — | validated via `mcp-sse-soak` |
 
-The 48 tool definitions live in `mcp_tools.py` (the `TOOL_SPEC` list), which `mcp_server.py` imports and
+The 59 tool definitions live in `mcp_tools.py` (the `TOOL_SPEC` list), which `mcp_server.py` imports and
 wraps into strict MCP `inputSchema`s (`additionalProperties: false`, `type: "object"`) via
-`_to_mcp_tool_spec()`.
+`_to_mcp_tool_spec()`. The prospective- and working-memory planes are exposed here too: five intention
+tools (schedule / update / cancel / evaluate / list) and four working-memory tools (seed / query / promote /
+expire). `docs/ENGINE-CONTRACT.md` is the canonical source for their exact method names and the
+MCP-vs-engine naming (the evaluate tool wraps the engine's due-intention evaluator).
 
 **Auth:** static bearer (`Authorization` / `--auth-token` / `MNEMOSYNE_MCP_TOKEN`) and/or a signed
 Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enforces session auth. The
@@ -738,14 +782,17 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 | Module | LOC | Role |
 |---|--:|---|
-| `cli.py` | 13.9K | `mneme` CLI — 91 subcommands across memory/graph/correction/branch/learning/parametric/profile/ops |
-| `postgres_engine.py` | 2.8K | PostgreSQL engine: RLS, FTS, pgvector, recursive PPR, bitemporal `as_of()` |
-| `consolidation.py` | 2.0K | 11-pass background knowledge compiler + promotion gate |
-| `engine.py` | 1.8K | `MemoryEngine` Protocol + `LocalMemoryEngine`; `route()` / `RoutePlan`; read-side sensitivity/access enforcement |
-| `mcp_server.py` | 1.6K | MCP transports (stdio shim / SDK stdio / SDK StreamableHTTP / hosted HTTP) + session exchange |
-| `mcp_tools.py` | 1.4K | 48-tool `MemoryTools` facade (`TOOL_SPEC`) |
-| `retrieval.py` | 1.3K | Provider adapters + deterministic local fallbacks |
-| `security.py` | 1.1K | `TrustTier` (0–5), `WriteRole` (reader/agent/consolidator/operator), sanitize, capability + OIDC authz |
+| `cli.py` | 20.8K | `mneme` CLI — 119 subcommands across memory/graph/correction/branch/learning/parametric/profile/prospective/working/ops |
+| `postgres_engine.py` | 6.9K | PostgreSQL engine: RLS, FTS, pgvector, recursive PPR, bitemporal `as_of()`, prospective/working planes |
+| `engine.py` | 5.4K | `MemoryEngine` Protocol + `LocalMemoryEngine`; `route()` / `RoutePlan`; `Intention` + prospective/working planes; `assertion_id_map` merge; read-side sensitivity/access enforcement |
+| `sqlite_engine.py` | 4.5K | Per-tenant single-file engine: FTS5, `as_of()`, prospective/working planes |
+| `consolidation.py` | 3.3K | 11-pass background knowledge compiler + promotion gate |
+| `retrieval.py` | 2.9K | Provider adapters + deterministic local fallbacks |
+| `mcp_tools.py` | 2.2K | 59-tool `MemoryTools` facade (`TOOL_SPEC`); `confirm` → `confirmed_id` |
+| `mcp_server.py` | 2.0K | MCP transports (stdio shim / SDK stdio / SDK StreamableHTTP / hosted HTTP) + session exchange |
+| `security.py` | 1.4K | `TrustTier` (0–5), `WriteRole` (reader/agent/consolidator/operator), sanitize, capability + OIDC authz |
+| `deletion.py` | 1.3K | Signed-deletion saga (`DeletionCoordinator`) + resumable `SQLiteDeletionLedger` receipts |
+| `deletion_manifest.py` | 0.4K | Persistence + fail-closed semantic/signature verify of `mnemosyne.deletion_manifest.v1` |
 | `self_optimization.py` | 0.8K | Shadow-mode policy search (`within_invariant_rails`) |
 | `provenance.py` | 0.8K | `SignedProvenanceVerifier` + `C2paToolVerifier` (chain of custody) |
 | `jobs.py` · `queue.py` | 0.6K · 0.4K | Durable job handlers + queue |
@@ -764,4 +811,6 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 ---
 
-*Generated from a structural read of `/Users/admin/Mnemosyne` @ `main` (`1b82c5e`); current checkout verified at `67c229a`.*
+*Generated from a structural read of `/Users/admin/Mnemosyne` @ `main`; reconciled to the merged W3
+prospective-/working-memory planes + W2 signed deletion manifest (PR #39 @ `0784340`). Counts computed from
+code: 119 CLI subcommands, 59 MCP tools, 28 schema tables.*
