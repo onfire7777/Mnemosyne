@@ -177,8 +177,10 @@ uv run --locked mneme intention-evaluate --tenant tenant-a \
   --evaluated-at 2026-07-21T09:00:00Z --trigger-context '{}' --operating-point '{}'
 ```
 
-> `working-seed` requires direct-user trust (`--source-trust-tier 0`) and
-> `intention-evaluate` requires the `prospective:evaluate` capability; token
+> `working-seed` seeds must stay within the write trust ceiling
+> (`max_trust_tier`, default `4`); under a signed session the effective tier is
+> taken from the session identity, so `--source-trust-tier` is not the operative
+> control. `intention-evaluate` requires the `prospective:evaluate` capability; token
 > verification also needs the session secret (`MNEMOSYNE_SESSION_SECRET` /
 > `--session-secret-command`). The public benchmark harness drives this seam
 > end-to-end through a signed-session evaluator (`eval/public/action_cli.py`)
@@ -202,7 +204,7 @@ uv run --locked mneme intention-evaluate --tenant tenant-a \
 | **Consolidation** | Warm-loop worker that runs an ordered 11-role pass pipeline through the promotion gate (see below). |
 | **Promotion gate** | Protected regression cases must pass before any candidate belief is promoted; failures roll back on a branch. |
 | **Branchable memory** | Fork (`branch`), experiment, then `merge` or `discard` — bitemporal, tenant-isolated. |
-| **Working memory** | An authenticated, TTL-bounded staging plane (`working-seed` / `working-query` / `working-promote` / `working-expire`). Seeds require a signed session and direct-user trust; promotion runs through the regression gate, and unpromoted seeds expire. |
+| **Working memory** | An authenticated, TTL-bounded staging plane (`working-seed` / `working-query` / `working-promote` / `working-expire`). Seeds require a signed session and must stay within the write trust ceiling (`max_trust_tier`, default `4`); promotion runs through the regression gate, and unpromoted seeds expire. |
 | **Prospective memory** | Session-bound *intentions* (`intention-schedule` / `-update` / `-cancel` / `-evaluate` / `-list`) that fire when due. Trigger types include `exact_time`, `time_window`, `event`, `condition`, and `dependency_completion`; an optional `recurrence_policy` reschedules future firings under a monotonic watermark. All intention writes require a signed session. |
 
 ### Roles (OIDC → Mnemosyne)
