@@ -10,6 +10,47 @@ independent external reproduction. Retrieval proportions use Wilson intervals;
 future answer-quality tracks must name their reader/judge and use bootstrap
 intervals. Families are never aggregated.
 
+## Deterministic action development suites
+
+The live registry exposes three repository-authored, non-publishable action
+profiles, and all three run through the authenticated public CLI subprocess
+seam. Each mints a per-scope signed session token and presents it through the
+production `--session-token` seam so every write and evaluation is verified and
+scoped by the engine. Run any of them, then verify and reproduce its
+byte-identical bundle:
+
+```
+uv run --locked mneme eval-public --suite pm-bench-development --out-dir /tmp/mneme-pm-bench
+uv run --locked mneme eval-public --suite triggerbench-development --out-dir /tmp/mneme-triggerbench
+uv run --locked mneme eval-public --suite working-memory-action-development --out-dir /tmp/mneme-working-action
+uv run --locked mneme eval-public --verify-bundle /tmp/mneme-pm-bench
+uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-pm-bench --out-dir /tmp/mneme-pm-bench-reproduced
+```
+
+`pm-bench-development` and `triggerbench-development` translate their
+repository-authored fixtures into authenticated `intention-schedule`,
+`intention-update`, `intention-cancel`, and `intention-evaluate` subprocess
+commands, and route the fixtures' time, event, and condition observations
+through the production evaluator's `intention-evaluate` arguments. Selection is
+the evaluator-side intersection of the production evaluator's fired data-only
+action IDs with the available opaque IDs; the harness never executes or exposes
+an action payload or fixture gold, and it fails closed on missing auth, scope
+mismatch, gold leakage, payload execution, or unsupported semantics.
+`working-memory-action-development` drives the authenticated
+`capture`/`working-seed`/`working-query`/`working-expire` commands under the
+same signed-session seam.
+
+Every profile produces a deterministic development bundle with its exact
+operating point, action traces, null reader/judge fields, registry revision and
+dataset digest, and false publication/headline flags. None is an official
+PM-Bench, TriggerBench, or Working Memory reproduction.
+
+This is deterministic synthetic/development eval only: no official
+dataset/model download, no benchmark run against protected/upstream data, and no
+publication or headline claim. The authenticated action lane descends from A1
+`t_5163502e` → P5 `t_8c72180a` → I0R `t_63a207ee`; downstream R1/R2/F0 remain
+future work.
+
 ## Frozen Phase 12 QA protocol
 
 The `_qa_protocol` registry entry preregisters the deterministic

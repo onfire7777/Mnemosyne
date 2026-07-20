@@ -143,4 +143,8 @@ required_tables = [
   "audit_log",
   "runtime_jobs",
   "runtime_state",
+  "working_memory",
+  "intentions",
+  "intention_firing_receipts",
+  "intention_firing_receipts_v2",
 ]
