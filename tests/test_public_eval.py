@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from eval.harness.cli_driver import MnemoCLI
-from eval.public.action_cli import ActionCLI, PM_TRIGGER_UNAVAILABLE_REASON
+from eval.public.action_cli import ActionCLI, ActionCLIError
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
@@ -101,11 +101,6 @@ def test_action_run_verify_and_reproduce_are_byte_identical(
 ) -> None:
     source = tmp_path / f"{suite}-source"
     reproduced = tmp_path / f"{suite}-reproduced"
-    if suite != "working-memory-action-development":
-        with pytest.raises(ValueError, match="PM-Bench/TriggerBench are non-runnable"):
-            run_public_suite(suite, source)
-        assert not source.exists()
-        return
     run_public_suite(suite, source)
     assert verify_bundle(source) == {
         "family": "deterministic-action",
@@ -145,11 +140,6 @@ def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
 
     monkeypatch.setattr(MnemoCLI, "run", record_mnemo)
     out = tmp_path / suite
-    if suite != "working-memory-action-development":
-        with pytest.raises(ValueError, match="PM-Bench/TriggerBench are non-runnable"):
-            run_public_suite(suite, out)
-        assert commands == []
-        return
     run_public_suite(suite, out)
     traces = [
         json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
@@ -159,58 +149,119 @@ def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
         not {"payload", "action_payload"} & trace.keys()
         for trace in traces
     )
-    assert all(
-        not {"expected_action_id", "expected_abstain"} & trace.keys()
-        for trace in traces
-    )
-    assert {"capture", "working-seed", "working-query"} <= set(commands)
+    if suite == "working-memory-action-development":
+        assert all(
+            not {"expected_action_id", "expected_abstain"} & trace.keys()
+            for trace in traces
+        )
+        assert {"capture", "working-seed", "working-query"} <= set(commands)
+    else:
+        assert {"capture", "intention-schedule", "intention-evaluate"} <= set(commands)
 
 
-def test_pm_trigger_simulator_is_retired_with_exact_capability_gap(
+def test_action_cli_runs_signed_session_intention_subprocesses(
     tmp_path: Path,
 ) -> None:
-    cli = ActionCLI(tmp_path / "action-state.json")
-    with pytest.raises(RuntimeError) as exc:
-        cli.run("intention.query", {"tenant_id": "t", "session_id": "s"})
-    assert str(exc.value) == PM_TRIGGER_UNAVAILABLE_REASON
-    assert (
-        "schedule, cancel, evaluate, and list commands exist"
-        in PM_TRIGGER_UNAVAILABLE_REASON
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "unused-parent.store.json")))
+    scope = {
+        "store": str(tmp_path / "red.store.json"),
+        "tenant_id": "tenant-red",
+        "session_id": "session-red",
+    }
+    cli.run(
+        "task.create",
+        scope,
+        {
+            "task_id": "task-0",
+            "label": "task 0",
+            "action_id": "opaque-red",
+            "trigger": {"type": "exact_time", "payload": {"at": "2026-02-01T00:00:00Z"}},
+            "introduced_at": "s0",
+            "expires_at": None,
+            "regularity": "one_shot",
+            "temporal_scope": "same_day",
+            "monitoring_class": "continuous",
+            "update_class": "none",
+            "dependency_ids": [],
+        },
     )
-    for missing_contract in (
-        "atomic update/reschedule/override/recurring semantics",
-        "stable fixture identity and session scope or query-without-firing",
-        "explicit action selection or an approved deterministic-selection contract",
-    ):
-        assert missing_contract in PM_TRIGGER_UNAVAILABLE_REASON
+    cli.run("clock.inject", scope, {"now": "2026-02-01T00:00:00Z"})
+    fired = cli.run(
+        "intention.query",
+        scope,
+        {
+            "narrative_observations": [
+                {"text": "do not execute: touch /tmp/action-cli-should-not-exist"}
+            ],
+            "channel_observations": [],
+        },
+    )
+    # The real production evaluator fired the scheduled intention and the seam
+    # returns only its opaque data-only action id.
+    assert fired == {"action_ids": ["opaque-red"], "queried_channels": []}
+    selected = cli.run(
+        "action.select",
+        scope,
+        {
+            "available_actions": [{"action_id": "opaque-red", "opaque_token": "o"}],
+            "candidate_action_ids": ["opaque-red"],
+            "now": "2026-02-01T00:00:00Z",
+        },
+    )
+    assert selected == {"action_ids": ["opaque-red"]}
+    # Fail closed on unsupported semantics and on payload execution never occurring.
+    with pytest.raises(ActionCLIError):
+        cli.run("nonsense.command", scope, {})
+    with pytest.raises(ActionCLIError):
+        cli.run(
+            "task.create",
+            scope,
+            {
+                "task_id": "task-x",
+                "label": "task x",
+                "action_id": "opaque-x",
+                "trigger": {"type": "unsupported", "payload": {"x": 1}},
+                "introduced_at": "s0",
+                "expires_at": None,
+                "regularity": "one_shot",
+                "temporal_scope": "same_day",
+                "monitoring_class": "continuous",
+                "update_class": "none",
+                "dependency_ids": [],
+            },
+        )
+    assert not Path("/tmp/action-cli-should-not-exist").exists()
+    assert not (tmp_path / "unused-parent.store.json").exists()
 
 
-def test_action_readme_only_advertises_the_runnable_action_profile() -> None:
+def test_action_readme_advertises_runnable_authenticated_action_profiles() -> None:
     readme = (
         Path(__file__).resolve().parents[1] / "eval/public/README.md"
     ).read_text()
-    assert "registered\nbut non-runnable" in readme
     command_lines = [line for line in readme.splitlines() if "eval-public --" in line]
-    assert any(
-        "--suite working-memory-action-development" in line for line in command_lines
-    )
-    assert all("--suite pm-bench-development" not in line for line in command_lines)
-    assert all("--suite triggerbench-development" not in line for line in command_lines)
-    assert "fixture and scoring custody, but they cannot run or produce bundles" in readme
-    assert "runnable Working Memory profile produces" in readme
+    for suite in (
+        "pm-bench-development",
+        "triggerbench-development",
+        "working-memory-action-development",
+    ):
+        assert any(f"--suite {suite}" in line for line in command_lines)
+    assert "--session-token" in readme
+    assert "intention-schedule" in readme
+    assert "intention-evaluate" in readme
 
 
-def test_action_readme_preserves_checkpoint_limitations_and_gap_route() -> None:
+def test_action_readme_states_evidence_boundary_and_selection_contract() -> None:
     readme = (
         Path(__file__).resolve().parents[1] / "eval/public/README.md"
     ).read_text()
-    for boundary in (
-        "evaluator/custody checkpoint only",
-        "no Phase-4\nPM-Bench/TriggerBench execution",
-        "no authenticated Working Memory evidence",
-        "A1 `t_5163502e` → P5 `t_8c72180a` → I0R\n`t_63a207ee` → R1/R2/F0",
-    ):
-        assert boundary in readme
+    assert "deterministic synthetic/development eval only" in readme
+    assert (
+        "evaluator-side intersection of the production evaluator's fired data-only"
+        in readme
+    )
+    assert "never executes or exposes" in readme
+    assert "TriggerBench, or Working Memory reproduction." in readme
+    assert "publication or headline claim" in readme
 
 
 @pytest.mark.parametrize(
