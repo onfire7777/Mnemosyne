@@ -3450,16 +3450,27 @@ class SqliteEngine:
                 else:
                     report.assertions_merged += 1
             # Phase 2: repoint superseded_by chains that still reference a source
-            # id onto its actual destination id. Runs after the whole map is
-            # known so remapping is correct regardless of iteration order.
+            # id onto its actual destination id. Snapshot the current links FIRST
+            # so a row already remapped in this pass is never re-matched by a later
+            # map entry whose source id equals an earlier destination id — a
+            # per-source bulk UPDATE matching on the mutated column would otherwise
+            # transitively double-hop X->Y->Z. Each row is remapped at most once via
+            # a single map lookup, matching the Local/PostgreSQL engines and keeping
+            # the result independent of iteration order.
+            superseded_rows = conn.execute(
+                "SELECT id, superseded_by FROM assertions "
+                "WHERE tenant_id = ? AND branch = ? AND superseded_by IS NOT NULL",
+                (tenant_id, into),
+            ).fetchall()
             with conn:
-                for source_id, dest_id in assertion_id_map.items():
-                    if source_id == dest_id:
+                for row in superseded_rows:
+                    dest_id = assertion_id_map.get(row["superseded_by"])
+                    if dest_id is None or dest_id == row["superseded_by"]:
                         continue
                     conn.execute(
                         "UPDATE assertions SET superseded_by = ? "
-                        "WHERE tenant_id = ? AND branch = ? AND superseded_by = ?",
-                        (dest_id, tenant_id, into, source_id),
+                        "WHERE tenant_id = ? AND branch = ? AND id = ?",
+                        (dest_id, tenant_id, into, row["id"]),
                     )
             report.assertion_id_map = assertion_id_map
             rel_rows = conn.execute(
