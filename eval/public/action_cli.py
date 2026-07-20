@@ -104,6 +104,7 @@ class _ScopeState:
 
     cli: MnemoCLI
     tenant_id: str
+    session_id: str
     evidence_cid: str
     now: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -155,8 +156,8 @@ class ActionCLI:
             raise ActionCLIError("scope session_id is required")
         existing = self._scopes.get(store)
         if existing is not None:
-            if existing.tenant_id != tenant_id:
-                raise ActionCLIError("scope store reused across tenants")
+            if existing.tenant_id != tenant_id or existing.session_id != session_id:
+                raise ActionCLIError("scope store reused across tenants or sessions")
             return existing
         token = mint_session_token(
             tenant_id=tenant_id,
@@ -173,7 +174,12 @@ class ActionCLI:
             env={**self._mnemo.env, "MNEMOSYNE_SESSION_SECRET": SESSION_SECRET},
         )
         evidence_cid = self._capture_evidence(cli, tenant_id)
-        state = _ScopeState(cli=cli, tenant_id=tenant_id, evidence_cid=evidence_cid)
+        state = _ScopeState(
+            cli=cli,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            evidence_cid=evidence_cid,
+        )
         self._scopes[store] = state
         return state
 

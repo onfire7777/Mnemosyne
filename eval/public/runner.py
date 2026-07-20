@@ -23,7 +23,7 @@ from eval.public.adapters import (
     working_memory_action_probe,
 )
 from eval.public.assets import AssetSpec, load_asset_set
-from eval.public.action_cli import ActionCLI
+from eval.public.action_cli import _EVAL_THRESHOLD, ActionCLI
 from eval.public.bundle import _canonical, _scoring_labels, write_bundle
 from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import (
@@ -389,6 +389,19 @@ def run_public_suite(
             f"{suite_name}: normalized benchmark digest does not match registry"
         )
     if suite["family"] == "deterministic-action":
+        if suite["adapter"] == "pm-bench-triggerbench" and (
+            benchmark.get("operating_point_config", {}).get("threshold")
+            != _EVAL_THRESHOLD
+        ):
+            # The authenticated seam evaluates every case through the production
+            # evaluator at ActionCLI's fixed firing threshold. A fixture whose
+            # declared threshold diverges would be evaluated under a different
+            # operating point than the bundle records — fail closed rather than
+            # silently mislabel the metrics.
+            raise ValueError(
+                f"{suite_name}: fixture operating point threshold diverges from "
+                "the authenticated evaluation seam"
+            )
         from eval.public.scoring import score_profile
 
         measured = score_profile(
