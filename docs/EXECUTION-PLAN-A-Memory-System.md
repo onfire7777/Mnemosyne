@@ -71,7 +71,7 @@ Mnemosyne already implements a large share of the field's best ideas. This table
 | Retrieval/param split | Small model + huge swappable DB | RETRO | Already retrieval-first over Postgres | **Keep** | — |
 | Bounded working memory | Compressive per-layer memory; memory tokens | Infini-attention; RMT | N/A (model-agnostic) | **Skip** (model-internal, out of scope) | — |
 | **Activation-space memory + introspection** | J-space / global workspace, persona vectors, SAE features | **Anthropic** (§3.5) | None | **Research track** — calibration + security differentiator | Med |
-| Agent memory API contract | `/memories` file ops + context editing + compaction | Anthropic memory tool / context engineering | `mneme` CLI + 48 MCP tools | **Align** the MCP memory surface to this contract | Med |
+| Agent memory API contract | `/memories` file ops + context editing + compaction | Anthropic memory tool / context engineering | `mneme` CLI + 59 MCP tools | **Align** the MCP memory surface to this contract | Med |
 
 ---
 
