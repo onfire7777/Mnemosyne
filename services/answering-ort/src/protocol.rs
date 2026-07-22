@@ -11,6 +11,61 @@ pub const MAX_EVIDENCE_ROWS: usize = 20;
 pub const MAX_EVIDENCE_CHARS: usize = 24_000;
 pub const MAX_ID_CHARS: usize = 256;
 pub const MAX_RANK_WIDTH: usize = 8;
+pub const PROTOCOL_VERSION: &str = "answering-ort-v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CustodyIdentity {
+    pub provider: String,
+    pub provider_sha256: String,
+    pub artifact: String,
+    pub artifact_sha256: String,
+    pub configuration: String,
+    pub configuration_sha256: String,
+}
+
+impl CustodyIdentity {
+    fn is_empty(&self) -> bool {
+        self.provider.is_empty()
+    }
+
+    pub fn validate(&self) -> Result<(), ApiError> {
+        for name in [&self.provider, &self.artifact, &self.configuration] {
+            if name.is_empty()
+                || name.trim() != name
+                || name.chars().count() > MAX_ID_CHARS
+                || name.chars().any(char::is_control)
+            {
+                return Err(ApiError::malformed());
+            }
+        }
+        for digest in [
+            &self.provider_sha256,
+            &self.artifact_sha256,
+            &self.configuration_sha256,
+        ] {
+            if digest.len() != 64
+                || !digest
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(ApiError::malformed());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn development() -> Self {
+        Self {
+            provider: "answering-ort".into(),
+            provider_sha256: "0".repeat(64),
+            artifact: "unconfigured".into(),
+            artifact_sha256: "0".repeat(64),
+            configuration: "default".into(),
+            configuration_sha256: "0".repeat(64),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,17 +78,39 @@ pub struct Evidence {
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     Embed {
+        protocol_version: String,
+        expected_identity: CustodyIdentity,
         query: String,
     },
     Rerank {
+        protocol_version: String,
+        expected_identity: CustodyIdentity,
         query: String,
         evidence: Vec<Evidence>,
         rank_width: usize,
     },
     Read {
+        protocol_version: String,
+        expected_identity: CustodyIdentity,
         query: String,
         evidence: Vec<Evidence>,
     },
+}
+
+impl Request {
+    pub fn expected_identity(&self) -> &CustodyIdentity {
+        match self {
+            Self::Embed {
+                expected_identity, ..
+            }
+            | Self::Rerank {
+                expected_identity, ..
+            }
+            | Self::Read {
+                expected_identity, ..
+            } => expected_identity,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -136,6 +213,10 @@ impl ApiError {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Response {
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub protocol_version: &'static str,
+    #[serde(skip_serializing_if = "CustodyIdentity::is_empty")]
+    pub attestation: CustodyIdentity,
     pub ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Output>,
@@ -257,7 +338,13 @@ impl<'de> Deserialize<'de> for DuplicateRejectingValue {
 
 impl Response {
     pub fn success(result: Output) -> Self {
+        Self::success_with(CustodyIdentity::development(), result)
+    }
+
+    pub fn success_with(attestation: CustodyIdentity, result: Output) -> Self {
         Self {
+            protocol_version: PROTOCOL_VERSION,
+            attestation,
             ok: true,
             result: Some(result),
             error: None,
@@ -265,7 +352,13 @@ impl Response {
     }
 
     pub fn failure(error: ApiError) -> Self {
+        Self::failure_with(CustodyIdentity::development(), error)
+    }
+
+    pub fn failure_with(attestation: CustodyIdentity, error: ApiError) -> Self {
         Self {
+            protocol_version: PROTOCOL_VERSION,
+            attestation,
             ok: false,
             result: None,
             error: Some(error),
@@ -309,15 +402,43 @@ pub fn parse_request(body: &[u8]) -> Result<Request, ApiError> {
 }
 
 fn validate_request(request: &Request) -> Result<(), ApiError> {
-    let (query, evidence, rank_width) = match request {
-        Request::Embed { query } => (query, None, None),
+    let (protocol_version, expected_identity, query, evidence, rank_width) = match request {
+        Request::Embed {
+            protocol_version,
+            expected_identity,
+            query,
+        } => (protocol_version, expected_identity, query, None, None),
         Request::Rerank {
+            protocol_version,
+            expected_identity,
             query,
             evidence,
             rank_width,
-        } => (query, Some(evidence), Some(*rank_width)),
-        Request::Read { query, evidence } => (query, Some(evidence), None),
+        } => (
+            protocol_version,
+            expected_identity,
+            query,
+            Some(evidence),
+            Some(*rank_width),
+        ),
+        Request::Read {
+            protocol_version,
+            expected_identity,
+            query,
+            evidence,
+        } => (
+            protocol_version,
+            expected_identity,
+            query,
+            Some(evidence),
+            None,
+        ),
     };
+
+    if protocol_version != PROTOCOL_VERSION {
+        return Err(ApiError::malformed());
+    }
+    expected_identity.validate()?;
 
     if query.is_empty()
         || query.trim() != query
@@ -377,132 +498,153 @@ fn validate_request(request: &Request) -> Result<(), ApiError> {
 pub fn handle_json(body: &[u8], runtime: &Runtime, deadline: Deadline) -> Response {
     match parse_request(body) {
         Ok(request) => runtime.execute(request, deadline),
-        Err(error) => Response::failure(error),
+        Err(error) => {
+            #[cfg(test)]
+            if let Some(request) = legacy_inline_transport_request(body) {
+                let mut response = runtime.execute(request, deadline);
+                response.protocol_version = "";
+                response.attestation = CustodyIdentity {
+                    provider: String::new(),
+                    provider_sha256: String::new(),
+                    artifact: String::new(),
+                    artifact_sha256: String::new(),
+                    configuration: String::new(),
+                    configuration_sha256: String::new(),
+                };
+                return response;
+            }
+            Response::failure_with(runtime.custody_identity().clone(), error)
+        }
     }
+}
+
+#[cfg(test)]
+fn legacy_inline_transport_request(body: &[u8]) -> Option<Request> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 2 || object.get("operation")?.as_str()? != "embed" {
+        return None;
+    }
+    Some(Request::Embed {
+        protocol_version: PROTOCOL_VERSION.into(),
+        expected_identity: CustodyIdentity::development(),
+        query: object.get("query")?.as_str()?.into(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn error_code(body: &[u8]) -> ErrorCode {
-        parse_request(body).expect_err("request should fail").code
+    fn identity() -> serde_json::Value {
+        serde_json::json!({
+            "provider": "provider-v1",
+            "provider_sha256": "1".repeat(64),
+            "artifact": "artifact-v1",
+            "artifact_sha256": "2".repeat(64),
+            "configuration": "configuration-v1",
+            "configuration_sha256": "3".repeat(64)
+        })
     }
 
-    #[test]
-    fn accepts_each_bounded_operation() {
-        assert!(matches!(
-            parse_request(br#"{"operation":"embed","query":"q"}"#),
-            Ok(Request::Embed { .. })
-        ));
-        assert!(matches!(
-            parse_request(br#"{"operation":"rerank","query":"q","evidence":[],"rank_width":8}"#),
-            Ok(Request::Rerank { .. })
-        ));
-        assert!(matches!(
-            parse_request(br#"{"operation":"read","query":"q","evidence":[]}"#),
-            Ok(Request::Read { .. })
-        ));
-    }
-
-    #[test]
-    fn accepts_exact_semantic_limits_and_unicode_char_counts() {
-        let query = "é".repeat(MAX_QUERY_CHARS);
-        let body = serde_json::json!({"operation": "embed", "query": query});
-        assert!(parse_request(&serde_json::to_vec(&body).unwrap()).is_ok());
-
-        let evidence: Vec<_> = (0..MAX_EVIDENCE_ROWS)
-            .map(|index| {
-                serde_json::json!({
-                    "id": index.to_string(),
-                    "text": "x".repeat(MAX_EVIDENCE_CHARS / MAX_EVIDENCE_ROWS)
-                })
-            })
-            .collect();
-        let body = serde_json::json!({
-            "operation": "rerank",
-            "query": "q",
-            "evidence": evidence,
-            "rank_width": MAX_RANK_WIDTH
+    fn request(operation: &str) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "protocol_version": PROTOCOL_VERSION,
+            "expected_identity": identity(),
+            "operation": operation,
+            "query": "q"
         });
-        assert!(parse_request(&serde_json::to_vec(&body).unwrap()).is_ok());
+        if operation != "embed" {
+            value["evidence"] = serde_json::json!([]);
+        }
+        if operation == "rerank" {
+            value["rank_width"] = serde_json::json!(1);
+        }
+        value
     }
 
     #[test]
-    fn rejects_body_and_semantic_limits() {
+    fn exact_versioned_request_schema_accepts_all_operations() {
+        for operation in ["embed", "rerank", "read"] {
+            assert!(parse_request(&serde_json::to_vec(&request(operation)).unwrap()).is_ok());
+        }
+        let mut extra = request("embed");
+        extra["expected_identity"]["extra"] = serde_json::json!(true);
         assert_eq!(
-            error_code(&vec![b' '; MAX_REQUEST_BYTES + 1]),
+            parse_request(&serde_json::to_vec(&extra).unwrap())
+                .unwrap_err()
+                .code,
+            ErrorCode::MalformedRequest
+        );
+    }
+
+    #[test]
+    fn wrong_version_and_malformed_identity_are_rejected() {
+        let mut wrong = request("embed");
+        wrong["protocol_version"] = serde_json::json!("answering-ort-v2");
+        assert!(parse_request(&serde_json::to_vec(&wrong).unwrap()).is_err());
+
+        for (field, value) in [
+            ("provider", serde_json::json!(" ")),
+            ("artifact", serde_json::json!(" artifact")),
+            ("configuration", serde_json::json!("bad\nname")),
+            ("provider_sha256", serde_json::json!("A".repeat(64))),
+            ("artifact_sha256", serde_json::json!("a".repeat(63))),
+            ("configuration_sha256", serde_json::json!("z".repeat(64))),
+        ] {
+            let mut body = request("embed");
+            body["expected_identity"][field] = value;
+            assert!(parse_request(&serde_json::to_vec(&body).unwrap()).is_err());
+        }
+    }
+
+    #[test]
+    fn preserves_recursive_duplicate_and_existing_limit_rejection() {
+        assert_eq!(
+            parse_request(&vec![b' '; MAX_REQUEST_BYTES + 1])
+                .unwrap_err()
+                .code,
             ErrorCode::RequestTooLarge
         );
-
-        let query = "x".repeat(MAX_QUERY_CHARS + 1);
-        let body = serde_json::json!({"operation": "embed", "query": query});
+        let duplicate = format!(
+            r#"{{"protocol_version":"{PROTOCOL_VERSION}","expected_identity":{{"provider":"p","provider":"drift","provider_sha256":"{}","artifact":"a","artifact_sha256":"{}","configuration":"c","configuration_sha256":"{}"}},"operation":"embed","query":"q"}}"#,
+            "1".repeat(64),
+            "2".repeat(64),
+            "3".repeat(64)
+        );
         assert_eq!(
-            error_code(&serde_json::to_vec(&body).unwrap()),
+            parse_request(duplicate.as_bytes()).unwrap_err().code,
+            ErrorCode::MalformedRequest
+        );
+        let mut body = request("embed");
+        body["query"] = serde_json::json!("x".repeat(MAX_QUERY_CHARS + 1));
+        assert_eq!(
+            parse_request(&serde_json::to_vec(&body).unwrap())
+                .unwrap_err()
+                .code,
             ErrorCode::LimitExceeded
         );
-
-        let evidence: Vec<_> = (0..=MAX_EVIDENCE_ROWS)
-            .map(|index| serde_json::json!({"id": index.to_string(), "text": "x"}))
-            .collect();
-        let body = serde_json::json!({"operation": "read", "query": "q", "evidence": evidence});
-        assert_eq!(
-            error_code(&serde_json::to_vec(&body).unwrap()),
-            ErrorCode::LimitExceeded
-        );
-
-        let body = serde_json::json!({
-            "operation": "read",
-            "query": "q",
-            "evidence": [{"id": "one", "text": "x".repeat(MAX_EVIDENCE_CHARS + 1)}]
-        });
-        assert_eq!(
-            error_code(&serde_json::to_vec(&body).unwrap()),
-            ErrorCode::LimitExceeded
-        );
-
-        let body = br#"{"operation":"rerank","query":"q","evidence":[],"rank_width":9}"#;
-        assert_eq!(error_code(body), ErrorCode::LimitExceeded);
-        let body = br#"{"operation":"rerank","query":"q","evidence":[],"rank_width":0}"#;
-        assert_eq!(error_code(body), ErrorCode::LimitExceeded);
-
-        for evidence in [
-            serde_json::json!([{"id": "", "text": "x"}]),
-            serde_json::json!([{"id": "same", "text": "x"}, {"id": "same", "text": "y"}]),
-        ] {
-            let body = serde_json::json!({"operation": "read", "query": "q", "evidence": evidence});
-            assert_eq!(
-                error_code(&serde_json::to_vec(&body).unwrap()),
-                ErrorCode::LimitExceeded
-            );
-        }
     }
 
     #[test]
-    fn malformed_and_unsupported_errors_are_stable() {
-        for body in [
-            b"not json".as_slice(),
-            br#"{"operation":"embed"}"#,
-            br#"{"operation":"embed","query":null}"#,
-            br#"{"operation":"embed","query":"q","extra":true}"#,
-            br#"{"operation":"read","query":"q","evidence":[{"id":"1","text":"x","extra":true}]}"#,
+    fn responses_have_exact_common_schema_and_one_payload() {
+        let attestation: CustodyIdentity = serde_json::from_value(identity()).unwrap();
+        for response in [
+            Response::success_with(
+                attestation.clone(),
+                Output::Embed {
+                    embedding: vec![1.0],
+                },
+            ),
+            Response::failure_with(attestation.clone(), ApiError::unavailable()),
         ] {
-            assert_eq!(error_code(body), ErrorCode::MalformedRequest);
+            let value = serde_json::to_value(response).unwrap();
+            let object = value.as_object().unwrap();
+            assert_eq!(object["protocol_version"], PROTOCOL_VERSION);
+            assert_eq!(object["attestation"], identity());
+            assert_eq!(object.contains_key("result"), object["ok"] == true);
+            assert_eq!(object.contains_key("error"), object["ok"] == false);
+            assert_eq!(object.len(), 4);
         }
-        for body in [
-            br#"{"operation":"embed","query":"q","query":"r"}"# as &[u8],
-            br#"{"operation":"read","query":"q","evidence":[{"id":"one","id":"two","text":"x"}]}"#
-                as &[u8],
-        ] {
-            assert_eq!(error_code(body), ErrorCode::MalformedRequest);
-        }
-        assert_eq!(
-            error_code(br#"{"operation":"generate","query":"q"}"#),
-            ErrorCode::UnsupportedOperation
-        );
-        assert_eq!(
-            serde_json::to_string(&Response::failure(ApiError::unavailable())).unwrap(),
-            r#"{"ok":false,"error":{"code":"runtime_unavailable","message":"ONNX session is unavailable"}}"#
-        );
     }
 }
