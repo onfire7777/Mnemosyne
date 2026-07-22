@@ -307,6 +307,23 @@ def test_raw_answering_ort_shapes_preserve_ids_order_spans_and_custody() -> None
     ) == {"claims": [{"spans": [{"cid": "e1", "quote": "naïve 東京"}]}], "unresolved": False}
 
 
+@pytest.mark.parametrize("suffix", [b"", b"\n{}\n"])
+def test_raw_answering_ort_rejects_invalid_response_framing(suffix: bytes) -> None:
+    response = json.dumps({
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }, separators=(",", ":")).encode() + suffix
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        dims=2,
+        wire_protocol="answering-ort",
+        transport=lambda *_args: response,
+    )
+    with pytest.raises(CompactProtocolError, match="newline-delimited"):
+        provider.embed("framing")
+
+
 @pytest.mark.parametrize(
     "prediction",
     [
@@ -380,6 +397,47 @@ def test_raw_transport_supports_loopback_tcp_and_absolute_unix() -> None:
     assert unix_provider.embed("unix") == pytest.approx([0.6, 0.8])
     unix_thread.join()
     os.unlink(path)
+
+
+def test_raw_transport_rejects_delayed_second_frame() -> None:
+    response = json.dumps({
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }, separators=(",", ":")).encode() + b"\n"
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def serve() -> None:
+        with server:
+            connection, _address = server.accept()
+            with connection:
+                assert connection.recv(4096).endswith(b"\n")
+                connection.sendall(response)
+                connection.sendall(b"{}\n")
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    provider = CompactAnsweringProvider(
+        f"http://127.0.0.1:{port}", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    with pytest.raises(CompactProtocolError, match="newline-delimited"):
+        provider.embed("multiple frames")
+    thread.join()
+
+
+def test_raw_transport_normalizes_localhost_before_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_after_capture(address: tuple[str, int], _timeout: float) -> socket.socket:
+        assert address[0] == "127.0.0.1"
+        raise OSError("synthetic refusal")
+
+    monkeypatch.setattr(socket, "create_connection", reject_after_capture)
+    provider = CompactAnsweringProvider(
+        "http://localhost:18181", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    with pytest.raises(CompactProviderError, match="failed closed"):
+        provider.embed("local")
 
 
 @pytest.mark.parametrize("response", [
