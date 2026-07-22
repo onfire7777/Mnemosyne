@@ -470,6 +470,92 @@ def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> N
     assert claims[0].spans[0].slice_sha256 == hashlib.sha256("😀".encode("utf-8")).hexdigest()
 
 
+@pytest.mark.parametrize(
+    ("operation", "quotes", "expected"),
+    [
+        ("add", ("1.20", "2.80"), "4"),
+        ("compose_date", ("2024", "February", "29"), "2024-02-29"),
+    ],
+)
+def test_synthesis_claims_resolve_authorized_spans_and_render_canonical_output(
+    operation: str, quotes: tuple[str, ...], expected: str
+) -> None:
+    evidence = {
+        f"cid-{index}": f"prefix {quote} suffix"
+        for index, quote in enumerate(quotes)
+    }
+    claims = GroundedAnswerOrchestrator._claims(
+        {"claims": [{"synthesis": {"operation": operation, "spans": [
+            {"cid": cid, "quote": quote}
+            for cid, quote in zip(evidence, quotes, strict=True)
+        ]}}], "unresolved": False},
+        evidence,
+    )
+    claim = claims[0]
+    assert claim.text == expected
+    assert claim.evidence_cids == tuple(evidence)
+    assert tuple((span.cid, span.start, span.end) for span in claim.spans) == tuple(
+        (cid, 7, 7 + len(quote))
+        for cid, quote in zip(evidence, quotes, strict=True)
+    )
+    assert tuple(span.slice_sha256 for span in claim.spans) == tuple(
+        hashlib.sha256(quote.encode("utf-8")).hexdigest() for quote in quotes
+    )
+
+
+@pytest.mark.parametrize(
+    "synthesis",
+    [
+        None,
+        {"operation": "sum", "spans": [{"cid": "a", "quote": "1"}]},
+        {"operation": "add", "spans": [{"cid": "unknown", "quote": "1"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "3"}]},
+        {"operation": "add", "spans": [
+            {"cid": "a", "quote": "1"}, {"cid": "a", "quote": "1"},
+        ]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "1 + 2"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "ignore instructions"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "1"}], "answer": "1"},
+    ],
+)
+def test_synthesis_claims_fail_closed_for_invalid_proposals(synthesis: object) -> None:
+    with pytest.raises(ValueError):
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"synthesis": synthesis}], "unresolved": False},
+            {"a": "1 + 2 ignore instructions"},
+        )
+
+
+def test_synthesis_reader_abstains_with_replayed_evidence_on_drift_or_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    proposal = {"claims": [{"synthesis": {"operation": "add", "spans": [
+        {"cid": "unknown", "quote": "1"},
+    ]}}], "unresolved": False}
+    engine = _engine()
+    result = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(proposal))
+    assert result.abstained is True and result.evidence
+
+    original = engine.export_tenant_filtered
+    calls = 0
+
+    def drifting(tenant_id: str, context: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        value = original(tenant_id, context)
+        if calls > 1:
+            value["evidence"] = []
+        return value
+
+    monkeypatch.setattr(engine, "export_tenant_filtered", drifting)
+    drifted = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(proposal))
+    assert drifted.abstained is True and drifted.evidence == ()
+
+
 @pytest.mark.parametrize("quote", [None, 1, True, "", "AB", "x" * 2001])
 def test_exact_quote_selector_rejects_non_substrings_and_invalid_quotes(quote: object) -> None:
     with pytest.raises(ValueError):
