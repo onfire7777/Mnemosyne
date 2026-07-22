@@ -146,3 +146,52 @@ def test_division_fails_closed_for_zero_nonterminating_or_over_scale_results(
 
 def test_negative_zero_is_normalized() -> None:
     assert DeterministicSynthesizer().synthesize(_payload("multiply", "-0.0", "2"))["answer"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("quotes", "answer"),
+    [
+        (("2024", "02", "29"), "2024-02-29"),
+        (("1999", "December", "31"), "1999-12-31"),
+        (("2000", "jAnUaRy", "01"), "2000-01-01"),
+    ],
+)
+def test_compose_date_accepts_numeric_and_full_english_months(
+    quotes: tuple[str, ...], answer: str
+) -> None:
+    payload = _payload("compose_date", *quotes)
+
+    assert DeterministicSynthesizer().synthesize(payload) == {
+        "answer": answer,
+        "operation": "compose_date",
+        "provenance": payload["spans"],
+        "unresolved": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "quotes",
+    [
+        ("2023", "02", "29"),
+        ("1900", "February", "29"),
+        ("2024", "Feb", "29"),
+        ("29", "02", "2024"),
+        ("02", "29", "2024"),
+        ("2024", "02"),
+        ("2024", "02", "29", "extra"),
+        ("2024", "13", "01"),
+        ("2024", "04", "31"),
+        ("2024", "2", "29"),
+        ("2024", "02", "9"),
+        ("24", "02", "29"),
+        ("2024", "02", "29T00:00:00"),
+        ("2024", "02", "29Z"),
+        ("2024", "03/04", "05"),
+        ("2024 ", "February", "29"),
+    ],
+)
+def test_compose_date_fails_closed_for_invalid_or_ambiguous_inputs(
+    quotes: tuple[str, ...],
+) -> None:
+    with pytest.raises(DeterministicSynthesisError):
+        DeterministicSynthesizer().synthesize(_payload("compose_date", *quotes))

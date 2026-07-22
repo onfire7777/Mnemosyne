@@ -4,12 +4,37 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from datetime import date
 from fractions import Fraction
 from functools import reduce
 from operator import add, mul, sub
 
 _ARITHMETIC = {"add", "subtract", "multiply", "divide"}
+_OPERATIONS = _ARITHMETIC | {"compose_date"}
 _DECIMAL = re.compile(r"-?(?:0|[1-9][0-9]*)(?:\.([0-9]+))?")
+_YEAR = re.compile(r"[0-9]{4}")
+_MONTH = re.compile(r"[0-9]{2}")
+_DAY = re.compile(r"[0-9]{2}")
+_MONTHS = {
+    name: number
+    for number, name in enumerate(
+        (
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        ),
+        1,
+    )
+}
 _MAX_SPANS = 16
 _MAX_CID_LENGTH = 256
 _MAX_QUOTE_LENGTH = 128
@@ -105,6 +130,22 @@ def _arithmetic(operation: str, spans: list[dict[str, str]]) -> str:
     return _canonical_decimal(result)
 
 
+def _compose_date(spans: list[dict[str, str]]) -> str:
+    if len(spans) != 3:
+        raise _fail()
+    year_text, month_text, day_text = (span["quote"] for span in spans)
+    if _YEAR.fullmatch(year_text) is None or _DAY.fullmatch(day_text) is None:
+        raise _fail()
+    if _MONTH.fullmatch(month_text):
+        month = int(month_text)
+    else:
+        month = _MONTHS.get(month_text.lower(), 0)
+    try:
+        return date(int(year_text), month, int(day_text)).isoformat()
+    except ValueError:
+        raise _fail() from None
+
+
 class DeterministicSynthesizer:
     """Resolve allowlisted operations without models, I/O, or code execution."""
 
@@ -112,11 +153,13 @@ class DeterministicSynthesizer:
         if not isinstance(payload, Mapping) or set(payload) != {"operation", "spans"}:
             raise _fail()
         operation = payload["operation"]
-        if not isinstance(operation, str) or operation not in _ARITHMETIC:
+        if not isinstance(operation, str) or operation not in _OPERATIONS:
             raise _fail()
         spans = _validate_spans(payload["spans"])
         return {
-            "answer": _arithmetic(operation, spans),
+            "answer": _arithmetic(operation, spans)
+            if operation in _ARITHMETIC
+            else _compose_date(spans),
             "operation": operation,
             "provenance": spans,
             "unresolved": False,
