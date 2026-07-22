@@ -1,0 +1,194 @@
+{
+  "schema": "mnemosyne.embedder-selection-fixture.v1",
+  "split": "TRAIN",
+  "source": "source-owned",
+  "fixture_status": "synthetic-unmeasured",
+  "dimensions": {
+    "native_768": 768,
+    "padded_1024": 1024
+  },
+  "candidates": [
+    {
+      "id": "synthetic-anchor-a",
+      "identity": {
+        "artifact": "synthetic-granite-r2-anchor-v1",
+        "tokenizer": "synthetic-tokenizer-v1",
+        "preprocessing": "synthetic-normalize-v1",
+        "model_space": "native-768-zero-pad-1024-v1"
+      },
+      "receipt": {
+        "schema": "mnemosyne.embedder-bakeoff-receipt.v1",
+        "candidate_id": "synthetic-anchor-a",
+        "split": "TRAIN",
+        "identity": {
+          "artifact": "synthetic-granite-r2-anchor-v1",
+          "tokenizer": "synthetic-tokenizer-v1",
+          "preprocessing": "synthetic-normalize-v1",
+          "model_space": "native-768-zero-pad-1024-v1"
+        },
+        "identity_sha256": "a119332adfb20438577c202cdb4c36e9d379b6ddf0275d38a6072e2699dd1381",
+        "artifact_custody": "synthetic-fixture-no-artifact",
+        "artifact_sha256": null,
+        "status": "unmeasured",
+        "dimensions": {
+          "native_768": 768,
+          "padded_1024": 1024
+        },
+        "unmeasured": [
+          "artifact_bytes",
+          "quality",
+          "latency_ms",
+          "peak_memory_mib",
+          "resource_envelope"
+        ],
+        "parity": {
+          "cosine": true,
+          "ranking": true
+        },
+        "receipt_sha256": "abf5c93b90d3321ff4798abedb7a9291c9a8404c2935e198a010a0c4ab9bc77d"
+      }
+    },
+    {
+      "id": "synthetic-anchor-b",
+      "identity": {
+        "artifact": "synthetic-granite-r2-tie-v1",
+        "tokenizer": "synthetic-tokenizer-v1",
+        "preprocessing": "synthetic-normalize-v1",
+        "model_space": "native-768-zero-pad-1024-v1"
+      },
+      "receipt": {
+        "schema": "mnemosyne.embedder-bakeoff-receipt.v1",
+        "candidate_id": "synthetic-anchor-b",
+        "split": "TRAIN",
+        "identity": {
+          "artifact": "synthetic-granite-r2-tie-v1",
+          "tokenizer": "synthetic-tokenizer-v1",
+          "preprocessing": "synthetic-normalize-v1",
+          "model_space": "native-768-zero-pad-1024-v1"
+        },
+        "identity_sha256": "eac2a9bbe0bb1e96eacbc243f7ab7979f65e7c3808c39a93b24c50423f6ef7e8",
+        "artifact_custody": "synthetic-fixture-no-artifact",
+        "artifact_sha256": null,
+        "status": "unmeasured",
+        "dimensions": {
+          "native_768": 768,
+          "padded_1024": 1024
+        },
+        "unmeasured": [
+          "artifact_bytes",
+          "quality",
+          "latency_ms",
+          "peak_memory_mib",
+          "resource_envelope"
+        ],
+        "parity": {
+          "cosine": true,
+          "ranking": true
+        },
+        "receipt_sha256": "d58d87921d9b4a0d73705dae3c8a433942ba457e05855bf6bd4058d2a238c9f4"
+      }
+    },
+    {
+      "id": "synthetic-lower-c",
+      "identity": {
+        "artifact": "synthetic-granite-r2-lower-v1",
+        "tokenizer": "synthetic-tokenizer-v1",
+        "preprocessing": "synthetic-normalize-v1",
+        "model_space": "native-768-zero-pad-1024-v1"
+      },
+      "receipt": {
+        "schema": "mnemosyne.embedder-bakeoff-receipt.v1",
+        "candidate_id": "synthetic-lower-c",
+        "split": "TRAIN",
+        "identity": {
+          "artifact": "synthetic-granite-r2-lower-v1",
+          "tokenizer": "synthetic-tokenizer-v1",
+          "preprocessing": "synthetic-normalize-v1",
+          "model_space": "native-768-zero-pad-1024-v1"
+        },
+        "identity_sha256": "ba3f57fd6078372273e14bfd5c469625e2ae7d04bc44ba67414961bee0f38b44",
+        "artifact_custody": "synthetic-fixture-no-artifact",
+        "artifact_sha256": null,
+        "status": "unmeasured",
+        "dimensions": {
+          "native_768": 768,
+          "padded_1024": 1024
+        },
+        "unmeasured": [
+          "artifact_bytes",
+          "quality",
+          "latency_ms",
+          "peak_memory_mib",
+          "resource_envelope"
+        ],
+        "parity": {
+          "cosine": true,
+          "ranking": true
+        },
+        "receipt_sha256": "bdb30ea317d4bd574fe9d2653d3fe875debd59f31f5b54141a8aa48c66179e2b"
+      }
+    }
+  ],
+  "probes": [
+    {
+      "id": "synthetic-tie-probe",
+      "query": {
+        "native_768": {
+          "dimensions": 768,
+          "coordinates": [[0, 1.0], [1, 2.0]]
+        },
+        "padded_1024": {
+          "dimensions": 1024,
+          "coordinates": [[0, 1.0], [1, 2.0]]
+        }
+      },
+      "vectors": {
+        "synthetic-anchor-a": {
+          "native_768": {
+            "dimensions": 768,
+            "coordinates": [[0, 1.0], [1, 2.0]]
+          },
+          "padded_1024": {
+            "dimensions": 1024,
+            "coordinates": [[0, 1.0], [1, 2.0]]
+          }
+        },
+        "synthetic-anchor-b": {
+          "native_768": {
+            "dimensions": 768,
+            "coordinates": [[0, 1.0], [1, 2.0]]
+          },
+          "padded_1024": {
+            "dimensions": 1024,
+            "coordinates": [[0, 1.0], [1, 2.0]]
+          }
+        },
+        "synthetic-lower-c": {
+          "native_768": {
+            "dimensions": 768,
+            "coordinates": [[0, 2.0], [1, 1.0]]
+          },
+          "padded_1024": {
+            "dimensions": 1024,
+            "coordinates": [[0, 2.0], [1, 1.0]]
+          }
+        }
+      },
+      "expected_native_ranking": [
+        "synthetic-anchor-a",
+        "synthetic-anchor-b",
+        "synthetic-lower-c"
+      ],
+      "expected_padded_ranking": [
+        "synthetic-anchor-a",
+        "synthetic-anchor-b",
+        "synthetic-lower-c"
+      ]
+    }
+  ],
+  "selection": {
+    "method": "mean_cosine_then_id_v1",
+    "expected_candidate_id": "synthetic-anchor-a"
+  },
+  "fixture_sha256": "2f88542f75b35d0781c0380016be127cccd41a0188c81522b4c41f790d3c8140"
+}
