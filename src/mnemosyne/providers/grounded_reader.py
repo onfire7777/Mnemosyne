@@ -24,6 +24,10 @@ from mnemosyne.providers.bounded_command import (
     CommandOutputLimitError,
     run_bounded_command,
 )
+from mnemosyne.providers.compact_answering import (
+    CompactAnsweringProvider,
+    CompactProviderIdentity,
+)
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -85,6 +89,8 @@ class CommandGroundedProvider:
     def from_environment(cls) -> CommandGroundedProvider:
         query = os.environ.get("MNEMOSYNE_QUERY_DECOMPOSER_COMMAND", "").strip()
         reader = os.environ.get("MNEMOSYNE_GROUNDED_READER_COMMAND", "").strip()
+        if os.environ.get("MNEMOSYNE_GROUNDED_READER_PROVIDER") == "compact":
+            return _compact_from_environment(query)
         if not query or not reader:
             raise ValueError("grounded answer role commands are not configured")
         if (
@@ -210,3 +216,70 @@ class CommandGroundedProvider:
         if any(disclosure[key] != expected for key, expected in frozen.items()):
             raise ValueError(f"{role} disclosure does not match frozen protocol")
         return disclosure
+
+
+@dataclass(slots=True)
+class ComposedGroundedProvider:
+    """Keep command decomposition while explicitly selecting a compact reader."""
+
+    decomposer: CommandGroundedProvider
+    reader: CompactAnsweringProvider
+
+    def decompose(self, payload: dict[str, object]) -> object:
+        return self.decomposer.decompose(payload)
+
+    def read(self, payload: dict[str, object]) -> object:
+        return self.reader.read(payload)
+
+    @property
+    def disclosure(self) -> dict[str, object]:
+        return {
+            **self.decomposer.disclosure,
+            "grounded_reader": dict(self.reader.disclosure),
+        }
+
+
+def _compact_from_environment(query: str) -> ComposedGroundedProvider:
+    if not query or os.environ.get("MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER") != "command":
+        raise ValueError("query decomposer command is not configured")
+    query_model = os.environ.get("MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR", "")
+    query_digest = os.environ.get("MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256", "")
+    if query_model != EXTRACTIVE_DECOMPOSER_SELECTOR or query_digest != EXTRACTIVE_DECOMPOSER_CONTENT_SHA256:
+        raise ValueError("query decomposer disclosure does not match preregistration")
+    names = {
+        "provider": "MNEMOSYNE_COMPACT_PROVIDER",
+        "provider_sha256": "MNEMOSYNE_COMPACT_PROVIDER_SHA256",
+        "artifact": "MNEMOSYNE_COMPACT_ARTIFACT",
+        "artifact_sha256": "MNEMOSYNE_COMPACT_ARTIFACT_SHA256",
+        "configuration": "MNEMOSYNE_COMPACT_CONFIGURATION",
+        "configuration_sha256": "MNEMOSYNE_COMPACT_CONFIGURATION_SHA256",
+    }
+    values = {name: os.environ.get(variable, "").strip() for name, variable in names.items()}
+    missing = next((name for name, value in values.items() if not value), None)
+    if missing is not None:
+        raise ValueError(f"compact reader {missing} is not configured")
+    endpoint = os.environ.get("MNEMOSYNE_COMPACT_ENDPOINT", "").strip()
+    if not endpoint:
+        raise ValueError("compact reader endpoint is not configured")
+    try:
+        dims = int(os.environ.get("MNEMOSYNE_COMPACT_DIMS", ""))
+        timeout = float(os.environ.get("MNEMOSYNE_GROUNDED_PROVIDER_TIMEOUT", "30"))
+    except ValueError as exc:
+        raise ValueError("compact reader numeric configuration is invalid") from exc
+    decomposer = CommandGroundedProvider(
+        query,
+        query,
+        timeout_seconds=timeout,
+        expected_query_model=query_model,
+        expected_query_model_content_sha256=query_digest,
+    )
+    reader = CompactAnsweringProvider(
+        endpoint,
+        CompactProviderIdentity(**values),
+        dims=dims,
+        timeout_seconds=timeout,
+        max_request_bytes=64 * 1024,
+        max_response_bytes=256 * 1024,
+        wire_protocol="answering-ort",
+    )
+    return ComposedGroundedProvider(decomposer, reader)

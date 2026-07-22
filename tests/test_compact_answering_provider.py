@@ -13,6 +13,7 @@ from mnemosyne.providers.compact_answering import (
     CompactProviderError,
     CompactProviderIdentity,
     CompactProtocolError,
+    CompactServiceError,
 )
 
 
@@ -230,3 +231,106 @@ def test_unavailable_and_oversize_transports_fail_closed() -> None:
 def test_endpoint_policy_rejects_nonlocal_or_ambiguous_targets(endpoint: str) -> None:
     with pytest.raises(ValueError):
         CompactAnsweringProvider(endpoint, IDENTITY)
+
+
+class _RawTransport:
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.requests: list[dict[str, object]] = []
+
+    def __call__(self, _endpoint: str, body: bytes, *_args: object) -> bytes:
+        assert body.endswith(b"\n")
+        self.requests.append(json.loads(body))
+        return json.dumps(self.response, separators=(",", ":")).encode() + b"\n"
+
+
+def test_raw_answering_ort_shapes_preserve_ids_order_spans_and_custody() -> None:
+    transport = _RawTransport(
+        {
+            "ok": True,
+            "result": {
+                "operation": "rerank",
+                "ranked_ids": ["b", "a"],
+            },
+        }
+    )
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        dims=2,
+        wire_protocol="answering-ort",
+        transport=transport,
+    )
+    hits = [
+        Hit("a", "evidence", "tenant", "main", "first", 0.1, "lexical"),
+        Hit("b", "evidence", "tenant", "main", "second", 0.2, "lexical"),
+    ]
+    assert [hit.id for hit in provider.rerank("question", hits, 2)] == ["b", "a"]
+    assert transport.requests == [
+        {
+            "operation": "rerank",
+            "query": "query: question",
+            "evidence": [{"id": "a", "text": "first"}, {"id": "b", "text": "second"}],
+            "rank_width": 2,
+        }
+    ]
+    assert provider.disclosure["wire_protocol"] == "answering-ort"
+
+    transport.response = {
+        "ok": True,
+        "result": {
+            "operation": "read",
+            "prediction": {
+                "answer_type": "span",
+                "evidence_id": "e1",
+                "start": 7,
+                "end": 20,
+                "supporting_ids": ["e1"],
+            },
+        },
+    }
+    assert provider.read(
+        {"question": "What?", "evidence": [{"cid": "e1", "content": "prefix naïve 東京 suffix"}]}
+    ) == {"claims": [{"spans": [{"cid": "e1", "quote": "naïve 東京"}]}], "unresolved": False}
+
+
+@pytest.mark.parametrize("response", [
+    {"ok": False, "error": {"code": "runtime_busy", "message": "busy"}},
+    {"ok": True, "result": {"operation": "rerank", "ranked_ids": ["unknown"]}},
+    {"ok": True, "result": {"operation": "read", "prediction": {"answer_type": "yes", "supporting_ids": ["e1"]}}},
+])
+def test_raw_answering_ort_failures_are_typed_and_strict(response: dict[str, object]) -> None:
+    provider = CompactAnsweringProvider(
+        "unix:///tmp/answering-ort.sock",
+        IDENTITY,
+        wire_protocol="answering-ort",
+        transport=_RawTransport(response),
+    )
+    if response.get("ok") is False:
+        with pytest.raises(CompactServiceError) as raised:
+            provider.embed("question")
+        assert raised.value.code == "runtime_busy"
+    elif response["result"]["operation"] == "rerank":  # type: ignore[index]
+        with pytest.raises(CompactProtocolError, match="ranked id"):
+            provider.rerank("question", [Hit("a", "evidence", "t", "main", "x", 0.1, "lexical")], 1)
+    else:
+        with pytest.raises(CompactProtocolError, match="answer type"):
+            provider.read({"question": "What?", "evidence": [{"cid": "e1", "content": "yes"}]})
+
+
+def test_raw_answering_ort_enforces_component_bounds_before_transport() -> None:
+    transport = _RawTransport({"ok": True, "result": {"operation": "read"}})
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        wire_protocol="answering-ort",
+        transport=transport,
+    )
+    with pytest.raises(CompactProtocolError, match="character limit"):
+        provider.embed("x" * 2_001)
+    with pytest.raises(CompactProtocolError, match="component limit"):
+        provider.read({
+            "question": "bounded",
+            "evidence": [{"cid": f"e{index}", "content": "x"} for index in range(21)],
+        })
+    assert transport.requests == []
