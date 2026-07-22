@@ -403,8 +403,12 @@ def _raw_transport(
     max_response_bytes: int,
 ) -> bytes:
     parsed = _parse_endpoint(endpoint)
+    split = urllib.parse.urlsplit(endpoint)
+    host = split.hostname
+    if host == "localhost":
+        host = "127.0.0.1"
     sock = (
-        socket.create_connection((urllib.parse.urlsplit(endpoint).hostname, urllib.parse.urlsplit(endpoint).port or 80), timeout)
+        socket.create_connection((host, split.port or 80), timeout)
         if parsed.kind == "http"
         else socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     )
@@ -419,8 +423,6 @@ def _raw_transport(
             if not chunk:
                 break
             chunks.extend(chunk)
-            if b"\n" in chunk:
-                break
     except (OSError, TimeoutError) as exc:
         raise CompactProviderError("compact provider transport failed closed") from exc
     finally:
@@ -774,6 +776,8 @@ class CompactAnsweringProvider:
                 raise CompactProviderError("compact provider transport failed closed") from exc
             if not isinstance(raw, bytes) or len(raw) > min(self.max_response_bytes, 256 * 1024):
                 raise CompactProviderError("compact provider response exceeds the output limit")
+            if not raw.endswith(b"\n") or raw.count(b"\n") != 1:
+                raise CompactProtocolError("compact provider must return one newline-delimited response")
             response = _decode_json(raw, label=f"{operation} response")
             fields = _optional_keys(response, frozenset({"ok", "result", "error"}), label=f"{operation} response")
             if fields.get("ok") is False and set(fields) == {"ok", "error"}:
