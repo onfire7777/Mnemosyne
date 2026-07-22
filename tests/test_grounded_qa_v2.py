@@ -66,7 +66,14 @@ class RecordingCLI:
                         {"index": 0, "queries": ["Mara"], "channels": ["lexical"], "retrieved_cids": ["cid-0"]},
                         {"index": 1, "queries": ["Helios"], "channels": ["graph"], "retrieved_cids": ["cid-1"]},
                     ],
-                    "reader": {"grounded_reader": {}, "query_decomposer": {}},
+                    "reader": {
+                        "grounded_reader": {
+                            "artifact": "compact-int8.onnx",
+                            "provider": "answering-ort",
+                            "wire_protocol": "answering-ort",
+                        },
+                        "query_decomposer": {},
+                    },
                 }
             ]
         }
@@ -83,6 +90,16 @@ def test_synthetic_runner_keeps_gold_at_scorer_boundary() -> None:
         field not in serialized
         for field in ("gold_answer", "gold_aliases", "relevant_doc_ids", "distractor_answer")
     )
+    assert cli.answer_rows == [{
+        "context": {"role": "reader", "tenant_id": "dev", "user_id": "dev-user"},
+        "question": "When does Mara's project ship?",
+        "question_id": "q1",
+    }]
+    assert result["traces"][0]["reader"]["grounded_reader"] == {
+        "artifact": "compact-int8.onnx",
+        "provider": "answering-ort",
+        "wire_protocol": "answering-ort",
+    }
 
 
 def test_frozen_dataset_requires_canonical_path_and_explicit_one_shot_gate(
