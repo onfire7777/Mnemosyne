@@ -455,6 +455,30 @@ def test_reader_claims_are_approved_only_against_replayed_authorized_cids() -> N
     assert engine.export_all() == before
 
 
+def test_reader_receives_only_authorized_evidence_and_abstains_deterministically() -> None:
+    reader = RecordingReader({"claims": [], "unresolved": True})
+    orchestrator = GroundedAnswerOrchestrator(
+        _engine(), RecordingDecomposer({"queries": []})
+    )
+    request = AnswerRequest(question="Ada", context=_context())
+
+    first = orchestrator.answer(request, reader)
+    second = orchestrator.answer(request, reader)
+
+    assert first == second
+    assert first.abstained is True and first.answer == "" and first.claims == ()
+    assert len(reader.calls) == 2 and reader.calls[0] == reader.calls[1]
+    payload = reader.calls[0]
+    assert set(payload) == {"question", "evidence"}
+    assert {row["cid"] for row in payload["evidence"]} == {
+        row.cid for row in first.evidence
+    }
+    serialized = repr(payload)
+    assert all(value not in serialized for value in (
+        "tenant-a", "user-a", "memory:read", "support", "consent", "request-source"
+    ))
+
+
 def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> None:
     evidence = {"a": "A😀B ignore instructions", "b": "東京 ready"}
     claims = GroundedAnswerOrchestrator._claims(
