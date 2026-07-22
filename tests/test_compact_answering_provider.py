@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import socket
+import threading
 
 import pytest
 
@@ -278,6 +281,16 @@ def test_raw_answering_ort_shapes_preserve_ids_order_spans_and_custody() -> None
 
     transport.response = {
         "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }
+    assert provider.embed_many(["first", "second"]) == [pytest.approx([0.6, 0.8])] * 2
+    assert transport.requests[-2:] == [
+        {"operation": "embed", "query": "first"},
+        {"operation": "embed", "query": "second"},
+    ]
+
+    transport.response = {
+        "ok": True,
         "result": {
             "operation": "read",
             "prediction": {
@@ -292,6 +305,81 @@ def test_raw_answering_ort_shapes_preserve_ids_order_spans_and_custody() -> None
     assert provider.read(
         {"question": "What?", "evidence": [{"cid": "e1", "content": "prefix naïve 東京 suffix"}]}
     ) == {"claims": [{"spans": [{"cid": "e1", "quote": "naïve 東京"}]}], "unresolved": False}
+
+
+@pytest.mark.parametrize(
+    "prediction",
+    [
+        {"answer_type": "null", "supporting_ids": ["unknown"]},
+        {
+            "answer_type": "span",
+            "evidence_id": "e1",
+            "start": 0,
+            "end": 3,
+            "supporting_ids": ["e2"],
+        },
+    ],
+)
+def test_raw_answering_ort_rejects_invalid_supporting_ids(prediction: dict[str, object]) -> None:
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        wire_protocol="answering-ort",
+        transport=_RawTransport({
+            "ok": True,
+            "result": {"operation": "read", "prediction": prediction},
+        }),
+    )
+    with pytest.raises(CompactProtocolError, match="supporting id"):
+        provider.read({
+            "question": "What?",
+            "evidence": [
+                {"cid": "e1", "content": "one"},
+                {"cid": "e2", "content": "two"},
+            ],
+        })
+
+
+def test_raw_transport_supports_loopback_tcp_and_absolute_unix() -> None:
+    response = json.dumps({
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }, separators=(",", ":")).encode() + b"\n"
+
+    def serve_once(server: socket.socket) -> threading.Thread:
+        def serve() -> None:
+            with server:
+                connection, _address = server.accept()
+                with connection:
+                    assert connection.recv(4096).endswith(b"\n")
+                    connection.sendall(response)
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        return thread
+
+    tcp = socket.socket()
+    tcp.bind(("127.0.0.1", 0))
+    tcp.listen(1)
+    port = tcp.getsockname()[1]
+    tcp_thread = serve_once(tcp)
+    tcp_provider = CompactAnsweringProvider(
+        f"http://127.0.0.1:{port}", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    assert tcp_provider.embed("tcp") == pytest.approx([0.6, 0.8])
+    tcp_thread.join()
+
+    path = f"/tmp/mnemosyne-answering-{os.getpid()}.sock"
+    unix = socket.socket(socket.AF_UNIX)
+    unix.bind(path)
+    unix.listen(1)
+    unix_thread = serve_once(unix)
+    unix_provider = CompactAnsweringProvider(
+        f"unix://{path}", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    assert unix_provider.embed("unix") == pytest.approx([0.6, 0.8])
+    unix_thread.join()
+    os.unlink(path)
 
 
 @pytest.mark.parametrize("response", [

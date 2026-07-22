@@ -550,13 +550,30 @@ def test_synthesis_claims_fail_closed_for_invalid_proposals(synthesis: object) -
         )
 
 
+def test_synthesis_claims_reject_ambiguous_quotes() -> None:
+    with pytest.raises(ValueError, match="ambiguous"):
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"synthesis": {"operation": "add", "spans": [
+                {"cid": "a", "quote": "1"},
+            ]}}], "unresolved": False},
+            {"a": "1 then 1"},
+        )
+
+
 def test_synthesis_reader_abstains_with_replayed_evidence_on_drift_or_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    proposal = {"claims": [{"synthesis": {"operation": "add", "spans": [
-        {"cid": "unknown", "quote": "1"},
-    ]}}], "unresolved": False}
     engine = _engine()
+    assembled = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).assemble(AnswerRequest(question="Ada", context=_context()))
+    proposal = {"claims": [{"synthesis": {"operation": "add", "spans": [
+        {"cid": assembled.evidence[0].cid, "quote": "Ada owns project Zephyr."},
+    ]}}], "unresolved": False}
+    monkeypatch.setattr(
+        "mnemosyne.answering.DeterministicSynthesizer.synthesize",
+        lambda *_args: (_ for _ in ()).throw(ValueError("synthetic failure")),
+    )
     result = GroundedAnswerOrchestrator(
         engine, RecordingDecomposer({"queries": []})
     ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(proposal))
