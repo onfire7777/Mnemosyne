@@ -51,7 +51,7 @@ def _fail() -> DeterministicSynthesisError:
 
 
 def _validate_spans(value: object) -> list[dict[str, str]]:
-    if not isinstance(value, list) or not 2 <= len(value) <= _MAX_SPANS:
+    if not isinstance(value, list) or not 1 <= len(value) <= _MAX_SPANS:
         raise _fail()
     spans: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()

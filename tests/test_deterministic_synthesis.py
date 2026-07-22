@@ -33,6 +33,10 @@ def test_arithmetic_is_exact_and_canonical(
     assert DeterministicSynthesizer().synthesize(_payload(operation, *quotes))["answer"] == answer
 
 
+def test_singleton_arithmetic_is_accepted() -> None:
+    assert DeterministicSynthesizer().synthesize(_payload("add", "1.20"))["answer"] == "1.2"
+
+
 def test_output_preserves_provenance_order_and_exact_quotes() -> None:
     payload = {
         "operation": "add",
@@ -53,12 +57,25 @@ def test_output_preserves_provenance_order_and_exact_quotes() -> None:
 def test_output_has_deterministic_canonical_serialization() -> None:
     synthesizer = DeterministicSynthesizer()
     first = synthesizer.synthesize(_payload("add", "1.0", "2.00"))
-    second = synthesizer.synthesize(_payload("add", "1.0", "2.00"))
+    second = synthesizer.synthesize(
+        {
+            "spans": [
+                {"quote": "1.0", "cid": "source-1"},
+                {"quote": "2.00", "cid": "source-2"},
+            ],
+            "operation": "add",
+        }
+    )
 
     def canonical(value: object) -> str:
         return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
-    assert canonical(first) == canonical(second)
+    expected = (
+        '{"answer":"3","operation":"add","provenance":['
+        '{"cid":"source-1","quote":"1.0"},'
+        '{"cid":"source-2","quote":"2.00"}],"unresolved":false}'
+    )
+    assert canonical(first) == canonical(second) == expected
 
 
 @pytest.mark.parametrize(
@@ -72,7 +89,6 @@ def test_output_has_deterministic_canonical_serialization() -> None:
         {"operation": "sum", "spans": []},
         {"operation": "add", "spans": "1,2"},
         {"operation": "add", "spans": []},
-        {"operation": "add", "spans": [{"cid": "a", "quote": "1"}]},
         {"operation": "add", "spans": [{"cid": "", "quote": "1"}, {"cid": "b", "quote": "2"}]},
         {"operation": "add", "spans": [{"cid": "a", "quote": ""}, {"cid": "b", "quote": "2"}]},
         {"operation": "add", "spans": [{"cid": "a", "quote": "1", "extra": 0}, {"cid": "b", "quote": "2"}]},
@@ -81,6 +97,30 @@ def test_output_has_deterministic_canonical_serialization() -> None:
 def test_payload_and_spans_are_strict(payload: object) -> None:
     with pytest.raises(DeterministicSynthesisError):
         DeterministicSynthesizer().synthesize(payload)  # type: ignore[arg-type]
+
+
+def test_span_and_cid_bounds_accept_the_maximum() -> None:
+    spans = [
+        {"cid": "c" * 256 if index == 0 else f"source-{index}", "quote": "0"}
+        for index in range(16)
+    ]
+    assert DeterministicSynthesizer().synthesize({"operation": "add", "spans": spans})[
+        "answer"
+    ] == "0"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _payload("add", *("0" for _ in range(17))),
+        {"operation": "add", "spans": [{"cid": "c" * 257, "quote": "1"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "1" * 129}]},
+        {"operation": "add", "spans": [{"cid": 1, "quote": "1"}]},
+    ],
+)
+def test_span_and_field_bounds_reject_overflow(payload: dict[str, object]) -> None:
+    with pytest.raises(DeterministicSynthesisError):
+        DeterministicSynthesizer().synthesize(payload)
 
 
 def test_duplicate_identical_spans_are_rejected() -> None:
