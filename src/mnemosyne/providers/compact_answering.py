@@ -25,6 +25,11 @@ from mnemosyne.models import Hit
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _SUPPORTED_CAPABILITIES = frozenset({"embed", "embed_many", "rerank", "read"})
+_SERVICE_ERROR_CODES = frozenset({
+    "malformed_request", "request_too_large", "limit_exceeded",
+    "unsupported_operation", "request_timed_out", "runtime_unavailable",
+    "runtime_busy", "identity_mismatch", "inference_failed",
+})
 _IDENTITY_KEYS = frozenset(
     {
         "provider",
@@ -49,6 +54,14 @@ class CompactProviderError(RuntimeError):
 
 class CompactProtocolError(ValueError):
     """A malformed, unauthorised, or parity-incompatible provider message."""
+
+
+class CompactServiceError(CompactProviderError):
+    """A typed failure returned by the answering-ort service."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"compact provider failed closed: {code}: {message}")
+        self.code = code
 
 
 JsonTransport = Callable[[str, bytes, Mapping[str, str], float, int], bytes]
@@ -301,6 +314,16 @@ def _utf8_slice(value: str, start: int, end: int, *, label: str) -> str:
         ) from exc
 
 
+def _validate_raw_request(query: str, evidence: Sequence[Mapping[str, str]] = ()) -> None:
+    if len(query) > 2_000:
+        raise CompactProtocolError("answering-ort query exceeds the character limit")
+    if len(evidence) > 20 or sum(len(row["text"]) for row in evidence) > 24_000:
+        raise CompactProtocolError("answering-ort evidence exceeds the component limit")
+    ids = [row["id"] for row in evidence]
+    if any(not cid or len(cid) > 256 for cid in ids) or len(set(ids)) != len(ids):
+        raise CompactProtocolError("answering-ort evidence id is invalid or duplicated")
+
+
 def _default_transport(
     endpoint: str,
     body: bytes,
@@ -372,6 +395,43 @@ def _default_transport(
     return raw
 
 
+def _raw_transport(
+    endpoint: str,
+    body: bytes,
+    _headers: Mapping[str, str],
+    timeout: float,
+    max_response_bytes: int,
+) -> bytes:
+    parsed = _parse_endpoint(endpoint)
+    sock = (
+        socket.create_connection((urllib.parse.urlsplit(endpoint).hostname, urllib.parse.urlsplit(endpoint).port or 80), timeout)
+        if parsed.kind == "http"
+        else socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    )
+    sock.settimeout(timeout)
+    try:
+        if parsed.kind == "unix":
+            sock.connect(parsed.address)
+        sock.sendall(body)
+        chunks = bytearray()
+        while len(chunks) <= max_response_bytes:
+            chunk = sock.recv(min(8192, max_response_bytes + 1 - len(chunks)))
+            if not chunk:
+                break
+            chunks.extend(chunk)
+            if b"\n" in chunk:
+                break
+    except (OSError, TimeoutError) as exc:
+        raise CompactProviderError("compact provider transport failed closed") from exc
+    finally:
+        sock.close()
+    if len(chunks) > max_response_bytes:
+        raise CompactProviderError("compact provider response exceeds the output limit")
+    if not chunks.endswith(b"\n") or chunks.count(b"\n") != 1:
+        raise CompactProtocolError("compact provider must return one newline-delimited response")
+    return bytes(chunks)
+
+
 @dataclass(slots=True)
 class CompactAnsweringProvider:
     """Strict embed/rerank/read adapter for a configured compact sidecar.
@@ -391,6 +451,7 @@ class CompactAnsweringProvider:
     require_bearer_auth: bool = False
     query_prefix: str = "query: "
     max_read_spans: int = 20
+    wire_protocol: str = "custody-envelope"
     # Names used by the existing bounded command provider are accepted as
     # explicit aliases, while the request/response names remain canonical.
     max_input_bytes: int | None = None
@@ -402,6 +463,8 @@ class CompactAnsweringProvider:
         if not isinstance(self.identity, CompactProviderIdentity):
             raise ValueError("compact provider identity is required")
         self._parsed_endpoint = _parse_endpoint(self.endpoint)
+        if self.wire_protocol not in {"custody-envelope", "answering-ort"}:
+            raise ValueError("compact provider wire protocol is invalid")
         if self.max_input_bytes is not None:
             if self.max_request_bytes != 256 * 1024 and self.max_request_bytes != self.max_input_bytes:
                 raise ValueError("compact provider input limits disagree")
@@ -414,6 +477,8 @@ class CompactAnsweringProvider:
             raise ValueError("compact embedding dimensions must be positive")
         if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
             raise ValueError("compact provider timeout must be positive")
+        if self.wire_protocol == "answering-ort" and self.timeout_seconds > 30:
+            raise ValueError("answering-ort timeout must not exceed 30 seconds")
         if (
             not isinstance(self.max_request_bytes, int)
             or isinstance(self.max_request_bytes, bool)
@@ -447,6 +512,7 @@ class CompactAnsweringProvider:
         return {
             **self.identity.to_dict(),
             "capabilities": list(self.identity.capabilities),
+            "wire_protocol": self.wire_protocol,
         }
 
     @property
@@ -457,7 +523,11 @@ class CompactAnsweringProvider:
         self._require_capability("embed")
         if not isinstance(text, str):
             raise TypeError("compact embedding input must be text")
-        result = self._roundtrip("embed", {"input": text})
+        if self.wire_protocol == "answering-ort":
+            _validate_raw_request(text)
+        result = self._roundtrip(
+            "embed", {"query": text} if self.wire_protocol == "answering-ort" else {"input": text}
+        )
         payload = _require_keys(result, frozenset({"embedding"}), label="embed result")
         return _vector(payload["embedding"], dims=self.dims, label="embedding")
 
@@ -468,6 +538,8 @@ class CompactAnsweringProvider:
         self._require_capability("embed_many")
         if any(not isinstance(text, str) for text in items):
             raise TypeError("compact batch embedding input must be text")
+        if self.wire_protocol == "answering-ort":
+            return [self.embed(text) for text in items]
         result = self._roundtrip("embed", {"input": items})
         payload = _require_keys(result, frozenset({"data"}), label="batch embed result")
         rows = payload["data"]
@@ -513,14 +585,30 @@ class CompactAnsweringProvider:
             if not isinstance(text, str):
                 raise TypeError("compact rerank hits must contain text")
             documents.append(text)
-        result = self._roundtrip(
-            "rerank",
-            {
+        if self.wire_protocol == "answering-ort":
+            raw_evidence = [
+                {"id": hit.id, "text": text}
+                for hit, text in zip(hits, documents, strict=True)
+            ]
+            _validate_raw_request(_with_query_prefix(query, self.query_prefix), raw_evidence)
+            result = self._roundtrip("rerank", {
                 "query": _with_query_prefix(query, self.query_prefix),
-                "documents": documents,
-                "top_n": k,
-            },
-        )
+                "evidence": raw_evidence,
+                "rank_width": min(k, 8),
+            })
+            fields = _require_keys(result, frozenset({"ranked_ids"}), label="rerank result")
+            ids = fields["ranked_ids"]
+            if not isinstance(ids, list) or not ids or len(ids) != min(k, len(hits), 8):
+                raise CompactProtocolError("rerank ranked id count is invalid")
+            by_id = {hit.id: hit for hit in hits}
+            if len(by_id) != len(hits) or any(not isinstance(cid, str) or cid not in by_id for cid in ids) or len(set(ids)) != len(ids):
+                raise CompactProtocolError("rerank ranked id is unknown or duplicated")
+            return [by_id[cid] for cid in ids]
+        result = self._roundtrip("rerank", {
+            "query": _with_query_prefix(query, self.query_prefix),
+            "documents": documents,
+            "top_n": k,
+        })
         payload = _require_keys(result, frozenset({"results"}), label="rerank result")
         rows = payload["results"]
         if not isinstance(rows, list) or not rows or len(rows) > k:
@@ -588,10 +676,30 @@ class CompactAnsweringProvider:
                 raise CompactProtocolError("grounded reader evidence contains duplicate cid")
             contents[cid] = content
             evidence.append({"cid": cid, "content": content})
-        result = self._roundtrip(
-            "read",
-            {"question": question, "evidence": evidence},
-        )
+        if self.wire_protocol == "answering-ort":
+            _validate_raw_request(
+                question,
+                [{"id": row["cid"], "text": row["content"]} for row in evidence],
+            )
+        result = self._roundtrip("read", (
+            {"query": question, "evidence": [{"id": row["cid"], "text": row["content"]} for row in evidence]}
+            if self.wire_protocol == "answering-ort"
+            else {"question": question, "evidence": evidence}
+        ))
+        if self.wire_protocol == "answering-ort":
+            prediction = _require_keys(result, frozenset({"prediction"}), label="read result")["prediction"]
+            if not isinstance(prediction, dict):
+                raise CompactProtocolError("grounded reader prediction is malformed")
+            answer_type = prediction.get("answer_type")
+            if answer_type == "null" and set(prediction) == {"answer_type", "supporting_ids"}:
+                return {"claims": [], "unresolved": True}
+            if answer_type != "span" or set(prediction) != {"answer_type", "evidence_id", "start", "end", "supporting_ids"}:
+                raise CompactProtocolError("grounded reader answer type is unsupported")
+            supporting = prediction["supporting_ids"]
+            cid = prediction["evidence_id"]
+            if not isinstance(supporting, list) or not supporting or any(item not in contents for item in supporting) or len(set(supporting)) != len(supporting):
+                raise CompactProtocolError("grounded reader supporting id is invalid")
+            result = {"spans": [{"cid": cid, "start": prediction["start"], "end": prediction["end"]}], "unresolved": False}
         fields = _require_keys(
             result,
             frozenset({"spans", "unresolved"}),
@@ -647,6 +755,31 @@ class CompactAnsweringProvider:
     def _roundtrip(self, operation: str, payload: dict[str, object]) -> dict[str, object]:
         if operation not in _SUPPORTED_CAPABILITIES:
             raise CompactProtocolError("compact provider operation is not supported")
+        if self.wire_protocol == "answering-ort":
+            body = _canonical_json({"operation": operation, **payload}, label=f"{operation} request") + b"\n"
+            if len(body) > min(self.max_request_bytes, 64 * 1024):
+                raise CompactProviderError("compact provider request exceeds the input limit")
+            try:
+                raw = (self.transport or _raw_transport)(self.endpoint, body, {}, self.timeout_seconds, min(self.max_response_bytes, 256 * 1024))
+            except CompactProviderError:
+                raise
+            except (OSError, TimeoutError) as exc:
+                raise CompactProviderError("compact provider transport failed closed") from exc
+            if not isinstance(raw, bytes) or len(raw) > min(self.max_response_bytes, 256 * 1024):
+                raise CompactProviderError("compact provider response exceeds the output limit")
+            response = _decode_json(raw, label=f"{operation} response")
+            fields = _optional_keys(response, frozenset({"ok", "result", "error"}), label=f"{operation} response")
+            if fields.get("ok") is False and set(fields) == {"ok", "error"}:
+                error = _require_keys(fields["error"], frozenset({"code", "message"}), label="service error")
+                if error["code"] not in _SERVICE_ERROR_CODES or not isinstance(error["message"], str):
+                    raise CompactProtocolError("compact service error is malformed")
+                raise CompactServiceError(error["code"], error["message"])
+            if fields.get("ok") is not True or set(fields) != {"ok", "result"}:
+                raise CompactProtocolError("compact service response is malformed")
+            result = fields["result"]
+            if not isinstance(result, dict) or result.get("operation") != operation:
+                raise CompactProtocolError("compact provider response operation does not match request")
+            return {key: value for key, value in result.items() if key != "operation"}
         payload_bytes = _canonical_json(payload, label=f"{operation} request payload")
         request = {
             "operation": operation,
@@ -735,6 +868,7 @@ __all__ = [
     "CompactProviderError",
     "CompactProviderIdentity",
     "CompactProtocolError",
+    "CompactServiceError",
     "CompactReranker",
     "JsonTransport",
     "identity_digest",

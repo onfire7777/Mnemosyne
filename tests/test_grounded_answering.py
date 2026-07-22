@@ -18,6 +18,15 @@ from mnemosyne.answering import (
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Hit, Relation, RetrievalResult
+from mnemosyne.providers.compact_answering import CompactAnsweringProvider
+from mnemosyne.providers.extractive_decomposer import (
+    CONTENT_SHA256 as DECOMPOSER_SHA256,
+    SELECTOR as DECOMPOSER_SELECTOR,
+)
+from mnemosyne.providers.grounded_reader import (
+    CommandGroundedProvider,
+    ComposedGroundedProvider,
+)
 
 
 class RecordingDecomposer:
@@ -106,6 +115,48 @@ def _engine() -> LocalMemoryEngine:
         )
     )
     return engine
+
+
+def _compact_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": "query-command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR": DECOMPOSER_SELECTOR,
+        "MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256": DECOMPOSER_SHA256,
+        "MNEMOSYNE_GROUNDED_READER_PROVIDER": "compact",
+        "MNEMOSYNE_COMPACT_ENDPOINT": "unix:///tmp/answering-ort.sock",
+        "MNEMOSYNE_COMPACT_PROVIDER": "answering-ort",
+        "MNEMOSYNE_COMPACT_PROVIDER_SHA256": "1" * 64,
+        "MNEMOSYNE_COMPACT_ARTIFACT": "compact-int8.onnx",
+        "MNEMOSYNE_COMPACT_ARTIFACT_SHA256": "2" * 64,
+        "MNEMOSYNE_COMPACT_CONFIGURATION": "compact-config-v1",
+        "MNEMOSYNE_COMPACT_CONFIGURATION_SHA256": "3" * 64,
+        "MNEMOSYNE_COMPACT_DIMS": "1024",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_explicit_compact_environment_preserves_command_decomposer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _compact_environment(monkeypatch)
+    provider = CommandGroundedProvider.from_environment()
+    assert isinstance(provider, ComposedGroundedProvider)
+    assert isinstance(provider.decomposer, CommandGroundedProvider)
+    assert provider.decomposer.query_command == "query-command"
+    assert isinstance(provider.reader, CompactAnsweringProvider)
+    assert provider.disclosure["grounded_reader"]["wire_protocol"] == "answering-ort"
+
+
+def test_compact_environment_is_complete_and_has_no_command_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _compact_environment(monkeypatch)
+    monkeypatch.delenv("MNEMOSYNE_COMPACT_ARTIFACT_SHA256")
+    monkeypatch.setenv("MNEMOSYNE_GROUNDED_READER_COMMAND", "must-not-run")
+    with pytest.raises(ValueError, match="artifact_sha256"):
+        CommandGroundedProvider.from_environment()
 
 
 @pytest.mark.parametrize(
