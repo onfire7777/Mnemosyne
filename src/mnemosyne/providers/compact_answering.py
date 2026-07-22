@@ -691,13 +691,20 @@ class CompactAnsweringProvider:
             if not isinstance(prediction, dict):
                 raise CompactProtocolError("grounded reader prediction is malformed")
             answer_type = prediction.get("answer_type")
+            supporting = prediction.get("supporting_ids")
+            if (
+                not isinstance(supporting, list)
+                or len(supporting) > len(contents)
+                or any(not isinstance(item, str) or item not in contents for item in supporting)
+                or len(set(supporting)) != len(supporting)
+            ):
+                raise CompactProtocolError("grounded reader supporting id is invalid")
             if answer_type == "null" and set(prediction) == {"answer_type", "supporting_ids"}:
                 return {"claims": [], "unresolved": True}
             if answer_type != "span" or set(prediction) != {"answer_type", "evidence_id", "start", "end", "supporting_ids"}:
                 raise CompactProtocolError("grounded reader answer type is unsupported")
-            supporting = prediction["supporting_ids"]
             cid = prediction["evidence_id"]
-            if not isinstance(supporting, list) or not supporting or any(item not in contents for item in supporting) or len(set(supporting)) != len(supporting):
+            if not supporting or cid not in supporting:
                 raise CompactProtocolError("grounded reader supporting id is invalid")
             result = {"spans": [{"cid": cid, "start": prediction["start"], "end": prediction["end"]}], "unresolved": False}
         fields = _require_keys(

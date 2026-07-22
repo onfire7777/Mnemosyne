@@ -778,6 +778,8 @@ class GroundedAnswerOrchestrator:
                 start = evidence[cid].find(quote)
                 if start < 0:
                     raise ValueError("claim quote is outside authorized evidence")
+                if synthesis is not None and evidence[cid].find(quote, start + 1) >= 0:
+                    raise ValueError("synthesis claim quote is ambiguous")
                 end = start + len(quote)
                 if any(start < right and left < end for left, right in occupied.setdefault(cid, [])):
                     raise ValueError("claim spans overlap")
