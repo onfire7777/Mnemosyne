@@ -7,11 +7,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
 REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
+V2_REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
+ARCHITECTURE_OVERVIEW = ROOT / "docs" / "ARCHITECTURE-OVERVIEW.md"
+ENGINE_CONTRACT = ROOT / "docs" / "ENGINE-CONTRACT.md"
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
     r"\| ([^|]+) \| \[x\] Verified \|$"
 )
+V2_CAP_ROW = re.compile(r"^\| \[[ x]\] (CAP-\d{3}) \|")
 
 
 def _frontmatter_list(text: str, key: str) -> set[str]:
@@ -78,3 +82,88 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     ids = set(ID_PATTERN.findall(text))
     assert {f"REQ-{index:03d}" for index in range(1, 19)} <= ids
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
+
+
+def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
+    text = V2_REQUIREMENTS.read_text(encoding="utf-8")
+    expected_rows = {
+        "CAP-012": (
+            "Prospective memory persists subject-scoped intentions and evaluates "
+            "supported triggers deterministically and idempotently with provenance "
+            "and audit records across Local, Postgres, and Sqlite engines.",
+            "W3 P1/P4",
+        ),
+        "CAP-013": (
+            "Working memory provides tenant/session-scoped short-TTL storage, "
+            "explicit promotion, deterministic expiry, and a distinct retrieval "
+            "route across Local, Postgres, and Sqlite engines.",
+            "W3 P3/P4",
+        ),
+    }
+
+    rows_by_requirement: dict[str, list[str]] = {}
+    for line in text.splitlines():
+        match = V2_CAP_ROW.match(line)
+        if match:
+            rows_by_requirement.setdefault(match.group(1), []).append(line)
+
+    for requirement, (description, authority) in expected_rows.items():
+        assert rows_by_requirement.get(requirement) == [
+            f"| [x] {requirement} | {description} | {authority} | Complete |"
+        ]
+
+    phase_15 = next(line for line in text.splitlines() if line.startswith("| 15 |"))
+    assert phase_15 == "| 15 | CAP-004..010, CAP-012, CAP-013, RAIL-001..004 |"
+
+
+def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
+    text = ARCHITECTURE_OVERVIEW.read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
+
+    for expected in (
+        "prospective_memory",
+        "working_memory",
+        "without firing or mutating them",
+        "never promotes them implicitly",
+        "Local, Postgres, and Sqlite engines",
+        "kind ∈ {evidence, assertion, relation, preference, intention, working}",
+        "remain data-only",
+        "docs/ENGINE-CONTRACT.md",
+    ):
+        assert expected in normalized
+
+    for engine_contract_detail in (
+        "schedule_intention",
+        "evaluate_due_intentions",
+        "put_working",
+        "expire_working",
+    ):
+        assert engine_contract_detail not in normalized
+
+
+def test_engine_contract_documents_three_engine_memory_plane_parity() -> None:
+    text = ENGINE_CONTRACT.read_text(encoding="utf-8")
+    normalized = " ".join(text.split())
+
+    for expected in (
+        '@pytest.fixture(params=["local", "postgres", "sqlite"])',
+        "schedule_intention",
+        "cancel_intention",
+        "list_intentions",
+        "evaluate_due_intentions",
+        "put_working",
+        "get_working",
+        "list_working",
+        "expire_working",
+        "created_at <= as_of < expires_at",
+        "session_id`, `user_id`, `agent_id`, `task_id`, and `branch",
+        "legacy tombstone",
+        "limited to erased-replay detection",
+        "restricted to the owning user or agent",
+        "working_promote",
+        "working-promote",
+        "PromotionGate",
+        "Memory-plane implementation mapping",
+        "SqliteEngine (`src/mnemosyne/sqlite_engine.py`)",
+    ):
+        assert expected in normalized

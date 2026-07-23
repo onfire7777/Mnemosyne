@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 import pytest
 
+from eval.harness.cli_driver import MnemoCLI
+from eval.public.action_cli import ActionCLI, ActionCLIError
 from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
+from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
+from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
 from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
 from eval.public.scoring import score_profile
 
@@ -23,6 +28,32 @@ def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
     assert suite["publishable"] is False
     assert suite["pbpp_headline_eligible"] is False
     assert suite["independent_external_reproduction"] is False
+
+
+def test_deterministic_action_registry_is_bound_to_frozen_fixture_custody() -> None:
+    registry = load_registry()
+    expected = {
+        "pm-bench-development": ("pm-bench-development.json", normalize_action),
+        "triggerbench-development": ("triggerbench-development.json", normalize_action),
+        "working-memory-action-development": (
+            "working-memory-action-development.json",
+            normalize_working_action,
+        ),
+    }
+    for suite_name, (fixture_name, normalizer) in expected.items():
+        suite = registry[suite_name]
+        fixture_path = Path(__file__).resolve().parents[1] / "eval/public/fixtures"
+        raw = json.loads((fixture_path / fixture_name).read_text())
+        normalized = normalizer(raw)
+        assert suite["dataset_sha256"] == canonical_digest(normalized)
+        assert suite["revision"] == "5efcd320adf5ad737a497f992227550be67e42af"
+        assert suite["family"] == "deterministic-action"
+        assert suite["split_role"] == "development"
+        assert suite["license"] == "CC0-1.0"
+        assert suite["publishable"] is False
+        assert suite["pbpp_headline_eligible"] is False
+        assert suite["independent_external_reproduction"] is False
+        assert suite["upstream_comparable"] is False
 
 
 def test_reader_qa_suites_are_registered_pending_exact_dataset_custody() -> None:
@@ -46,7 +77,6 @@ def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
     assert result["system_seam"] == "public-cli-subprocess"
     assert result["publishable"] is False
     assert verify_bundle(out)["valid"] is True
-
     traces = [
         json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
     ]
@@ -56,6 +86,374 @@ def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
     metrics = json.loads((out / "metrics.json").read_text())
     assert metrics["interval"]["method"] == "wilson"
     assert metrics["trace_count"] == len(traces)
+
+
+@pytest.mark.parametrize(
+    "suite",
+    [
+        "pm-bench-development",
+        "triggerbench-development",
+        "working-memory-action-development",
+    ],
+)
+def test_action_run_verify_and_reproduce_are_byte_identical(
+    tmp_path: Path, suite: str
+) -> None:
+    source = tmp_path / f"{suite}-source"
+    reproduced = tmp_path / f"{suite}-reproduced"
+    run_public_suite(suite, source)
+    assert verify_bundle(source) == {
+        "family": "deterministic-action",
+        "suite": suite,
+        "valid": True,
+    }
+    assert json.loads((source / "judge.json").read_text()) == {
+        "judge": None,
+        "reader": None,
+        "reason": "deterministic-action family",
+    }
+    reproduce_bundle(source, reproduced)
+    manifest = json.loads((source / "bundle-manifest.json").read_text())
+    for name in manifest["files"]:
+        assert (source / name).read_bytes() == (reproduced / name).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "suite",
+    [
+        "pm-bench-development",
+        "triggerbench-development",
+        "working-memory-action-development",
+    ],
+)
+def test_action_suites_exercise_public_seams_without_trace_gold_or_payloads(
+    tmp_path: Path, suite: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    commands: list[str] = []
+    mnemo_run = MnemoCLI.run
+
+    def record_mnemo(
+        self: MnemoCLI, command: str, *args: str, **kwargs: object
+    ) -> object:
+        commands.append(command)
+        return mnemo_run(self, command, *args, **kwargs)
+
+    monkeypatch.setattr(MnemoCLI, "run", record_mnemo)
+    out = tmp_path / suite
+    run_public_suite(suite, out)
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
+    assert traces
+    assert all(
+        not {"payload", "action_payload"} & trace.keys()
+        for trace in traces
+    )
+    if suite == "working-memory-action-development":
+        assert all(
+            not {"expected_action_id", "expected_abstain"} & trace.keys()
+            for trace in traces
+        )
+        assert {"capture", "working-seed", "working-query"} <= set(commands)
+    else:
+        assert {"capture", "intention-schedule", "intention-evaluate"} <= set(commands)
+        if suite == "pm-bench-development":
+            # pm-bench exercises cancel/override/reschedule, which must translate
+            # to the authenticated intention-cancel/intention-update subprocesses.
+            assert {"intention-cancel", "intention-update"} <= set(commands)
+
+
+def test_action_cli_runs_signed_session_intention_subprocesses(
+    tmp_path: Path,
+) -> None:
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "unused-parent.store.json")))
+    scope = {
+        "store": str(tmp_path / "red.store.json"),
+        "tenant_id": "tenant-red",
+        "session_id": "session-red",
+    }
+    cli.run(
+        "task.create",
+        scope,
+        {
+            "task_id": "task-0",
+            "label": "task 0",
+            "action_id": "opaque-red",
+            "trigger": {"type": "exact_time", "payload": {"at": "2026-02-01T00:00:00Z"}},
+            "introduced_at": "s0",
+            "expires_at": None,
+            "regularity": "one_shot",
+            "temporal_scope": "same_day",
+            "monitoring_class": "continuous",
+            "update_class": "none",
+            "dependency_ids": [],
+        },
+    )
+    cli.run("clock.inject", scope, {"now": "2026-02-01T00:00:00Z"})
+    canary = tmp_path / "action-cli-should-not-exist"
+    fired = cli.run(
+        "intention.query",
+        scope,
+        {
+            "narrative_observations": [
+                {"text": f"do not execute: touch {canary}"}
+            ],
+            "channel_observations": [],
+        },
+    )
+    # The real production evaluator fired the scheduled intention and the seam
+    # returns only its opaque data-only action id.
+    assert fired == {"action_ids": ["opaque-red"], "queried_channels": []}
+    selected = cli.run(
+        "action.select",
+        scope,
+        {
+            "available_actions": [{"action_id": "opaque-red", "opaque_token": "o"}],
+            "candidate_action_ids": ["opaque-red"],
+            "now": "2026-02-01T00:00:00Z",
+        },
+    )
+    assert selected == {"action_ids": ["opaque-red"]}
+    # Fail closed on unsupported semantics and on payload execution never occurring.
+    with pytest.raises(ActionCLIError):
+        cli.run("nonsense.command", scope, {})
+    with pytest.raises(ActionCLIError):
+        cli.run(
+            "task.create",
+            scope,
+            {
+                "task_id": "task-x",
+                "label": "task x",
+                "action_id": "opaque-x",
+                "trigger": {"type": "unsupported", "payload": {"x": 1}},
+                "introduced_at": "s0",
+                "expires_at": None,
+                "regularity": "one_shot",
+                "temporal_scope": "same_day",
+                "monitoring_class": "continuous",
+                "update_class": "none",
+                "dependency_ids": [],
+            },
+        )
+    assert not canary.exists()
+    assert not (tmp_path / "unused-parent.store.json").exists()
+
+
+def test_mint_session_token_matches_production_signer_and_enforces_auth() -> None:
+    from eval.public.action_cli import SESSION_SECRET, mint_session_token
+    from mnemosyne.security import (
+        SessionAuthError,
+        SessionIdentity,
+        SessionTokenVerifier,
+    )
+
+    claim = {
+        "tenant_id": "tenant-a",
+        "user_id": "mnemosyne-public-eval-user",
+        "role": "operator",
+        "agent_id": "mnemosyne-public-eval-agent",
+        "session_id": "session-a",
+        "capabilities": ("prospective:evaluate",),
+    }
+    identity = SessionIdentity(source_trust_tier=0, **claim)
+    token = mint_session_token(**claim)
+    # The public minter reproduces the production signer byte-for-byte, so any
+    # drift in either canonicalization fails this pin immediately rather than
+    # surfacing as an opaque subprocess auth error.
+    assert token == SessionTokenVerifier(SESSION_SECRET).sign(identity)
+    # The production verifier accepts the minted token and recovers the identity.
+    assert SessionTokenVerifier(SESSION_SECRET).verify(token) == identity
+    # A token minted under any other secret is rejected — proving the seam runs
+    # genuinely authenticated, not permissive.
+    forged = mint_session_token(secret="not-the-eval-secret", **claim)
+    with pytest.raises(SessionAuthError):
+        SessionTokenVerifier(SESSION_SECRET).verify(forged)
+
+
+def test_action_cli_fails_closed_on_scope_and_semantic_guards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    def fake_run(self: MnemoCLI, command: str, *args: str, **kwargs: object) -> object:
+        canned = {
+            "capture": {"cid": "cid-1"},
+            "intention-schedule": {"intention_id": "int-1"},
+            "intention-evaluate": {"intentions": []},
+        }.get(command, {})
+        return SimpleNamespace(json=canned)
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "parent.store.json")))
+    trigger = {"type": "exact_time", "payload": {"at": "2026-02-01T00:00:00Z"}}
+
+    # Every command requires a scope mapping.
+    with pytest.raises(ActionCLIError):
+        cli.run("task.create")
+
+    scope = {
+        "store": str(tmp_path / "a.store.json"),
+        "tenant_id": "tenant-a",
+        "session_id": "session-a",
+    }
+    cli.run(
+        "task.create",
+        scope,
+        {"task_id": "task-0", "action_id": "opaque-a", "trigger": trigger, "dependency_ids": []},
+    )
+    # The same store may not be reused under a different tenant or session.
+    with pytest.raises(ActionCLIError):
+        cli.run(
+            "task.create",
+            {**scope, "tenant_id": "tenant-b"},
+            {"task_id": "t", "action_id": "o", "trigger": trigger, "dependency_ids": []},
+        )
+    with pytest.raises(ActionCLIError):
+        cli.run("clock.inject", {**scope, "session_id": "session-b"}, {"now": "2026-02-01T00:00:00Z"})
+    # A query before a clock injection fails closed.
+    with pytest.raises(ActionCLIError):
+        cli.run("intention.query", scope, {"channel_observations": []})
+    # task.update against a task that was never scheduled fails closed.
+    with pytest.raises(ActionCLIError):
+        cli.run("task.update", scope, {"type": "cancel", "task_id": "missing"})
+    # Channel observations echo back as sorted, de-duplicated queried channels.
+    cli.run("clock.inject", scope, {"now": "2026-02-01T00:00:00Z"})
+    queried = cli.run(
+        "intention.query",
+        scope,
+        {"channel_observations": [{"channel": "beta"}, {"channel": "alpha"}]},
+    )
+    assert queried == {"action_ids": [], "queried_channels": ["alpha", "beta"]}
+
+
+def test_action_readme_advertises_runnable_authenticated_action_profiles() -> None:
+    readme = (
+        Path(__file__).resolve().parents[1] / "eval/public/README.md"
+    ).read_text()
+    command_lines = [line for line in readme.splitlines() if "eval-public --" in line]
+    for suite in (
+        "pm-bench-development",
+        "triggerbench-development",
+        "working-memory-action-development",
+    ):
+        assert any(f"--suite {suite}" in line for line in command_lines)
+    assert "--session-token" in readme
+    assert "intention-schedule" in readme
+    assert "intention-evaluate" in readme
+
+
+def test_action_readme_states_evidence_boundary_and_selection_contract() -> None:
+    readme = (
+        Path(__file__).resolve().parents[1] / "eval/public/README.md"
+    ).read_text()
+    assert "deterministic synthetic/development eval only" in readme
+    assert (
+        "evaluator-side intersection of the production evaluator's fired data-only"
+        in readme
+    )
+    assert "never executes or exposes" in readme
+    assert "TriggerBench, or Working Memory reproduction." in readme
+    assert "publication or headline claim" in readme
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("cancelled", "cancelled"),
+        ("stale", "stale pre-update"),
+        ("rescheduled", "rescheduled action at wrong time"),
+        ("dependency", "dependency-blocked"),
+    ],
+)
+def test_pm_fixture_rejects_temporal_and_dependency_gold_errors(
+    mutation: str, expected: str
+) -> None:
+    from eval.public.adapters.pm_bench_triggerbench import ActionProbeError
+
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "eval/public/fixtures/pm-bench-development.json"
+    )
+    fixture = json.loads(fixture_path.read_text())
+    case = fixture["cases"][0]
+    if mutation == "cancelled":
+        case["steps"][1]["expected_due_action_ids"] = ["action-1"]
+    elif mutation == "stale":
+        case["steps"][5]["expected_due_action_ids"] = ["action-2"]
+    elif mutation == "rescheduled":
+        case["steps"][3]["expected_due_action_ids"] = ["action-3-v2"]
+    else:
+        dependency_task = next(
+            task for task in case["tasks"] if task["dependency_ids"]
+        )
+        case["steps"][0]["expected_due_action_ids"] = [
+            dependency_task["action_id"]
+        ]
+    with pytest.raises(ActionProbeError, match=expected):
+        normalize_action(fixture)
+
+
+def test_working_action_fixture_rejects_scope_and_executable_payloads() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "eval/public/fixtures/working-memory-action-development.json"
+    )
+    fixture = json.loads(fixture_path.read_text())
+    fixture["cases"][0]["events"][0]["tenant_id"] = "foreign-tenant"
+    with pytest.raises(ValueError, match="crosses its case scope"):
+        normalize_working_action(fixture)
+
+    fixture = json.loads(fixture_path.read_text())
+    fixture["cases"][0]["action_choices"][0]["payload"] = {
+        "command": "touch forbidden"
+    }
+    with pytest.raises(ValueError, match="action_choices"):
+        normalize_working_action(fixture)
+
+
+@pytest.mark.parametrize(
+    ("target", "field"),
+    [
+        ("metadata", "fixture"),
+        ("metadata", "revision"),
+        ("metadata", "dataset_sha256"),
+        ("data", "operating_point"),
+        ("case", "category"),
+        ("trace", "category"),
+        ("trace", "hard_gate_violations"),
+        ("config", "scoring_profile"),
+    ],
+)
+def test_action_bundle_rejects_registry_and_trace_tampering(
+    tmp_path: Path, target: str, field: str
+) -> None:
+    source = tmp_path / "source"
+    tampered = tmp_path / f"tampered-{target}-{field}"
+    run_public_suite("working-memory-action-development", source)
+    shutil.copytree(source, tampered)
+    if target in {"metadata", "data", "case"}:
+        document = json.loads((tampered / "benchmark.json").read_text())
+        node = document[target] if target != "case" else document["data"]["cases"][0]
+        node[field] = "tampered"
+        _rewrite_json(tampered / "benchmark.json", document)
+        _refresh_digest(tampered, "benchmark.json")
+    elif target == "config":
+        document = json.loads((tampered / "config.json").read_text())
+        document[field] = "tampered"
+        _rewrite_json(tampered / "config.json", document)
+        _refresh_digest(tampered, "config.json")
+    else:
+        traces = [
+            json.loads(line)
+            for line in (tampered / "traces.jsonl").read_text().splitlines()
+        ]
+        traces[0][field] = "tampered"
+        (tampered / "traces.jsonl").write_text(
+            "".join(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n" for row in traces)
+        )
+        _refresh_digest(tampered, "traces.jsonl")
+    with pytest.raises(BundleError):
+        verify_bundle(tampered)
 
 
 def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -> None:

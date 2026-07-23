@@ -55,3 +55,46 @@ def test_qa_abstention_scores_only_canonical_empty_answer() -> None:
     traces = [{"answer": "", "question_id": "q", "scoring_family": "qa"}]
     scored = score_profile("qa-em-f1-v1", labels, traces)
     assert scored["metrics"] == {"exact_match": 0.0, "token_f1": 0.0}
+
+
+def test_working_action_dispatch_preserves_categories_safety_and_metadata() -> None:
+    categories = (
+        "active_goal",
+        "current_plan_step",
+        "active_constraint",
+        "unresolved_question",
+        "recent_tool_result",
+        "intermediate_conclusion",
+    )
+    labels = [
+        {
+            "case_id": f"case-{index}",
+            "category": category,
+            "expected_action_id": f"action-{index}",
+            "expected_abstain": False,
+            "seed": 94125,
+        }
+        for index, category in enumerate(categories)
+    ]
+    traces = [
+        {
+            "case_id": f"case-{index}",
+            "category": category,
+            "status": "action",
+            "predicted_action_id": f"action-{index}",
+            "scoring_family": "deterministic-action",
+            "hard_gate_violations": {
+                "fixture_gold_exposed_to_policy": 0,
+                "foreign_scope_visible": 0,
+                "payload_executed": 0,
+                "automatic_durable_promotion": 0,
+            },
+        }
+        for index, category in enumerate(categories)
+    ]
+    scored = score_profile("working-memory-action-v1", labels, traces)
+    assert scored["family"] == "deterministic-action"
+    assert scored["profile_version"] == 1
+    assert scored["interval"]["method"] == "bootstrap"
+    assert [row["category"] for row in scored["category_rows"]] == list(categories)
+    assert not any(scored["hard_gate_violations"].values())

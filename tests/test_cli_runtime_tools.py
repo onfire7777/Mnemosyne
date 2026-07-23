@@ -1364,6 +1364,73 @@ def test_cli_object_option_works_with_global_object_store_flags(tmp_path: Path) 
     assert corrected["security"]["operation"] == "correct"
 
 
+def _run_cli_inproc(capsys: pytest.CaptureFixture[str], store: Path, *args: str) -> dict:
+    # In-process CLI dispatch (build_parser + func) so the transparent-output
+    # assertion exercises the code under test rather than any externally
+    # installed console-script snapshot.
+    parsed = build_parser().parse_args(["--store", str(store), *args])
+    parsed.func(parsed)
+    return json.loads(capsys.readouterr().out)
+
+
+def test_cli_confirm_transparent_output_exposes_confirmed_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    proposed = _run_cli_inproc(
+        capsys,
+        store,
+        "propose",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "cli confirm subject",
+        "--predicate",
+        "promotes",
+        "--object",
+        "cli candidate",
+        "--trust-tier",
+        "0",
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
+    confirmed = _run_cli_inproc(
+        capsys,
+        store,
+        "confirm",
+        "--id",
+        proposed["id"],
+        "--tenant",
+        TENANT,
+        "--role",
+        "operator",
+        "--source-trust-tier",
+        "0",
+    )
+
+    # The transparent CLI envelope surfaces both the submitted source id and the
+    # authoritative confirmed destination id resolved from the merge map.
+    assert confirmed["id"] == proposed["id"]
+    assert confirmed["source_id"] == proposed["id"]
+    confirmed_id = confirmed["confirmed_id"]
+    assert isinstance(confirmed_id, str) and confirmed_id
+    assert confirmed["merge"]["assertion_id_map"][proposed["id"]] == confirmed_id
+
+    # The promoted assertion lives on main under exactly the confirmed_id.
+    exported = LocalMemoryEngine(store_path=store).export_tenant(TENANT)
+    main_assertion = next(
+        item
+        for item in exported["assertions"]
+        if item["id"] == confirmed_id and item["branch"] == "main"
+    )
+    assert main_assertion["subject"] == "cli confirm subject"
+    assert main_assertion["object"] == "cli candidate"
+
+
 def test_cli_session_exchange_exposes_jwks_rotation_flags() -> None:
     args = build_parser().parse_args(
         [

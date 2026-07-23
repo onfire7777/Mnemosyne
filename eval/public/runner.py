@@ -17,11 +17,14 @@ from eval.public.adapters import (
     hipporag_multihop,
     longmemeval,
     longmemeval_qa,
+    pm_bench_triggerbench,
     qa_smoke,
     smoke,
+    working_memory_action_probe,
 )
 from eval.public.assets import AssetSpec, load_asset_set
-from eval.public.bundle import _canonical, write_bundle
+from eval.public.action_cli import _EVAL_THRESHOLD, ActionCLI
+from eval.public.bundle import _canonical, _scoring_labels, write_bundle
 from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import (
     ANCHOR_NORMALIZER_SPEC,
@@ -50,18 +53,25 @@ _ADAPTERS = {
     "hipporag-reader-qa": hipporag_multihop.run_reader_qa,
     "qa-smoke": qa_smoke.run,
     "smoke": smoke.run,
+    "pm-bench-triggerbench": pm_bench_triggerbench.run,
+    "working-memory-action": working_memory_action_probe.run,
 }
 _NORMALIZERS = {
     "hipporag-multihop": hipporag_multihop.normalize,
     "longmemeval": longmemeval.normalize,
     "longmemeval-qa": longmemeval_qa.normalize,
     "hipporag-reader-qa": hipporag_multihop.normalize_reader_qa,
+    "pm-bench-triggerbench": pm_bench_triggerbench.normalize,
+    "working-memory-action": working_memory_action_probe.normalize,
 }
 _PROFILE_CONTRACTS = {
     "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
     "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
     "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
     "qa-em-f1-v1": ("qa", "bootstrap"),
+    "pm-bench-action-v1": ("deterministic-action", "wilson"),
+    "triggerbench-action-v1": ("deterministic-action", "wilson"),
+    "working-memory-action-v1": ("deterministic-action", "bootstrap"),
 }
 
 _FROZEN_RETRIEVAL_BASELINES = {
@@ -338,7 +348,12 @@ def run_public_suite(
     else:
         fixture_bytes = (ROOT / suite["fixture"]).read_bytes()
         adapter_input = json.loads(fixture_bytes)
-    if hashlib.sha256(_canonical(adapter_input)).hexdigest() != suite["dataset_sha256"]:
+        if suite["adapter"] in _NORMALIZERS:
+            adapter_input = _NORMALIZERS[suite["adapter"]](adapter_input)
+    dataset_bytes = _canonical(adapter_input)
+    if suite["family"] == "deterministic-action":
+        dataset_bytes = dataset_bytes.rstrip(b"\n")
+    if hashlib.sha256(dataset_bytes).hexdigest() != suite["dataset_sha256"]:
         raise ValueError(
             f"{suite_name}: normalized benchmark digest does not match registry"
         )
@@ -349,7 +364,12 @@ def run_public_suite(
     }
     allowed_env.update(runtime_env)
     with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
-        cli = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
+        mnemo = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
+        cli: Any = (
+            ActionCLI(mnemo)
+            if suite["adapter"] == "pm-bench-triggerbench"
+            else mnemo
+        )
         with patch.dict(os.environ, allowed_env, clear=True):
             result = adapter(adapter_input, cli)
     if len(result) == 2:
@@ -361,9 +381,31 @@ def run_public_suite(
         raise ValueError(
             "public adapter must return (traces, metrics) or (benchmark, traces, metrics)"
         )
-    if hashlib.sha256(_canonical(benchmark)).hexdigest() != suite["dataset_sha256"]:
+    dataset_bytes = _canonical(benchmark)
+    if suite["family"] == "deterministic-action":
+        dataset_bytes = dataset_bytes.rstrip(b"\n")
+    if hashlib.sha256(dataset_bytes).hexdigest() != suite["dataset_sha256"]:
         raise ValueError(
             f"{suite_name}: normalized benchmark digest does not match registry"
+        )
+    if suite["family"] == "deterministic-action":
+        if suite["adapter"] == "pm-bench-triggerbench" and (
+            benchmark.get("operating_point_config", {}).get("threshold")
+            != _EVAL_THRESHOLD
+        ):
+            # The authenticated seam evaluates every case through the production
+            # evaluator at ActionCLI's fixed firing threshold. A fixture whose
+            # declared threshold diverges would be evaluated under a different
+            # operating point than the bundle records — fail closed rather than
+            # silently mislabel the metrics.
+            raise ValueError(
+                f"{suite_name}: fixture operating point threshold diverges from "
+                "the authenticated evaluation seam"
+            )
+        from eval.public.scoring import score_profile
+
+        measured = score_profile(
+            suite["scoring_profile"], _scoring_labels(benchmark), traces
         )
     interval_method = measured.get("interval", {}).get("method")
     if suite["scoring_profile"] == "qa-em-f1-v1":

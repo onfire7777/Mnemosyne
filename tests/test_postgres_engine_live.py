@@ -2370,3 +2370,48 @@ def test_provider_check_native_backend_reports_probes() -> None:
     assert backends["graph_local"] is False
     assert backends["lexical_probe"] is not None and backends["lexical_probe"]["top_id"]
     assert backends["graph_probe"] is not None and backends["graph_probe"]["top_id"]
+
+
+def test_postgres_merge_assertion_id_map_source_differs_from_destination_live() -> None:
+    from mnemosyne.mcp_tools import MemoryTools
+
+    dsn = live_dsn()
+    engine = PostgresEngine(dsn)
+    tenant = f"tenant-idmap-live-{uuid4()}"
+    user = f"user-idmap-live-{uuid4()}"
+    tools = MemoryTools(engine)
+
+    proposal = tools.propose(
+        tenant,
+        user,
+        "pg idmap subject",
+        "promotes",
+        "pg candidate",
+        confidence=0.9,
+        trust_tier=1,
+    )
+    source_id = proposal["id"]
+    confirmed = tools.confirm(
+        source_id, role="operator", source_trust_tier=0, tenant_id=tenant
+    )
+    id_map = confirmed["merge"]["assertion_id_map"]
+
+    # PostgreSQL derives a deterministic destination clone id because
+    # assertions.id is globally unique: source != destination, yet the map still
+    # carries the complete authoritative entry and confirm surfaces it.
+    assert id_map[source_id] != source_id
+    assert confirmed["source_id"] == source_id
+    assert confirmed["confirmed_id"] == id_map[source_id]
+
+    exported = engine.export_tenant(tenant)
+    main_assertion = next(
+        item
+        for item in exported["assertions"]
+        if item["id"] == confirmed["confirmed_id"] and item["branch"] == "main"
+    )
+    assert main_assertion["subject"] == "pg idmap subject"
+    assert main_assertion["object"] == "pg candidate"
+    # A fresh connection reconstructs the persisted merge audit with the map.
+    reconnected = PostgresEngine(dsn)
+    merge_log = reconnected.export_tenant(tenant)["merge_log"]
+    assert merge_log[-1]["assertion_id_map"][source_id] == confirmed["confirmed_id"]

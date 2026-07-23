@@ -3,27 +3,67 @@
 from __future__ import annotations
 
 import base64
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Any
 
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import (
+    Intention,
+    LocalMemoryEngine,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+    WorkingMemoryItem,
+)
 from mnemosyne.ids import new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
-from mnemosyne.gate import GATING_CASE_ORIGINS, GateResult, RegressionCase
+from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier, protected_suite_is_gating, protected_suite_report
+from mnemosyne.postgres_engine import _stable_uuid as _postgres_stable_uuid
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
-from mnemosyne.security import SecurityPolicy, TrustTier, WriteRole
+from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier, WriteRole
 from mnemosyne.source_truth import apply_markdown_git_source
 from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry
 
 
+def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
+    if type(value) is not str:
+        raise ValueError(f"{field} must be an ISO-8601 string")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return parsed
+
+
 TOOL_SPEC: list[dict[str, Any]] = [
+    {
+        "name": "working_seed",
+        "description": "Seed tenant/session-scoped working memory with bounded TTL and evidence provenance.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "kind", "content", "evidence_ids", "ttl_seconds", "created_at", "role", "source_trust_tier"],
+    },
+    {
+        "name": "working_query",
+        "description": "List live working-memory items in an explicit authenticated subject scope.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "as_of"],
+    },
+    {
+        "name": "working_promote",
+        "description": "Promote one working item through the regression-backed promotion gate.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "item_id", "as_of", "cases", "role", "source_trust_tier"],
+    },
+    {
+        "name": "working_expire",
+        "description": "Expire due working-memory items in an explicit authenticated subject scope.",
+        "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "expired_at", "role", "source_trust_tier"],
+    },
     {
         "name": "capture",
         "description": "Append verbatim evidence to the content-addressed ledger.",
@@ -64,6 +104,51 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "name": "preference",
         "description": "Record an explicit or inferred preference with precedence rules.",
         "arguments": ["tenant_id", "user_id", "category", "statement"],
+    },
+    {
+        "name": "schedule_intention",
+        "description": "Schedule a data-only prospective-memory intention backed by originating evidence.",
+        "arguments": [
+            "tenant_id",
+            "user_id",
+            "agent_id",
+            "trigger_type",
+            "trigger_expression",
+            "action",
+            "due_at",
+            "evidence_ids",
+            "priority",
+            "dependencies",
+            "reschedule_history",
+            "recurrence_policy",
+        ],
+    },
+    {
+        "name": "update_intention",
+        "description": "Reschedule or replace the data-only action for an authenticated subject intention.",
+        "arguments": [
+            "tenant_id", "intention_id", "user_id", "agent_id", "due_at",
+            "action", "recurrence_policy",
+        ],
+    },
+    {
+        "name": "cancel_intention",
+        "description": "Cancel a scheduled prospective-memory intention as its owning user or agent.",
+        "arguments": [
+            "tenant_id",
+            "intention_id",
+            "cancelled_by",
+        ],
+    },
+    {
+        "name": "evaluate_intentions",
+        "description": "Evaluate due prospective-memory intentions from an authenticated scheduler context.",
+        "arguments": ["tenant_id", "evaluated_at", "trigger_context", "operating_point"],
+    },
+    {
+        "name": "list_intentions",
+        "description": "List prospective-memory intentions owned by the authenticated subject.",
+        "arguments": ["tenant_id"],
     },
     {
         "name": "search",
@@ -313,6 +398,168 @@ class MemoryTools:
         self.parametric = parametric or ParametricTier()
         self.metrics = metrics or (runtime_state.load_metrics() if runtime_state else MetricsRegistry())
 
+    @staticmethod
+    def _working_time(value: str | datetime, name: str) -> datetime:
+        parsed = parse_dt(value)
+        if parsed is None or parsed.tzinfo is None:
+            raise ValueError(f"{name} must be an ISO 8601 timestamp with timezone")
+        return parsed.astimezone(UTC)
+
+    @staticmethod
+    def _working_matches(
+        item: WorkingMemoryItem, *, user_id: str, agent_id: str, task_id: str, branch: str
+    ) -> bool:
+        return (
+            item.user_id == user_id
+            and item.agent_id == agent_id
+            and item.task_id == task_id
+            and item.metadata.get("branch") == branch
+        )
+
+    def _authorize_working(
+        self,
+        identity: SessionIdentity | None,
+        *,
+        tenant_id: str,
+        session_id: str,
+        user_id: str,
+        agent_id: str,
+    ) -> SessionIdentity:
+        authorization = self._authorize_prospective(
+            "read",
+            identity,
+            tenant_id=tenant_id,
+            owner_id=user_id,
+        )
+        if not isinstance(identity, SessionIdentity):
+            raise PermissionError("working memory requires verified session identity")
+        if not identity.agent_id or identity.agent_id != agent_id:
+            raise PermissionError("working memory agent mismatch")
+        if not identity.session_id or identity.session_id != session_id:
+            raise PermissionError("working memory session mismatch")
+        if authorization.tenant_id != tenant_id or authorization.owner_id != user_id:
+            raise PermissionError("working memory subject mismatch")
+        return identity
+
+    def working_seed(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, kind: str, content: str, evidence_ids: list[str],
+        ttl_seconds: int, created_at: str | datetime, role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.NORMAL), item_id: str | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
+        if type(ttl_seconds) is not int or isinstance(ttl_seconds, bool) or ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be a positive integer")
+        if ttl_seconds > 24 * 60 * 60:
+            raise ValueError("ttl_seconds must not exceed 86400")
+        security = self._authorize(
+            "working_seed", role=role, source_trust_tier=source_trust_tier, target_sink="belief"
+        )
+        created = self._working_time(created_at, "created_at")
+        item = WorkingMemoryItem(
+            item_id=item_id or new_id(), tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id, kind=kind, task_id=task_id,
+            content=content, created_at=created, expires_at=created + timedelta(seconds=ttl_seconds),
+            evidence_ids=evidence_ids, trust_tier=source_trust_tier,
+            access_policy={"tenant": tenant_id}, metadata={"branch": branch},
+        )
+        self.engine.put_working(item)
+        return {"item": item.to_dict(), "security": security}
+
+    def working_query(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, as_of: str | datetime,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        clock = self._working_time(as_of, "as_of")
+        items = [
+            item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
+            if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+        ]
+        return {"as_of": clock.isoformat(), "items": [item.to_dict() for item in items]}
+
+    def working_promote(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, item_id: str, as_of: str | datetime,
+        cases: list[dict[str, Any]], role: WriteRole, source_trust_tier: int,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
+        security = self._authorize(
+            "working_promote", role=role, source_trust_tier=source_trust_tier,
+            target_sink="branch_promotion",
+        )
+        if not cases:
+            raise ValueError("working promotion requires explicit regression cases")
+        clock = self._working_time(as_of, "as_of")
+        item = self.engine.get_working(tenant_id, session_id, item_id, as_of=clock)
+        if item is None or not self._working_matches(
+            item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch
+        ):
+            raise KeyError("live working item not found in authenticated scope")
+        regression_cases = [RegressionCase.from_dict(case) for case in cases]
+        candidate = Candidate(
+            id=item.item_id, kind="fact", signature=f"{item.kind} {item.task_id}",
+            description=item.content, branch=f"working-promote-{new_id()}",
+            source_evidence_cids=list(item.evidence_ids),
+        )
+
+        def apply_candidate(engine: LocalMemoryEngine, candidate_branch: str) -> None:
+            engine.upsert_assertion(
+                Assertion(
+                    tenant_id=tenant_id, user_id=user_id, subject=item.task_id,
+                    predicate=item.kind, object=item.content,
+                    source_evidence_cids=list(item.evidence_ids), trust_tier=item.trust_tier,
+                    access_policy=dict(item.access_policy),
+                ),
+                branch=candidate_branch,
+            )
+
+        gate = PromotionGate(self.engine, regression_cases).evaluate(tenant_id, candidate, apply_candidate)
+        return {"item_id": item.item_id, "gate": gate.to_dict(), "security": security}
+
+    def working_expire(
+        self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
+        task_id: str, branch: str, expired_at: str | datetime, role: WriteRole,
+        source_trust_tier: int, session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        identity = self._authorize_working(
+            session_identity, tenant_id=tenant_id, session_id=session_id,
+            user_id=user_id, agent_id=agent_id,
+        )
+        role = identity.role
+        source_trust_tier = identity.source_trust_tier
+        security = self._authorize(
+            "working_expire", role=role, source_trust_tier=source_trust_tier,
+            destructive=True, target_sink="belief",
+        )
+        clock = self._working_time(expired_at, "expired_at")
+        expired = self.engine.expire_working(
+            tenant_id,
+            session_id=session_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            task_id=task_id,
+            branch=branch,
+            expired_at=clock,
+        )
+        return {"expired_at": clock.isoformat(), "items": [item.to_dict() for item in expired], "security": security}
+
     def capture(
         self,
         tenant_id: str,
@@ -543,6 +790,229 @@ class MemoryTools:
             )
         )
         return {"id": preference_id, "security": decision}
+
+    def schedule_intention(
+        self,
+        tenant_id: str,
+        user_id: str,
+        agent_id: str,
+        trigger_type: str,
+        trigger_expression: dict[str, Any],
+        action: dict[str, Any],
+        due_at: str,
+        evidence_ids: list[str],
+        priority: str = "normal",
+        dependencies: list[str] | None = None,
+        reschedule_history: list[dict[str, Any]] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "schedule",
+            session_identity,
+            tenant_id=tenant_id,
+            actor_id=user_id,
+            owner_id=user_id,
+            agent_id=agent_id,
+        )
+        assert isinstance(session_identity, SessionIdentity)
+        if not session_identity.session_id:
+            raise PermissionError(
+                "schedule intention denied: authenticated session identifier is required"
+            )
+        intention = Intention(
+            intention_id=new_id(),
+            tenant_id=authorization.tenant_id or tenant_id,
+            user_id=authorization.owner_id or user_id,
+            agent_id=authorization.agent_id or agent_id,
+            trigger_type=trigger_type,
+            trigger_expression=trigger_expression,
+            action=action,
+            due_at=_parse_prospective_datetime(due_at, field="due_at"),
+            priority=priority,
+            dependencies=dependencies or [],
+            reschedule_history=reschedule_history or [],
+            evidence_ids=evidence_ids,
+            session_id=session_identity.session_id,
+            recurrence_policy=recurrence_policy or {"type": "none"},
+        )
+        self.engine.schedule_intention(intention)
+        return intention.to_dict()
+
+    def update_intention(
+        self,
+        tenant_id: str,
+        intention_id: str,
+        user_id: str,
+        agent_id: str,
+        due_at: str | None = None,
+        action: dict[str, Any] | None = None,
+        recurrence_policy: dict[str, Any] | None = None,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "update", session_identity, tenant_id=tenant_id, actor_id=user_id,
+            owner_id=user_id, agent_id=agent_id,
+        )
+        assert isinstance(session_identity, SessionIdentity)
+        if not session_identity.session_id:
+            raise PermissionError("update intention denied: authenticated session identifier is required")
+        updated = self.engine.update_intention(
+            authorization.tenant_id or tenant_id, intention_id,
+            user_id=authorization.owner_id or user_id,
+            agent_id=authorization.agent_id or agent_id,
+            session_id=session_identity.session_id,
+            due_at=(_parse_prospective_datetime(due_at, field="due_at") if due_at is not None else None),
+            action=action, recurrence_policy=recurrence_policy,
+        )
+        return updated.to_dict()
+
+    def cancel_intention(
+        self,
+        tenant_id: str,
+        intention_id: str,
+        cancelled_by: str,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "cancel",
+            session_identity,
+            tenant_id=tenant_id,
+            actor_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
+            owner_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
+        )
+        assert isinstance(session_identity, SessionIdentity)
+        allowed_principals = {session_identity.user_id}
+        if session_identity.agent_id:
+            allowed_principals.add(session_identity.agent_id)
+        if cancelled_by not in allowed_principals:
+            raise PermissionError("cancel intention denied: cancellation principal is not authenticated")
+        if not session_identity.session_id:
+            raise PermissionError(
+                "cancel intention denied: authenticated session identifier is required"
+            )
+        authorized_tenant = authorization.tenant_id or tenant_id
+        current = next(
+            (
+                intention
+                for intention in self.engine.list_intentions(authorized_tenant)
+                if intention.intention_id == intention_id
+            ),
+            None,
+        )
+        if (
+            current is not None
+            and current.session_id is not None
+            and current.session_id != session_identity.session_id
+        ):
+            raise PermissionError(
+                "cancel intention denied: intention session does not match authenticated session"
+            )
+        if (
+            current is not None
+            and cancelled_by != session_identity.user_id
+            and current.user_id != session_identity.user_id
+            and current.user_id != _postgres_stable_uuid("user", session_identity.user_id)
+        ):
+            # A shared agent identity must not reach across users: the agent
+            # principal only cancels intentions the authenticated user owns.
+            # Pre-backfill Postgres rows expose the internal user UUID as
+            # their external user id, so the authenticated user must also be
+            # matched through the same stable-UUID mapping the engine applies.
+            raise PermissionError(
+                "cancel intention denied: agent principal may only cancel the authenticated user's intentions"
+            )
+        self.engine.cancel_intention(
+            authorized_tenant,
+            intention_id,
+            cancelled_by=cancelled_by,
+            session_id=session_identity.session_id,
+        )
+        return next(
+            intention.to_dict()
+            for intention in self.engine.list_intentions(authorized_tenant)
+            if intention.intention_id == intention_id
+        )
+
+    def evaluate_intentions(
+        self,
+        tenant_id: str,
+        evaluated_at: str,
+        trigger_context: dict[str, Any],
+        operating_point: dict[str, Any],
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "evaluate",
+            session_identity,
+            tenant_id=tenant_id,
+        )
+        evaluated = _parse_prospective_datetime(
+            evaluated_at,
+            field="evaluated_at",
+        )
+        if type(trigger_context) is not dict:
+            raise ValueError("trigger_context must be a JSON object")
+        if type(operating_point) is not dict:
+            raise ValueError("operating_point must be a JSON object")
+        context_tenant_id = trigger_context.get("tenant_id", authorization.tenant_id or tenant_id)
+        if context_tenant_id != (authorization.tenant_id or tenant_id):
+            raise ValueError("trigger_context tenant_id must match authenticated tenant")
+        context_arguments = dict(trigger_context)
+        context_arguments["tenant_id"] = authorization.tenant_id or tenant_id
+        context = TriggerEvaluationContext(**context_arguments)
+        point = ProspectiveOperatingPoint(**operating_point)
+        intentions = self.engine.evaluate_due_intentions(
+            authorization.tenant_id or tenant_id,
+            evaluated_at=evaluated,
+            trigger_context=context,
+            operating_point=point,
+        )
+        return {"intentions": [intention.to_dict() for intention in intentions]}
+
+    def list_intentions(
+        self,
+        tenant_id: str,
+        session_identity: SessionIdentity | None = None,
+    ) -> dict[str, Any]:
+        authorization = self._authorize_prospective(
+            "read",
+            session_identity,
+            tenant_id=tenant_id,
+            owner_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
+        )
+        intentions = [
+            intention
+            for intention in self.engine.list_intentions(authorization.tenant_id or tenant_id)
+            if intention.user_id == authorization.owner_id
+        ]
+        return {"intentions": [intention.to_dict() for intention in intentions]}
+
+    def _authorize_prospective(
+        self,
+        operation: str,
+        identity: SessionIdentity | None,
+        *,
+        tenant_id: str,
+        actor_id: str | None = None,
+        owner_id: str | None = None,
+        agent_id: str | None = None,
+    ) -> Any:
+        # Updates are policy-equivalent to schedule: the Task 5 lease forbids
+        # broadening SecurityPolicy, while the denial message below keeps the
+        # real operation name.
+        policy_operation = "schedule" if operation == "update" else operation
+        decision = self.security.authorize_prospective_memory(
+            policy_operation,
+            identity,  # type: ignore[arg-type]
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            owner_id=owner_id,
+            agent_id=agent_id,
+        )
+        if not decision.allowed:
+            raise PermissionError(f"{operation} intention denied: {decision.reason}")
+        return decision
 
     def search(
         self,
@@ -783,13 +1253,34 @@ class MemoryTools:
         )
         proposal_branch = branch or self._find_candidate_branch(id, tenant_id)
         report = self._engine_merge(proposal_branch, into, tenant_id=tenant_id)
+        confirmed_id = self._resolve_confirmed_id(id, report)
         return {
+            # Preserve the submitted id for backward compatibility, and ADD the
+            # explicit source/confirmed identity resolved from the merge's
+            # assertion_id_map (never a forced physical-id equality).
             "id": id,
+            "source_id": id,
+            "confirmed_id": confirmed_id,
             "branch": proposal_branch,
             "into": into,
             "merge": report.to_dict(),
             "security": decision,
         }
+
+    @staticmethod
+    def _resolve_confirmed_id(source_id: str, report: Any) -> str:
+        """Resolve the authoritative destination id for ``source_id``.
+
+        Fails closed when the merge produced no unique, non-blank string mapping
+        for the requested source rather than fabricating an identity id.
+        """
+        id_map = getattr(report, "assertion_id_map", None) or {}
+        confirmed_id = id_map.get(source_id)
+        if not isinstance(confirmed_id, str) or not confirmed_id:
+            raise KeyError(
+                f"confirm: no authoritative destination mapping for source assertion {source_id!r}"
+            )
+        return confirmed_id
 
     def supersede(
         self,
@@ -954,9 +1445,23 @@ class MemoryTools:
             return id
         if tenant_id:
             exported = self.engine.export_tenant(tenant_id)
-            for item in exported.get("assertions", []):
-                if item.get("id") == id and item.get("branch") != "main":
-                    return str(item["branch"])
+            candidates = sorted(
+                {
+                    str(item["branch"])
+                    for item in exported.get("assertions", [])
+                    if item.get("id") == id and item.get("branch") != "main"
+                }
+            )
+            if len(candidates) > 1:
+                # Fail closed: auto-discovery is ambiguous. Refuse to silently
+                # promote whichever branch happens to be enumerated first; the
+                # caller must pass an explicit branch to disambiguate.
+                raise KeyError(
+                    f"confirm: ambiguous candidate branches {candidates!r} for {id!r}; "
+                    "pass an explicit branch to disambiguate"
+                )
+            if candidates:
+                return candidates[0]
         if id.startswith("proposal-"):
             return id
         raise KeyError(f"proposal branch not found for {id}")

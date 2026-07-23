@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import random
 import string
@@ -10,6 +11,8 @@ from collections import Counter
 from typing import Any
 
 from eval.harness.metrics import wilson_interval
+from eval.public.adapters.pm_bench_triggerbench import recompute_metrics
+from eval.public.adapters.working_memory_action_probe import score as score_working_action
 
 BOOTSTRAP_ITERATIONS = 2_000
 BOOTSTRAP_SEED = 1_234
@@ -20,6 +23,10 @@ class ScoringError(ValueError):
 
 
 def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[str, Any]]) -> dict[str, Any]:
+    if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
+        return _score_pm_action(profile, labels, traces)
+    if profile == "working-memory-action-v1":
+        return _score_working_action(labels, traces)
     pairs = _bind(labels, traces)
     if profile == "longmemeval-retrieval-v1":
         _require_family(traces, "deterministic-retrieval")
@@ -67,6 +74,127 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
             },
         }
     raise ScoringError(f"unknown scoring profile: {profile}")
+
+
+def _score_pm_action(
+    profile: str,
+    labels: list[dict[str, Any]],
+    traces: list[dict[str, Any]],
+) -> dict[str, Any]:
+    pairs = _bind_action(labels, traces, ("case_id", "step_id"))
+    benchmark_name = "pm-bench" if profile == "pm-bench-action-v1" else "triggerbench"
+    operating_points = {
+        (
+            label.get("operating_point_id"),
+            _frozen_json(label.get("operating_point_config")),
+        )
+        for label, _ in pairs
+    }
+    if len(operating_points) != 1:
+        raise ScoringError("action labels must declare one exact operating point")
+    operating_point_id, frozen_config = operating_points.pop()
+    merged: list[dict[str, Any]] = []
+    for label, trace in pairs:
+        if trace.get("category") != label.get("category"):
+            raise ScoringError("action trace category does not match scoring custody")
+        if trace.get("operating_point_id") != label.get("operating_point_id"):
+            raise ScoringError("action trace operating point does not match scoring custody")
+        expected = label.get("expected_due_action_ids")
+        if not isinstance(expected, list) or any(
+            not isinstance(value, str) or not value for value in expected
+        ):
+            raise ScoringError("action gold must be a string list")
+        if "expected_due_action_ids" in trace and trace["expected_due_action_ids"] != expected:
+            raise ScoringError("trace action gold does not match scoring custody")
+        merged.append({**trace, "expected_due_action_ids": list(expected)})
+    measured = recompute_metrics(
+        merged,
+        {
+            "benchmark": benchmark_name,
+            "operating_point_id": operating_point_id,
+            "operating_point_config": json.loads(frozen_config),
+        },
+    )
+    successes = sum(
+        set(row["acted_action_ids"]) == set(row["expected_due_action_ids"])
+        for row in merged
+    )
+    measured.update(
+        family="deterministic-action",
+        profile=profile,
+        profile_version=1,
+        total=len(merged),
+        trace_count=len(merged),
+        interval=_wilson_projection(wilson_interval(successes, len(merged)).as_dict()),
+    )
+    return measured
+
+
+def _score_working_action(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    pairs = _bind_action(labels, traces, ("case_id",))
+    seeds = {label.get("seed") for label, _ in pairs}
+    if len(seeds) != 1 or isinstance(next(iter(seeds)), bool) or not isinstance(next(iter(seeds)), int):
+        raise ScoringError("working-action labels must declare one integer seed")
+    seed = seeds.pop()
+    measured = score_working_action(
+        [
+            {
+                "case_id": label["case_id"],
+                "expected_action_id": label.get("expected_action_id"),
+                "expected_abstain": label.get("expected_abstain"),
+            }
+            for label, _ in pairs
+        ],
+        [trace for _, trace in pairs],
+        seed=seed,
+    )
+    if any(trace.get("category") != label.get("category") for label, trace in pairs):
+        raise ScoringError("working-action category does not match scoring custody")
+    bootstrap = measured["bootstrap_macro_accuracy"]
+    measured.update(
+        family="deterministic-action",
+        profile="working-memory-action-v1",
+        profile_version=1,
+        total=len(pairs),
+        interval={
+            "confidence": 0.95,
+            "high": bootstrap["ci95"][1],
+            "low": bootstrap["ci95"][0],
+            "method": "bootstrap",
+            "iterations": bootstrap["samples"],
+            "seed": bootstrap["seed"],
+        },
+    )
+    return measured
+
+
+def _bind_action(
+    labels: list[dict[str, Any]],
+    traces: list[dict[str, Any]],
+    keys: tuple[str, ...],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    def index(rows: list[dict[str, Any]], kind: str) -> dict[tuple[str, ...], dict[str, Any]]:
+        result: dict[tuple[str, ...], dict[str, Any]] = {}
+        for row in rows:
+            identifier = tuple(row.get(key) for key in keys)
+            if any(not isinstance(value, str) or not value for value in identifier) or identifier in result:
+                raise ScoringError(f"duplicate or missing {kind} action ID")
+            result[identifier] = row
+        return result
+
+    _require_family(traces, "deterministic-action")
+    gold, observed = index(labels, "label"), index(traces, "trace")
+    if not gold or set(gold) != set(observed):
+        raise ScoringError("label and trace actions do not match")
+    return [(gold[key], observed[key]) for key in sorted(gold)]
+
+
+def _frozen_json(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        raise ScoringError("operating point config must be a non-empty object")
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def normalize_answer(value: str) -> str:

@@ -117,9 +117,20 @@ def test_merge_branch_into_main_shapes(tmp_path: Path) -> None:
     assert s_report.into_branch == "main"
     assert s_merged is True
 
-    # Cross-engine: the whole MergeReport dict matches the Local oracle.
-    assert s_report.to_dict() == oracle_report.to_dict()
+    # Cross-engine: the whole MergeReport dict matches the Local oracle, EXCEPT
+    # assertion_id_map, whose keys/values are per-run random assertion ids (each
+    # engine ran its own _merge_scenario). Both engines preserve the source id
+    # for a no-peer merge, so each map is a single identity entry.
+    s_dict = s_report.to_dict()
+    oracle_dict = oracle_report.to_dict()
+    s_map = s_dict.pop("assertion_id_map")
+    oracle_map = oracle_dict.pop("assertion_id_map")
+    assert s_dict == oracle_dict
     assert s_merged == oracle_merged
+    for id_map in (s_map, oracle_map):
+        assert len(id_map) == 1
+        [(source_id, dest_id)] = id_map.items()
+        assert dest_id == source_id
 
 
 def test_merge_report_field_order_is_positional() -> None:
@@ -133,6 +144,9 @@ def test_merge_report_field_order_is_positional() -> None:
     assert report.assertions_merged == 3
     assert report.relations_added == 4
     assert report.conflicts == []
+    # assertion_id_map is a TRAILING field: the seven historical positional args
+    # still construct a valid report and it defaults to an empty map.
+    assert report.assertion_id_map == {}
     assert list(report.to_dict()) == [
         "from_branch",
         "into_branch",
@@ -141,6 +155,7 @@ def test_merge_report_field_order_is_positional() -> None:
         "assertions_merged",
         "relations_added",
         "conflicts",
+        "assertion_id_map",
     ]
 
 
@@ -159,7 +174,20 @@ def test_merge_same_object_reinforces_as_merged(tmp_path: Path) -> None:
     oracle = scenario(local, TENANT)
     assert s.assertions_merged == 1
     assert s.assertions_added == 0
-    assert s.to_dict() == oracle.to_dict()
+    # Everything but assertion_id_map matches the Local oracle. The map itself is
+    # engine-specific: SqliteEngine mints a fresh id when branch() clones main's
+    # assertion (so the reinforced source id differs from its main destination),
+    # while Local preserves it (identity). Both are complete source->destination
+    # maps with exactly one entry pointing at the single reinforced main row.
+    s_dict = s.to_dict()
+    oracle_dict = oracle.to_dict()
+    s_map = s_dict.pop("assertion_id_map")
+    oracle_map = oracle_dict.pop("assertion_id_map")
+    assert s_dict == oracle_dict
+    for id_map in (s_map, oracle_map):
+        assert len(id_map) == 1
+        [dest_id] = id_map.values()
+        assert isinstance(dest_id, str) and dest_id
 
 
 # --- branch isolation --------------------------------------------------------
@@ -397,8 +425,26 @@ def test_star_tenant_merge_audit_export_no_divergence(tmp_path: Path) -> None:
 
     a_sqlite = sqlite_engine.export_tenant("tenant-A")
     a_local = local.export_tenant("tenant-A")
-    assert a_sqlite["merge_log"] == a_local["merge_log"]
     assert len(a_sqlite["merge_log"]) == 1
+    assert len(a_local["merge_log"]) == 1
+
+    def _without_map(entries: list[dict]) -> tuple[list[dict], list[dict]]:
+        stripped, maps = [], []
+        for entry in entries:
+            entry = dict(entry)
+            maps.append(entry.pop("assertion_id_map"))
+            stripped.append(entry)
+        return stripped, maps
+
+    sqlite_stripped, sqlite_maps = _without_map(a_sqlite["merge_log"])
+    local_stripped, local_maps = _without_map(a_local["merge_log"])
+    # Everything but the (per-run-random-id) assertion_id_map matches Local.
+    assert sqlite_stripped == local_stripped
+    # Each engine's map is a single source->source identity entry (no-peer merge).
+    for id_map in (*sqlite_maps, *local_maps):
+        assert len(id_map) == 1
+        [(source_id, dest_id)] = id_map.items()
+        assert dest_id == source_id
 
     # The merge audit is recorded under the REAL tenant, not "*".
     merge_audits = [row for row in a_sqlite["audit_log"] if row.get("op") == "merge"]
@@ -406,3 +452,20 @@ def test_star_tenant_merge_audit_export_no_divergence(tmp_path: Path) -> None:
 
     assert sqlite_engine.export_tenant("tenant-B")["merge_log"] == []
     assert local.export_tenant("tenant-B")["merge_log"] == []
+
+
+def test_merge_assertion_id_map_persists_across_sqlite_reopen(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    engine = SqliteEngine(root)
+    report, merged = _merge_scenario(engine, TENANT)
+    assert merged is True
+    assert report.assertion_id_map
+    [(source_id, dest_id)] = report.assertion_id_map.items()
+    assert dest_id == source_id  # SQLite preserves the source id for a no-peer merge.
+
+    # Reconnect a fresh engine at the same root: the persisted merge audit must
+    # reconstruct the complete assertion_id_map.
+    reopened = SqliteEngine(root)
+    merge_log = reopened.export_tenant(TENANT)["merge_log"]
+    assert len(merge_log) == 1
+    assert merge_log[0]["assertion_id_map"] == report.assertion_id_map
