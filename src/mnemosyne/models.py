@@ -186,7 +186,7 @@ class Preference:
 @dataclass(slots=True)
 class Hit:
     id: str
-    kind: Literal["evidence", "assertion", "relation", "preference"]
+    kind: Literal["evidence", "assertion", "relation", "preference", "intention", "working"]
     tenant_id: str
     branch: str
     text: str
@@ -234,6 +234,14 @@ class MergeReport:
     assertions_merged: int
     relations_added: int
     conflicts: list[dict[str, Any]]
+    # Trailing, backward-compatible source -> actual-destination assertion id
+    # map. One complete entry per source assertion promoted by the merge,
+    # INCLUDING identity mappings (Local/SQLite frequently preserve the source
+    # id) and the deterministic clone ids PostgreSQL mints (source != dest).
+    # Destination values need not be globally unique: several sources may
+    # absorb into one existing peer. Built positionally-last so every existing
+    # ``MergeReport(frm, into, ...)`` call site keeps working unchanged.
+    assertion_id_map: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

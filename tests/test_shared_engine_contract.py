@@ -13,7 +13,13 @@ import pytest
 
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, tune_calibration_set
 from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, ConsolidationWorker
-from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.engine import (
+    Intention,
+    LocalMemoryEngine,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+    WorkingMemoryItem,
+)
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ids import evidence_unscoped_cid
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -225,7 +231,7 @@ def engine_bundle(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, 
     tenant = f"tenant-shared-{request.param}-{uuid4()}"
     user = f"user-shared-{request.param}"
     if request.param == "local":
-        return LocalMemoryEngine(), tenant, user
+        return LocalMemoryEngine(store_path=tmp_path / "local-store.json"), tenant, user
     if request.param == "sqlite":
         # Per-tenant SQLite files under a tmp root — no external service, so the
         # contract suite RUNS this third param by default (no DSN skip).
@@ -255,6 +261,820 @@ def engine_capabilities(engine: Any) -> frozenset[str]:
     return frozenset({"in_memory"})
 
 
+_PROSPECTIVE_EVALUATED_AT = datetime(2026, 7, 16, 12, 0, tzinfo=UTC)
+_PROSPECTIVE_OPERATING_POINT = ProspectiveOperatingPoint(
+    operating_point_id="shared-contract-op-v1",
+    threshold=0.8,
+    measured_precision=0.95,
+    measured_recall=0.9,
+    measurement_cid="cidv1:shared-contract-measurement",
+)
+
+
+def _prospective_context(
+    tenant_id: str, trigger_type: str, *, positive: bool
+) -> TriggerEvaluationContext:
+    if trigger_type == "event":
+        return TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=tenant_id,
+            events=[
+                {
+                    "event_id": "shared-event-1",
+                    "event_type": "report.submitted",
+                    "occurred_at": (
+                        _PROSPECTIVE_EVALUATED_AT - timedelta(minutes=1)
+                    ).isoformat(),
+                    "payload": {
+                        "report_id": "report-1" if positive else "other-report"
+                    },
+                    "confidence": 0.95 if positive else 0.1,
+                    "tenant_id": tenant_id,
+                }
+            ],
+            conditions={},
+        )
+    if trigger_type == "condition":
+        return TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=tenant_id,
+            events=[],
+            conditions={
+                "report-ready": {
+                    "value": 35 if positive else 20,
+                    "observed_at": (
+                        _PROSPECTIVE_EVALUATED_AT - timedelta(minutes=1)
+                    ).isoformat(),
+                    "confidence": 0.95 if positive else 0.1,
+                    "tenant_id": tenant_id,
+                }
+            },
+        )
+    return TriggerEvaluationContext(
+        infrastructure_available=True,
+        tenant_id=tenant_id,
+        events=[],
+        conditions={},
+    )
+
+
+def _prospective_evidence(engine: Any, tenant: str, user: str, agent: str) -> str:
+    return engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            actor="assistant",
+            source_type="episode",
+            source_identity="conversation:shared-prospective-memory-contract",
+            content="Remind me to submit the report.",
+            trust_tier=2,
+            capability_tags=["prospective-memory"],
+            access_policy={"tenant": tenant},
+        )
+    )
+
+
+def _prospective_intention(
+    *,
+    intention_id: str,
+    tenant: str,
+    user: str,
+    agent: str,
+    evidence_id: str,
+    trigger_type: str,
+    trigger_expression: dict[str, Any],
+    due_at: datetime,
+    dependencies: list[str] | None = None,
+    session_id: str | None = None,
+    recurrence_policy: dict[str, Any] | None = None,
+) -> Intention:
+    return Intention(
+        intention_id=intention_id,
+        tenant_id=tenant,
+        user_id=user,
+        agent_id=agent,
+        trigger_type=trigger_type,
+        trigger_expression=trigger_expression,
+        action={"type": "remind", "message": "Submit the report."},
+        due_at=due_at,
+        dependencies=list(dependencies or []),
+        evidence_ids=[evidence_id],
+        session_id=session_id,
+        recurrence_policy=recurrence_policy or {"type": "none"},
+    )
+
+
+def _prospective_audit_log(engine: Any, tenant: str) -> list[dict[str, Any]]:
+    return engine.export_tenant(tenant)["audit_log"]
+
+
+def test_shared_prospective_update_replay_and_recurrence(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-recurrence"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    intention = _prospective_intention(
+        intention_id="shared-recurrence", tenant=tenant, user=user, agent=agent,
+        evidence_id=evidence_id, trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()}, due_at=due,
+        session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 2},
+    )
+    engine.schedule_intention(intention)
+    updated = engine.update_intention(
+        tenant, intention.intention_id, user_id=user, agent_id=agent,
+        session_id="session-a", action={"type": "remind", "message": "Updated."},
+    )
+    audit_count = len(_prospective_audit_log(engine, tenant))
+    replay = engine.update_intention(
+        tenant, intention.intention_id, user_id=user, agent_id=agent,
+        session_id="session-a", action={"type": "remind", "message": "Updated."},
+    )
+    assert replay == updated
+    assert len(_prospective_audit_log(engine, tenant)) == audit_count
+    for index in range(2):
+        evaluated = due + timedelta(minutes=index)
+        assert len(engine.evaluate_due_intentions(
+            tenant, evaluated_at=evaluated,
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )) == 1
+        assert engine.evaluate_due_intentions(
+            tenant, evaluated_at=evaluated,
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        ) == []
+    assert engine.list_intentions(tenant)[0].status == "fired"
+
+
+def test_shared_update_rejects_foreign_owner_missing_and_cross_tenant(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-update-guard"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT + timedelta(hours=1)
+    intention = _prospective_intention(
+        intention_id="shared-update-guard", tenant=tenant, user=user, agent=agent,
+        evidence_id=evidence_id, trigger_type="exact_time",
+        trigger_expression={"at": due.isoformat()}, due_at=due,
+        session_id="session-a",
+    )
+    engine.schedule_intention(intention)
+    before = engine.list_intentions(tenant)[0]
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            tenant, intention.intention_id, user_id=f"{user}-other", agent_id=agent,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            tenant, intention.intention_id, user_id=user, agent_id=f"{agent}-other",
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            tenant, "missing-intention", user_id=user, agent_id=agent,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            f"{tenant}-other", intention.intention_id, user_id=user, agent_id=agent,
+            session_id="session-a", action={"type": "noop"},
+        )
+    assert engine.list_intentions(tenant)[0] == before
+
+
+@pytest.mark.parametrize("trigger_type", ["event", "condition"])
+def test_shared_recurring_signal_is_consumed_once(
+    engine_bundle: tuple[Any, str, str], trigger_type: str
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = f"agent-shared-consumed-{trigger_type}"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    expression = (
+        {"event_type": "report.submitted", "match": {"report_id": "report-1"}}
+        if trigger_type == "event"
+        else {"condition_id": "report-ready", "operator": "gt", "value": 30}
+    )
+    engine.schedule_intention(
+        _prospective_intention(
+            intention_id=f"shared-consumed-{trigger_type}",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type=trigger_type,
+            trigger_expression=expression,
+            due_at=due,
+            recurrence_policy={
+                "type": "interval",
+                "interval_seconds": 60,
+                "max_occurrences": 3,
+            },
+        )
+    )
+
+    late_signal_at = due + timedelta(minutes=10)
+
+    def context(observed_at: datetime) -> TriggerEvaluationContext:
+        if trigger_type == "event":
+            return TriggerEvaluationContext(
+                infrastructure_available=True,
+                tenant_id=tenant,
+                events=[
+                    {
+                        "event_id": f"event-{observed_at.isoformat()}",
+                        "event_type": "report.submitted",
+                        "occurred_at": observed_at.isoformat(),
+                        "payload": {"report_id": "report-1"},
+                        "confidence": 0.95,
+                        "tenant_id": tenant,
+                    }
+                ],
+                conditions={},
+            )
+        return TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=tenant,
+            events=[],
+            conditions={
+                "report-ready": {
+                    "value": 35,
+                    "observed_at": observed_at.isoformat(),
+                    "confidence": 0.95,
+                    "tenant_id": tenant,
+                }
+            },
+        )
+
+    first_context = context(late_signal_at)
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=late_signal_at,
+            trigger_context=first_context,
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=late_signal_at + timedelta(minutes=1),
+        trigger_context=first_context,
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    ) == []
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=late_signal_at + timedelta(minutes=2),
+            trigger_context=context(late_signal_at + timedelta(minutes=2)),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+
+
+def test_shared_recurring_events_never_cycle_consumed_signals(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-consumed-history"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    engine.schedule_intention(
+        _prospective_intention(
+            intention_id="shared-consumed-history",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type="event",
+            trigger_expression={
+                "event_type": "report.submitted",
+                "match": {"report_id": "report-1"},
+            },
+            due_at=due,
+            recurrence_policy={
+                "type": "interval",
+                "interval_seconds": 60,
+                "max_occurrences": 3,
+            },
+        )
+    )
+    events = [
+        {
+            "event_id": f"event-{index}",
+            "event_type": "report.submitted",
+            "occurred_at": (due + timedelta(minutes=index)).isoformat(),
+            "payload": {"report_id": "report-1"},
+            "confidence": 0.95,
+            "tenant_id": tenant,
+        }
+        for index in range(2)
+    ]
+    context = TriggerEvaluationContext(
+        infrastructure_available=True,
+        tenant_id=tenant,
+        events=events,
+        conditions={},
+    )
+
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=due + timedelta(minutes=1),
+            trigger_context=context,
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=due + timedelta(minutes=2),
+            trigger_context=context,
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    state = engine.list_intentions(tenant)[0].recurrence_state
+    assert "consumed_signals" not in state
+    assert state["consumed_signal"] == {
+        "event_id": "event-1",
+        "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+    }
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=due + timedelta(minutes=3),
+        trigger_context=context,
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    ) == []
+
+
+def test_shared_recurring_conditions_never_cycle_consumed_signals(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-consumed-condition-history"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due = _PROSPECTIVE_EVALUATED_AT
+    engine.schedule_intention(
+        _prospective_intention(
+            intention_id="shared-consumed-condition-history",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type="condition",
+            trigger_expression={
+                "condition_id": "report-ready",
+                "operator": "gt",
+                "value": 30,
+            },
+            due_at=due,
+            recurrence_policy={
+                "type": "interval",
+                "interval_seconds": 60,
+                "max_occurrences": 3,
+            },
+        )
+    )
+
+    def context(observed_at: datetime) -> TriggerEvaluationContext:
+        return TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=tenant,
+            events=[],
+            conditions={
+                "report-ready": {
+                    "value": 35,
+                    "observed_at": observed_at.isoformat(),
+                    "confidence": 0.95,
+                    "tenant_id": tenant,
+                }
+            },
+        )
+
+    first = due + timedelta(minutes=1)
+    second = due + timedelta(minutes=2)
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=first,
+            trigger_context=context(first),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    assert len(
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=second,
+            trigger_context=context(second),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+    ) == 1
+    state = engine.list_intentions(tenant)[0].recurrence_state
+    assert "consumed_signals" not in state
+    assert state["consumed_signal"] == {
+        "condition_id": "report-ready",
+        "observed_at": second.isoformat(),
+    }
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=due + timedelta(minutes=3),
+        trigger_context=context(first),
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "trigger_type",
+    ["exact_time", "time_window", "event", "condition", "dependency_completion"],
+)
+def test_shared_prospective_trigger_matrix(
+    engine_bundle: tuple[Any, str, str], trigger_type: str
+) -> None:
+    """All engines share fire/no-fire, receipt, audit, and operating-point semantics."""
+
+    engine, tenant, user = engine_bundle
+    agent = f"agent-shared-{trigger_type}"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    due_at = _PROSPECTIVE_EVALUATED_AT - timedelta(minutes=5)
+
+    if trigger_type == "exact_time":
+        expression = {"at": due_at.isoformat()}
+    elif trigger_type == "time_window":
+        expression = {
+            "start": due_at.isoformat(),
+            "end": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=1)).isoformat(),
+        }
+    elif trigger_type == "event":
+        expression = {
+            "event_type": "report.submitted",
+            "match": {"report_id": "report-1"},
+        }
+    elif trigger_type == "condition":
+        expression = {
+            "condition_id": "report-ready",
+            "operator": "gt",
+            "value": 30,
+        }
+    elif trigger_type == "dependency_completion":
+        prerequisite = _prospective_intention(
+            intention_id="shared-prerequisite",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type="exact_time",
+            trigger_expression={"at": due_at.isoformat()},
+            due_at=due_at,
+        )
+        dependent = _prospective_intention(
+            intention_id="shared-dependent",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            due_at=due_at + timedelta(minutes=1),
+            dependencies=[prerequisite.intention_id],
+        )
+        engine.schedule_intention(prerequisite)
+        engine.schedule_intention(dependent)
+        first = engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+        second = engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+        replay = engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+        assert [item.intention_id for item in first] == [prerequisite.intention_id]
+        assert [item.intention_id for item in second] == [dependent.intention_id]
+        assert replay == []
+        expected_fired_ids = {prerequisite.intention_id, dependent.intention_id}
+    if trigger_type != "dependency_completion":
+        intention = _prospective_intention(
+            intention_id=f"shared-{trigger_type}",
+            tenant=tenant,
+            user=user,
+            agent=agent,
+            evidence_id=evidence_id,
+            trigger_type=trigger_type,
+            trigger_expression=expression,
+            due_at=due_at,
+        )
+        engine.schedule_intention(intention)
+        no_fire_at = (
+            due_at - timedelta(minutes=1)
+            if trigger_type in {"exact_time", "time_window"}
+            else _PROSPECTIVE_EVALUATED_AT
+        )
+        assert (
+            engine.evaluate_due_intentions(
+                tenant,
+                evaluated_at=no_fire_at,
+                trigger_context=_prospective_context(tenant, trigger_type, positive=False),
+                operating_point=_PROSPECTIVE_OPERATING_POINT,
+            )
+            == []
+        )
+        fired = engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+        replay = engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+            trigger_context=_prospective_context(tenant, trigger_type, positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+        assert [item.intention_id for item in fired] == [intention.intention_id]
+        assert replay == []
+        expected_fired_ids = {intention.intention_id}
+
+    stored = engine.list_intentions(tenant)
+    assert {item.intention_id for item in stored if item.status == "fired"} == expected_fired_ids
+    fire_audits = [
+        row
+        for row in _prospective_audit_log(engine, tenant)
+        if row["op"] == "fire_intention"
+    ]
+    observed_targets = {
+        row["target_id"] or row["diff"].get("target_id") for row in fire_audits
+    }
+    assert observed_targets >= expected_fired_ids
+    assert len(fire_audits) == len(expected_fired_ids)
+    # Explicit contract exemption: live-DB audit exports carry the internal
+    # tenant UUID rather than the runtime tenant id. Normalizing
+    # PostgresEngine.export_tenant is pre-existing behavior owned outside the
+    # prospective lease; this branch documents the divergence instead of
+    # silently certifying it as parity.
+    expected_audit_tenant = (
+        str(_stable_uuid("tenant", tenant))
+        if "live_db" in engine_capabilities(engine)
+        else tenant
+    )
+    for row in fire_audits:
+        assert row["tenant_id"] == expected_audit_tenant
+        assert row["source"] == "prospective_memory"
+        assert row["trust_tier"] == 2
+        assert row["capability_tags"] == ["prospective-memory"]
+        assert row["diff"]["operating_point"] == _PROSPECTIVE_OPERATING_POINT.to_dict()
+        assert row["diff"]["evidence_ids"] == [evidence_id]
+
+
+@pytest.mark.parametrize(
+    ("trigger_type", "trigger_expression"),
+    [
+        ("exact_time", {"at": _PROSPECTIVE_EVALUATED_AT.isoformat()}),
+        (
+            "time_window",
+            {
+                "start": _PROSPECTIVE_EVALUATED_AT.isoformat(),
+                "end": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=1)).isoformat(),
+            },
+        ),
+        ("event", {"event_type": "report.submitted", "match": {"report_id": "report-1"}}),
+        ("condition", {"condition_id": "report-ready", "operator": "gt", "value": 30}),
+    ],
+)
+def test_shared_non_dependency_triggers_reject_dependencies(
+    trigger_type: str, trigger_expression: dict[str, Any]
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match="dependencies are only valid for dependency_completion triggers",
+    ):
+        Intention(
+            intention_id=f"invalid-dependencies-{trigger_type}",
+            tenant_id="tenant-shared",
+            user_id="user-shared",
+            agent_id="agent-shared",
+            trigger_type=trigger_type,
+            trigger_expression=trigger_expression,
+            action={"type": "remind"},
+            due_at=_PROSPECTIVE_EVALUATED_AT,
+            dependencies=["unexpected-dependency"],
+            evidence_ids=["evidence-shared"],
+        )
+
+
+def test_shared_firing_receipt_survives_erasure_and_rejects_reuse(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    evidence_id = _prospective_evidence(engine, tenant, user, "agent-receipt")
+    due_at = _PROSPECTIVE_EVALUATED_AT - timedelta(minutes=5)
+    intention = _prospective_intention(
+        intention_id="shared-receipt-reuse",
+        tenant=tenant,
+        user=user,
+        agent="agent-receipt",
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={"at": due_at.isoformat()},
+        due_at=due_at,
+    )
+    engine.schedule_intention(intention)
+    assert engine.evaluate_due_intentions(
+        tenant,
+        evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+        trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+        operating_point=_PROSPECTIVE_OPERATING_POINT,
+    )
+    engine.forget(
+        tenant,
+        evidence_id,
+        requested_by=user,
+        erasure_mode=ErasureMode.TOMBSTONE_RECOMPUTE,
+    )
+
+    replacement_evidence = _prospective_evidence(
+        engine, tenant, user, "agent-receipt-replacement"
+    )
+    replacement = _prospective_intention(
+        intention_id=intention.intention_id,
+        tenant=tenant,
+        user=user,
+        agent="agent-receipt",
+        evidence_id=replacement_evidence,
+        trigger_type="exact_time",
+        trigger_expression={"at": due_at.isoformat()},
+        due_at=due_at,
+    )
+    with pytest.raises(ValueError, match="already has a durable firing receipt"):
+        engine.schedule_intention(replacement)
+
+
+@pytest.mark.parametrize("case", ["missing", "foreign_tenant", "wrong_user"])
+def test_shared_prospective_provenance_rejects_without_mutation(
+    engine_bundle: tuple[Any, str, str], case: str
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-provenance"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    if case == "missing":
+        evidence_id = "missing-shared-provenance"
+    elif case == "foreign_tenant":
+        evidence_id = _prospective_evidence(
+            engine, f"{tenant}-foreign", user, agent
+        )
+    intention = _prospective_intention(
+        intention_id=f"shared-provenance-{case}",
+        tenant=tenant,
+        user=user if case != "wrong_user" else f"{user}-other",
+        agent=agent,
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={
+            "at": (_PROSPECTIVE_EVALUATED_AT - timedelta(minutes=1)).isoformat()
+        },
+        due_at=_PROSPECTIVE_EVALUATED_AT - timedelta(minutes=1),
+    )
+    audit_count = len(_prospective_audit_log(engine, tenant))
+
+    with pytest.raises(ValueError):
+        engine.schedule_intention(intention)
+
+    assert engine.list_intentions(tenant) == []
+    assert len(_prospective_audit_log(engine, tenant)) == audit_count
+
+
+def test_shared_prospective_cancellation_is_tenant_scoped_and_idempotent(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-cancellation"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    intention = _prospective_intention(
+        intention_id="shared-cancelled",
+        tenant=tenant,
+        user=user,
+        agent=agent,
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={
+            "at": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=5)).isoformat()
+        },
+        due_at=_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=5),
+        session_id="session-a",
+    )
+    engine.schedule_intention(intention)
+
+    assert engine.list_intentions(f"{tenant}-other") == []
+    with pytest.raises(KeyError):
+        engine.cancel_intention(f"{tenant}-other", intention.intention_id, cancelled_by=user, session_id="session-a")
+    with pytest.raises(PermissionError):
+        engine.cancel_intention(tenant, intention.intention_id, cancelled_by=f"{user}-other", session_id="session-a")
+    with pytest.raises(ValueError, match="session_id"):
+        engine.cancel_intention(
+            tenant, intention.intention_id, cancelled_by=user, session_id=""
+        )
+    with pytest.raises(PermissionError, match="session"):
+        engine.cancel_intention(
+            tenant, intention.intention_id, cancelled_by=user, session_id="session-b"
+        )
+
+    engine.cancel_intention(tenant, intention.intention_id, cancelled_by=user, session_id="session-a")
+    engine.cancel_intention(tenant, intention.intention_id, cancelled_by=user, session_id="session-a")
+    with pytest.raises(PermissionError, match="session"):
+        engine.cancel_intention(
+            tenant, intention.intention_id, cancelled_by=user, session_id="session-b"
+        )
+    assert engine.list_intentions(tenant)[0].status == "cancelled"
+
+    legacy = _prospective_intention(
+        intention_id="shared-cancelled-legacy",
+        tenant=tenant,
+        user=user,
+        agent=agent,
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={
+            "at": (_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=6)).isoformat()
+        },
+        due_at=_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=6),
+    )
+    engine.schedule_intention(legacy)
+    engine.cancel_intention(
+        tenant, legacy.intention_id, cancelled_by=user, session_id="session-a"
+    )
+    stored_legacy = next(
+        item for item in engine.list_intentions(tenant)
+        if item.intention_id == legacy.intention_id
+    )
+    assert stored_legacy.status == "cancelled"
+    assert stored_legacy.session_id == "session-a"
+    assert (
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT + timedelta(minutes=10),
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+            operating_point=_PROSPECTIVE_OPERATING_POINT,
+        )
+        == []
+    )
+    cancellation_audits = [
+        row
+        for row in _prospective_audit_log(engine, tenant)
+        if row["op"] == "cancel_intention"
+    ]
+    assert len(cancellation_audits) == 2
+    assert {row["target_id"] for row in cancellation_audits} == {
+        intention.intention_id,
+        legacy.intention_id,
+    }
+    assert all(row["actor"] == user for row in cancellation_audits)
+    assert all(row["diff"]["status"] == "cancelled" for row in cancellation_audits)
+    assert all(row["diff"]["evidence_ids"] == [evidence_id] for row in cancellation_audits)
+
+
+def test_shared_prospective_evaluation_requires_explicit_operating_point(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    agent = "agent-shared-operating-point"
+    evidence_id = _prospective_evidence(engine, tenant, user, agent)
+    intention = _prospective_intention(
+        intention_id="shared-operating-point",
+        tenant=tenant,
+        user=user,
+        agent=agent,
+        evidence_id=evidence_id,
+        trigger_type="exact_time",
+        trigger_expression={"at": _PROSPECTIVE_EVALUATED_AT.isoformat()},
+        due_at=_PROSPECTIVE_EVALUATED_AT,
+    )
+    engine.schedule_intention(intention)
+    audit_count = len(_prospective_audit_log(engine, tenant))
+
+    with pytest.raises(ValueError, match="operating_point"):
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=_PROSPECTIVE_EVALUATED_AT,
+            trigger_context=_prospective_context(tenant, "exact_time", positive=True),
+            operating_point=None,
+        )
+
+    assert engine.list_intentions(tenant)[0].status == "scheduled"
+    assert len(_prospective_audit_log(engine, tenant)) == audit_count
+
+
 def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tuple[Any, str, str]) -> None:
     engine, tenant, user = engine_bundle
     cid = engine.append_evidence(
@@ -279,6 +1099,169 @@ def test_shared_engine_contract_retrieves_and_exports_evidence(engine_bundle: tu
     assert any(item["cid"] == cid for item in exported["evidence"])
 
 
+def test_shared_engine_contract_working_memory_is_scoped_detached_and_non_durable(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    expires_at = created_at + timedelta(minutes=10)
+    source_cid = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id=user,
+            session_id="shared-session",
+            actor="user",
+            source_type="shared-contract",
+            content="Working-memory provenance source.",
+            access_policy={"tenant": tenant},
+        )
+    )
+    item = WorkingMemoryItem(
+        item_id="shared-working-item",
+        tenant_id=tenant,
+        session_id="shared-session",
+        user_id=user,
+        agent_id=user,
+        kind="current_plan",
+        task_id="shared-task",
+        content="Transient shared plan content.",
+        created_at=created_at,
+        expires_at=expires_at,
+        evidence_ids=[source_cid],
+        access_policy={"tenant": tenant},
+    )
+
+    assert engine.put_working(item) == item.item_id
+    assert engine.get_working(tenant, "other-session", item.item_id, as_of=created_at) is None
+    assert engine.list_working("other-tenant", "shared-session", as_of=created_at) == []
+    detached = engine.get_working(tenant, "shared-session", item.item_id, as_of=created_at)
+    assert detached is not None
+    detached.metadata["caller_mutation"] = True
+    reread = engine.get_working(tenant, "shared-session", item.item_id, as_of=created_at)
+    assert reread is not None
+    assert "caller_mutation" not in reread.metadata
+    assert engine.get_working(tenant, "shared-session", item.item_id, as_of=expires_at) is None
+
+    exported = engine.export_tenant(tenant)
+    assert all(row.get("content") != item.content for row in exported["evidence"])
+    assert any(
+        row["op"] == "put_working" and row["target_id"] == item.item_id
+        for row in exported["audit_log"]
+    )
+
+    expired = engine.expire_working(tenant, expired_at=expires_at, session_id="shared-session")
+    assert [row.item_id for row in expired] == [item.item_id]
+    assert expired[0].status == "expired"
+    assert engine.list_working(tenant, "shared-session", as_of=expires_at) == []
+
+
+@pytest.mark.parametrize("selector", ["user_id", "agent_id", "task_id", "branch"])
+def test_shared_engine_contract_working_expiry_is_subject_scoped(
+    engine_bundle: tuple[Any, str, str],
+    selector: str,
+) -> None:
+    engine, tenant, user = engine_bundle
+    created_at = datetime(2026, 7, 18, 12, 0, tzinfo=UTC)
+    expires_at = created_at + timedelta(minutes=10)
+
+    def add_item(item_id: str, scoped_user: str, agent: str, task: str, branch: str) -> None:
+        source_cid = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id=scoped_user,
+                session_id="shared-subject-session",
+                actor="user",
+                source_type="shared-contract",
+                content=f"Provenance for {item_id}.",
+                access_policy={"tenant": tenant},
+            )
+        )
+        engine.put_working(
+            WorkingMemoryItem(
+                item_id=item_id,
+                tenant_id=tenant,
+                session_id="shared-subject-session",
+                user_id=scoped_user,
+                agent_id=agent,
+                kind="current_plan",
+                task_id=task,
+                content=f"Transient plan for {item_id}.",
+                created_at=created_at,
+                expires_at=expires_at,
+                evidence_ids=[source_cid],
+                access_policy={"tenant": tenant},
+                metadata={"branch": branch},
+            )
+        )
+
+    scope_a = {"user_id": user, "agent_id": "agent-a", "task_id": "task-a", "branch": "main"}
+    scope_b = {**scope_a, selector: f"{selector}-other"}
+    add_item("scope-a", scope_a["user_id"], scope_a["agent_id"], scope_a["task_id"], scope_a["branch"])
+    add_item("scope-b", scope_b["user_id"], scope_b["agent_id"], scope_b["task_id"], scope_b["branch"])
+
+    expired = engine.expire_working(
+        tenant,
+        session_id="shared-subject-session",
+        user_id=scope_a["user_id"],
+        agent_id=scope_a["agent_id"],
+        task_id=scope_a["task_id"],
+        branch=scope_a["branch"],
+        expired_at=expires_at,
+    )
+
+    assert [item.item_id for item in expired] == ["scope-a"]
+    assert engine.expire_working(
+        tenant,
+        session_id="shared-subject-session",
+        user_id=scope_a["user_id"],
+        agent_id=scope_a["agent_id"],
+        task_id=scope_a["task_id"],
+        branch=scope_a["branch"],
+        expired_at=expires_at,
+    ) == []
+    remaining = engine.get_working(
+        tenant, "shared-subject-session", "scope-b", as_of=created_at
+    )
+    assert remaining is not None
+    assert remaining.status == "active"
+
+
+def test_shared_engine_contract_working_hit_cannot_collide_with_or_mark_durable_evidence(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    cid = _append_evidence(engine, tenant, user, "Durable collision sentinel.")
+    durable = Hit(
+        id=cid,
+        kind="evidence",
+        tenant_id=tenant,
+        branch="main",
+        text="Durable collision sentinel.",
+        score=1.0,
+        channel="lexical",
+    )
+    working = Hit(
+        id=cid,
+        kind="working",
+        tenant_id=tenant,
+        branch="main",
+        text="Transient collision sentinel.",
+        score=1.0,
+        channel="working_memory",
+        provenance=[cid],
+        metadata={"memory_type": "working"},
+    )
+
+    fused = engine._rrf([[durable], [working]], k=10)
+    assert {(hit.kind, hit.id) for hit in fused} == {("evidence", cid), ("working", cid)}
+    before = engine.get_evidence(tenant, cid)
+    assert before is not None
+    assert engine._record_retrieval_access([working]) == {"assertions": 0, "evidence": 0}
+    after = engine.get_evidence(tenant, cid)
+    assert after is not None
+    assert after.metadata == before.metadata
+
+
 def test_shared_engine_read_without_access_telemetry_is_store_immutable_cached_and_uncached(
     engine_bundle: tuple[Any, str, str],
     monkeypatch: pytest.MonkeyPatch,
@@ -297,9 +1280,6 @@ def test_shared_engine_read_without_access_telemetry_is_store_immutable_cached_a
             access_policy={"tenant": tenant},
         )
     )
-    if isinstance(engine, LocalMemoryEngine):
-        engine.store_path = tmp_path / "local-store.json"
-        engine._persist()
     monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
     with pipeline._RESULT_CACHE_LOCK:
         pipeline._RESULT_CACHE.clear()
@@ -2565,13 +3545,20 @@ def test_shared_engine_contract_memory_tools_propose_confirm_facades(
         tenant_id=tenant,
     )
     exported = engine.export_tenant(tenant)
+    # No physical-id equality is forced, and the lookup is NOT weakened to
+    # subject/predicate/object matching: the authoritative destination id comes
+    # from the merge's assertion_id_map, surfaced by confirm as confirmed_id.
+    id_map = confirmed["merge"]["assertion_id_map"]
+    assert id_map[proposal["id"]] == confirmed["confirmed_id"]
     main_assertion = next(
         item
         for item in exported["assertions"]
-        if item["id"] == proposal["id"] and item["branch"] == "main"
+        if item["id"] == confirmed["confirmed_id"] and item["branch"] == "main"
     )
 
     assert confirmed["id"] == proposal["id"]
+    assert confirmed["source_id"] == proposal["id"]
+    assert isinstance(confirmed["confirmed_id"], str) and confirmed["confirmed_id"]
     assert confirmed["branch"] == proposal["branch"]
     assert confirmed["into"] == "main"
     assert confirmed["security"]["allowed"] is True
@@ -3785,6 +4772,166 @@ def test_shared_engine_contract_repeated_merge_converges_and_resolves_supersessi
             assert item["superseded_by"] in first_ids
 
 
+def _idmap_assertion(tenant: str, user: str, subject: str, obj: str, cid: str, **kw: Any) -> Assertion:
+    return Assertion(
+        tenant_id=tenant,
+        user_id=user,
+        subject=subject,
+        predicate="idmaps",
+        object=obj,
+        confidence=kw.pop("confidence", 0.8),
+        source_evidence_cids=[cid],
+        status="active",
+        trust_tier=0,
+        access_policy={"tenant": tenant},
+        **kw,
+    )
+
+
+def _main_idmap_rows(engine: Any, tenant: str, subject: str) -> dict[str, dict[str, Any]]:
+    return {
+        item["id"]: item
+        for item in engine.export_tenant(tenant)["assertions"]
+        if item["branch"] == "main" and item["subject"] == subject
+    }
+
+
+def test_shared_engine_contract_merge_assertion_id_map_records_destination(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-nopeer-{uuid4()}"
+    subject = f"idmap nopeer subject {uuid4()}"
+    _branch(engine, branch, tenant)
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "destination", "a" * 64), branch=branch
+    )
+
+    report = _merge(engine, branch, tenant)
+    id_map = report.assertion_id_map
+
+    # Complete: exactly one source assertion → exactly one non-blank string entry.
+    assert set(id_map) == {source_id}
+    dest_id = id_map[source_id]
+    assert isinstance(dest_id, str) and dest_id
+    # The mapped destination id is the assertion actually stored on main.
+    main_rows = _main_idmap_rows(engine, tenant, subject)
+    assert set(main_rows) == {dest_id}
+    # PostgreSQL derives a deterministic destination clone id (source != dest);
+    # Local/SQLite preserve the source id (identity mapping). Both keep a
+    # complete, correct entry — the map never omits identity mappings.
+    if "live_db" in engine_capabilities(engine):
+        assert dest_id != source_id
+    else:
+        assert dest_id == source_id
+
+
+def test_shared_engine_contract_merge_assertion_id_map_absorbs_into_existing_peer(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    subject = f"idmap absorb subject {uuid4()}"
+    branch = f"shared-idmap-absorb-{uuid4()}"
+    # Branch off EMPTY main so the branch does not inherit the peer; the peer is
+    # created on main afterward and the branch assertion gets a distinct id.
+    _branch(engine, branch, tenant)
+    main_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "shared object", "b" * 64, confidence=0.7)
+    )
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "shared object", "c" * 64, confidence=0.95),
+        branch=branch,
+    )
+    assert source_id != main_id
+
+    report = _merge(engine, branch, tenant)
+    id_map = report.assertion_id_map
+
+    # Semantic absorption maps the source to the ACTUAL existing peer, not the
+    # source id and not a fresh clone id.
+    assert id_map[source_id] == main_id
+    assert report.assertions_merged >= 1
+    main_rows = _main_idmap_rows(engine, tenant, subject)
+    assert set(main_rows) == {main_id}
+
+
+def test_shared_engine_contract_merge_assertion_id_map_replay_stable(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-replay-{uuid4()}"
+    subject = f"idmap replay subject {uuid4()}"
+    _branch(engine, branch, tenant)
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "stable", "d" * 64), branch=branch
+    )
+
+    first = _merge(engine, branch, tenant)
+    first_rows = _main_idmap_rows(engine, tenant, subject)
+    second = _merge(engine, branch, tenant)
+    second_rows = _main_idmap_rows(engine, tenant, subject)
+
+    # Replay returns the SAME map and never mints a duplicate destination row.
+    assert second.assertion_id_map == first.assertion_id_map
+    assert set(second.assertion_id_map) == {source_id}
+    assert set(second_rows) == set(first_rows)
+    assert len(second_rows) == 1
+
+
+def test_shared_engine_contract_merge_assertion_id_map_remaps_superseded_chain(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-chain-{uuid4()}"
+    subject = f"idmap chain subject {uuid4()}"
+    base = datetime(2026, 3, 1, tzinfo=UTC)
+    _branch(engine, branch, tenant)
+    older = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "chain v1", "e" * 64, valid_from=base),
+        branch=branch,
+    )
+    newer = engine.upsert_assertion(
+        _idmap_assertion(
+            tenant, user, subject, "chain v2", "f" * 64, valid_from=base + timedelta(days=1)
+        ),
+        branch=branch,
+    )
+
+    report = _merge(engine, branch, tenant)
+    id_map = report.assertion_id_map
+
+    assert set(id_map) == {older, newer}
+    main_rows = _main_idmap_rows(engine, tenant, subject)
+    # Both source assertions land on main under their mapped destination ids.
+    assert set(main_rows) == {id_map[older], id_map[newer]}
+    superseded = [row for row in main_rows.values() if row.get("superseded_by")]
+    assert len(superseded) == 1
+    # The superseded chain is remapped to the ACTUAL destination id of the
+    # superseding assertion (regardless of iteration order / engine id scheme).
+    assert superseded[0]["id"] == id_map[older]
+    assert superseded[0]["superseded_by"] == id_map[newer]
+
+
+def test_shared_engine_contract_merge_assertion_id_map_retained_in_audit_export(
+    engine_bundle: tuple[Any, str, str],
+) -> None:
+    engine, tenant, user = engine_bundle
+    branch = f"shared-idmap-export-{uuid4()}"
+    subject = f"idmap export subject {uuid4()}"
+    _branch(engine, branch, tenant)
+    source_id = engine.upsert_assertion(
+        _idmap_assertion(tenant, user, subject, "retained", "1" * 64), branch=branch
+    )
+
+    report = _merge(engine, branch, tenant)
+    assert report.assertion_id_map
+    exported = engine.export_tenant(tenant)
+    merge_entry = exported["merge_log"][-1]
+    # Merge audit/export retains the complete map verbatim.
+    assert merge_entry["assertion_id_map"] == report.assertion_id_map
+    assert source_id in merge_entry["assertion_id_map"]
+
+
 def test_shared_engine_contract_relation_merge_reinforces_overlapping_fact(
     engine_bundle: tuple[Any, str, str],
 ) -> None:
@@ -4101,6 +5248,7 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     # derived_actions and erased_derived_evidence) — the exact fields the review
     # found leaking the plaintext cid past the top-level evidence_cid swap.
     cid = _append_evidence(engine, tenant, user, "Shared hard-delete contract evidence.")
+    surviving_cid = _append_evidence(engine, tenant, user, "Shared unaffected custody evidence.")
     summary_cid = engine.append_evidence(
         Evidence(
             tenant_id=tenant,
@@ -4108,7 +5256,7 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
             actor="user",
             source_type="derived-note",
             content="Derived summary of the hard-delete target.",
-            metadata={"source_evidence_cids": [cid]},
+            metadata={"source_evidence_cids": [cid, surviving_cid]},
             access_policy={"tenant": tenant},
         )
     )
@@ -4159,6 +5307,14 @@ def test_shared_engine_contract_hard_delete_records_audit_and_deletion_log(engin
     assert source_placeholder != cid
     assert source_placeholder in hard_entry["propagated"]["standing_cascade"]["affected_cids"]
     assert all(row["target_id"] == source_placeholder for row in forget_rows)
+
+    derived_action = hard_entry["propagated"]["standing_cascade"]["derived_actions"][0]
+    retained_sources = derived_action["source_evidence_cids_before"]
+    assert cid not in retained_sources
+    assert source_placeholder in retained_sources
+    assert surviving_cid in retained_sources
+    assert derived_action["cid"] != summary_cid
+    assert derived_action["cid"] in hard_entry["propagated"]["erased_derived_evidence"]
 
     # A tombstone_recompute forget KEEPS the cid (its ledger row is the blocklist).
     keep_cid = _append_evidence(engine, tenant, user, "Tombstone keeps its cid.")
@@ -4223,6 +5379,10 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
         )
     )
 
+    # Inspect source write custody before hard deletion redacts every retained
+    # reference to the erased CID. The post-delete audit below separately checks
+    # that the forget event uses a non-recomputable placeholder.
+    write_audit_log = engine.export_tenant(tenant)["audit_log"]
     engine.forget(tenant, cid, requested_by=user, erasure_mode=ErasureMode.HARD_DELETE_LEGAL)
     exported = engine.export_tenant(tenant)
     audit_log = exported["audit_log"]
@@ -4235,19 +5395,25 @@ def test_shared_audit_log_records_actor_source_tier_and_diff_for_every_write(
         assert "capability_tags" in item
         assert isinstance(item["diff"], dict)
 
-    evidence_audit = next(item for item in audit_log if item["op"] == "append_evidence" and item["target_id"] == cid)
+    evidence_audit = next(
+        item for item in write_audit_log if item["op"] == "append_evidence" and item["target_id"] == cid
+    )
     assert evidence_audit["actor"] == "tool"
     assert evidence_audit["source"] == "workflow-log"
     assert evidence_audit["trust_tier"] == 2
     assert sorted(evidence_audit["capability_tags"]) == ["signed", "tool-import"]
     assert evidence_audit["diff"]["source_identity"] == "git:memory-source-truth.md"
 
-    assertion_audit = next(item for item in audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id)
+    assertion_audit = next(
+        item for item in write_audit_log if item["op"] == "upsert_assertion" and item["target_id"] == assertion_id
+    )
     assert assertion_audit["source"] == "assertion"
     assert assertion_audit["trust_tier"] == 2
     assert assertion_audit["diff"]["source_evidence_cids"] == [cid, corroborating_cid]
 
-    preference_audit = next(item for item in audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id)
+    preference_audit = next(
+        item for item in write_audit_log if item["op"] == "add_preference" and item["target_id"] == preference_id
+    )
     assert preference_audit["source"] == "preference"
     assert preference_audit["trust_tier"] == 0
     assert preference_audit["diff"]["source_evidence_cids"] == [cid]

@@ -7,21 +7,63 @@ from threading import Barrier
 from typing import Any
 
 import pytest
+import copy
 
 from mnemosyne.audit_chain import (
     build_audit_chain,
     local_hmac_provider,
     verify_audit_chain,
 )
-from mnemosyne.engine import Evidence, Intention, LocalMemoryEngine
+from mnemosyne.engine import (
+    Evidence,
+    Intention,
+    LocalMemoryEngine,
+    ProspectiveOperatingPoint,
+    TriggerEvaluationContext,
+    canonicalize_intention,
+    intention_audit_diff,
+    intention_fire_receipt_id,
+)
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
-
 
 TENANT_ID = "tenant-prospective"
 USER_ID = "user-prospective"
 AGENT_ID = "agent-prospective"
 EVALUATED_AT = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
+
+OPERATING_POINT = ProspectiveOperatingPoint(
+    operating_point_id="op-default",
+    threshold=0.5,
+    measured_precision=0.9,
+    measured_recall=0.85,
+    measurement_cid="cid-measurement-1",
+)
+
+
+def _context(
+    *,
+    infrastructure_available: bool = True,
+    events: list[dict[str, Any]] | None = None,
+    conditions: dict[str, dict[str, Any]] | None = None,
+    tenant_id: str = TENANT_ID,
+) -> TriggerEvaluationContext:
+    normalized_events = [
+        {**event, "tenant_id": event.get("tenant_id", tenant_id)} for event in events or []
+    ]
+    normalized_conditions = {
+        condition_id: {
+            **observation,
+            "tenant_id": observation.get("tenant_id", tenant_id),
+        }
+        for condition_id, observation in (conditions or {}).items()
+    }
+    return TriggerEvaluationContext(
+        infrastructure_available=infrastructure_available,
+        tenant_id=tenant_id,
+        events=normalized_events,
+        conditions=normalized_conditions,
+    )
 
 
 def _originating_episode(
@@ -69,6 +111,582 @@ def _intention(*, evidence_id: str, due_at: datetime, **overrides: Any) -> Inten
     return Intention(**values)
 
 
+def test_update_intention_is_session_bound_atomic_and_detached() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    original = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    )
+    engine.schedule_intention(original)
+    new_due = EVALUATED_AT + timedelta(hours=2)
+
+    updated = engine.update_intention(
+        TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=new_due,
+        action={"type": "remind", "message": "Updated."},
+        recurrence_policy={"type": "interval", "interval_seconds": 3600, "max_occurrences": 3},
+    )
+    updated.action["message"] = "mutated detached result"
+
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.action["message"] == "Updated."
+    assert stored.due_at == new_due
+    assert stored.reschedule_history == [{"from": original.due_at.isoformat(), "to": new_due.isoformat()}]
+    assert stored.recurrence_state == {"occurrence": 0}
+    assert [row["op"] for row in engine.audit_log if row["target_id"] == original.intention_id] == [
+        "schedule_intention", "update_intention"
+    ]
+
+
+def test_update_intention_rejects_wrong_binding_terminal_and_invalid_recurrence() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    original = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    )
+    engine.schedule_intention(original)
+    with pytest.raises(PermissionError, match="session"):
+        engine.update_intention(
+            TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-b", action={"type": "noop"},
+        )
+    with pytest.raises(ValueError, match="interval_seconds"):
+        engine.update_intention(
+            TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", recurrence_policy={"type": "interval", "interval_seconds": 0},
+        )
+    engine.cancel_intention(TENANT_ID, original.intention_id, cancelled_by=USER_ID, session_id="session-a")
+    with pytest.raises(ValueError, match="scheduled"):
+        engine.update_intention(
+            TENANT_ID, original.intention_id, user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+
+
+def test_identical_update_replay_is_a_zero_mutation() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT + timedelta(hours=1)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a"
+    ))
+    action = {"type": "remind", "message": "Submit the report."}
+    first = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=due, action=action,
+        recurrence_policy={"type": "none"},
+    )
+    audit_count = len(engine.audit_log)
+    second = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=due, action=action,
+        recurrence_policy={"type": "none"},
+    )
+    assert first == second
+    assert second.reschedule_history == []
+    assert len(engine.audit_log) == audit_count
+
+
+def test_explicit_null_max_occurrences_normalizes_to_absent_key() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    ))
+    first = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    )
+    audit_count = len(engine.audit_log)
+    second = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a",
+        recurrence_policy={
+            "type": "interval", "interval_seconds": 60, "max_occurrences": None,
+        },
+    )
+    assert first == second
+    assert second.recurrence_policy == {"type": "interval", "interval_seconds": 60}
+    assert len(engine.audit_log) == audit_count
+
+
+def test_time_window_reschedule_beyond_datetime_range_raises_value_error() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT + timedelta(hours=1)
+    end = datetime(9999, 12, 31, tzinfo=timezone.utc)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="time_window",
+        trigger_expression={"start": due.isoformat(), "end": end.isoformat()},
+        session_id="session-a",
+    ))
+    with pytest.raises(ValueError, match="representable datetime range"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", due_at=due + timedelta(days=365),
+        )
+
+
+def test_legacy_sessionless_row_binds_once_on_first_update() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1)
+    ))
+    bound = engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", action={"type": "remind", "message": "Bound."},
+    )
+    assert bound.session_id == "session-a"
+    with pytest.raises(PermissionError, match="session"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-b", action={"type": "remind", "message": "Other."},
+        )
+
+
+def test_update_intention_rejects_foreign_user_and_foreign_agent() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    ))
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id="other-user", agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id="other-agent",
+            session_id="session-a", action={"type": "noop"},
+        )
+    assert engine.list_intentions(TENANT_ID)[0].action == {
+        "type": "remind", "message": "Submit the report.",
+    }
+
+
+def test_update_intention_missing_and_cross_tenant_raise_keyerror() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    ))
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            TENANT_ID, "no-such-intention", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+    with pytest.raises(KeyError):
+        engine.update_intention(
+            "other-tenant", "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+
+
+def test_update_intention_rejects_fired_state_and_invalid_arguments() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT, session_id="session-a",
+    ))
+    with pytest.raises(ValueError, match="at least one change"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a",
+        )
+    with pytest.raises(ValueError, match="due_at must be timezone-aware"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", due_at=EVALUATED_AT.replace(tzinfo=None),
+        )
+    with pytest.raises(ValueError, match="action must be a JSON object"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action=["not-an-object"],  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="session_id must be a non-empty string"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="", action={"type": "noop"},
+        )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=EVALUATED_AT, trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert len(fired) == 1
+    with pytest.raises(ValueError, match="only scheduled intentions may be updated"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+            session_id="session-a", action={"type": "noop"},
+        )
+    # Ownership is checked before terminal state, matching cancellation: a
+    # foreign principal probing a fired intention cannot learn its status
+    # from the exception type.
+    with pytest.raises(PermissionError, match="owning user and agent"):
+        engine.update_intention(
+            TENANT_ID, "intention-submit-report", user_id=f"{USER_ID}-other",
+            agent_id=AGENT_ID, session_id="session-a", action={"type": "noop"},
+        )
+
+
+def test_recancelling_a_cancelled_sessionless_intention_stays_sessionless() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    row = _intention(
+        evidence_id=evidence_id, due_at=EVALUATED_AT + timedelta(hours=1)
+    ).to_dict()
+    row["status"] = "cancelled"
+    row["cancellation_state"] = {"cancelled_by": USER_ID}
+    legacy = Intention.from_dict(row)
+    engine.intentions[(TENANT_ID, legacy.intention_id)] = legacy
+    audit_count = len(engine.audit_log)
+
+    engine.cancel_intention(
+        TENANT_ID, legacy.intention_id, cancelled_by=USER_ID, session_id="session-a"
+    )
+    engine.cancel_intention(
+        TENANT_ID, legacy.intention_id, cancelled_by=USER_ID, session_id="session-b"
+    )
+
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.status == "cancelled"
+    assert stored.session_id is None
+    assert len(engine.audit_log) == audit_count
+
+
+def test_interval_recurrence_advances_once_per_occurrence_and_terminates() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 3},
+    ))
+    occurrences: list[int] = []
+    for index in range(3):
+        evaluated = due + timedelta(minutes=index)
+        fired = engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=evaluated, trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+        occurrences.append(fired[0].recurrence_state["occurrence"])
+        assert engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=evaluated, trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        ) == []
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert occurrences == [0, 1, 2]
+    assert stored.status == "fired"
+    assert stored.recurrence_state["occurrence"] == 2
+    receipts = [row["id"] for row in engine.audit_log if row["op"] == "fire_intention"]
+    assert len(receipts) == len(set(receipts)) == 3
+
+
+def test_recurrence_overflow_terminates_as_final_fire_instead_of_poisoning() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = datetime(9999, 12, 31, 23, 30, tzinfo=timezone.utc)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 3600},
+    ))
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=due, trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert len(fired) == 1
+    stored = engine.list_intentions(TENANT_ID)[0]
+    assert stored.status == "fired"
+    assert stored.recurrence_state["occurrence"] == 0
+    # The tenant evaluation loop must keep working after the terminal fire.
+    assert engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=due, trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    ) == []
+
+
+def test_infinite_event_recurrence_uses_one_monotonic_signal_watermark() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+    for index in range(20):
+        occurred = due + timedelta(minutes=index)
+        context = TriggerEvaluationContext(
+            infrastructure_available=True, tenant_id=TENANT_ID,
+            events=[{"event_id": f"event-{index:02d}", "event_type": "report.submitted",
+                     "occurred_at": occurred.isoformat(), "payload": {}, "confidence": 0.99,
+                     "tenant_id": TENANT_ID}], conditions={},
+        )
+        assert len(engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=occurred, trigger_context=context,
+            operating_point=OPERATING_POINT,
+        )) == 1
+        state = engine.list_intentions(TENANT_ID)[0].recurrence_state
+        assert set(state) == {"occurrence", "last_evaluated_at", "consumed_signal"}
+        assert state["consumed_signal"] == {
+            "event_id": f"event-{index:02d}", "occurred_at": occurred.isoformat(),
+        }
+
+
+def test_event_watermark_orders_replay_and_legacy_state_fail_closed() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+    first = due + timedelta(minutes=1)
+    events = [{"event_id": event_id, "event_type": "report.submitted",
+               "occurred_at": occurred.isoformat(), "payload": {}, "confidence": 0.99,
+               "tenant_id": TENANT_ID}
+              for event_id, occurred in (("z", first), ("a", first), ("future", first + timedelta(minutes=2)))]
+    context = TriggerEvaluationContext(
+        infrastructure_available=True, tenant_id=TENANT_ID, events=events, conditions={}
+    )
+    assert len(engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=first, trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )) == 1
+    assert engine.list_intentions(TENANT_ID)[0].recurrence_state["consumed_signal"] == {
+        "event_id": "a", "occurred_at": first.isoformat(),
+    }
+    with pytest.raises(ValueError, match="backwards"):
+        engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=due, trigger_context=context,
+            operating_point=OPERATING_POINT,
+        )
+
+    base = _intention(
+        evidence_id="cidv1:legacy-watermark", due_at=due, trigger_type="condition",
+        trigger_expression={"condition_id": "ready", "operator": "eq", "value": True},
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ).to_dict()
+    last = due + timedelta(minutes=2)
+    base["recurrence_state"] = {
+        "occurrence": 2, "last_evaluated_at": last.isoformat(),
+        "consumed_signals": [
+            {"condition_id": "ready", "observed_at": due.isoformat()},
+            {"condition_id": "ready", "observed_at": last.isoformat()},
+        ],
+    }
+    normalized = Intention.from_dict(base).recurrence_state
+    assert normalized["consumed_signal"] == {
+        "condition_id": "ready", "observed_at": last.isoformat(),
+    }
+    assert "consumed_signals" not in normalized
+    mixed = copy.deepcopy(base)
+    mixed["recurrence_state"]["consumed_signal"] = {
+        "condition_id": "ready", "observed_at": last.isoformat(),
+    }
+    with pytest.raises(ValueError, match="mixed"):
+        Intention.from_dict(mixed)
+    legacy_event = copy.deepcopy(base)
+    legacy_event["trigger_type"] = "event"
+    legacy_event["trigger_expression"] = {"event_type": "report.submitted", "match": {}}
+    legacy_event["recurrence_state"] = {
+        "occurrence": 2, "last_evaluated_at": last.isoformat(),
+        "consumed_signals": [{"event_id": "a"}, {"event_id": "z"}],
+    }
+    assert Intention.from_dict(legacy_event).recurrence_state["consumed_signal"] == {
+        "event_id": "z", "occurred_at": last.isoformat(),
+    }
+    del legacy_event["recurrence_state"]["last_evaluated_at"]
+    with pytest.raises(ValueError, match="last_evaluated_at"):
+        Intention.from_dict(legacy_event)
+
+
+def test_time_window_recurrence_shifts_window_with_preserved_duration() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    end = due + timedelta(minutes=10)
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, trigger_type="time_window",
+        trigger_expression={"start": due.isoformat(), "end": end.isoformat()},
+        recurrence_policy={"type": "interval", "interval_seconds": 3600},
+    ))
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=due + timedelta(minutes=1),
+        trigger_context=_context(), operating_point=OPERATING_POINT,
+    )
+    assert len(fired) == 1
+    stored = engine.list_intentions(TENANT_ID)[0]
+    next_due = due + timedelta(seconds=3600)
+    assert stored.status == "scheduled"
+    assert stored.due_at == next_due
+    assert stored.trigger_expression["start"] == next_due.isoformat()
+    assert stored.trigger_expression["end"] == (
+        next_due + timedelta(minutes=10)
+    ).isoformat()
+    fired_again = engine.evaluate_due_intentions(
+        TENANT_ID, evaluated_at=next_due + timedelta(minutes=1),
+        trigger_context=_context(), operating_point=OPERATING_POINT,
+    )
+    assert len(fired_again) == 1
+
+
+_RECURRENCE_STATE_LAST = (EVALUATED_AT + timedelta(minutes=5)).isoformat()
+
+
+@pytest.mark.parametrize(
+    ("policy", "state", "message"),
+    [
+        ("interval", None, "recurrence_policy must be a JSON object"),
+        ({"type": "cron"}, None, "recurrence_policy.type must be 'none' or 'interval'"),
+        ({"type": "none", "interval_seconds": 60}, None, "non-recurring policy only accepts type"),
+        ({"type": "interval"}, None, "interval_seconds must be a positive integer"),
+        (
+            {"type": "interval", "interval_seconds": 10**15},
+            None,
+            "interval_seconds must not exceed",
+        ),
+        (
+            {"type": "interval", "interval_seconds": 60, "max_occurrences": 0},
+            None,
+            "max_occurrences must be a positive integer",
+        ),
+        (
+            {"type": "interval", "interval_seconds": 60, "jitter": 5},
+            None,
+            "recurrence_policy contains unsupported fields",
+        ),
+        (None, {"occurrence": -1}, "occurrence must be a non-negative integer"),
+        (None, {"occurrence": "1"}, "occurrence must be a non-negative integer"),
+        (None, {"occurrence": 0, "unknown": True}, "recurrence_state contains unsupported fields"),
+        (None, {"occurrence": 0, "last_evaluated_at": 12}, "last_evaluated_at must be ISO-8601"),
+        (
+            None,
+            {"occurrence": 0, "consumed_signals": "not-a-list"},
+            "consumed_signals must be a JSON array",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": _RECURRENCE_STATE_LAST,
+                "consumed_signal": {"bogus": 1},
+            },
+            "consumed_signal is invalid",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": _RECURRENCE_STATE_LAST,
+                "consumed_signal": {"event_id": ""},
+            },
+            "consumed_signal.event_id is invalid",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "consumed_signal": {
+                    "event_id": "event-1",
+                    "occurred_at": _RECURRENCE_STATE_LAST,
+                },
+            },
+            "consumed signal requires last_evaluated_at",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": EVALUATED_AT.isoformat(),
+                "consumed_signal": {
+                    "event_id": "event-1",
+                    "occurred_at": _RECURRENCE_STATE_LAST,
+                },
+            },
+            "consumed signal is after last_evaluated_at",
+        ),
+        (
+            None,
+            {
+                "occurrence": 0,
+                "last_evaluated_at": _RECURRENCE_STATE_LAST,
+                "consumed_signals": [
+                    {"event_id": "a"},
+                    {"event_id": "b", "occurred_at": _RECURRENCE_STATE_LAST},
+                ],
+            },
+            "consumed signal history is ambiguous",
+        ),
+        (None, {"occurrence": 3}, "occurrence must be below max_occurrences"),
+    ],
+)
+def test_intention_rejects_invalid_recurrence_policy_and_state(
+    policy: Any, state: Any, message: str
+) -> None:
+    base = _intention(
+        evidence_id="evidence", due_at=EVALUATED_AT, trigger_type="event",
+        trigger_expression={"event_type": "report.submitted", "match": {}},
+        recurrence_policy={"type": "interval", "interval_seconds": 60, "max_occurrences": 3},
+    ).to_dict()
+    if policy is not None:
+        base["recurrence_policy"] = policy
+    if state is not None:
+        base["recurrence_state"] = state
+    with pytest.raises(ValueError, match=message):
+        Intention.from_dict(base)
+
+
+def test_consumed_signal_must_match_trigger_type() -> None:
+    base = _intention(
+        evidence_id="evidence", due_at=EVALUATED_AT,
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ).to_dict()
+    base["recurrence_state"] = {
+        "occurrence": 1,
+        "last_evaluated_at": _RECURRENCE_STATE_LAST,
+        "consumed_signal": {"event_id": "event-1", "occurred_at": _RECURRENCE_STATE_LAST},
+    }
+    with pytest.raises(ValueError, match="does not match trigger_type"):
+        Intention.from_dict(base)
+
+
+def test_recurrence_reschedule_history_stays_bounded() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT
+    engine.schedule_intention(_intention(
+        evidence_id=evidence_id, due_at=due, session_id="session-a",
+        recurrence_policy={"type": "interval", "interval_seconds": 60},
+    ))
+    manual_due = due + timedelta(seconds=30)
+    engine.update_intention(
+        TENANT_ID, "intention-submit-report", user_id=USER_ID, agent_id=AGENT_ID,
+        session_id="session-a", due_at=manual_due,
+    )
+    for index in range(55):
+        fired = engine.evaluate_due_intentions(
+            TENANT_ID, evaluated_at=manual_due + timedelta(minutes=index),
+            trigger_context=_context(), operating_point=OPERATING_POINT,
+        )
+        assert len(fired) == 1
+    history = engine.list_intentions(TENANT_ID)[0].reschedule_history
+    recurrence_entries = [
+        entry for entry in history if entry.get("reason") == "recurrence"
+    ]
+    assert len(recurrence_entries) == 50
+    assert recurrence_entries[-1]["occurrence"] == 55
+    assert history[0] == {"from": due.isoformat(), "to": manual_due.isoformat()}
+
+
 def test_due_exact_time_intention_fires_once_with_provenance_and_audit() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)
@@ -77,9 +695,17 @@ def test_due_exact_time_intention_fires_once_with_provenance_and_audit() -> None
     )
 
     engine.schedule_intention(intention)
-    first_firings = engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    first_firings = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
     replay_firings = engine.evaluate_due_intentions(
-        TENANT_ID, evaluated_at=EVALUATED_AT
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
     )
 
     assert [firing.intention_id for firing in first_firings] == [intention.intention_id]
@@ -108,7 +734,15 @@ def test_future_exact_time_intention_does_not_fire() -> None:
 
     engine.schedule_intention(intention)
 
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert (
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+        == []
+    )
     assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
 
 
@@ -120,9 +754,17 @@ def test_cancelled_intention_never_fires() -> None:
     )
 
     engine.schedule_intention(intention)
-    engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID)
+    engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a")
 
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert (
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+        == []
+    )
     stored = engine.list_intentions(TENANT_ID)[0]
     assert stored.status == "cancelled"
     assert stored.cancellation_state is not None
@@ -133,8 +775,8 @@ def test_cancelled_intention_never_fires() -> None:
     [
         ({"intention_id": 7}, "intention_id must be a non-empty string"),
         ({"tenant_id": ""}, "tenant_id must be a non-empty string"),
-        ({"trigger_type": "event"}, "supports only exact_time"),
-        ({"trigger_expression": {}}, "trigger_expression.at"),
+        ({"trigger_type": "unknown"}, "trigger_type must be one of"),
+        ({"trigger_expression": {}}, "exact_time trigger_expression.at"),
         ({"trigger_expression": {"at": "not-a-time"}}, "must be ISO-8601"),
         (
             {
@@ -146,17 +788,13 @@ def test_cancelled_intention_never_fires() -> None:
         ),
         ({"action": {"payload": object()}}, "must contain JSON data only"),
         (
-            {"dependencies": ["future-intention"]},
-            "does not support dependency triggers",
-        ),
-        (
             {"cancellation_state": {"cancelled_by": USER_ID}},
             "cannot have cancellation state",
         ),
         ({"evidence_ids": []}, "must contain originating evidence"),
     ],
 )
-def test_intention_rejects_invalid_phase_one_state(
+def test_intention_rejects_invalid_state(
     overrides: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(ValueError, match=message):
@@ -178,7 +816,12 @@ def test_intention_rejects_naive_clocks_and_evaluator_accepts_equal_offset_time(
     intention = _intention(evidence_id=evidence_id, due_at=offset_due)
     engine.schedule_intention(intention)
 
-    fired = engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
 
     assert [item.intention_id for item in fired] == [intention.intention_id]
     assert fired[0].due_at == EVALUATED_AT
@@ -187,6 +830,8 @@ def test_intention_rejects_naive_clocks_and_evaluator_accepts_equal_offset_time(
         engine.evaluate_due_intentions(
             TENANT_ID,
             evaluated_at=EVALUATED_AT.replace(tzinfo=None),
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
         )
 
 
@@ -250,6 +895,36 @@ def test_schedule_rejects_invalid_provenance_without_mutation(case: str) -> None
     assert len(engine.audit_log) == audit_count
 
 
+def test_intention_provenance_uses_main_branch_only() -> None:
+    engine = LocalMemoryEngine()
+    engine.branch("scratch")
+    scratch_evidence = Evidence(
+        tenant_id=TENANT_ID,
+        user_id=USER_ID,
+        actor=AGENT_ID,
+        source_type="episode",
+        source_identity="conversation:prospective-memory-contract",
+        content="Remind me to submit the report.",
+        capability_tags=["data-only", "no-write-authority"],
+        access_policy={"tenant": TENANT_ID},
+    )
+    main_evidence = Evidence(
+        tenant_id=TENANT_ID,
+        user_id=USER_ID,
+        actor=AGENT_ID,
+        source_type="episode",
+        source_identity="conversation:prospective-memory-contract",
+        content="Remind me to submit the report.",
+        capability_tags=["prospective-memory"],
+        access_policy={"tenant": TENANT_ID},
+    )
+    scratch_cid = engine.append_evidence(scratch_evidence, branch="scratch")
+    main_cid = engine.append_evidence(main_evidence, branch="main")
+    assert scratch_cid == main_cid
+
+    engine.schedule_intention(_intention(evidence_id=main_cid, due_at=EVALUATED_AT))
+
+
 def test_intention_tenant_scope_and_cancellation_ownership() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _originating_episode(engine)
@@ -258,30 +933,36 @@ def test_intention_tenant_scope_and_cancellation_ownership() -> None:
 
     assert engine.list_intentions("other-tenant") == []
     assert (
-        engine.evaluate_due_intentions("other-tenant", evaluated_at=EVALUATED_AT) == []
+        engine.evaluate_due_intentions(
+            "other-tenant",
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(tenant_id="other-tenant"),
+            operating_point=OPERATING_POINT,
+        )
+        == []
     )
     with pytest.raises(KeyError):
         engine.cancel_intention(
             "other-tenant",
             intention.intention_id,
-            cancelled_by=USER_ID,
+            cancelled_by=USER_ID, session_id="session-a",
         )
     with pytest.raises(PermissionError, match="owning user or agent"):
         engine.cancel_intention(
             TENANT_ID,
             intention.intention_id,
-            cancelled_by="other-user",
+            cancelled_by="other-user", session_id="session-a",
         )
 
     engine.cancel_intention(
         TENANT_ID,
         intention.intention_id,
-        cancelled_by=AGENT_ID,
+        cancelled_by=AGENT_ID, session_id="session-a",
     )
     engine.cancel_intention(
         TENANT_ID,
         intention.intention_id,
-        cancelled_by=AGENT_ID,
+        cancelled_by=AGENT_ID, session_id="session-a",
     )
 
     cancellation_audits = [
@@ -295,6 +976,17 @@ def test_intention_tenant_scope_and_cancellation_ownership() -> None:
     assert cancellation_audits[0]["trust_tier"] == 2
     assert cancellation_audits[0]["capability_tags"] == ["prospective-memory"]
     assert cancellation_audits[0]["diff"]["intention_digest"]
+
+
+def test_evaluation_rejects_trigger_context_from_another_tenant() -> None:
+    engine = LocalMemoryEngine()
+    with pytest.raises(ValueError, match="trigger_context tenant_id"):
+        engine.evaluate_due_intentions(
+            "other-tenant",
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
 
 
 @pytest.mark.parametrize(
@@ -322,7 +1014,15 @@ def test_forget_removes_intentions_derived_from_erased_evidence(
     assert report["erased"] is True
     assert report["propagated"]["removed_intentions"] == [intention.intention_id]
     assert engine.list_intentions(TENANT_ID) == []
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert (
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+        == []
+    )
 
 
 def test_evaluation_fails_closed_if_provenance_becomes_invalid() -> None:
@@ -336,7 +1036,12 @@ def test_evaluation_fails_closed_if_provenance_becomes_invalid() -> None:
     evidence.erased = True
 
     with pytest.raises(ValueError, match="missing or outside"):
-        engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
 
     assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
     assert not any(row["op"] == "fire_intention" for row in engine.audit_log)
@@ -349,6 +1054,8 @@ def test_evaluation_validates_clock_without_stored_intentions() -> None:
         engine.evaluate_due_intentions(
             TENANT_ID,
             evaluated_at=EVALUATED_AT.replace(tzinfo=None),
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
         )
 
 
@@ -382,7 +1089,12 @@ def test_evaluation_prevalidates_all_due_provenance_before_firing() -> None:
     invalid_evidence.erased = True
 
     with pytest.raises(ValueError, match="missing or outside"):
-        engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
 
     assert [item.status for item in engine.list_intentions(TENANT_ID)] == [
         "scheduled",
@@ -396,7 +1108,12 @@ def _fire_audit_from_fresh_engine() -> tuple[dict[str, Any], list[dict[str, Any]
     evidence_id = _originating_episode(engine)
     intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
     engine.schedule_intention(intention)
-    engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
     fire_audit = next(row for row in engine.audit_log if row["op"] == "fire_intention")
     return fire_audit, engine.export_tenant(TENANT_ID)["audit_log"]
 
@@ -415,6 +1132,8 @@ def test_audit_custody_is_complete_deterministic_and_hash_chain_compatible() -> 
     assert first["diff"]["trigger_type"] == "exact_time"
     assert first["diff"]["due_at"] == EVALUATED_AT.isoformat()
     assert first["diff"]["intention_digest"]
+    assert first["diff"]["operating_point"]["operating_point_id"] == "op-default"
+    assert first["diff"]["operating_point"]["threshold"] == 0.5
 
     provider = local_hmac_provider("prospective-memory-test")
     document = build_audit_chain(
@@ -458,7 +1177,12 @@ def test_concurrent_evaluation_fires_each_intention_once_in_stable_order() -> No
 
     def evaluate() -> list[Intention]:
         barrier.wait()
-        return engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+        return engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: evaluate(), range(2)))
@@ -487,7 +1211,12 @@ def test_intention_values_are_isolated_from_caller_mutation() -> None:
     assert listed[0].action["message"] == "Submit the report."
     assert listed[0].evidence_ids == [evidence_id]
 
-    fired = engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
     fired[0].status = "scheduled"
     fired[0].action.clear()
     listed[0].status = "scheduled"
@@ -495,7 +1224,15 @@ def test_intention_values_are_isolated_from_caller_mutation() -> None:
     stored = engine.list_intentions(TENANT_ID)[0]
     assert stored.status == "fired"
     assert stored.action["message"] == "Submit the report."
-    assert engine.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT) == []
+    assert (
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+        == []
+    )
 
 
 def test_local_store_round_trips_intention_and_audit_state(tmp_path: Path) -> None:
@@ -504,10 +1241,17 @@ def test_local_store_round_trips_intention_and_audit_state(tmp_path: Path) -> No
     evidence_id = _originating_episode(engine)
     intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
     engine.schedule_intention(intention)
+    engine.close()
 
     reloaded = LocalMemoryEngine(store_path=store)
     assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
-    reloaded.evaluate_due_intentions(TENANT_ID, evaluated_at=EVALUATED_AT)
+    reloaded.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    reloaded.close()
 
     fired_reload = LocalMemoryEngine(store_path=store)
     assert fired_reload.list_intentions(TENANT_ID)[0].status == "fired"
@@ -530,3 +1274,1218 @@ def test_instruction_like_action_remains_plain_data() -> None:
     engine.schedule_intention(intention)
 
     assert engine.list_intentions(TENANT_ID)[0].action == action
+
+
+# --- Phase 2: time_window trigger ---
+
+
+def test_time_window_fires_inside_window() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    start = EVALUATED_AT - timedelta(minutes=5)
+    end = EVALUATED_AT + timedelta(minutes=5)
+    intention = _intention(
+        evidence_id=evidence_id,
+        due_at=start,
+        trigger_type="time_window",
+        trigger_expression={"start": start.isoformat(), "end": end.isoformat()},
+    )
+    engine.schedule_intention(intention)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in fired] == [intention.intention_id]
+    assert engine.list_intentions(TENANT_ID)[0].status == "fired"
+
+
+def test_time_window_does_not_fire_at_or_after_end() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    start = EVALUATED_AT - timedelta(minutes=10)
+    end = EVALUATED_AT
+    intention = _intention(
+        evidence_id=evidence_id,
+        due_at=start,
+        trigger_type="time_window",
+        trigger_expression={"start": start.isoformat(), "end": end.isoformat()},
+    )
+    engine.schedule_intention(intention)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+
+
+def test_time_window_fires_at_start_boundary() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    start = EVALUATED_AT
+    end = EVALUATED_AT + timedelta(minutes=5)
+    intention = _intention(
+        evidence_id=evidence_id,
+        due_at=start,
+        trigger_type="time_window",
+        trigger_expression={"start": start.isoformat(), "end": end.isoformat()},
+    )
+    engine.schedule_intention(intention)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in fired] == [intention.intention_id]
+
+
+def test_time_window_rejects_start_not_equal_due_at() -> None:
+    with pytest.raises(ValueError, match="same instant as due_at"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            trigger_type="time_window",
+            trigger_expression={
+                "start": (EVALUATED_AT - timedelta(minutes=1)).isoformat(),
+                "end": (EVALUATED_AT + timedelta(minutes=5)).isoformat(),
+            },
+        )
+
+
+def test_time_window_rejects_start_after_end() -> None:
+    with pytest.raises(ValueError, match="start must precede end"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT + timedelta(minutes=5),
+            trigger_type="time_window",
+            trigger_expression={
+                "start": (EVALUATED_AT + timedelta(minutes=5)).isoformat(),
+                "end": EVALUATED_AT.isoformat(),
+            },
+        )
+
+
+# --- Phase 2: event trigger ---
+
+
+def _event_intention(
+    *,
+    evidence_id: str,
+    due_at: datetime,
+    event_type: str = "report.submitted",
+    match: dict[str, Any] | None = None,
+    intention_id: str = "intention-event",
+    **overrides: Any,
+) -> Intention:
+    return _intention(
+        evidence_id=evidence_id,
+        due_at=due_at,
+        trigger_type="event",
+        trigger_expression={
+            "event_type": event_type,
+            "match": match or {},
+        },
+        intention_id=intention_id,
+        **overrides,
+    )
+
+
+def test_event_fires_on_matching_event_with_sufficient_confidence() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _event_intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        match={"report_id": "rpt-42"},
+    )
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        events=[
+            {
+                "event_id": "evt-1",
+                "event_type": "report.submitted",
+                "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+                "payload": {"report_id": "rpt-42", "status": "final"},
+                "confidence": 0.8,
+            }
+        ]
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in fired] == [intention.intention_id]
+    fire_audit = next(
+        row for row in engine.audit_log if row["op"] == "fire_intention"
+    )
+    assert fire_audit["diff"]["matched_event_id"] == "evt-1"
+
+
+def test_event_does_not_fire_on_wrong_event_type() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _event_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        events=[
+            {
+                "event_id": "evt-1",
+                "event_type": "report.rejected",
+                "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+                "payload": {},
+                "confidence": 0.9,
+            }
+        ]
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+def test_event_does_not_fire_on_payload_mismatch() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _event_intention(
+        evidence_id=evidence_id, due_at=due, match={"report_id": "rpt-42"}
+    )
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        events=[
+            {
+                "event_id": "evt-1",
+                "event_type": "report.submitted",
+                "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+                "payload": {"report_id": "rpt-99"},
+                "confidence": 0.9,
+            }
+        ]
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+def test_event_does_not_fire_below_confidence_threshold() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _event_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        events=[
+            {
+                "event_id": "evt-1",
+                "event_type": "report.submitted",
+                "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+                "payload": {},
+                "confidence": 0.3,
+            }
+        ]
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+def test_event_picks_earliest_canonical_match() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=10)
+    intention = _event_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        events=[
+            {
+                "event_id": "evt-late",
+                "event_type": "report.submitted",
+                "occurred_at": (due + timedelta(minutes=5)).isoformat(),
+                "payload": {},
+                "confidence": 0.9,
+            },
+            {
+                "event_id": "evt-early",
+                "event_type": "report.submitted",
+                "occurred_at": (due + timedelta(minutes=1)).isoformat(),
+                "payload": {},
+                "confidence": 0.9,
+            },
+        ]
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in fired] == [intention.intention_id]
+    fire_audit = next(
+        row for row in engine.audit_log if row["op"] == "fire_intention"
+    )
+    assert fire_audit["diff"]["matched_event_id"] == "evt-early"
+
+
+def test_event_rejects_missing_match_key() -> None:
+    with pytest.raises(ValueError, match="event trigger_expression.match is required"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            trigger_type="event",
+            trigger_expression={"event_type": "report.submitted"},
+        )
+
+
+def test_event_rejects_empty_event_type() -> None:
+    with pytest.raises(ValueError, match="event_type must be a non-empty string"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            trigger_type="event",
+            trigger_expression={"event_type": "", "match": {}},
+        )
+
+
+# --- Phase 2: condition trigger ---
+
+
+def _condition_intention(
+    *,
+    evidence_id: str,
+    due_at: datetime,
+    condition_id: str = "temp-reading",
+    operator: str = "gte",
+    value: Any = 25,
+    intention_id: str = "intention-condition",
+    **overrides: Any,
+) -> Intention:
+    return _intention(
+        evidence_id=evidence_id,
+        due_at=due_at,
+        trigger_type="condition",
+        trigger_expression={
+            "condition_id": condition_id,
+            "operator": operator,
+            "value": value,
+        },
+        intention_id=intention_id,
+        **overrides,
+    )
+
+
+def test_condition_fires_when_comparison_is_true() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _condition_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        conditions={
+            "temp-reading": {
+                "value": 30,
+                "observed_at": (due + timedelta(minutes=1)).isoformat(),
+                "confidence": 0.8,
+            }
+        }
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in fired] == [intention.intention_id]
+    fire_audit = next(
+        row for row in engine.audit_log if row["op"] == "fire_intention"
+    )
+    assert fire_audit["diff"]["matched_condition_id"] == "temp-reading"
+
+
+def test_condition_does_not_fire_when_comparison_is_false() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _condition_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        conditions={
+            "temp-reading": {
+                "value": 20,
+                "observed_at": (due + timedelta(minutes=1)).isoformat(),
+                "confidence": 0.8,
+            }
+        }
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+def test_condition_does_not_fire_below_confidence_threshold() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _condition_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        conditions={
+            "temp-reading": {
+                "value": 30,
+                "observed_at": (due + timedelta(minutes=1)).isoformat(),
+                "confidence": 0.3,
+            }
+        }
+    )
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+def test_condition_does_not_fire_when_observation_missing() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _condition_intention(evidence_id=evidence_id, due_at=due)
+    engine.schedule_intention(intention)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+@pytest.mark.parametrize(
+    ("operator", "observed", "expected", "fires"),
+    [
+        ("eq", 25, 25, True),
+        ("eq", 25, 30, False),
+        ("ne", 25, 30, True),
+        ("ne", 25, 25, False),
+        ("lt", 20, 25, True),
+        ("lt", 25, 25, False),
+        ("lte", 25, 25, True),
+        ("lte", 30, 25, False),
+        ("gt", 30, 25, True),
+        ("gt", 25, 25, False),
+        ("gte", 25, 25, True),
+        ("gte", 20, 25, False),
+        ("in", 3, [1, 2, 3], True),
+        ("in", 4, [1, 2, 3], False),
+    ],
+)
+def test_condition_all_operators(
+    operator: str, observed: Any, expected: Any, fires: bool
+) -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _condition_intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        operator=operator,
+        value=expected,
+    )
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        conditions={
+            "temp-reading": {
+                "value": observed,
+                "observed_at": (due + timedelta(minutes=1)).isoformat(),
+                "confidence": 0.9,
+            }
+        }
+    )
+    result = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=ctx,
+        operating_point=OPERATING_POINT,
+    )
+    assert (len(result) == 1) == fires
+
+
+def test_condition_type_mismatch_fails_closed() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    intention = _condition_intention(
+        evidence_id=evidence_id, due_at=due, operator="lt", value=25
+    )
+    engine.schedule_intention(intention)
+
+    ctx = _context(
+        conditions={
+            "temp-reading": {
+                "value": "hot",
+                "observed_at": (due + timedelta(minutes=1)).isoformat(),
+                "confidence": 0.9,
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="same-type"):
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=ctx,
+            operating_point=OPERATING_POINT,
+        )
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+
+
+def test_condition_rejects_invalid_operator() -> None:
+    with pytest.raises(ValueError, match="operator must be one of"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            trigger_type="condition",
+            trigger_expression={
+                "condition_id": "temp",
+                "operator": "approx",
+                "value": 25,
+            },
+        )
+
+
+# --- Phase 2: dependency_completion trigger ---
+
+
+def test_dependency_completion_fires_when_all_deps_fired() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+
+    dep_a = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="dep-a",
+    )
+    dep_b = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="dep-b",
+    )
+    engine.schedule_intention(dep_a)
+    engine.schedule_intention(dep_b)
+    engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert engine.list_intentions(TENANT_ID)[0].status == "fired"
+    assert engine.list_intentions(TENANT_ID)[1].status == "fired"
+
+    dependent = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="intention-dependent",
+        trigger_type="dependency_completion",
+        trigger_expression={"require": "all"},
+        dependencies=["dep-a", "dep-b"],
+    )
+    engine.schedule_intention(dependent)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert [item.intention_id for item in fired] == ["intention-dependent"]
+
+
+def test_dependency_completion_does_not_fire_when_dep_pending() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+
+    dep = _intention(
+        evidence_id=evidence_id,
+        due_at=EVALUATED_AT + timedelta(minutes=5),
+        intention_id="dep-pending",
+    )
+    engine.schedule_intention(dep)
+
+    dependent = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="intention-dependent",
+        trigger_type="dependency_completion",
+        trigger_expression={"require": "all"},
+        dependencies=["dep-pending"],
+    )
+    engine.schedule_intention(dependent)
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    assert fired == []
+
+
+def test_dependency_completion_fails_closed_on_missing_dep() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+
+    dependent = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="intention-dependent",
+        trigger_type="dependency_completion",
+        trigger_expression={"require": "all"},
+        dependencies=["missing-dep"],
+    )
+    with pytest.raises(ValueError, match="missing or cross-tenant"):
+        engine.schedule_intention(dependent)
+    assert engine.list_intentions(TENANT_ID) == []
+
+
+def test_dependency_completion_rejects_self_reference() -> None:
+    with pytest.raises(ValueError, match="cannot depend on itself"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            intention_id="intention-self",
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=["intention-self"],
+        )
+
+
+def test_dependency_completion_rejects_duplicate_deps() -> None:
+    with pytest.raises(ValueError, match="dependencies must not contain duplicates"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            intention_id="intention-dup",
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=["dep-a", "dep-a"],
+        )
+
+
+def test_dependency_completion_rejects_empty_deps() -> None:
+    with pytest.raises(ValueError, match="non-empty dependencies"):
+        _intention(
+            evidence_id="evidence",
+            due_at=EVALUATED_AT,
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=[],
+        )
+
+
+def test_dependency_completion_rejects_cycle_at_schedule_time() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+
+    dep = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="dep-cycle",
+        trigger_type="dependency_completion",
+        trigger_expression={"require": "all"},
+        dependencies=["intention-cycle"],
+    )
+    engine.intentions[(TENANT_ID, dep.intention_id)] = dep
+
+    cycling = _intention(
+        evidence_id=evidence_id,
+        due_at=due,
+        intention_id="intention-cycle",
+        trigger_type="dependency_completion",
+        trigger_expression={"require": "all"},
+        dependencies=["dep-cycle"],
+    )
+    with pytest.raises(ValueError, match="dependency cycle"):
+        engine.schedule_intention(cycling)
+
+
+# --- Phase 2: ProspectiveOperatingPoint ---
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operating_point_id", ""),
+        ("threshold", 1.5),
+        ("threshold", -0.1),
+        ("measured_precision", 2.0),
+        ("measured_recall", -1.0),
+        ("measurement_cid", ""),
+    ],
+)
+def test_operating_point_rejects_invalid_values(field: str, value: Any) -> None:
+    kwargs: dict[str, Any] = {
+        "operating_point_id": "op-1",
+        "threshold": 0.5,
+        "measured_precision": 0.9,
+        "measured_recall": 0.85,
+        "measurement_cid": "cid-1",
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError):
+        ProspectiveOperatingPoint(**kwargs)
+
+
+def test_operating_point_rejects_nan_threshold() -> None:
+    with pytest.raises(ValueError, match="finite number"):
+        ProspectiveOperatingPoint(
+            operating_point_id="op-1",
+            threshold=float("nan"),
+            measured_precision=0.9,
+            measured_recall=0.85,
+            measurement_cid="cid-1",
+        )
+
+
+# --- Phase 2: TriggerEvaluationContext ---
+
+
+def test_context_rejects_duplicate_event_ids() -> None:
+    with pytest.raises(ValueError, match="event_id must be unique"):
+        TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=TENANT_ID,
+            events=[
+                {
+                    "event_id": "evt-1",
+                    "event_type": "x",
+                    "occurred_at": EVALUATED_AT.isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                },
+                {
+                    "event_id": "evt-1",
+                    "event_type": "y",
+                    "occurred_at": EVALUATED_AT.isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                },
+            ],
+            conditions={},
+        )
+
+
+def test_context_rejects_naive_event_timestamp() -> None:
+    with pytest.raises(ValueError, match="occurred_at must be timezone-aware"):
+        TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=TENANT_ID,
+            events=[
+                {
+                    "event_id": "evt-1",
+                    "event_type": "x",
+                    "occurred_at": EVALUATED_AT.replace(tzinfo=None).isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                }
+            ],
+            conditions={},
+        )
+
+
+def test_context_rejects_confidence_out_of_range() -> None:
+    with pytest.raises(ValueError, match="confidence must be in"):
+        TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=TENANT_ID,
+            events=[
+                {
+                    "event_id": "evt-1",
+                    "event_type": "x",
+                    "occurred_at": EVALUATED_AT.isoformat(),
+                    "payload": {},
+                    "confidence": 1.5,
+                    "tenant_id": TENANT_ID,
+                }
+            ],
+            conditions={},
+        )
+
+
+def test_context_rejects_non_bool_infrastructure_available() -> None:
+    with pytest.raises(ValueError, match="infrastructure_available must be a bool"):
+        TriggerEvaluationContext(
+            infrastructure_available="yes",  # type: ignore[arg-type]
+            tenant_id=TENANT_ID,
+            events=[],
+            conditions={},
+        )
+
+
+# --- Phase 2: infrastructure_available=False ---
+
+
+def test_infrastructure_unavailable_raises_runtime_error_without_mutation() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+    audit_count = len(engine.audit_log)
+
+    with pytest.raises(RuntimeError, match="infrastructure_available"):
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(infrastructure_available=False),
+            operating_point=OPERATING_POINT,
+        )
+
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert len(engine.audit_log) == audit_count
+
+
+def test_evaluate_rejects_missing_operating_point() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+
+    with pytest.raises(ValueError, match="operating_point must be"):
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point="not-an-op",  # type: ignore[arg-type]
+        )
+
+
+def test_evaluate_rejects_missing_trigger_context() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+
+    with pytest.raises(ValueError, match="trigger_context must be"):
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context="not-a-context",  # type: ignore[arg-type]
+            operating_point=OPERATING_POINT,
+        )
+
+
+# --- Phase 2: deterministic audit event_id ---
+
+
+def test_fire_audit_event_id_is_deterministic_canonical_key() -> None:
+    first, _ = _fire_audit_from_fresh_engine()
+    second, _ = _fire_audit_from_fresh_engine()
+    assert first["id"] == second["id"]
+
+
+def test_canonical_intention_helpers_detach_and_stabilize_receipts() -> None:
+    evidence_id = "evidence-canonical"
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+
+    canonical = canonicalize_intention(intention, require_scheduled=True)
+
+    assert canonical is not intention
+    assert canonical.to_dict() == intention.to_dict()
+    assert intention_fire_receipt_id(TENANT_ID, intention.intention_id)
+    assert intention_audit_diff(canonical, status="scheduled")["evidence_ids"] == [
+        evidence_id
+    ]
+
+
+def test_mixed_trigger_results_keep_their_matched_signals_after_sorting() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=5)
+    engine.schedule_intention(
+        _event_intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="z-event",
+        )
+    )
+    engine.schedule_intention(
+        _condition_intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="a-condition",
+        )
+    )
+
+    fired = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(
+            events=[
+                {
+                    "event_id": "evt-match",
+                    "event_type": "report.submitted",
+                    "occurred_at": due.isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                }
+            ],
+            conditions={
+                "temp-reading": {
+                    "value": 30,
+                    "observed_at": due.isoformat(),
+                    "confidence": 0.9,
+                }
+            },
+        ),
+        operating_point=OPERATING_POINT,
+    )
+
+    assert [item.intention_id for item in fired] == ["a-condition", "z-event"]
+    audits = {
+        row["target_id"]: row["diff"]
+        for row in engine.audit_log
+        if row["op"] == "fire_intention"
+    }
+    assert audits["a-condition"]["matched_condition_id"] == "temp-reading"
+    assert "matched_event_id" not in audits["a-condition"]
+    assert audits["z-event"]["matched_event_id"] == "evt-match"
+    assert "matched_condition_id" not in audits["z-event"]
+
+
+def _inject_replace_failure(monkeypatch: pytest.MonkeyPatch) -> Any:
+    original = Path.replace
+
+    def fail_replace(self: Path, target: Path) -> Path:
+        raise OSError("injected persistence failure")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    return original
+
+
+def test_schedule_rolls_back_memory_audit_and_store_on_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    audit_before = list(engine.audit_log)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.schedule_intention(
+            _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+        )
+
+    assert engine.list_intentions(TENANT_ID) == []
+    assert engine.audit_log == audit_before
+    engine.close()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID) == []
+    assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_cancel_rolls_back_memory_audit_and_store_on_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+    audit_before = list(engine.audit_log)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.cancel_intention(TENANT_ID, intention.intention_id, cancelled_by=USER_ID, session_id="session-a")
+
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert engine.audit_log == audit_before
+    engine.close()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_update_rolls_back_memory_history_audit_and_retries_after_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(
+        evidence_id=evidence_id,
+        due_at=EVALUATED_AT + timedelta(hours=1),
+        session_id="session-a",
+    )
+    engine.schedule_intention(intention)
+    before = engine.list_intentions(TENANT_ID)[0]
+    audit_before = list(engine.audit_log)
+    moved = before.due_at + timedelta(hours=1)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.update_intention(
+            TENANT_ID,
+            intention.intention_id,
+            user_id=USER_ID,
+            agent_id=AGENT_ID,
+            session_id="session-a",
+            due_at=moved,
+        )
+
+    assert engine.list_intentions(TENANT_ID)[0] == before
+    assert engine.audit_log == audit_before
+    monkeypatch.setattr(Path, "replace", original_replace)
+    retried = engine.update_intention(
+        TENANT_ID,
+        intention.intention_id,
+        user_id=USER_ID,
+        agent_id=AGENT_ID,
+        session_id="session-a",
+        due_at=moved,
+    )
+    assert retried.due_at == moved
+    assert len(retried.reschedule_history) == 1
+    assert len(engine.audit_log) == len(audit_before) + 1
+    engine.close()
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID)[0] == retried
+    reloaded.close()
+
+
+def test_evaluate_rolls_back_memory_audit_and_store_on_persistence_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    engine = LocalMemoryEngine(store_path=store)
+    evidence_id = _originating_episode(engine)
+    intention = _intention(evidence_id=evidence_id, due_at=EVALUATED_AT)
+    engine.schedule_intention(intention)
+    audit_before = list(engine.audit_log)
+    original_replace = _inject_replace_failure(monkeypatch)
+
+    with pytest.raises(OSError, match="injected persistence failure"):
+        engine.evaluate_due_intentions(
+            TENANT_ID,
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+
+    assert engine.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert engine.audit_log == audit_before
+    engine.close()
+    monkeypatch.setattr(Path, "replace", original_replace)
+    reloaded = LocalMemoryEngine(store_path=store)
+    assert reloaded.list_intentions(TENANT_ID)[0].status == "scheduled"
+    assert reloaded.audit_log == audit_before
+    reloaded.close()
+
+
+def test_local_store_allows_only_one_writer_per_canonical_path(tmp_path: Path) -> None:
+    store = tmp_path / "nested" / ".." / "mnemosyne.json"
+    first = LocalMemoryEngine(store_path=store)
+
+    with pytest.raises(RuntimeError, match="already has a writer"):
+        LocalMemoryEngine(store_path=store.resolve())
+
+    first.close()
+    replacement = LocalMemoryEngine(store_path=store.resolve())
+    replacement.close()
+
+
+@pytest.mark.parametrize("field", ["threshold", "measured_precision", "measured_recall"])
+def test_operating_point_rejects_integer_metrics(field: str) -> None:
+    kwargs: dict[str, Any] = {
+        "operating_point_id": "op-1",
+        "threshold": 0.5,
+        "measured_precision": 0.9,
+        "measured_recall": 0.85,
+        "measurement_cid": "cid-1",
+    }
+    kwargs[field] = 1
+
+    with pytest.raises(ValueError, match="expressed as float"):
+        ProspectiveOperatingPoint(**kwargs)
+
+
+@pytest.mark.parametrize(
+    ("events", "conditions", "message"),
+    [
+        (
+            [
+                {
+                    "event_id": "evt-1",
+                    "event_type": "x",
+                    "occurred_at": EVALUATED_AT.isoformat(),
+                    "payload": {},
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                    "unexpected": TENANT_ID,
+                }
+            ],
+            {},
+            r"events\[0\] contains unknown keys",
+        ),
+        (
+            [],
+            {
+                "condition-1": {
+                    "value": True,
+                    "observed_at": EVALUATED_AT.isoformat(),
+                    "confidence": 0.9,
+                    "tenant_id": TENANT_ID,
+                    "unexpected": TENANT_ID,
+                }
+            },
+            r"conditions\[condition-1\] contains unknown keys",
+        ),
+    ],
+)
+def test_context_rejects_unknown_signal_keys(
+    events: list[dict[str, Any]],
+    conditions: dict[str, dict[str, Any]],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        TriggerEvaluationContext(
+            infrastructure_available=True,
+            tenant_id=TENANT_ID,
+            events=events,
+            conditions=conditions,
+        )
+
+
+def test_evaluate_rejects_empty_tenant_without_mutation() -> None:
+    engine = LocalMemoryEngine()
+    audit_before = list(engine.audit_log)
+
+    with pytest.raises(ValueError, match="tenant_id must be a non-empty string"):
+        engine.evaluate_due_intentions(
+            "",
+            evaluated_at=EVALUATED_AT,
+            trigger_context=_context(),
+            operating_point=OPERATING_POINT,
+        )
+
+    assert engine.audit_log == audit_before
+
+
+def test_event_replay_does_not_duplicate_firing_or_audit() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=1)
+    engine.schedule_intention(_event_intention(evidence_id=evidence_id, due_at=due))
+    context = _context(
+        events=[
+            {
+                "event_id": "evt-replay",
+                "event_type": "report.submitted",
+                "occurred_at": due.isoformat(),
+                "payload": {},
+                "confidence": 0.9,
+            }
+        ]
+    )
+
+    first = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )
+    replay = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT + timedelta(minutes=1),
+        trigger_context=context,
+        operating_point=OPERATING_POINT,
+    )
+
+    assert [item.intention_id for item in first] == ["intention-event"]
+    assert replay == []
+    assert len([row for row in engine.audit_log if row["op"] == "fire_intention"]) == 1
+
+
+def test_dependency_does_not_cascade_from_a_firing_in_the_same_batch() -> None:
+    engine = LocalMemoryEngine()
+    evidence_id = _originating_episode(engine)
+    due = EVALUATED_AT - timedelta(minutes=1)
+    engine.schedule_intention(
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="dependency",
+        )
+    )
+    engine.schedule_intention(
+        _intention(
+            evidence_id=evidence_id,
+            due_at=due,
+            intention_id="dependent",
+            trigger_type="dependency_completion",
+            trigger_expression={"require": "all"},
+            dependencies=["dependency"],
+        )
+    )
+
+    first = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+    second = engine.evaluate_due_intentions(
+        TENANT_ID,
+        evaluated_at=EVALUATED_AT,
+        trigger_context=_context(),
+        operating_point=OPERATING_POINT,
+    )
+
+    assert [item.intention_id for item in first] == ["dependency"]
+    assert [item.intention_id for item in second] == ["dependent"]

@@ -195,6 +195,37 @@ ENSURE_STATEMENTS: list[str] = [
         PRIMARY KEY (tenant_id, canonical)
     )
     """,
+    # intentions — PK(tenant_id, intention_id); the record column holds the
+    # full Intention.to_dict() JSON so rows rehydrate through Intention.from_dict
+    # exactly (same pattern as preferences/justifications/contradictions). The
+    # status and due_at columns are denormalized from the record JSON so the
+    # evaluate_due_intentions scan and the forget cascade can filter in SQL
+    # without parsing every record. due_at is stored as the ISO-8601 string
+    # Local's to_dict emits (``.isoformat()``); comparisons are lexicographic on
+    # UTC-normalized instants, matching Local's (due_at, intention_id) order.
+    """
+    CREATE TABLE IF NOT EXISTS intentions (
+        tenant_id TEXT NOT NULL,
+        intention_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'scheduled'
+            CHECK (status IN ('scheduled', 'cancelled', 'fired')),
+        due_at TEXT NOT NULL,
+        record TEXT NOT NULL,
+        PRIMARY KEY (tenant_id, intention_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS intentions_tenant_status_due_idx
+        ON intentions(tenant_id, status, due_at, intention_id)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS intention_fire_receipts (
+        event_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        intention_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL
+    )
+    """,
     # audit/deletion/merge logs — append-ordered plain dict rows persisted
     # verbatim (seq preserves LocalMemoryEngine's list ordering).
     """
@@ -294,6 +325,37 @@ ENSURE_STATEMENTS: list[str] = [
         refreshed_at TEXT NOT NULL,
         PRIMARY KEY (tenant_id, branch, seed_hash, as_of_key)
     )
+    """,
+    # working_memory — tenant/session/item composite identity. Working items
+    # deliberately have no durable-memory foreign key: their provenance is
+    # checked by the engine before every write and read, while this plane stays
+    # short-lived and cannot be promoted implicitly.
+    """
+    CREATE TABLE IF NOT EXISTS working_memory (
+        tenant_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        trust_tier INTEGER NOT NULL DEFAULT 0 CHECK (trust_tier BETWEEN 0 AND 4),
+        capability_tags TEXT NOT NULL DEFAULT '[]',
+        sensitivity INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired')),
+        expired_at TEXT,
+        evidence_ids TEXT NOT NULL DEFAULT '[]',
+        access_policy TEXT NOT NULL DEFAULT '{}',
+        metadata TEXT NOT NULL DEFAULT '{}',
+        PRIMARY KEY (tenant_id, session_id, item_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS working_memory_scope_expiry_idx
+        ON working_memory(tenant_id, session_id, status, expires_at, item_id)
     """,
     # evidence_fts (Task 4) — FTS5 candidate-recall index over evidence.content.
     #

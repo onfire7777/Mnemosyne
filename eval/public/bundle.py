@@ -105,7 +105,7 @@ def write_bundle(
         else:
             _write_json(
                 temp / "judge.json",
-                {"judge": None, "reader": None, "reason": "retrieval family"},
+                {"judge": None, "reader": None, "reason": f"{metadata['family']} family"},
             )
         _write_json(temp / "metrics.json", metrics)
         (temp / "traces.jsonl").write_bytes(
@@ -165,9 +165,9 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         _parse_json(line, "traces.jsonl")
         for line in (root / "traces.jsonl").read_text().splitlines()
     ]
-    question_ids = [trace.get("question_id") for trace in traces]
-    if len(question_ids) != len(set(question_ids)) or None in question_ids:
-        raise BundleError("duplicate or missing question IDs")
+    trace_ids = [_trace_id(trace, family=config.get("family")) for trace in traces]
+    if len(trace_ids) != len(set(trace_ids)):
+        raise BundleError("duplicate trace IDs")
     if measured.get("trace_count") != len(traces) or measured.get("total") != len(
         traces
     ):
@@ -182,13 +182,16 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
         "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
         "qa-em-f1-v1": ("qa", "bootstrap"),
+        "pm-bench-action-v1": ("deterministic-action", "wilson"),
+        "triggerbench-action-v1": ("deterministic-action", "wilson"),
+        "working-memory-action-v1": ("deterministic-action", "bootstrap"),
     }.get(profile)
     if any(trace.get("scoring_family") != family for trace in traces):
         raise BundleError("metric families may not be blended")
-    if family == "deterministic-retrieval" and (
+    if family in {"deterministic-retrieval", "deterministic-action"} and (
         judge.get("reader") is not None or judge.get("judge") is not None
     ):
-        raise BundleError("retrieval family must not declare a reader or judge")
+        raise BundleError("deterministic families must not declare a reader or judge")
     if family == "qa" and not all(
         isinstance(judge.get(key), str) and judge[key].strip()
         for key in ("reader", "judge")
@@ -199,9 +202,10 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if allowed_profile != (family, method):
         raise BundleError("wrong interval-family metadata")
     metadata = benchmark.get("metadata", {})
-    if hashlib.sha256(_canonical(benchmark.get("data"))).hexdigest() != metadata.get(
-        "dataset_sha256"
-    ):
+    dataset_bytes = _canonical(benchmark.get("data"))
+    if family == "deterministic-action":
+        dataset_bytes = dataset_bytes.rstrip(b"\n")
+    if hashlib.sha256(dataset_bytes).hexdigest() != metadata.get("dataset_sha256"):
         raise BundleError("benchmark custody digest mismatch")
     _verify_registry_anchor(metadata)
     expected_config = {
@@ -229,7 +233,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
             expected_metrics = score_profile(
                 profile, _scoring_labels(benchmark.get("data")), traces
             )
-        except ScoringError as exc:
+        except (ScoringError, ValueError, TypeError, AttributeError, KeyError) as exc:
             raise BundleError(
                 "generalized scoring profile recomputation failed"
             ) from exc
@@ -555,9 +559,35 @@ def _render_report_note(report: dict[str, Any], report_digest: str) -> bytes:
 
 
 def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
-    if not isinstance(benchmark, dict) or not isinstance(
-        benchmark.get("questions"), list
-    ):
+    if not isinstance(benchmark, dict):
+        raise BundleError("scoring profile benchmark is missing")
+    if isinstance(benchmark.get("cases"), list):
+        if benchmark.get("benchmark") in {"pm-bench", "triggerbench"}:
+            return [
+                {
+                    "case_id": case.get("case_id"),
+                    "step_id": step.get("step_id"),
+                    "category": case.get("category"),
+                    "expected_due_action_ids": step.get("expected_due_action_ids"),
+                    "operating_point_id": benchmark.get("operating_point_id"),
+                    "operating_point_config": benchmark.get("operating_point_config"),
+                }
+                for case in benchmark["cases"]
+                for step in case.get("steps", [])
+            ]
+        if benchmark.get("suite") == "working-memory-action-v1":
+            return [
+                {
+                    "case_id": case.get("case_id"),
+                    "category": case.get("category"),
+                    "expected_action_id": case.get("expected_action_id"),
+                    "expected_abstain": case.get("expected_abstain"),
+                    "seed": benchmark.get("seed"),
+                }
+                for case in benchmark["cases"]
+            ]
+        raise BundleError("unknown deterministic-action benchmark schema")
+    if not isinstance(benchmark.get("questions"), list):
         raise BundleError("scoring profile benchmark questions are missing")
     labels = []
     for question in benchmark["questions"]:
@@ -591,6 +621,20 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
             label["answers"] = question["answers"]
         labels.append(label)
     return labels
+
+
+def _trace_id(trace: dict[str, Any], *, family: Any) -> tuple[Any, ...]:
+    if family == "deterministic-action":
+        case_id, step_id = trace.get("case_id"), trace.get("step_id")
+        if not isinstance(case_id, str) or not case_id or (
+            step_id is not None and (not isinstance(step_id, str) or not step_id)
+        ):
+            raise BundleError("missing deterministic-action trace ID")
+        return (case_id,) if step_id is None else (case_id, step_id)
+    question_id = trace.get("question_id")
+    if not isinstance(question_id, str) or not question_id:
+        raise BundleError("missing question ID")
+    return (question_id,)
 
 
 def _verify_qa_custody(
@@ -901,6 +945,9 @@ def _verify_registry_anchor(metadata: dict[str, Any]) -> None:
         "qa_protocol_version",
         "interval_methods",
         "assets",
+        "fixture",
+        "headline_eligible",
+        "upstream_comparable",
     )
     if any(metadata.get(key) != canonical.get(key) for key in anchored):
         raise BundleError("bundle metadata does not match canonical registry anchor")

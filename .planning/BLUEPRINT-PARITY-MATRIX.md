@@ -15,6 +15,27 @@
 > top missing local features are implemented, and Tier B operator production
 > evidence remains the blocking strict-parity class.
 
+> **Addendum (2026-07-20) — post-blueprint memory-plane merge:** PR #39
+> (`main@0784340`) merged the W3 prospective-memory and working-memory planes
+> across Local/Postgres/Sqlite, the W2 D5 signed deletion manifest
+> (`src/mnemosyne/deletion.py` + `deletion_manifest.py`), the explicit
+> cross-engine `assertion_id_map` branch-merge identity map, and the W3 I0R
+> signed-session public-action evaluator (`eval/public/action_cli.py`). These are
+> **new capabilities beyond the original `Mnemosyne-v2-Build-Blueprint.md`
+> §1–§38 surface** this matrix maps — they extend, and do not regress, the
+> historical rows below. Their status is tracked authoritatively in
+> `.planning/REQUIREMENTS.md` (CAP-012/CAP-013, both Complete and test-pinned by
+> `tests/test_planning_traceability.py`) and `.planning/STATE.md`; the current
+> engine/DDL surface is `docs/ARCHITECTURE-OVERVIEW.md` and
+> `docs/ENGINE-CONTRACT.md`, where the DDL now enumerates the added memory-plane
+> tables (the §18–19 "20 tables" and §25 forgetting rows below predate this
+> merge and are not re-derived here). The I0R action suites
+> (`pm-bench-development`, `triggerbench-development`,
+> `working-memory-action-development`) are development-split and
+> `publishable:false`/`pbpp_headline_eligible:false`, so no public or headline
+> benchmark row changes. W1 production parity and the W4/W5 external-adapter
+> GATEs remain operator-gated and are not claimed complete.
+
 ## Purpose & method
 
 This matrix maps every blueprint surface to the module that implements it, the test that

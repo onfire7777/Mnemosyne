@@ -32,6 +32,8 @@ source for this repository and depends on no external local path.
 - **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
 - **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
 - **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
+- **Working- and prospective-memory planes.** Beyond the retrospective projection store, an authenticated **working-memory plane** holds TTL-bounded seeds that promote into beliefs through the same regression gate or expire, and a **prospective-memory plane** schedules session-bound, recurring *intentions* that fire when evaluated.
+- **Signed, fail-closed deletion.** Hard-delete and erasure emit a **signed deletion manifest** (`deletion.py` + `deletion_manifest.py`) whose semantic verifier proves every custody surface was swept before the operation is reported complete.
 - **Three backends, proven equivalent.** A zero-dependency in-memory engine, a PostgreSQL-backed engine, and a per-tenant SQLite engine pass the shared contract + parity test suite; the Tier-B operator production evidence is now captured and offline-verified (2026-07-07 — 29/29 production deployment-soak green, `release-audit` `ok:true`, `production-evidence-verify` `ok:true`; see `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`).
 - **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
 
@@ -42,8 +44,8 @@ source for this repository and depends on no external local path.
 ```mermaid
 flowchart TD
     subgraph Clients
-      CLI["mneme CLI<br/>(91 subcommands)"]
-      MCP["mneme-mcp<br/>(48 MCP tools)"]
+      CLI["mneme CLI<br/>(119 subcommands)"]
+      MCP["mneme-mcp<br/>(59 MCP tools)"]
     end
     CLI --> SEC
     MCP --> SEC
@@ -55,6 +57,8 @@ flowchart TD
     PROJ --> RET["Hybrid retrieval<br/>FTS + pgvector + graph/PPR → rerank → calibrate"]
     EV --> RET
     RET --> ANS["Answer + confidence<br/>or calibrated abstention"]
+    SEC --> WORK[("Working-memory plane<br/>authenticated TTL seeds → promote | expire")]
+    SEC --> PROSP[("Prospective-memory plane<br/>schedule · evaluate · recur intentions")]
     ENGINE{{"MemoryEngine contract"}} -.backs.-> EV
     ENGINE -.implemented by.-> LOCAL["LocalMemoryEngine<br/>in-memory"]
     ENGINE -.implemented by.-> PG["PostgresEngine<br/>RLS · HNSW · recursive PPR · as-of"]
@@ -88,8 +92,8 @@ After `uv sync`, the two console-script entry points are available through
 
 | Command    | Entry point                  | Purpose                |
 | ---------- | ---------------------------- | ---------------------- |
-| `mneme`    | `mnemosyne.cli:main`         | Memory CLI (91 subcommands) |
-| `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (48 tools)  |
+| `mneme`    | `mnemosyne.cli:main`         | Memory CLI (119 subcommands) |
+| `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (59 tools)  |
 
 > The module form `uv run --locked python -m mnemosyne.cli …` is equivalent to `uv run --locked mneme …`.
 
@@ -139,6 +143,50 @@ mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
   --auth-token "$MNEMOSYNE_MCP_TOKEN" --require-session
 ```
 
+### Authenticated memory planes
+
+The **working-memory** and **prospective-memory** planes fail closed: every
+`working-*` and `intention-*` subcommand exits with `requires --session-token`
+unless a signed Mnemosyne session is supplied (`--session-token` /
+`MNEMOSYNE_SESSION_TOKEN`), minted from a verified OIDC/JWT token by
+`session-exchange`.
+
+```bash
+# Mint a bounded signed session from a JWKS-validated IdP token
+export MNEMOSYNE_SESSION_TOKEN=$(uv run --locked mneme session-exchange \
+  --idp-token "$IDP_JWT" --idp-jwks-file jwks.json \
+  --idp-issuer https://idp.example --idp-audience mnemosyne)
+
+# Working memory: an authenticated, TTL-bounded seed that can later promote or expire
+uv run --locked mneme working-seed --tenant tenant-a --session-id sess-1 \
+  --user user-a --agent-id agent-a --task-id task-1 --branch main \
+  --kind scratch --content "draft: ship the release notes" \
+  --evidence-cid "$CID" --ttl-seconds 3600 \
+  --created-at 2026-07-20T12:00:00Z --source-trust-tier 0
+
+# Prospective memory: schedule a session-bound intention (optionally recurring)
+uv run --locked mneme intention-schedule --tenant tenant-a \
+  --user user-a --agent agent-a --trigger-type exact_time \
+  --trigger-expression '{"at": "2026-07-21T09:00:00Z"}' \
+  --action '{"ref": "release-reminder"}' --due-at 2026-07-21T09:00:00Z \
+  --evidence-cid "$CID" \
+  --recurrence-policy '{"type": "interval", "interval_seconds": 600, "max_occurrences": 4}'
+
+# Fire due intentions from an authenticated scheduler context
+uv run --locked mneme intention-evaluate --tenant tenant-a \
+  --evaluated-at 2026-07-21T09:00:00Z --trigger-context '{}' --operating-point '{}'
+```
+
+> `working-seed` seeds must stay within the write trust ceiling
+> (`max_trust_tier`, default `4`); under a signed session the effective tier is
+> taken from the session identity, so `--source-trust-tier` is not the operative
+> control. `intention-evaluate` requires the `prospective:evaluate` capability; token
+> verification also needs the session secret (`MNEMOSYNE_SESSION_SECRET` /
+> `--session-secret-command`). The public benchmark harness drives this seam
+> end-to-end through a signed-session evaluator (`eval/public/action_cli.py`)
+> that mints its own session tokens and calls the production `intention-*`
+> subprocesses.
+
 ---
 
 ## Core concepts
@@ -156,6 +204,8 @@ mneme-mcp --http --http-host 127.0.0.1 --http-port 8765 \
 | **Consolidation** | Warm-loop worker that runs an ordered 11-role pass pipeline through the promotion gate (see below). |
 | **Promotion gate** | Protected regression cases must pass before any candidate belief is promoted; failures roll back on a branch. |
 | **Branchable memory** | Fork (`branch`), experiment, then `merge` or `discard` — bitemporal, tenant-isolated. |
+| **Working memory** | An authenticated, TTL-bounded staging plane (`working-seed` / `working-query` / `working-promote` / `working-expire`). Seeds require a signed session and must stay within the write trust ceiling (`max_trust_tier`, default `4`); promotion runs through the regression gate, and unpromoted seeds expire. |
+| **Prospective memory** | Session-bound *intentions* (`intention-schedule` / `-update` / `-cancel` / `-evaluate` / `-list`) that fire when due. Trigger types include `exact_time`, `time_window`, `event`, `condition`, and `dependency_completion`; an optional `recurrence_policy` reschedules future firings under a monotonic watermark. All intention writes require a signed session. |
 
 ### Roles (OIDC → Mnemosyne)
 
@@ -253,21 +303,21 @@ Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosy
 
 - [Architecture Overview](https://github.com/onfire7777/Mnemosyne/wiki/Architecture-Overview) — component layers, write/read flows, deployment topology
 - [Getting Started](https://github.com/onfire7777/Mnemosyne/wiki/Getting-Started) — install, first capture, Postgres setup
-- [CLI Reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference) — all 91 subcommands incl. the operations/preflight suite
-- [MCP Server and Tools](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools) — transports, auth, all 48 tools
-- [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 24-table schema, RLS, and bitemporal design
+- [CLI Reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference) — all 119 subcommands incl. the memory-plane and operations/preflight suites
+- [MCP Server and Tools](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools) — transports, auth, all 59 tools
+- [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 28-table schema, RLS, and bitemporal design
 - [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
 - [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
 
 ### MCP tools (illustrative)
 
-`mcp_tools.py` exposes **48** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, and the `profile_*` user-model tools.
+`mcp_tools.py` exposes **59** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, the `profile_*` user-model tools, the working-memory tools (`working_seed` / `working_query` / `working_promote` / `working_expire`), and the prospective-memory tools (`schedule_intention` / `update_intention` / `cancel_intention` / `evaluate_intentions` / `list_intentions`).
 
-### Data model (24 tables)
+### Data model (28 tables)
 
-`sql/schema.sql` defines the canonical Postgres schema (extensions `pgcrypto` + `vector`). Vectors are `VECTOR(1024)` with HNSW indexes (`vector_cosine_ops`) on `evidence.embedding` and `assertions.embedding`; every tenant-scoped table enforces RLS via `mnemosyne_current_tenant()`.
+`sql/schema.sql` defines the canonical Postgres schema (extensions `pgcrypto` + `vector`). Vectors are `VECTOR(1024)` with HNSW indexes (`vector_cosine_ops`) on `evidence.embedding` and `assertions.embedding`; every tenant-scoped table enforces RLS via `mnemosyne_current_tenant()`. The table set is pinned against drift by `config/drift-baseline.toml` (`[schema].required_tables`) and `tests/test_config_drift.py`.
 
-`tenants` · `branches` · `evidence` · `assertions` · `justifications` · `entities` · `entity_aliases` · `relations` · `graph_ppr_cache` · `contradictions` · `procedures` · `lessons` · `preferences` · `user_latent` · `trajectories` · `self_model` · `eval_cases` · `resources` · `merges` · `deletion_log` · `conformal_calibration` · `audit_log` · `runtime_jobs` · `runtime_state`
+`tenants` · `branches` · `evidence` · `assertions` · `justifications` · `entities` · `entity_aliases` · `relations` · `graph_ppr_cache` · `contradictions` · `procedures` · `lessons` · `preferences` · `user_latent` · `trajectories` · `self_model` · `eval_cases` · `resources` · `merges` · `deletion_log` · `conformal_calibration` · `audit_log` · `runtime_jobs` · `runtime_state` · `working_memory` · `intentions` · `intention_firing_receipts` · `intention_firing_receipts_v2`
 
 ---
 
@@ -279,22 +329,23 @@ Mnemosyne/
 │   ├── engine.py            # MemoryEngine contract + LocalMemoryEngine; route() + RoutePlan
 │   ├── postgres_engine.py   # PostgresEngine: RLS, FTS, pgvector, recursive PPR, as-of
 │   ├── sqlite_engine.py     # SqliteEngine: per-tenant WAL file, shared retrieval pipeline
-│   ├── mcp_tools.py         # 48 MCP tool definitions (the TOOL_SPEC facade)
+│   ├── mcp_tools.py         # 59 MCP tool definitions (the TOOL_SPEC facade)
 │   ├── mcp_server.py        # stdio shim · SDK stdio · SDK StreamableHTTP · hosted HTTP
-│   ├── cli.py               # 91-subcommand CLI (mneme)
+│   ├── cli.py               # 119-subcommand CLI (mneme)
 │   ├── ingestion.py         # content-addressed ingest, signed provenance, media extract
 │   ├── retrieval.py         # embedding/reranker/lexical/graph adapter classes + fallbacks
 │   ├── consolidation.py     # 11-role warm-loop pipeline → promotion gate
 │   ├── gate.py              # promotion gate: protected regression cases, branch rollback
 │   ├── guard.py             # §25 anti-degradation guard (no_degradation_guard)
 │   ├── lifecycle.py         # fidelity tiers + gist-risk abstention
-│   ├── security.py          # trust tiers, capabilities, sessions, sanitization
+│   ├── security.py          # trust tiers, capabilities, signed sessions, sanitization
+│   ├── deletion.py / deletion_manifest.py  # resumable erasure ledger + fail-closed signed deletion manifest
 │   ├── self_optimization.py # shadow-first policy variants under §31 rails
 │   ├── queue.py / jobs.py / media.py   # durable queue + 7 job kinds
 │   └── providers/           # ProviderRegistry + adapter plumbing (adapter classes live in retrieval.py)
-├── sql/schema.sql           # canonical 24-table PostgreSQL schema
+├── sql/schema.sql           # canonical 28-table PostgreSQL schema
 ├── tests/                   # invariant, parity, contract, and completion suites
-├── eval/                    # §33 eval harness: recall@k / nDCG / ECE / latency SLOs
+├── eval/                    # §33 eval harness (recall@k / nDCG / ECE / latency SLOs) + eval/public signed-session action evaluator
 ├── infra/                   # Keycloak (OIDC), Vault, C2PA, provider compose stack
 ├── rust/mneme-providers/    # Provider sidecar for compact embed/rerank contracts
 ├── rust/mnemosyne-native/   # Optional PyO3 native retrieval kernels
@@ -359,6 +410,7 @@ uv run --locked python -m pytest          # local gate (live-DB tests skip witho
 - **Retrieved text is data, not instructions** — every retrieved span is sanitized (§31 Rail 6) to defend against prompt injection. The poison corpus under `tests/completion/security/` is fixture data, never executable.
 - **Tenant isolation** via Postgres RLS keyed on `mnemosyne_current_tenant()` on every tenant-scoped table.
 - **Crypto-shred erasure**: encrypted object storage and KMS/Vault-backed key-custody adapters support legal hard-delete once production custody is configured and evidenced.
+- **Signed deletion manifest**: hard-delete and erasure run through a resumable, receipted ledger (`deletion.py`) and a fail-closed semantic verifier (`deletion_manifest.py`, schema `mnemosyne.deletion_manifest.v1`) that signs the manifest and refuses to report completion unless every declared custody surface is verified swept.
 - **Provenance**: C2PA verification with scoped trust roots; manifests that match no trust rule are quarantined, not trusted.
 
 Please report vulnerabilities privately to the maintainers rather than opening a public issue.
