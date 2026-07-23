@@ -41,6 +41,11 @@ selects a Unix socket instead and takes precedence over the TCP setting.
   are clamped to the lower of two or detected physical cores. Inter-op threads
   are fixed at one, the CPU arena seam is disabled, and the model-memory seam is
   configured for mapping.
+- The production custody identity is loaded from the six
+  `ANSWERING_ORT_CUSTODY_*` fields: `PROVIDER`, `PROVIDER_SHA256`, `ARTIFACT`,
+  `ARTIFACT_SHA256`, `CONFIGURATION`, and `CONFIGURATION_SHA256`. Leaving all
+  six unset keeps the local development identity; setting any custody field
+  requires a complete valid identity or requests fail closed.
 
 ## Protocol
 
@@ -65,8 +70,9 @@ span boundaries before a successful response can leave the process.
 Failures use `{"ok":false,"error":{"code":"...","message":"..."}}`. Stable
 codes are `malformed_request`, `request_too_large`, `limit_exceeded`,
 `unsupported_operation`, `request_timed_out`, `runtime_unavailable`,
-`runtime_busy`, and `inference_failed`. This placeholder returns
-`runtime_unavailable` for valid requests because it does not load a session.
+`runtime_busy`, `identity_mismatch`, and `inference_failed`. This placeholder
+returns `runtime_unavailable` for valid requests because it does not load a
+session.
 
 The boundary rejects request bodies over 64 KiB, queries over 2,000 characters,
 more than 20 evidence rows, more than 24,000 evidence characters, and rerank
