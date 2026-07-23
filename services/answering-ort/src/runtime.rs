@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -14,6 +15,21 @@ use crate::rerank::{RerankIdentity, RerankRequest, RerankResponse};
 pub const MAX_IN_FLIGHT: usize = 1;
 pub const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 pub const MAX_EMBEDDING_DIMENSIONS: usize = 4_096;
+
+const CUSTODY_PROVIDER_ENV: &str = "ANSWERING_ORT_CUSTODY_PROVIDER";
+const CUSTODY_PROVIDER_SHA256_ENV: &str = "ANSWERING_ORT_CUSTODY_PROVIDER_SHA256";
+const CUSTODY_ARTIFACT_ENV: &str = "ANSWERING_ORT_CUSTODY_ARTIFACT";
+const CUSTODY_ARTIFACT_SHA256_ENV: &str = "ANSWERING_ORT_CUSTODY_ARTIFACT_SHA256";
+const CUSTODY_CONFIGURATION_ENV: &str = "ANSWERING_ORT_CUSTODY_CONFIGURATION";
+const CUSTODY_CONFIGURATION_SHA256_ENV: &str = "ANSWERING_ORT_CUSTODY_CONFIGURATION_SHA256";
+const CUSTODY_ENV_NAMES: [&str; 6] = [
+    CUSTODY_PROVIDER_ENV,
+    CUSTODY_PROVIDER_SHA256_ENV,
+    CUSTODY_ARTIFACT_ENV,
+    CUSTODY_ARTIFACT_SHA256_ENV,
+    CUSTODY_CONFIGURATION_ENV,
+    CUSTODY_CONFIGURATION_SHA256_ENV,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -47,13 +63,50 @@ impl RuntimeConfig {
     }
 
     pub fn from_env() -> Self {
-        let model_path = std::env::var_os("ANSWERING_ORT_MODEL_PATH").map(PathBuf::from);
-        let requested_threads = std::env::var("ANSWERING_ORT_INTRA_OP_THREADS")
-            .ok()
+        Self::from_env_with(|name| std::env::var_os(name))
+    }
+
+    fn from_env_with<F>(var_os: F) -> Self
+    where
+        F: Fn(&str) -> Option<OsString>,
+    {
+        let model_path = var_os("ANSWERING_ORT_MODEL_PATH").map(PathBuf::from);
+        let requested_threads = env_string(&var_os, "ANSWERING_ORT_INTRA_OP_THREADS")
             .and_then(|value| value.parse().ok())
             .unwrap_or(2);
-        Self::new(model_path, requested_threads)
+        let mut config = Self::new(model_path, requested_threads);
+        if let Some(custody_identity) = custody_identity_from_env(&var_os) {
+            config.custody_identity = custody_identity;
+        }
+        config
     }
+}
+
+fn env_string<F>(var_os: &F, name: &str) -> Option<String>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    var_os(name).map(|value| value.into_string().unwrap_or_default())
+}
+
+fn custody_identity_from_env<F>(var_os: &F) -> Option<CustodyIdentity>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    let values = CUSTODY_ENV_NAMES.map(|name| env_string(var_os, name));
+    if values.iter().all(Option::is_none) {
+        return None;
+    }
+    let [provider, provider_sha256, artifact, artifact_sha256, configuration, configuration_sha256] =
+        values;
+    Some(CustodyIdentity {
+        provider: provider.unwrap_or_default(),
+        provider_sha256: provider_sha256.unwrap_or_default(),
+        artifact: artifact.unwrap_or_default(),
+        artifact_sha256: artifact_sha256.unwrap_or_default(),
+        configuration: configuration.unwrap_or_default(),
+        configuration_sha256: configuration_sha256.unwrap_or_default(),
+    })
 }
 
 fn clamp_intra_op_threads(requested: usize, physical_cores: usize) -> usize {
@@ -890,15 +943,86 @@ mod tests {
     }
 
     #[test]
+    fn runtime_config_loads_trusted_custody_identity_from_environment() {
+        let configured = CustodyIdentity {
+            provider: "provider-prod-v1".into(),
+            provider_sha256: "1".repeat(64),
+            artifact: "artifact-prod-v1".into(),
+            artifact_sha256: "2".repeat(64),
+            configuration: "configuration-prod-v1".into(),
+            configuration_sha256: "3".repeat(64),
+        };
+        let config = RuntimeConfig::from_env_with(|name| match name {
+            "ANSWERING_ORT_MODEL_PATH" => Some(OsString::from("/models/prod.onnx")),
+            "ANSWERING_ORT_INTRA_OP_THREADS" => Some(OsString::from("64")),
+            "ANSWERING_ORT_CUSTODY_PROVIDER" => Some(OsString::from(&configured.provider)),
+            "ANSWERING_ORT_CUSTODY_PROVIDER_SHA256" => {
+                Some(OsString::from(&configured.provider_sha256))
+            }
+            "ANSWERING_ORT_CUSTODY_ARTIFACT" => Some(OsString::from(&configured.artifact)),
+            "ANSWERING_ORT_CUSTODY_ARTIFACT_SHA256" => {
+                Some(OsString::from(&configured.artifact_sha256))
+            }
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION" => {
+                Some(OsString::from(&configured.configuration))
+            }
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION_SHA256" => {
+                Some(OsString::from(&configured.configuration_sha256))
+            }
+            _ => None,
+        });
+
+        assert_eq!(config.model_path, Some(PathBuf::from("/models/prod.onnx")));
+        assert_eq!(
+            config.intra_op_threads,
+            num_cpus::get_physical().clamp(1, 2)
+        );
+        assert_eq!(config.custody_identity, configured);
+    }
+
+    #[test]
+    fn unset_custody_environment_keeps_development_identity() {
+        let config = RuntimeConfig::from_env_with(|_| None);
+
+        assert_eq!(config.custody_identity, CustodyIdentity::development());
+    }
+
+    #[test]
+    fn partial_custody_environment_fails_closed() {
+        let config = RuntimeConfig::from_env_with(|name| match name {
+            "ANSWERING_ORT_CUSTODY_PROVIDER" => Some(OsString::from("provider-prod-v1")),
+            _ => None,
+        });
+
+        assert!(config.custody_identity.validate().is_err());
+    }
+
+    #[test]
+    fn malformed_custody_environment_fails_closed() {
+        let config = RuntimeConfig::from_env_with(|name| match name {
+            "ANSWERING_ORT_CUSTODY_PROVIDER" => Some(OsString::from("provider-prod-v1")),
+            "ANSWERING_ORT_CUSTODY_PROVIDER_SHA256" => Some(OsString::from("not-a-digest")),
+            "ANSWERING_ORT_CUSTODY_ARTIFACT" => Some(OsString::from("artifact-prod-v1")),
+            "ANSWERING_ORT_CUSTODY_ARTIFACT_SHA256" => Some(OsString::from("2".repeat(64))),
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION" => Some(OsString::from("configuration-prod-v1")),
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION_SHA256" => Some(OsString::from("3".repeat(64))),
+            _ => None,
+        });
+
+        assert!(config.custody_identity.validate().is_err());
+    }
+
+    #[test]
     fn process_runtime_is_shared_and_unavailable_fails_closed() {
         let first = shared_runtime();
         let second = shared_runtime();
         assert!(std::ptr::eq(first, second));
+        let expected_identity = first.custody_identity().clone();
 
         let response = first.execute(
             Request::Embed {
                 protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
-                expected_identity: CustodyIdentity::development(),
+                expected_identity,
                 query: "bounded".into(),
             },
             Deadline::default(),
