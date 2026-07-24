@@ -177,6 +177,18 @@ def standing(unit_signals: Mapping[str, Any] | None) -> Standing:
     )
 
 
+def effective_independent_external_count(unit_signals: Mapping[str, Any] | None) -> int:
+    """Return Standing's effective independent *external* corroboration count.
+
+    Self-generated / unknown reality classes always yield 0 — the §23.3 fact
+    gate must never treat self-echo as external corroboration.
+    """
+
+    score = standing(unit_signals)
+    inputs = score.explain.get("inputs", {})
+    return int(inputs.get("effective_independent_corroboration_count", 0) or 0)
+
+
 def standing_from_authority_state(*, answer_authority: bool, critical_path: bool) -> dict[str, Any]:
     """Mirror an authority/critical-path state as a Standing report."""
 
