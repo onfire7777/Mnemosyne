@@ -9,6 +9,7 @@ from typing import Any
 
 from mnemosyne.ids import new_id
 from mnemosyne.models import parse_dt
+from mnemosyne.text import hashing_embedding
 
 
 class UserMemoryKind(str, Enum):
@@ -86,6 +87,29 @@ class LatentUserProfile:
         copy = dict(data)
         copy["updated_at"] = parse_dt(copy.get("updated_at")) or datetime.now(UTC)
         return cls(**copy)
+
+
+def build_advisory_latent_profile(
+    tenant_id: str,
+    user_id: str,
+    summary: str,
+    *,
+    dims: int = 64,
+) -> LatentUserProfile:
+    """Build an advisory latent profile from free-text summary (FR-16 residual #26).
+
+    Uses the deterministic hashing embedding as a local stand-in so the dual-user
+    model can carry a fixed-width advisory vector without ML deps in Python core.
+    Explicit/hard preferences still outrank this advisory signal.
+    """
+
+    text = (summary or "").strip() or "empty"
+    return LatentUserProfile(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        embedding=hashing_embedding(text, dims=dims),
+        summary=text,
+    )
 
 
 @dataclass(slots=True)
