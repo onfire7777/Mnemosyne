@@ -176,6 +176,86 @@ def test_schema_has_single_preference_valid_to_column() -> None:
     assert len(re.findall(r"\bvalid_to\b", match.group(1))) == 1
 
 
+def test_section7_c_pg_residual_pins_evidence_collapse_and_relation_preference_columns() -> None:
+    """Lease C residual for BLUEPRINT §7 [C] items #2/#3/#4 (Postgres DDL truth).
+
+    #2 — Evidence bitemporal collapse is **documented**: evidence carries a
+    single ``created_at`` custody clock (no ``event_time``/``recorded_time``).
+    Assertion bitemporality remains on valid_from/valid_to/transaction_time/
+    recorded_time.
+
+    #3 — ``relations`` keeps weight + recorded/expired + justification + status
+    (CREATE body + migration-safe ALTER).
+
+    #4 — ``preferences.superseded_by`` is present (CREATE + ALTER).
+    """
+    schema = Path("sql/schema.sql").read_text(encoding="utf-8")
+    evidence = re.search(
+        r"CREATE TABLE IF NOT EXISTS evidence \((.*?)\);", schema, re.S
+    )
+    assert evidence is not None
+    body = evidence.group(1)
+    assert re.search(r"\bcreated_at\b", body)
+    assert not re.search(r"\bevent_time\b", body)
+    assert not re.search(r"\brecorded_time\b", body)
+
+    assertions = re.search(
+        r"CREATE TABLE IF NOT EXISTS assertions \((.*?)\);", schema, re.S
+    )
+    assert assertions is not None
+    abody = assertions.group(1)
+    for col in ("valid_from", "valid_to", "transaction_time", "recorded_time"):
+        assert re.search(rf"\b{col}\b", abody), col
+
+    relations = re.search(
+        r"CREATE TABLE IF NOT EXISTS relations \((.*?)\);", schema, re.S
+    )
+    assert relations is not None
+    rbody = relations.group(1)
+    for col in ("weight", "recorded_at", "expired_at", "justification_id", "status"):
+        assert re.search(rf"\b{col}\b", rbody), col
+    assert "ALTER TABLE relations ADD COLUMN IF NOT EXISTS weight" in schema
+    assert "ALTER TABLE relations ADD COLUMN IF NOT EXISTS recorded_at" in schema
+    assert "ALTER TABLE relations ADD COLUMN IF NOT EXISTS expired_at" in schema
+    assert "ALTER TABLE relations ADD COLUMN IF NOT EXISTS justification_id" in schema
+    assert "ALTER TABLE relations ADD COLUMN IF NOT EXISTS status" in schema
+
+    preferences = re.search(
+        r"CREATE TABLE IF NOT EXISTS preferences \((.*?)\);", schema, re.S
+    )
+    assert preferences is not None
+    assert re.search(r"\bsuperseded_by\b", preferences.group(1))
+    assert "ALTER TABLE preferences ADD COLUMN IF NOT EXISTS superseded_by" in schema
+
+
+def test_section7_c_sqlite_residual_pins_evidence_collapse_and_relation_columns() -> None:
+    """Lease C residual #2/#3 on SQLite DDL (schema.py ENSURE_STATEMENTS).
+
+    Evidence collapses to created_at only (same documented collapse as Postgres).
+    Relations carry weight/recorded_at/expired_at/justification_id/status for
+    storage parity with Postgres residual #3 (model field expansion remains CR).
+    """
+    from mnemosyne.sqlite_schema import ENSURE_STATEMENTS
+
+    joined = "\n".join(ENSURE_STATEMENTS)
+    evidence = re.search(
+        r"CREATE TABLE IF NOT EXISTS evidence \((.*?)\);", joined, re.S
+    )
+    assert evidence is not None
+    body = evidence.group(1)
+    assert re.search(r"\bcreated_at\b", body)
+    assert not re.search(r"\bevent_time\b", body)
+    assert not re.search(r"\brecorded_time\b", body)
+
+    relations = re.search(
+        r"CREATE TABLE IF NOT EXISTS relations \((.*?)\);", joined, re.S
+    )
+    assert relations is not None
+    rbody = relations.group(1)
+    for col in ("weight", "recorded_at", "expired_at", "justification_id", "status"):
+        assert re.search(rf"\b{col}\b", rbody), col
+
+
 def test_schema_enables_tenant_row_level_security() -> None:
     schema = Path("sql/schema.sql").read_text(encoding="utf-8")
 
