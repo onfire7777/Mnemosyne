@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: answering-ort custody protocol merged to main on 2026-07-23 via PR #42 as main@074c101 and PR #43 as main@bd48b3e; services/answering-ort/ is a bounded, local-only Rust ONNX (ort) compact-answering sidecar skeleton (W5) that loads its custody identity from the environment and fails closed with runtime_unavailable (no ONNX model loaded, no runtime parity claimed). This builds on the W3 prospective-memory + working-memory plane fully merged across Local/Postgres/Sqlite via PR #39 as main@0784340, the W2 D5 signed deletion manifest (deletion.py/deletion_manifest.py), and the W3 I0R signed-session public-action evaluator (eval/public/action_cli.py); W1 production-Postgres parity, runtime readiness, grounded-reader development QA, the protected attempt, and the W4/W5 external-adapter GATEs remain operator-gated and unchanged
-last_updated: "2026-07-23T19:53:46Z"
-last_activity: 2026-07-23
+stopped_at: 12-04-02 public-CLI-only internal qa_hard_v2 evaluator landed on main from the AgentsMesh team branch (eval/datasets/v2/run_grounded_qa_v2.py + tests/test_grounded_qa_v2.py + eval/reports/phase-12-grounded-qa.md, with preserve additions to tests/test_public_longmemeval_qa.py and tests/test_public_requirement_truth.py); the evaluator binds the immutable 12-04-01 freeze phase12-candidate-v19 (manifest sha256 e81fc655…) with scorer-isolated gold, 24-case single-pass, order-drift refusal, and external O_EXCL evidence paths; CAP-003 and BENCH-005 remain Partial — live EM/F1 ≥ 0.85 was not measured (Ollama unreachable from the agent workspace) and the protected/held-out 12-04-03 attempt remains operator-gated. Earlier: answering-ort custody protocol merged 2026-07-23 via PR #42 main@074c101 and PR #43 main@bd48b3e (local-only W5 skeleton, fails closed runtime_unavailable); W3 memory planes + W2 D5 deletion manifest + I0R evaluator merged via PR #39 main@0784340; W1 production parity, runtime readiness, protected attempt, and W4/W5 external-adapter GATEs remain operator-gated and unchanged
+last_updated: "2026-07-24T16:05:00Z"
+last_activity: 2026-07-24
 progress:
   total_phases: 7
   completed_phases: 2
