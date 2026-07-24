@@ -819,6 +819,20 @@ class SqliteEngine:
                     "ALTER TABLE working_memory ADD COLUMN trust_tier INTEGER NOT NULL "
                     "DEFAULT 0 CHECK (trust_tier BETWEEN 0 AND 4)"
                 )
+            # Lease C residual #3 (Plan CR-C1 admit): migration-safe relation columns.
+            relation_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(relations)")
+            }
+            relation_alters = (
+                ("weight", "ALTER TABLE relations ADD COLUMN weight REAL NOT NULL DEFAULT 1.0"),
+                ("recorded_at", "ALTER TABLE relations ADD COLUMN recorded_at TEXT"),
+                ("expired_at", "ALTER TABLE relations ADD COLUMN expired_at TEXT"),
+                ("justification_id", "ALTER TABLE relations ADD COLUMN justification_id TEXT"),
+                ("status", "ALTER TABLE relations ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"),
+            )
+            for name, statement in relation_alters:
+                if name not in relation_columns:
+                    conn.execute(statement)
             conn.execute(
                 "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
