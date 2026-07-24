@@ -135,13 +135,18 @@ def test_oracle_portable_when_engine_report_requires_cursor() -> None:
     cid_a = _evidence(engine, "The preferred database is Postgres.")
     cid_b = _evidence(engine, "Independent: preferred database is Postgres.", source_type="chat")
     worker = ConsolidationWorker(engine, [_case()])
+    original = engine._independent_corroboration_report
 
     def _boom(*_a, **_k):  # noqa: ANN001
         raise TypeError("missing required positional argument: 'cur'")
 
     engine._independent_corroboration_report = _boom  # type: ignore[method-assign]
-    signals = worker._fact_unit_signals_for_job(_job([cid_a, cid_b]))
+    try:
+        signals = worker._fact_unit_signals_for_job(_job([cid_a, cid_b]))
+    finally:
+        engine._independent_corroboration_report = original  # type: ignore[method-assign]
     assert int(signals["independent_corroboration_count"]) >= 2
     assert signals["reality_class"] == "grounded"
+    # Full promote path with restored oracle (signals path already exercised above).
     result = worker.run_job(_job([cid_a, cid_b], signature="pg-portable"))
     assert result.promoted is True
