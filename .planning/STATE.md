@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: W3 prospective-memory + working-memory plane fully merged across Local/Postgres/Sqlite via PR #39 as main@0784340 (schedule/update/cancel/evaluate/list intentions; put/get/list/expire/promote working memory; session-authenticated scheduling and working-seed writes), together with the W2 D5 signed deletion manifest (deletion.py/deletion_manifest.py) and the W3 I0R signed-session public-action evaluator (eval/public/action_cli.py driving development-split PM-Bench/TriggerBench/Working-Memory action suites); W1 production-Postgres parity, runtime readiness, grounded-reader development QA, the protected attempt, and the W4/W5 external-adapter GATEs remain operator-gated and unchanged
-last_updated: "2026-07-20T19:37:08Z"
-last_activity: 2026-07-20
+stopped_at: answering-ort custody protocol merged to main on 2026-07-23 via PR #42 as main@074c101 and PR #43 as main@bd48b3e; services/answering-ort/ is a bounded, local-only Rust ONNX (ort) compact-answering sidecar skeleton (W5) that loads its custody identity from the environment and fails closed with runtime_unavailable (no ONNX model loaded, no runtime parity claimed). This builds on the W3 prospective-memory + working-memory plane fully merged across Local/Postgres/Sqlite via PR #39 as main@0784340, the W2 D5 signed deletion manifest (deletion.py/deletion_manifest.py), and the W3 I0R signed-session public-action evaluator (eval/public/action_cli.py); W1 production-Postgres parity, runtime readiness, grounded-reader development QA, the protected attempt, and the W4/W5 external-adapter GATEs remain operator-gated and unchanged
+last_updated: "2026-07-23T19:53:46Z"
+last_activity: 2026-07-23
 progress:
   total_phases: 7
   completed_phases: 2
@@ -229,6 +229,8 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 ## Session Continuity
 
 Current continuation: see **Latest checkpoint** below.
+
+Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
 Latest checkpoint (2026-07-20): PR #39 merged to `main` as `0784340`, delivering the full W3 prospective-memory and working-memory planes across Local, Postgres, and Sqlite engines, the W2 D5 signed deletion manifest (`src/mnemosyne/deletion.py` / `deletion_manifest.py`), the explicit cross-engine `assertion_id_map` branch-merge identity map, and the W3 I0R signed-session public-action evaluator (`eval/public/action_cli.py`) with the development-split `pm-bench-development`, `triggerbench-development`, and `working-memory-action-development` suites. All three action suites are `publishable:false`/`pbpp_headline_eligible:false`, so no public benchmark or headline claim changed. CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`. Documentation (README, `docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`) and these planning files were reconciled to the merged code. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 

@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -5,13 +6,30 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::embed::{EmbedRequest, EmbedResponse, EmbedSpace, EmbedderIdentity};
-use crate::protocol::{ApiError, Evidence, Output, ReadPrediction, Request, Response};
+use crate::protocol::{
+    ApiError, CustodyIdentity, Evidence, Output, ReadPrediction, Request, Response,
+};
 use crate::reader::{ReaderAnswer, ReaderIdentity, ReaderPrediction, ReaderRequest};
 use crate::rerank::{RerankIdentity, RerankRequest, RerankResponse};
 
 pub const MAX_IN_FLIGHT: usize = 1;
 pub const REQUEST_DEADLINE: Duration = Duration::from_secs(30);
 pub const MAX_EMBEDDING_DIMENSIONS: usize = 4_096;
+
+const CUSTODY_PROVIDER_ENV: &str = "ANSWERING_ORT_CUSTODY_PROVIDER";
+const CUSTODY_PROVIDER_SHA256_ENV: &str = "ANSWERING_ORT_CUSTODY_PROVIDER_SHA256";
+const CUSTODY_ARTIFACT_ENV: &str = "ANSWERING_ORT_CUSTODY_ARTIFACT";
+const CUSTODY_ARTIFACT_SHA256_ENV: &str = "ANSWERING_ORT_CUSTODY_ARTIFACT_SHA256";
+const CUSTODY_CONFIGURATION_ENV: &str = "ANSWERING_ORT_CUSTODY_CONFIGURATION";
+const CUSTODY_CONFIGURATION_SHA256_ENV: &str = "ANSWERING_ORT_CUSTODY_CONFIGURATION_SHA256";
+const CUSTODY_ENV_NAMES: [&str; 6] = [
+    CUSTODY_PROVIDER_ENV,
+    CUSTODY_PROVIDER_SHA256_ENV,
+    CUSTODY_ARTIFACT_ENV,
+    CUSTODY_ARTIFACT_SHA256_ENV,
+    CUSTODY_CONFIGURATION_ENV,
+    CUSTODY_CONFIGURATION_SHA256_ENV,
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -20,6 +38,7 @@ pub struct RuntimeConfig {
     pub memory_map_model: bool,
     pub intra_op_threads: usize,
     pub inter_op_threads: usize,
+    pub custody_identity: CustodyIdentity,
 }
 
 impl RuntimeConfig {
@@ -33,17 +52,61 @@ impl RuntimeConfig {
                 num_cpus::get_physical(),
             ),
             inter_op_threads: 1,
+            custody_identity: CustodyIdentity::development(),
         }
     }
 
+    pub fn with_custody_identity(mut self, identity: CustodyIdentity) -> Result<Self, ApiError> {
+        identity.validate()?;
+        self.custody_identity = identity;
+        Ok(self)
+    }
+
     pub fn from_env() -> Self {
-        let model_path = std::env::var_os("ANSWERING_ORT_MODEL_PATH").map(PathBuf::from);
-        let requested_threads = std::env::var("ANSWERING_ORT_INTRA_OP_THREADS")
-            .ok()
+        Self::from_env_with(|name| std::env::var_os(name))
+    }
+
+    fn from_env_with<F>(var_os: F) -> Self
+    where
+        F: Fn(&str) -> Option<OsString>,
+    {
+        let model_path = var_os("ANSWERING_ORT_MODEL_PATH").map(PathBuf::from);
+        let requested_threads = env_string(&var_os, "ANSWERING_ORT_INTRA_OP_THREADS")
             .and_then(|value| value.parse().ok())
             .unwrap_or(2);
-        Self::new(model_path, requested_threads)
+        let mut config = Self::new(model_path, requested_threads);
+        if let Some(custody_identity) = custody_identity_from_env(&var_os) {
+            config.custody_identity = custody_identity;
+        }
+        config
     }
+}
+
+fn env_string<F>(var_os: &F, name: &str) -> Option<String>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    var_os(name).map(|value| value.into_string().unwrap_or_default())
+}
+
+fn custody_identity_from_env<F>(var_os: &F) -> Option<CustodyIdentity>
+where
+    F: Fn(&str) -> Option<OsString>,
+{
+    let values = CUSTODY_ENV_NAMES.map(|name| env_string(var_os, name));
+    if values.iter().all(Option::is_none) {
+        return None;
+    }
+    let [provider, provider_sha256, artifact, artifact_sha256, configuration, configuration_sha256] =
+        values;
+    Some(CustodyIdentity {
+        provider: provider.unwrap_or_default(),
+        provider_sha256: provider_sha256.unwrap_or_default(),
+        artifact: artifact.unwrap_or_default(),
+        artifact_sha256: artifact_sha256.unwrap_or_default(),
+        configuration: configuration.unwrap_or_default(),
+        configuration_sha256: configuration_sha256.unwrap_or_default(),
+    })
 }
 
 fn clamp_intra_op_threads(requested: usize, physical_cores: usize) -> usize {
@@ -267,13 +330,16 @@ impl InferenceSession for ComponentSession {
             return Err(ApiError::timed_out());
         }
         match request {
-            Request::Embed { query } => self.infer_embed(query, deadline),
+            Request::Embed { query, .. } => self.infer_embed(query, deadline),
             Request::Rerank {
                 query,
                 evidence,
                 rank_width,
+                ..
             } => self.infer_rerank(query, evidence, *rank_width, deadline),
-            Request::Read { query, evidence } => self.infer_read(query, evidence, deadline),
+            Request::Read {
+                query, evidence, ..
+            } => self.infer_read(query, evidence, deadline),
         }
     }
 }
@@ -497,22 +563,33 @@ impl Runtime {
         &self.config
     }
 
+    pub fn custody_identity(&self) -> &CustodyIdentity {
+        &self.config.custody_identity
+    }
+
     pub fn execute(&self, request: Request, deadline: Deadline) -> Response {
+        let attestation = self.custody_identity().clone();
+        if attestation.validate().is_err() {
+            return Response::failure_with(attestation, ApiError::identity_mismatch());
+        }
+        if request.expected_identity() != self.custody_identity() {
+            return Response::failure_with(attestation, ApiError::identity_mismatch());
+        }
         if deadline.is_expired() {
-            return Response::failure(ApiError::timed_out());
+            return Response::failure_with(attestation, ApiError::timed_out());
         }
 
         let permit = match InFlightPermit::acquire(&self.in_flight) {
             Some(permit) => permit,
-            None => return Response::failure(ApiError::busy()),
+            None => return Response::failure_with(attestation, ApiError::busy()),
         };
 
         let Some(session) = &self.session else {
-            return Response::failure(ApiError::unavailable());
+            return Response::failure_with(attestation, ApiError::unavailable());
         };
 
         let Some(remaining) = deadline.remaining() else {
-            return Response::failure(ApiError::timed_out());
+            return Response::failure_with(attestation, ApiError::timed_out());
         };
         let session = Arc::clone(session);
         let worker_request = request.clone();
@@ -525,18 +602,24 @@ impl Runtime {
             })
             .is_err()
         {
-            return Response::failure(ApiError::inference_failed());
+            return Response::failure_with(attestation, ApiError::inference_failed());
         }
 
         match receiver.recv_timeout(remaining) {
-            Ok(_) if deadline.is_expired() => Response::failure(ApiError::timed_out()),
+            Ok(_) if deadline.is_expired() => {
+                Response::failure_with(attestation, ApiError::timed_out())
+            }
             Ok(Ok(output)) => match validate_output(&request, &output) {
-                Ok(()) => Response::success(output),
-                Err(error) => Response::failure(error),
+                Ok(()) => Response::success_with(attestation, output),
+                Err(error) => Response::failure_with(attestation, error),
             },
-            Ok(Err(error)) => Response::failure(error),
-            Err(RecvTimeoutError::Timeout) => Response::failure(ApiError::timed_out()),
-            Err(RecvTimeoutError::Disconnected) => Response::failure(ApiError::inference_failed()),
+            Ok(Err(error)) => Response::failure_with(attestation, error),
+            Err(RecvTimeoutError::Timeout) => {
+                Response::failure_with(attestation, ApiError::timed_out())
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                Response::failure_with(attestation, ApiError::inference_failed())
+            }
         }
     }
 }
@@ -698,6 +781,18 @@ mod tests {
         }
     }
 
+    fn protocol_body(operation: &str, fields: serde_json::Value) -> Vec<u8> {
+        let mut body = serde_json::json!({
+            "protocol_version": crate::protocol::PROTOCOL_VERSION,
+            "expected_identity": CustodyIdentity::development(),
+            "operation": operation,
+        });
+        body.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        serde_json::to_vec(&body).unwrap()
+    }
+
     struct BlockingSession {
         started: Arc<Barrier>,
         release: Arc<Barrier>,
@@ -848,13 +943,86 @@ mod tests {
     }
 
     #[test]
+    fn runtime_config_loads_trusted_custody_identity_from_environment() {
+        let configured = CustodyIdentity {
+            provider: "provider-prod-v1".into(),
+            provider_sha256: "1".repeat(64),
+            artifact: "artifact-prod-v1".into(),
+            artifact_sha256: "2".repeat(64),
+            configuration: "configuration-prod-v1".into(),
+            configuration_sha256: "3".repeat(64),
+        };
+        let config = RuntimeConfig::from_env_with(|name| match name {
+            "ANSWERING_ORT_MODEL_PATH" => Some(OsString::from("/models/prod.onnx")),
+            "ANSWERING_ORT_INTRA_OP_THREADS" => Some(OsString::from("64")),
+            "ANSWERING_ORT_CUSTODY_PROVIDER" => Some(OsString::from(&configured.provider)),
+            "ANSWERING_ORT_CUSTODY_PROVIDER_SHA256" => {
+                Some(OsString::from(&configured.provider_sha256))
+            }
+            "ANSWERING_ORT_CUSTODY_ARTIFACT" => Some(OsString::from(&configured.artifact)),
+            "ANSWERING_ORT_CUSTODY_ARTIFACT_SHA256" => {
+                Some(OsString::from(&configured.artifact_sha256))
+            }
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION" => {
+                Some(OsString::from(&configured.configuration))
+            }
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION_SHA256" => {
+                Some(OsString::from(&configured.configuration_sha256))
+            }
+            _ => None,
+        });
+
+        assert_eq!(config.model_path, Some(PathBuf::from("/models/prod.onnx")));
+        assert_eq!(
+            config.intra_op_threads,
+            num_cpus::get_physical().clamp(1, 2)
+        );
+        assert_eq!(config.custody_identity, configured);
+    }
+
+    #[test]
+    fn unset_custody_environment_keeps_development_identity() {
+        let config = RuntimeConfig::from_env_with(|_| None);
+
+        assert_eq!(config.custody_identity, CustodyIdentity::development());
+    }
+
+    #[test]
+    fn partial_custody_environment_fails_closed() {
+        let config = RuntimeConfig::from_env_with(|name| match name {
+            "ANSWERING_ORT_CUSTODY_PROVIDER" => Some(OsString::from("provider-prod-v1")),
+            _ => None,
+        });
+
+        assert!(config.custody_identity.validate().is_err());
+    }
+
+    #[test]
+    fn malformed_custody_environment_fails_closed() {
+        let config = RuntimeConfig::from_env_with(|name| match name {
+            "ANSWERING_ORT_CUSTODY_PROVIDER" => Some(OsString::from("provider-prod-v1")),
+            "ANSWERING_ORT_CUSTODY_PROVIDER_SHA256" => Some(OsString::from("not-a-digest")),
+            "ANSWERING_ORT_CUSTODY_ARTIFACT" => Some(OsString::from("artifact-prod-v1")),
+            "ANSWERING_ORT_CUSTODY_ARTIFACT_SHA256" => Some(OsString::from("2".repeat(64))),
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION" => Some(OsString::from("configuration-prod-v1")),
+            "ANSWERING_ORT_CUSTODY_CONFIGURATION_SHA256" => Some(OsString::from("3".repeat(64))),
+            _ => None,
+        });
+
+        assert!(config.custody_identity.validate().is_err());
+    }
+
+    #[test]
     fn process_runtime_is_shared_and_unavailable_fails_closed() {
         let first = shared_runtime();
         let second = shared_runtime();
         assert!(std::ptr::eq(first, second));
+        let expected_identity = first.custody_identity().clone();
 
         let response = first.execute(
             Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity,
                 query: "bounded".into(),
             },
             Deadline::default(),
@@ -866,7 +1034,11 @@ mod tests {
     fn expired_deadline_fails_before_session_access() {
         let runtime = Runtime::unavailable(RuntimeConfig::default());
         let response = runtime.execute(
-            Request::Embed { query: "q".into() },
+            Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
+                query: "q".into(),
+            },
             Deadline::from_start(Instant::now() - Duration::from_secs(31)),
         );
         assert_eq!(response.error.unwrap().code, ErrorCode::RequestTimedOut);
@@ -882,7 +1054,14 @@ mod tests {
         );
         assert!(
             success
-                .execute(Request::Embed { query: "q".into() }, Deadline::default())
+                .execute(
+                    Request::Embed {
+                        protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                        expected_identity: CustodyIdentity::development(),
+                        query: "q".into()
+                    },
+                    Deadline::default()
+                )
                 .ok
         );
 
@@ -895,7 +1074,14 @@ mod tests {
         );
         assert_eq!(
             failure
-                .execute(Request::Embed { query: "q".into() }, Deadline::default())
+                .execute(
+                    Request::Embed {
+                        protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                        expected_identity: CustodyIdentity::development(),
+                        query: "q".into()
+                    },
+                    Deadline::default()
+                )
                 .error
                 .unwrap()
                 .code,
@@ -917,7 +1103,7 @@ mod tests {
         );
 
         let embed = handle_json(
-            br#"{"operation":"embed","query":"bounded query"}"#,
+            &protocol_body("embed", serde_json::json!({"query": "bounded query"})),
             &runtime,
             Deadline::default(),
         );
@@ -928,7 +1114,17 @@ mod tests {
         assert_eq!(embedding[0], 1.0);
 
         let rerank = handle_json(
-            br#"{"operation":"rerank","query":"bounded query","evidence":[{"id":"first","text":"first evidence"},{"id":"second","text":"second evidence"}],"rank_width":2}"#,
+            &protocol_body(
+                "rerank",
+                serde_json::json!({
+                    "query": "bounded query",
+                    "evidence": [
+                        {"id": "first", "text": "first evidence"},
+                        {"id": "second", "text": "second evidence"}
+                    ],
+                    "rank_width": 2
+                }),
+            ),
             &runtime,
             Deadline::default(),
         );
@@ -940,7 +1136,13 @@ mod tests {
         );
 
         let read = handle_json(
-            br#"{"operation":"read","query":"what is the answer","evidence":[{"id":"fact-1","text":"alpha beta"}]}"#,
+            &protocol_body(
+                "read",
+                serde_json::json!({
+                    "query": "what is the answer",
+                    "evidence": [{"id": "fact-1", "text": "alpha beta"}]
+                }),
+            ),
             &runtime,
             Deadline::default(),
         );
@@ -981,6 +1183,8 @@ mod tests {
         );
         let response = runtime.execute(
             Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "query".into(),
             },
             Deadline::default(),
@@ -991,6 +1195,64 @@ mod tests {
         );
         assert!(!response.ok);
         assert!(response.result.is_none());
+    }
+
+    #[test]
+    fn custody_identity_is_configured_not_adopted_from_requests() {
+        let configured = CustodyIdentity {
+            provider: "configured-provider".into(),
+            provider_sha256: "1".repeat(64),
+            artifact: "configured-artifact".into(),
+            artifact_sha256: "2".repeat(64),
+            configuration: "configured-configuration".into(),
+            configuration_sha256: "3".repeat(64),
+        };
+        let config = RuntimeConfig::default()
+            .with_custody_identity(configured.clone())
+            .unwrap();
+        let runtime = Runtime::with_session(
+            config,
+            Arc::new(FixedSession(Ok(Output::Embed {
+                embedding: vec![1.0],
+            }))),
+        );
+
+        let matching = Request::Embed {
+            protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+            expected_identity: configured.clone(),
+            query: "q".into(),
+        };
+        let success = runtime.execute(matching, Deadline::default());
+        assert!(success.ok);
+        assert_eq!(success.attestation, configured);
+
+        for field in 0..6 {
+            let mut drifted = configured.clone();
+            match field {
+                0 => drifted.provider.push_str("-drift"),
+                1 => drifted.provider_sha256 = "4".repeat(64),
+                2 => drifted.artifact.push_str("-drift"),
+                3 => drifted.artifact_sha256 = "4".repeat(64),
+                4 => drifted.configuration.push_str("-drift"),
+                5 => drifted.configuration_sha256 = "4".repeat(64),
+                _ => unreachable!(),
+            }
+            let response = runtime.execute(
+                Request::Embed {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                    expected_identity: drifted,
+                    query: "q".into(),
+                },
+                Deadline::default(),
+            );
+            assert_eq!(
+                response.error.as_ref().unwrap().code,
+                ErrorCode::IdentityMismatch
+            );
+            assert_eq!(response.attestation, configured);
+            assert!(!response.ok);
+            assert!(response.result.is_none());
+        }
     }
 
     #[test]
@@ -1009,6 +1271,8 @@ mod tests {
         let worker = thread::spawn(move || {
             worker_runtime.execute(
                 Request::Embed {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                    expected_identity: CustodyIdentity::development(),
                     query: "one".into(),
                 },
                 Deadline::default(),
@@ -1018,6 +1282,8 @@ mod tests {
 
         let busy = runtime.execute(
             Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "two".into(),
             },
             Deadline::default(),
@@ -1028,6 +1294,8 @@ mod tests {
 
         let later = runtime.execute(
             Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "three".into(),
             },
             Deadline::default(),
@@ -1052,6 +1320,8 @@ mod tests {
         let request = thread::spawn(move || {
             worker_runtime.execute(
                 Request::Embed {
+                    protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                    expected_identity: CustodyIdentity::development(),
                     query: "one".into(),
                 },
                 Deadline::after(Duration::from_millis(20)),
@@ -1064,6 +1334,8 @@ mod tests {
             runtime
                 .execute(
                     Request::Embed {
+                        protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                        expected_identity: CustodyIdentity::development(),
                         query: "two".into()
                     },
                     Deadline::default(),
@@ -1082,6 +1354,8 @@ mod tests {
             runtime
                 .execute(
                     Request::Embed {
+                        protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                        expected_identity: CustodyIdentity::development(),
                         query: "three".into(),
                     },
                     Deadline::default(),
@@ -1106,13 +1380,19 @@ mod tests {
         }
 
         assert_invalid(
-            Request::Embed { query: "q".into() },
+            Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
+                query: "q".into(),
+            },
             Output::Embed {
                 embedding: vec![f32::NAN],
             },
         );
         assert_invalid(
             Request::Rerank {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "q".into(),
                 evidence: vec![Evidence {
                     id: "known".into(),
@@ -1126,6 +1406,8 @@ mod tests {
         );
         assert_invalid(
             Request::Read {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "q".into(),
                 evidence: vec![Evidence {
                     id: "known".into(),
@@ -1143,6 +1425,8 @@ mod tests {
         );
         assert_invalid(
             Request::Rerank {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "q".into(),
                 evidence: vec![Evidence {
                     id: "known".into(),
@@ -1156,6 +1440,8 @@ mod tests {
         );
         assert_invalid(
             Request::Read {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "q".into(),
                 evidence: vec![
                     Evidence {
@@ -1179,6 +1465,8 @@ mod tests {
         );
         assert_invalid(
             Request::Read {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
                 query: "q".into(),
                 evidence: vec![Evidence {
                     id: "known".into(),
@@ -1192,7 +1480,11 @@ mod tests {
             },
         );
         assert_invalid(
-            Request::Embed { query: "q".into() },
+            Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
+                query: "q".into(),
+            },
             Output::Read {
                 prediction: ReadPrediction::Null {
                     supporting_ids: Vec::new(),
@@ -1214,7 +1506,11 @@ mod tests {
         }
         let runtime = Runtime::with_session(RuntimeConfig::default(), Arc::new(LateSession));
         let response = runtime.execute(
-            Request::Embed { query: "q".into() },
+            Request::Embed {
+                protocol_version: crate::protocol::PROTOCOL_VERSION.into(),
+                expected_identity: CustodyIdentity::development(),
+                query: "q".into(),
+            },
             Deadline::after(Duration::from_millis(1)),
         );
         assert_eq!(response.error.unwrap().code, ErrorCode::RequestTimedOut);
