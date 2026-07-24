@@ -42,6 +42,14 @@ Division of authority: Plan A builds, Plan B proves and publishes — no externa
 
 - `superpowers/specs/` — dated design specs (`2026-07-01` native acceleration, `2026-07-05` performance program, …); each spawns implementation plans in `superpowers/plans/`. These are the source of truth for their programs; the blueprints extend, never duplicate, them.
 
+## Governance (`governance/`)
+
+Internal governance lane for the neutral memory-benchmark leaderboard: the governance [CHARTER.md](governance/CHARTER.md), [BOARD-STATUS.md](governance/BOARD-STATUS.md), [METHODOLOGY.md](governance/METHODOLOGY.md), [APPEALS-AND-DISPUTES.md](governance/APPEALS-AND-DISPUTES.md), conflict-of-interest ([CONFLICT-OF-INTEREST.md](governance/CONFLICT-OF-INTEREST.md) / [COI-REGISTER.md](governance/COI-REGISTER.md)), change control, operator firewall, methods-paper outline, and the recruitment packet. Only the human operator may seat the board or ratify policy. See [governance/README.md](governance/README.md) for that lane's index.
+
+## Plans (`plans/`)
+
+goalex round plans (e.g. the W3 prospective-memory model-determinism plan); mostly completed or transient working plans, with finished ones under [`plans/completed/`](plans/completed/). Once landed, they are superseded by the merged code and the `.planning/` trackers.
+
 ## Archive (`_archive/`)
 
 Superseded documents, retained verbatim with a supersession banner — e.g. `EXECUTION-PLAN-World-Best-Memory-and-Leaderboard.md` (the combined plan split into Plans A + B).
