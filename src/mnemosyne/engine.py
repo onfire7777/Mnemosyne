@@ -53,13 +53,16 @@ from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    MEMORY_CHANNELS,
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     embed_query,
     is_retired_summary_metadata,
+    marginal_gain_cutoff,
     query_support,
+    scored_channel_for_hit,
     validate_adapter_hit_scope,
     workspace_broadcast_from_context,
 )
@@ -3362,7 +3365,12 @@ class LocalMemoryEngine:
                 if score > 0:
                     hit.score = score
                     stored_raw = bool(hit.metadata.get("stored_embedding_used"))
-                    hit.channel = "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
+                    base = (
+                        "dense_media"
+                        if stored_raw and hit.metadata.get("stored_media_embedding")
+                        else "dense_hash"
+                    )
+                    hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
                     hits.append(hit)
         else:
             for hit in self._candidate_hits(filt):
@@ -3373,7 +3381,12 @@ class LocalMemoryEngine:
                 if score > 0:
                     hit.score = score
                     stored_raw = bool(hit.metadata.get("stored_embedding_used"))
-                    hit.channel = "dense_media" if stored_raw and hit.metadata.get("stored_media_embedding") else "dense_hash"
+                    base = (
+                        "dense_media"
+                        if stored_raw and hit.metadata.get("stored_media_embedding")
+                        else "dense_hash"
+                    )
+                    hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel=base)
                     hits.append(hit)
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
@@ -3406,14 +3419,14 @@ class LocalMemoryEngine:
             for hit, score in zip(candidates, scores, strict=True):
                 if score > 0:
                     hit.score = score
-                    hit.channel = "lexical"
+                    hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
                     hits.append(hit)
         else:
             for hit in self._candidate_hits(filt):
                 score = lexical_score(query, hit.text)
                 if score > 0:
                     hit.score = score
-                    hit.channel = "lexical"
+                    hit.channel = scored_channel_for_hit(kind=hit.kind, base_channel="lexical")
                     hits.append(hit)
         return self._mark_retrieved_text_as_data(sorted(hits, key=lambda item: item.score, reverse=True)[:k])
 
@@ -3621,7 +3634,7 @@ class LocalMemoryEngine:
         *,
         record_access: bool = True,
     ) -> RetrievalResult:
-        return run_retrieval_pipeline(
+        result = run_retrieval_pipeline(
             self,
             query=query,
             tenant_id=tenant_id,
@@ -3631,6 +3644,65 @@ class LocalMemoryEngine:
             policy=self.policy,
             record_access=record_access,
         )
+        # §22.2 residual #8: project preference/procedure/lesson channel counts
+        # from scored hits so explain stays memory-channel aware.
+        channels = result.explain.setdefault("channels", {})
+        for name in MEMORY_CHANNELS:
+            count = sum(
+                1
+                for hit in result.hits
+                if hit.channel == name or name in str(hit.channel).split("+")
+            )
+            if count:
+                channels[name] = count
+        # §22.4 residual #9: opt-in ACT-R expected-marginal-gain assembly.
+        if isinstance(filt, dict) and filt.get("assembly") == "marginal_gain":
+            selected, used = marginal_gain_cutoff(
+                result.hits,
+                token_budget=int(self.policy.token_budget),
+            )
+            result.hits = selected
+            result.used_tokens = used
+            result.explain["assembly"] = {
+                "mode": "marginal_gain",
+                "selected": len(selected),
+                "used_tokens": used,
+            }
+        return result
+
+    def retrieve_with_route(
+        self,
+        query: str,
+        tenant_id: str,
+        branch: str = "main",
+        filt: dict[str, Any] | None = None,
+        *,
+        ctx: dict[str, Any] | None = None,
+        record_access: bool = True,
+    ) -> RetrievalResult:
+        """Route then retrieve — replaces a hardcoded ``deep`` bool (§30.4 / #29).
+
+        Composes the cheap :func:`route` classifier with :meth:`retrieve` so
+        callers never hand-roll deep vs fast selection. The plan is recorded on
+        ``result.explain['route']`` for custody/debug without a second stack.
+        """
+
+        route_ctx: dict[str, Any] = {}
+        if isinstance(filt, dict):
+            route_ctx.update(filt)
+        if isinstance(ctx, dict):
+            route_ctx.update(ctx)
+        plan = route(query, route_ctx)
+        result = self.retrieve(
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=(plan.mode == "deep"),
+            filt=filt,
+            record_access=record_access,
+        )
+        result.explain["route"] = plan.to_dict()
+        return result
 
     def set_calibration(self, calibration: CalibrationSet) -> None:
         with self._lock:
