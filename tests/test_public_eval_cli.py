@@ -277,6 +277,8 @@ def test_capture_batch_consolidates_every_cid_only_when_opted_in(tmp_path: Path)
 
 def test_capture_batch_consolidation_preserves_user_boundaries(tmp_path: Path) -> None:
     rows = tmp_path / "mixed-users.jsonl"
+    # Two independent sources per user so §7 #17 external floor is met without
+    # mixing alice/bob corroboration across user boundaries.
     rows.write_text(
         "\n".join(
             (
@@ -292,10 +294,28 @@ def test_capture_batch_consolidation_preserves_user_boundaries(tmp_path: Path) -
                 json.dumps(
                     {
                         "tenant": "eval",
+                        "user": "alice",
+                        "source_type": "qa-v2-dev",
+                        "source_identity": "alice-source-b",
+                        "content": "Independent note: Alice is the owner of Atlas.",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "tenant": "eval",
                         "user": "bob",
                         "source_type": "qa-v2-dev",
                         "source_identity": "bob-source",
                         "content": "Bob is the owner of Borealis.",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "tenant": "eval",
+                        "user": "bob",
+                        "source_type": "qa-v2-dev",
+                        "source_identity": "bob-source-b",
+                        "content": "Independent note: Bob is the owner of Borealis.",
                     }
                 ),
             )
@@ -309,27 +329,36 @@ def test_capture_batch_consolidation_preserves_user_boundaries(tmp_path: Path) -
 
     consolidated = cli.capture_batch(rows, consolidate=True)
     payload = json.loads(store.read_text(encoding="utf-8"))
-    captured_users = {
-        item["cid"]: item["user_id"]
+    alice_cids = {
+        item["cid"]
         for item in payload["evidence"]
-        if item["source_identity"] in {"alice-source", "bob-source"}
+        if item.get("source_identity", "").startswith("alice-source")
+        and item.get("source_type") != "consolidation-summary"
+    }
+    bob_cids = {
+        item["cid"]
+        for item in payload["evidence"]
+        if item.get("source_identity", "").startswith("bob-source")
+        and item.get("source_type") != "consolidation-summary"
     }
     jobs = consolidated["consolidation"]["jobs"]
 
     assert len(jobs) == 2
-    assert {
-        (job["payload"]["user_id"], tuple(job["result"]["source_evidence_cids"]))
+    jobs_by_user = {
+        job["payload"]["user_id"]: set(job["result"]["source_evidence_cids"])
         for job in jobs
-    } == {
-        (user, (cid,)) for cid, user in captured_users.items()
     }
-    assert {
-        (item["user_id"], tuple(item["metadata"]["source_evidence_cids"]))
+    assert jobs_by_user["alice"] == alice_cids
+    assert jobs_by_user["bob"] == bob_cids
+    # No cross-user source leakage in consolidation jobs.
+    assert jobs_by_user["alice"].isdisjoint(jobs_by_user["bob"])
+    summary_by_user = {
+        item["user_id"]: set(item["metadata"]["source_evidence_cids"])
         for item in payload["evidence"]
         if item["source_type"] == "consolidation-summary"
-    } == {
-        (user, (cid,)) for cid, user in captured_users.items()
     }
+    assert summary_by_user["alice"] == alice_cids
+    assert summary_by_user["bob"] == bob_cids
 
 
 def test_capture_batch_consolidation_preserves_trust_boundaries(tmp_path: Path) -> None:
@@ -344,6 +373,16 @@ def test_capture_batch_consolidation_preserves_trust_boundaries(tmp_path: Path) 
                         "source_type": "qa-v2-dev",
                         "source_identity": "trusted-source",
                         "content": "Mara is the owner of Helios.",
+                        "trust_tier": int(TrustTier.DIRECT_USER),
+                    }
+                ),
+                json.dumps(
+                    {
+                        "tenant": "eval",
+                        "user": "benchmark-corpus",
+                        "source_type": "qa-v2-dev",
+                        "source_identity": "trusted-source-b",
+                        "content": "Independent confirmation: Mara is the owner of Helios.",
                         "trust_tier": int(TrustTier.DIRECT_USER),
                     }
                 ),
