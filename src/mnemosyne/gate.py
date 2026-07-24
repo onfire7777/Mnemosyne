@@ -3,15 +3,103 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Callable, Literal, Mapping
 
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.policy import OperatingPolicy
+from mnemosyne.standing import standing
 
 CaseTier = Literal["smoke", "core", "archive"]
 CaseOrigin = Literal["curated", "genuine", "synthetic"]
 VALID_CASE_ORIGINS = frozenset({"curated", "genuine", "synthetic"})
 GATING_CASE_ORIGINS = frozenset({"curated", "genuine"})
 VALID_CASE_MODES = frozenset({"shadow", "active"})
+
+
+@dataclass(slots=True)
+class FactCorroborationVerdict:
+    """§23.3 / §7 #17 verdict: may a fact-candidate proceed to promotion?
+
+    Fail-closed when independent *external* corroboration is missing or when
+    only self-generated echoes are present. Consumes Standing's effective
+    independent count (self-echo zeroed for non-grounded reality classes).
+    """
+
+    allowed: bool
+    independent_external_count: int
+    required: int
+    reason: str
+    standing: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def evaluate_fact_external_corroboration(
+    *,
+    unit_signals: Mapping[str, Any] | None,
+    policy: OperatingPolicy | None = None,
+    min_external: int | None = None,
+) -> FactCorroborationVerdict:
+    """Gate fact-candidates on provenance-independent external corroboration.
+
+    Uses Standing to derive the *effective* independent external count. Raw
+    self-generated corroboration never raises the effective count and cannot
+    satisfy the floor. Missing signals fail closed.
+    """
+
+    pol = policy if policy is not None else OperatingPolicy()
+    required = max(
+        1,
+        int(
+            min_external
+            if min_external is not None
+            else getattr(pol, "min_external_corroboration_for_fact", 2)
+        ),
+    )
+    score = standing(unit_signals)
+    payload = score.to_dict()
+    inputs = dict(payload.get("explain", {}).get("inputs", {}))
+    independent = int(inputs.get("effective_independent_corroboration_count", 0) or 0)
+    self_echo = int(inputs.get("self_generated_corroboration_count", 0) or 0)
+    reality = str(inputs.get("reality_class", "unknown"))
+
+    if reality != "grounded":
+        return FactCorroborationVerdict(
+            allowed=False,
+            independent_external_count=0,
+            required=required,
+            reason=(
+                f"fail-closed: reality_class={reality!r} is not externally grounded; "
+                "self-only or unknown corroboration cannot promote fact-candidates (§23.3)"
+            ),
+            standing=payload,
+        )
+    if independent < required:
+        detail = (
+            f"insufficient independent external corroboration: {independent} < required {required}"
+        )
+        if self_echo > 0:
+            detail += f" (rejected {self_echo} self-generated corroborator(s))"
+        if independent == 0:
+            detail = f"missing independent external corroboration: {detail}"
+        return FactCorroborationVerdict(
+            allowed=False,
+            independent_external_count=independent,
+            required=required,
+            reason=detail,
+            standing=payload,
+        )
+    return FactCorroborationVerdict(
+        allowed=True,
+        independent_external_count=independent,
+        required=required,
+        reason=(
+            f"external corroboration satisfied: {independent} independent source(s) "
+            f">= required {required}"
+        ),
+        standing=payload,
+    )
 
 
 @dataclass(slots=True)
