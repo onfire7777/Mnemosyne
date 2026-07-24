@@ -5,6 +5,7 @@ from mnemosyne.standing import (
     EVIDENCE_DOMINANCE_GAP,
     GROUNDED_FLOOR,
     SELF_GENERATED_CEILING,
+    effective_independent_external_count,
     standing,
 )
 
@@ -55,6 +56,29 @@ def test_independent_external_corroboration_raises_groundedness() -> None:
     assert weak.groundedness >= GROUNDED_FLOOR
     assert strong.groundedness > weak.groundedness
     assert strong.authority is True
+
+
+def test_effective_independent_external_count_zeros_self_echo() -> None:
+    assert (
+        effective_independent_external_count(
+            {
+                "reality_class": "self_generated",
+                "independent_corroboration_count": 9,
+                "self_generated_corroboration_count": 9,
+            }
+        )
+        == 0
+    )
+    assert (
+        effective_independent_external_count(
+            {
+                "reality_class": "grounded",
+                "trust_tier": 0,
+                "independent_corroboration_count": 3,
+            }
+        )
+        == 3
+    )
 
 
 def test_self_generated_corroboration_cannot_cross_evidence_band() -> None:
