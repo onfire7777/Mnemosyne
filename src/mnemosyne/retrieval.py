@@ -2282,6 +2282,22 @@ class GraphSignalCache:
         self._store.clear()
 
 
+# Blueprint §22.2 memory channels fused alongside exact/lexical/dense/graph.
+MEMORY_CHANNELS: frozenset[str] = frozenset({"preference", "procedure", "lesson"})
+
+
+def scored_channel_for_hit(*, kind: str, base_channel: str) -> str:
+    """Map a scored candidate to its retrieval channel name.
+
+    Preference rows remain first-class memory channel hits (§22.2 / residual #8)
+    rather than being relabeled as generic lexical/dense after scoring.
+    """
+
+    if kind == "preference":
+        return "preference"
+    return base_channel
+
+
 def build_channel_hits(
     items: Sequence[Mapping[str, object]],
     *,
@@ -2300,6 +2316,11 @@ def build_channel_hits(
     channel-tagged :class:`Hit` objects ready for RRF fusion. ``channel`` should
     be one of ``preference`` / ``procedure`` / ``lesson``.
     """
+
+    if channel not in MEMORY_CHANNELS:
+        raise ValueError(
+            f"memory channel must be one of {sorted(MEMORY_CHANNELS)}; got {channel!r}"
+        )
 
     hits: list[Hit] = []
     for item in items:
