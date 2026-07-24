@@ -350,6 +350,7 @@ Mnemosyne/
 ├── rust/mneme-providers/    # Provider sidecar for compact embed/rerank contracts
 ├── rust/mnemosyne-native/   # Optional PyO3 native retrieval kernels
 ├── services/embedding/      # standalone embedding provider service
+├── services/answering-ort/  # Rust ONNX (ort) compact-answering sidecar (W5); bounded local-only skeleton, fails closed with runtime_unavailable
 ├── docs/ROADMAP-TO-100.md   # sequenced path to 1:1 blueprint parity
 └── .github/workflows/ci.yml # ruff + pytest + Postgres integration job
 ```
@@ -374,10 +375,10 @@ Exact 1:1 blueprint parity's Tier-B production-evidence rows are now CLOSED (202
 The local implementation surface has moved past the original two-engine
 posture: the native retrieval kernels, per-tenant SQLite engine, provider
 sidecar, and proposal-role consolidation ladder are locally gate-proven on the
-active Phase 3 branch. The latest Phase 3 exit record reports **1592 passed /
-127 skipped** native, **1589 / 130** with `MNEMOSYNE_PURE=1`, **434 / 6**
-DSN-armed parity plus `postgres_live`, and clean Rust/ruff/diff checks. These
-are local engineering gates, not production sign-off.
+active Phase 3 branch. The full suite passes on the Phase 3 exit branch —
+native, with `MNEMOSYNE_PURE=1`, and DSN-armed parity plus `postgres_live` —
+with the exact pass/skip counts produced by CI, alongside clean Rust/ruff/diff
+checks. These are local engineering gates, not production sign-off.
 
 Future Tier-B recaptures must use the same operator-owned production evidence
 path: real IdP/Keycloak, Vault/KMS, ParadeDB/Apache AGE, hosted
