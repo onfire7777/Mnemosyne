@@ -1179,3 +1179,31 @@ def test_build_channel_hits_tags_and_validates() -> None:
         )
     with pytest.raises(ValueError, match="must be mappings"):
         build_channel_hits(["not-a-mapping"], channel="lesson", tenant_id="t", branch="main")
+    with pytest.raises(ValueError, match="memory channel"):
+        build_channel_hits(
+            [{"id": "x", "text": "y", "score": 0.1}],
+            channel="not-a-memory-channel",
+            tenant_id="t",
+            branch="main",
+        )
+    # procedure + lesson channels are first-class alongside preference (§22.2 / #8).
+    for channel in ("procedure", "lesson"):
+        tagged = build_channel_hits(
+            [{"id": f"{channel}-1", "text": f"{channel} body", "score": 0.5}],
+            channel=channel,
+            tenant_id="t",
+            branch="main",
+        )
+        assert len(tagged) == 1
+        assert tagged[0].channel == channel
+        assert tagged[0].metadata["channel_source"] == channel
+
+
+def test_scored_channel_for_hit_tags_preference_memory_channel() -> None:
+    """§22.2 residual #8: preference kind scores as the preference channel, not generic lexical."""
+    from mnemosyne.retrieval import scored_channel_for_hit
+
+    assert scored_channel_for_hit(kind="preference", base_channel="lexical") == "preference"
+    assert scored_channel_for_hit(kind="preference", base_channel="dense_hash") == "preference"
+    assert scored_channel_for_hit(kind="evidence", base_channel="lexical") == "lexical"
+    assert scored_channel_for_hit(kind="assertion", base_channel="dense_hash") == "dense_hash"
