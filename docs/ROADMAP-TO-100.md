@@ -6,6 +6,8 @@
 
 ---
 
+> **Historical (superseded).** The current verdict is the 100%-strict-Tier-B-rows closure recorded above (2026-07-07): all 10 strict-blueprint parity rows are Done on attested, offline-verified production evidence. The percentage discussion in sections 0–1 below is retained only to explain the historical plateau — it is not the live status.
+
 ## 0. Why the number sat at ~70% for so long — and what moved it to ~82% (read this first)
 
 The headline number is a **blended** figure, and the blend hides the real shape of the work:
@@ -22,6 +24,8 @@ The ~70% plateau held for so long — and the remaining ~18% to 100% is slow —
 **The trap to avoid (already observed):** Codex has been spending recent cycles adding more `test(...)` coverage and more release-audit *gates*. With the mandatory Tier A wirings now closed, placeholder/hollow evidence rejected, production manifest rendering made deterministic/fail-closed, A12 cached PPR closed, and offline custody review wired, real progress should pivot to **Tier B real-infrastructure evidence** — and optional A11 hosted-transport code only if a concrete audit finding demands it — not more gates or tests.
 
 ---
+
+> **Historical (superseded).** The 100%-strict-Tier-B-rows closure (2026-07-07) is the current verdict; the "~82%" framing below is retained only to explain the historical plateau.
 
 ## 1. What is actually DONE (so the ~82% is legible)
 

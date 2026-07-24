@@ -642,8 +642,13 @@ flowchart TB
         EMB["app.py · /embed /rerank /health<br/>:8000 · torch optional · fallback encoder"]
     end
 
+    subgraph svc2["services/answering-ort"]
+        ANS["Rust ONNX (ort) compact-answering sidecar (W5)<br/>bounded local-only skeleton · no model loaded<br/>fails closed · runtime_unavailable"]
+    end
+
     APP --> PG
     APP --> EMB
+    APP -. skeleton .-> ANS
     APP -. OIDC .-> KC
     APP -. KMS .-> VA
     APP -. verify .-> C2
@@ -749,7 +754,7 @@ by running `deployment-soak --evidence-dir` plus manifest-bound
 
 See `docs/ROADMAP-TO-100.md` for the controlling sequenced parity path,
 `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md` for the controlling Partial rows,
-`docs/STATE-OF-COMPLETION.md` for the historical scoreboard, and
+`docs/_archive/2026-07-03/STATE-OF-COMPLETION.md` for the historical scoreboard, and
 `infra/PRODUCTION-EVIDENCE.md` + `infra/scripts/capture-production-evidence.sh` for the Tier-B operator
 capture handoff.
 
