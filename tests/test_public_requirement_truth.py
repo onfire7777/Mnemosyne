@@ -23,6 +23,30 @@ def test_bench_005_cannot_complete_before_phase_12_qa_evidence() -> None:
     assert "BENCH-005 remains partial until" in roadmap
 
 
+
+def test_cap_003_stays_partial_until_measured_em_f1_at_least_0_85() -> None:
+    """EM/F1 reporting honesty: CAP-003 is Partial without measured ≥ 0.85.
+
+    Unit-path perfect scores on synthetic/public-CLI stand-ins must not flip the
+    requirement to Complete. Live frozen + held-out thresholds remain open.
+    """
+    requirements = (ROOT / ".planning/REQUIREMENTS.md").read_text(encoding="utf-8")
+    row = next(
+        line
+        for line in requirements.splitlines()
+        if "CAP-003" in line and "qa_hard_v2" in line
+    )
+    assert "[ ] CAP-003" in row
+    assert "Partial" in row
+    assert "Complete" not in row
+    assert "0.85" in row
+    report = (ROOT / "eval/reports/phase-12-grounded-qa.md").read_text(encoding="utf-8")
+    assert "CAP-003 remains Partial" in report
+    assert "no CAP-003 Complete" in report
+    # Gate numbers stay explicit; do not lower thresholds in prose or tables.
+    assert "≥ 0.85" in report
+    assert "Not re-measured live" in report
+
 def test_phase_11_evidence_projection_keeps_retrieval_truth_boundaries() -> None:
     evidence = (ROOT / "eval/reports/phase-11-evidence.md").read_text(encoding="utf-8")
     prose = " ".join(evidence.split())

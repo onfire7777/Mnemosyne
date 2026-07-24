@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,14 @@ import pytest
 from mnemosyne.ids import evidence_cid
 
 from eval.public.adapters.longmemeval_qa import normalize, run
+import eval.public.runner as runner
+from eval.public.runner import (
+    build_candidate_manifest,
+    load_qa_protocol,
+    qa_protocol_digests,
+    validate_candidate_manifest,
+    write_candidate_manifest,
+)
 
 
 def _assets() -> dict[str, Any]:
@@ -99,3 +108,44 @@ def test_longmemeval_qa_question_set_and_answer_labels_fail_closed() -> None:
     )
     with pytest.raises(ValueError):
         normalize(value)
+
+
+def test_case_gold_answer_fields_never_enter_capture_or_reader_payloads() -> None:
+    """Gold isolation: answer labels stay scorer-side; capture/eval payloads omit them."""
+    cli = RecordingCLI()
+    run(_assets(), cli)  # type: ignore[arg-type]
+    for payload in cli.payloads:
+        for banned in ("gold_answer", "gold_aliases", "answer_aliases", "answer"):
+            assert banned not in payload
+
+
+def test_external_candidate_manifest_freeze_is_immutable_and_schema_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """12-04-01 freeze: external no-overwrite manifest binds protocol digests once."""
+    protocol = load_qa_protocol()
+    git_sha = "a" * 40
+    model_digest = "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
+    manifest = build_candidate_manifest(
+        model_content_sha256=model_digest,
+        git_sha=git_sha,
+        created_at_utc="2026-07-11T00:00:00Z",
+    )
+    assert manifest["candidate_version"] == protocol["version"]
+    assert manifest["git_sha"] == git_sha
+    assert manifest["transport_retries"] == 0
+    assert manifest["evidence_budget"] == protocol["evidence_budget"]
+    assert manifest["abstention"] == protocol["abstention"]
+    digests = qa_protocol_digests(protocol)
+    for key, value in digests.items():
+        assert manifest[key] == value
+    validate_candidate_manifest(manifest, expected_git_sha=git_sha)
+    monkeypatch.setattr(runner, "_current_clean_head", lambda _root: git_sha)
+    external = tmp_path / "candidate-manifest.json"
+    write_candidate_manifest(external, manifest)
+    assert stat.S_IMODE(external.stat().st_mode) == 0o600
+    with pytest.raises(FileExistsError):
+        write_candidate_manifest(external, manifest)
+    forged = {**manifest, "git_sha": "b" * 40}
+    with pytest.raises(ValueError, match="expected commit"):
+        validate_candidate_manifest(forged, expected_git_sha=git_sha)
