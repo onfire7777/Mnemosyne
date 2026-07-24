@@ -285,3 +285,77 @@ ledger binds the receipt digest before execution, preventing another
 small-synthetic-pass/large-wrapper-timeout loss like v12.
 
 No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
+
+---
+
+## 12-04-02 — Public-CLI-only internal evaluator (lease-12-04-02)
+
+**Status:** Evaluator surface **complete**; live measured gates **not met** → **CAP-003 remains Partial**.
+**Updated (UTC):** 2026-07-24T05:47:00Z (mne-implement re-validation on team tip)
+**Task:** Run frozen `qa_hard_v2` through a public-CLI-only internal reader evaluator with scorer-isolated gold.
+
+### Bound custody (immutable 12-04-01 freeze)
+
+| Field | Value |
+|-------|--------|
+| freeze_path | `/home/runner/.local/share/mnemosyne/candidates/phase12-v19/candidate-manifest.json` |
+| candidate_version | `phase12-candidate-v19` |
+| git_sha | `df438ca34061467ecc227bcf4d45bb1f7e886aee` |
+| candidate_manifest_sha256 | `e81fc655f81ab43f1cfd5ad1b8644a9271a190027c49233efe89a2dd682c95f3` |
+| dataset | `eval/datasets/v2/qa_hard_v2.json` (`dataset_id=qa_hard_v2`, 24 queries) |
+| dataset_sha256 | `1864974807f2171904a5e5f04b727b3cbfb258f94c1280106ecc08a4dade52e2` |
+| scorer | `qa-em-f1-v1` (Wilson EM interval + bootstrap token F1) |
+| evaluator module | `eval/datasets/v2/run_grounded_qa_v2.py` |
+
+### Evaluator contract (implemented + unit-proven)
+
+1. **Public-CLI-only path:** capture + `eval_answer_batch` via CLI driver; gold fields never appear in capture/answer JSONL payloads (`gold_answer`, `gold_aliases`, `relevant_doc_ids`, `distractor_answer` scorer-only).
+2. **Full frozen set once:** loads canonical `qa_hard_v2` (24 cases); answer order must match dataset order (order drift hard-fails; **no** per-question ID patch / selective re-run surface).
+3. **Reader traces:** each row carries answer, claims, hops, reader disclosure, retrieved doc ids, `scoring_family=qa`.
+4. **Report columns projected by `evaluate` + `attach_custody`:**
+   - EM / token F1 + intervals (`qa.metrics`, `qa.intervals`)
+   - Grounding rails: abstained, unsupported_claims, fabricated_citations, second_hop, graph_participation
+   - Retrieval Recall@5 and nDCG@5
+   - External `candidate_manifest_sha256`, `candidate_git_sha`, optional `candidate_version`
+5. **Failure policy:** failed candidate → new preregistered version only; attempt ledger + result paths are external O_EXCL no-overwrite.
+
+### Validation (automated)
+
+```bash
+uv run --locked python -m pytest tests/test_grounded_qa_v2.py tests/test_public_requirement_truth.py -q
+```
+
+Pack result: **pass** (includes synthetic gold isolation, 24-case once dry-run against frozen corpus with public-CLI stand-in, custody bind constants, order-drift refusal, scale preflight, exclusive external paths).
+
+Re-validation this cycle (`mne-implement` / unit residual, 2026-07-24):
+
+- `tests/test_grounded_qa_v2.py` + `tests/test_public_requirement_truth.py` → **pass**
+- Preserve spot-check: `tests/test_grounded_answering.py` + `tests/test_public_longmemeval_qa.py` → **pass**
+- Ollama `127.0.0.1:11434` → **unreachable** (no live protected attempt)
+- Residual unit pins: exact answer payload shape, frozen one-shot fail-closed gates, no per-QID patch surface, CAP-003 Partial until measured EM/F1 ≥ 0.85
+
+
+### Live protected / host measurement residual
+
+| Gate | Required | Measured under this lease |
+|------|----------|---------------------------|
+| Internal EM | ≥ 0.85 | **Not re-measured live** (host Ollama `127.0.0.1:11434` unreachable in this workspace) |
+| Token F1 | ≥ 0.85 | **Not re-measured live** (same) |
+| Recall@5 | 1.0 | **Not re-measured live** |
+| nDCG@5 | 1.0 | **Not re-measured live** |
+| Grounding rails | pass | **Not re-measured live** |
+
+**Last protected aggregates on prior candidates (unchanged; not v19 live):**
+
+- v17 / v18 protected `qa_hard_v2`: EM/F1 `0.08333333333333333`, Recall@5 `0.08333333333333333`, nDCG@5 `0.0625` (2/24 answered; aggregate-only; no per-ID inspection).
+- v19 freeze is bound above; a new live one-shot still requires scale preflight receipt + attempt ledger + runtime manifest + Ollama under the frozen CLI path. That live attempt was **not** consumed under lease-12-04-02 in this workspace.
+
+### CAP / BENCH truth
+
+| Requirement | Status after 12-04-02 | Notes |
+|-------------|----------------------|--------|
+| **CAP-003** | **Partial** | Evaluator + custody + gold isolation + 24-case once contract proven; **no** measured EM/F1 ≥ 0.85 on frozen live run |
+| **BENCH-005** | **Partial** | Held-out LongMemEval/Hippo remains 12-04-03 (not admitted) |
+| CAP-001 / CAP-002 | Partial | Outside this task’s close criteria |
+
+**Explicit non-claims:** no CAP-003 Complete; no BENCH-005 Complete; no held-out run; no registry self-SHA rewrite; no per-question patch of frozen IDs; no mutation of external freeze `phase12-candidate-v19`.
