@@ -141,7 +141,9 @@ def demotion_decision(
         protected=state.protected,
         # I7/§25: keep the pointer to the verbatim original so a demoted gist can
         # be reconstructed from raw evidence (the documented confabulation guard).
-        verbatim_pointer=state.verbatim_pointer,
+        # When no explicit pointer was set, demotion records the item_id itself as
+        # the pointer-to-original so reconstruction never loses the source handle.
+        verbatim_pointer=state.verbatim_pointer or state.item_id,
     )
     return updated, True
 

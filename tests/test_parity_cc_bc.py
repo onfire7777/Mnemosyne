@@ -472,6 +472,24 @@ def test_verbatim_pointer_survives_demotion_and_round_trips() -> None:
     assert restored.verbatim_pointer == "cid-verbatim-1"
 
 
+def test_demotion_records_item_id_as_pointer_to_original_when_unset() -> None:
+    """§25 residual #14: demotion without an explicit pointer binds item_id."""
+    now = datetime(2026, 6, 1, tzinfo=UTC)
+    state = LifecycleState(
+        "orig-item-42",
+        FidelityTier.VERBATIM,
+        salience=0.01,
+        importance=0.0,
+        access_count=0,
+        last_accessed=now - timedelta(days=400),
+        verbatim_pointer=None,
+    )
+    demoted, changed = demotion_decision(state, now, utility_threshold=0.2)
+    assert changed is True
+    assert demoted.tier == FidelityTier.EXTRACTIVE_SUMMARY
+    assert demoted.verbatim_pointer == "orig-item-42"
+
+
 def test_sole_low_fidelity_support_requires_abstention() -> None:
     gist_risky = LifecycleState(
         "gist", FidelityTier.ABSTRACTIVE_GIST, 0.3, 0.2, 0, None, confabulation_risk=True
