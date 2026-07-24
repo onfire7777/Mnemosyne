@@ -16,6 +16,7 @@ import pytest
 
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
+    DEFAULT_CONSOLIDATION_PASSES,
     CommandCandidateExtractor,
     CommandEntityResolver,
     CommandEvidenceSummarizer,
@@ -2082,6 +2083,7 @@ def test_postgres_cli_ingests_raw_media_embedding_for_vector_retrieval_live(
 
 
 def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
+    """§7 #17 / G-consol: dual independent sources required (floor aligns policy=2)."""
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-gate-live-{uuid4()}"
     user = "user-gate-live"
@@ -2096,23 +2098,45 @@ def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
             content="Postgres gate fact is tenant aware.",
         )
     )
-    worker = QueueWorker(
-        queue,
+    result_b = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="note",
+            content="Independent note: Postgres gate fact is tenant aware.",
+        )
+    )
+    # Drain auto-enqueued single-CID jobs (fail-closed under external floor).
+    while queue.lease(CONSOLIDATE_EVIDENCE_JOB) is not None:
+        pass
+    consolidator = ConsolidationWorker(
+        engine,
+        gate_cases=[
+            RegressionCase(
+                "postgres-gate-smoke",
+                "postgres gate fact",
+                "Postgres gate fact",
+                "Postgres gate fact is tenant aware",
+                protected=True,
+            )
+        ],
+    )
+    queue.enqueue(
+        CONSOLIDATE_EVIDENCE_JOB,
         {
-            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
-                engine,
-                gate_cases=[
-                    RegressionCase(
-                        "postgres-gate-smoke",
-                        "postgres gate fact",
-                        "Postgres gate fact",
-                        "Postgres gate fact is tenant aware",
-                        protected=True,
-                    )
-                ],
-            ).run_queue_payload
+            "tenant_id": tenant,
+            "user_id": user,
+            "branch": "main",
+            "source_evidence_cids": [result.cid, result_b.cid],
+            "trigger": "test-dual-source",
+            "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+            "trust_tier": 0,
+            "sensitivity": 0,
+            "capability_tags": [],
         },
     )
+    worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
 
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     search = engine.retrieve("Postgres gate fact", tenant)
@@ -2120,13 +2144,17 @@ def test_postgres_gated_consolidation_promotes_direct_user_fact_live() -> None:
     assert job is not None
     assert job.status == "complete"
     assert job.result["candidate_results"][0]["promoted"] is True
-    assert any(hit.kind == "assertion" and hit.provenance == [result.cid] for hit in search.hits)
+    assert any(
+        hit.kind == "assertion" and set(hit.provenance) >= {result.cid}
+        for hit in search.hits
+    )
     exported_entities = engine.export_tenant(tenant)["entities"]
     assert exported_entities[0]["canonical"] == "postgres-gate-fact"
-    assert exported_entities[0]["source_evidence_cids"] == [result.cid]
+    assert set(exported_entities[0]["source_evidence_cids"]) >= {result.cid}
 
 
 def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> None:
+    """Command-provider consolidation with dual independent sources for external floor."""
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-command-consolidation-live-{uuid4()}"
     user = "user-command-consolidation-live"
@@ -2141,6 +2169,17 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
             content="Meeting note: pg target/local CLI; not a deterministic is-fact sentence.",
         )
     )
+    result_b = pipeline.ingest(
+        IngestRequest(
+            tenant_id=tenant,
+            user_id=user,
+            actor="user",
+            source_type="note",
+            content="Independent corroboration: Postgres command target is local CLI.",
+        )
+    )
+    while queue.lease(CONSOLIDATE_EVIDENCE_JOB) is not None:
+        pass
     extractor_script = tmp_path / "candidate_extractor.py"
     extractor_script.write_text(
         "\n".join(
@@ -2180,26 +2219,36 @@ def test_postgres_gated_consolidation_uses_command_providers_live(tmp_path) -> N
         ),
         encoding="utf-8",
     )
-    worker = QueueWorker(
-        queue,
+    consolidator = ConsolidationWorker(
+        engine,
+        gate_cases=[
+            RegressionCase(
+                "postgres-command-provider-smoke",
+                "postgres command target local cli",
+                "postgres command target",
+                "local CLI",
+                protected=True,
+            )
+        ],
+        candidate_extractor=CommandCandidateExtractor([sys.executable, str(extractor_script)]),
+        entity_resolver=CommandEntityResolver([sys.executable, str(resolver_script)]),
+        summarizer=CommandEvidenceSummarizer([sys.executable, str(summarizer_script)]),
+    )
+    queue.enqueue(
+        CONSOLIDATE_EVIDENCE_JOB,
         {
-            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
-                engine,
-                gate_cases=[
-                    RegressionCase(
-                        "postgres-command-provider-smoke",
-                        "postgres command target local cli",
-                        "postgres command target",
-                        "local CLI",
-                        protected=True,
-                    )
-                ],
-                candidate_extractor=CommandCandidateExtractor([sys.executable, str(extractor_script)]),
-                entity_resolver=CommandEntityResolver([sys.executable, str(resolver_script)]),
-                summarizer=CommandEvidenceSummarizer([sys.executable, str(summarizer_script)]),
-            ).run_queue_payload
+            "tenant_id": tenant,
+            "user_id": user,
+            "branch": "main",
+            "source_evidence_cids": [result.cid, result_b.cid],
+            "trigger": "test-dual-source-command",
+            "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+            "trust_tier": 0,
+            "sensitivity": 0,
+            "capability_tags": [],
         },
     )
+    worker = QueueWorker(queue, {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload})
 
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
     assert job is not None
