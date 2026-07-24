@@ -1660,51 +1660,105 @@ class ConsolidationWorker:
         trust_values = [int(payload.get("trust_tier", TrustTier.NORMAL)), *(item.trust_tier for item in evidence)]
         return any(value >= int(TrustTier.UNTRUSTED_EXTERNAL) for value in trust_values)
 
+    def _load_evidence_rows_for_corroboration(
+        self, job: ConsolidationJob, cids: list[str]
+    ) -> list[Evidence]:
+        """Load Evidence objects via public get_evidence (Local + Postgres)."""
+
+        rows: list[Evidence] = []
+        engine = self.engine
+        if not hasattr(engine, "get_evidence"):
+            return rows
+        for cid in cids:
+            if not cid:
+                continue
+            try:
+                ev = engine.get_evidence(job.tenant_id, str(cid), branch="main")
+            except TypeError:
+                try:
+                    ev = engine.get_evidence(job.tenant_id, str(cid))
+                except Exception:
+                    ev = None
+            except Exception:
+                ev = None
+            if ev is not None:
+                rows.append(ev)
+        return rows
+
+    def _independent_corroboration_report_for_job(
+        self, job: ConsolidationJob, cids: list[str]
+    ) -> dict[str, Any]:
+        """Independent-source report portable across LocalMemoryEngine and Postgres.
+
+        Prefer the engine's keyword oracle when it matches the Local signature.
+        Postgres requires a DB cursor for that method, so fall back to loading
+        Evidence via get_evidence and classifying with the Local from-evidence
+        oracle (same Standing-shaped independent-count semantics).
+        """
+
+        engine = self.engine
+        fn = getattr(engine, "_independent_corroboration_report", None)
+        if callable(fn):
+            try:
+                return dict(
+                    fn(
+                        tenant_id=job.tenant_id,
+                        branch="main",
+                        source_evidence_cids=cids,
+                    )
+                )
+            except TypeError:
+                # PostgresEngine signature requires cur/db_tenant_id — fall through.
+                pass
+        rows = self._load_evidence_rows_for_corroboration(job, cids)
+        from_evidence = getattr(engine, "_independent_corroboration_report_from_evidence", None)
+        if callable(from_evidence):
+            return dict(from_evidence(rows))
+        # Reuse LocalMemoryEngine classifier on already-loaded Evidence rows.
+        return dict(LocalMemoryEngine()._independent_corroboration_report_from_evidence(rows))
+
     def _fact_unit_signals_for_job(self, job: ConsolidationJob) -> dict[str, Any]:
         """Build Standing-shaped unit_signals from the engine independent-corroboration oracle.
 
-        Uses LocalMemoryEngine independent-source classification (not raw CID
-        cardinality) so self-generated / duplicate-root sources never inflate
-        the external count (§23.3 / §7 #17).
+        Uses independent-source classification (not raw CID cardinality) so
+        self-generated / duplicate-root sources never inflate the external count
+        (§23.3 / §7 #17). Portable across Local and Postgres engines.
         """
 
         cids = list(job.source_evidence_cids or [])
-        report: dict[str, Any] = {}
-        engine = self.engine
-        if hasattr(engine, "_independent_corroboration_report"):
-            report = dict(
-                engine._independent_corroboration_report(
+        report = self._independent_corroboration_report_for_job(job, cids)
+        independent = int(report.get("independent_corroboration_count", 0) or 0)
+        self_echo = int(report.get("self_generated_corroboration_count", 0) or 0)
+        # Reality class: grounded when independent external sources exist; self_generated
+        # when only self-echo remains; unknown when empty.
+        if independent > 0:
+            reality = "grounded"
+        elif self_echo > 0:
+            reality = "self_generated"
+        elif cids:
+            reality = "unknown"
+        else:
+            reality = "unknown"
+        # Prefer engine projection monitoring when it accepts Local-style kwargs.
+        mon_fn = getattr(self.engine, "_projection_reality_monitoring_for_sources", None)
+        if callable(mon_fn):
+            try:
+                monitoring = mon_fn(
                     tenant_id=job.tenant_id,
                     branch="main",
                     source_evidence_cids=cids,
                 )
-            )
-        else:
-            distinct = len({cid for cid in cids if cid})
-            report = {
-                "independent_corroboration_count": distinct,
-                "independent_corroboration_weight": min(distinct, 5) / 5.0,
-                "self_generated_corroboration_count": 0,
-                "rejected_corroboration_count": 0,
-            }
-        reality = "unknown"
-        if hasattr(engine, "_projection_reality_monitoring_for_sources"):
-            monitoring = engine._projection_reality_monitoring_for_sources(
-                tenant_id=job.tenant_id,
-                branch="main",
-                source_evidence_cids=cids,
-            )
-            reality = str(monitoring.get("reality_class") or "unknown")
-        elif int(report.get("independent_corroboration_count", 0) or 0) > 0:
-            reality = "grounded"
+                reality = str(monitoring.get("reality_class") or reality)
+            except TypeError:
+                pass
         return {
             "reality_class": reality,
             "trust_tier": int(getattr(job, "trust_tier", 0) or 0),
-            "independent_corroboration_count": int(report.get("independent_corroboration_count", 0) or 0),
-            "independent_corroboration_weight": float(report.get("independent_corroboration_weight", 0.0) or 0.0),
-            "self_generated_corroboration_count": int(
-                report.get("self_generated_corroboration_count", 0) or 0
+            "independent_corroboration_count": independent,
+            "independent_corroboration_weight": float(
+                report.get("independent_corroboration_weight", 0.0) or 0.0
             ),
+            "self_generated_corroboration_count": self_echo,
             "rejected_corroboration_count": int(report.get("rejected_corroboration_count", 0) or 0),
         }
 

@@ -127,3 +127,21 @@ def test_candidate_carries_unit_signals_into_promotion_gate() -> None:
     assert int(signals["independent_corroboration_count"]) >= 2
     result = worker.run_job(_job([cid_a, cid_b], signature="with-signals"))
     assert result.promoted is True
+
+
+def test_oracle_portable_when_engine_report_requires_cursor() -> None:
+    """Postgres-style TypeError on report(cur=...) must fall back to get_evidence path."""
+    engine = LocalMemoryEngine()
+    cid_a = _evidence(engine, "The preferred database is Postgres.")
+    cid_b = _evidence(engine, "Independent: preferred database is Postgres.", source_type="chat")
+    worker = ConsolidationWorker(engine, [_case()])
+
+    def _boom(*_a, **_k):  # noqa: ANN001
+        raise TypeError("missing required positional argument: 'cur'")
+
+    engine._independent_corroboration_report = _boom  # type: ignore[method-assign]
+    signals = worker._fact_unit_signals_for_job(_job([cid_a, cid_b]))
+    assert int(signals["independent_corroboration_count"]) >= 2
+    assert signals["reality_class"] == "grounded"
+    result = worker.run_job(_job([cid_a, cid_b], signature="pg-portable"))
+    assert result.promoted is True
