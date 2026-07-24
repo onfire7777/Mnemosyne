@@ -115,6 +115,8 @@ def test_synthetic_runner_keeps_gold_at_scorer_boundary() -> None:
     assert result["trace_count"] == 1
     assert result["traces"][0]["scoring_family"] == "qa"
     assert "reader" in result["traces"][0]
+    # F-2: graph_evidence projected for qa_report dual-path (hop channel derive).
+    assert result["traces"][0]["graph_evidence"] == {"participated": True}
     serialized = json.dumps([cli.capture_rows, cli.answer_rows])
     assert cli.consolidated is True
     assert all(
@@ -500,3 +502,88 @@ def test_no_per_question_id_patch_surface_on_runner_module() -> None:
         "failed_qids",
     ):
         assert needle not in source
+
+
+def test_evaluate_projects_graph_evidence_for_qa_report_dual_path() -> None:
+    """F-2: traces always carry graph_evidence for qa_report dual-path parity."""
+    # Explicit graph_evidence from CLI is forwarded unchanged.
+    explicit = RecordingCLI(
+        answers=[
+            {
+                "question_id": "q1",
+                "answer": "Q3 2026",
+                "abstained": False,
+                "claims": [{"text": "Q3 2026", "evidence_cids": ["cid-1"]}],
+                "hops": [
+                    {
+                        "index": 0,
+                        "queries": ["Mara"],
+                        "channels": ["lexical"],
+                        "retrieved_cids": ["cid-0", "cid-1"],
+                    }
+                ],
+                "graph_evidence": {"participated": True, "backend": "local"},
+                "reader": {},
+            }
+        ]
+    )
+    result = evaluate(_dataset(), explicit)  # type: ignore[arg-type]
+    assert result["traces"][0]["graph_evidence"] == {
+        "participated": True,
+        "backend": "local",
+    }
+    assert result["grounding"]["graph_participation"] == 1
+
+    # No graph channel and no graph_evidence → participated false.
+    class LexicalOnlyCLI(RecordingCLI):
+        def eval_answer_batch(self, path: Path) -> dict[str, Any]:
+            self.answer_rows = [json.loads(line) for line in path.read_text().splitlines()]
+            return {
+                "results": [
+                    {
+                        "question_id": "q1",
+                        "answer": "Q3 2026",
+                        "abstained": False,
+                        "claims": [{"text": "Q3 2026", "evidence_cids": ["cid-1"]}],
+                        "hops": [
+                            {
+                                "index": 0,
+                                "queries": ["Mara"],
+                                "channels": ["lexical"],
+                                "retrieved_cids": ["cid-0", "cid-1"],
+                            }
+                        ],
+                        "reader": {},
+                    }
+                ]
+            }
+
+    lexical = evaluate(_dataset(), LexicalOnlyCLI())  # type: ignore[arg-type]
+    assert lexical["traces"][0]["graph_evidence"] == {"participated": False}
+    assert lexical["grounding"]["graph_participation"] == 0
+
+
+def test_cap_003_honesty_pins_live_in_lease_a_suite() -> None:
+    """F-1 path-2: CAP-003 Partial honesty lives on the Lease A primary suite.
+
+    Plan re-admitted ``tests/test_public_requirement_truth.py`` onto Lease A;
+    this dual-homes the same gate inside ``test_grounded_qa_v2.py`` so the
+    original three-file task write-set also pins honesty without depending on
+    the truth-file path alone. Unit-perfect EM/F1 must not Complete CAP-003.
+    """
+    root = Path(__file__).resolve().parents[1]
+    requirements = (root / ".planning/REQUIREMENTS.md").read_text(encoding="utf-8")
+    row = next(
+        line
+        for line in requirements.splitlines()
+        if "CAP-003" in line and "qa_hard_v2" in line
+    )
+    assert "[ ] CAP-003" in row
+    assert "Partial" in row
+    assert "Complete" not in row
+    assert "0.85" in row
+    report = (root / "eval/reports/phase-12-grounded-qa.md").read_text(encoding="utf-8")
+    assert "CAP-003 remains Partial" in report
+    assert "no CAP-003 Complete" in report
+    assert "≥ 0.85" in report
+    assert "Not re-measured live" in report
