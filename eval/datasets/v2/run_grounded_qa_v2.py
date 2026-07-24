@@ -26,6 +26,18 @@ _SCALE_DATASET = Path(__file__).with_name("qa_scale_dev_v1.json").resolve()
 _SCALE_SHA256 = "54b3cf83e95bb023f4eff65d2ac2d25eff621685d5ef9f58fd75432ac294c8d2"
 _FROZEN_BATCH_TIMEOUT_SECONDS = 3600
 _PREFLIGHT_SCHEMA = "grounded-qa-scale-preflight-v1"
+# Immutable 12-04-01 freeze bind for 12-04-02 evidence (read-only external custody).
+PHASE12_V19_FREEZE = {
+    "path": str(
+        Path.home()
+        / ".local/share/mnemosyne/candidates/phase12-v19/candidate-manifest.json"
+    ),
+    "git_sha": "df438ca34061467ecc227bcf4d45bb1f7e886aee",
+    "manifest_sha256": (
+        "e81fc655f81ab43f1cfd5ad1b8644a9271a190027c49233efe89a2dd682c95f3"
+    ),
+    "candidate_version": "phase12-candidate-v19",
+}
 
 
 def load_dataset(path: Path, *, allow_frozen: bool = False) -> dict[str, Any]:
@@ -53,6 +65,73 @@ def compare_retrieval_baseline(
         if key in measured and measured[key] < baseline[key]
     }
     return {"passed": not missing and not regressions, "missing": sorted(missing), "regressions": regressions}
+
+
+def _grounding_summary(traces: list[dict[str, Any]]) -> dict[str, int]:
+    """Aggregate grounding/citation/abstention/second-hop/graph participation."""
+    unsupported = 0
+    fabricated = 0
+    graph = 0
+    second_hop = 0
+    abstained = 0
+    for trace in traces:
+        retrieved = {
+            cid
+            for hop in trace.get("hops", []) or []
+            if isinstance(hop, dict)
+            for cid in hop.get("retrieved_cids", []) or []
+        }
+        hops = trace.get("hops", []) or []
+        second_hop += int(len(hops) > 1)
+        graph += int(
+            bool((trace.get("graph_evidence") or {}).get("participated"))
+            or any(
+                channel in {"graph", "ppr"}
+                for hop in hops
+                if isinstance(hop, dict)
+                for channel in hop.get("channels", []) or []
+            )
+        )
+        abstained += int(trace.get("abstained") is True)
+        for claim in trace.get("claims", []) or []:
+            if not isinstance(claim, dict):
+                continue
+            citations = claim.get("evidence_cids", []) or []
+            unsupported += int(not citations)
+            fabricated += sum(1 for cid in citations if cid not in retrieved)
+    return {
+        "abstained": abstained,
+        "fabricated_citations": fabricated,
+        "graph_participation": graph,
+        "second_hop": second_hop,
+        "unsupported_claims": unsupported,
+    }
+
+
+def attach_custody(
+    result: Mapping[str, Any],
+    *,
+    git_sha: str,
+    candidate_manifest_sha256: str,
+    candidate_version: str | None = None,
+) -> dict[str, Any]:
+    """Bind external candidate custody onto an evaluate() result (report surface)."""
+    if not isinstance(git_sha, str) or len(git_sha) != 40 or any(
+        ch not in "0123456789abcdef" for ch in git_sha
+    ):
+        raise ValueError("grounded QA custody git_sha is invalid")
+    if (
+        not isinstance(candidate_manifest_sha256, str)
+        or len(candidate_manifest_sha256) != 64
+        or any(ch not in "0123456789abcdef" for ch in candidate_manifest_sha256)
+    ):
+        raise ValueError("grounded QA custody candidate_manifest_sha256 is invalid")
+    projected = dict(result)
+    projected["candidate_git_sha"] = git_sha
+    projected["candidate_manifest_sha256"] = candidate_manifest_sha256
+    if candidate_version is not None:
+        projected["candidate_version"] = _string(candidate_version, "candidate_version")
+    return projected
 
 
 def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
@@ -142,6 +221,7 @@ def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
                 "scoring_family": "qa",
             }
         )
+    # Gold labels exist only here, for the public scorer — never in CLI payloads above.
     labels = [
         {
             "answers": list(dict.fromkeys([
@@ -161,6 +241,7 @@ def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
         "dataset_id": dataset.get("dataset_id"),
         "qa": qa,
         "retrieval": retrieval,
+        "grounding": _grounding_summary(traces),
         "trace_count": len(traces),
         "traces": traces,
     }
@@ -342,8 +423,16 @@ def main(argv: list[str] | None = None) -> int:
         env=runtime_env,
         timeout_s=_FROZEN_BATCH_TIMEOUT_SECONDS if frozen or scale else 120.0,
     )
-    result = evaluate(dataset, cli)
-    result["candidate_manifest_sha256"] = candidate_digest
+    result = attach_custody(
+        evaluate(dataset, cli),
+        git_sha=str(expected_sha),
+        candidate_manifest_sha256=candidate_digest,
+        candidate_version=(
+            str(candidate["candidate_version"])
+            if isinstance(candidate.get("candidate_version"), str)
+            else None
+        ),
+    )
     if args.write_preflight_receipt is not None:
         metrics = result.get("qa", {}).get("metrics")
         retrieval = result.get("retrieval")
