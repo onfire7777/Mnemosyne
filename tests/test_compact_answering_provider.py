@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import socket
+import threading
 
 import pytest
 
@@ -13,6 +16,7 @@ from mnemosyne.providers.compact_answering import (
     CompactProviderError,
     CompactProviderIdentity,
     CompactProtocolError,
+    CompactServiceError,
 )
 
 
@@ -230,3 +234,249 @@ def test_unavailable_and_oversize_transports_fail_closed() -> None:
 def test_endpoint_policy_rejects_nonlocal_or_ambiguous_targets(endpoint: str) -> None:
     with pytest.raises(ValueError):
         CompactAnsweringProvider(endpoint, IDENTITY)
+
+
+class _RawTransport:
+    def __init__(self, response: dict[str, object]) -> None:
+        self.response = response
+        self.requests: list[dict[str, object]] = []
+
+    def __call__(self, _endpoint: str, body: bytes, *_args: object) -> bytes:
+        assert body.endswith(b"\n")
+        self.requests.append(json.loads(body))
+        return json.dumps(self.response, separators=(",", ":")).encode() + b"\n"
+
+
+def test_raw_answering_ort_shapes_preserve_ids_order_spans_and_custody() -> None:
+    transport = _RawTransport(
+        {
+            "ok": True,
+            "result": {
+                "operation": "rerank",
+                "ranked_ids": ["b", "a"],
+            },
+        }
+    )
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        dims=2,
+        wire_protocol="answering-ort",
+        transport=transport,
+    )
+    hits = [
+        Hit("a", "evidence", "tenant", "main", "first", 0.1, "lexical"),
+        Hit("b", "evidence", "tenant", "main", "second", 0.2, "lexical"),
+    ]
+    assert [hit.id for hit in provider.rerank("question", hits, 2)] == ["b", "a"]
+    assert transport.requests == [
+        {
+            "operation": "rerank",
+            "query": "query: question",
+            "evidence": [{"id": "a", "text": "first"}, {"id": "b", "text": "second"}],
+            "rank_width": 2,
+        }
+    ]
+    assert provider.disclosure["wire_protocol"] == "answering-ort"
+
+    transport.response = {
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }
+    assert provider.embed_many(["first", "second"]) == [pytest.approx([0.6, 0.8])] * 2
+    assert transport.requests[-2:] == [
+        {"operation": "embed", "query": "first"},
+        {"operation": "embed", "query": "second"},
+    ]
+
+    transport.response = {
+        "ok": True,
+        "result": {
+            "operation": "read",
+            "prediction": {
+                "answer_type": "span",
+                "evidence_id": "e1",
+                "start": 7,
+                "end": 20,
+                "supporting_ids": ["e1"],
+            },
+        },
+    }
+    assert provider.read(
+        {"question": "What?", "evidence": [{"cid": "e1", "content": "prefix naïve 東京 suffix"}]}
+    ) == {"claims": [{"spans": [{"cid": "e1", "quote": "naïve 東京"}]}], "unresolved": False}
+
+
+@pytest.mark.parametrize("suffix", [b"", b"\n{}\n"])
+def test_raw_answering_ort_rejects_invalid_response_framing(suffix: bytes) -> None:
+    response = json.dumps({
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }, separators=(",", ":")).encode() + suffix
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        dims=2,
+        wire_protocol="answering-ort",
+        transport=lambda *_args: response,
+    )
+    with pytest.raises(CompactProtocolError, match="newline-delimited"):
+        provider.embed("framing")
+
+
+@pytest.mark.parametrize(
+    "prediction",
+    [
+        {"answer_type": "null", "supporting_ids": ["unknown"]},
+        {
+            "answer_type": "span",
+            "evidence_id": "e1",
+            "start": 0,
+            "end": 3,
+            "supporting_ids": ["e2"],
+        },
+    ],
+)
+def test_raw_answering_ort_rejects_invalid_supporting_ids(prediction: dict[str, object]) -> None:
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        wire_protocol="answering-ort",
+        transport=_RawTransport({
+            "ok": True,
+            "result": {"operation": "read", "prediction": prediction},
+        }),
+    )
+    with pytest.raises(CompactProtocolError, match="supporting id"):
+        provider.read({
+            "question": "What?",
+            "evidence": [
+                {"cid": "e1", "content": "one"},
+                {"cid": "e2", "content": "two"},
+            ],
+        })
+
+
+def test_raw_transport_supports_loopback_tcp_and_absolute_unix() -> None:
+    response = json.dumps({
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }, separators=(",", ":")).encode() + b"\n"
+
+    def serve_once(server: socket.socket) -> threading.Thread:
+        def serve() -> None:
+            with server:
+                connection, _address = server.accept()
+                with connection:
+                    assert connection.recv(4096).endswith(b"\n")
+                    connection.sendall(response)
+
+        thread = threading.Thread(target=serve)
+        thread.start()
+        return thread
+
+    tcp = socket.socket()
+    tcp.bind(("127.0.0.1", 0))
+    tcp.listen(1)
+    port = tcp.getsockname()[1]
+    tcp_thread = serve_once(tcp)
+    tcp_provider = CompactAnsweringProvider(
+        f"http://127.0.0.1:{port}", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    assert tcp_provider.embed("tcp") == pytest.approx([0.6, 0.8])
+    tcp_thread.join()
+
+    path = f"/tmp/mnemosyne-answering-{os.getpid()}.sock"
+    unix = socket.socket(socket.AF_UNIX)
+    unix.bind(path)
+    unix.listen(1)
+    unix_thread = serve_once(unix)
+    unix_provider = CompactAnsweringProvider(
+        f"unix://{path}", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    assert unix_provider.embed("unix") == pytest.approx([0.6, 0.8])
+    unix_thread.join()
+    os.unlink(path)
+
+
+def test_raw_transport_rejects_delayed_second_frame() -> None:
+    response = json.dumps({
+        "ok": True,
+        "result": {"operation": "embed", "embedding": [3.0, 4.0]},
+    }, separators=(",", ":")).encode() + b"\n"
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def serve() -> None:
+        with server:
+            connection, _address = server.accept()
+            with connection:
+                assert connection.recv(4096).endswith(b"\n")
+                connection.sendall(response)
+                connection.sendall(b"{}\n")
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    provider = CompactAnsweringProvider(
+        f"http://127.0.0.1:{port}", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    with pytest.raises(CompactProtocolError, match="newline-delimited"):
+        provider.embed("multiple frames")
+    thread.join()
+
+
+def test_raw_transport_normalizes_localhost_before_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    def reject_after_capture(address: tuple[str, int], _timeout: float) -> socket.socket:
+        assert address[0] == "127.0.0.1"
+        raise OSError("synthetic refusal")
+
+    monkeypatch.setattr(socket, "create_connection", reject_after_capture)
+    provider = CompactAnsweringProvider(
+        "http://localhost:18181", IDENTITY, dims=2, wire_protocol="answering-ort"
+    )
+    with pytest.raises(CompactProviderError, match="failed closed"):
+        provider.embed("local")
+
+
+@pytest.mark.parametrize("response", [
+    {"ok": False, "error": {"code": "runtime_busy", "message": "busy"}},
+    {"ok": True, "result": {"operation": "rerank", "ranked_ids": ["unknown"]}},
+    {"ok": True, "result": {"operation": "read", "prediction": {"answer_type": "yes", "supporting_ids": ["e1"]}}},
+])
+def test_raw_answering_ort_failures_are_typed_and_strict(response: dict[str, object]) -> None:
+    provider = CompactAnsweringProvider(
+        "unix:///tmp/answering-ort.sock",
+        IDENTITY,
+        wire_protocol="answering-ort",
+        transport=_RawTransport(response),
+    )
+    if response.get("ok") is False:
+        with pytest.raises(CompactServiceError) as raised:
+            provider.embed("question")
+        assert raised.value.code == "runtime_busy"
+    elif response["result"]["operation"] == "rerank":  # type: ignore[index]
+        with pytest.raises(CompactProtocolError, match="ranked id"):
+            provider.rerank("question", [Hit("a", "evidence", "t", "main", "x", 0.1, "lexical")], 1)
+    else:
+        with pytest.raises(CompactProtocolError, match="answer type"):
+            provider.read({"question": "What?", "evidence": [{"cid": "e1", "content": "yes"}]})
+
+
+def test_raw_answering_ort_enforces_component_bounds_before_transport() -> None:
+    transport = _RawTransport({"ok": True, "result": {"operation": "read"}})
+    provider = CompactAnsweringProvider(
+        "http://127.0.0.1:18181",
+        IDENTITY,
+        wire_protocol="answering-ort",
+        transport=transport,
+    )
+    with pytest.raises(CompactProtocolError, match="character limit"):
+        provider.embed("x" * 2_001)
+    with pytest.raises(CompactProtocolError, match="component limit"):
+        provider.read({
+            "question": "bounded",
+            "evidence": [{"cid": f"e{index}", "content": "x"} for index in range(21)],
+        })
+    assert transport.requests == []
