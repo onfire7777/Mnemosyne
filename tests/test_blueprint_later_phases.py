@@ -300,6 +300,17 @@ def test_promotion_gate_promotes_clean_candidate_to_main() -> None:
             access_policy={"tenant": TENANT},
         )
     )
+    cid_b = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="seed",
+            content="Independent note: preferred database remains Postgres.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
     case = RegressionCase(
         id="case-postgres",
         signature="database preference",
@@ -313,7 +324,13 @@ def test_promotion_gate_promotes_clean_candidate_to_main() -> None:
         signature="database preference",
         description="database is Postgres",
         branch="canary-postgres",
-        source_evidence_cids=[cid],
+        source_evidence_cids=[cid, cid_b],
+        unit_signals={
+            "reality_class": "grounded",
+            "trust_tier": 0,
+            "independent_corroboration_count": 2,
+            "independent_corroboration_weight": 0.4,
+        },
     )
     gate = PromotionGate(engine, [case])
 
@@ -325,7 +342,7 @@ def test_promotion_gate_promotes_clean_candidate_to_main() -> None:
                 predicate="is",
                 object="Postgres",
                 confidence=0.95,
-                source_evidence_cids=[cid],
+                source_evidence_cids=[cid, cid_b],
                 status="active",
                 trust_tier=0,
                 access_policy={"tenant": TENANT},
@@ -394,6 +411,17 @@ def test_consolidation_worker_promotes_through_gate() -> None:
             access_policy={"tenant": TENANT},
         )
     )
+    evidence_cid_b = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="episode",
+            content="Second source: recurring workflow uses a protected regression suite.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
     worker = ConsolidationWorker(
         engine,
         [
@@ -415,7 +443,7 @@ def test_consolidation_worker_promotes_through_gate() -> None:
             candidate_subject="recurring workflow",
             candidate_predicate="uses",
             candidate_object="protected regression suite",
-            source_evidence_cids=[evidence_cid],
+            source_evidence_cids=[evidence_cid, evidence_cid_b],
         )
     )
 

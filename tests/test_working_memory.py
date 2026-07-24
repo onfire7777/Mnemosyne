@@ -391,8 +391,23 @@ def test_put_and_expiry_never_auto_promote() -> None:
 def test_explicit_promotion_gate_approval_preserves_working_item() -> None:
     engine = LocalMemoryEngine()
     evidence_id = _evidence(engine, content="The task evidence is grounded.")
+    # §7 #17 floor: fact promote needs ≥2 independent external sources.
+    evidence_id_b = _evidence(engine, content="Second independent grounded corroborator.")
     item = _put(engine, evidence_id=evidence_id, content="Transient working note")
-    candidate = Candidate("candidate-working", "fact", "grounded task", "working promotion", "working-canary", [evidence_id])
+    candidate = Candidate(
+        "candidate-working",
+        "fact",
+        "grounded task",
+        "working promotion",
+        "working-canary",
+        [evidence_id, evidence_id_b],
+        unit_signals={
+            "reality_class": "grounded",
+            "trust_tier": 0,
+            "independent_corroboration_count": 2,
+            "independent_corroboration_weight": 0.4,
+        },
+    )
     gate = PromotionGate(
         engine,
         [RegressionCase("protected-working", "grounded", "grounded", "grounded", protected=True)],
@@ -407,7 +422,7 @@ def test_explicit_promotion_gate_approval_preserves_working_item() -> None:
                 predicate="state",
                 object="grounded",
                 branch=branch,
-                source_evidence_cids=[evidence_id],
+                source_evidence_cids=[evidence_id, evidence_id_b],
                 status="active",
                 access_policy={"tenant": TENANT},
             ),

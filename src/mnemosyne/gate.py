@@ -135,6 +135,10 @@ class Candidate:
     description: str
     branch: str
     source_evidence_cids: list[str]
+    # Optional Standing-shaped unit signals for §7 #17 fact corroboration.
+    # When omitted on kind=="fact", PromotionGate derives a local oracle from
+    # distinct source_evidence_cids (grounded count only — not self-echo).
+    unit_signals: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -206,6 +210,7 @@ class PromotionGate:
         noise_margin: float = 0.01,
         counterfactual_hook: CounterfactualHook | None = None,
         require_ignition: bool = False,
+        policy: OperatingPolicy | None = None,
     ):
         self.engine = engine
         self.cases = cases
@@ -214,6 +219,8 @@ class PromotionGate:
         # otherwise-promotable candidate. Default ``None`` preserves prior behaviour.
         self.counterfactual_hook = counterfactual_hook
         self.require_ignition = require_ignition
+        # §23.3 / §7 #17 policy floor for fact-candidate external corroboration.
+        self.policy = policy if policy is not None else OperatingPolicy()
 
     def relevant_cases(self, candidate: Candidate) -> list[RegressionCase]:
         signature_terms = set(candidate.signature.lower().split())
@@ -306,6 +313,26 @@ class PromotionGate:
             if not ignition.ready:
                 failed.append("ignition_not_ready: " + "; ".join(ignition.blocking_reasons))
                 promoted = False
+        # §23.3 / §7 #17: fact-candidates require independent external corroboration
+        # (Standing effective count). Self-echo and missing signals fail closed and
+        # can veto an otherwise-promotable candidate; never rescue a failed suite.
+        # Explicit unit_signals enforce the full policy floor (default 2). When only
+        # source CIDs are available, derive local-oracle signals and apply a
+        # transitional min_external=1 so consolidation's dual-standard CID floor
+        # (min_corroboration default 1) is not silently rewritten here — Plan may
+        # later admit consolidation migration onto the Standing rail.
+        if candidate.kind == "fact":
+            explicit = getattr(candidate, "unit_signals", None)
+            fact_verdict = evaluate_fact_external_corroboration(
+                unit_signals=self._fact_unit_signals(candidate),
+                policy=self.policy,
+                min_external=None if explicit is not None else 1,
+            )
+            if promoted and not fact_verdict.allowed:
+                reason = f"fact_external_corroboration: {fact_verdict.reason}"
+                failed.append(reason)
+                protected_regressions.append(reason)
+                promoted = False
         rollback_branch = None
         if promoted:
             self._merge(branch, tenant_id)
@@ -313,6 +340,29 @@ class PromotionGate:
             rollback_branch = branch
             self._discard(branch, tenant_id)
         return GateResult(candidate.id, promoted, protected_regressions, failed, passed, margin, rollback_branch, counterfactual)
+
+    @staticmethod
+    def _fact_unit_signals(candidate: Candidate) -> Mapping[str, Any] | None:
+        """Resolve Standing-shaped signals for the fact external-corroboration rail.
+
+        Prefer explicit ``candidate.unit_signals``. Otherwise derive a local-oracle
+        mapping from distinct source evidence CIDs (count as independent grounded
+        sources). Empty/missing CIDs yield no signals → fail closed.
+        """
+
+        explicit = getattr(candidate, "unit_signals", None)
+        if explicit is not None:
+            return explicit
+        distinct = {cid for cid in (candidate.source_evidence_cids or []) if cid}
+        if not distinct:
+            return None
+        n = len(distinct)
+        return {
+            "reality_class": "grounded",
+            "trust_tier": 0,
+            "independent_corroboration_count": n,
+            "independent_corroboration_weight": min(n, 5) / 5.0,
+        }
 
     def _reset_branch(self, branch: str, tenant_id: str) -> None:
         branches = getattr(self.engine, "branches", None)
