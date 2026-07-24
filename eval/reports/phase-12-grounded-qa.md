@@ -291,7 +291,7 @@ No CAP-001/CAP-002/CAP-003/BENCH-005 completion or public number is claimed.
 ## 12-04-02 — Public-CLI-only internal evaluator (lease-12-04-02)
 
 **Status:** Evaluator surface **complete**; live measured gates **not met** → **CAP-003 remains Partial**.
-**Updated (UTC):** 2026-07-24T05:47:00Z (mne-implement re-validation on team tip)
+**Updated (UTC):** 2026-07-24T18:08:19Z (mne-implement F-1 path-2 + F-2 graph_evidence + re-validation @ `3239d30`)
 **Task:** Run frozen `qa_hard_v2` through a public-CLI-only internal reader evaluator with scorer-isolated gold.
 
 ### Bound custody (immutable 12-04-01 freeze)
@@ -327,12 +327,14 @@ uv run --locked python -m pytest tests/test_grounded_qa_v2.py tests/test_public_
 
 Pack result: **pass** (includes synthetic gold isolation, 24-case once dry-run against frozen corpus with public-CLI stand-in, custody bind constants, order-drift refusal, scale preflight, exclusive external paths).
 
-Re-validation this cycle (`mne-implement` / unit residual, 2026-07-24):
+Re-validation this cycle (`mne-implement` / unit residual, 2026-07-24T18:08:19Z @ `3239d30`):
 
-- `tests/test_grounded_qa_v2.py` + `tests/test_public_requirement_truth.py` → **pass**
-- Preserve spot-check: `tests/test_grounded_answering.py` + `tests/test_public_longmemeval_qa.py` → **pass**
-- Ollama `127.0.0.1:11434` → **unreachable** (no live protected attempt)
+- `tests/test_grounded_qa_v2.py` + `tests/test_public_requirement_truth.py` → **pass** (20+5)
+- F-1 path-2: `test_cap_003_honesty_pins_live_in_lease_a_suite` dual-homes CAP-003 Partial honesty on primary suite (Plan path-1 truth file also CLEAR)
+- F-2: `evaluate()` projects `graph_evidence` (forward CLI dict or derive `participated` from hop `graph`/`ppr` channels) — `test_evaluate_projects_graph_evidence_for_qa_report_dual_path`
+- Ollama `127.0.0.1:11434` → **unreachable** (no live protected attempt; CAP-003 remains Partial)
 - Residual unit pins: exact answer payload shape, frozen one-shot fail-closed gates, no per-QID patch surface, CAP-003 Partial until measured EM/F1 ≥ 0.85
+- Handoff: `.agentsmesh/handoff/implement.md` → **ready-for-review / ready-for-test**
 
 
 ### Live protected / host measurement residual

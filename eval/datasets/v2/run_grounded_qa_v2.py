@@ -209,12 +209,26 @@ def evaluate(dataset: dict[str, Any], cli: MnemoCLI) -> dict[str, Any]:
         )
         gold_docs = _strings(question.get("relevant_doc_ids"), "relevant_doc_ids")
         retrieval_scores.append(_retrieval_score(retrieved[:5], gold_docs))
+        hops = result.get("hops")
+        graph_evidence = result.get("graph_evidence")
+        if not isinstance(graph_evidence, dict):
+            # Dual-path parity with qa_report: project participated when hop
+            # channels include graph/ppr even if the CLI omitted graph_evidence.
+            hop_rows = hops if isinstance(hops, list) else []
+            participated = any(
+                channel in {"graph", "ppr"}
+                for hop in hop_rows
+                if isinstance(hop, dict)
+                for channel in hop.get("channels", []) or []
+            )
+            graph_evidence = {"participated": participated}
         traces.append(
             {
                 "abstained": result.get("abstained"),
                 "answer": result.get("answer"),
                 "claims": result.get("claims"),
-                "hops": result.get("hops"),
+                "graph_evidence": graph_evidence,
+                "hops": hops,
                 "question_id": question["qid"],
                 "reader": result.get("reader"),
                 "retrieved_doc_ids": retrieved,
