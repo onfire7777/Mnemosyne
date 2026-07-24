@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any, Mapping, Protocol, Sequence
 
 from mnemosyne.engine import MemoryEngine
+from mnemosyne.providers.deterministic_synthesis import DeterministicSynthesizer
 from mnemosyne.retrieval import QUERY_SUPPORT_STOPWORDS, normalise_query_term
 from mnemosyne.text import tokenize
 
@@ -753,10 +754,18 @@ class GroundedAnswerOrchestrator:
             raise ValueError("reader must return bounded claims")
         claims: list[AnswerClaim] = []
         for row in rows:
-            if not isinstance(row, dict) or set(row) != {"spans"}:
+            if not isinstance(row, dict) or set(row) not in ({"spans"}, {"synthesis"}):
                 raise ValueError("invalid claim schema")
-            raw_spans = row["spans"]
-            if not isinstance(raw_spans, list) or not raw_spans or len(raw_spans) > 3:
+            synthesis = row["synthesis"] if "synthesis" in row else None
+            if "synthesis" in row:
+                if not isinstance(synthesis, dict) or set(synthesis) != {"operation", "spans"}:
+                    raise ValueError("invalid synthesis schema")
+                raw_spans = synthesis["spans"]
+                max_spans = 16
+            else:
+                raw_spans = row["spans"]
+                max_spans = 3
+            if not isinstance(raw_spans, list) or not raw_spans or len(raw_spans) > max_spans:
                 raise ValueError("claim spans are invalid")
             spans: list[AnswerSpan] = []
             occupied: dict[str, list[tuple[int, int]]] = {}
@@ -769,13 +778,29 @@ class GroundedAnswerOrchestrator:
                 start = evidence[cid].find(quote)
                 if start < 0:
                     raise ValueError("claim quote is outside authorized evidence")
+                if synthesis is not None and evidence[cid].find(quote, start + 1) >= 0:
+                    raise ValueError("synthesis claim quote is ambiguous")
                 end = start + len(quote)
                 if any(start < right and left < end for left, right in occupied.setdefault(cid, [])):
                     raise ValueError("claim spans overlap")
                 occupied[cid].append((start, end))
                 spans.append(AnswerSpan(cid, start, end, hashlib.sha256(quote.encode("utf-8")).hexdigest()))
-            rendered = " ".join(evidence[span.cid][span.start:span.end] for span in spans)
-            if not rendered.strip() or len(rendered) > 2_000:
+            if synthesis is not None:
+                try:
+                    result = DeterministicSynthesizer().synthesize(synthesis)
+                except Exception as exc:
+                    raise ValueError("invalid synthesis proposal") from exc
+                if (
+                    set(result) != {"answer", "operation", "provenance", "unresolved"}
+                    or result["operation"] != synthesis["operation"]
+                    or result["provenance"] != raw_spans
+                    or result["unresolved"] is not False
+                ):
+                    raise ValueError("invalid synthesis result")
+                rendered = result["answer"]
+            else:
+                rendered = " ".join(evidence[span.cid][span.start:span.end] for span in spans)
+            if not isinstance(rendered, str) or not rendered.strip() or len(rendered) > 2_000:
                 raise ValueError("claim span rendering is invalid")
             claims.append(AnswerClaim(rendered, tuple(dict.fromkeys(span.cid for span in spans)), tuple(spans)))
         return tuple(claims)

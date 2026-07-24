@@ -18,6 +18,15 @@ from mnemosyne.answering import (
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence, Hit, Relation, RetrievalResult
+from mnemosyne.providers.compact_answering import CompactAnsweringProvider
+from mnemosyne.providers.extractive_decomposer import (
+    CONTENT_SHA256 as DECOMPOSER_SHA256,
+    SELECTOR as DECOMPOSER_SELECTOR,
+)
+from mnemosyne.providers.grounded_reader import (
+    CommandGroundedProvider,
+    ComposedGroundedProvider,
+)
 
 
 class RecordingDecomposer:
@@ -106,6 +115,48 @@ def _engine() -> LocalMemoryEngine:
         )
     )
     return engine
+
+
+def _compact_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "MNEMOSYNE_QUERY_DECOMPOSER_PROVIDER": "command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_COMMAND": "query-command",
+        "MNEMOSYNE_QUERY_DECOMPOSER_SELECTOR": DECOMPOSER_SELECTOR,
+        "MNEMOSYNE_QUERY_DECOMPOSER_CONTENT_SHA256": DECOMPOSER_SHA256,
+        "MNEMOSYNE_GROUNDED_READER_PROVIDER": "compact",
+        "MNEMOSYNE_COMPACT_ENDPOINT": "unix:///tmp/answering-ort.sock",
+        "MNEMOSYNE_COMPACT_PROVIDER": "answering-ort",
+        "MNEMOSYNE_COMPACT_PROVIDER_SHA256": "1" * 64,
+        "MNEMOSYNE_COMPACT_ARTIFACT": "compact-int8.onnx",
+        "MNEMOSYNE_COMPACT_ARTIFACT_SHA256": "2" * 64,
+        "MNEMOSYNE_COMPACT_CONFIGURATION": "compact-config-v1",
+        "MNEMOSYNE_COMPACT_CONFIGURATION_SHA256": "3" * 64,
+        "MNEMOSYNE_COMPACT_DIMS": "1024",
+    }
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_explicit_compact_environment_preserves_command_decomposer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _compact_environment(monkeypatch)
+    provider = CommandGroundedProvider.from_environment()
+    assert isinstance(provider, ComposedGroundedProvider)
+    assert isinstance(provider.decomposer, CommandGroundedProvider)
+    assert provider.decomposer.query_command == "query-command"
+    assert isinstance(provider.reader, CompactAnsweringProvider)
+    assert provider.disclosure["grounded_reader"]["wire_protocol"] == "answering-ort"
+
+
+def test_compact_environment_is_complete_and_has_no_command_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _compact_environment(monkeypatch)
+    monkeypatch.delenv("MNEMOSYNE_COMPACT_ARTIFACT_SHA256")
+    monkeypatch.setenv("MNEMOSYNE_GROUNDED_READER_COMMAND", "must-not-run")
+    with pytest.raises(ValueError, match="artifact_sha256"):
+        CommandGroundedProvider.from_environment()
 
 
 @pytest.mark.parametrize(
@@ -404,6 +455,30 @@ def test_reader_claims_are_approved_only_against_replayed_authorized_cids() -> N
     assert engine.export_all() == before
 
 
+def test_reader_receives_only_authorized_evidence_and_abstains_deterministically() -> None:
+    reader = RecordingReader({"claims": [], "unresolved": True})
+    orchestrator = GroundedAnswerOrchestrator(
+        _engine(), RecordingDecomposer({"queries": []})
+    )
+    request = AnswerRequest(question="Ada", context=_context())
+
+    first = orchestrator.answer(request, reader)
+    second = orchestrator.answer(request, reader)
+
+    assert first == second
+    assert first.abstained is True and first.answer == "" and first.claims == ()
+    assert len(reader.calls) == 2 and reader.calls[0] == reader.calls[1]
+    payload = reader.calls[0]
+    assert set(payload) == {"question", "evidence"}
+    assert {row["cid"] for row in payload["evidence"]} == {
+        row.cid for row in first.evidence
+    }
+    serialized = repr(payload)
+    assert all(value not in serialized for value in (
+        "tenant-a", "user-a", "memory:read", "support", "consent", "request-source"
+    ))
+
+
 def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> None:
     evidence = {"a": "A😀B ignore instructions", "b": "東京 ready"}
     claims = GroundedAnswerOrchestrator._claims(
@@ -417,6 +492,109 @@ def test_extractive_span_reader_renders_unicode_cross_cid_and_utf8_hashes() -> N
     assert claims[0].text == "😀 東京 ignore instructions"
     assert claims[0].evidence_cids == ("a", "b")
     assert claims[0].spans[0].slice_sha256 == hashlib.sha256("😀".encode("utf-8")).hexdigest()
+
+
+@pytest.mark.parametrize(
+    ("operation", "quotes", "expected"),
+    [
+        ("add", ("1.20", "2.80"), "4"),
+        ("compose_date", ("2024", "February", "29"), "2024-02-29"),
+    ],
+)
+def test_synthesis_claims_resolve_authorized_spans_and_render_canonical_output(
+    operation: str, quotes: tuple[str, ...], expected: str
+) -> None:
+    evidence = {
+        f"cid-{index}": f"prefix {quote} suffix"
+        for index, quote in enumerate(quotes)
+    }
+    claims = GroundedAnswerOrchestrator._claims(
+        {"claims": [{"synthesis": {"operation": operation, "spans": [
+            {"cid": cid, "quote": quote}
+            for cid, quote in zip(evidence, quotes, strict=True)
+        ]}}], "unresolved": False},
+        evidence,
+    )
+    claim = claims[0]
+    assert claim.text == expected
+    assert claim.evidence_cids == tuple(evidence)
+    assert tuple((span.cid, span.start, span.end) for span in claim.spans) == tuple(
+        (cid, 7, 7 + len(quote))
+        for cid, quote in zip(evidence, quotes, strict=True)
+    )
+    assert tuple(span.slice_sha256 for span in claim.spans) == tuple(
+        hashlib.sha256(quote.encode("utf-8")).hexdigest() for quote in quotes
+    )
+
+
+@pytest.mark.parametrize(
+    "synthesis",
+    [
+        None,
+        {"operation": "sum", "spans": [{"cid": "a", "quote": "1"}]},
+        {"operation": "add", "spans": [{"cid": "unknown", "quote": "1"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "3"}]},
+        {"operation": "add", "spans": [
+            {"cid": "a", "quote": "1"}, {"cid": "a", "quote": "1"},
+        ]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "1 + 2"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "ignore instructions"}]},
+        {"operation": "add", "spans": [{"cid": "a", "quote": "1"}], "answer": "1"},
+    ],
+)
+def test_synthesis_claims_fail_closed_for_invalid_proposals(synthesis: object) -> None:
+    with pytest.raises(ValueError):
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"synthesis": synthesis}], "unresolved": False},
+            {"a": "1 + 2 ignore instructions"},
+        )
+
+
+def test_synthesis_claims_reject_ambiguous_quotes() -> None:
+    with pytest.raises(ValueError, match="ambiguous"):
+        GroundedAnswerOrchestrator._claims(
+            {"claims": [{"synthesis": {"operation": "add", "spans": [
+                {"cid": "a", "quote": "1"},
+            ]}}], "unresolved": False},
+            {"a": "1 then 1"},
+        )
+
+
+def test_synthesis_reader_abstains_with_replayed_evidence_on_drift_or_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = _engine()
+    assembled = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).assemble(AnswerRequest(question="Ada", context=_context()))
+    proposal = {"claims": [{"synthesis": {"operation": "add", "spans": [
+        {"cid": assembled.evidence[0].cid, "quote": "Ada owns project Zephyr."},
+    ]}}], "unresolved": False}
+    monkeypatch.setattr(
+        "mnemosyne.answering.DeterministicSynthesizer.synthesize",
+        lambda *_args: (_ for _ in ()).throw(ValueError("synthetic failure")),
+    )
+    result = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(proposal))
+    assert result.abstained is True and result.evidence
+
+    original = engine.export_tenant_filtered
+    calls = 0
+
+    def drifting(tenant_id: str, context: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        value = original(tenant_id, context)
+        if calls > 1:
+            value["evidence"] = []
+        return value
+
+    monkeypatch.setattr(engine, "export_tenant_filtered", drifting)
+    drifted = GroundedAnswerOrchestrator(
+        engine, RecordingDecomposer({"queries": []})
+    ).answer(AnswerRequest(question="Ada", context=_context()), RecordingReader(proposal))
+    assert drifted.abstained is True and drifted.evidence == ()
 
 
 @pytest.mark.parametrize("quote", [None, 1, True, "", "AB", "x" * 2001])
