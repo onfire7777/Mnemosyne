@@ -1251,3 +1251,109 @@ def test_route_plan_composes_with_any_engine_retrieval_path() -> None:
     plan = route("why does Mnemosyne use Postgres historically")
     result = engine.deep_search("Mnemosyne", TENANT) if plan.mode == "deep" else engine.retrieve("Mnemosyne", TENANT)
     assert result is not None
+
+
+def test_retrieve_tags_matching_preference_as_preference_channel() -> None:
+    """§22.2 / Lease D #8: scored preferences surface as the preference channel."""
+    engine = LocalMemoryEngine()
+    engine.add_preference(
+        Preference(
+            tenant_id=TENANT,
+            user_id=USER,
+            category="format",
+            statement="Always cite evidence CIDs in answers.",
+            confidence=0.9,
+            explicit=True,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    result = engine.retrieve("cite evidence CIDs", TENANT)
+    pref_hits = [hit for hit in result.hits if hit.kind == "preference"]
+    assert pref_hits, "expected preference hit in retrieve results"
+    # Channel may be fused/annotated (e.g. preference+rerank) but must remain preference-rooted.
+    assert all(
+        hit.channel == "preference" or hit.channel.startswith("preference+")
+        or "preference" in hit.channel.split("+")
+        for hit in pref_hits
+    )
+    assert result.explain["channels"].get("preference", 0) >= 1
+
+
+def test_retrieve_assembly_marginal_gain_applies_act_r_cutoff() -> None:
+    """§22.4 / Lease D #9: filt assembly=marginal_gain uses expected-marginal-gain cutoff."""
+    engine = LocalMemoryEngine(
+        policy=OperatingPolicy(token_budget=64, top_k=8, deep_top_k=8)
+    )
+    for index, content in enumerate(
+        (
+            "Alpha project ships helium modules for retrieval budget tests.",
+            "Alpha project ships helium modules for retrieval budget tests.",  # redundant
+            "Beta warehouse stores graphite rods for unrelated inventory.",
+        ),
+        start=1,
+    ):
+        engine.append_evidence(
+            Evidence(
+                tenant_id=TENANT,
+                user_id=USER,
+                actor="user",
+                source_type="chat",
+                content=content,
+                trust_tier=0,
+                access_policy={"tenant": TENANT},
+                source_identity=f"doc-{index}",
+            )
+        )
+    default = engine.retrieve("Alpha project helium modules", TENANT)
+    margined = engine.retrieve(
+        "Alpha project helium modules",
+        TENANT,
+        filt={"assembly": "marginal_gain"},
+    )
+    assert margined.explain.get("assembly", {}).get("mode") == "marginal_gain"
+    assert margined.used_tokens <= engine.policy.token_budget
+    # Marginal-gain should not admit more hits than the default budgeted path.
+    assert len(margined.hits) <= len(default.hits)
+    assert len(margined.hits) >= 1
+
+
+def test_retrieve_with_route_records_plan_and_selects_deep_vs_fast() -> None:
+    """§30.4 / Lease D #29: retrieve_with_route replaces hardcoded deep bool."""
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Mnemosyne uses Postgres for durable storage historically.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.add_relation(
+        Relation(
+            tenant_id=TENANT,
+            source="Mnemosyne",
+            predicate="uses",
+            target="Postgres",
+            confidence=0.9,
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
+    deep = engine.retrieve_with_route(
+        "why did Mnemosyne originally choose Postgres and how did that decision evolve",
+        TENANT,
+    )
+    assert deep.explain["route"]["mode"] == "deep"
+    assert "why" in deep.explain["route"]["reason"] or deep.explain["route"]["signals"]
+
+    fast = engine.retrieve_with_route("what stores durable data", TENANT)
+    assert fast.explain["route"]["mode"] == "fast"
+    forced = engine.retrieve_with_route(
+        "what stores durable data",
+        TENANT,
+        ctx={"mode": "deep"},
+    )
+    assert forced.explain["route"]["mode"] == "deep"
