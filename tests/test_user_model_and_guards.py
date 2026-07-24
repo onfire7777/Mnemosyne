@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from mnemosyne.guard import no_degradation_guard
+from mnemosyne.guard import LongHorizonNoDegradationTracker, no_degradation_guard
+from mnemosyne.user_model import build_advisory_latent_profile
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, next_rehearsal_days
 from mnemosyne.user_model import (
     LatentUserProfile,
@@ -160,6 +161,31 @@ def test_no_degradation_guard_blocks_memory_below_baseline() -> None:
     assert passing.passed is True
     assert failing.passed is False
     assert "degraded" in failing.reason
+
+
+def test_long_horizon_no_degradation_tracker_flags_breach_and_trend() -> None:
+    """§25 residual #30: long-horizon anti-degradation is tracked, not one-shot."""
+    tracker = LongHorizonNoDegradationTracker(minimum_margin=0.0)
+    assert tracker.record(0.9, 0.8).passed is True
+    assert tracker.record(0.85, 0.8).passed is True
+    assert tracker.record(0.7, 0.8).passed is False  # breach
+    horizon = tracker.evaluate()
+    assert horizon.passed is False
+    assert horizon.samples == 3
+    assert horizon.first_breach == 2
+    assert horizon.worst_margin < 0.0
+    assert horizon.trend <= 0.0  # eroding or flat
+
+
+def test_build_advisory_latent_profile_is_deterministic_and_fixed_width() -> None:
+    """FR-16 residual #26: advisory latent vectors are deterministic hashing embeds."""
+    a = build_advisory_latent_profile(TENANT, USER, "prefers concise diffs", dims=32)
+    b = build_advisory_latent_profile(TENANT, USER, "prefers concise diffs", dims=32)
+    other = build_advisory_latent_profile(TENANT, USER, "prefers long essays", dims=32)
+    assert a.embedding == b.embedding
+    assert len(a.embedding) == 32
+    assert a.embedding != other.embedding
+    assert a.summary == "prefers concise diffs"
 
 
 def test_user_model_entry_serialization_round_trips() -> None:
