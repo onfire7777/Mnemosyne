@@ -33,6 +33,9 @@ class OperatingPolicy:
     # mirrored by config/drift-baseline.toml and enforced structurally.
     max_supersession_rate: float = 0.05
     min_corroboration_for_delete: int = 2
+    # §23.3 / §7 #17: fact-candidate promotion requires provenance-independent
+    # external corroboration (Standing effective count). Self-echo never qualifies.
+    min_external_corroboration_for_fact: int = 2
     max_prune_fraction_per_pass: float = 0.02
     # Cognitive-architecture G1 knobs. Defaults are conservative and keep the
     # path deterministic: schema bridging only boosts recognized low-risk
