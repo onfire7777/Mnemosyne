@@ -9,7 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import (
@@ -736,9 +736,43 @@ class CounterfactualReplayReport:
         return asdict(self)
 
 
-def _session_succeeds(engine: LocalMemoryEngine, session: ReplaySession, *, branch: str = "main") -> bool:
+@runtime_checkable
+class SupportsRetrieve(Protocol):
+    """Retrieve-capable engine surface for CF session success (ENGINE-CONTRACT L2).
+
+    App-side composition only — engines provide ``retrieve`` primitives; this
+    module does not reimplement PPR/RRF. Structural so Local/Postgres/Sqlite and
+    test doubles all satisfy without LocalMemoryEngine type-bind.
+    """
+
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        *,
+        branch: str = "main",
+    ) -> Any: ...
+
+
+@runtime_checkable
+class SupportsCounterfactualEngine(Protocol):
+    """Retrieve + mutable policy for shadow :func:`counterfactual_replay`."""
+
+    policy: OperatingPolicy
+
+    def retrieve(
+        self,
+        query: str,
+        tenant_id: str,
+        *,
+        branch: str = "main",
+    ) -> Any: ...
+
+
+def _session_succeeds(engine: SupportsRetrieve, session: ReplaySession, *, branch: str = "main") -> bool:
     # Mirror the promotion gate's success criterion exactly (gate.py): the
     # expected answer must surface in retrieved hit text and not be abstained.
+    # Engine is structural (SupportsRetrieve) — not LocalMemoryEngine-only.
     result = engine.retrieve(session.query, session.tenant_id, branch=branch)
     rendered = "\n".join(getattr(hit, "text", "") for hit in result.hits)
     return session.expected_substring.lower() in rendered.lower() and not getattr(result, "abstained", False)
@@ -758,12 +792,14 @@ def make_counterfactual_hook(
     *regress* historical task success (predicted lift < 0); a non-inferior
     candidate passes. The gate only ever uses this to veto, never to rescue a
     candidate the regression suite already failed.
+
+    Session success uses :class:`SupportsRetrieve` (engine-agnostic L2).
     """
 
     def hook(
         tenant_id: str,
         candidate: Candidate,
-        engine: LocalMemoryEngine,
+        engine: SupportsRetrieve,
         passed: list[str],
         failed: list[str],
     ) -> CounterfactualVerdict:
@@ -805,6 +841,9 @@ def default_counterfactual_hook(
     * Once the bar clears (``authorized_to_trust``), it vetoes any candidate whose
       mean predicted lift is negative. It still does **not** flip
       ``cold_loop_counterfactual_trusted``; that remains the explicit operator path.
+
+    The gate-supplied ``engine`` is typed as :class:`SupportsRetrieve` for L2
+    engine-agnostic composition (unused by the pair-based OQ2 path).
     """
 
     fidelity_bar = bar or OQ2FidelityBar(min_window=min_window, max_proxy_true_gap=max_gap)
@@ -812,10 +851,12 @@ def default_counterfactual_hook(
     def hook(
         tenant_id: str,
         candidate: Candidate,
-        engine: LocalMemoryEngine,
+        engine: SupportsRetrieve,
         passed: list[str],
         failed: list[str],
     ) -> CounterfactualVerdict:
+        # Gate signature includes engine/suite lists; OQ2 path is pair-based only.
+        _ = (candidate, engine, passed, failed)
         pairs = self_model.replay_pairs(tenant_id)
         report = evaluate_oq2_fidelity(
             pairs,
@@ -844,7 +885,7 @@ def default_counterfactual_hook(
 
 
 def counterfactual_replay(
-    engine: LocalMemoryEngine,
+    engine: SupportsCounterfactualEngine,
     variant: PolicyVariant,
     sessions: Sequence[ReplaySession],
 ) -> CounterfactualReplayReport:
@@ -855,6 +896,10 @@ def counterfactual_replay(
     the engine policy is restored. This is a pure shadow evaluation — it never
     mutates production state. Cold-loop promotion (§23.3 step 3) requires the
     returned report to be ``non_inferior`` (no historical regression).
+
+    Engine is :class:`SupportsCounterfactualEngine` (retrieve + policy) — not
+    LocalMemoryEngine-only — so Postgres/Sqlite ducks work without reimplementing
+    retrieval inside engines.
     """
     baseline = engine.policy
     if not within_invariant_rails(baseline, variant):

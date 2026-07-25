@@ -10,11 +10,16 @@ from mnemosyne.self_optimization import (
     OQ2_MIN_REPLAY_WINDOW,
     OQ2_PROXY_TRUE_GAP,
     PolicyVariant,
+    ReplaySession,
     SelfModelRecord,
     SelfModelStore,
     ShadowPolicyOptimizer,
+    SupportsRetrieve,
+    _session_succeeds,
     apply_cold_loop_counterfactual_trust,
+    counterfactual_replay,
     evaluate_oq2_fidelity,
+    make_counterfactual_hook,
     sign_agreement,
     spearman_rho,
     tripwire_check,
@@ -387,3 +392,72 @@ def test_default_hook_authorizes_when_oq2_bar_clears() -> None:
     assert result.counterfactual["passed"] is True
     assert "OQ2 bar cleared" in result.counterfactual["reason"]
     assert result.promoted is True
+
+
+class _FakeRetrieveEngine:
+    """Minimal SupportsRetrieve duck for #19b protocol pins."""
+
+    def __init__(self, hit_text: str, *, abstained: bool = False) -> None:
+        self._hit_text = hit_text
+        self._abstained = abstained
+
+    def retrieve(self, query: str, tenant_id: str, *, branch: str = "main"):
+        del query, tenant_id, branch
+
+        class _Hit:
+            def __init__(self, text: str) -> None:
+                self.text = text
+
+        class _Result:
+            def __init__(self, text: str, abstained: bool) -> None:
+                self.hits = [_Hit(text)]
+                self.abstained = abstained
+
+        return _Result(self._hit_text, self._abstained)
+
+
+def test_supports_retrieve_protocol_accepts_local_and_duck() -> None:
+    assert isinstance(seeded_engine(), SupportsRetrieve)
+    assert isinstance(_FakeRetrieveEngine("x"), SupportsRetrieve)
+
+
+def test_session_succeeds_is_engine_agnostic_protocol() -> None:
+    session = ReplaySession(TENANT, "self optimization rails", "immutable rails")
+    assert _session_succeeds(_FakeRetrieveEngine("… immutable rails …"), session) is True
+    assert _session_succeeds(_FakeRetrieveEngine("nope"), session) is False
+    assert _session_succeeds(_FakeRetrieveEngine("immutable rails", abstained=True), session) is False
+    # Local path unchanged
+    assert _session_succeeds(seeded_engine(), session) is True
+
+
+def test_make_counterfactual_hook_session_success_on_protocol_engine() -> None:
+    from mnemosyne.gate import Candidate
+
+    sessions = [ReplaySession(TENANT, "q", "hit")]
+    hook = make_counterfactual_hook(sessions, baseline_successes=0)
+    candidate = Candidate(
+        id="v",
+        kind="policy",
+        signature="s",
+        description="d",
+        branch="main",
+        source_evidence_cids=[],
+    )
+    engine = _FakeRetrieveEngine("hit text")
+    verdict = hook(TENANT, candidate, engine, [], [])  # type: ignore[arg-type]
+    assert verdict.passed is True
+    assert verdict.predicted_lift >= 0.0
+
+
+def test_counterfactual_replay_still_works_on_local_engine() -> None:
+    engine = seeded_engine()
+    variant = PolicyVariant(
+        id="safe",
+        activation_weights={"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10},
+        abstention_threshold=0.45,
+        top_k=8,
+    )
+    sessions = [ReplaySession(TENANT, "self optimization rails", "immutable rails")]
+    report = counterfactual_replay(engine, variant, sessions)
+    assert report.total == 1
+    assert report.after_successes >= 0
