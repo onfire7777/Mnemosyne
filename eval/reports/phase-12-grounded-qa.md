@@ -334,7 +334,7 @@ Re-validation this cycle (`mne-implement` / unit residual, 2026-07-24T18:08:19Z 
 - F-2: `evaluate()` projects `graph_evidence` (forward CLI dict or derive `participated` from hop `graph`/`ppr` channels) — `test_evaluate_projects_graph_evidence_for_qa_report_dual_path`
 - Ollama `127.0.0.1:11434` → **unreachable** (no live protected attempt; CAP-003 remains Partial)
 - Residual unit pins: exact answer payload shape, frozen one-shot fail-closed gates, no per-QID patch surface, CAP-003 Partial until measured EM/F1 ≥ 0.85
-- Handoff: `.agentsmesh/handoff/implement.md` → **ready-for-review / ready-for-test**
+- Handoff: `.agentsmesh/handoff/implement.md` → **ready-for-review / ready-for-test** *(historical: that handoff file lived on the build fleet's staging branch, which was retired 2026-07-25; the path no longer resolves. The evidence recorded above is unaffected.)*
 
 
 ### Live protected / host measurement residual
