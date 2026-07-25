@@ -74,6 +74,8 @@ def test_credibility_rests_on_verifiability_not_an_institution() -> None:
     # A ledger alone cannot expose an omitted system; the roster closes that hole.
     assert "no_run" in model
     assert "expected entrant roster" in model
+    # Preregistration + ledger both passing is not sufficient on its own.
+    assert "roster-to-ledger completeness" in model
 
     # The honest label is claimed and the stronger one is explicitly withheld.
     assert "operator-run, fully auditable" in charter
@@ -92,6 +94,7 @@ def test_credibility_rests_on_verifiability_not_an_institution() -> None:
         "adversarial self-report populated",
         "public dispute channel",
         "public methods write-up",
+        "roster-to-ledger completeness",
     ):
         assert gate in status, gate
 
@@ -123,6 +126,8 @@ def test_publication_plan_keeps_external_validation_optional() -> None:
     assert "does not gate it" in plan
     assert "register b does not" in plan
     assert "genuine independent reproduction" not in plan
+    assert "reproduced by an independent third party" not in plan
+    assert "third-party reproduction on file" not in plan
     assert "external independence requirement" not in plan
     assert "independent reproduction on file" not in plan
     assert "governance board seated" not in plan

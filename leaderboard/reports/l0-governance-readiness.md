@@ -10,8 +10,9 @@ non-waivable operator firewall, public appeals and correction protocols,
 methodology policy, activation register, disclosure register, and methods-paper
 outline. The structural policy test makes this source readiness auditable.
 
-The board is not yet seated and governance is not yet active, and the *neutral*
-label therefore remains unavailable. That is now recorded as an **optional
+The board is not yet seated, so the optional Register B upgrade is inactive and
+the *neutral* label remains unavailable. Source-owned governance under Register A
+is active as policy; its gates are open as evidence. That is now recorded as an **optional
 upgrade** rather than a blocking gate: see
 [CREDIBILITY-MODEL](../../docs/governance/CREDIBILITY-MODEL.md).
 

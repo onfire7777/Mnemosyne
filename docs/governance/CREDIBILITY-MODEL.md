@@ -83,6 +83,13 @@ entrant roster** alongside the configuration, and requiring an explicit
 does not produce a result. An unexplained gap between roster and ledger is
 itself a detectable violation.
 
+Pre-registration and the ledger are necessary but not jointly sufficient: both
+can pass independently while an omitted entrant leaves no trace anywhere. The
+binding check is a **roster-to-ledger completeness gate** — publication is
+refused unless every rostered system resolves to either a result or a reasoned
+`no_run` record. It is listed as its own Register A gate rather than left
+implicit in the other two.
+
 ### 4. Adversarial self-reporting
 
 Any system the operator authors — including Mnemosyne — must publish where it

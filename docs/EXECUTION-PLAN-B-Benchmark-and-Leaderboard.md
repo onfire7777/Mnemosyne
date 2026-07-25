@@ -47,7 +47,7 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 |---|---|---|
 | M-i | Public benchmarks wired | LongMemEval (retrieval), HippoRAG multi-hop, MemoryAgentBench, BEAM runnable in `eval/public/` with artifact bundles |
 | M-ii | Metric families separated | Every result reports deterministic-retrieval and LLM-judged-QA in distinct columns |
-| M-iii | Reproducible | Every headline number reproduced by an independent third party from the bundle alone |
+| M-iii | Reproducible | Every headline number regenerated from the bundle alone by one documented command, demonstrated from a clean checkout; a third-party reproduction note is recorded when offered but is not required |
 | M-iv | Honest posture | Charter upgraded to PBPP; private suite never headlined |
 
 ### Part II — The neutral leaderboard
