@@ -16,10 +16,17 @@ from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import merge_access_policies, validate_access_policy
 from mnemosyne.engine import LocalMemoryEngine
-from mnemosyne.gate import Candidate, GateResult, PromotionGate, RegressionCase
+from mnemosyne.gate import (
+    Candidate,
+    GateResult,
+    PromotionGate,
+    RegressionCase,
+    evaluate_fact_external_corroboration,
+)
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
 from mnemosyne.models import Assertion, Evidence, Relation, utc_now
+from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import detect_pii_tags, redact_pii_text
 from mnemosyne.retrieval import HashingEmbeddingProvider, is_retired_summary_metadata
 from mnemosyne.security import SecurityPolicy, TrustTier
@@ -316,7 +323,7 @@ class ConsolidationWorker:
         lesson_distiller: "LessonDistiller | None" = None,
         procedure_inducer: "ProcedureInducer | None" = None,
         user_model: UserModel | None = None,
-        min_corroboration: int = 1,
+        min_corroboration: int | None = None,
         consolidation_min_interval_seconds: float = 0.0,
         consolidation_min_steps: int = 5,
         consolidation_max_interval_seconds: float = 24 * 60 * 60,
@@ -351,13 +358,16 @@ class ConsolidationWorker:
         self._tenant_pass_calls: dict[str, int] = {}
         self._tenant_last_pass_call: dict[str, int] = {}
         self._tenant_last_pass_at: dict[str, datetime] = {}
-        # §23.3: minimum number of distinct corroborating evidence sources a fact
-        # candidate must carry before it is allowed through the promotion gate.
-        # Defaults to 1 (no extra corroboration required), so existing single-
-        # source promotion behaviour is unchanged unless a deployment opts in.
-        self.min_corroboration = max(1, int(min_corroboration))
+        # §23.3 / §7 #17: fact promote floor is policy.min_external_corroboration_for_fact
+        # (Standing independent external count). Optional min_corroboration may only
+        # raise the floor, never lower it below policy.
         policy = getattr(engine, "policy", None)
         self.policy = policy
+        policy_floor = int(getattr(policy, "min_external_corroboration_for_fact", 2) or 2)
+        if min_corroboration is None:
+            self.min_corroboration = policy_floor
+        else:
+            self.min_corroboration = max(policy_floor, int(min_corroboration))
         policy_supersession_rate = getattr(policy, "max_supersession_rate", 0.05)
         self.max_supersession_rate = max(
             0.0,
@@ -492,6 +502,19 @@ class ConsolidationWorker:
                     )
                 )
                 for candidate in candidates:
+                    # Union payload sources with any per-candidate CIDs so batch
+                    # captures (multiple independent evidence rows) count as
+                    # external corroboration under §7 #17 — not only the leaf CID.
+                    candidate_cids = [
+                        str(cid)
+                        for cid in (
+                            list(candidate.get("source_evidence_cids") or [])
+                            + list(source_evidence_cids)
+                        )
+                        if cid
+                    ]
+                    # Preserve order while de-duplicating.
+                    merged_cids = list(dict.fromkeys(candidate_cids))
                     result = self.run_job(
                         ConsolidationJob(
                             tenant_id=tenant_id,
@@ -500,10 +523,7 @@ class ConsolidationWorker:
                             candidate_subject=str(candidate["candidate_subject"]),
                             candidate_predicate=str(candidate["candidate_predicate"]),
                             candidate_object=str(candidate["candidate_object"]),
-                            source_evidence_cids=list(
-                                candidate.get("source_evidence_cids")
-                                or source_evidence_cids
-                            ),
+                            source_evidence_cids=merged_cids,
                             confidence=float(candidate.get("confidence", payload.get("confidence", 0.72))),
                             trust_tier=int(candidate.get("trust_tier", payload.get("trust_tier", TrustTier.NORMAL))),
                             sensitivity=int(candidate.get("sensitivity", payload.get("sensitivity", 0))),
@@ -1640,15 +1660,184 @@ class ConsolidationWorker:
         trust_values = [int(payload.get("trust_tier", TrustTier.NORMAL)), *(item.trust_tier for item in evidence)]
         return any(value >= int(TrustTier.UNTRUSTED_EXTERNAL) for value in trust_values)
 
+    def _load_evidence_rows_for_corroboration(
+        self, job: ConsolidationJob, cids: list[str]
+    ) -> list[Evidence]:
+        """Load Evidence objects via public get_evidence (Local + Postgres)."""
+
+        rows: list[Evidence] = []
+        engine = self.engine
+        if not hasattr(engine, "get_evidence"):
+            return rows
+        for cid in cids:
+            if not cid:
+                continue
+            try:
+                ev = engine.get_evidence(job.tenant_id, str(cid), branch="main")
+            except TypeError:
+                try:
+                    ev = engine.get_evidence(job.tenant_id, str(cid))
+                except Exception:
+                    ev = None
+            except Exception:
+                ev = None
+            if ev is not None:
+                rows.append(ev)
+        return rows
+
+    def _independent_corroboration_report_for_job(
+        self, job: ConsolidationJob, cids: list[str]
+    ) -> dict[str, Any]:
+        """Independent-source report portable across LocalMemoryEngine and Postgres.
+
+        Prefer the engine's keyword oracle when it matches the Local signature.
+        Postgres requires a DB cursor for that method, so fall back to loading
+        Evidence via get_evidence and classifying with the Local from-evidence
+        oracle (same Standing-shaped independent-count semantics).
+        """
+
+        engine = self.engine
+        fn = getattr(engine, "_independent_corroboration_report", None)
+        if callable(fn):
+            try:
+                return dict(
+                    fn(
+                        tenant_id=job.tenant_id,
+                        branch="main",
+                        source_evidence_cids=cids,
+                    )
+                )
+            except TypeError:
+                # PostgresEngine signature requires cur/db_tenant_id — fall through.
+                pass
+        rows = self._load_evidence_rows_for_corroboration(job, cids)
+        from_evidence = getattr(engine, "_independent_corroboration_report_from_evidence", None)
+        if callable(from_evidence):
+            return dict(from_evidence(rows))
+        # Reuse LocalMemoryEngine classifier on already-loaded Evidence rows.
+        return dict(LocalMemoryEngine()._independent_corroboration_report_from_evidence(rows))
+
+    @staticmethod
+    def _content_tokens(text: str) -> set[str]:
+        return {tok.lower() for tok in re.findall(r"[A-Za-z0-9]{3,}", text or "")}
+
+    def _corroboration_cids_for_job(self, job: ConsolidationJob) -> list[str]:
+        """CIDs used for external corroboration counting.
+
+        Starts from ``job.source_evidence_cids`` only. Optionally unions other
+        tenant/main evidence whose content shares ≥2 significant tokens with the
+        candidate SPO/query/signature — never a bare tenant-wide dump (Review
+        major: unrelated grounded evidence must not free-ride).
+        """
+
+        base = list(dict.fromkeys(str(cid) for cid in (job.source_evidence_cids or []) if cid))
+        needle = self._content_tokens(
+            " ".join(
+                [
+                    str(job.signature or ""),
+                    str(job.query or ""),
+                    str(job.candidate_subject or ""),
+                    str(job.candidate_predicate or ""),
+                    str(job.candidate_object or ""),
+                ]
+            )
+        )
+        if len(needle) < 2:
+            return base
+        found = list(base)
+        seen = set(found)
+
+        def _maybe_add(cid: object, content: str) -> None:
+            if not cid:
+                return
+            key = str(cid)
+            if key in seen:
+                return
+            if len(self._content_tokens(content) & needle) < 2:
+                return
+            seen.add(key)
+            found.append(key)
+
+        engine = self.engine
+        evidence_map = getattr(engine, "evidence", None)
+        if isinstance(evidence_map, dict):
+            for ev in evidence_map.values():
+                if getattr(ev, "tenant_id", None) != job.tenant_id:
+                    continue
+                if getattr(ev, "erased", False):
+                    continue
+                if (getattr(ev, "branch", "main") or "main") != "main":
+                    continue
+                _maybe_add(getattr(ev, "cid", None), getattr(ev, "content", "") or "")
+            return found
+
+        export_tenant = getattr(engine, "export_tenant", None)
+        if callable(export_tenant):
+            try:
+                exported = export_tenant(job.tenant_id)
+            except Exception:
+                return found
+            for item in exported.get("evidence") or []:
+                if not isinstance(item, dict) or item.get("erased"):
+                    continue
+                if (item.get("branch") or "main") != "main":
+                    continue
+                _maybe_add(item.get("cid"), item.get("content") or "")
+        return found
+
+    def _fact_unit_signals_for_job(self, job: ConsolidationJob) -> dict[str, Any]:
+        """Build Standing-shaped unit_signals from the engine independent-corroboration oracle.
+
+        Uses independent-source classification (not raw CID cardinality) so
+        self-generated / duplicate-root sources never inflate the external count
+        (§23.3 / §7 #17). Portable across Local and Postgres engines.
+        """
+
+        cids = self._corroboration_cids_for_job(job)
+        report = self._independent_corroboration_report_for_job(job, cids)
+        independent = int(report.get("independent_corroboration_count", 0) or 0)
+        self_echo = int(report.get("self_generated_corroboration_count", 0) or 0)
+        # Reality class: grounded when independent external sources exist; self_generated
+        # when only self-echo remains; unknown when empty.
+        if independent > 0:
+            reality = "grounded"
+        elif self_echo > 0:
+            reality = "self_generated"
+        elif cids:
+            reality = "unknown"
+        else:
+            reality = "unknown"
+        # Prefer engine projection monitoring when it accepts Local-style kwargs.
+        mon_fn = getattr(self.engine, "_projection_reality_monitoring_for_sources", None)
+        if callable(mon_fn):
+            try:
+                monitoring = mon_fn(
+                    tenant_id=job.tenant_id,
+                    branch="main",
+                    source_evidence_cids=cids,
+                )
+                reality = str(monitoring.get("reality_class") or reality)
+            except TypeError:
+                pass
+        return {
+            "reality_class": reality,
+            "trust_tier": int(getattr(job, "trust_tier", 0) or 0),
+            "independent_corroboration_count": independent,
+            "independent_corroboration_weight": float(
+                report.get("independent_corroboration_weight", 0.0) or 0.0
+            ),
+            "self_generated_corroboration_count": self_echo,
+            "rejected_corroboration_count": int(report.get("rejected_corroboration_count", 0) or 0),
+        }
+
     def run_job(self, job: ConsolidationJob, mutation_budget: MutationRailBudget | None = None) -> GateResult:
         """Promote a single fact candidate through authorization, cadence, corroboration, and the gate.
 
         Fails closed when the consolidator write is not authorized, when the same
-        signature was consolidated within the anti-thrash interval (§21), when the
-        candidate lacks the required number of distinct corroborating evidence
-        sources (§23.3), or when a protected regression case would break; only a
-        fully authorized, non-throttled, corroborated, regression-clean candidate
-        is promoted.
+        signature was consolidated within the anti-thrash interval (§21), when
+        independent external corroboration is below the policy floor (§23.3 / §7 #17),
+        or when a protected regression case would break; only a fully authorized,
+        non-throttled, corroborated, regression-clean candidate is promoted.
         """
         try:
             validated_access_policy = validate_access_policy(
@@ -1703,19 +1892,21 @@ class ConsolidationWorker:
                     rollback_branch=None,
                 )
             self._last_consolidation_at[cadence_key] = now
-        # §23.3: gate fact candidates on external corroboration before the
-        # promotion gate runs — a fact must be backed by at least
-        # ``min_corroboration`` distinct evidence sources.
-        distinct_sources = len({cid for cid in job.source_evidence_cids if cid})
-        if distinct_sources < self.min_corroboration:
+        # §23.3 / §7 #17: same external-corroboration rail as PromotionGate — Standing
+        # independent external count via engine oracle (not raw CID cardinality).
+        policy = self.policy if isinstance(self.policy, OperatingPolicy) else OperatingPolicy()
+        unit_signals = self._fact_unit_signals_for_job(job)
+        fact_verdict = evaluate_fact_external_corroboration(
+            unit_signals=unit_signals,
+            policy=policy,
+            min_external=int(self.min_corroboration),
+        )
+        if not fact_verdict.allowed:
             return GateResult(
                 candidate_id=f"candidate-{job.signature}",
                 promoted=False,
                 protected_regressions=[],
-                failed_cases=[
-                    f"insufficient corroboration: {distinct_sources} distinct source(s) "
-                    f"< required {self.min_corroboration}"
-                ],
+                failed_cases=[f"fact_external_corroboration: {fact_verdict.reason}"],
                 passed_cases=[],
                 margin=0.0,
                 rollback_branch=None,
@@ -1727,6 +1918,7 @@ class ConsolidationWorker:
             description=f"{job.candidate_subject} {job.candidate_predicate} {job.candidate_object}",
             branch=f"canary-{job.signature}",
             source_evidence_cids=job.source_evidence_cids,
+            unit_signals=unit_signals,
         )
 
         def apply(engine: LocalMemoryEngine, branch: str) -> None:

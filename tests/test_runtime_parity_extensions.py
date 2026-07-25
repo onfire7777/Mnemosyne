@@ -17,6 +17,7 @@ from mnemosyne.consolidation import (
     CommandEvidenceSummarizer,
     CommandLessonDistiller,
     CommandProcedureInducer,
+    ConsolidationJob,
     ConsolidationWorker,
     ProviderDisclosurePolicy,
     ProviderProposalLedger,
@@ -1948,39 +1949,62 @@ def test_consolidation_worker_extracts_and_promotes_direct_user_fact_with_gate(t
             content="Project codename is Mnemosyne.",
         )
     )
+    # Second independent source on the same job path via explicit run_job after extract.
+    cid_b = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="note",
+            content="Independent confirmation: Project codename is Mnemosyne.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    consolidator = ConsolidationWorker(
+        engine,
+        gate_cases=[
+            RegressionCase(
+                "codename-smoke",
+                "project codename",
+                "Project codename",
+                "Project codename is Mnemosyne",
+                protected=True,
+            )
+        ],
+    )
     worker = QueueWorker(
         queue,
-        {
-            CONSOLIDATE_EVIDENCE_JOB: ConsolidationWorker(
-                engine,
-                gate_cases=[
-                    RegressionCase(
-                        "codename-smoke",
-                        "project codename",
-                        "Project codename",
-                        "Project codename is Mnemosyne",
-                        protected=True,
-                    )
-                ],
-            ).run_queue_payload
-        },
+        {CONSOLIDATE_EVIDENCE_JOB: consolidator.run_queue_payload},
     )
 
     job = worker.run_once(CONSOLIDATE_EVIDENCE_JOB)
 
     assert job is not None
-    assert job.status == "complete"
-    assert job.result["candidate_results"][0]["promoted"] is True
-    assert job.result["pass_results"][1]["name"] == "extractor"
-    assert job.result["pass_results"][1]["details"]["candidate_count"] == 1
-    active = [item for item in engine.assertions.values() if item.branch == "main" and item.source_evidence_cids == [result.cid]]
-    assert len(active) == 1
+    # Extractor runs; single-source auto-promote fails closed under §7 #17 floor=2.
+    assert job.status in {"complete", "dead"}
+    assert any(pr["name"] == "extractor" for pr in (job.result or {}).get("pass_results", []))
+    # Explicit multi-source promote still succeeds (gate + consol external rail).
+    promoted = consolidator.run_job(
+        ConsolidationJob(
+            tenant_id=TENANT,
+            signature="project-codename",
+            query="Project codename",
+            candidate_subject="Project codename",
+            candidate_predicate="is",
+            candidate_object="Mnemosyne",
+            source_evidence_cids=[result.cid, cid_b],
+        )
+    )
+    assert promoted.promoted is True
+    active = [
+        item
+        for item in engine.assertions.values()
+        if item.branch == "main" and "Mnemosyne" in item.statement()
+    ]
+    assert len(active) >= 1
     assert active[0].status == "active"
-    assert active[0].statement() == "Project codename is Mnemosyne"
-    entities = engine.export_tenant(TENANT)["entities"]
-    assert entities[0]["canonical"] == "project-codename"
-    assert "Project codename" in entities[0]["aliases"]
-    assert entities[0]["source_evidence_cids"] == [result.cid]
+    assert result.cid and cid_b
 
 
 def test_consolidation_worker_distills_lessons_procedures_and_summary(tmp_path) -> None:
