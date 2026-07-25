@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -266,3 +267,176 @@ def reality_monitor_confidence(
     if explicit_label:
         score += 0.05
     return round(max(0.0, min(1.0, score)), 6)
+
+
+# §26 / blueprint §7 #18 — multi-signal calibrated_confidence fuse (L2 pure).
+# Weights pinned by tests/test_calibrated_confidence_fuse.py.
+FUSE_WEIGHT_RAW = 0.35
+FUSE_WEIGHT_CERTAINTY = 0.20  # (1 - semantic_entropy)
+FUSE_WEIGHT_AGREEMENT = 0.20
+FUSE_WEIGHT_PROVENANCE = 0.15
+FUSE_WEIGHT_FIDELITY = 0.10
+
+
+def _bounded_unit(value: Any, *, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _fidelity_from_reality_class(reality_class: str) -> float:
+    reality = str(reality_class or "").strip().lower().replace("-", "_")
+    if reality in {"grounded", "evidence_grounded"}:
+        return 1.0
+    if reality in {"self_generated", "externally_suggested"}:
+        return 0.2
+    if reality == "unknown":
+        return 0.4
+    return 0.0
+
+
+def fuse_calibrated_confidence(
+    *,
+    raw_confidence: float,
+    semantic_entropy: float = 0.0,
+    retrieval_agreement: float = 1.0,
+    provenance_strength: float = 0.0,
+    fidelity_score: float = 0.0,
+) -> float:
+    """Return fused calibrated_confidence in [0, 1]. Pure. Deterministic.
+
+    ENGINE-CONTRACT L2 — engines store/return only; they must not reimplement
+    fusion. Missing provenance/fidelity default fail-closed (0.0). Agreement
+    defaults to 1.0 (no channel conflict evidence). Entropy defaults to 0.0
+    (no uncertainty evidence). Identity alias ``fused == raw`` is *not*
+    guaranteed once non-raw signals diverge.
+    """
+    raw = _bounded_unit(raw_confidence, default=0.0)
+    entropy = _bounded_unit(semantic_entropy, default=0.0)
+    certainty = 1.0 - entropy
+    agreement = _bounded_unit(retrieval_agreement, default=1.0)
+    provenance = _bounded_unit(provenance_strength, default=0.0)
+    fidelity = _bounded_unit(fidelity_score, default=0.0)
+    fused = (
+        FUSE_WEIGHT_RAW * raw
+        + FUSE_WEIGHT_CERTAINTY * certainty
+        + FUSE_WEIGHT_AGREEMENT * agreement
+        + FUSE_WEIGHT_PROVENANCE * provenance
+        + FUSE_WEIGHT_FIDELITY * fidelity
+    )
+    return max(0.0, min(1.0, float(fused)))
+
+
+def explain_calibrated_confidence(
+    *,
+    raw_confidence: float,
+    semantic_entropy: float = 0.0,
+    retrieval_agreement: float = 1.0,
+    provenance_strength: float = 0.0,
+    fidelity_score: float = 0.0,
+) -> dict[str, Any]:
+    """Attribution companion for fuse_calibrated_confidence (standing/packet)."""
+    raw = _bounded_unit(raw_confidence, default=0.0)
+    entropy = _bounded_unit(semantic_entropy, default=0.0)
+    certainty = 1.0 - entropy
+    agreement = _bounded_unit(retrieval_agreement, default=1.0)
+    provenance = _bounded_unit(provenance_strength, default=0.0)
+    fidelity = _bounded_unit(fidelity_score, default=0.0)
+    fused = fuse_calibrated_confidence(
+        raw_confidence=raw,
+        semantic_entropy=entropy,
+        retrieval_agreement=agreement,
+        provenance_strength=provenance,
+        fidelity_score=fidelity,
+    )
+    return {
+        "calibrated_confidence": fused,
+        "raw_confidence": raw,
+        "semantic_entropy": entropy,
+        "certainty": certainty,
+        "retrieval_agreement": agreement,
+        "provenance_strength": provenance,
+        "fidelity_score": fidelity,
+        "weights": {
+            "raw": FUSE_WEIGHT_RAW,
+            "certainty": FUSE_WEIGHT_CERTAINTY,
+            "agreement": FUSE_WEIGHT_AGREEMENT,
+            "provenance": FUSE_WEIGHT_PROVENANCE,
+            "fidelity": FUSE_WEIGHT_FIDELITY,
+        },
+    }
+
+
+def calibrated_confidence_signals_from_hit(
+    *,
+    metadata: Mapping[str, Any] | None,
+    reality_class: str = "",
+    trust_tier: int = 5,
+) -> dict[str, float]:
+    """Collect fuse kwargs from a retrieval hit's metadata envelope (§19/§26)."""
+    meta = dict(metadata) if isinstance(metadata, Mapping) else {}
+    raw = meta.get(
+        "verbalized_confidence",
+        meta.get("confidence", meta.get("calibrated_confidence", 0.0)),
+    )
+    entropy = meta.get("semantic_entropy", meta.get("entropy"))
+    if entropy is None:
+        entropy = 0.0
+
+    agreement = meta.get("retrieval_agreement", meta.get("channel_agreement"))
+    if agreement is None:
+        activation = meta.get("activation")
+        if isinstance(activation, Mapping) and activation.get("score") is not None:
+            agreement = activation.get("score")
+        else:
+            agreement = 1.0
+
+    provenance = meta.get("provenance_strength")
+    if provenance is None:
+        ic = meta.get("independent_corroboration")
+        if isinstance(ic, Mapping) and ic.get("independent_corroboration_weight") is not None:
+            provenance = ic.get("independent_corroboration_weight")
+        else:
+            try:
+                tier = int(trust_tier)
+            except (TypeError, ValueError):
+                tier = 5
+            # trust_tier 0 is strongest external; map to provenance strength [0,1]
+            provenance = max(0.0, min(1.0, 1.0 - (tier / 5.0)))
+
+    fidelity = meta.get("fidelity", meta.get("fidelity_score"))
+    if fidelity is None:
+        lifecycle = meta.get("lifecycle")
+        if isinstance(lifecycle, Mapping):
+            fidelity = lifecycle.get("fidelity_score")
+        if fidelity is None:
+            fidelity = _fidelity_from_reality_class(
+                reality_class or str(meta.get("reality_class") or "")
+            )
+
+    return {
+        "raw_confidence": _bounded_unit(raw, default=0.0),
+        "semantic_entropy": _bounded_unit(entropy, default=0.0),
+        "retrieval_agreement": _bounded_unit(agreement, default=1.0),
+        "provenance_strength": _bounded_unit(provenance, default=0.0),
+        "fidelity_score": _bounded_unit(fidelity, default=0.0),
+    }
+
+
+def fuse_calibrated_confidence_from_hit(
+    *,
+    metadata: Mapping[str, Any] | None,
+    reality_class: str = "",
+    trust_tier: int = 5,
+) -> float:
+    """Standing-path helper: collect hit signals then fuse (shared Local/Postgres)."""
+    signals = calibrated_confidence_signals_from_hit(
+        metadata=metadata,
+        reality_class=reality_class,
+        trust_tier=trust_tier,
+    )
+    return fuse_calibrated_confidence(**signals)
+
