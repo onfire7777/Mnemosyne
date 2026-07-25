@@ -45,7 +45,7 @@ contract, pytest, Ruff.
 - Produces: schema identifier `mnemosyne.leaderboard.result/v1` and test fixture
   builders local to the test module.
 
-- [ ] **Step 1: Write failing tests for the two accepted records**
+- [x] **Step 1: Write failing tests for the two accepted records**
 
 Create literal synthetic deterministic-retrieval and disclosed-judge records.
 Add tests named
@@ -54,7 +54,7 @@ Add tests named
 `validate_record(record)` and expect an empty error list. The import must fail
 because `leaderboard.validate` does not exist yet.
 
-- [ ] **Step 2: Run RED and verify the missing validator is the cause**
+- [x] **Step 2: Run RED and verify the missing validator is the cause**
 
 Run:
 
@@ -64,7 +64,7 @@ uv run pytest -q tests/test_leaderboard_result_contract.py
 
 Expected: collection fails on missing `leaderboard.validate`, not fixture syntax.
 
-- [ ] **Step 3: Add the minimal schema contract**
+- [x] **Step 3: Add the minimal schema contract**
 
 The checked-in schema must require literal, non-empty fields for:
 `schema_version`, `record_id`, `system`, `track`, `benchmark`,
@@ -74,7 +74,7 @@ The checked-in schema must require literal, non-empty fields for:
 (`retrieval` or `judged_qa`), a numeric value, unit, and confidence interval.
 Judged metrics must carry judge model, prompt digest, and config digest.
 
-- [ ] **Step 4: Add only enough validator surface to make accepted examples green**
+- [x] **Step 4: Add only enough validator surface to make accepted examples green**
 
 Create:
 
@@ -86,7 +86,7 @@ def validate_record(record: object) -> list[str]:
 Use explicit standard-library type and presence checks. Do not build a generic
 schema engine.
 
-- [ ] **Step 5: Run GREEN**
+- [x] **Step 5: Run GREEN**
 
 ```sh
 uv run pytest -q tests/test_leaderboard_result_contract.py
