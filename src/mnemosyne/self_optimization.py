@@ -787,23 +787,27 @@ def default_counterfactual_hook(
     *,
     min_window: int = OQ2_MIN_REPLAY_WINDOW,
     max_gap: float = OQ2_PROXY_TRUE_GAP,
+    bar: OQ2FidelityBar | None = None,
+    bootstrap_iterations: int = OQ2_BOOTSTRAP_ITERATIONS,
+    seed: int = OQ2_BOOTSTRAP_SEED,
 ) -> CounterfactualHook:
     """Default cold-loop counterfactual scorer over recorded replay pairs (I12/§30.6).
 
     This is attached to the promotion gate by default so the cold loop *consumes*
     the counterfactual replay term on every self-modification decision. It is
-    deterministic and strictly **veto-only**, and it honours the OQ2 forcing
-    function: the proxy is only authorized to act once it has proven fidelity on
-    enough real paired data.
+    deterministic and strictly **veto-only**, and it honours the full OQ2 bar via
+    :func:`evaluate_oq2_fidelity` (Spearman ρ + CI, sign-agreement, gap, coverage,
+    window/active floors) — not a weaker window+mean-gap dual standard.
 
-    * Below ``min_window`` recorded pairs, or when the mean proxy-vs-true gap
-      exceeds ``max_gap``, the proxy is unproven -> it fails closed
-      (``passed=False``): active promotion is blocked until replay fidelity is
-      proven. Callers that want shadow-only exploration may pass an explicit
-      hook with different semantics.
-    * Once fidelity holds, it vetoes any candidate whose mean predicted lift is
-      negative (a self-modification predicted to regress historical task success).
+    * When the OQ2 bar is not cleared, the proxy is unproven → fails closed
+      (``passed=False``). Callers that want shadow-only exploration may pass an
+      explicit hook with different semantics.
+    * Once the bar clears (``authorized_to_trust``), it vetoes any candidate whose
+      mean predicted lift is negative. It still does **not** flip
+      ``cold_loop_counterfactual_trusted``; that remains the explicit operator path.
     """
+
+    fidelity_bar = bar or OQ2FidelityBar(min_window=min_window, max_proxy_true_gap=max_gap)
 
     def hook(
         tenant_id: str,
@@ -813,24 +817,24 @@ def default_counterfactual_hook(
         failed: list[str],
     ) -> CounterfactualVerdict:
         pairs = self_model.replay_pairs(tenant_id)
-        window = len(pairs)
-        if window < min_window:
-            return CounterfactualVerdict(
-                passed=False,
-                predicted_lift=0.0,
-                reason=f"cf proxy unproven: {window} replay pairs < window {min_window}",
-            )
-        mean_gap = sum(abs(predicted - observed) for predicted, observed in pairs) / window
-        mean_predicted = sum(predicted for predicted, _ in pairs) / window
-        if mean_gap > max_gap:
+        report = evaluate_oq2_fidelity(
+            pairs,
+            bar=fidelity_bar,
+            bootstrap_iterations=bootstrap_iterations,
+            seed=seed,
+        )
+        mean_predicted = (
+            sum(predicted for predicted, _ in pairs) / len(pairs) if pairs else 0.0
+        )
+        if not report.authorized_to_trust:
             return CounterfactualVerdict(
                 passed=False,
                 predicted_lift=mean_predicted,
-                reason=f"cf proxy unproven: fidelity gap {mean_gap:.3f} > {max_gap}",
+                reason=f"cf proxy unproven: {report.reason}",
             )
         non_inferior = mean_predicted >= 0.0
         reason = (
-            "cf proxy authorized: mean predicted lift non-negative"
+            "cf proxy authorized: OQ2 bar cleared; mean predicted lift non-negative"
             if non_inferior
             else f"cf proxy vetoes: mean predicted lift {mean_predicted:.3f} < 0"
         )

@@ -301,3 +301,89 @@ def test_untrusted_proxy_still_fails_closed_with_recorded_pairs_below_bar() -> N
     assert result.counterfactual is not None
     assert result.counterfactual["passed"] is False
     assert "cf proxy unproven" in result.counterfactual["reason"]
+    assert "OQ2" in result.counterfactual["reason"]
+
+
+def test_default_hook_uses_full_oq2_bar_not_window_gap_only() -> None:
+    """#19a.1: window+mean-gap alone must not authorize; full OQ2 bar required."""
+    engine = seeded_engine()
+    store = SelfModelStore()
+    n = OQ2_MIN_REPLAY_WINDOW
+    # Small-magnitude rank-reversed pairs: mean |gap| stays under OQ2_PROXY_TRUE_GAP
+    # so the old dual-standard would have authorized, but Spearman ρ fails.
+    predicted = [(i - n / 2) / (n * 20.0) for i in range(n)]
+    observed = list(reversed(predicted))
+    mean_gap = sum(abs(p - o) for p, o in zip(predicted, observed, strict=True)) / n
+    assert mean_gap <= OQ2_PROXY_TRUE_GAP
+    for p, o in zip(predicted, observed, strict=True):
+        store.record_replay_pair(TENANT, "v", p, o)
+    report = store.evaluate_oq2_fidelity(TENANT)
+    assert report.n == n
+    assert report.authorized_to_trust is False
+    assert report.rho < 0.6
+
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-self-optimization-rails",
+                signature="policy retrieval activation confidence",
+                query="self optimization rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+        self_model=store,
+        require_ignition=False,
+    )
+    variant = PolicyVariant(
+        id="safe",
+        activation_weights={"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10},
+        abstention_threshold=0.45,
+        top_k=8,
+    )
+    result = optimizer.evaluate_variant(TENANT, variant)
+    assert result.promoted is False
+    assert result.counterfactual is not None
+    assert result.counterfactual["passed"] is False
+    assert "cf proxy unproven" in result.counterfactual["reason"]
+    assert "OQ2" in result.counterfactual["reason"]
+
+
+def test_default_hook_authorizes_when_oq2_bar_clears() -> None:
+    """Faithful pairs clear OQ2 → hook may authorize (still veto-only on lift)."""
+    engine = seeded_engine()
+    store = SelfModelStore()
+    # Positive-mean faithful pairs so authorized path is non-inferior (not vetoed).
+    n = OQ2_MIN_REPLAY_WINDOW
+    for i in range(n):
+        predicted = 0.05 + (i / n) * 0.4  # strictly positive lifts
+        observed = predicted + (0.01 if i % 2 == 0 else -0.01)
+        store.record_replay_pair(TENANT, "v", predicted, observed)
+    assert store.evaluate_oq2_fidelity(TENANT).authorized_to_trust is True
+
+    optimizer = ShadowPolicyOptimizer(
+        engine,
+        [
+            RegressionCase(
+                id="case-self-optimization-rails",
+                signature="policy retrieval activation confidence",
+                query="self optimization rails",
+                expected_substring="immutable rails",
+                protected=True,
+            )
+        ],
+        self_model=store,
+        require_ignition=False,
+    )
+    variant = PolicyVariant(
+        id="safe",
+        activation_weights={"base_level": 0.35, "semantic": 0.35, "importance": 0.20, "recency": 0.10},
+        abstention_threshold=0.45,
+        top_k=8,
+    )
+    result = optimizer.evaluate_variant(TENANT, variant)
+    assert result.counterfactual is not None
+    assert result.counterfactual["passed"] is True
+    assert "OQ2 bar cleared" in result.counterfactual["reason"]
+    assert result.promoted is True
