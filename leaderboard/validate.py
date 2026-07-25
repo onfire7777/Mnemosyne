@@ -1,6 +1,7 @@
 """Validate public leaderboard result records."""
 
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -36,7 +37,22 @@ _DIGEST_FIELDS = (
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and (not isinstance(value, float) or math.isfinite(value))
+    )
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _parse_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"non-finite JSON number: {value}")
+    return parsed
 
 
 def _validate_metric(metric: object, index: int) -> list[str]:
@@ -62,6 +78,10 @@ def _validate_metric(metric: object, index: int) -> list[str]:
         for bound in ("low", "high"):
             if not _is_number(interval.get(bound)):
                 errors.append(f"{pointer}/confidence_interval/{bound}")
+        low = interval.get("low")
+        high = interval.get("high")
+        if _is_number(low) and _is_number(high) and low > high:
+            errors.append(f"{pointer}/confidence_interval")
 
     if family == "judged_qa":
         judge = metric.get("judge")
@@ -180,8 +200,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: invalid JSON: {path}", file=sys.stderr)
         return 2
     try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError:
+        payload = json.loads(
+            raw,
+            parse_constant=_reject_json_constant,
+            parse_float=_parse_finite_float,
+        )
+    except (json.JSONDecodeError, ValueError):
         print(f"error: invalid JSON: {path}", file=sys.stderr)
         return 2
 

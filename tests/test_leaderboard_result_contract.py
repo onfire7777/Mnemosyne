@@ -70,6 +70,25 @@ def test_accepts_minimal_disclosed_judged_qa_record() -> None:
     assert validate_record(_judged_qa_record()) == []
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_rejects_non_finite_metric_numbers(value: float) -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    metrics[0]["value"] = value
+
+    assert "/metrics/0/value" in validate_record(record)
+
+
+def test_rejects_inverted_confidence_interval() -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    metrics[0]["confidence_interval"] = {"low": 0.9, "high": 0.1}
+
+    assert "/metrics/0/confidence_interval" in validate_record(record)
+
+
 def _delete(record: dict[str, object], field: str) -> None:
     del record[field]
 
@@ -207,3 +226,17 @@ def test_cli_reports_unreadable_or_invalid_json(
     invalid.write_bytes(b"\xff")
     assert validate.main([str(invalid)]) == 2
     assert capsys.readouterr().err == f"error: invalid JSON: {invalid}\n"
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity", "1e400"])
+def test_cli_rejects_non_finite_json_numbers(
+    constant: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "non-finite.json"
+    path.write_text(
+        json.dumps(_retrieval_record()).replace("0.75", constant, 1),
+        encoding="utf-8",
+    )
+
+    assert validate.main([str(path)]) == 2
+    assert capsys.readouterr().err == f"error: invalid JSON: {path}\n"
