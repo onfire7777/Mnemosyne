@@ -165,20 +165,26 @@ def copy_confidence_metadata(source: Mapping[str, Any] | None, dest: dict[str, A
 def example_confidence_from_hit(hit: Any) -> float:
     """Per-example confidence used for conformal nonconformity (I8 / §7 #12).
 
-    Prefers explicit confidence fields on hit metadata (including fused
-    ``calibrated_confidence``), then falls back to the retrieval score as a weak
-    proxy. Always returns a unit interval. Non-finite values are rejected.
+    Trusted sources only (fail closed against client-forged aliases):
+
+    1. ``metadata["confidence"]`` — server/assertion confidence on projections
+    2. retrieval ``score`` as a weak proxy when no explicit confidence
+
+    ``calibrated_confidence`` / ``verbalized_confidence`` from arbitrary evidence
+    metadata are *not* used for the conformal accept bar (CWE-345: clients must
+    not inflate aliases to bypass abstention). Those fields may still be copied
+    onto hit envelopes for explain/display via :func:`copy_confidence_metadata`.
+    Non-finite values are rejected.
     """
     meta = getattr(hit, "metadata", None)
-    if isinstance(meta, Mapping):
-        for key in CONFIDENCE_METADATA_KEYS:
-            if key in meta and meta[key] is not None:
-                try:
-                    value = float(meta[key])
-                except (TypeError, ValueError):
-                    continue
-                if math.isfinite(value):
-                    return max(0.0, min(1.0, value))
+    if isinstance(meta, Mapping) and meta.get("confidence") is not None:
+        try:
+            value = float(meta["confidence"])
+        except (TypeError, ValueError):
+            value = None
+        else:
+            if math.isfinite(value):
+                return max(0.0, min(1.0, value))
     score = getattr(hit, "score", None)
     if score is not None:
         try:
