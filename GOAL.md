@@ -90,10 +90,24 @@ completed inside this lease, stop and report the required boundary change.
 
 ## Operating Context
 
-Use context-mode by default for repository search, planning/document extraction,
-command output, diagnostics, CI/log analysis, and retained session context.
-Keep only derived findings in the active context; this is an operating practice,
-not an additional launch gate.
+Use CBM/codebase-memory-mcp as the primary source for repository discovery and
+understanding: verify the index, then use architecture/schema, graph search,
+traces, snippets, impact, and ADRs as relevant. Use Gbrain as the primary
+durable knowledge layer and refresh both only at meaningful milestones. Use
+context-mode for retained command/log/document captures and derivation, keeping
+only derived findings active. Restrict text search to precise literals, config,
+errors, or an identified graph gap. These are operating practices, not
+additional launch gates.
+
+Deliver every coherent package through its isolated Worktrunk branch: inspect
+the diff and secret/risky-file surface, run relevant checks, commit
+intentionally, push the branch, and open or update its pull request. Monitor
+exact-head CI and review, fix confirmed failures inside the lease, and merge
+normally only when required checks and reviews are green and GitHub reports the
+pull request mergeable. Never push directly to `main`, force-push, bypass hooks
+or checks, or merge unresolved failures. Verify post-merge `main` CI before
+milestone planning/docs/CBM/Gbrain synchronization and selection of the next
+dependency-ready package.
 
 ## Acceptance Criteria
 

@@ -1,10 +1,11 @@
 # Phase 16 L2 Public Result Contract Implementation Plan
 
 > **For agentic workers:** Execute task-by-task with Ponytail, strict TDD, and
-> the configured native RalphEx/Codex review stages. Use context-mode by
-> default for search, extraction, command/log analysis, diagnostics, and
-> retained session context; keep only derived findings active. Do not widen
-> the lease.
+> the configured native RalphEx/Codex review stages. Use CBM as the primary
+> code-discovery surface, Gbrain for durable milestone knowledge, and
+> context-mode for retained command/log/document captures and derivation.
+> Restrict text search to precise literals/config/errors or an identified graph
+> gap, and keep only derived findings active. Do not widen the lease.
 
 **Goal:** Add a versioned, fail-closed public leaderboard result contract and
 deterministic validator without producing or publishing a benchmark result.
@@ -24,12 +25,16 @@ contract, pytest, Ruff.
 - Exact write lease: `leaderboard/schema/**`, `leaderboard/validate.py`,
   `leaderboard/__init__.py`, `tests/test_leaderboard_result_contract.py`, and
   this plan/progress metadata only.
-- Use no new dependency and no network, protected-environment, production,
-  external-custody, benchmark, or hardware access.
+- Use no new dependency and no product/runtime network, protected-environment,
+  production, external-custody, benchmark, or hardware access. GitHub branch,
+  pull-request, review, and CI delivery operations are allowed.
 - Do not update `.planning/` or canonical governance status unless verified
   implementation evidence changes their truth.
 - Plan/task/review model: `gpt-5.6-sol:low`; native Codex executor; no external
   review binding; no Hermes.
+- Work only on `codex/phase16-result-contract` in its Worktrunk checkout.
+  Never direct-push `main`, force-push, bypass hooks/checks, or merge unresolved
+  failures.
 
 ---
 
@@ -179,3 +184,17 @@ invoke an external review bot.
 
 Stage explicit paths only and create an atomic conventional commit after the
 acceptance matrix and review are green.
+
+- [ ] **Step 5: Push the isolated branch and open or update its pull request**
+
+Recheck the complete branch diff plus secret/risky-file surface, then push
+`codex/phase16-result-contract` normally and open or update its pull request.
+Do not modify `main` directly.
+
+- [ ] **Step 6: Resolve exact-head delivery findings**
+
+Monitor the pull request's exact head for required CI and review. Reproduce any
+confirmed failure, add a focused regression test for logic defects, commit and
+push the narrow fix, and wait for the new exact-head gates. Leave merge and
+post-merge `main` verification to supervision once every required gate is green
+and GitHub reports the pull request mergeable.
