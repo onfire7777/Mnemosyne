@@ -109,7 +109,7 @@ Expected: both accepted-record tests pass.
 - Consumes: `validate_record(record: object) -> list[str]`.
 - Produces: deterministic, sorted JSON-pointer errors and process exit status.
 
-- [ ] **Step 1: Add one failing table-driven test per prohibited mutation**
+- [x] **Step 1: Add one failing table-driven test per prohibited mutation**
 
 Use literal mutations and expected error pointers for:
 
@@ -126,13 +126,13 @@ Use literal mutations and expected error pointers for:
 Name each parametrized case after the production mutation it catches. Run the
 focused test and verify every case fails because validation is absent.
 
-- [ ] **Step 2: Implement the minimal cross-field checks**
+- [x] **Step 2: Implement the minimal cross-field checks**
 
 Add small private functions only where one invariant becomes clearer. Sort and
 deduplicate errors before return. Never infer missing evidence, default
 publishability to true, or rewrite input.
 
-- [ ] **Step 3: Add the deterministic CLI**
+- [x] **Step 3: Add the deterministic CLI**
 
 Implement:
 
@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
 Return `0` for valid input, `1` for contract violations, and `2` for unreadable
 or invalid JSON. Accept no network URL and write no file.
 
-- [ ] **Step 4: Verify GREEN and CLI behavior**
+- [x] **Step 4: Verify GREEN and CLI behavior**
 
 ```sh
 uv run pytest -q tests/test_leaderboard_result_contract.py
