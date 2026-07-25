@@ -5323,9 +5323,9 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
         "--run-consolidation-once",
     )
     exported = run_cli(store, "export", "--tenant", TENANT)
-    summary = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
-    summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
-    fact_relation = next(item for item in exported["relations"] if item["predicate"] == "is")
+    assert any(item["source_type"] == "consolidation-summary" for item in exported["evidence"])
+    assert any(item["predicate"] == "summary-derived-gist" for item in exported["relations"])
+    assert any(item["predicate"] == "is" for item in exported["relations"])
 
     recompute = run_cli(
         store,
