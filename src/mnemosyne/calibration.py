@@ -205,22 +205,41 @@ def scored_labels_from_hits(hits: list[Any]) -> list[tuple[str, float]]:
     return labels
 
 
+def _hit_has_trusted_confidence(hit: Any) -> bool:
+    meta = getattr(hit, "metadata", None)
+    if not isinstance(meta, Mapping):
+        return False
+    if meta.get("confidence") is None:
+        return False
+    try:
+        value = float(meta["confidence"])
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(value)
+
+
 def conformal_prediction_set_size_for_hits(
     hits: list[Any],
     *,
     threshold: float,
 ) -> int:
-    """Count hits whose nonconformity clears the conformal accept bar.
+    """Count hits in the conformal prediction set (I8 / §7 #12).
 
-    ``threshold`` is the conformal *confidence* threshold (accept bar). A hit
-    with example-confidence ``c`` is in the set iff
-    ``nonconformity_score(c) <= nonconformity_score(threshold)`` (i.e. ``c >= threshold``).
+    * When at least one hit carries trusted ``metadata["confidence"]`` (assertion
+      confidence / server-set field), size is the **per-example** count:
+      ``nonconformity_score(c) <= nonconformity_score(threshold)``.
+    * When every hit is score-only (typical raw evidence retrieve), fall back to
+      the historical **packet-relative** size
+      ``count(score >= max_score * threshold)`` so RRF scores are not treated as
+      calibrated confidences (which would empty the set and force abstention).
 
-    This is the per-example residual for blueprint §7 #12 — distinct from the
-    historical packet-relative size ``count(score >= max_score * threshold)``.
+    Diverge fixtures use explicit confidence metadata to prove the per-example
+    path is not identity-equivalent to packet-relative.
     """
     if not hits:
         return 0
+    if not any(_hit_has_trusted_confidence(hit) for hit in hits):
+        return packet_relative_prediction_set_size(hits, threshold=threshold)
     try:
         bar = max(0.0, min(1.0, float(threshold)))
     except (TypeError, ValueError):

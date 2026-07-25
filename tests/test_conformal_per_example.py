@@ -131,6 +131,19 @@ def test_per_example_set_size_diverges_from_packet_relative() -> None:
     assert per_example != packet
 
 
+def test_score_only_hits_keep_packet_relative_sizing() -> None:
+    """Raw evidence retrieve (no confidence meta) must not mass-abstain."""
+    hits = [
+        _hit(hit_id="s1", score=1.0, confidence=None),
+        _hit(hit_id="s2", score=0.9, confidence=None),
+        _hit(hit_id="s3", score=0.2, confidence=None),
+    ]
+    threshold = 0.5
+    assert conformal_prediction_set_size_for_hits(hits, threshold=threshold) == (
+        packet_relative_prediction_set_size(hits, threshold=threshold)
+    )
+
+
 def test_engine_prediction_set_size_uses_per_example() -> None:
     hits = [
         _hit(hit_id="h1", score=1.0, confidence=0.1),
