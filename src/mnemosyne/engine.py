@@ -33,7 +33,7 @@ from mnemosyne.access_policy import (
     vector_partition_for_item,
 )
 from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
-from mnemosyne.calibration import CalibrationSet
+from mnemosyne.calibration import CalibrationSet, fuse_calibrated_confidence_from_hit
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename
@@ -4013,17 +4013,23 @@ class LocalMemoryEngine:
         source_cids = self._hit_source_evidence_cids(hit)
         if hit.kind == "evidence" and hit.id:
             source_cids = sorted(set(source_cids + [hit.id]))
-        corroboration = hit.metadata.get("independent_corroboration") if isinstance(hit.metadata, dict) else None
-        if not isinstance(corroboration, dict):
-            corroboration = self._independent_corroboration_report(
-                tenant_id=hit.tenant_id,
-                branch=hit.branch,
-                source_evidence_cids=source_cids,
-            )
+        # Always compute engine-side corroboration — never trust adapter-supplied IC.
+        corroboration = self._independent_corroboration_report(
+            tenant_id=hit.tenant_id,
+            branch=hit.branch,
+            source_evidence_cids=source_cids,
+        )
+        meta = dict(hit.metadata) if isinstance(hit.metadata, dict) else {}
+        # Unconditionally overwrite — adapter-supplied IC must not drive fuse.
+        meta["independent_corroboration"] = corroboration
         return {
             "reality_class": reality_class,
             "trust_tier": hit.trust_tier,
-            "calibrated_confidence": hit.metadata.get("confidence", 0.0),
+            "calibrated_confidence": fuse_calibrated_confidence_from_hit(
+                metadata=meta,
+                reality_class=reality_class,
+                trust_tier=int(hit.trust_tier) if hit.trust_tier is not None else 5,
+            ),
             "corroboration_count": len(source_cids),
             "independent_corroboration_count": corroboration["independent_corroboration_count"],
             "independent_corroboration_weight": corroboration["independent_corroboration_weight"],
