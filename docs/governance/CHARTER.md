@@ -51,6 +51,7 @@ operator can produce:
 | Open stack | Specification, generators, graders, adapters, and harness published under the repository licence |
 | Adversarial self-report | A populated record of where Mnemosyne underperforms |
 | Public dispute channel | Open, logged, with resolutions published |
+| Roster-to-ledger completeness | Every pre-registered entrant resolves to a result or a reasoned `no_run` record |
 
 Two publication classes, so "publishable" is unambiguous:
 

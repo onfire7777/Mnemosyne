@@ -72,7 +72,7 @@ and launch a governance-separated memory leaderboard without weakening v1.0.
 - Deterministic LongMemEval retrieval and HippoRAG multi-hop tracks.
 - Grounded iterative multi-hop answer synthesis with evidence-CID claims.
 - MemoryAgentBench, BEAM, security, calibration, performance, and scale columns.
-- Independent reproduction plus neutral governance and leaderboard launch.
+- Reproduction by construction plus open, operator-run governance and leaderboard launch.
 
 ## Evolution
 

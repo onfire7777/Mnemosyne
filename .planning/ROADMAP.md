@@ -10,7 +10,7 @@
 - [x] **Phase 11: Deterministic Public Retrieval Tracks** - LongMemEval retrieval plus HippoRAG multi-hop deterministic measurement. (completed 2026-07-11)
 - [ ] **Phase 12: Grounded Multi-Hop Answer Synthesis** - Close Plan A S1 under public and private regression gates.
 - [ ] **Phase 13: External Benchmark Adapters and Scheduled CI** - MemoryAgentBench, BEAM, and regression-only cadence.
-- [ ] **Phase 14: Reproducibility Standard and Independent Reproduction** - M2/M3 publication eligibility.
+- [ ] **Phase 14: Reproducibility Standard** - M2/M3 publication eligibility via reproduction by construction.
 - [ ] **Phase 15: Memory Capability and Evidence Closure** - Plan A S2-S5 capability, security, calibration, performance, scale, and research closure.
 - [ ] **Phase 16: Open Leaderboard Build and Launch** - L1-L4 after PBPP, Part I, and Register A gates.
 

@@ -20,6 +20,7 @@ Per [CHARTER](CHARTER.md) and [CREDIBILITY-MODEL](CREDIBILITY-MODEL.md).
 | Adversarial self-report populated | None | Open |
 | Public dispute channel | Repository issues available; no logged resolution protocol wired | Open |
 | Public methods write-up | Outline only; preprint and open review channel not published | Open |
+| Roster-to-ledger completeness | Not implemented; no check binds the pre-registered entrant roster to ledger outcomes | Open |
 
 No gate above requires another organisation, funding, or a legal entity. Each is
 a software and disclosure task.
