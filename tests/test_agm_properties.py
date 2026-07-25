@@ -66,6 +66,7 @@ def test_revision_minimal_change_supersede() -> None:
     engine = LocalMemoryEngine()
     core = BeliefRevisionCore(engine)
     first = core.revise(_assertion("project", "status", "draft", confidence=0.6))
+    assert first.agm_operation == "expansion"
     newer = _assertion("project", "status", "shipped", confidence=0.95)
     newer.valid_from = datetime(2026, 3, 1, tzinfo=UTC)
     second = core.revise(newer, rule="newer fact")
