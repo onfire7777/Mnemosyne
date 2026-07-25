@@ -36,6 +36,7 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import (
     CalibrationSet,
     conformal_prediction_set_size_for_hits,
+    copy_confidence_metadata,
     fuse_calibrated_confidence_from_hit,
 )
 from mnemosyne.consciousness import RealityMonitor
@@ -5051,8 +5052,7 @@ class LocalMemoryEngine:
                 metadata["summary"] = dict(ev.metadata["summary"])
             if isinstance(ev.metadata.get("lifecycle"), dict):
                 metadata["lifecycle"] = dict(ev.metadata["lifecycle"])
-            if "confidence" in ev.metadata:
-                metadata["confidence"] = ev.metadata["confidence"]
+            copy_confidence_metadata(ev.metadata, metadata)
             if isinstance(ev.metadata.get("earned_autonomy"), dict):
                 metadata["earned_autonomy"] = dict(ev.metadata["earned_autonomy"])
             if "birth_groundedness" in ev.metadata:

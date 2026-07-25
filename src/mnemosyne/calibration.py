@@ -145,27 +145,48 @@ def conformal_should_abstain(
     return not prediction_set or len(prediction_set) > max_set_size
 
 
+# Confidence fields preserved on retrieval hit metadata for per-example conformal (I8).
+CONFIDENCE_METADATA_KEYS = (
+    "calibrated_confidence",
+    "verbalized_confidence",
+    "confidence",
+)
+
+
+def copy_confidence_metadata(source: Mapping[str, Any] | None, dest: dict[str, Any]) -> None:
+    """Copy calibrated/verbalized/raw confidence fields into a hit metadata envelope."""
+    if not isinstance(source, Mapping):
+        return
+    for key in CONFIDENCE_METADATA_KEYS:
+        if key in source and source[key] is not None:
+            dest[key] = source[key]
+
+
 def example_confidence_from_hit(hit: Any) -> float:
     """Per-example confidence used for conformal nonconformity (I8 / §7 #12).
 
     Prefers explicit confidence fields on hit metadata (including fused
     ``calibrated_confidence``), then falls back to the retrieval score as a weak
-    proxy. Always returns a unit interval.
+    proxy. Always returns a unit interval. Non-finite values are rejected.
     """
     meta = getattr(hit, "metadata", None)
     if isinstance(meta, Mapping):
-        for key in ("calibrated_confidence", "verbalized_confidence", "confidence"):
+        for key in CONFIDENCE_METADATA_KEYS:
             if key in meta and meta[key] is not None:
                 try:
-                    return max(0.0, min(1.0, float(meta[key])))
+                    value = float(meta[key])
                 except (TypeError, ValueError):
-                    pass
+                    continue
+                if math.isfinite(value):
+                    return max(0.0, min(1.0, value))
     score = getattr(hit, "score", None)
     if score is not None:
         try:
-            return max(0.0, min(1.0, float(score)))
+            value = float(score)
         except (TypeError, ValueError):
-            pass
+            return 0.0
+        if math.isfinite(value):
+            return max(0.0, min(1.0, value))
     return 0.0
 
 

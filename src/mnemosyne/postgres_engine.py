@@ -35,6 +35,7 @@ from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rr
 from mnemosyne.calibration import (
     CalibrationSet,
     conformal_prediction_set_size_for_hits,
+    copy_confidence_metadata,
     fuse_calibrated_confidence_from_hit,
 )
 from mnemosyne.consciousness import RealityMonitor
@@ -3008,8 +3009,7 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
-                    if "confidence" in metadata:
-                        hit_metadata["confidence"] = metadata["confidence"]
+                    copy_confidence_metadata(metadata, hit_metadata)
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
@@ -3256,8 +3256,7 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
-                    if "confidence" in metadata:
-                        hit_metadata["confidence"] = metadata["confidence"]
+                    copy_confidence_metadata(metadata, hit_metadata)
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
@@ -3383,8 +3382,7 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
-                    if "confidence" in metadata:
-                        hit_metadata["confidence"] = metadata["confidence"]
+                    copy_confidence_metadata(metadata, hit_metadata)
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
@@ -5708,8 +5706,7 @@ class PostgresEngine:
                             hit_metadata["summary"] = metadata["summary"]
                         if isinstance(metadata.get("lifecycle"), dict):
                             hit_metadata["lifecycle"] = metadata["lifecycle"]
-                        if "confidence" in metadata:
-                            hit_metadata["confidence"] = metadata["confidence"]
+                        copy_confidence_metadata(metadata, hit_metadata)
                         if isinstance(metadata.get("earned_autonomy"), dict):
                             hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                         if "birth_groundedness" in metadata:
