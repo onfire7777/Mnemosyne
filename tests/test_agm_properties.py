@@ -103,6 +103,30 @@ def test_contraction_retracts_root_and_cascade_dependents() -> None:
     assert statuses[dep.assertion_id] == "retracted"
 
 
+def test_contraction_scopes_cascade_to_requested_branch() -> None:
+    """contract(branch=X) must not retract assertions on another branch."""
+    engine = LocalMemoryEngine()
+    engine.branch("experiment", frm="main", kind="scratch")
+    core = BeliefRevisionCore(engine)
+    main_report = core.revise(_assertion("topic", "is", "main-value"), branch="main")
+    other = _assertion("topic", "is", "other-value")
+    other.branch = "experiment"
+    other_report = core.revise(other, branch="experiment")
+    report = core.contract(
+        TENANT, other_report.assertion_id, reason="drop experiment", branch="experiment"
+    )
+    assert report.agm_operation == "contraction"
+    assert core.atms_label(TENANT, other_report.assertion_id, branch="experiment") == "out"
+    assert core.atms_label(TENANT, main_report.assertion_id, branch="main") == "in"
+    statuses = {
+        (a.id, a.branch): a.status
+        for a in engine.assertions.values()
+        if a.tenant_id == TENANT
+    }
+    assert statuses[(main_report.assertion_id, "main")] == "active"
+    assert statuses[(other_report.assertion_id, "experiment")] == "retracted"
+
+
 def test_contraction_retains_unrelated_belief_consistency() -> None:
     """Contracting one belief must not retract an independent expansion."""
     engine = LocalMemoryEngine()

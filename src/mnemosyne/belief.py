@@ -161,7 +161,9 @@ class BeliefRevisionCore:
         ``CONTRACTION``, ``agm_operation="contraction"``, and ATMS in/out labels
         for the root and every cascade-invalidated assertion.
         """
-        invalidated = self.cascade_invalidate(tenant_id, assertion_id, reason=reason)
+        invalidated = self.cascade_invalidate(
+            tenant_id, assertion_id, reason=reason, branch=branch
+        )
         # Include root even if already retracted / no-op cascade
         ids = sorted(set(invalidated) | {assertion_id})
         atms = {aid: self.atms_label(tenant_id, aid, branch=branch) for aid in ids}
@@ -217,19 +219,38 @@ class BeliefRevisionCore:
             self.engine._persist()
         return report
 
-    def cascade_invalidate(self, tenant_id: str, assertion_id: str, reason: str = "dependency invalidated") -> list[str]:
+    def cascade_invalidate(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        reason: str = "dependency invalidated",
+        *,
+        branch: str | None = None,
+    ) -> list[str]:
         """Retract an assertion and every belief transitively derived from it.
 
         Walks the justification dependency graph breadth-first from
         ``assertion_id``, marking each reachable assertion ``retracted`` with the
         given ``reason``, then audits and persists. Returns the list of
         invalidated assertion ids (including the root).
+
+        When ``branch`` is set, only assertions on that branch are retracted
+        (AGM ``contract(..., branch=...)`` isolation).
         """
+        branch_of: dict[str, str] = {}
+        for item in self.engine.assertions.values():
+            if item.tenant_id == tenant_id:
+                branch_of[item.id] = item.branch
         dependencies: dict[str, list[str]] = defaultdict(list)
         for justification in self.engine.justifications.values():
             if justification.tenant_id != tenant_id:
                 continue
+            dep_assertion = justification.assertion_id
+            if branch is not None and branch_of.get(dep_assertion) not in {None, branch}:
+                continue
             for dependency in justification.dependency_ids:
+                if branch is not None and branch_of.get(dependency) not in {None, branch}:
+                    continue
                 dependencies[dependency].append(justification.assertion_id)
         invalidated: list[str] = []
         queue: deque[str] = deque([assertion_id])
@@ -240,7 +261,12 @@ class BeliefRevisionCore:
                 continue
             seen.add(current)
             for key, assertion in self.engine.assertions.items():
-                if assertion.tenant_id == tenant_id and assertion.id == current and assertion.status != "retracted":
+                if (
+                    assertion.tenant_id == tenant_id
+                    and assertion.id == current
+                    and assertion.status != "retracted"
+                    and (branch is None or assertion.branch == branch)
+                ):
                     assertion.status = "retracted"
                     assertion.calibration["invalidated_reason"] = reason
                     assertion.calibration["standing_cascade"] = {
@@ -257,6 +283,8 @@ class BeliefRevisionCore:
                     invalidated.append(current)
                     self.engine.assertions[key] = assertion
             for dependent in dependencies.get(current, []):
+                if branch is not None and branch_of.get(dependent) not in {None, branch}:
+                    continue
                 queue.append(dependent)
         if invalidated:
             self.engine._audit(
@@ -267,6 +295,7 @@ class BeliefRevisionCore:
                 {
                     "invalidated": invalidated,
                     "reason": reason,
+                    "branch": branch,
                     "standing_cascade": {
                         "schema_version": "standing.belief-cascade.v1",
                         "standing_fn_version": STANDING_FN_VERSION,
