@@ -1,37 +1,64 @@
-# Neutral Leaderboard Charter
+# Leaderboard Charter
 
-Version: 0.1.0
-Status: draft; External activation required
+Version: 0.2.0
+Status: source-owned gates active; External activation required only for the optional independent-board upgrade
 
 ## Purpose and authority
 
-The future board will steward a neutral, reproducible comparison of memory
-systems. This repository may implement the policy before activation, but may
-not describe the board as seated or governance as independent or active.
+This charter governs an open, operator-run, fully auditable comparison of memory
+systems. Authority rests on **mechanical verifiability**, not on an institution:
+every published number is reproducible from a signed, pre-registered bundle by
+any third party. The reasoning is in [CREDIBILITY-MODEL](CREDIBILITY-MODEL.md).
+
+Outputs are labelled **open, operator-run, fully auditable**. They may not be
+described as *neutral* or *independent* unless the optional board upgrade below
+is actually seated.
 
 ## Roles and composition
 
-The board requires at least five voting members: two independent academic
-methodologists, one reproducibility lead, one security/privacy lead, and one
-community representative. A non-voting operator liaison supplies records.
-No vendor may hold a voting majority. At least three voting members and a
-majority of eligible non-recused members form quorum.
+In the base model there is one role: the **operator**, who builds the harness,
+runs every system under it, and publishes results and traces. The operator holds
+a permanent, non-curable conflict with respect to Mnemosyne, governed by
+[CONFLICT-OF-INTEREST](CONFLICT-OF-INTEREST.md).
 
-Members disclose conflicts before deliberation. A conflicted member recuses
-from discussion, evidence custody, and votes concerning that system. The
-permanent Mnemosyne conflict is governed by
-[CONFLICT-OF-INTEREST](CONFLICT-OF-INTEREST.md) and cannot be cured by disclosure.
+Because a solo operator cannot be separated from the product team as a person,
+separation is enforced in time and code instead — deterministic pipeline, frozen
+pre-registered configuration, programmatic grading, automated publication from
+an append-only ledger. See [OPERATOR-FIREWALL](OPERATOR-FIREWALL.md).
 
 ## Powers and constraints
 
-The board may approve methodology versions, adjudicate appeals, publish
-corrections, and authorize releases. It may not waive the equal-treatment
-firewall, conceal run history, silently alter scores, or grant private access.
-Methodology changes require quorum and a two-thirds vote of eligible members.
+The operator may publish methodology versions, resolve appeals in public, and
+issue versioned corrections. The operator may **not** waive the equal-treatment
+firewall, conceal run history, silently alter or retract scores, grant private
+access to any system including Mnemosyne, or tune Mnemosyne against an
+operator-authored benchmark without disclosure.
+
+Methodology changes require a versioned entry in
+[CHANGE-CONTROL](CHANGE-CONTROL.md) and a pre-registration digest that precedes
+any affected score.
 
 ## Activation gate
 
-Activation requires public evidence of all items in [BOARD-STATUS](BOARD-STATUS.md):
-seated independent members and acceptances, signed disclosures, a legal
-steward, durable funding/hosting/license decisions, ratification, and a
-multi-owner archive. Until then all outputs must say source-ready, not neutral.
+Publication is gated on **verifiable source-owned evidence**, all of which the
+operator can produce:
+
+| Gate | Evidence required |
+|---|---|
+| Pre-registration in force | Signed `preregistration.json` committed before any scored run |
+| Append-only run ledger | Hash-chained, signed, containing every run including failures and discards |
+| Reproducible by construction | A stranger can reproduce any published number from its pinned bundle with one documented command |
+| Open stack | Specification, generators, graders, adapters, and harness published under the repository licence |
+| Adversarial self-report | A populated record of where Mnemosyne underperforms |
+| Public dispute channel | Open, logged, with resolutions published |
+
+Until every gate above holds, outputs are labelled **source-ready**, not
+publishable. No gate depends on another organisation.
+
+## Optional upgrade: independent board
+
+Seating an independent board remains desirable.
+It is a strict upgrade and is optional, not a prerequisite. It would permit the stronger *neutral* label. Its composition
+requirements and the external evidence it would need are recorded in
+[BOARD-STATUS](BOARD-STATUS.md). No build, measurement, or publication step in
+this project waits on it.

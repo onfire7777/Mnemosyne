@@ -36,10 +36,10 @@
 
 | ID | Requirement | Authority | Status |
 |---|---|---|---|
-| [ ] GOV-001 | An independent governance charter creates a hard operator/firewall boundary, conflict policy, appeals, versioning, and public change control. | Plan B L0 | Partial — source policy complete; external ratification pending |
-| [ ] LEAD-001 | The submission methodology runs every system under one identical harness with contamination declarations and public raw artifacts. | Plan B L1 | Planned |
-| [ ] LEAD-002 | The leaderboard data pipeline validates signed bundles and renders separate retrieval, QA, security, calibration, performance, and reproducibility columns. | Plan B L2/L3 | Planned |
-| [ ] LEAD-003 | Public launch remains blocked until PBPP is in force, Part I results exist, governance is active, and Mnemosyne is treated identically to every entrant. | Plan B L4 | Planned |
+| [ ] GOV-001 | A verifiable-neutrality charter creates a hard operator/firewall boundary enforced mechanically, conflict policy, appeals, versioning, and public change control. | Plan B L0 | Partial — source policy complete (v0.2.0); Register A publication gates open. External board ratification moved to the optional Register B upgrade and is no longer blocking |
+| [ ] LEAD-001 | The submission methodology runs every system under one identical harness with contamination declarations, public raw artifacts, pre-registration, and an append-only signed run ledger covering failed and discarded runs. | Plan B L1 | Planned |
+| [ ] LEAD-002 | The leaderboard data pipeline validates signed bundles and renders separate retrieval, QA, security, calibration, performance, and reproducibility columns, with operator-authored and established suites in visually distinct columns. Dimensions render only once measured. | Plan B L2/L3 | Planned |
+| [ ] LEAD-003 | Public launch remains blocked until PBPP is in force, Part I results exist, Register A source-owned gates hold, and Mnemosyne is treated identically to every entrant and labelled as the operator entry. | Plan B L4 | Planned |
 
 ## Non-Negotiable Rails
 

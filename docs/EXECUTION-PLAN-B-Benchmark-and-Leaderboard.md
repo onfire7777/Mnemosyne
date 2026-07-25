@@ -133,15 +133,25 @@ Update blueprint `§9.2.7` and the provider-bakeoff README to reference PBPP (§
 
 ---
 
+### M5 — Memory-native benchmark (MNB) — *added v0.2.0*
+Existing public suites measure QA over long context. They do not score provenance integrity, calibrated abstention (they **penalise** it), bitemporal correctness, belief revision, deletion compliance, or write-path safety — the properties a memory compiler exists to provide. Spec: [`docs/benchmark/MEMORY-NATIVE-BENCHMARK.md`](benchmark/MEMORY-NATIVE-BENCHMARK.md).
+
+Nine dimensions D1–D9, each mapped to an existing CAP requirement so nothing is invented to flatter. Fully open-sourced under the repo licence: spec, generators, graders, fixtures, adapters, harness. Binding anti-self-dealing rules — spec frozen before any system runs, never headlined alone, adapter parity or "not measured", a standing published record of where Mnemosyne loses, held-out split with pre-published digest, open dispute channel, no tuning against MNB without disclosure.
+
+**DoD:** spec frozen and pre-registered; ≥1 dimension implemented with a passing programmatic grader; Mnemosyne and ≥1 external system measured on it; the "where Mnemosyne loses" section is non-empty.
+
 # PART II — The neutral Memory Leaderboard
 
 Working name: **OpenMemBench** (final naming is a branding decision; recommendation: a neutral, non-Mnemosyne-branded identity to preserve independence).
 
-### L0 — Governance & neutrality FIRST (the credibility moat — build before any code)
-- **L0.1 Independent governance charter.** Multi-institution advisory board (invite ≥2 academics who authored memory benchmarks); published, dated COI policy; the operator's own entry (Mnemosyne) gets **no** extra runs, no private tuning window, no earlier held-out access, no score-retraction rights. Model on HELM's disclosed-funding posture + LMArena's post-"Illusion" reforms.
-- **L0.2 One-harness rule.** Operator runs **every** system itself under one identical harness (the reused `eval/public/` core); vendor-submitted numbers are never accepted as-is. Structurally eliminates the "you misconfigured us" dispute.
-- **L0.3 Survivability.** Openly-licensed results dump with durable, citable URLs + non-single-owner hosting so the board outlives its host (the Papers-with-Code lesson).
-- **L0.4 Methodology paper.** Publish a peer-review-grade methods paper at launch (arXiv 2603.07670 explicitly calls for a "GLUE-style shared leaderboard for agent memory" — that gap is the opening).
+### L0 — Verifiable neutrality FIRST (the credibility moat — build before any code)
+> **Revised v0.2.0.** The original L0 required a multi-institution board, legal steward, durable funding, external ratification, and a multi-owner archive. A solo maintainer cannot produce those by writing software, so Phase 16 could never open. Credibility now rests on **mechanical verifiability** — see [`docs/governance/CREDIBILITY-MODEL.md`](governance/CREDIBILITY-MODEL.md). The disclosure standard is unchanged; only *who vouches* changed.
+- **L0.1 Pre-registration.** Before any scored run, commit a signed `preregistration.json` (harness commit, adapter versions, dataset digests, metric definitions, held-out split digest, stopping rule). Off-registration scores are ineligible and labelled so.
+- **L0.2 One-harness rule.** Operator runs **every** system itself under one identical harness (the reused `eval/public/` core); vendor-submitted numbers are never accepted as-is. Unchanged from v0.1.0 and non-waivable.
+- **L0.3 Append-only signed run ledger.** Every run — including failed, aborted, and discarded — hash-chained and Ed25519-signed, reusing the v1.0 Tier-B evidence substrate. Never deleted, only superseded with a stated reason. This is what makes cherry-picking third-party-detectable, which is the property the board was there to provide.
+- **L0.4 Survivability by replication.** Openly-licensed results dump in git + DOI snapshot + public archive mirror, permissive licence, explicit "fork this" policy. Durability through replication rather than co-ownership.
+- **L0.5 Methods write-up.** Public preprint plus an open, logged review channel. Not gated on peer-review acceptance.
+- **L0.6 Honest label.** Outputs are **open, operator-run, fully auditable** — never "neutral" or "independent" while the operator competes and no board is seated.
 
 ### L1 — Benchmark methodology & harness (requirements checklist)
 Each item maps to a proven precedent (full source map in Appendix B):
@@ -152,7 +162,7 @@ Each item maps to a proven precedent (full source map in Appendix B):
 - **L1.e Anti-gaming:** signed **attestation that evaluated build == public release** (LMArena's Llama-4 fix); submission throttling (SuperGLUE 2/day); disclose *all* variants tested; public retirement list.
 - **L1.f Keep the judge honest:** publish the judge's acceptance rate on intentionally-wrong-but-topical answers (beat LoCoMo's 62.8%); multi-judge averaging; rotating human adjudication; prefer deterministic grading where possible.
 - **L1.g Systems-fair reporting:** efficiency (latency + cost/query) first-class, budget-normalized; CIs + rank ranges with overlapping-CI systems treated as **ties**; set-independent aggregation (Borda, not mean-win-rate).
-- **L1.h Reproducibility:** pinned harness commit, full per-question traces public, open-source-to-rank.
+- **L1.h Reproducibility:** pinned harness commit, full per-question traces public, open-source-to-rank, and **reproducible by construction** — one documented command regenerates any published number from its bundle. Third-party reproduction is recorded as strengthening evidence when it happens, never as a blocking gate.
 
 ### L2 — Website architecture & build (greenfield `web/` + `leaderboard/`)
 - **Stack (recommendation):** static-first for durability + trust — **Astro or Next.js (static export)** front-end; results stored as **flat, versioned JSON/Parquet in a public git repo** (not a hidden DB) so every number is auditable and URLs are permanent; light charting lib; a **per-question trace browser** (HELM's "browse all predictions" pattern). CDN-hosted; mirrored data dump.
@@ -166,7 +176,7 @@ Plain-language explainers of each major system's architecture (reuse `docs/resea
 ### L4 — Launch & community
 Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS, supermemory, HippoRAG, + Mnemosyne) under the one harness; publish the methods paper; open submissions + a public audit/dispute channel; **release raw head-to-head data** (LMArena's single most trust-restoring act). **DoD:** public launch with ≥8 systems and a reproducible methods paper.
 
-**Part II exit gate:** L-i…L-iv met; independent board seated; ≥8 systems live; methods paper public; Mnemosyne entered under identical rules.
+**Part II exit gate (revised v0.2.0):** Register A of [`BOARD-STATUS.md`](governance/BOARD-STATUS.md) satisfied with verifiable evidence; the open stack published; a populated adversarial self-report; methods write-up public; Mnemosyne entered under identical rules and labelled as the operator entry. System coverage is reported honestly rather than gated on a fixed count — every absence is disclosed with its reason. Board seating is an optional upgrade that would permit the *neutral* label.
 
 ---
 

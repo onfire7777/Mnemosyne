@@ -8,6 +8,7 @@ GOVERNANCE = ROOT / "docs" / "governance"
 
 REQUIRED_DOCUMENTS = {
     "README.md",
+    "CREDIBILITY-MODEL.md",
     "CHARTER.md",
     "CONFLICT-OF-INTEREST.md",
     "OPERATOR-FIREWALL.md",
@@ -41,12 +42,39 @@ def test_governance_is_explicitly_inactive_and_fail_closed() -> None:
     )
     for text in (charter, status, readiness):
         assert "External activation required" in text
-    assert "Status: inactive" in status
+    # The board stays unseated and must never be described otherwise.
     assert "board is not yet seated" in status
     assert "governance is not yet active" in status
-    assert "methods paper is not yet published" in readiness
     assert "GOV-001: partial" in readiness
     assert "Phase 16" in readiness
+
+
+def test_credibility_rests_on_verifiability_not_an_institution() -> None:
+    """The publication path must not depend on external organisations.
+
+    v0.1.0 gated Phase 16 on seating academics, retaining a legal steward, and
+    securing funding. A solo maintainer cannot satisfy those by writing
+    software, so the roadmap terminated in a permanent block. Credibility now
+    comes from mechanisms the operator can build and a stranger can check.
+    """
+    model = _read("CREDIBILITY-MODEL.md").lower()
+    charter = _read("CHARTER.md").lower()
+    status = _read("BOARD-STATUS.md").lower()
+    for phrase in (
+        "pre-registration",
+        "append-only",
+        "reproducible by construction",
+        "operator-run, fully auditable",
+    ):
+        assert phrase in model, phrase
+    # The honest label is claimed; the stronger one is not.
+    assert "operator-run, fully auditable" in charter
+    assert "may not be" in charter and "neutral" in charter
+    # The board is recorded as an optional, non-blocking upgrade.
+    assert "optional" in charter and "not a prerequisite" in charter
+    assert "non-blocking" in status
+    # Publication gates must be source-owned.
+    assert "no gate above requires another organisation" in status
 
 
 def test_permanent_conflict_and_equal_treatment_are_non_waivable() -> None:

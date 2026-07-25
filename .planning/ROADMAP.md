@@ -114,14 +114,29 @@ and `publishable:false` — they add no public or headline benchmark result. The
 remaining Phase 15 items (CAP-004..010) stay planned, and the W1/W4/W5 GATEs
 remain operator-gated; none of that gated or adapter work is claimed complete.
 
-### Phase 16: Neutral Leaderboard Build and Launch
+### Phase 16: Open Leaderboard Build and Launch
 
 **Goal:** Reuse the public harness as the equal-access submission engine, build
-the transparent data/site surfaces, and launch only after governance, PBPP,
-Part I, and reproduction gates pass.
+the transparent data/site surfaces, and launch once the source-owned Register A
+gates hold.
 **Requirements:** LEAD-001, LEAD-002, LEAD-003, GOV-001, RAIL-003, RAIL-004
-**Depends on:** Phases 10-15
+**Depends on:** Phases 10-12. The site and data pipeline no longer wait on full
+Phase 15 capability closure — see Sequencing below.
 **Plans:** Not planned
+
+**Revised v0.2.0.** Launch is gated on Register A of
+`docs/governance/BOARD-STATUS.md` — pre-registration, an append-only signed run
+ledger, reproducibility by construction, an open stack, a populated adversarial
+self-report, and a public dispute channel — all of which the operator can
+produce. Board seating, a legal steward, funding, external ratification, and a
+multi-owner archive moved to Register B as an optional upgrade that would permit
+the *neutral* label. Rationale: `docs/governance/CREDIBILITY-MODEL.md`.
+
+**Sequencing.** The leaderboard surface may be built and published against
+whatever tracks genuinely exist, filling in as capabilities land. A dimension is
+rendered only once measured; nothing is claimed ahead of evidence. This removes
+the previous dead end in which the site waited on eight unplanned CAP
+requirements while those requirements had no delivery date.
 
 ## Carried Evidence Boundaries
 
