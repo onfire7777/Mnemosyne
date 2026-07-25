@@ -1,7 +1,10 @@
 # Phase 16 L2 Public Result Contract Implementation Plan
 
 > **For agentic workers:** Execute task-by-task with Ponytail, strict TDD, and
-> the configured native RalphEx/Codex review stages. Do not widen the lease.
+> the configured native RalphEx/Codex review stages. Use context-mode by
+> default for search, extraction, command/log analysis, diagnostics, and
+> retained session context; keep only derived findings active. Do not widen
+> the lease.
 
 **Goal:** Add a versioned, fail-closed public leaderboard result contract and
 deterministic validator without producing or publishing a benchmark result.

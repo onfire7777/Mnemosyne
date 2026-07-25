@@ -88,6 +88,13 @@ Do not modify product retrieval, storage, reader, benchmark adapter, governance,
 planning, release, deployment, or hardware code. If the package cannot be
 completed inside this lease, stop and report the required boundary change.
 
+## Operating Context
+
+Use context-mode by default for repository search, planning/document extraction,
+command output, diagnostics, CI/log analysis, and retained session context.
+Keep only derived findings in the active context; this is an operating practice,
+not an additional launch gate.
+
 ## Acceptance Criteria
 
 1. A versioned JSON Schema defines one leaderboard result record with:
