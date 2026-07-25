@@ -16,6 +16,7 @@ from mnemosyne.standing import STANDING_FN_VERSION
 # AGM theory-change operation for each belief-core classification.
 # ADD/UPDATE add a belief consistent with the current set (expansion);
 # SUPERSEDE replaces a contradicted belief under minimal change (revision);
+# CONTRACTION removes a belief (and cascade dependents) while retaining consistency;
 # CONTEST retains a competing hypothesis without forcing a single conclusion;
 # NOOP leaves the belief set unchanged.
 AGM_OPERATIONS: dict[str, str] = {
@@ -24,6 +25,7 @@ AGM_OPERATIONS: dict[str, str] = {
     "NOOP": "none",
     "SUPERSEDE": "revision",
     "CONTEST": "expansion",
+    "CONTRACTION": "contraction",
 }
 
 
@@ -131,7 +133,47 @@ class BeliefRevisionCore:
             and item.predicate == assertion.predicate
         )
         self.engine._persist()
-        return BeliefRevisionReport(operation, assertion_id, justification_id, affected, contradictions)
+        atms = {
+            aid: self.atms_label(assertion.tenant_id, aid, branch=branch) for aid in affected
+        }
+        return BeliefRevisionReport(
+            operation=operation,  # type: ignore[arg-type]
+            assertion_id=assertion_id,
+            justification_id=justification_id,
+            affected_assertion_ids=affected,
+            contradictions=contradictions,
+            agm_operation=agm_operation(operation),
+            atms_by_assertion_id=atms,
+        )
+
+    def contract(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        *,
+        reason: str = "agm contraction",
+        branch: str = "main",
+    ) -> BeliefRevisionReport:
+        """AGM contraction: retract a belief and cascade dependents (I2 / §7 #13).
+
+        App-side L2 composition — uses existing cascade/retract paths; does not
+        hard-delete ledger evidence. Returns a report with operation
+        ``CONTRACTION``, ``agm_operation="contraction"``, and ATMS in/out labels
+        for the root and every cascade-invalidated assertion.
+        """
+        invalidated = self.cascade_invalidate(tenant_id, assertion_id, reason=reason)
+        # Include root even if already retracted / no-op cascade
+        ids = sorted(set(invalidated) | {assertion_id})
+        atms = {aid: self.atms_label(tenant_id, aid, branch=branch) for aid in ids}
+        return BeliefRevisionReport(
+            operation="CONTRACTION",
+            assertion_id=assertion_id,
+            justification_id=None,
+            affected_assertion_ids=ids,
+            contradictions=[],
+            agm_operation="contraction",
+            atms_by_assertion_id=atms,
+        )
 
     def apply_tier0_correction(self, assertion: Assertion, branch: str = "main") -> BeliefRevisionReport:
         """Apply a tier-0 (direct-user) correction as an immediate supersession.
