@@ -690,10 +690,13 @@ def test_consolidation_corroboration_gate_requires_distinct_sources() -> None:
             source_evidence_cids=cids,
         )
 
-    # A single source does not corroborate -> gate refuses to promote.
+    # A single source does not corroborate -> external rail refuses to promote.
     single = worker.run_job(job([cid]))
     assert single.promoted is False
-    assert any("corroboration" in failure for failure in single.failed_cases)
+    assert any(
+        "corroboration" in failure or "fact_external_corroboration" in failure
+        for failure in single.failed_cases
+    )
 
     # A second independent source satisfies §23.3 corroboration -> promotes.
     cid2 = engine.append_evidence(
@@ -712,7 +715,8 @@ def test_consolidation_corroboration_gate_requires_distinct_sources() -> None:
 
 
 def test_consolidation_default_corroboration_is_single_source() -> None:
-    # Default min_corroboration=1 keeps single-source promotion working.
+    # §7 #17 G-consol: default floor aligns with min_external_corroboration_for_fact=2.
+    # Single-source facts fail closed via evaluate_fact_external_corroboration.
     engine = LocalMemoryEngine()
     cid = engine.append_evidence(
         Evidence(
@@ -733,6 +737,7 @@ def test_consolidation_default_corroboration_is_single_source() -> None:
         protected=True,
     )
     worker = ConsolidationWorker(engine, [gate_case])
+    assert worker.min_corroboration >= 2
     result = worker.run_job(
         ConsolidationJob(
             tenant_id=TENANT,
@@ -744,7 +749,8 @@ def test_consolidation_default_corroboration_is_single_source() -> None:
             source_evidence_cids=[cid],
         )
     )
-    assert result.promoted is True
+    assert result.promoted is False
+    assert any("fact_external_corroboration" in failure or "corroboration" in failure for failure in result.failed_cases)
 
 
 def test_consolidation_cadence_throttles_rapid_resignature() -> None:
@@ -756,6 +762,17 @@ def test_consolidation_cadence_throttles_rapid_resignature() -> None:
             actor="user",
             source_type="episode",
             content="The build server is online.",
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    cid_b = engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            content="Second source: the build server is online.",
             trust_tier=0,
             access_policy={"tenant": TENANT},
         )
@@ -781,7 +798,7 @@ def test_consolidation_cadence_throttles_rapid_resignature() -> None:
         candidate_subject="build server",
         candidate_predicate="is",
         candidate_object="online",
-        source_evidence_cids=[cid],
+        source_evidence_cids=[cid, cid_b],
     )
 
     first = worker.run_job(job)
