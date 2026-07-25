@@ -56,12 +56,14 @@ The next milestone executes the two authoritative post-v1.0 programs:
 - Neutral leaderboard governance L0 begins in parallel with M1; the public site
   remains blocked until Part I results and PBPP publication gates are satisfied.
 - No public headline number may be published before the pinned harness, complete
-  artifact bundle, separate retrieval/QA columns, and independent reproduction.
+  artifact bundle, separate retrieval/QA columns, and reproduction by construction
+  (independent third-party reproduction strengthens a claim but does not gate it —
+  see docs/governance/CREDIBILITY-MODEL.md).
 
 ## Current Milestone: v2.0 Public Benchmark and Memory Leadership
 
 **Goal:** Prove Mnemosyne's capabilities under neutral public measurement,
-close the grounded multi-hop synthesis gap, obtain independent reproduction,
+close the grounded multi-hop synthesis gap, make results reproducible by construction,
 and launch a governance-separated memory leaderboard without weakening v1.0.
 
 **Target features:**

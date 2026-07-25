@@ -19,6 +19,7 @@ Per [CHARTER](CHARTER.md) and [CREDIBILITY-MODEL](CREDIBILITY-MODEL.md).
 | Open stack published | Harness and adapters exist under Apache-2.0 in `eval/public/`; memory-native generators and graders not written | Partial |
 | Adversarial self-report populated | None | Open |
 | Public dispute channel | Repository issues available; no logged resolution protocol wired | Open |
+| Public methods write-up | Outline only; preprint and open review channel not published | Open |
 
 No gate above requires another organisation, funding, or a legal entity. Each is
 a software and disclosure task.

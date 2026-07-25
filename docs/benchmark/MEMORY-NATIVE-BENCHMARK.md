@@ -37,13 +37,21 @@ maps to an existing capability requirement, so nothing is invented to flatter.
 |---|---|---|---|
 | D1 | Provenance integrity | Does every synthesized claim resolve to evidence CIDs? | CAP-002 |
 | D2 | Calibrated abstention | Does it refuse when evidence is insufficient, and is refusal well-calibrated? | CAP-002, CAP-005 |
-| D3 | Bitemporal correctness | Can it answer "what was believed at time T" separately from "what is true now"? | Engine contract |
-| D4 | Belief revision | Are contradictions handled by supersession and contraction rather than silent overwrite? | §7 #13 |
-| D5 | Deletion compliance | After a signed deletion manifest, is the content genuinely unrecoverable? | Engine contract |
+| D3 | Bitemporal correctness | Can it answer "what was believed at time T" separately from "what is true now"? | RAIL-002; `docs/ENGINE-CONTRACT.md` Layer 1 |
+| D4 | Belief revision | Are contradictions handled by supersession and contraction rather than silent overwrite? | CAP-008; Blueprint §7 #13 |
+| D5 | Deletion compliance | After a signed deletion manifest, is the content unrecoverable across the declared scope? | RAIL-004; `docs/ENGINE-CONTRACT.md` Signed deletion manifest |
 | D6 | Write-path safety | Are taint propagation and capability gates enforced under adversarial writes? | CAP-004 |
 | D7 | Consolidation and decay | Does memory degrade gracefully across cadences while preserving freshness and expiry? | CAP-007 |
 | D8 | Prospective memory | Are subject-scoped intentions triggered deterministically and idempotently? | CAP-012 |
 | D9 | Working memory | Are TTL, explicit promotion, and deterministic expiry honoured on a distinct route? | CAP-013 |
+
+**D5 deletion oracle.** "Unrecoverable" is meaningless without scope, and an
+undefined scope lets two adapters pass under incompatible readings. D5 declares
+its surfaces explicitly — primary store, derived indexes, caches, replicas, and
+any snapshot the system exposes as readable — and probes each by direct read,
+retrieval path, and restore path. Surfaces the system does not expose are
+recorded as out of scope for that adapter rather than silently assumed clean.
+Offline backup media are out of scope for every adapter.
 
 D1–D5 are engine-agnostic and portable to other systems. D6–D9 require the
 target system to expose the relevant surface; where it does not, the cell is
@@ -85,6 +93,14 @@ every published number without asking permission or possessing private data.
 
 Task data is generated from seeded, declared synthetic sources so the corpus can
 be rebuilt deterministically rather than downloaded from a single owner.
+
+**Scope of the reproducibility promise.** Full third-party reproduction applies
+to **public tracks**, and to a held-out track only **after its reveal**. Before
+reveal, a held-out result is verifiable in three weaker but non-vacuous ways:
+its split digest was published in advance, its bundle is signed and appears in
+the append-only ledger, and the grader is public so the scoring path can be
+audited even where the inputs are withheld. Pre-reveal numbers are labelled as
+such and are never presented as independently reproduced.
 
 ## Status and gates
 
