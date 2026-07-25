@@ -93,11 +93,14 @@ completed inside this lease, stop and report the required boundary change.
 Use CBM/codebase-memory-mcp as the primary source for repository discovery and
 understanding: verify the index, then use architecture/schema, graph search,
 traces, snippets, impact, and ADRs as relevant. Use Gbrain as the primary
-durable knowledge layer and refresh both only at meaningful milestones. Use
+durable project-knowledge layer. Check/refresh CBM before code reasoning and
+after meaningful code milestones; sync Gbrain after coherent committed or
+merged milestones without duplicating another memory owner's content. Use
 context-mode for retained command/log/document captures and derivation, keeping
 only derived findings active. Restrict text search to precise literals, config,
-errors, or an identified graph gap. These are operating practices, not
-additional launch gates.
+errors, or an identified graph gap. Reconcile code, GitHub, canonical docs,
+planning state, and memory surfaces against verified evidence. These are
+operating practices, not additional launch gates.
 
 Deliver every coherent package through its isolated Worktrunk branch: inspect
 the diff and secret/risky-file surface, run relevant checks, commit
@@ -108,6 +111,22 @@ pull request mergeable. Never push directly to `main`, force-push, bypass hooks
 or checks, or merge unresolved failures. Verify post-merge `main` CI before
 milestone planning/docs/CBM/Gbrain synchronization and selection of the next
 dependency-ready package.
+
+## Loop Authority and Continuity
+
+Later user instructions supersede earlier conflicts. Run native RalphEx with
+`gpt-5.6-sol:low` for plan, task, review, and monitoring; keep external review,
+Hermes, and legacy automation bindings off. Use a fresh Worktrunk-isolated
+worktree for each dependency-ready package, Ponytail for every implementation
+choice, and only the Superpowers/GSD workflows triggered by the work.
+
+Continue autonomously across ordinary configuration/startup failures, test or
+CI failures, review findings, branch/PR synchronization, documentation/planning
+drift, CBM/Gbrain refreshes, recoverable stalls, and rate limits. Stop only for
+a real safety gate, a scope-changing decision, or a blocker that cannot be
+repaired inside the lease. Record an ADR only for a durable architectural
+decision, refresh canonical docs/planning only when evidence changes their
+truth, and report only substantive verified progress or blockers.
 
 ## Acceptance Criteria
 
