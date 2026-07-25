@@ -4020,7 +4020,10 @@ class LocalMemoryEngine:
                 branch=hit.branch,
                 source_evidence_cids=source_cids,
             )
-        meta = hit.metadata if isinstance(hit.metadata, dict) else {}
+        meta = dict(hit.metadata) if isinstance(hit.metadata, dict) else {}
+        # Feed computed corroboration into fuse so provenance is not trust-tier-only.
+        if "independent_corroboration" not in meta or meta.get("independent_corroboration") is None:
+            meta["independent_corroboration"] = corroboration
         return {
             "reality_class": reality_class,
             "trust_tier": hit.trust_tier,

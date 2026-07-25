@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -282,9 +283,20 @@ def _bounded_unit(value: Any, *, default: float) -> float:
     if value is None:
         return default
     try:
-        return max(0.0, min(1.0, float(value)))
+        number = float(value)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(number):
+        return default
+    return max(0.0, min(1.0, number))
+
+
+def _first_present(mapping: Mapping[str, Any], *keys: str) -> Any:
+    """Return the first non-None value among keys (None aliases treated as absent)."""
+    for key in keys:
+        if key in mapping and mapping[key] is not None:
+            return mapping[key]
+    return None
 
 
 def _fidelity_from_reality_class(reality_class: str) -> float:
@@ -378,15 +390,15 @@ def calibrated_confidence_signals_from_hit(
 ) -> dict[str, float]:
     """Collect fuse kwargs from a retrieval hit's metadata envelope (§19/§26)."""
     meta = dict(metadata) if isinstance(metadata, Mapping) else {}
-    raw = meta.get(
-        "verbalized_confidence",
-        meta.get("confidence", meta.get("calibrated_confidence", 0.0)),
-    )
-    entropy = meta.get("semantic_entropy", meta.get("entropy"))
+    raw = _first_present(meta, "verbalized_confidence", "confidence", "calibrated_confidence")
+    if raw is None:
+        raw = 0.0
+
+    entropy = _first_present(meta, "semantic_entropy", "entropy")
     if entropy is None:
         entropy = 0.0
 
-    agreement = meta.get("retrieval_agreement", meta.get("channel_agreement"))
+    agreement = _first_present(meta, "retrieval_agreement", "channel_agreement")
     if agreement is None:
         activation = meta.get("activation")
         if isinstance(activation, Mapping) and activation.get("score") is not None:
@@ -394,7 +406,8 @@ def calibrated_confidence_signals_from_hit(
         else:
             agreement = 1.0
 
-    provenance = meta.get("provenance_strength")
+    # Prefer explicit key when non-None; else independent_corroboration; else trust tier.
+    provenance = _first_present(meta, "provenance_strength")
     if provenance is None:
         ic = meta.get("independent_corroboration")
         if isinstance(ic, Mapping) and ic.get("independent_corroboration_weight") is not None:
@@ -407,10 +420,10 @@ def calibrated_confidence_signals_from_hit(
             # trust_tier 0 is strongest external; map to provenance strength [0,1]
             provenance = max(0.0, min(1.0, 1.0 - (tier / 5.0)))
 
-    fidelity = meta.get("fidelity", meta.get("fidelity_score"))
+    fidelity = _first_present(meta, "fidelity", "fidelity_score")
     if fidelity is None:
         lifecycle = meta.get("lifecycle")
-        if isinstance(lifecycle, Mapping):
+        if isinstance(lifecycle, Mapping) and lifecycle.get("fidelity_score") is not None:
             fidelity = lifecycle.get("fidelity_score")
         if fidelity is None:
             fidelity = _fidelity_from_reality_class(
