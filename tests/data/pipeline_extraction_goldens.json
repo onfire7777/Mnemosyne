@@ -237,7 +237,7 @@
     "confidence": "0x1.3333333333334p-6",
     "confidence_block": {
       "answer_score": "0x1.3333333333334p-6",
-      "prediction_set_size": 2,
+      "prediction_set_size": 1,
       "score": "0x1.3333333333334p-6",
       "source": "evidence_quality",
       "threshold": "0x1.ccccccccccccdp-2"

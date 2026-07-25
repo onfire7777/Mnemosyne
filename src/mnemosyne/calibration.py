@@ -145,6 +145,91 @@ def conformal_should_abstain(
     return not prediction_set or len(prediction_set) > max_set_size
 
 
+def example_confidence_from_hit(hit: Any) -> float:
+    """Per-example confidence used for conformal nonconformity (I8 / §7 #12).
+
+    Prefers explicit confidence fields on hit metadata (including fused
+    ``calibrated_confidence``), then falls back to the retrieval score as a weak
+    proxy. Always returns a unit interval.
+    """
+    meta = getattr(hit, "metadata", None)
+    if isinstance(meta, Mapping):
+        for key in ("calibrated_confidence", "verbalized_confidence", "confidence"):
+            if key in meta and meta[key] is not None:
+                try:
+                    return max(0.0, min(1.0, float(meta[key])))
+                except (TypeError, ValueError):
+                    pass
+    score = getattr(hit, "score", None)
+    if score is not None:
+        try:
+            return max(0.0, min(1.0, float(score)))
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def scored_labels_from_hits(hits: list[Any]) -> list[tuple[str, float]]:
+    """Build ``(label, confidence)`` pairs for conformal_prediction_set."""
+    labels: list[tuple[str, float]] = []
+    for hit in hits:
+        label = str(getattr(hit, "id", None) or getattr(hit, "kind", "hit") or "hit")
+        labels.append((label, example_confidence_from_hit(hit)))
+    return labels
+
+
+def conformal_prediction_set_size_for_hits(
+    hits: list[Any],
+    *,
+    threshold: float,
+) -> int:
+    """Count hits whose nonconformity clears the conformal accept bar.
+
+    ``threshold`` is the conformal *confidence* threshold (accept bar). A hit
+    with example-confidence ``c`` is in the set iff
+    ``nonconformity_score(c) <= nonconformity_score(threshold)`` (i.e. ``c >= threshold``).
+
+    This is the per-example residual for blueprint §7 #12 — distinct from the
+    historical packet-relative size ``count(score >= max_score * threshold)``.
+    """
+    if not hits:
+        return 0
+    try:
+        bar = max(0.0, min(1.0, float(threshold)))
+    except (TypeError, ValueError):
+        bar = 1.0
+    cutoff = nonconformity_score(bar)
+    return sum(
+        1
+        for hit in hits
+        if nonconformity_score(example_confidence_from_hit(hit)) <= cutoff
+    )
+
+
+def packet_relative_prediction_set_size(
+    hits: list[Any],
+    *,
+    threshold: float,
+) -> int:
+    """Legacy packet-relative set size (score vs max_score * threshold).
+
+    Kept for diverge fixtures / characterization — retrieve must *not* use this
+    after #12; engines call :func:`conformal_prediction_set_size_for_hits`.
+    """
+    if not hits:
+        return 0
+    scores = [max(float(getattr(hit, "score", 0.0) or 0.0), 0.0) for hit in hits]
+    max_score = max(scores) if scores else 0.0
+    if max_score <= 0.0:
+        return 0
+    try:
+        bar = max(0.05, min(0.95, float(threshold)))
+    except (TypeError, ValueError):
+        bar = 0.05
+    cutoff = max_score * bar
+    return sum(1 for score in scores if score >= cutoff)
+
+
 def calibration_examples_from_rows(rows: list[dict[str, Any]]) -> list[CalibrationExample]:
     return [CalibrationExample.from_mapping(row) for row in rows]
 
