@@ -235,21 +235,25 @@ class BeliefRevisionCore:
         invalidated assertion ids (including the root).
 
         When ``branch`` is set, only assertions on that branch are retracted
-        (AGM ``contract(..., branch=...)`` isolation).
+        (AGM ``contract(..., branch=...)`` isolation). Assertion ids may be
+        cloned across branches via ``engine.branch()``; membership is keyed by
+        presence on the requested branch — never a lossy id→branch map.
         """
-        branch_of: dict[str, str] = {}
+        # ids that exist on the requested branch (or all ids when branch is None)
+        ids_on_scope: set[str] = set()
         for item in self.engine.assertions.values():
-            if item.tenant_id == tenant_id:
-                branch_of[item.id] = item.branch
+            if item.tenant_id != tenant_id:
+                continue
+            if branch is None or item.branch == branch:
+                ids_on_scope.add(item.id)
         dependencies: dict[str, list[str]] = defaultdict(list)
         for justification in self.engine.justifications.values():
             if justification.tenant_id != tenant_id:
                 continue
-            dep_assertion = justification.assertion_id
-            if branch is not None and branch_of.get(dep_assertion) not in {None, branch}:
+            if justification.assertion_id not in ids_on_scope:
                 continue
             for dependency in justification.dependency_ids:
-                if branch is not None and branch_of.get(dependency) not in {None, branch}:
+                if dependency not in ids_on_scope:
                     continue
                 dependencies[dependency].append(justification.assertion_id)
         invalidated: list[str] = []
@@ -283,7 +287,7 @@ class BeliefRevisionCore:
                     invalidated.append(current)
                     self.engine.assertions[key] = assertion
             for dependent in dependencies.get(current, []):
-                if branch is not None and branch_of.get(dependent) not in {None, branch}:
+                if dependent not in ids_on_scope:
                     continue
                 queue.append(dependent)
         if invalidated:

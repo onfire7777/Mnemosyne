@@ -127,6 +127,30 @@ def test_contraction_scopes_cascade_to_requested_branch() -> None:
     assert statuses[(other_report.assertion_id, "experiment")] == "retracted"
 
 
+def test_contraction_isolates_engine_branch_clones_same_id() -> None:
+    """engine.branch() clones assertions with the same id — cascade must not collapse them."""
+    engine = LocalMemoryEngine()
+    core = BeliefRevisionCore(engine)
+    seed = core.revise(_assertion("clone-topic", "is", "shared"))
+    engine.branch("scratch", frm="main", kind="scratch")
+    # Same assertion id now exists on main and scratch
+    clones = [
+        a for a in engine.assertions.values() if a.tenant_id == TENANT and a.id == seed.assertion_id
+    ]
+    assert {a.branch for a in clones} == {"main", "scratch"}
+    report = core.contract(TENANT, seed.assertion_id, reason="contract main only", branch="main")
+    assert report.agm_operation == "contraction"
+    statuses = {
+        (a.id, a.branch): a.status
+        for a in engine.assertions.values()
+        if a.tenant_id == TENANT and a.id == seed.assertion_id
+    }
+    assert statuses[(seed.assertion_id, "main")] == "retracted"
+    assert statuses[(seed.assertion_id, "scratch")] == "active"
+    assert core.atms_label(TENANT, seed.assertion_id, branch="main") == "out"
+    assert core.atms_label(TENANT, seed.assertion_id, branch="scratch") == "in"
+
+
 def test_contraction_retains_unrelated_belief_consistency() -> None:
     """Contracting one belief must not retract an independent expansion."""
     engine = LocalMemoryEngine()
