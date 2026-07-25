@@ -201,16 +201,16 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 
 ### CC-BC (B12) — belief/calibration/consolidation/lifecycle
 11. `[C]` real IVM dirty-set/memoization + auto-trigger (I6). ✅ local: projection recompute walks affected evidence/projection edges, queues only dirty surviving source inputs, and memo-skips unchanged fingerprints; production proof remains Tier B.
-12. `[C]` per-example conformal nonconformity (I8).
-13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2).
-14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25).
+12. `[C]` per-example conformal nonconformity (I8). ✅ closed @`b8bfc36a` (PR #59) — per-example nonconformity in `engine.py`/`postgres_engine.py`; `tests/test_conformal_per_example.py`
+13. `[C]` explicit AGM expansion/revision/contraction + ATMS labels (I2). ✅ closed @`51acba55` (PR #60) — `BeliefStore.contract()` + `atms_label()` in `belief.py`
+14. `[C]` enforce `must_keep` in lifecycle demotion + pointer-to-original (I7/§25). ✅ closed @`34effb4b` (PR #61) — `must_keep` gates demotion in `lifecycle.py`; `tests/test_must_keep_properties.py`
 15. `[C]` tier-0 correction → same-turn supersession in belief core (pairs #23). ✅ closed locally.
 16. `[C]` cadence-bound consolidation anti-thrash (§21). ✅ closed locally.
 17. `[C]` gate fact-candidates by external corroboration (§23.3).
-18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(needs CC-PG column)*
+18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(needs CC-PG column)* ✅ closed @`3d0ed940` (PR #58) — `fuse_calibrated_confidence()` in `calibration.py`, weights pinned by `tests/test_calibrated_confidence_fuse.py`
 
 ### CC-LS (B2) — learning/self-opt/eval
-19. `[C]` implement counterfactual replay + wire dead `counterfactual_replay_score()` into gate/eval (I12/§30.6).
+19. `[C]` implement counterfactual replay + wire dead `counterfactual_replay_score()` into gate/eval (I12/§30.6). ✅ closed @`a8581e7c`,`d8e63960`,`85a7ab0d` (PRs #55/#56/#57) — `counterfactual_replay_score()` now wired into `self_optimization.py` + `mcp_tools.py` (no longer dead)
 20. `[C]` hot-loop CRITIC verify-with-tools → candidate-lesson (§23.1). *(in progress — see commit `f7e4180`)*
 21. `[C/T]` `eval.py` recall@k/nDCG + ECE + poison-block-rate% + TTL-lift + shadow-mode harness.
 22. `[C/T]` pin numeric invariant-rail VALUES (`max_supersession_rate`≈0.05, `min_corroboration`≈2, `max_prune_fraction`) as live constants tested by config-drift (§31). *(CC-LS adds constants on `OperatingPolicy`; AUX-DOCS pins them in `config/drift-baseline.toml` + `test_config_drift.py`.)*
