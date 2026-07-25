@@ -4,13 +4,15 @@
 **Version:** 1.2 · **Date:** 2026-07-13 · **Status:** In Progress (approved)
 **Scope:** the public benchmark harness (`eval/public/`), the publication protocol, and the greenfield `leaderboard/` + `web/` products.
 **Companion doc:** *Execution Plan A — The Memory System* builds the capabilities this plan measures. This plan owns measurement, publication, and the leaderboard. Where Plan A says "measured/published," the authority is here.
-**Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus human operators for governance and third-party reproduction.
+**Audience:** an autonomous engineering agent (or fleet) executing end-to-end, plus a human operator for governance. Third-party reproduction is welcome but never required.
 
 **Live execution routing:** M4/PBPP and BENCH-001 through
 BENCH-004 are complete. M1.3 remains partial behind Phase 12's grounded-reader
 and positive graph/PPR gates; Phases 13 through 16 own the remaining benchmark,
-reproduction, capability-column, and leaderboard work. External board seating,
-third-party reproduction, and approval of any public number remain human-only.
+reproduction, capability-column, and leaderboard work. Approval of any public
+number remains human-owned. External board seating and third-party reproduction
+are optional upgrades that gate nothing — see
+[`docs/governance/CREDIBILITY-MODEL.md`](governance/CREDIBILITY-MODEL.md).
 The physical-8-GiB full-capability and hardware-invariant product-quality path
 is governed by
 `docs/superpowers/specs/2026-07-13-8gb-full-capability-unblock-design.md`.
@@ -29,12 +31,12 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 2. **Retrieval-recall and LLM-judged-QA are never blended.** Separate columns, always. Disclose judge model + prompt. (This is the single most common field failure — MemPalace, the mem0↔Zep dispute.)
 3. **Never tune on a held-out/test split** — our own system included. Contamination discipline (§M1, §L1) applies to us exactly as to submitters.
 4. **No self-defined benchmark is ever a headline claim** (the gbrain "BrainBench" anti-pattern). Mnemosyne's private suite (0.977 / 0.983 / ECE 0.0063 / poison 1.0 / 149.5 ms) stays internal QA.
-5. **Neutrality is structural, not asserted** (§L0). If we operate the leaderboard *and* compete, the firewall in §L0 is mandatory, or the board is not credible.
+5. **Credibility is structural, not asserted** (§L0). If we operate the leaderboard *and* compete, the firewall and source-owned Register A gates are mandatory. The optional Register B board is required only for the stronger *neutral* label.
 
 **Ground-truth references (source of truth over this doc if they conflict):**
 `docs/research/AI-Memory-Systems-Market-Research-2026.md` (the competitive + benchmark landscape and why LoCoMo is contested), `docs/blueprint/Mnemosyne-Performance-and-Refactoring-Blueprint.md` (§9.2.7 slates LongMemEval/BEAM wiring and carries the current benchmark-posture/honesty rule), `eval/README.md`, `eval/provider_bakeoff/README.md`.
 
-**DoD template:** *Harness/site code merged + artifacts written to the named path + a one-paragraph result note in `leaderboard/reports/` + public data-repo updated (Part II) + independent reproduction on file (headline numbers).*
+**DoD template:** *Harness/site code merged + artifacts written to the named path + a one-paragraph result note in `leaderboard/reports/` + public data-repo updated (Part II) + one-command reproduction demonstrated from each headline number's pinned bundle; record third-party reproduction when offered.*
 
 ---
 
@@ -79,7 +81,7 @@ most reproducible in a field full of contested vendor claims. M4's two policy
 surfaces and contributor regression gate are complete; no publication is
 authorized by that source-owned completion alone.
 
-**Problem 2 — the neutrality paradox.** We cannot be referee and champion on trust alone; vendor-run-where-they-win boards get dismissed (OmniMemEval, omegamax, the LMArena "Illusion"). Resolution (§L0): the leaderboard runs under **independent governance with a hard firewall**; the operator **runs every system itself under one identical harness** (killing the "you misconfigured us" defense that defined the mem0↔Zep dispute); Mnemosyne is entered and scored **by the same rules as everyone else**; all raw artifacts are public. We win by having the best *reproducible* numbers on neutral turf — not by controlling the scoreboard.
+**Problem 2 — the neutrality paradox.** We cannot be referee and champion on trust alone; vendor-run-where-they-win boards get dismissed (OmniMemEval, omegamax, the LMArena "Illusion"). Resolution (§L0): source-owned Register A gates and a hard firewall make every operator action auditable; the operator **runs every system itself under one identical harness** (killing the "you misconfigured us" defense that defined the mem0↔Zep dispute); Mnemosyne is entered and scored **by the same rules as everyone else**; all raw artifacts are public. The output is open, operator-run, and fully auditable; it is not called neutral unless the optional Register B board is seated.
 
 ---
 
@@ -99,17 +101,19 @@ Blueprint §9.2.7 slates this. Build as a new isolated tree so the private suite
 deterministic retrieval adapters are wired, while disclosed-reader columns and
 positive provenance-linked graph/PPR effect remain open behind Phase 12. The
 aggregate M1 checkbox stays open, and none of this source-owned progress
-authorizes publication without M2 plus genuine human-owned M3 reproduction.
+authorizes publication without M2 plus reproduction by construction; a third-party M3 note strengthens a claim but does not gate it.
 
 ### M2 — Reproducibility artifact bundle (the PBPP standard)
-Every public result ships: pinned harness commit + `uv`/`pip` runner; per-question traces (**what was stored, what was retrieved, final answer**); disclosed judge model + prompt + all configs; system build fingerprint (we already emit `sha256:…` release fingerprints); Wilson/bootstrap CIs; one-command reproduce script. **DoD:** a clean-room agent run reproduces the number from the bundle alone as an internal bundle-readiness check. This does not satisfy M3's external independence requirement.
+Every public result ships: pinned harness commit + `uv`/`pip` runner; per-question traces (**what was stored, what was retrieved, final answer**); disclosed judge model + prompt + all configs; system build fingerprint (we already emit `sha256:…` release fingerprints); Wilson/bootstrap CIs; one-command reproduce script. **DoD:** a clean-room agent run reproduces the number from the bundle alone as the required M3 reproduction-by-construction demonstration.
 
-### M3 — Third-party reproduction
-**Agent scope:** prepare the immutable bundle, reproduction instructions,
-acceptance rubric, intake checklist, and report template. **Human scope:** select
-and commission a genuinely independent external party, receive its result, and
-decide whether it satisfies PBPP. **DoD:** a signed external reproduction note
-supplied through the human-owned process is recorded in `leaderboard/reports/`
+### M3 — Reproducibility (by construction; third-party optional)
+**Agent scope:** prepare the immutable bundle, a one-command reproduction path,
+acceptance rubric, intake checklist, and report template. **Human scope:** none
+required — a third party may reproduce unprompted and submit a note, which is
+recorded and welcomed, but commissioning one is not a precondition for anything.
+**DoD (revised v0.2.0):** a stranger can regenerate every headline number from
+its pinned bundle with one documented command, demonstrated end-to-end from a
+clean checkout, and the recipe is published in `leaderboard/reports/`
 before any public claim. An agent may not commission, impersonate, or approve
 the reproducer.
 
@@ -129,7 +133,7 @@ Update blueprint `§9.2.7` and the provider-bakeoff README to reference PBPP (§
 | Internal-only | private v2 suite, LongMemEval-QA | — | private / LLM-judged | QA + regression signal; **never** a headline claim |
 | Avoid headlining | LoCoMo, DMR/MSC | — | contested / saturated | Run silently at most; never lead with them |
 
-**Part I exit gate:** M-i…M-iv met; PBPP in force; third-party reproduction on file.
+**Part I exit gate (revised v0.2.0):** M-i…M-iv met; PBPP in force; reproduction by construction demonstrated — one documented command regenerates each headline number from its pinned bundle. A third-party reproduction note is recorded when offered but is not required.
 
 ---
 
@@ -188,12 +192,12 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 - LMArena "Leaderboard Illusion": operator/unequal access. → Neutralized by L0.1–L0.2.
 - LoCoMo: 6.4% wrong answer key + lenient judge. → We don't headline LoCoMo; judge honesty published (L1.f).
 
-**Verification:** every headline public number reproduced by an independent party before publication (M3); every leaderboard result reproducible from its bundle; a standing "red-team the number" review before any external claim.
+**Verification:** every headline public number reproducible by construction from its pinned bundle before publication (M3), with independent reproduction recorded when offered; every leaderboard result reproducible from its bundle; a standing "red-team the number" review before any external claim.
 
 **Risk register:**
 | Risk | Mitigation |
 |---|---|
-| Neutrality perception (we compete + operate) | Independent board, one-harness rule, no special access, raw-data release (§L0) |
+| Credibility perception (we compete + operate) | Register A gates, one-harness rule, no special access, raw-data release; optional Register B board for the neutral label (§L0) |
 | Honesty-charter breach | PBPP (§2); private suite never headlined |
 | Benchmark saturation / contamination | Hidden split + rotation + fresh scenarios (L1.d) |
 | Compute cost of running all systems | Budget realistically; curated reference set + community queue (Open-LLM-Leaderboard lesson) |
@@ -207,20 +211,20 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 **Sequencing (critical path bold):**
 1. **M4 charter → PBPP** (unblocks all publication) — days.
 2. **M1 public harness** (Wave E kickoff) ∥ **L0 governance charter** — weeks 1–3.
-3. **M2/M3 bundle + third-party repro** ∥ **L1 methodology + L2 site scaffold** — weeks 2–8.
+3. **M2/M3 bundle + one-command reproduction path** ∥ **L1 methodology + L2 site scaffold** — weeks 2–8.
 4. L3 explainers ∥ finalize Part I results — weeks 4–10.
 5. **L4 launch** (seed every system with a fair adapter, public methods write-up) — weeks 8–14.
 
-**Dependencies:** M4 blocks any publication; M1's harness **is** L1's engine (shared eval core — serialize writes); L0 blocks L4; Part I depends on **Plan A** capabilities for the QA numbers. Deterministic tracks may be benchmarked before reader tracks, but publication still requires the complete PBPP bundle and genuine independent reproduction.
+**Dependencies:** M4 blocks any publication; M1's harness **is** L1's engine (shared eval core — serialize writes); L0's Register A blocks L4 (Register B does not); Part I depends on **Plan A** capabilities for the QA numbers. Deterministic tracks may be benchmarked before reader tracks, but publication still requires the complete PBPP bundle and reproduction by construction (third-party reproduction strengthens a claim but does not gate it).
 
-**Roles:** *eval-eng agent* (M1–M2), *web agent* (L2–L3), *governance/human operator* (L0 board, M3 third-party repro), *research/writing* (L0.4 methods paper). Independent workstreams run as parallel sub-agents; serialize shared-eval-core writes.
+**Roles:** *eval-eng agent* (M1–M2), *web agent* (L2–L3), *governance/human operator* (L0 Register A gates; optional Register B board), *research/writing* (L0.4 methods paper). Independent workstreams run as parallel sub-agents; serialize shared-eval-core writes.
 
 ### Definition-of-Done checklist (Plan B)
 - [x] Charter updated to PBPP; provider-bakeoff README references it (M4).
 - [ ] `eval/public/` harness live; LongMemEval-recall, HippoRAG multi-hop, MemoryAgentBench adapter, BEAM runnable with bundles (M1).
 - [ ] Reproducibility bundle standard implemented; agent-reproduces from bundle (M2).
-- [ ] Independent third-party reproduction of headline numbers on file (M3).
-- [ ] Governance board seated; COI + firewall policy public (L0).
+- [ ] Headline numbers reproducible by construction from their bundles, one documented command each (M3); any third-party reproduction note recorded as strengthening evidence.
+- [ ] Register A gates satisfied — pre-registration, append-only signed run ledger, reproducibility by construction, open stack, populated adversarial self-report, public dispute channel, public methods write-up; COI + firewall policy public (L0). Board seating is the optional Register B upgrade and gates nothing here.
 - [ ] Methodology + anti-gaming + contamination controls implemented (L1).
 - [ ] Leaderboard site live from a public, versioned results repo; trace browser working (L2).
 - [ ] Explainer/education layer published (L3).
@@ -230,7 +234,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 ---
 
 ## Appendix A — Dependency on Plan A
-Plan A (*The Memory System*) produces the capabilities this plan measures: elite retrieval, multi-hop synthesis (S1, the QA-number driver), security-under-attack and calibration (S3), and scale numbers (S4). Deterministic-retrieval results can be benchmarked on today's system, but publication remains blocked on M2/M3, the complete PBPP bundle, genuine independent reproduction, and human approval; QA numbers improve as Plan A S1 lands.
+Plan A (*The Memory System*) produces the capabilities this plan measures: elite retrieval, multi-hop synthesis (S1, the QA-number driver), security-under-attack and calibration (S3), and scale numbers (S4). Deterministic-retrieval results can be benchmarked on today's system, but publication remains blocked on M2/M3, the complete PBPP bundle, reproduction by construction (third-party reproduction strengthens a claim but does not gate it), and human approval; QA numbers improve as Plan A S1 lands.
 
 ## Appendix B — Leaderboard-credibility source map
 MTEB (arXiv 2506.21182; docs.mteb.org), HELM (2211.09110; crfm.stanford.edu), Chatbot Arena / LMArena (2403.04132) + Leaderboard Illusion (2504.20879) + Arena response (arena.ai/blog/our-response), GLUE/SuperGLUE (1804.07461 / 1905.00537), SWE-bench Verified (openai.com/index/introducing-swe-bench-verified) + SWE-bench Illusion (2506.12286), ARC-AGI (arcprize.org), Kaggle (kaggle.com/docs/competitions), Papers-with-Code shutdown (github.com/paperswithcode/paperswithcode-data/issues/116), memory-leaderboard call (2603.07670), in-repo landscape (`docs/research/AI-Memory-Systems-Market-Research-2026.md`).
