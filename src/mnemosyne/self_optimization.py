@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -30,6 +31,16 @@ OQ2_PROXY_TRUE_GAP = 0.15
 # Minimum number of real (predicted, observed) replay pairs before the cold-loop
 # counterfactual proxy is authorized to act on a promotion (OQ2 forcing function).
 OQ2_MIN_REPLAY_WINDOW = 50
+# OQ2 / §17 FR-17 fidelity bar (docs/decisions/SECTION-17-OPEN-QUESTIONS.md).
+# Used by the fidelity recorder to decide when the cold-loop rail *may* be flipped;
+# never auto-sets OperatingPolicy.cold_loop_counterfactual_trusted.
+OQ2_MIN_SPEARMAN_RHO = 0.60
+OQ2_MIN_RHO_CI_LOWER = 0.30
+OQ2_MIN_SIGN_AGREEMENT = 0.80
+OQ2_MIN_DECISION_COVERAGE = 0.80
+OQ2_MIN_ACTIVE_PAIRS = 10
+OQ2_BOOTSTRAP_ITERATIONS = 1000
+OQ2_BOOTSTRAP_SEED = 17
 
 
 @dataclass(slots=True)
@@ -119,6 +130,315 @@ class ReplayPair:
         return asdict(self)
 
 
+@dataclass(frozen=True, slots=True)
+class OQ2FidelityBar:
+    """Pre-registered OQ2 acceptance bar (FR-17 / §17)."""
+
+    min_rho: float = OQ2_MIN_SPEARMAN_RHO
+    min_rho_ci_lower: float = OQ2_MIN_RHO_CI_LOWER
+    min_sign_agreement: float = OQ2_MIN_SIGN_AGREEMENT
+    max_proxy_true_gap: float = OQ2_PROXY_TRUE_GAP
+    min_window: int = OQ2_MIN_REPLAY_WINDOW
+    min_active_pairs: int = OQ2_MIN_ACTIVE_PAIRS
+    min_decision_coverage: float = OQ2_MIN_DECISION_COVERAGE
+    decision_threshold: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class OQ2Interval:
+    point: float
+    low: float
+    high: float
+    method: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "point": _oq2_round(self.point),
+            "ci_low": _oq2_round(self.low),
+            "ci_high": _oq2_round(self.high),
+            "ci_method": self.method,
+        }
+
+
+@dataclass(slots=True)
+class OQ2FidelityReport:
+    """Deterministic OQ2 fidelity report over paired (predicted, observed) lifts.
+
+    ``authorized_to_trust`` is True only when every OQ2 bar check passes. It does
+    **not** flip ``OperatingPolicy.cold_loop_counterfactual_trusted`` — that requires
+    an explicit operator call to :func:`apply_cold_loop_counterfactual_trust`.
+    """
+
+    n: int
+    active_pairs: int
+    rho: float
+    rho_ci: OQ2Interval
+    sign_agreement: float
+    proxy_true_gap: float
+    decision_coverage: float
+    bar: OQ2FidelityBar
+    checks: list[dict[str, Any]] = field(default_factory=list)
+    bar_passed: bool = False
+    authorized_to_trust: bool = False
+    reason: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "n": self.n,
+            "active_pairs": self.active_pairs,
+            "rho": _oq2_round(self.rho),
+            "rho_ci": self.rho_ci.to_dict(),
+            "sign_agreement": _oq2_round(self.sign_agreement),
+            "proxy_true_gap": _oq2_round(self.proxy_true_gap),
+            "decision_coverage": _oq2_round(self.decision_coverage),
+            "bar": self.bar.to_dict(),
+            "checks": list(self.checks),
+            "bar_passed": self.bar_passed,
+            "authorized_to_trust": self.authorized_to_trust,
+            "reason": self.reason,
+        }
+
+
+def _oq2_round(value: float, places: int = 4) -> float:
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return value
+    return round(float(value), places)
+
+
+def _oq2_rankdata(values: Sequence[float]) -> list[float]:
+    """Average ranks (fractional ties), matching scipy.stats.rankdata."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    n = len(values)
+    while i < n:
+        j = i
+        while j + 1 < n and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        avg = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = avg
+        i = j + 1
+    return ranks
+
+
+def _oq2_pearson(x: Sequence[float], y: Sequence[float]) -> float:
+    n = len(x)
+    if n < 2:
+        return float("nan")
+    mx = sum(x) / n
+    my = sum(y) / n
+    sxy = sum((a - mx) * (b - my) for a, b in zip(x, y, strict=True))
+    sxx = sum((a - mx) ** 2 for a in x)
+    syy = sum((b - my) ** 2 for b in y)
+    denom = math.sqrt(sxx * syy)
+    if denom == 0.0:
+        return 0.0
+    return sxy / denom
+
+
+def spearman_rho(predicted: Sequence[float], observed: Sequence[float]) -> float:
+    """Spearman rank correlation; 0.0 when a series has no variance."""
+    if len(predicted) != len(observed):
+        raise ValueError("predicted/observed length mismatch")
+    if len(predicted) < 2:
+        return float("nan")
+    return _oq2_pearson(_oq2_rankdata(predicted), _oq2_rankdata(observed))
+
+
+def _oq2_percentile(ordered: Sequence[float], q: float) -> float:
+    if not ordered:
+        return float("nan")
+    if len(ordered) == 1:
+        return ordered[0]
+    pos = q * (len(ordered) - 1)
+    lo = math.floor(pos)
+    hi = math.ceil(pos)
+    if lo == hi:
+        return ordered[int(pos)]
+    frac = pos - lo
+    return ordered[lo] * (1 - frac) + ordered[hi] * frac
+
+
+def spearman_bootstrap_ci(
+    predicted: Sequence[float],
+    observed: Sequence[float],
+    *,
+    iterations: int = OQ2_BOOTSTRAP_ITERATIONS,
+    alpha: float = 0.05,
+    seed: int = OQ2_BOOTSTRAP_SEED,
+) -> OQ2Interval:
+    """Deterministic percentile-bootstrap CI for Spearman ρ (OQ2 n=1000)."""
+    predicted_list = list(predicted)
+    observed_list = list(observed)
+    n = len(predicted_list)
+    point = spearman_rho(predicted_list, observed_list)
+    if n < 2 or math.isnan(point):
+        return OQ2Interval(point, float("nan"), float("nan"), "bootstrap-spearman")
+    rng = random.Random(seed)
+    stats: list[float] = []
+    for _ in range(iterations):
+        idx = [rng.randrange(n) for _ in range(n)]
+        rp = [predicted_list[i] for i in idx]
+        ro = [observed_list[i] for i in idx]
+        rho = spearman_rho(rp, ro)
+        stats.append(0.0 if math.isnan(rho) else rho)
+    stats.sort()
+    return OQ2Interval(
+        point=point,
+        low=_oq2_percentile(stats, alpha / 2),
+        high=_oq2_percentile(stats, 1 - alpha / 2),
+        method="bootstrap-spearman",
+    )
+
+
+def _oq2_sign(value: float, tol: float = 1e-9) -> int:
+    if value > tol:
+        return 1
+    if value < -tol:
+        return -1
+    return 0
+
+
+def sign_agreement(predicted: Sequence[float], observed: Sequence[float]) -> float:
+    """Fraction of pairs where proxy and reality agree on sign(lift)."""
+    if not predicted:
+        return float("nan")
+    agree = sum(1 for p, o in zip(predicted, observed, strict=True) if _oq2_sign(p) == _oq2_sign(o))
+    return agree / len(predicted)
+
+
+def proxy_true_gap(predicted: Sequence[float], observed: Sequence[float]) -> float:
+    """Mean |proxy - true| magnitude bias (mirrors tripwire_check gap)."""
+    if not predicted:
+        return float("nan")
+    return sum(abs(p - o) for p, o in zip(predicted, observed, strict=True)) / len(predicted)
+
+
+def decision_coverage(
+    predicted: Sequence[float],
+    observed: Sequence[float],
+    *,
+    threshold: float = 0.0,
+) -> float:
+    """Fraction of pairs where proxy promote/reject matches observed truth."""
+    if not predicted:
+        return float("nan")
+    correct = 0
+    for p, o in zip(predicted, observed, strict=True):
+        if (p > threshold) == (o > threshold):
+            correct += 1
+    return correct / len(predicted)
+
+
+def count_active_pairs(pairs: Sequence[tuple[float, float]], *, tol: float = 1e-9) -> int:
+    """Pairs with non-neutral predicted or observed lift (OQ2 ≥10 active)."""
+    return sum(1 for predicted, observed in pairs if abs(predicted) > tol or abs(observed) > tol)
+
+
+def evaluate_oq2_fidelity(
+    pairs: Sequence[tuple[float, float]],
+    *,
+    bar: OQ2FidelityBar | None = None,
+    bootstrap_iterations: int = OQ2_BOOTSTRAP_ITERATIONS,
+    seed: int = OQ2_BOOTSTRAP_SEED,
+) -> OQ2FidelityReport:
+    """Score paired (predicted, observed) lifts against the OQ2 fidelity bar.
+
+    Shadow-only recorder: never mutates policy. ``authorized_to_trust`` is True
+    only when every criterion passes; operators must still call
+    :func:`apply_cold_loop_counterfactual_trust` to flip the rail.
+    """
+    bar = bar or OQ2FidelityBar()
+    pair_list = [(float(p), float(o)) for p, o in pairs]
+    predicted = [p for p, _ in pair_list]
+    observed = [o for _, o in pair_list]
+    n = len(pair_list)
+    active = count_active_pairs(pair_list)
+    rho = spearman_rho(predicted, observed) if n >= 2 else float("nan")
+    rho_ci = spearman_bootstrap_ci(
+        predicted, observed, iterations=bootstrap_iterations, seed=seed
+    )
+    sgn = sign_agreement(predicted, observed)
+    gap = proxy_true_gap(predicted, observed)
+    cov = decision_coverage(predicted, observed, threshold=bar.decision_threshold)
+
+    def _check(name: str, value: float, op: str, target: float) -> dict[str, Any]:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            ok = False
+        elif op == ">=":
+            ok = value >= target
+        elif op == ">":
+            ok = value > target
+        elif op == "<=":
+            ok = value <= target
+        else:
+            raise ValueError(op)
+        return {
+            "name": name,
+            "value": _oq2_round(value) if isinstance(value, float) else value,
+            "op": op,
+            "target": target,
+            "pass": bool(ok),
+        }
+
+    checks = [
+        _check("window", float(n), ">=", float(bar.min_window)),
+        _check("active_pairs", float(active), ">=", float(bar.min_active_pairs)),
+        _check("spearman_rho", rho, ">=", bar.min_rho),
+        _check("rho_ci_lower", rho_ci.low, ">", bar.min_rho_ci_lower),
+        _check("sign_agreement", sgn, ">=", bar.min_sign_agreement),
+        _check("proxy_true_gap", gap, "<=", bar.max_proxy_true_gap),
+        _check("decision_coverage", cov, ">=", bar.min_decision_coverage),
+    ]
+    bar_passed = all(bool(item["pass"]) for item in checks)
+    if bar_passed:
+        reason = "OQ2 fidelity bar cleared; cold_loop rail may be flipped explicitly"
+    else:
+        failed = [item["name"] for item in checks if not item["pass"]]
+        reason = f"OQ2 fidelity bar not met: {', '.join(failed)}"
+    return OQ2FidelityReport(
+        n=n,
+        active_pairs=active,
+        rho=rho,
+        rho_ci=rho_ci,
+        sign_agreement=sgn,
+        proxy_true_gap=gap,
+        decision_coverage=cov,
+        bar=bar,
+        checks=checks,
+        bar_passed=bar_passed,
+        authorized_to_trust=bar_passed,
+        reason=reason,
+    )
+
+
+def apply_cold_loop_counterfactual_trust(
+    policy: OperatingPolicy,
+    report: OQ2FidelityReport,
+    *,
+    enable: bool,
+) -> bool:
+    """Explicit operator path to flip ``cold_loop_counterfactual_trusted``.
+
+    Fail-closed: never sets True unless ``enable`` and ``report.authorized_to_trust``.
+    Setting ``enable=False`` always clears the rail (safe demotion). Returns the
+    resulting rail value. Does not promote candidates or open gate.py seams.
+    """
+    if not enable:
+        policy.cold_loop_counterfactual_trusted = False
+        return False
+    if not report.authorized_to_trust:
+        # Refuse silent trust — leave rail off (or leave prior False).
+        policy.cold_loop_counterfactual_trusted = False
+        return False
+    policy.cold_loop_counterfactual_trusted = True
+    return True
+
+
 class SelfModelStore:
     def __init__(self) -> None:
         self.records: dict[str, SelfModelRecord] = {}
@@ -173,6 +493,22 @@ class SelfModelStore:
         gate scores (blueprint §30.6 / FR-17).
         """
         return [(pair.predicted_lift, pair.observed_lift) for pair in self._replay_pairs if pair.tenant_id == tenant_id]
+
+    def evaluate_oq2_fidelity(
+        self,
+        tenant_id: str,
+        *,
+        bar: OQ2FidelityBar | None = None,
+        bootstrap_iterations: int = OQ2_BOOTSTRAP_ITERATIONS,
+        seed: int = OQ2_BOOTSTRAP_SEED,
+    ) -> OQ2FidelityReport:
+        """Score this tenant's recorded replay pairs against the OQ2 bar (shadow-only)."""
+        return evaluate_oq2_fidelity(
+            self.replay_pairs(tenant_id),
+            bar=bar,
+            bootstrap_iterations=bootstrap_iterations,
+            seed=seed,
+        )
 
 
 def within_invariant_rails(base: OperatingPolicy, variant: PolicyVariant) -> bool:
