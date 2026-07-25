@@ -22,9 +22,10 @@ contract, pytest, Ruff.
 ## Global Constraints
 
 - `GOAL.md` and every controlling source it names are binding.
-- Exact write lease: `leaderboard/schema/**`, `leaderboard/validate.py`,
-  `leaderboard/__init__.py`, `tests/test_leaderboard_result_contract.py`, and
-  this plan/progress metadata only.
+- Exact write lease: `GOAL.md`, `leaderboard/schema/**`,
+  `leaderboard/validate.py`, `leaderboard/__init__.py`,
+  `tests/test_leaderboard_result_contract.py`, and this plan/progress metadata
+  only.
 - Use no new dependency and no product/runtime network, protected-environment,
   production, external-custody, benchmark, or hardware access. GitHub branch,
   pull-request, review, and CI delivery operations are allowed.
@@ -202,3 +203,37 @@ confirmed failure, add a focused regression test for logic defects, commit and
 push the narrow fix, and wait for the new exact-head gates. Leave merge and
 post-merge `main` verification to supervision once every required gate is green
 and GitHub reports the pull request mergeable.
+
+### Task 4: Resolve confirmed exact-head review findings
+
+**Files:**
+- Modify: `leaderboard/schema/result-v1.schema.json`
+- Modify: `leaderboard/validate.py`
+- Modify: `tests/test_leaderboard_result_contract.py`
+- Modify: `GOAL.md`
+- Modify: this plan
+
+- [ ] **Step 1: Add failing boundary tests**
+
+Add focused tests proving the validator rejects non-finite values, JSON
+`NaN`/`Infinity` constants and overflowed numbers, and confidence intervals
+whose `low` bound exceeds `high`. Verify RED for the missing behavior.
+
+- [ ] **Step 2: Align the published schema and validator**
+
+Make the checked-in schema enforce the validator's immutable commit/digest,
+required publication/operator/history, and interval constraints. Use finite
+numeric validation at both the untrusted JSON parser and validator boundary,
+and reject inverted intervals. Keep the implementation standard-library only.
+
+- [ ] **Step 3: Re-run the local acceptance and risk gates**
+
+Run the focused tests, Ruff, JSON parsing, diff checks, exact-lease check, and
+secret/risky-file sweep. Resolve only confirmed review findings; do not widen
+the product scope.
+
+- [ ] **Step 4: Commit, push, and recheck the successor head**
+
+Commit the narrow review fix, push the existing isolated branch normally, and
+monitor PR #65 on the new exact head. Do not merge while review is
+changes-requested or any required check is pending or failing.

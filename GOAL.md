@@ -78,6 +78,7 @@ The Phase 13, 14, and 16 decomposition is:
 
 The implementation may modify only:
 
+- `GOAL.md`
 - `leaderboard/schema/**`
 - `leaderboard/validate.py`
 - `leaderboard/__init__.py`
