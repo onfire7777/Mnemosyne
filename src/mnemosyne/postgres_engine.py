@@ -4360,30 +4360,31 @@ class PostgresEngine:
         source_cids = self._hit_source_evidence_cids(hit)
         if hit.kind == "evidence" and hit.id:
             source_cids = sorted(set(source_cids + [hit.id]))
-        corroboration = hit.metadata.get("independent_corroboration") if isinstance(hit.metadata, dict) else None
-        if not isinstance(corroboration, dict):
-            try:
-                with self.connect() as conn:
-                    with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
-                        db_tenant_id = _stable_uuid("tenant", hit.tenant_id)
-                        self._set_tenant(cur, db_tenant_id)
-                        corroboration = self._independent_corroboration_report(
-                            cur,
-                            tenant_id=hit.tenant_id,
-                            branch=hit.branch,
-                            db_tenant_id=db_tenant_id,
-                            source_evidence_cids=source_cids,
-                        )
-            except Exception:
-                corroboration = self._fallback_independent_corroboration_report(
-                    hit,
-                    reality_class=reality_class,
-                    source_evidence_cids=source_cids,
-                )
+        # Always compute server-side corroboration for standing/fuse — never trust
+        # client/adapter-supplied independent_corroboration as authoritative.
+        try:
+            with self.connect() as conn:
+                with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                    db_tenant_id = _stable_uuid("tenant", hit.tenant_id)
+                    self._set_tenant(cur, db_tenant_id)
+                    corroboration = self._independent_corroboration_report(
+                        cur,
+                        tenant_id=hit.tenant_id,
+                        branch=hit.branch,
+                        db_tenant_id=db_tenant_id,
+                        source_evidence_cids=source_cids,
+                    )
+        except Exception:
+            # Fail closed: DB/RLS failure must not synthesize plausible provenance.
+            corroboration = {
+                "independent_corroboration_count": 0,
+                "independent_corroboration_weight": 0.0,
+                "self_generated_corroboration_count": 0,
+                "rejected_corroboration_count": 0,
+            }
         meta = dict(hit.metadata) if isinstance(hit.metadata, dict) else {}
-        # Feed computed corroboration into fuse so provenance is not trust-tier-only.
-        if "independent_corroboration" not in meta or meta.get("independent_corroboration") is None:
-            meta["independent_corroboration"] = corroboration
+        # Unconditionally overwrite — adapter-supplied IC must not drive fuse.
+        meta["independent_corroboration"] = corroboration
         return {
             "reality_class": reality_class,
             "trust_tier": hit.trust_tier,

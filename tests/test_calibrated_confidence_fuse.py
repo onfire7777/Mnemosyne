@@ -261,3 +261,56 @@ def test_local_standing_injects_computed_corroboration_into_fuse() -> None:
     )
     assert with_ic["calibrated_confidence"] > no_ic
     assert with_ic["independent_corroboration_weight"] == 0.85
+
+
+def test_local_standing_overwrites_adapter_supplied_corroboration() -> None:
+    """Server-computed IC always wins over adapter-supplied metadata (CWE-345)."""
+    from mnemosyne.engine import LocalMemoryEngine
+
+    engine = LocalMemoryEngine.__new__(LocalMemoryEngine)
+    engine.evidence = {}
+    engine._evidence_key = lambda tenant_id, branch, cid: f"{tenant_id}:{branch}:{cid}"
+    engine._independent_corroboration_report = lambda **kwargs: {
+        "independent_corroboration_count": 1,
+        "independent_corroboration_weight": 0.4,
+        "self_generated_corroboration_count": 0,
+        "rejected_corroboration_count": 0,
+    }
+    engine._hit_source_evidence_cids = lambda hit: ["e1"]
+
+    hit = Hit(
+        id="h3",
+        kind="assertion",
+        tenant_id="t",
+        branch="main",
+        text="z",
+        score=1.0,
+        channel="dense",
+        trust_tier=5,
+        metadata={
+            "confidence": 0.7,
+            # Malicious / adapter-inflated payload must not drive fuse.
+            "independent_corroboration": {
+                "independent_corroboration_count": 9,
+                "independent_corroboration_weight": 1.0,
+                "self_generated_corroboration_count": 0,
+                "rejected_corroboration_count": 0,
+            },
+        },
+    )
+    signals = LocalMemoryEngine._standing_signals_for_hit(engine, hit, "grounded")
+    assert signals["independent_corroboration_weight"] == 0.4
+    expected = fuse_calibrated_confidence_from_hit(
+        metadata={
+            "confidence": 0.7,
+            "independent_corroboration": {
+                "independent_corroboration_count": 1,
+                "independent_corroboration_weight": 0.4,
+                "self_generated_corroboration_count": 0,
+                "rejected_corroboration_count": 0,
+            },
+        },
+        reality_class="grounded",
+        trust_tier=5,
+    )
+    assert signals["calibrated_confidence"] == expected

@@ -4013,17 +4013,15 @@ class LocalMemoryEngine:
         source_cids = self._hit_source_evidence_cids(hit)
         if hit.kind == "evidence" and hit.id:
             source_cids = sorted(set(source_cids + [hit.id]))
-        corroboration = hit.metadata.get("independent_corroboration") if isinstance(hit.metadata, dict) else None
-        if not isinstance(corroboration, dict):
-            corroboration = self._independent_corroboration_report(
-                tenant_id=hit.tenant_id,
-                branch=hit.branch,
-                source_evidence_cids=source_cids,
-            )
+        # Always compute engine-side corroboration — never trust adapter-supplied IC.
+        corroboration = self._independent_corroboration_report(
+            tenant_id=hit.tenant_id,
+            branch=hit.branch,
+            source_evidence_cids=source_cids,
+        )
         meta = dict(hit.metadata) if isinstance(hit.metadata, dict) else {}
-        # Feed computed corroboration into fuse so provenance is not trust-tier-only.
-        if "independent_corroboration" not in meta or meta.get("independent_corroboration") is None:
-            meta["independent_corroboration"] = corroboration
+        # Unconditionally overwrite — adapter-supplied IC must not drive fuse.
+        meta["independent_corroboration"] = corroboration
         return {
             "reality_class": reality_class,
             "trust_tier": hit.trust_tier,
