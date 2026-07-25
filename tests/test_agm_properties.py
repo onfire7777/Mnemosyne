@@ -151,6 +151,27 @@ def test_contraction_isolates_engine_branch_clones_same_id() -> None:
     assert core.atms_label(TENANT, seed.assertion_id, branch="scratch") == "in"
 
 
+def test_atms_label_branch_scopes_derived_belief_clone_dependencies() -> None:
+    """Derived belief + clone: contracting main source must not leave scratch ATMS wrong."""
+    engine = LocalMemoryEngine()
+    core = BeliefRevisionCore(engine)
+    source = core.revise(_assertion("dep-root", "says", "A"))
+    derived = _assertion("dep-child", "is", "A-dependent")
+    child = core.add_derived_belief(
+        derived,
+        dependency_ids=[source.assertion_id],
+        rule="if source then conclusion",
+    )
+    engine.branch("scratch", frm="main", kind="scratch")
+    # Contract only main source — scratch keeps source+child active
+    core.contract(TENANT, source.assertion_id, reason="contract main source", branch="main")
+    assert core.atms_label(TENANT, source.assertion_id, branch="main") == "out"
+    assert core.atms_label(TENANT, child.assertion_id, branch="main") == "out"
+    # Scratch clones still active; child ATMS must use scratch-local dep status (in)
+    assert core.atms_label(TENANT, source.assertion_id, branch="scratch") == "in"
+    assert core.atms_label(TENANT, child.assertion_id, branch="scratch") == "in"
+
+
 def test_contraction_retains_unrelated_belief_consistency() -> None:
     """Contracting one belief must not retract an independent expansion."""
     engine = LocalMemoryEngine()
