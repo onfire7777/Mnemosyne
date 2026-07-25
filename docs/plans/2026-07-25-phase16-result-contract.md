@@ -176,4 +176,3 @@ invoke an external review bot.
 
 Stage explicit paths only and create an atomic conventional commit after the
 acceptance matrix and review are green.
-
