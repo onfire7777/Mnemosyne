@@ -362,10 +362,12 @@ class BeliefRevisionCore:
                 break
         if target is None or target.status not in {"active", "contested"}:
             return "out"
+        # Branch-scoped statuses: engine.branch() clones keep the same id, so a
+        # tenant-wide map would conflate main vs scratch dependency state.
         status_by_id = {
             item.id: item.status
             for item in self.engine.assertions.values()
-            if item.tenant_id == tenant_id
+            if item.tenant_id == tenant_id and item.branch == branch
         }
         justifications = [
             justification
