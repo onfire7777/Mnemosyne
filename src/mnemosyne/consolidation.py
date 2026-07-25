@@ -1726,6 +1726,23 @@ class ConsolidationWorker:
         """
 
         cids = list(job.source_evidence_cids or [])
+        # Expand with other stored tenant evidence so multi-ingest-before-worker
+        # patterns can meet the external floor (default 2) without rewriting
+        # every single-CID queue payload (CLI --run-consolidation-once, live tests).
+        engine = self.engine
+        if hasattr(engine, "export_tenant"):
+            try:
+                exported = engine.export_tenant(job.tenant_id)
+                for item in exported.get("evidence") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    cid = item.get("cid")
+                    if cid and str(cid) not in cids:
+                        cids.append(str(cid))
+                    if len(cids) >= 32:
+                        break
+            except Exception:
+                pass
         report = self._independent_corroboration_report_for_job(job, cids)
         independent = int(report.get("independent_corroboration_count", 0) or 0)
         self_echo = int(report.get("self_generated_corroboration_count", 0) or 0)
