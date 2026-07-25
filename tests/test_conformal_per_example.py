@@ -83,18 +83,36 @@ def test_copy_confidence_metadata_preserves_aliases() -> None:
         "verbalized_confidence": 0.6,
         "confidence": 0.5,
     }
-    assert example_confidence_from_hit(
-        Hit(
-            id="x",
-            kind="evidence",
-            tenant_id="t",
-            branch="main",
-            text="x",
-            score=0.1,
-            channel="dense",
-            metadata=dest,
-        )
-    ) == 0.7  # prefers calibrated_confidence
+
+
+def test_example_confidence_ignores_untrusted_calibrated_alias() -> None:
+    """Client-forged calibrated_confidence must not drive conformal accept."""
+    hit = Hit(
+        id="x",
+        kind="evidence",
+        tenant_id="t",
+        branch="main",
+        text="x",
+        score=0.1,
+        channel="dense",
+        metadata={
+            "calibrated_confidence": 0.99,
+            "verbalized_confidence": 0.98,
+            # no trusted confidence key
+        },
+    )
+    assert example_confidence_from_hit(hit) == 0.1  # falls back to score
+    hit2 = Hit(
+        id="y",
+        kind="evidence",
+        tenant_id="t",
+        branch="main",
+        text="y",
+        score=0.1,
+        channel="dense",
+        metadata={"confidence": 0.4, "calibrated_confidence": 0.99},
+    )
+    assert example_confidence_from_hit(hit2) == 0.4  # trusted confidence wins
 
 
 def test_per_example_set_size_diverges_from_packet_relative() -> None:
