@@ -99,6 +99,42 @@ def test_credibility_rests_on_verifiability_not_an_institution() -> None:
     assert "track publication" in charter and "headline publication" in charter
 
 
+def test_publication_plan_keeps_external_validation_optional() -> None:
+    plan = " ".join(
+        (ROOT / "docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md")
+        .read_text(encoding="utf-8")
+        .lower()
+        .split()
+    )
+    roadmap = " ".join(
+        (ROOT / ".planning/ROADMAP.md").read_text(encoding="utf-8").lower().split()
+    )
+    requirements = " ".join(
+        (ROOT / ".planning/REQUIREMENTS.md")
+        .read_text(encoding="utf-8")
+        .lower()
+        .split()
+    )
+
+    # All three sources are lowercased above, so assertions must be too —
+    # a capitalised needle here can never match and the test would be vacuous.
+    #
+    # The invariant: external validation may strengthen a claim, never gate one.
+    assert "does not gate it" in plan
+    assert "register b does not" in plan
+    assert "genuine independent reproduction" not in plan
+    assert "external independence requirement" not in plan
+    assert "independent reproduction on file" not in plan
+    assert "governance board seated" not in plan
+    assert "| independent board," not in plan
+
+    assert "strengthening evidence when offered" in roadmap
+    assert "strengthening evidence when offered" in requirements
+
+    # No fixed-count launch gate may reappear.
+    assert "≥8 systems" not in plan
+
+
 def test_permanent_conflict_and_equal_treatment_are_non_waivable() -> None:
     coi = _read("CONFLICT-OF-INTEREST.md")
     firewall = _read("OPERATOR-FIREWALL.md")

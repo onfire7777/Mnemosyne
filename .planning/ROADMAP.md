@@ -82,10 +82,13 @@ deterministic regression runs that never tune on test data.
 **Depends on:** Phases 10-12
 **Plans:** Not planned
 
-### Phase 14: Reproducibility Standard and Independent Reproduction
+### Phase 14: Reproducibility Standard
 
-**Goal:** Freeze the neutral artifact standard and obtain independent
-third-party reproduction for at least one headline-eligible result.
+**Goal:** Freeze the artifact standard and demonstrate reproduction by
+construction — a stranger regenerates at least one headline-eligible result from
+its pinned bundle with one documented command, from a clean checkout.
+Independent third-party reproduction is recorded as
+strengthening evidence when offered, and does not gate the phase (revised v0.2.0).
 **Requirements:** REPRO-001, REPRO-002, RAIL-003, RAIL-004
 **Depends on:** Phases 11-13
 **Plans:** Not planned

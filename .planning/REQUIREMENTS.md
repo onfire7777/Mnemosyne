@@ -12,7 +12,7 @@
 | [ ] BENCH-006 | MemoryAgentBench has a conforming Mnemosyne adapter and upstream submission path; BEAM runs with a fully disclosed reader/config. | Plan B M1.4/M1.5 | Planned |
 | [ ] BENCH-007 | Deterministic public suites run on a scheduled regression-only CI cadence without tuning on held-out/test data. | Plan B M1.6 | Planned |
 | [ ] REPRO-001 | A neutral reproducibility bundle standard covers manifests, raw traces, configs, environment/build fingerprints, metrics, intervals, and integrity hashes. | Plan B M2 | Planned |
-| [ ] REPRO-002 | At least one headline-eligible result is independently reproduced from the published bundle before any external claim. | Plan B M3/PBPP | Planned |
+| [ ] REPRO-002 | At least one headline-eligible result is reproducible by construction from the published bundle — one documented command from a clean checkout — before any external claim. Independent third-party reproduction is recorded as strengthening evidence when offered and does not gate the claim. | Plan B M3/PBPP | Planned |
 
 ## Capability Leadership
 
