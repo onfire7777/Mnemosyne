@@ -129,6 +129,38 @@ def test_candidate_carries_unit_signals_into_promotion_gate() -> None:
     assert result.promoted is True
 
 
+def test_unrelated_tenant_evidence_does_not_raise_external_count() -> None:
+    """Review major: free-riding on unrelated grounded tenant evidence is forbidden."""
+    engine = LocalMemoryEngine()
+    _evidence(engine, "Completely unrelated astronomy fact about nebulae and quasars.")
+    _evidence(engine, "Another unrelated note about cooking recipes and spices.")
+    cid = _evidence(engine, "The preferred database is Postgres.")
+    worker = ConsolidationWorker(engine, [_case()])
+    signals = worker._fact_unit_signals_for_job(_job([cid]))
+    assert signals["independent_corroboration_count"] < 2
+    result = worker.run_job(_job([cid], signature="no-free-ride"))
+    assert result.promoted is False
+    assert any("fact_external_corroboration" in item for item in result.failed_cases)
+
+
+def test_related_dual_captures_can_meet_floor_via_token_overlap() -> None:
+    """Related dual captures (token overlap) may count; unrelated may not."""
+    engine = LocalMemoryEngine()
+    cid_a = _evidence(engine, "The preferred database is Postgres.")
+    cid_b = _evidence(
+        engine,
+        "Independent confirmation: preferred database remains Postgres.",
+        source_type="chat",
+    )
+    worker = ConsolidationWorker(engine, [_case()])
+    # Job lists only one CID; related second capture should still raise independent count.
+    signals = worker._fact_unit_signals_for_job(_job([cid_a]))
+    assert signals["independent_corroboration_count"] >= 2
+    result = worker.run_job(_job([cid_a], signature="related-dual"))
+    assert result.promoted is True
+    assert cid_b  # second capture present in store
+
+
 def test_oracle_portable_when_engine_report_requires_cursor() -> None:
     """Postgres-style TypeError on report(cur=...) must fall back to get_evidence path."""
     engine = LocalMemoryEngine()

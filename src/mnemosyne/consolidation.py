@@ -1717,6 +1717,74 @@ class ConsolidationWorker:
         # Reuse LocalMemoryEngine classifier on already-loaded Evidence rows.
         return dict(LocalMemoryEngine()._independent_corroboration_report_from_evidence(rows))
 
+    @staticmethod
+    def _content_tokens(text: str) -> set[str]:
+        return {tok.lower() for tok in re.findall(r"[A-Za-z0-9]{3,}", text or "")}
+
+    def _corroboration_cids_for_job(self, job: ConsolidationJob) -> list[str]:
+        """CIDs used for external corroboration counting.
+
+        Starts from ``job.source_evidence_cids`` only. Optionally unions other
+        tenant/main evidence whose content shares ≥2 significant tokens with the
+        candidate SPO/query/signature — never a bare tenant-wide dump (Review
+        major: unrelated grounded evidence must not free-ride).
+        """
+
+        base = list(dict.fromkeys(str(cid) for cid in (job.source_evidence_cids or []) if cid))
+        needle = self._content_tokens(
+            " ".join(
+                [
+                    str(job.signature or ""),
+                    str(job.query or ""),
+                    str(job.candidate_subject or ""),
+                    str(job.candidate_predicate or ""),
+                    str(job.candidate_object or ""),
+                ]
+            )
+        )
+        if len(needle) < 2:
+            return base
+        found = list(base)
+        seen = set(found)
+
+        def _maybe_add(cid: object, content: str) -> None:
+            if not cid:
+                return
+            key = str(cid)
+            if key in seen:
+                return
+            if len(self._content_tokens(content) & needle) < 2:
+                return
+            seen.add(key)
+            found.append(key)
+
+        engine = self.engine
+        evidence_map = getattr(engine, "evidence", None)
+        if isinstance(evidence_map, dict):
+            for ev in evidence_map.values():
+                if getattr(ev, "tenant_id", None) != job.tenant_id:
+                    continue
+                if getattr(ev, "erased", False):
+                    continue
+                if (getattr(ev, "branch", "main") or "main") != "main":
+                    continue
+                _maybe_add(getattr(ev, "cid", None), getattr(ev, "content", "") or "")
+            return found
+
+        export_tenant = getattr(engine, "export_tenant", None)
+        if callable(export_tenant):
+            try:
+                exported = export_tenant(job.tenant_id)
+            except Exception:
+                return found
+            for item in exported.get("evidence") or []:
+                if not isinstance(item, dict) or item.get("erased"):
+                    continue
+                if (item.get("branch") or "main") != "main":
+                    continue
+                _maybe_add(item.get("cid"), item.get("content") or "")
+        return found
+
     def _fact_unit_signals_for_job(self, job: ConsolidationJob) -> dict[str, Any]:
         """Build Standing-shaped unit_signals from the engine independent-corroboration oracle.
 
@@ -1725,24 +1793,7 @@ class ConsolidationWorker:
         (§23.3 / §7 #17). Portable across Local and Postgres engines.
         """
 
-        cids = list(job.source_evidence_cids or [])
-        # Expand with other stored tenant evidence so multi-ingest-before-worker
-        # patterns can meet the external floor (default 2) without rewriting
-        # every single-CID queue payload (CLI --run-consolidation-once, live tests).
-        engine = self.engine
-        if hasattr(engine, "export_tenant"):
-            try:
-                exported = engine.export_tenant(job.tenant_id)
-                for item in exported.get("evidence") or []:
-                    if not isinstance(item, dict):
-                        continue
-                    cid = item.get("cid")
-                    if cid and str(cid) not in cids:
-                        cids.append(str(cid))
-                    if len(cids) >= 32:
-                        break
-            except Exception:
-                pass
+        cids = self._corroboration_cids_for_job(job)
         report = self._independent_corroboration_report_for_job(job, cids)
         independent = int(report.get("independent_corroboration_count", 0) or 0)
         self_echo = int(report.get("self_generated_corroboration_count", 0) or 0)
