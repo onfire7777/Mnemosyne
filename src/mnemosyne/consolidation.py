@@ -1613,6 +1613,15 @@ class ConsolidationWorker:
             tier = FidelityTier(tier_raw)
         except ValueError:
             tier = FidelityTier.VERBATIM
+        # I7/§25: must_keep and verbatim_pointer must round-trip through the
+        # forgetter load path so demotion never drops pointer-to-original and
+        # durable memories remain non-demotable across consolidation passes.
+        pointer_raw = data.get("verbatim_pointer")
+        if pointer_raw is None and isinstance(item.metadata, dict):
+            pointer_raw = item.metadata.get("verbatim_pointer")
+        must_keep = bool(data.get("must_keep", False))
+        if not must_keep and isinstance(item.metadata, dict):
+            must_keep = bool(item.metadata.get("must_keep", False))
         return LifecycleState(
             item_id=item.cid or "",
             tier=tier,
@@ -1623,12 +1632,13 @@ class ConsolidationWorker:
             ),
             access_count=int(ConsolidationWorker._safe_float(data.get("access_count"), 0.0)),
             last_accessed=ConsolidationWorker._parse_datetime(data.get("last_accessed")),
-            must_keep=bool(data.get("must_keep", False)),
+            must_keep=must_keep,
             successful_rehearsals=int(ConsolidationWorker._safe_float(data.get("successful_rehearsals"), 0.0)),
             next_rehearsal_at=ConsolidationWorker._parse_datetime(data.get("next_rehearsal_at")),
             last_rehearsed_at=ConsolidationWorker._parse_datetime(data.get("last_rehearsed_at")),
             confabulation_risk=bool(data.get("confabulation_risk", False)),
             protected=bool(data.get("protected", False)),
+            verbatim_pointer=(str(pointer_raw) if pointer_raw is not None else None),
         )
 
     @staticmethod
