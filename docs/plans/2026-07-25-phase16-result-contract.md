@@ -213,26 +213,26 @@ and GitHub reports the pull request mergeable.
 - Modify: `GOAL.md`
 - Modify: this plan
 
-- [ ] **Step 1: Add failing boundary tests**
+- [x] **Step 1: Add failing boundary tests**
 
 Add focused tests proving the validator rejects non-finite values, JSON
 `NaN`/`Infinity` constants and overflowed numbers, and confidence intervals
 whose `low` bound exceeds `high`. Verify RED for the missing behavior.
 
-- [ ] **Step 2: Align the published schema and validator**
+- [x] **Step 2: Align the published schema and validator**
 
 Make the checked-in schema enforce the validator's immutable commit/digest,
 required publication/operator/history, and interval constraints. Use finite
 numeric validation at both the untrusted JSON parser and validator boundary,
 and reject inverted intervals. Keep the implementation standard-library only.
 
-- [ ] **Step 3: Re-run the local acceptance and risk gates**
+- [x] **Step 3: Re-run the local acceptance and risk gates**
 
 Run the focused tests, Ruff, JSON parsing, diff checks, exact-lease check, and
 secret/risky-file sweep. Resolve only confirmed review findings; do not widen
 the product scope.
 
-- [ ] **Step 4: Commit, push, and recheck the successor head**
+- [x] **Step 4: Commit, push, and recheck the successor head**
 
 Commit the narrow review fix, push the existing isolated branch normally, and
 monitor PR #65 on the new exact head. Do not merge while review is

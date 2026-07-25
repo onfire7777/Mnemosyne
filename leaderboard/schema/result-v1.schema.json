@@ -40,19 +40,20 @@
       "$ref": "#/$defs/nonEmptyString"
     },
     "run_commit": {
-      "$ref": "#/$defs/nonEmptyString"
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
     },
     "build_fingerprint": {
-      "$ref": "#/$defs/nonEmptyString"
+      "$ref": "#/$defs/sha256Digest"
     },
     "config_digest": {
-      "$ref": "#/$defs/nonEmptyString"
+      "$ref": "#/$defs/sha256Digest"
     },
     "bundle_digest": {
-      "$ref": "#/$defs/nonEmptyString"
+      "$ref": "#/$defs/sha256Digest"
     },
     "trace_index_digest": {
-      "$ref": "#/$defs/nonEmptyString"
+      "$ref": "#/$defs/sha256Digest"
     },
     "metrics": {
       "type": "array",
@@ -63,24 +64,118 @@
     },
     "publication": {
       "type": "object",
-      "minProperties": 1
+      "required": [
+        "publishable",
+        "label"
+      ],
+      "properties": {
+        "publishable": {
+          "type": "boolean"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "register_b_satisfied": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "label": {
+                "const": "neutral"
+              }
+            },
+            "required": [
+              "label"
+            ]
+          },
+          "then": {
+            "properties": {
+              "register_b_satisfied": {
+                "const": true
+              }
+            },
+            "required": [
+              "register_b_satisfied"
+            ]
+          }
+        }
+      ]
     },
     "operator_entry": {
       "type": "object",
-      "minProperties": 1
+      "required": [
+        "operator",
+        "disclosed"
+      ],
+      "properties": {
+        "operator": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "disclosed": {
+          "const": true
+        }
+      }
     },
     "history": {
       "type": "object",
-      "minProperties": 1
+      "$comment": "The standard-library validator rejects self-supersession.",
+      "required": [
+        "supersedes"
+      ],
+      "properties": {
+        "supersedes": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          ]
+        }
+      }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "track": {
+            "const": "development"
+          }
+        },
+        "required": [
+          "track"
+        ]
+      },
+      "then": {
+        "properties": {
+          "publication": {
+            "properties": {
+              "publishable": {
+                "const": false
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
     },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
     "confidenceInterval": {
       "type": "object",
+      "$comment": "The standard-library validator additionally enforces low <= high.",
       "required": [
         "low",
         "high"
@@ -106,10 +201,10 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "prompt_digest": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/sha256Digest"
         },
         "config_digest": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/sha256Digest"
         }
       }
     },
