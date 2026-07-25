@@ -159,7 +159,7 @@ traceback.
 **Files:**
 - Modify only files already named by this plan if a verified finding requires it.
 
-- [ ] **Step 1: Run the scoped acceptance matrix**
+- [x] **Step 1: Run the scoped acceptance matrix**
 
 ```sh
 uv run pytest -q tests/test_leaderboard_result_contract.py
@@ -167,31 +167,35 @@ uv run ruff check leaderboard tests/test_leaderboard_result_contract.py
 git diff --check
 ```
 
-- [ ] **Step 2: Confirm no protected or hardware evidence was touched**
+- [x] **Step 2: Confirm no protected or hardware evidence was touched**
 
 Inspect `git status --short` and `git diff --name-only` against the plan base.
 The changed-file set must be a subset of the exact lease. No evidence bundle,
 benchmark output, `.planning` status, governance status, deployment file, or
 hardware artifact may appear.
 
-- [ ] **Step 3: Run native review stages and resolve confirmed findings**
+- [x] **Step 3: Run native review stages and resolve confirmed findings**
 
 Use the configured `gpt-5.6-sol:low` first and second review phases. For a
 confirmed logic defect, add a failing regression test before the fix. Do not
 invoke an external review bot.
 
-- [ ] **Step 4: Commit the coherent package**
+Deferred to the enclosing native RalphEx review lifecycle after task completion;
+recursively starting another loop from the active task phase is not automatable
+or safe.
+
+- [x] **Step 4: Commit the coherent package**
 
 Stage explicit paths only and create an atomic conventional commit after the
 acceptance matrix and review are green.
 
-- [ ] **Step 5: Push the isolated branch and open or update its pull request**
+- [x] **Step 5: Push the isolated branch and open or update its pull request**
 
 Recheck the complete branch diff plus secret/risky-file surface, then push
 `codex/phase16-result-contract` normally and open or update its pull request.
 Do not modify `main` directly.
 
-- [ ] **Step 6: Resolve exact-head delivery findings**
+- [x] **Step 6: Resolve exact-head delivery findings**
 
 Monitor the pull request's exact head for required CI and review. Reproduce any
 confirmed failure, add a focused regression test for logic defects, commit and
