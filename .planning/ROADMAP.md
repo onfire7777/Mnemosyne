@@ -10,9 +10,9 @@
 - [x] **Phase 11: Deterministic Public Retrieval Tracks** - LongMemEval retrieval plus HippoRAG multi-hop deterministic measurement. (completed 2026-07-11)
 - [ ] **Phase 12: Grounded Multi-Hop Answer Synthesis** - Close Plan A S1 under public and private regression gates.
 - [ ] **Phase 13: External Benchmark Adapters and Scheduled CI** - MemoryAgentBench, BEAM, and regression-only cadence.
-- [ ] **Phase 14: Reproducibility Standard and Independent Reproduction** - M2/M3 publication eligibility.
+- [ ] **Phase 14: Reproducibility Standard** - M2/M3 publication eligibility via reproduction by construction.
 - [ ] **Phase 15: Memory Capability and Evidence Closure** - Plan A S2-S5 capability, security, calibration, performance, scale, and research closure.
-- [ ] **Phase 16: Neutral Leaderboard Build and Launch** - L1-L4 after PBPP and Part I gates.
+- [ ] **Phase 16: Open Leaderboard Build and Launch** - L1-L4 after PBPP, Part I, and Register A gates.
 
 ### Phase 10: Public Harness and Neutral Governance Foundation
 
@@ -28,7 +28,9 @@ Plans:
 - [x] 10-02-PLAN.md — Neutral governance, permanent COI, and operator firewall.
 
 **Boundary:** Harness and governance source scope are complete. GOV-001 remains
-partial until the external board is seated and ratifies the source policy;
+partial until the source-owned Register A gates in
+`docs/governance/BOARD-STATUS.md` hold; external board seating moved to the
+optional Register B upgrade and no longer gates GOV-001 or Phase 16.
 Phase 16 owns final activation and launch readiness.
 
 ### Phase 11: Deterministic Public Retrieval Tracks
@@ -80,10 +82,13 @@ deterministic regression runs that never tune on test data.
 **Depends on:** Phases 10-12
 **Plans:** Not planned
 
-### Phase 14: Reproducibility Standard and Independent Reproduction
+### Phase 14: Reproducibility Standard
 
-**Goal:** Freeze the neutral artifact standard and obtain independent
-third-party reproduction for at least one headline-eligible result.
+**Goal:** Freeze the artifact standard and demonstrate reproduction by
+construction — a stranger regenerates at least one headline-eligible result from
+its pinned bundle with one documented command, from a clean checkout.
+Independent third-party reproduction is recorded as
+strengthening evidence when offered, and does not gate the phase (revised v0.2.0).
 **Requirements:** REPRO-001, REPRO-002, RAIL-003, RAIL-004
 **Depends on:** Phases 11-13
 **Plans:** Not planned
@@ -114,14 +119,29 @@ and `publishable:false` — they add no public or headline benchmark result. The
 remaining Phase 15 items (CAP-004..010) stay planned, and the W1/W4/W5 GATEs
 remain operator-gated; none of that gated or adapter work is claimed complete.
 
-### Phase 16: Neutral Leaderboard Build and Launch
+### Phase 16: Open Leaderboard Build and Launch
 
 **Goal:** Reuse the public harness as the equal-access submission engine, build
-the transparent data/site surfaces, and launch only after governance, PBPP,
-Part I, and reproduction gates pass.
+the transparent data/site surfaces, and launch once the source-owned Register A
+gates hold.
 **Requirements:** LEAD-001, LEAD-002, LEAD-003, GOV-001, RAIL-003, RAIL-004
-**Depends on:** Phases 10-15
+**Depends on:** Phases 10-12. The site and data pipeline no longer wait on full
+Phase 15 capability closure — see Sequencing below.
 **Plans:** Not planned
+
+**Revised v0.2.0.** Launch is gated on Register A of
+`docs/governance/BOARD-STATUS.md` — pre-registration, an append-only signed run
+ledger, reproducibility by construction, an open stack, a populated adversarial
+self-report, and a public dispute channel — all of which the operator can
+produce. Board seating, a legal steward, funding, external ratification, and a
+multi-owner archive moved to Register B as an optional upgrade that would permit
+the *neutral* label. Rationale: `docs/governance/CREDIBILITY-MODEL.md`.
+
+**Sequencing.** The leaderboard surface may be built and published against
+whatever tracks genuinely exist, filling in as capabilities land. A dimension is
+rendered only once measured; nothing is claimed ahead of evidence. This removes
+the previous dead end in which the site waited on eight unplanned CAP
+requirements while those requirements had no delivery date.
 
 ## Carried Evidence Boundaries
 

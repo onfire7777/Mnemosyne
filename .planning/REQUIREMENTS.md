@@ -12,7 +12,7 @@
 | [ ] BENCH-006 | MemoryAgentBench has a conforming Mnemosyne adapter and upstream submission path; BEAM runs with a fully disclosed reader/config. | Plan B M1.4/M1.5 | Planned |
 | [ ] BENCH-007 | Deterministic public suites run on a scheduled regression-only CI cadence without tuning on held-out/test data. | Plan B M1.6 | Planned |
 | [ ] REPRO-001 | A neutral reproducibility bundle standard covers manifests, raw traces, configs, environment/build fingerprints, metrics, intervals, and integrity hashes. | Plan B M2 | Planned |
-| [ ] REPRO-002 | At least one headline-eligible result is independently reproduced from the published bundle before any external claim. | Plan B M3/PBPP | Planned |
+| [ ] REPRO-002 | At least one headline-eligible result is reproducible by construction from the published bundle — one documented command from a clean checkout — before any external claim. Independent third-party reproduction is recorded as strengthening evidence when offered and does not gate the claim. | Plan B M3/PBPP | Planned |
 
 ## Capability Leadership
 
@@ -36,10 +36,10 @@
 
 | ID | Requirement | Authority | Status |
 |---|---|---|---|
-| [ ] GOV-001 | An independent governance charter creates a hard operator/firewall boundary, conflict policy, appeals, versioning, and public change control. | Plan B L0 | Partial — source policy complete; external ratification pending |
-| [ ] LEAD-001 | The submission methodology runs every system under one identical harness with contamination declarations and public raw artifacts. | Plan B L1 | Planned |
-| [ ] LEAD-002 | The leaderboard data pipeline validates signed bundles and renders separate retrieval, QA, security, calibration, performance, and reproducibility columns. | Plan B L2/L3 | Planned |
-| [ ] LEAD-003 | Public launch remains blocked until PBPP is in force, Part I results exist, governance is active, and Mnemosyne is treated identically to every entrant. | Plan B L4 | Planned |
+| [ ] GOV-001 | A verifiable-neutrality charter creates a hard operator/firewall boundary enforced mechanically, conflict policy, appeals, versioning, and public change control. | Plan B L0 | Partial — source policy complete (v0.2.0); Register A publication gates open. External board ratification moved to the optional Register B upgrade and is no longer blocking |
+| [ ] LEAD-001 | The submission methodology runs every system under one identical harness with contamination declarations, public raw artifacts, pre-registration, and an append-only signed run ledger covering failed and discarded runs. | Plan B L1 | Planned |
+| [ ] LEAD-002 | The leaderboard data pipeline validates signed bundles and renders separate retrieval, QA, security, calibration, performance, and reproducibility columns, with operator-authored and established suites in visually distinct columns. Dimensions render only once measured. | Plan B L2/L3 | Planned |
+| [ ] LEAD-003 | Public launch remains blocked until PBPP is in force, Part I results exist, Register A source-owned gates hold, and Mnemosyne is treated identically to every entrant and labelled as the operator entry. | Plan B L4 | Planned |
 
 ## Non-Negotiable Rails
 
@@ -47,7 +47,7 @@
 |---|---|---|---|
 | [ ] RAIL-001 | All §31 invariant rails, §33 test classes, tenant/privacy/provenance/capability boundaries, and data-not-instructions behavior remain green. | v2 blueprint | Continuous |
 | [ ] RAIL-002 | The minimal core keeps only `cryptography` required; heavy benchmark/model dependencies remain optional or isolated in services/tools. | Plan A/B | Continuous |
-| [ ] RAIL-003 | No public number is headlined without the pinned harness, complete bundle, separate retrieval/QA columns, disclosed judge, and independent reproduction. | PBPP | Continuous |
+| [ ] RAIL-003 | No public number is headlined without the pinned harness, complete bundle, separate retrieval/QA columns, disclosed judge, and reproduction by construction — one documented command regenerates the number from its pinned bundle. Independent third-party reproduction strengthens a claim and is recorded when it occurs, but does not gate publication. | PBPP | Continuous |
 | [ ] RAIL-004 | Private-suite results remain internal QA and no held-out/test split is used for tuning, patching, or benchmark-specific teaching. | PBPP | Continuous |
 
 ## Traceability

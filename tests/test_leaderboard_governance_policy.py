@@ -8,6 +8,7 @@ GOVERNANCE = ROOT / "docs" / "governance"
 
 REQUIRED_DOCUMENTS = {
     "README.md",
+    "CREDIBILITY-MODEL.md",
     "CHARTER.md",
     "CONFLICT-OF-INTEREST.md",
     "OPERATOR-FIREWALL.md",
@@ -41,12 +42,102 @@ def test_governance_is_explicitly_inactive_and_fail_closed() -> None:
     )
     for text in (charter, status, readiness):
         assert "External activation required" in text
-    assert "Status: inactive" in status
+    # The board stays unseated and must never be described otherwise.
     assert "board is not yet seated" in status
     assert "governance is not yet active" in status
-    assert "methods paper is not yet published" in readiness
     assert "GOV-001: partial" in readiness
     assert "Phase 16" in readiness
+
+
+def test_credibility_rests_on_verifiability_not_an_institution() -> None:
+    """The publication path must not depend on external organisations.
+
+    v0.1.0 gated Phase 16 on seating academics, retaining a legal steward, and
+    securing funding. A solo maintainer cannot satisfy those by writing
+    software, so the roadmap terminated in a permanent block. Credibility now
+    comes from mechanisms the operator can build and a stranger can check.
+    """
+    model = _read("CREDIBILITY-MODEL.md").lower()
+    charter = _read("CHARTER.md").lower()
+    status = _read("BOARD-STATUS.md").lower()
+
+    # Every integrity mechanism the model claims must actually be described.
+    for phrase in (
+        "pre-registration",
+        "append-only",
+        "reproducible by construction",
+        "operator-run, fully auditable",
+        "expected entrant roster",
+    ):
+        assert phrase in model, phrase
+
+    # A ledger alone cannot expose an omitted system; the roster closes that hole.
+    assert "no_run" in model
+    assert "expected entrant roster" in model
+    # Preregistration + ledger both passing is not sufficient on its own.
+    assert "roster-to-ledger completeness" in model
+
+    # The honest label is claimed and the stronger one is explicitly withheld.
+    assert "operator-run, fully auditable" in charter
+    assert "they may not be" in charter, "charter must withhold the neutral label"
+    assert "unless the optional board upgrade below" in charter
+
+    # Register A is source-owned and blocking; Register B is optional and not.
+    assert "register a — publication gates (source-owned, blocking)" in status
+    assert "register b — optional independent-board upgrade (non-blocking)" in status
+    assert "no gate above requires another organisation" in status
+    for gate in (
+        "pre-registration in force",
+        "append-only signed run ledger",
+        "reproducible by construction",
+        "open stack published",
+        "adversarial self-report populated",
+        "public dispute channel",
+        "public methods write-up",
+        "roster-to-ledger completeness",
+    ):
+        assert gate in status, gate
+
+    # Publication classes must be distinguishable, or "publishable" is ambiguous.
+    assert "track publication" in charter and "headline publication" in charter
+
+
+def test_publication_plan_keeps_external_validation_optional() -> None:
+    plan = " ".join(
+        (ROOT / "docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md")
+        .read_text(encoding="utf-8")
+        .lower()
+        .split()
+    )
+    roadmap = " ".join(
+        (ROOT / ".planning/ROADMAP.md").read_text(encoding="utf-8").lower().split()
+    )
+    requirements = " ".join(
+        (ROOT / ".planning/REQUIREMENTS.md")
+        .read_text(encoding="utf-8")
+        .lower()
+        .split()
+    )
+
+    # All three sources are lowercased above, so assertions must be too —
+    # a capitalised needle here can never match and the test would be vacuous.
+    #
+    # The invariant: external validation may strengthen a claim, never gate one.
+    assert "does not gate it" in plan
+    assert "register b does not" in plan
+    assert "genuine independent reproduction" not in plan
+    assert "reproduced by an independent third party" not in plan
+    assert "third-party reproduction on file" not in plan
+    assert "external independence requirement" not in plan
+    assert "independent reproduction on file" not in plan
+    assert "governance board seated" not in plan
+    assert "| independent board," not in plan
+
+    assert "strengthening evidence when offered" in roadmap
+    assert "strengthening evidence when offered" in requirements
+
+    # No fixed-count launch gate may reappear.
+    assert "≥8 systems" not in plan
 
 
 def test_permanent_conflict_and_equal_treatment_are_non_waivable() -> None:

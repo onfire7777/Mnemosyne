@@ -1,14 +1,17 @@
 # Leaderboard Governance
 
-Version: 0.1.0
-Status: draft — External activation required
+Version: 0.2.0
+Status: source-owned gates active — External activation required only for the optional board upgrade
 
-This directory is the source-owned policy package for a future independently
-governed public leaderboard. It is complete enough for review and ratification,
-but it does not establish independent governance by itself.
+This directory is the policy package for an **open, operator-run, fully
+auditable** leaderboard. Credibility rests on mechanical verifiability rather
+than on an institution — see [CREDIBILITY-MODEL](CREDIBILITY-MODEL.md), which is
+the anchor document. An independent board remains an optional upgrade that would
+permit the stronger *neutral* label; it is not on the critical path.
 
 ## Canonical documents
 
+- [CREDIBILITY-MODEL](CREDIBILITY-MODEL.md)
 - [CHARTER](CHARTER.md)
 - [CONFLICT-OF-INTEREST](CONFLICT-OF-INTEREST.md)
 - [OPERATOR-FIREWALL](OPERATOR-FIREWALL.md)

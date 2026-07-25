@@ -100,4 +100,5 @@ under a new preregistration.
 
 Passing this contract establishes internal 8 GB admission evidence only. No
 externally facing compatibility, performance, benchmark, or leadership claim
-may be published until PBPP and genuine independent reproduction are complete.
+may be published until PBPP and reproduction by construction are complete
+(independent third-party reproduction is strengthening evidence, not a gate).
