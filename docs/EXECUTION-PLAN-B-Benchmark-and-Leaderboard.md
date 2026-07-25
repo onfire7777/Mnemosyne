@@ -25,7 +25,7 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 
 **Hard guardrails (violating any = stop and escalate):**
 
-1. **PBPP governs every public number** (§2). No public claim without the full artifact bundle (§M2) and independent reproduction (§M3).
+1. **PBPP governs every public number** (§2). No public claim without the full artifact bundle (§M2) and reproduction by construction — one documented command regenerates the number from its pinned bundle. Independent third-party reproduction strengthens a claim and is recorded when it occurs, but does not gate publication (§M3, revised v0.2.0).
 2. **Retrieval-recall and LLM-judged-QA are never blended.** Separate columns, always. Disclose judge model + prompt. (This is the single most common field failure — MemPalace, the mem0↔Zep dispute.)
 3. **Never tune on a held-out/test split** — our own system included. Contamination discipline (§M1, §L1) applies to us exactly as to submitters.
 4. **No self-defined benchmark is ever a headline claim** (the gbrain "BrainBench" anti-pattern). Mnemosyne's private suite (0.977 / 0.983 / ECE 0.0063 / poison 1.0 / 149.5 ms) stays internal QA.
@@ -174,7 +174,7 @@ Each item maps to a proven precedent (full source map in Appendix B):
 Plain-language explainers of each major system's architecture (reuse `docs/research/AI-Memory-Systems-Market-Research-2026.md`), the **recall-vs-QA** distinction front-and-center, and a transparent methodology page. **DoD:** explainer pages published; reviewed for accuracy against primary sources.
 
 ### L4 — Launch & community
-Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS, supermemory, HippoRAG, + Mnemosyne) under the one harness; publish the methods paper; open submissions + a public audit/dispute channel; **release raw head-to-head data** (LMArena's single most trust-restoring act). **DoD:** public launch with ≥8 systems and a reproducible methods paper.
+Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS, supermemory, HippoRAG, + Mnemosyne) under the one harness; publish the methods paper; open submissions + a public audit/dispute channel; **release raw head-to-head data** (LMArena's single most trust-restoring act). **DoD (revised v0.2.0):** public launch with every system for which a fair adapter exists, each absence disclosed with its reason, and a reproducible public methods write-up. Coverage is reported honestly rather than gated on a fixed count.
 
 **Part II exit gate (revised v0.2.0):** Register A of [`BOARD-STATUS.md`](governance/BOARD-STATUS.md) satisfied with verifiable evidence; the open stack published; a populated adversarial self-report; methods write-up public; Mnemosyne entered under identical rules and labelled as the operator entry. System coverage is reported honestly rather than gated on a fixed count — every absence is disclosed with its reason. Board seating is an optional upgrade that would permit the *neutral* label.
 

@@ -12,7 +12,7 @@
 - [ ] **Phase 13: External Benchmark Adapters and Scheduled CI** - MemoryAgentBench, BEAM, and regression-only cadence.
 - [ ] **Phase 14: Reproducibility Standard and Independent Reproduction** - M2/M3 publication eligibility.
 - [ ] **Phase 15: Memory Capability and Evidence Closure** - Plan A S2-S5 capability, security, calibration, performance, scale, and research closure.
-- [ ] **Phase 16: Neutral Leaderboard Build and Launch** - L1-L4 after PBPP and Part I gates.
+- [ ] **Phase 16: Open Leaderboard Build and Launch** - L1-L4 after PBPP, Part I, and Register A gates.
 
 ### Phase 10: Public Harness and Neutral Governance Foundation
 
@@ -28,7 +28,9 @@ Plans:
 - [x] 10-02-PLAN.md — Neutral governance, permanent COI, and operator firewall.
 
 **Boundary:** Harness and governance source scope are complete. GOV-001 remains
-partial until the external board is seated and ratifies the source policy;
+partial until the source-owned Register A gates in
+`docs/governance/BOARD-STATUS.md` hold; external board seating moved to the
+optional Register B upgrade and no longer gates GOV-001 or Phase 16.
 Phase 16 owns final activation and launch readiness.
 
 ### Phase 11: Deterministic Public Retrieval Tracks

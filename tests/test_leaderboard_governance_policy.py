@@ -60,21 +60,43 @@ def test_credibility_rests_on_verifiability_not_an_institution() -> None:
     model = _read("CREDIBILITY-MODEL.md").lower()
     charter = _read("CHARTER.md").lower()
     status = _read("BOARD-STATUS.md").lower()
+
+    # Every integrity mechanism the model claims must actually be described.
     for phrase in (
         "pre-registration",
         "append-only",
         "reproducible by construction",
         "operator-run, fully auditable",
+        "expected entrant roster",
     ):
         assert phrase in model, phrase
-    # The honest label is claimed; the stronger one is not.
+
+    # A ledger alone cannot expose an omitted system; the roster closes that hole.
+    assert "no_run" in model
+    assert "expected entrant roster" in model
+
+    # The honest label is claimed and the stronger one is explicitly withheld.
     assert "operator-run, fully auditable" in charter
-    assert "may not be" in charter and "neutral" in charter
-    # The board is recorded as an optional, non-blocking upgrade.
-    assert "optional" in charter and "not a prerequisite" in charter
-    assert "non-blocking" in status
-    # Publication gates must be source-owned.
+    assert "they may not be" in charter, "charter must withhold the neutral label"
+    assert "unless the optional board upgrade below" in charter
+
+    # Register A is source-owned and blocking; Register B is optional and not.
+    assert "register a — publication gates (source-owned, blocking)" in status
+    assert "register b — optional independent-board upgrade (non-blocking)" in status
     assert "no gate above requires another organisation" in status
+    for gate in (
+        "pre-registration in force",
+        "append-only signed run ledger",
+        "reproducible by construction",
+        "open stack published",
+        "adversarial self-report populated",
+        "public dispute channel",
+        "public methods write-up",
+    ):
+        assert gate in status, gate
+
+    # Publication classes must be distinguishable, or "publishable" is ambiguous.
+    assert "track publication" in charter and "headline publication" in charter
 
 
 def test_permanent_conflict_and_equal_treatment_are_non_waivable() -> None:

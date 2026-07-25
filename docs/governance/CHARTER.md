@@ -52,8 +52,17 @@ operator can produce:
 | Adversarial self-report | A populated record of where Mnemosyne underperforms |
 | Public dispute channel | Open, logged, with resolutions published |
 
-Until every gate above holds, outputs are labelled **source-ready**, not
-publishable. No gate depends on another organisation.
+Two publication classes, so "publishable" is unambiguous:
+
+- **Track publication** — a measured track with its traces, bundle, and
+  pre-registration may be published as soon as *that track* satisfies the gates
+  above. This is what permits the site to render incrementally.
+- **Headline publication** — any comparative ranking, leaderboard standing, or
+  external claim requires **every** gate above to hold across all rendered
+  tracks.
+
+Until a class's gates hold, its outputs are labelled **source-ready**, not
+published. No gate depends on another organisation.
 
 ## Optional upgrade: independent board
 

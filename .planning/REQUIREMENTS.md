@@ -47,7 +47,7 @@
 |---|---|---|---|
 | [ ] RAIL-001 | All §31 invariant rails, §33 test classes, tenant/privacy/provenance/capability boundaries, and data-not-instructions behavior remain green. | v2 blueprint | Continuous |
 | [ ] RAIL-002 | The minimal core keeps only `cryptography` required; heavy benchmark/model dependencies remain optional or isolated in services/tools. | Plan A/B | Continuous |
-| [ ] RAIL-003 | No public number is headlined without the pinned harness, complete bundle, separate retrieval/QA columns, disclosed judge, and independent reproduction. | PBPP | Continuous |
+| [ ] RAIL-003 | No public number is headlined without the pinned harness, complete bundle, separate retrieval/QA columns, disclosed judge, and reproduction by construction — one documented command regenerates the number from its pinned bundle. Independent third-party reproduction strengthens a claim and is recorded when it occurs, but does not gate publication. | PBPP | Continuous |
 | [ ] RAIL-004 | Private-suite results remain internal QA and no held-out/test split is used for tuning, patching, or benchmark-specific teaching. | PBPP | Continuous |
 
 ## Traceability

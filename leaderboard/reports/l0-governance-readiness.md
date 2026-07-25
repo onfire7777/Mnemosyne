@@ -1,7 +1,7 @@
 # L0 Governance Readiness
 
 Version: 0.2.0
-Status: draft; External activation required
+Status: source-owned gates active; External activation required only for the optional board upgrade
 
 GOV-001: partial
 

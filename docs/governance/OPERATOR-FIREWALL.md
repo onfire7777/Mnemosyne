@@ -18,7 +18,7 @@ are published automatically from the append-only ledger rather than hand-picked.
 The operator's only residual power is to not run something, which the ledger
 makes visible as a recorded absence.
 
-Operators They execute pinned public inputs,
+Operators execute pinned public inputs,
 retain immutable run identifiers and logs, and publish failures as well as
 successes. Product teams may submit a public adapter and factual documentation;
 they cannot operate, judge, redact, or choose the reported run for their own

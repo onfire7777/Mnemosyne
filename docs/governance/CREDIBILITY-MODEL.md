@@ -47,7 +47,8 @@ only one a solo maintainer can honestly make.
 
 Before any scoring run, a signed `preregistration.json` is committed publicly
 containing: harness commit, adapter versions, dataset revisions and digests,
-metric definitions, the held-out split digest, and the stopping rule. Scores
+metric definitions, the held-out split digest, the stopping rule, and the
+**expected entrant roster**. Scores
 produced under a configuration that does not match a prior pre-registration are
 ineligible and are labelled as such.
 
@@ -74,9 +75,13 @@ separation is enforced in **time and code** instead:
   intentionally-wrong-but-topical answers are published.
 - Result publication is automated from the ledger, not hand-curated.
 
-The operator's remaining power is to *not run something*. That is neutralised by
-the ledger: an absent system is visible as an absence, and the reason is
-recorded.
+The operator's remaining power is to *not run something*. A run ledger alone does
+**not** close this: a system that is never run produces no entry, so silent
+omission would stay invisible. It is closed by pre-registering the **expected
+entrant roster** alongside the configuration, and requiring an explicit
+`no_run` ledger record — with a stated reason — for every rostered system that
+does not produce a result. An unexplained gap between roster and ledger is
+itself a detectable violation.
 
 ### 4. Adversarial self-reporting
 
