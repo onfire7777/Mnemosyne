@@ -16,6 +16,7 @@ from mnemosyne.standing import STANDING_FN_VERSION
 # AGM theory-change operation for each belief-core classification.
 # ADD/UPDATE add a belief consistent with the current set (expansion);
 # SUPERSEDE replaces a contradicted belief under minimal change (revision);
+# CONTRACTION removes a belief (and cascade dependents) while retaining consistency;
 # CONTEST retains a competing hypothesis without forcing a single conclusion;
 # NOOP leaves the belief set unchanged.
 AGM_OPERATIONS: dict[str, str] = {
@@ -24,6 +25,7 @@ AGM_OPERATIONS: dict[str, str] = {
     "NOOP": "none",
     "SUPERSEDE": "revision",
     "CONTEST": "expansion",
+    "CONTRACTION": "contraction",
 }
 
 
@@ -131,7 +133,49 @@ class BeliefRevisionCore:
             and item.predicate == assertion.predicate
         )
         self.engine._persist()
-        return BeliefRevisionReport(operation, assertion_id, justification_id, affected, contradictions)
+        atms = {
+            aid: self.atms_label(assertion.tenant_id, aid, branch=branch) for aid in affected
+        }
+        return BeliefRevisionReport(
+            operation=operation,  # type: ignore[arg-type]
+            assertion_id=assertion_id,
+            justification_id=justification_id,
+            affected_assertion_ids=affected,
+            contradictions=contradictions,
+            agm_operation=agm_operation(operation),
+            atms_by_assertion_id=atms,
+        )
+
+    def contract(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        *,
+        reason: str = "agm contraction",
+        branch: str = "main",
+    ) -> BeliefRevisionReport:
+        """AGM contraction: retract a belief and cascade dependents (I2 / §7 #13).
+
+        App-side L2 composition — uses existing cascade/retract paths; does not
+        hard-delete ledger evidence. Returns a report with operation
+        ``CONTRACTION``, ``agm_operation="contraction"``, and ATMS in/out labels
+        for the root and every cascade-invalidated assertion.
+        """
+        invalidated = self.cascade_invalidate(
+            tenant_id, assertion_id, reason=reason, branch=branch
+        )
+        # Include root even if already retracted / no-op cascade
+        ids = sorted(set(invalidated) | {assertion_id})
+        atms = {aid: self.atms_label(tenant_id, aid, branch=branch) for aid in ids}
+        return BeliefRevisionReport(
+            operation="CONTRACTION",
+            assertion_id=assertion_id,
+            justification_id=None,
+            affected_assertion_ids=ids,
+            contradictions=[],
+            agm_operation="contraction",
+            atms_by_assertion_id=atms,
+        )
 
     def apply_tier0_correction(self, assertion: Assertion, branch: str = "main") -> BeliefRevisionReport:
         """Apply a tier-0 (direct-user) correction as an immediate supersession.
@@ -175,19 +219,42 @@ class BeliefRevisionCore:
             self.engine._persist()
         return report
 
-    def cascade_invalidate(self, tenant_id: str, assertion_id: str, reason: str = "dependency invalidated") -> list[str]:
+    def cascade_invalidate(
+        self,
+        tenant_id: str,
+        assertion_id: str,
+        reason: str = "dependency invalidated",
+        *,
+        branch: str | None = None,
+    ) -> list[str]:
         """Retract an assertion and every belief transitively derived from it.
 
         Walks the justification dependency graph breadth-first from
         ``assertion_id``, marking each reachable assertion ``retracted`` with the
         given ``reason``, then audits and persists. Returns the list of
         invalidated assertion ids (including the root).
+
+        When ``branch`` is set, only assertions on that branch are retracted
+        (AGM ``contract(..., branch=...)`` isolation). Assertion ids may be
+        cloned across branches via ``engine.branch()``; membership is keyed by
+        presence on the requested branch — never a lossy id→branch map.
         """
+        # ids that exist on the requested branch (or all ids when branch is None)
+        ids_on_scope: set[str] = set()
+        for item in self.engine.assertions.values():
+            if item.tenant_id != tenant_id:
+                continue
+            if branch is None or item.branch == branch:
+                ids_on_scope.add(item.id)
         dependencies: dict[str, list[str]] = defaultdict(list)
         for justification in self.engine.justifications.values():
             if justification.tenant_id != tenant_id:
                 continue
+            if justification.assertion_id not in ids_on_scope:
+                continue
             for dependency in justification.dependency_ids:
+                if dependency not in ids_on_scope:
+                    continue
                 dependencies[dependency].append(justification.assertion_id)
         invalidated: list[str] = []
         queue: deque[str] = deque([assertion_id])
@@ -198,7 +265,12 @@ class BeliefRevisionCore:
                 continue
             seen.add(current)
             for key, assertion in self.engine.assertions.items():
-                if assertion.tenant_id == tenant_id and assertion.id == current and assertion.status != "retracted":
+                if (
+                    assertion.tenant_id == tenant_id
+                    and assertion.id == current
+                    and assertion.status != "retracted"
+                    and (branch is None or assertion.branch == branch)
+                ):
                     assertion.status = "retracted"
                     assertion.calibration["invalidated_reason"] = reason
                     assertion.calibration["standing_cascade"] = {
@@ -215,6 +287,8 @@ class BeliefRevisionCore:
                     invalidated.append(current)
                     self.engine.assertions[key] = assertion
             for dependent in dependencies.get(current, []):
+                if dependent not in ids_on_scope:
+                    continue
                 queue.append(dependent)
         if invalidated:
             self.engine._audit(
@@ -225,6 +299,7 @@ class BeliefRevisionCore:
                 {
                     "invalidated": invalidated,
                     "reason": reason,
+                    "branch": branch,
                     "standing_cascade": {
                         "schema_version": "standing.belief-cascade.v1",
                         "standing_fn_version": STANDING_FN_VERSION,
@@ -287,10 +362,12 @@ class BeliefRevisionCore:
                 break
         if target is None or target.status not in {"active", "contested"}:
             return "out"
+        # Branch-scoped statuses: engine.branch() clones keep the same id, so a
+        # tenant-wide map would conflate main vs scratch dependency state.
         status_by_id = {
             item.id: item.status
             for item in self.engine.assertions.values()
-            if item.tenant_id == tenant_id
+            if item.tenant_id == tenant_id and item.branch == branch
         }
         justifications = [
             justification

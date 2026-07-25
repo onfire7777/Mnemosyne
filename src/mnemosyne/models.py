@@ -17,7 +17,7 @@ AssertionStatus = Literal[
     "quarantined",
     "retracted",
 ]
-BeliefOperation = Literal["ADD", "UPDATE", "SUPERSEDE", "NOOP", "CONTEST"]
+BeliefOperation = Literal["ADD", "UPDATE", "SUPERSEDE", "NOOP", "CONTEST", "CONTRACTION"]
 
 
 def utc_now() -> datetime:
@@ -315,6 +315,10 @@ class BeliefRevisionReport:
     justification_id: str | None
     affected_assertion_ids: list[str]
     contradictions: list[str]
+    # AGM theory-change label (expansion / revision / contraction / none)
+    agm_operation: str = "none"
+    # ATMS in/out labels for root + affected assertions after the op
+    atms_by_assertion_id: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
