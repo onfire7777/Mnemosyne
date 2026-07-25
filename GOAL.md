@@ -26,11 +26,16 @@ score, run a protected benchmark, or claim Phase 12, 14, 15, or 16 complete.
 
 Read these before planning or editing. They are authoritative over this goal:
 
+- `/Users/admin/Mnemosyne/GOAL.md` (historical program goal; its own
+  point-in-time warning defers live status to `.planning/STATE.md`)
+- `.planning/ACTIVE-GOAL-OPERATING-CONTRACT.md`
+- `.planning/OPS-HANDOFF-AND-OWNERSHIP.md`
 - `.planning/ROADMAP.md`
 - `.planning/STATE.md`
 - `.planning/REQUIREMENTS.md`
 - `.planning/phases/12-grounded-multi-hop-answer-synthesis/12-04-PLAN.md`
 - `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md`
+- `docs/CODEX-HANDOFF-EXECUTION-PROMPT.md`
 - `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md`
 - `docs/benchmark/MEMORY-NATIVE-BENCHMARK.md`
 - `docs/governance/BOARD-STATUS.md`
@@ -41,6 +46,16 @@ Read these before planning or editing. They are authoritative over this goal:
 - `eval/public/README.md`
 - `eval/public/bundle.py`
 - `eval/public/runner.py`
+- `docs/superpowers/specs/2026-07-15-world-best-memory-platform-design.md`
+- `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md`
+
+Traceability: the historical program goal explicitly requires Phases 13-16
+agent-owned work and names W4's reproducibility standard plus leaderboard
+preparation. The live roadmap's revised Phase 16 sequencing permits the site and
+data pipeline before full Phase 15 closure, while the active-goal and operations
+contracts forbid treating local code/tests as production evidence. This package
+implements only that data-contract seam and leaves the higher-priority,
+operator-owned production capture path untouched.
 
 The Phase 13, 14, and 16 decomposition is:
 
