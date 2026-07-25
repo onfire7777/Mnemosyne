@@ -32,7 +32,12 @@ from mnemosyne.access_policy import (
     vector_partition_for_item,
 )
 from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
-from mnemosyne.calibration import CalibrationSet, fuse_calibrated_confidence_from_hit
+from mnemosyne.calibration import (
+    CalibrationSet,
+    conformal_prediction_set_size_for_hits,
+    copy_confidence_metadata,
+    fuse_calibrated_confidence_from_hit,
+)
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.engine import (
     Intention,
@@ -3004,8 +3009,7 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
-                    if "confidence" in metadata:
-                        hit_metadata["confidence"] = metadata["confidence"]
+                    copy_confidence_metadata(metadata, hit_metadata)
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
@@ -3252,8 +3256,7 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
-                    if "confidence" in metadata:
-                        hit_metadata["confidence"] = metadata["confidence"]
+                    copy_confidence_metadata(metadata, hit_metadata)
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
@@ -3379,8 +3382,7 @@ class PostgresEngine:
                         hit_metadata["summary"] = metadata["summary"]
                     if isinstance(metadata.get("lifecycle"), dict):
                         hit_metadata["lifecycle"] = metadata["lifecycle"]
-                    if "confidence" in metadata:
-                        hit_metadata["confidence"] = metadata["confidence"]
+                    copy_confidence_metadata(metadata, hit_metadata)
                     if isinstance(metadata.get("earned_autonomy"), dict):
                         hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                     if "birth_groundedness" in metadata:
@@ -4044,13 +4046,19 @@ class PostgresEngine:
     @staticmethod
     def _calibration_explain(calibration: CalibrationSet | None, threshold: float) -> dict[str, Any]:
         if calibration is None:
-            return {"source": "policy", "memory_type": "fact", "threshold": threshold}
+            return {
+                "source": "policy",
+                "memory_type": "fact",
+                "threshold": threshold,
+                "nonconformity": "per_example",
+            }
         return {
             "source": "conformal",
             "memory_type": calibration.memory_type,
             "threshold": threshold,
             "target_coverage": calibration.target_coverage,
             "scores": len(calibration.scores),
+            "nonconformity": "per_example",
         }
 
     def _record_retrieval_access(self, hits: list[Hit]) -> dict[str, int]:
@@ -5698,8 +5706,7 @@ class PostgresEngine:
                             hit_metadata["summary"] = metadata["summary"]
                         if isinstance(metadata.get("lifecycle"), dict):
                             hit_metadata["lifecycle"] = metadata["lifecycle"]
-                        if "confidence" in metadata:
-                            hit_metadata["confidence"] = metadata["confidence"]
+                        copy_confidence_metadata(metadata, hit_metadata)
                         if isinstance(metadata.get("earned_autonomy"), dict):
                             hit_metadata["earned_autonomy"] = metadata["earned_autonomy"]
                         if "birth_groundedness" in metadata:
@@ -6589,13 +6596,8 @@ class PostgresEngine:
 
     @staticmethod
     def _prediction_set_size(hits: list[Hit], threshold: float) -> int:
-        if not hits:
-            return 0
-        max_score = max((max(hit.score, 0.0) for hit in hits), default=0.0)
-        if max_score <= 0.0:
-            return 0
-        cutoff = max_score * max(0.05, min(0.95, threshold))
-        return sum(1 for hit in hits if max(hit.score, 0.0) >= cutoff)
+        """Per-example conformal set size (I8 / §7 #12) — not packet-relative."""
+        return conformal_prediction_set_size_for_hits(hits, threshold=threshold)
 
 
 def _cid_to_bytes(cid: str) -> bytes:
