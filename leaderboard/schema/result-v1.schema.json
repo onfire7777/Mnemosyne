@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mnemosyne.leaderboard.result/v1",
+  "title": "Mnemosyne public leaderboard result v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "record_id",
+    "system",
+    "track",
+    "benchmark",
+    "benchmark_version",
+    "run_commit",
+    "build_fingerprint",
+    "config_digest",
+    "bundle_digest",
+    "trace_index_digest",
+    "metrics",
+    "publication",
+    "operator_entry",
+    "history"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mnemosyne.leaderboard.result/v1"
+    },
+    "record_id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "system": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "track": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "benchmark": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "benchmark_version": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "run_commit": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "build_fingerprint": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "config_digest": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "bundle_digest": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "trace_index_digest": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/metric"
+      }
+    },
+    "publication": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "operator_entry": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "history": {
+      "type": "object",
+      "minProperties": 1
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "confidenceInterval": {
+      "type": "object",
+      "required": [
+        "low",
+        "high"
+      ],
+      "properties": {
+        "low": {
+          "type": "number"
+        },
+        "high": {
+          "type": "number"
+        }
+      }
+    },
+    "judge": {
+      "type": "object",
+      "required": [
+        "model",
+        "prompt_digest",
+        "config_digest"
+      ],
+      "properties": {
+        "model": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "prompt_digest": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "config_digest": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "required": [
+        "name",
+        "family",
+        "value",
+        "unit",
+        "confidence_interval"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "family": {
+          "enum": [
+            "retrieval",
+            "judged_qa"
+          ]
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "confidence_interval": {
+          "$ref": "#/$defs/confidenceInterval"
+        },
+        "judge": {
+          "$ref": "#/$defs/judge"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "family": {
+                "const": "judged_qa"
+              }
+            },
+            "required": [
+              "family"
+            ]
+          },
+          "then": {
+            "required": [
+              "judge"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "judge"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

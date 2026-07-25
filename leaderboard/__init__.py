@@ -1,0 +1,1 @@
+"""Public leaderboard result contract."""
