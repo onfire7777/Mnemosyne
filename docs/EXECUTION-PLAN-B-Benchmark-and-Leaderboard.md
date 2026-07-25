@@ -54,7 +54,7 @@ Execution spec, not prose. Two parts: **Part I** benchmarks Mnemosyne credibly; 
 | L-i | It exists & is trusted | Public site + open harness + methods paper + openly-licensed results dump |
 | L-ii | Structurally neutral | Operator runs every system under one harness; hard firewall on our own entry (§L0) |
 | L-iii | Resists gaming | Hidden/rotated split, contamination controls, signed build==public attestation, honest LLM-judge reporting |
-| L-iv | Becomes the default | Multi-track (conversational / agentic / multi-session); ≥8 systems live; academic co-sign |
+| L-iv | Becomes the default | Multi-track (conversational / agentic / multi-session); every system with a fair adapter live, absences disclosed; external citation or co-sign is strengthening evidence, not a gate |
 
 ### Explicit non-goals / anti-patterns
 - No headlining **LoCoMo** or **DMR/MSC** (contested / saturated — market research §6).
@@ -209,7 +209,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 2. **M1 public harness** (Wave E kickoff) ∥ **L0 governance charter** — weeks 1–3.
 3. **M2/M3 bundle + third-party repro** ∥ **L1 methodology + L2 site scaffold** — weeks 2–8.
 4. L3 explainers ∥ finalize Part I results — weeks 4–10.
-5. **L4 launch** (seed ≥8 systems, methods paper) — weeks 8–14.
+5. **L4 launch** (seed every system with a fair adapter, public methods write-up) — weeks 8–14.
 
 **Dependencies:** M4 blocks any publication; M1's harness **is** L1's engine (shared eval core — serialize writes); L0 blocks L4; Part I depends on **Plan A** capabilities for the QA numbers. Deterministic tracks may be benchmarked before reader tracks, but publication still requires the complete PBPP bundle and genuine independent reproduction.
 
@@ -224,7 +224,7 @@ Seed by running **all major systems** (mem0, Zep/Graphiti, Letta, Cognee, MemOS,
 - [ ] Methodology + anti-gaming + contamination controls implemented (L1).
 - [ ] Leaderboard site live from a public, versioned results repo; trace browser working (L2).
 - [ ] Explainer/education layer published (L3).
-- [ ] Public launch: ≥8 systems, methods paper, raw-data dump openly licensed (L4).
+- [ ] Public launch: every system with a fair adapter plus disclosed absences, public methods write-up, raw-data dump openly licensed (L4).
 - [ ] Mnemosyne entered under identical rules; no special access.
 
 ---
