@@ -7,6 +7,8 @@ from mnemosyne.calibration import (
     conformal_prediction_set,
     conformal_prediction_set_size_for_hits,
     conformal_should_abstain,
+    conformal_threshold,
+    copy_confidence_metadata,
     example_confidence_from_hit,
     nonconformity_score,
     packet_relative_prediction_set_size,
@@ -51,6 +53,50 @@ def test_example_confidence_prefers_metadata_over_score() -> None:
     assert example_confidence_from_hit(hit) == 0.2
 
 
+def test_example_confidence_rejects_nan_and_inf() -> None:
+    hit = Hit(
+        id="n",
+        kind="evidence",
+        tenant_id="t",
+        branch="main",
+        text="n",
+        score=0.3,
+        channel="dense",
+        metadata={"confidence": float("nan"), "calibrated_confidence": float("inf")},
+    )
+    # Non-finite metadata skipped → fall through to finite score.
+    assert example_confidence_from_hit(hit) == 0.3
+
+
+def test_copy_confidence_metadata_preserves_aliases() -> None:
+    dest: dict = {}
+    copy_confidence_metadata(
+        {
+            "calibrated_confidence": 0.7,
+            "verbalized_confidence": 0.6,
+            "confidence": 0.5,
+        },
+        dest,
+    )
+    assert dest == {
+        "calibrated_confidence": 0.7,
+        "verbalized_confidence": 0.6,
+        "confidence": 0.5,
+    }
+    assert example_confidence_from_hit(
+        Hit(
+            id="x",
+            kind="evidence",
+            tenant_id="t",
+            branch="main",
+            text="x",
+            score=0.1,
+            channel="dense",
+            metadata=dest,
+        )
+    ) == 0.7  # prefers calibrated_confidence
+
+
 def test_per_example_set_size_diverges_from_packet_relative() -> None:
     """Acceptance: set size != packet-only path under mixed conf vs score."""
     # High retrieval scores, low explicit confidences, moderate threshold.
@@ -93,20 +139,16 @@ def test_conformal_prediction_set_and_should_abstain_wire() -> None:
         _hit(hit_id="d", score=0.7, confidence=0.06),
     ]
     labels = scored_labels_from_hits(hits)
-    # Packet path keeps many high-score hits; per-example set is empty/tiny.
-    packet = packet_relative_prediction_set_size(hits, threshold=0.2)
+    thr = conformal_threshold(calibration)
+    packet = packet_relative_prediction_set_size(hits, threshold=thr)
     assert packet >= 3
     pred = conformal_prediction_set(labels, calibration)
-    eng_size = LocalMemoryEngine._prediction_set_size(hits, threshold=0.5)
-    assert eng_size == len(pred) or eng_size <= 1
-    # Empty/tiny per-example set ⇒ conformal abstain.
+    eng_size = LocalMemoryEngine._prediction_set_size(hits, threshold=thr)
+    assert eng_size == len(pred)
+    # Empty/tiny per-example set ⇒ conformal abstain; packet size diverges.
     assert conformal_should_abstain(labels, calibration, max_set_size=3) is True
-    # Packet-relative size is large; per-example engine size is small/empty — diverge.
     assert packet != eng_size
     assert should_abstain(0.99, calibration, prediction_set_size=0, max_set_size=3) is True
-    # High conf + small per-example set size (1) may still accept if conf clears bar.
-    if eng_size == 1:
-        assert should_abstain(0.99, calibration, prediction_set_size=eng_size, max_set_size=3) is False
 
 
 def test_calibration_explain_marks_per_example_nonconformity() -> None:
