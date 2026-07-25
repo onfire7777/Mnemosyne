@@ -145,6 +145,137 @@ def conformal_should_abstain(
     return not prediction_set or len(prediction_set) > max_set_size
 
 
+# Confidence fields preserved on retrieval hit metadata for per-example conformal (I8).
+CONFIDENCE_METADATA_KEYS = (
+    "calibrated_confidence",
+    "verbalized_confidence",
+    "confidence",
+)
+
+
+def copy_confidence_metadata(source: Mapping[str, Any] | None, dest: dict[str, Any]) -> None:
+    """Copy calibrated/verbalized/raw confidence fields into a hit metadata envelope."""
+    if not isinstance(source, Mapping):
+        return
+    for key in CONFIDENCE_METADATA_KEYS:
+        if key in source and source[key] is not None:
+            dest[key] = source[key]
+
+
+def example_confidence_from_hit(hit: Any) -> float:
+    """Per-example confidence used for conformal nonconformity (I8 / §7 #12).
+
+    Trusted sources only (fail closed against client-forged aliases):
+
+    1. ``metadata["confidence"]`` — server/assertion confidence on projections
+    2. retrieval ``score`` as a weak proxy when no explicit confidence
+
+    ``calibrated_confidence`` / ``verbalized_confidence`` from arbitrary evidence
+    metadata are *not* used for the conformal accept bar (CWE-345: clients must
+    not inflate aliases to bypass abstention). Those fields may still be copied
+    onto hit envelopes for explain/display via :func:`copy_confidence_metadata`.
+    Non-finite values are rejected.
+    """
+    meta = getattr(hit, "metadata", None)
+    if isinstance(meta, Mapping) and meta.get("confidence") is not None:
+        try:
+            value = float(meta["confidence"])
+        except (TypeError, ValueError):
+            value = None
+        else:
+            if math.isfinite(value):
+                return max(0.0, min(1.0, value))
+    score = getattr(hit, "score", None)
+    if score is not None:
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            return 0.0
+        if math.isfinite(value):
+            return max(0.0, min(1.0, value))
+    return 0.0
+
+
+def scored_labels_from_hits(hits: list[Any]) -> list[tuple[str, float]]:
+    """Build ``(label, confidence)`` pairs for conformal_prediction_set."""
+    labels: list[tuple[str, float]] = []
+    for hit in hits:
+        label = str(getattr(hit, "id", None) or getattr(hit, "kind", "hit") or "hit")
+        labels.append((label, example_confidence_from_hit(hit)))
+    return labels
+
+
+def _hit_has_trusted_confidence(hit: Any) -> bool:
+    meta = getattr(hit, "metadata", None)
+    if not isinstance(meta, Mapping):
+        return False
+    if meta.get("confidence") is None:
+        return False
+    try:
+        value = float(meta["confidence"])
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(value)
+
+
+def conformal_prediction_set_size_for_hits(
+    hits: list[Any],
+    *,
+    threshold: float,
+) -> int:
+    """Count hits in the conformal prediction set (I8 / §7 #12).
+
+    * When at least one hit carries trusted ``metadata["confidence"]`` (assertion
+      confidence / server-set field), size is the **per-example** count:
+      ``nonconformity_score(c) <= nonconformity_score(threshold)``.
+    * When every hit is score-only (typical raw evidence retrieve), fall back to
+      the historical **packet-relative** size
+      ``count(score >= max_score * threshold)`` so RRF scores are not treated as
+      calibrated confidences (which would empty the set and force abstention).
+
+    Diverge fixtures use explicit confidence metadata to prove the per-example
+    path is not identity-equivalent to packet-relative.
+    """
+    if not hits:
+        return 0
+    if not any(_hit_has_trusted_confidence(hit) for hit in hits):
+        return packet_relative_prediction_set_size(hits, threshold=threshold)
+    try:
+        bar = max(0.0, min(1.0, float(threshold)))
+    except (TypeError, ValueError):
+        bar = 1.0
+    cutoff = nonconformity_score(bar)
+    return sum(
+        1
+        for hit in hits
+        if nonconformity_score(example_confidence_from_hit(hit)) <= cutoff
+    )
+
+
+def packet_relative_prediction_set_size(
+    hits: list[Any],
+    *,
+    threshold: float,
+) -> int:
+    """Legacy packet-relative set size (score vs max_score * threshold).
+
+    Kept for diverge fixtures / characterization — retrieve must *not* use this
+    after #12; engines call :func:`conformal_prediction_set_size_for_hits`.
+    """
+    if not hits:
+        return 0
+    scores = [max(float(getattr(hit, "score", 0.0) or 0.0), 0.0) for hit in hits]
+    max_score = max(scores) if scores else 0.0
+    if max_score <= 0.0:
+        return 0
+    try:
+        bar = max(0.05, min(0.95, float(threshold)))
+    except (TypeError, ValueError):
+        bar = 0.05
+    cutoff = max_score * bar
+    return sum(1 for score in scores if score >= cutoff)
+
+
 def calibration_examples_from_rows(rows: list[dict[str, Any]]) -> list[CalibrationExample]:
     return [CalibrationExample.from_mapping(row) for row in rows]
 
