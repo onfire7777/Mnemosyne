@@ -216,6 +216,71 @@ def run_cli(store: Path, *args: str) -> dict:
     return json.loads(result.stdout)
 
 
+def dual_source_consolidate(
+    store: Path,
+    *,
+    content_a: str,
+    content_b: str,
+    provider_args: tuple[str, ...] = (),
+    source_type_a: str = "chat",
+    source_type_b: str = "note",
+) -> tuple[dict, dict, dict]:
+    """Ingest two independent sources, then consolidate with both CIDs (§7 #17 floor)."""
+    from mnemosyne.consolidation import CONSOLIDATE_EVIDENCE_JOB, DEFAULT_CONSOLIDATION_PASSES
+
+    first = run_cli(
+        store,
+        *provider_args,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        source_type_a,
+        "--content",
+        content_a,
+        "--no-enqueue-consolidation",
+    )
+    second = run_cli(
+        store,
+        *provider_args,
+        "ingest",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--actor",
+        "user",
+        "--source-type",
+        source_type_b,
+        "--content",
+        content_b,
+        "--no-enqueue-consolidation",
+    )
+    payload = {
+        "tenant_id": TENANT,
+        "user_id": USER,
+        "branch": "main",
+        "source_evidence_cids": [first["cid"], second["cid"]],
+        "trigger": "test_dual_source",
+        "passes": list(DEFAULT_CONSOLIDATION_PASSES),
+        "trust_tier": 0,
+    }
+    run_cli(
+        store,
+        "queue-enqueue",
+        "--kind",
+        CONSOLIDATE_EVIDENCE_JOB,
+        "--payload",
+        json.dumps(payload),
+    )
+    consolidated = run_cli(store, *provider_args, "consolidate-once")
+    return first, second, consolidated
+
+
 def seed_grounded_gate_evidence(
     store: Path,
     content: str,
@@ -5201,9 +5266,13 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
                 "from pathlib import Path",
                 "state = Path(sys.argv[1])",
                 "request = json.load(sys.stdin)",
-                "candidate = request['candidates'][0]",
-                "state.write_text(json.dumps({'tenant_id': request['tenant_id'], 'signatures': [item['signature'] for item in request['candidates']]}, sort_keys=True), encoding='utf-8')",
-                "print(json.dumps({'candidates': [{'signature': candidate['signature'], 'entity_key': 'runtime-cli'}], 'entities': [{'key': 'runtime-cli', 'label': 'Runtime CLI', 'aliases': [candidate['candidate_subject']], 'candidate_signatures': [candidate['signature']]}]}))",
+                "candidates = request['candidates']",
+                "by_sig = {item['signature']: item for item in candidates}",
+                "unique = list(by_sig.values())",
+                "state.write_text(json.dumps({'tenant_id': request['tenant_id'], 'signatures': [item['signature'] for item in unique]}, sort_keys=True), encoding='utf-8')",
+                "resolved = [{'signature': item['signature'], 'entity_key': 'runtime-cli'} for item in unique]",
+                "aliases = sorted({item.get('candidate_subject') for item in unique if item.get('candidate_subject')})",
+                "print(json.dumps({'candidates': resolved, 'entities': [{'key': 'runtime-cli', 'label': 'Runtime CLI', 'aliases': aliases, 'candidate_signatures': [item['signature'] for item in unique]}]}))",
             ]
         ),
         encoding="utf-8",
@@ -5222,52 +5291,27 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
         "local CLI",
         "--protected",
     )
-    ingested = run_cli(
-        store,
+    provider_args = (
         "--entity-resolver-provider",
         "command",
         "--entity-resolver-command",
         resolver_command,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "chat",
-        "--content",
-        "Runtime consolidation target is local CLI.",
     )
-    # Dual independent sources before consolidator so external floor (2) can pass.
-    ingested_b = run_cli(
+    first, second, consolidated = dual_source_consolidate(
         store,
-        "--entity-resolver-provider",
-        "command",
-        "--entity-resolver-command",
-        resolver_command,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "note",
-        "--content",
-        "Independent note: Runtime consolidation target is local CLI.",
-        "--run-consolidation-once",
+        content_a="Runtime consolidation target is local CLI.",
+        # Same fact on an independent source_type (note) — avoid extra parse noise.
+        content_b="Runtime consolidation target is local CLI.",
+        provider_args=provider_args,
     )
     report = run_cli(store, "ops-report", "--tenant", TENANT)
     exported = run_cli(store, "export", "--tenant", TENANT)
 
-    assert ingested["queued_jobs"][0]["kind"] == "consolidate_evidence"
-    job = ingested_b["consolidation_worker"]["job"]
+    job = consolidated["job"]
     assert job is not None
     assert job["status"] == "complete"
     assert job["result"]["candidate_results"][0]["promoted"] is True
+    assert set(job["result"]["source_evidence_cids"]) == {first["cid"], second["cid"]}
     assert job["result"]["passes_run"][:3] == ["replayer", "extractor", "resolver"]
     resolver_details = job["result"]["pass_results"][2]["details"]
     assert resolver_details["strategy"] == "command_entity_resolver"
@@ -5293,39 +5337,16 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
         "local CLI",
         "--protected",
     )
-    run_cli(
+    first, _second, consolidated = dual_source_consolidate(
         store,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "chat",
-        "--content",
-        "Runtime consolidation target is local CLI.",
+        content_a="Runtime consolidation target is local CLI.",
+        content_b="Runtime consolidation target is local CLI.",
     )
-    ingested = run_cli(
-        store,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "note",
-        "--content",
-        "Independent note: Runtime consolidation target is local CLI.",
-        "--run-consolidation-once",
-    )
+    assert consolidated["job"]["result"]["candidate_results"][0]["promoted"] is True
     exported = run_cli(store, "export", "--tenant", TENANT)
-    assert any(item["source_type"] == "consolidation-summary" for item in exported["evidence"])
-    assert any(item["predicate"] == "summary-derived-gist" for item in exported["relations"])
-    assert any(item["predicate"] == "is" for item in exported["relations"])
+    summary = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
+    summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
+    fact_relation = next(item for item in exported["relations"] if item["predicate"] == "is")
 
     recompute = run_cli(
         store,
@@ -5335,17 +5356,25 @@ def test_cli_projection_recompute_tracks_affected_projection_set(tmp_path: Path)
         "--user",
         USER,
         "--cid",
-        ingested["cid"],
+        first["cid"],
     )
     details = recompute["job"]["result"]["details"]
 
     assert recompute["ok"] is True
     assert recompute["job"]["status"] == "complete"
-    assert ingested["cid"] in details.get("changed_evidence_cids", [])
-    # Under G-consol dual-source, affected projection fan-out may omit summary nodes
-    # depending on which cid is re-rooted; require successful recompute + metrics.
+    assert details["changed_evidence_cids"] == [first["cid"]]
+    assert first["cid"] in details["affected_evidence_cids"]
+    assert summary["cid"] in details["affected_evidence_cids"]
+    assert details["affected_projection_counts"]["assertions"] >= 1
+    assert details["affected_projection_counts"]["entities"] >= 1
+    assert details["affected_projection_counts"]["relations"] >= 2
+    assert details["affected_projection_counts"]["preferences"] == 0
+    assert len(details["affected_projections"]["assertions"]) >= 1
+    assert "runtime-consolidation-target" in details["affected_projections"]["entities"]
+    assert fact_relation["id"] in details["affected_projections"]["relations"]
+    assert summary_relation["id"] in details["affected_projections"]["relations"]
+    assert len(details["queued_consolidation_jobs"]) == 1
     assert recompute["metrics"]["counters"]["projection_recompute.completed"] == 1
-
 
 
 
@@ -5475,7 +5504,8 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
                 "import json, sys",
                 "request = json.load(sys.stdin)",
                 "evidence = request['evidence'][0]",
-                "print(json.dumps({'candidates': [{'signature': 'model backed runtime target local cli', 'query': 'model backed runtime target', 'candidate_subject': 'Model backed runtime target', 'candidate_predicate': 'is', 'candidate_object': 'local CLI', 'confidence': 0.91, 'access_policy': evidence['access_policy']}], 'metadata': {'source': 'test-extractor'}}))",
+                "cids = [item.get('cid') for item in request.get('evidence', []) if item.get('cid')]",
+                "print(json.dumps({'candidates': [{'signature': 'model backed runtime target local cli', 'query': 'model backed runtime target', 'candidate_subject': 'Model backed runtime target', 'candidate_predicate': 'is', 'candidate_object': 'local CLI', 'confidence': 0.91, 'access_policy': evidence['access_policy'], 'source_evidence_cids': cids or [evidence.get('cid')]}], 'metadata': {'source': 'test-extractor'}}))",
             ]
         ),
         encoding="utf-8",
@@ -5508,8 +5538,7 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
         "--protected",
     )
 
-    ingested = run_cli(
-        store,
+    provider_args = (
         "--candidate-extractor-provider",
         "command",
         "--candidate-extractor-command",
@@ -5518,44 +5547,14 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
         "command",
         "--summarizer-command",
         summarizer_command,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "chat",
-        "--content",
-        "Meeting note: target/local CLI; not a deterministic is-fact sentence.",
     )
-    ingested_b = run_cli(
+    first, second, consolidated = dual_source_consolidate(
         store,
-        "--candidate-extractor-provider",
-        "command",
-        "--candidate-extractor-command",
-        extractor_command,
-        "--summarizer-provider",
-        "command",
-        "--summarizer-command",
-        summarizer_command,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "note",
-        "--content",
-        "Independent note: Model backed runtime target is local CLI.",
-        "--run-consolidation-once",
+        content_a="Meeting note: target/local CLI; not a deterministic is-fact sentence.",
+        content_b="Independent confirmation: Model backed runtime target is local CLI.",
+        provider_args=provider_args,
     )
-    job = ingested_b["consolidation_worker"]["job"]
-    first_cid = ingested["cid"]
-    ingested = ingested_b
+    job = consolidated["job"]
     extractor_result = job["result"]["pass_results"][1]
     summarizer_result = next(item for item in job["result"]["pass_results"] if item["name"] == "summarizer")
     role_pipeline = job["result"]["role_pipeline"]
@@ -5564,6 +5563,7 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
 
     assert job["status"] == "complete"
     assert job["result"]["candidate_results"][0]["promoted"] is True
+    assert set(job["result"]["source_evidence_cids"]) == {first["cid"], second["cid"]}
     assert role_pipeline["owner_role"] == "consolidator"
     assert role_pipeline["write_authorized"] is True
     assert role_pipeline["model_backed_roles"] == ["candidate_extractor", "evidence_summarizer"]
@@ -5576,12 +5576,17 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
     assert summarizer_result["details"]["strategy"] == "command_evidence_summarizer"
     assert summarizer_result["details"]["summary"] == "Model-backed extraction identified the runtime target."
     assert summarizer_result["details"]["materialized"] is True
-    summary_evidence = next(item for item in exported["evidence"] if item["source_type"] == "consolidation-summary")
-    summary_relation = next(item for item in exported["relations"] if item["predicate"] == "summary-derived-gist")
-    assert summary_evidence["cid"] == summarizer_result["details"]["summary_cid"]
+    summary_cid = summarizer_result["details"]["summary_cid"]
+    summary_evidence = next(item for item in exported["evidence"] if item["cid"] == summary_cid)
+    summary_relation = next(
+        item
+        for item in exported["relations"]
+        if item["predicate"] == "summary-derived-gist" and item["target"] == summary_cid
+    )
+    assert summary_evidence["source_type"] == "consolidation-summary"
     assert summary_evidence["metadata"]["summary"]["strategy"] == "command_evidence_summarizer"
-    assert first_cid in summary_evidence["metadata"]["summary"]["source_evidence_cids"] or ingested["cid"] in summary_evidence["metadata"]["summary"]["source_evidence_cids"]
-    assert summary_relation["source"] in {first_cid, ingested["cid"]}
+    assert set(summary_evidence["metadata"]["summary"]["source_evidence_cids"]) == {first["cid"], second["cid"]}
+    assert summary_relation["source"] in {first["cid"], second["cid"]}
     assert summary_relation["target"] == summary_evidence["cid"]
     assert exported["assertions"][0]["subject"] == "Model backed runtime target"
     assert exported["assertions"][0]["object"] == "local CLI"
@@ -5602,46 +5607,18 @@ def test_cli_persisted_gate_case_blocks_consolidation_promotion(tmp_path: Path) 
         "required protected memory",
         "--protected",
     )
-    run_cli(
+    _first, _second, consolidated = dual_source_consolidate(
         store,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "chat",
-        "--content",
-        "Runtime consolidation target is local CLI.",
-    )
-    ingested = run_cli(
-        store,
-        "ingest",
-        "--tenant",
-        TENANT,
-        "--user",
-        USER,
-        "--actor",
-        "user",
-        "--source-type",
-        "note",
-        "--content",
-        "Independent note: Runtime consolidation target is local CLI.",
-        "--run-consolidation-once",
+        content_a="Runtime consolidation target is local CLI.",
+        content_b="Runtime consolidation target is local CLI.",
     )
 
-    candidate = ingested["consolidation_worker"]["job"]["result"]["candidate_results"][0]
+    candidate = consolidated["job"]["result"]["candidate_results"][0]
 
     assert listed["case"]["id"] == "protected-sentinel"
     assert run_cli(store, "gate-case-list")["cases"][0]["protected"] is True
     assert candidate["promoted"] is False
-    assert (
-        candidate.get("protected_regressions") == ["protected-sentinel"]
-        or any("protected" in str(x).lower() for x in candidate.get("failed_cases", []))
-        or any("fact_external_corroboration" in str(x) for x in candidate.get("failed_cases", []))
-    )
+    assert candidate["protected_regressions"] == ["protected-sentinel"]
 
 
 def test_cli_gate_suite_check_reports_fingerprint_and_fails_closed(tmp_path: Path) -> None:
