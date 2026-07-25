@@ -33,7 +33,7 @@ from mnemosyne.access_policy import (
     vector_partition_for_item,
 )
 from mnemosyne.algorithms import fit_budget, mmr_select, ppr_power_iteration, rrf_fuse, u_curve_order
-from mnemosyne.calibration import CalibrationSet
+from mnemosyne.calibration import CalibrationSet, fuse_calibrated_confidence_from_hit
 from mnemosyne.consciousness import RealityMonitor
 from mnemosyne.ids import content_cid, evidence_cid, evidence_unscoped_cid, new_id
 from mnemosyne.journal import CIDJournal, journal_filename
@@ -4020,10 +4020,15 @@ class LocalMemoryEngine:
                 branch=hit.branch,
                 source_evidence_cids=source_cids,
             )
+        meta = hit.metadata if isinstance(hit.metadata, dict) else {}
         return {
             "reality_class": reality_class,
             "trust_tier": hit.trust_tier,
-            "calibrated_confidence": hit.metadata.get("confidence", 0.0),
+            "calibrated_confidence": fuse_calibrated_confidence_from_hit(
+                metadata=meta,
+                reality_class=reality_class,
+                trust_tier=int(hit.trust_tier) if hit.trust_tier is not None else 5,
+            ),
             "corroboration_count": len(source_cids),
             "independent_corroboration_count": corroboration["independent_corroboration_count"],
             "independent_corroboration_weight": corroboration["independent_corroboration_weight"],
