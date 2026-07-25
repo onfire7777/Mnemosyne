@@ -207,7 +207,7 @@ Lane-routed. Status tracked here; owning lane commits only its own files. Cross-
 15. `[C]` tier-0 correction → same-turn supersession in belief core (pairs #23). ✅ closed locally.
 16. `[C]` cadence-bound consolidation anti-thrash (§21). ✅ closed locally.
 17. `[C]` gate fact-candidates by external corroboration (§23.3).
-18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(needs CC-PG column)* ✅ closed @`3d0ed940` (PR #58) — `fuse_calibrated_confidence()` in `calibration.py`, weights pinned by `tests/test_calibrated_confidence_fuse.py`
+18. `[C]` persist + compute per-memory `calibrated_confidence`, fuse signals (§26). *(CC-PG column `assertions.calibrated_confidence` landed @`5103a3a`)* ✅ closed @`3d0ed940` (PR #58) — `fuse_calibrated_confidence()` in `calibration.py`, weights pinned by `tests/test_calibrated_confidence_fuse.py`
 
 ### CC-LS (B2) — learning/self-opt/eval
 19. `[C]` implement counterfactual replay + wire dead `counterfactual_replay_score()` into gate/eval (I12/§30.6). ✅ closed @`a8581e7c`,`d8e63960`,`85a7ab0d` (PRs #55/#56/#57) — `counterfactual_replay_score()` now wired into `self_optimization.py` + `mcp_tools.py` (no longer dead)
