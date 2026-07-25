@@ -547,17 +547,24 @@ def test_default_cf_hook_fails_closed_until_window_then_gates() -> None:
     verdict = default_counterfactual_hook(sparse)(TENANT, candidate, engine, [], [])
     assert verdict.passed is False and "unproven" in verdict.reason
 
-    # (2) enough faithful pairs with non-negative mean predicted lift -> authorized pass
+    # (2) enough rank-varying faithful pairs, non-negative mean lift -> OQ2 bar + authorize
+    # Constant (0.10, 0.11) pairs fail Spearman (no rank variance); full OQ2 bar requires
+    # monotone spread with small residual gap (#19a.1).
     good = SelfModelStore()
-    for _ in range(OQ2_MIN_REPLAY_WINDOW):
-        good.record_replay_pair(TENANT, "v", 0.10, 0.11)
+    n = OQ2_MIN_REPLAY_WINDOW
+    for i in range(n):
+        predicted = 0.05 + (i / n) * 0.4
+        observed = predicted + (0.01 if i % 2 == 0 else -0.01)
+        good.record_replay_pair(TENANT, "v", predicted, observed)
     ok = default_counterfactual_hook(good)(TENANT, candidate, engine, [], [])
     assert ok.passed is True and "authorized" in ok.reason
 
-    # (3) enough faithful pairs but negative mean predicted lift -> veto
+    # (3) enough faithful pairs but negative mean predicted lift -> veto after OQ2 clears
     bad = SelfModelStore()
-    for _ in range(OQ2_MIN_REPLAY_WINDOW):
-        bad.record_replay_pair(TENANT, "v", -0.10, -0.11)
+    for i in range(n):
+        predicted = -0.45 + (i / n) * 0.35  # strictly negative, rank-varying
+        observed = predicted + (0.01 if i % 2 == 0 else -0.01)
+        bad.record_replay_pair(TENANT, "v", predicted, observed)
     veto = default_counterfactual_hook(bad)(TENANT, candidate, engine, [], [])
     assert veto.passed is False and "vetoes" in veto.reason
 
@@ -566,7 +573,7 @@ def test_default_cf_hook_fails_closed_until_window_then_gates() -> None:
     for _ in range(OQ2_MIN_REPLAY_WINDOW):
         noisy.record_replay_pair(TENANT, "v", 0.9, -0.9)
     drift = default_counterfactual_hook(noisy)(TENANT, candidate, engine, [], [])
-    assert drift.passed is False and "gap" in drift.reason
+    assert drift.passed is False and ("gap" in drift.reason or "unproven" in drift.reason)
 
 
 def test_evaluate_variant_consumes_cf_proxy_by_default_and_fails_closed() -> None:
