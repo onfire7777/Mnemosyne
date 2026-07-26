@@ -29,8 +29,6 @@ protected Phase 12 attempt, or claim Phase 15 hardware proof.
 - `leaderboard/readiness.py`
 - `tests/test_leaderboard_readiness.py`
 - `docs/plans/2026-07-26-phase16-launch-readiness.md`
-- `README.md`
-
 No other tracked path may change. `GOAL.md` and the round plan may update their
 own task and verification state. RalphEx must not archive or rename `GOAL.md`
 before GitHub delivery and post-merge verification are complete.
@@ -90,9 +88,8 @@ before GitHub delivery and post-merge verification are complete.
 
 ### Task 3: Review, verify, and deliver
 
-- [ ] Run both native review stages and repair confirmed findings with focused
-  regressions (the first review produced the current uncommitted repairs; the
-  follow-up critical/major review remains).
+- [x] Run both native review stages and repair confirmed findings; add focused
+  regressions for behavior changes.
 - [x] Run focused tests, unrestricted full pytest with the MCP extra, full
   Ruff, diff, exact-lease, secret, and risky-file checks.
 - [ ] Commit explicit leased paths, push normally, and open/update the PR
@@ -102,7 +99,6 @@ before GitHub delivery and post-merge verification are complete.
 
 ### Remaining gates
 
-- Run the follow-up critical/major native review.
 - Commit and push the review fixes, then open or update the PR.
 - Require exact-head CI and both reviewers, merge normally, and verify
   post-merge main CI.
