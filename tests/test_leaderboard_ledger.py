@@ -481,12 +481,28 @@ def test_append_repairs_only_a_torn_final_fragment(
     private_key, public_key = key_paths
     first = _append(ledger_path, private_key, entry_id="entry-complete")
     acknowledged = ledger_path.read_bytes()
+    pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
+    pending_path.write_text('{"prior_count":1}\n')
     ledger_path.write_bytes(acknowledged + b'{"entry_id":"unacknowledged')
 
     second = _append(ledger_path, private_key, entry_id="entry-after-repair")
 
     assert ledger_path.read_bytes().startswith(acknowledged)
     assert verify_ledger(ledger_path, public_key) == [first, second]
+
+
+def test_append_preserves_a_torn_acknowledged_entry_without_pending_intent(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    _append(ledger_path, private_key, entry_id="entry-acknowledged")
+    torn = ledger_path.read_bytes()[:-10]
+    ledger_path.write_bytes(torn)
+
+    with pytest.raises(LedgerError, match="torn final fragment"):
+        _append(ledger_path, private_key, entry_id="entry-rejected")
+
+    assert ledger_path.read_bytes() == torn
 
 
 def test_append_rejects_complete_final_entry_missing_only_newline(
@@ -524,6 +540,16 @@ def _append_after_start(
     )
 
 
+def _verify_after_start(
+    ledger_path: str,
+    public_key: str,
+    started: Any,
+    result: Any,
+) -> None:
+    started.set()
+    result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
+
+
 def test_append_serializes_on_sibling_process_lock(
     ledger_path: Path, key_paths: tuple[Path, Path]
 ) -> None:
@@ -550,6 +576,33 @@ def test_append_serializes_on_sibling_process_lock(
     process.join(timeout=5)
     assert process.exitcode == 0
     assert len(verify_ledger(ledger_path, public_key)) == 1
+
+
+def test_verify_serializes_on_sibling_process_lock(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    _append(ledger_path, private_key, entry_id="entry-existing")
+    context = multiprocessing.get_context("spawn")
+    started = context.Event()
+    result = context.Queue()
+    process = context.Process(
+        target=_verify_after_start,
+        args=(str(ledger_path), str(public_key), started, result),
+    )
+    lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
+
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        process.start()
+        assert started.wait(timeout=5)
+        process.join(timeout=1)
+        assert process.is_alive()
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    process.join(timeout=5)
+    assert process.exitcode == 0
+    assert result.get(timeout=1) == 1
 
 
 def test_append_reports_fsync_failure_without_rewriting_prefix(

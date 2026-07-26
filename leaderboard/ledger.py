@@ -242,34 +242,7 @@ def _ledger_lock(path: Path) -> Iterator[None]:
         raise LedgerError("ledger lock could not be acquired") from exc
 
 
-def _load_entries(path: Path, *, repair_torn_tail: bool = False) -> list[dict[str, object]]:
-    try:
-        data = path.read_bytes()
-    except FileNotFoundError:
-        return []
-    except OSError as exc:
-        raise LedgerError("ledger could not be read") from exc
-
-    if data and not data.endswith(b"\n"):
-        if not repair_torn_tail:
-            raise LedgerError("ledger has an unacknowledged torn final fragment")
-        keep = data.rfind(b"\n") + 1
-        try:
-            json.loads(data[keep:])
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            pass
-        else:
-            raise LedgerError("ledger has a complete unterminated final entry")
-        try:
-            with path.open("r+b") as handle:
-                handle.truncate(keep)
-                handle.flush()
-                os.fsync(handle.fileno())
-            _fsync_dir(path.parent)
-        except OSError as exc:
-            raise LedgerError("ledger torn final fragment could not be repaired") from exc
-        data = data[:keep]
-
+def _parse_entries(data: bytes) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
     for index, raw in enumerate(data.splitlines(), start=1):
         try:
@@ -282,6 +255,26 @@ def _load_entries(path: Path, *, repair_torn_tail: bool = False) -> list[dict[st
             raise LedgerError(f"ledger line {index} contains non-canonical JSON")
         entries.append(entry)
     return entries
+
+
+def _load_entries(path: Path) -> list[dict[str, object]]:
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise LedgerError("ledger could not be read") from exc
+
+    if data and not data.endswith(b"\n"):
+        fragment = data[data.rfind(b"\n") + 1 :]
+        try:
+            json.loads(fragment)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        else:
+            raise LedgerError("ledger has a complete unterminated final entry")
+        raise LedgerError("ledger has an unacknowledged torn final fragment")
+    return _parse_entries(data)
 
 
 def _validate_entry(
@@ -373,16 +366,57 @@ def verify_ledger(ledger_path: Path, public_key_path: Path) -> list[dict[str, ob
         raise LedgerError("ledger public key could not be loaded") from exc
     expected_fingerprint = _public_key_sha256(public_key)
     path = Path(ledger_path)
-    entries = _load_entries(path)
-    _verify_entries(entries, public_key, expected_fingerprint)
-    _verify_head(
-        _load_head(path),
-        entries,
-        public_key,
-        expected_fingerprint,
-        require_complete_roster=True,
-    )
+    with _ledger_lock(path):
+        entries = _load_entries(path)
+        _verify_entries(entries, public_key, expected_fingerprint)
+        _verify_head(
+            _load_head(path),
+            entries,
+            public_key,
+            expected_fingerprint,
+            require_complete_roster=True,
+        )
     return entries
+
+
+def _repair_pending_torn_tail(
+    path: Path,
+    head: dict[str, object] | None,
+    public_key: Any,
+    fingerprint: str,
+) -> None:
+    prior_count = _load_pending(path)
+    if prior_count is None:
+        return
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        data = b""
+    except OSError as exc:
+        raise LedgerError("ledger could not be read") from exc
+    if not data or data.endswith(b"\n"):
+        return
+    complete = _parse_entries(data[: data.rfind(b"\n") + 1])
+    if prior_count > len(complete):
+        raise LedgerError("ledger append intent exceeds ledger length")
+    prefix = complete[:prior_count]
+    _verify_entries(prefix, public_key, fingerprint)
+    _verify_head(
+        head,
+        prefix,
+        public_key,
+        fingerprint,
+        require_complete_roster=False,
+    )
+    keep = sum(len(_canonical(entry)) + 1 for entry in prefix)
+    try:
+        with path.open("r+b") as handle:
+            handle.truncate(keep)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_dir(path.parent)
+    except OSError as exc:
+        raise LedgerError("unacknowledged ledger append could not be repaired") from exc
 
 
 def _recover_pending_append(
@@ -460,7 +494,8 @@ def append_entry(
     fingerprint = _public_key_sha256(public_key)
     with _ledger_lock(path):
         head = _load_head(path)
-        entries = _load_entries(path, repair_torn_tail=True)
+        _repair_pending_torn_tail(path, head, public_key, fingerprint)
+        entries = _load_entries(path)
         entries = _recover_pending_append(path, head, entries, public_key, fingerprint)
         if entries:
             # Verification with the signing key prevents appending after acknowledged corruption.
