@@ -66,7 +66,7 @@ def _validate_metric(metric: object, index: int) -> list[str]:
             errors.append(f"{pointer}/{field}")
 
     family = metric.get("family")
-    if family not in {"retrieval", "judged_qa"}:
+    if not isinstance(family, str) or family not in ("retrieval", "judged_qa"):
         errors.append(f"{pointer}/family")
     if not _is_number(metric.get("value")):
         errors.append(f"{pointer}/value")
@@ -114,6 +114,10 @@ def _validate_publication(record: dict[str, object]) -> list[str]:
         errors.append("/publication/label")
     if record.get("track") == "development" and publishable is True:
         errors.append("/publication/publishable")
+    if "register_b_satisfied" in publication and not isinstance(
+        publication["register_b_satisfied"], bool
+    ):
+        errors.append("/publication/register_b_satisfied")
     if label == "neutral" and (
         publication.get("register_b_satisfied") is not True
     ):
@@ -168,7 +172,9 @@ def validate_record(record: object) -> list[str]:
         for index, metric in enumerate(metrics):
             errors.extend(_validate_metric(metric, index))
             if isinstance(metric, dict):
-                families.add(metric.get("family"))
+                family = metric.get("family")
+                if isinstance(family, str):
+                    families.add(family)
         if {"retrieval", "judged_qa"} <= families:
             errors.append("/metrics")
 
