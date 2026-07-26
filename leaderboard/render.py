@@ -233,16 +233,22 @@ def _render_pages(
 
 
 def _publish(pages: dict[Path, str], destination: Path) -> None:
-    destination = destination.resolve()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary = Path(
-        tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent)
-    )
-    backup = Path(
-        tempfile.mkdtemp(prefix=f".{destination.name}-backup-", dir=destination.parent)
-    )
-    backup.rmdir()
+    destination = destination.absolute()
+    temporary: Path | None = None
+    backup: Path | None = None
     try:
+        if destination.is_symlink():
+            raise RenderError(f"destination may not be a symlink: {destination}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent)
+        )
+        backup = Path(
+            tempfile.mkdtemp(
+                prefix=f".{destination.name}-backup-", dir=destination.parent
+            )
+        )
+        backup.rmdir()
         for relative, content in sorted(pages.items(), key=lambda item: str(item[0])):
             target = temporary / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -256,12 +262,14 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
                 os.replace(backup, destination)
             raise
         shutil.rmtree(backup, ignore_errors=True)
-    except OSError as exc:
+    except RenderError:
+        raise
+    except (OSError, UnicodeError) as exc:
         raise RenderError(f"failed to publish site: {destination}") from exc
     finally:
-        if temporary.exists():
+        if temporary is not None and temporary.exists():
             shutil.rmtree(temporary)
-        if backup.exists() and destination.exists():
+        if backup is not None and backup.exists() and destination.exists():
             shutil.rmtree(backup, ignore_errors=True)
 
 
