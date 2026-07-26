@@ -17,11 +17,11 @@ separate competency reporting without running or publishing benchmark evidence.
 
 - [x] RED: freeze canonical metadata, ordering, and fail-closed behavior.
 - [x] GREEN: implement the smallest stdlib-only submission builder.
-- [x] REVIEW: local diff review found no confirmed defect; nested native stages
-  skipped because recursive review is unsafe in the active RalphEx iteration.
-- [x] VERIFY: 30 focused tests, Ruff, diff, lease, secret, and risky-file checks
-  passed; unrestricted full pytest skipped because the sandbox denies `/bin/ps`.
-- [x] INTEGRATE: branch pushed; PR, exact-head CI/reviews, merge, and main CI
+- [ ] REVIEW: this review corrected inaccurate completion state; follow-up
+  review remains required.
+- [ ] VERIFY: 30 focused tests, Ruff, diff, lease, secret, and risky-file checks
+  passed previously; unrestricted full pytest remains pending.
+- [ ] INTEGRATE: branch pushed; PR, exact-head CI/reviews, merge, and main CI
   skipped because GitHub API access was unavailable.
 
 ## Non-Goals
