@@ -139,6 +139,31 @@ def _load_head(path: Path) -> dict[str, object] | None:
     return head
 
 
+def _verify_active_dispositions(entries: list[dict[str, object]]) -> None:
+    superseded_ids = {
+        str(entry["supersedes"])
+        for entry in entries
+        if entry["status"] == "superseded"
+    }
+    active: dict[str, set[str]] = {}
+    for entry in entries:
+        if entry["entry_id"] in superseded_ids:
+            continue
+        status = str(entry["status"])
+        if status in RUN_STATUSES | {"no_run"}:
+            active.setdefault(str(entry["entrant_id"]), set()).add(status)
+    contradictory = sorted(
+        entrant
+        for entrant, statuses in active.items()
+        if "no_run" in statuses and statuses & RUN_STATUSES
+    )
+    if contradictory:
+        raise LedgerError(
+            "ledger has contradictory active dispositions for entrant: "
+            + ", ".join(contradictory)
+        )
+
+
 def _verify_head(
     head: dict[str, object] | None,
     entries: list[dict[str, object]],
@@ -185,6 +210,7 @@ def _verify_head(
         raise LedgerError(
             "ledger entrant is absent from pre-registered roster: " + ", ".join(sorted(unknown))
         )
+    _verify_active_dispositions(entries)
     covered = {
         str(entry["entrant_id"])
         for entry in entries
@@ -556,6 +582,7 @@ def append_entry(
             seen_entrants=seen_entrants,
             superseded_ids=superseded_ids,
         )
+        _verify_active_dispositions([*entries, entry])
         entry["entry_digest"] = _digest(entry)
         entry["signature"] = base64.b64encode(private_key.sign(_signed_bytes(entry))).decode("ascii")
         line = _canonical(entry) + b"\n"
