@@ -24,12 +24,17 @@ manufacture, or publish evidence.
 
 ## Delivery
 
-1. Freeze canonical ready, blocked, invalid, and deterministic-output behavior
-   with RED tests.
-2. Implement one stdlib-only validator and CLI that reads only its input file.
-3. Run native review and the full local verification matrix.
-4. Push the Worktrunk branch, open a PR, require exact-head CI and both review
-   bots, merge normally, and verify post-merge main CI.
+- [x] Freeze canonical ready, blocked, invalid, and deterministic-output
+  behavior with RED tests.
+- [x] Implement one stdlib-only validator and CLI that reads only its input
+  file.
+- [ ] Run native review and the full local verification matrix. The first review
+  produced focused repairs; focused tests, unrestricted MCP-extra full pytest,
+  Ruff, diff, lease, secret, and risky-file checks pass. The follow-up
+  critical/major review remains.
+- [ ] Push the review-fix commit, open or update the PR, require exact-head CI
+  and both review bots, merge normally, and verify post-merge main CI. The
+  pre-review branch is already pushed.
 
 ## Non-Goals
 

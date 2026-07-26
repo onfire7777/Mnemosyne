@@ -70,9 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     except (
         OSError,
         UnicodeError,
-        json.JSONDecodeError,
         RecursionError,
-        ReadinessError,
+        ValueError,
     ):
         print("error: invalid readiness record", file=sys.stderr)
         return 2
