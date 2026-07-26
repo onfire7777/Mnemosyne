@@ -77,9 +77,9 @@ own task and verification state.
 
 ### Task 2: Implement the minimum envelope
 
-- [ ] Add the stdlib-only submission builder in the leased adapter module.
-- [ ] Make focused tests green without I/O or new dependencies.
-- [ ] Commit the implementation.
+- [x] Add the stdlib-only submission builder in the leased adapter module.
+- [x] Make focused tests green without I/O or new dependencies.
+- [x] Commit the implementation.
 
 ### Task 3: Review and deliver
 
