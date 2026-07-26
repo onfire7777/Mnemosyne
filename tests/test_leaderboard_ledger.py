@@ -1,15 +1,22 @@
 import copy
+import fcntl
 import json
+import multiprocessing
+import os
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from leaderboard.ledger import LedgerError, append_entry, verify_ledger
+
+
+_DEFAULT_RUN_ID = object()
 
 
 @pytest.fixture
@@ -73,7 +80,7 @@ def _append(
     entry_id: str,
     status: str = "succeeded",
     entrant_id: str = "synthetic-entrant",
-    run_id: str | None = None,
+    run_id: str | None | object = _DEFAULT_RUN_ID,
     reason: str | None = None,
     result: dict[str, object] | None = None,
     supersedes: str | None = None,
@@ -85,7 +92,7 @@ def _append(
         timestamp="2026-07-25T12:00:00Z",
         entrant_id=entrant_id,
         status=status,
-        run_id=run_id or f"run-{entry_id}",
+        run_id=f"run-{entry_id}" if run_id is _DEFAULT_RUN_ID else run_id,
         reason=reason,
         result=_result(f"result-{entry_id}") if status == "succeeded" and result is None else result,
         supersedes=supersedes,
@@ -122,6 +129,46 @@ def test_writes_canonical_newline_terminated_jsonl(
     ).encode()
 
 
+def test_verify_rejects_noncanonical_json_bytes(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    entry = _append(ledger_path, private_key, entry_id="entry-noncanonical")
+    ledger_path.write_text(json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n")
+
+    with pytest.raises(LedgerError, match="non-canonical"):
+        verify_ledger(ledger_path, public_key)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "tomorrow",
+        "2026-07-25 12:00:00Z",
+        "2026-07-25T12:00:00+00:00",
+        "2026-02-30T12:00:00Z",
+    ],
+)
+def test_rejects_invalid_or_noncanonical_utc_timestamps(
+    ledger_path: Path,
+    key_paths: tuple[Path, Path],
+    timestamp: str,
+) -> None:
+    private_key, _ = key_paths
+
+    with pytest.raises(LedgerError, match="timestamp"):
+        append_entry(
+            ledger_path,
+            private_key,
+            entry_id="entry-invalid-timestamp",
+            timestamp=timestamp,
+            entrant_id="synthetic-entrant",
+            status="failed",
+            run_id="run-invalid-timestamp",
+            reason="synthetic failure",
+        )
+
+
 def test_builds_contiguous_sequence_and_hash_links_with_signatures(
     ledger_path: Path, key_paths: tuple[Path, Path]
 ) -> None:
@@ -156,6 +203,27 @@ def test_requires_reason_for_non_success_and_recorded_absence(
             status=status,
             reason=reason,
             result=None,
+        )
+
+
+@pytest.mark.parametrize("status", ["succeeded", "failed", "aborted", "discarded"])
+@pytest.mark.parametrize("run_id", [None, "", "   "])
+def test_requires_run_id_for_actual_run_outcomes(
+    ledger_path: Path,
+    key_paths: tuple[Path, Path],
+    status: str,
+    run_id: str | None,
+) -> None:
+    private_key, _ = key_paths
+
+    with pytest.raises(LedgerError, match="run_id"):
+        _append(
+            ledger_path,
+            private_key,
+            entry_id=f"entry-{status}",
+            status=status,
+            run_id=run_id,
+            reason=None if status == "succeeded" else "synthetic failure",
         )
 
 
@@ -250,30 +318,28 @@ def test_rejects_repeated_supersession(
 ) -> None:
     private_key, _ = key_paths
     _append(ledger_path, private_key, entry_id="entry-original")
-    for entry_id in ("entry-correction-1", "entry-correction-2"):
-        if entry_id.endswith("2"):
-            with pytest.raises(LedgerError, match="already superseded"):
-                append_entry(
-                    ledger_path,
-                    private_key,
-                    entry_id=entry_id,
-                    timestamp="2026-07-25T12:02:00Z",
-                    entrant_id="synthetic-entrant",
-                    status="superseded",
-                    reason="second correction",
-                    supersedes="entry-original",
-                )
-        else:
-            append_entry(
-                ledger_path,
-                private_key,
-                entry_id=entry_id,
-                timestamp="2026-07-25T12:01:00Z",
-                entrant_id="synthetic-entrant",
-                status="superseded",
-                reason="first correction",
-                supersedes="entry-original",
-            )
+    append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-correction-1",
+        timestamp="2026-07-25T12:01:00Z",
+        entrant_id="synthetic-entrant",
+        status="superseded",
+        reason="first correction",
+        supersedes="entry-original",
+    )
+
+    with pytest.raises(LedgerError, match="already superseded"):
+        append_entry(
+            ledger_path,
+            private_key,
+            entry_id="entry-correction-2",
+            timestamp="2026-07-25T12:02:00Z",
+            entrant_id="synthetic-entrant",
+            status="superseded",
+            reason="second correction",
+            supersedes="entry-original",
+        )
 
 
 def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> None:
@@ -365,6 +431,87 @@ def test_append_repairs_only_a_torn_final_fragment(
 
     assert ledger_path.read_bytes().startswith(acknowledged)
     assert verify_ledger(ledger_path, public_key) == [first, second]
+
+
+def test_append_rejects_complete_final_entry_missing_only_newline(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    _append(ledger_path, private_key, entry_id="entry-complete")
+    without_newline = ledger_path.read_bytes().removesuffix(b"\n")
+    ledger_path.write_bytes(without_newline)
+
+    with pytest.raises(LedgerError, match="unterminated"):
+        _append(ledger_path, private_key, entry_id="entry-rejected")
+
+    assert ledger_path.read_bytes() == without_newline
+
+
+def _append_after_start(
+    ledger_path: str,
+    private_key: str,
+    started: Any,
+    start: Any,
+) -> None:
+    started.set()
+    start.wait()
+    append_entry(
+        Path(ledger_path),
+        Path(private_key),
+        entry_id="entry-concurrent",
+        timestamp="2026-07-25T12:00:00Z",
+        entrant_id="synthetic-entrant",
+        status="failed",
+        run_id="run-concurrent",
+        reason="synthetic failure",
+    )
+
+
+def test_append_serializes_on_sibling_process_lock(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    context = multiprocessing.get_context("spawn")
+    started = context.Event()
+    start = context.Event()
+    process = context.Process(
+        target=_append_after_start,
+        args=(str(ledger_path), str(private_key), started, start),
+    )
+    lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
+    lock_path.touch()
+
+    with lock_path.open("a+b") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        process.start()
+        assert started.wait(timeout=5)
+        start.set()
+        process.join(timeout=1)
+        assert process.is_alive()
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    process.join(timeout=5)
+    assert process.exitcode == 0
+    assert len(verify_ledger(ledger_path, public_key)) == 1
+
+
+def test_append_reports_fsync_failure_without_rewriting_prefix(
+    ledger_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, _ = key_paths
+    _append(ledger_path, private_key, entry_id="entry-complete")
+    acknowledged = ledger_path.read_bytes()
+
+    def fail_fsync(_fd: int) -> None:
+        raise OSError("synthetic fsync failure")
+
+    monkeypatch.setattr(os, "fsync", fail_fsync)
+    with pytest.raises(LedgerError, match="durably appended"):
+        _append(ledger_path, private_key, entry_id="entry-unacknowledged")
+
+    assert ledger_path.read_bytes().startswith(acknowledged)
 
 
 def test_append_rejects_corruption_in_acknowledged_bytes(
