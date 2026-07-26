@@ -86,9 +86,10 @@ wiring, measurements, and publication out of scope.
   exact post-merge main verification.
 
 - [ ] Run both native review stages and repair only reproduced in-lease issues.
-- [ ] Run focused tests, unrestricted
-  `uv run --extra mcp pytest -q`, and `uv run ruff check .`.
-- [ ] Run `git diff --check`, exact-lease, risky-file, and secret checks.
+- [x] Run focused tests, unrestricted
+  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (16 focused tests,
+  unrestricted full pytest, and full Ruff passed.)
+- [x] Run `git diff --check`, exact-lease, risky-file, and secret checks.
 - [ ] Commit deliberately, push normally, and open/update the PR.
 - [ ] Require exact-head CI, CodeRabbit, Greptile, clear reviewDecision, and zero
   active non-outdated threads before normal merge.

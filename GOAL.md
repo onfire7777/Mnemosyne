@@ -96,7 +96,9 @@ own task and verification state.
 ### Task 3: Review and deliver
 
 - [ ] Run both native review stages and repair confirmed in-lease findings.
-- [ ] Complete local verification and exact-lease checks.
+- [x] Complete local verification and exact-lease checks. (16 focused tests,
+  unrestricted MCP-extra full pytest, full Ruff, diff, exact-lease, secret,
+  and risky-file checks passed.)
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
   normally.
 - [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
