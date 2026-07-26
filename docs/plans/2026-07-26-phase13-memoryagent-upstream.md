@@ -17,12 +17,13 @@ separate competency reporting without running or publishing benchmark evidence.
 
 - [x] RED: freeze canonical metadata, ordering, and fail-closed behavior.
 - [x] GREEN: implement the smallest stdlib-only submission builder.
-- [ ] REVIEW: this review corrected inaccurate completion state; follow-up
-  review remains required.
-- [ ] VERIFY: 30 focused tests, Ruff, diff, lease, secret, and risky-file checks
-  passed previously; unrestricted full pytest remains pending.
-- [ ] INTEGRATE: branch pushed; PR, exact-head CI/reviews, merge, and main CI
-  skipped because GitHub API access was unavailable.
+- [x] REVIEW: both native stages completed; the confirmed reporting and module
+  docstring findings were repaired.
+- [x] VERIFY: 30 focused tests, unrestricted MCP-extra full pytest, Ruff, diff,
+  lease, secret, and risky-file checks passed; one intervening runtime-lock
+  fixture race reproduced green in isolation before the successful full rerun.
+- [ ] INTEGRATE: reviewed successor commits, PR, exact-head CI/reviews, merge,
+  and main CI remain pending.
 
 ## Non-Goals
 
