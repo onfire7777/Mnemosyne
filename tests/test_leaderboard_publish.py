@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,6 +9,22 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from leaderboard.ledger import append_entry
 from leaderboard.publish import PublicationError, main, publish_site
+
+_TRACE_TEXT = (
+    json.dumps(
+        {
+            "answer": "doc-1",
+            "gold_references": ["doc-1"],
+            "question_id": "question-001",
+            "ranked_retrieved_hits": ["doc-1", "doc-2"],
+            "scoring_family": "deterministic-retrieval",
+            "stored_records": ["doc-1", "doc-2"],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    + "\n"
+)
 
 
 @pytest.fixture
@@ -43,7 +60,8 @@ def _result(record_id: str) -> dict[str, object]:
         "build_fingerprint": f"sha256:{'1' * 64}",
         "config_digest": f"sha256:{'2' * 64}",
         "bundle_digest": f"sha256:{'3' * 64}",
-        "trace_index_digest": f"sha256:{'4' * 64}",
+        "trace_index_digest": "sha256:"
+        + hashlib.sha256(_TRACE_TEXT.encode()).hexdigest(),
         "metrics": [
             {
                 "name": "recall_at_10",
@@ -60,22 +78,7 @@ def _result(record_id: str) -> dict[str, object]:
 
 
 def _trace(path: Path) -> Path:
-    path.write_text(
-        json.dumps(
-            {
-                "answer": "doc-1",
-                "gold_references": ["doc-1"],
-                "question_id": "question-001",
-                "ranked_retrieved_hits": ["doc-1", "doc-2"],
-                "scoring_family": "deterministic-retrieval",
-                "stored_records": ["doc-1", "doc-2"],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    path.write_text(_TRACE_TEXT, encoding="utf-8")
     return path
 
 
@@ -256,6 +259,34 @@ def test_rejects_an_invalid_signature_before_mutating_destination(
 
     assert marker.read_text(encoding="utf-8") == "unchanged\n"
     assert sorted(destination.iterdir()) == [marker]
+
+
+def test_rejects_trace_evidence_not_bound_to_the_signed_result(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    trace = _trace(tmp_path / "trace.jsonl")
+    trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8")
+    destination = tmp_path / "site"
+
+    with pytest.raises(PublicationError, match="trace digest mismatch"):
+        publish_site(
+            ledger,
+            public_key,
+            {"result-success": trace},
+            destination,
+        )
+
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize("status", ["failed", "aborted", "discarded", "no_run"])
