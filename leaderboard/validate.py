@@ -38,6 +38,15 @@ _STRING_FIELDS = (
     "trace_index_digest",
 )
 _PUBLICATION_LABELS = ("operator-run", "neutral")
+_MAX_JSON_DEPTH = 1_000
+_METRIC_FAMILIES = (
+    "retrieval",
+    "judged_qa",
+    "security",
+    "calibration",
+    "performance",
+    "reproducibility",
+)
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
 _DIGEST_FIELDS = (
@@ -65,6 +74,29 @@ def _parse_finite_float(value: str) -> float:
     if not math.isfinite(parsed):
         raise ValueError(f"non-finite JSON number: {value}")
     return parsed
+
+
+def _json_nesting_too_deep(raw: str) -> bool:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in raw:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        elif character == '"':
+            in_string = True
+        elif character in "[{":
+            depth += 1
+            if depth > _MAX_JSON_DEPTH:
+                return True
+        elif character in "]}":
+            depth -= 1
+    return False
 
 
 def _unexpected_keys(
@@ -95,7 +127,7 @@ def _validate_metric(metric: object, index: int) -> list[str]:
             errors.append(f"{pointer}/{field}")
 
     family = metric.get("family")
-    if not isinstance(family, str) or family not in ("retrieval", "judged_qa"):
+    if not isinstance(family, str) or family not in _METRIC_FAMILIES:
         errors.append(f"{pointer}/family")
     if not _is_number(metric.get("value")):
         errors.append(f"{pointer}/value")
@@ -262,9 +294,9 @@ def validate_record(record: object) -> list[str]:
             errors.extend(_validate_metric(metric, index))
             if isinstance(metric, dict):
                 family = metric.get("family")
-                if isinstance(family, str):
+                if family in _METRIC_FAMILIES:
                     families.add(family)
-        if {"retrieval", "judged_qa"} <= families:
+        if len(families) > 1:
             errors.append("/metrics")
 
     for field in ("publication", "operator_entry", "history"):
@@ -302,6 +334,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: cannot read JSON: {path}", file=sys.stderr)
         return 2
     except UnicodeDecodeError:
+        print(f"error: invalid JSON: {path}", file=sys.stderr)
+        return 2
+    if _json_nesting_too_deep(raw):
         print(f"error: invalid JSON: {path}", file=sys.stderr)
         return 2
     try:
