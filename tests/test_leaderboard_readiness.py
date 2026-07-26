@@ -138,6 +138,35 @@ def test_cli_returns_two_for_malformed_or_duplicate_key_json(
     assert output.err == "error: invalid readiness record\n"
 
 
+@pytest.mark.parametrize("argv", [[], ["first.json", "second.json"]])
+def test_cli_returns_two_unless_given_exactly_one_path(
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(argv) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "error: invalid readiness record\n"
+
+
+@pytest.mark.parametrize("invalid_input", ["missing", "invalid-utf8", "oversized-int"])
+def test_cli_returns_two_for_unreadable_or_unparseable_input(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    invalid_input: str,
+) -> None:
+    path = tmp_path / "invalid.json"
+    if invalid_input == "invalid-utf8":
+        path.write_bytes(b"\xff")
+    elif invalid_input == "oversized-int":
+        path.write_text("9" * 5000, encoding="utf-8")
+
+    assert main([str(path)]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "error: invalid readiness record\n"
+
+
 def _gate(record: dict[str, object], name: str) -> dict[str, object]:
     value = record[name]
     assert isinstance(value, dict)

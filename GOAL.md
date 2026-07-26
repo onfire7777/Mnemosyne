@@ -15,7 +15,7 @@ protected Phase 12 attempt, or claim Phase 15 hardware proof.
 - `.planning/ROADMAP.md`
 - `.planning/STATE.md`
 - `.planning/REQUIREMENTS.md`
-- `docs/PUBLIC-BENCHMARK-PUBLICATION-POLICY.md`
+- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` §2
 - `docs/governance/BOARD-STATUS.md`
 - `docs/plans/2026-07-25-phase16-result-contract.md`
 - `docs/plans/2026-07-25-phase16-run-ledger.md`
@@ -89,17 +89,22 @@ before GitHub delivery and post-merge verification are complete.
 
 ### Task 3: Review, verify, and deliver
 
-- [x] Run both native review stages and repair confirmed findings with focused
-  regressions (native nested runner blocked by read-only Codex state; both
-  review scopes completed in-process with no confirmed findings).
+- [ ] Run both native review stages and repair confirmed findings with focused
+  regressions (the first review produced the current uncommitted repairs; the
+  follow-up critical/major review remains).
 - [x] Run focused tests, unrestricted full pytest with the MCP extra, full
-  Ruff, diff, exact-lease, secret, and risky-file checks (full pytest skipped -
-  managed sandbox denies `/bin/ps`; all other checks passed).
-- [x] Commit explicit leased paths, push normally, and open/update the PR
-  (normal push succeeded; PR skipped - GitHub API access unavailable).
-- [x] Require fresh exact-head CI and both reviewers to clear before normal
-  merge; verify post-merge main CI (skipped - external GitHub verification is
-  not automatable without valid authentication).
+  Ruff, diff, exact-lease, secret, and risky-file checks.
+- [ ] Commit explicit leased paths, push normally, and open/update the PR
+  (the pre-review branch is already pushed).
+- [ ] Require fresh exact-head CI and both reviewers to clear before normal
+  merge; verify post-merge main CI.
+
+### Remaining gates
+
+- Run the follow-up critical/major native review.
+- Commit and push the review fixes, then open or update the PR.
+- Require exact-head CI and both reviewers, merge normally, and verify
+  post-merge main CI.
 
 ## Completion
 
