@@ -25,7 +25,19 @@ _REQUIRED_FIELDS = (
     "operator_entry",
     "history",
 )
-_STRING_FIELDS = _REQUIRED_FIELDS[1:11]
+_STRING_FIELDS = (
+    "record_id",
+    "system",
+    "track",
+    "benchmark",
+    "benchmark_version",
+    "run_commit",
+    "build_fingerprint",
+    "config_digest",
+    "bundle_digest",
+    "trace_index_digest",
+)
+_PUBLICATION_LABELS = ("operator-run", "neutral")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
 _DIGEST_FIELDS = (
@@ -55,14 +67,31 @@ def _parse_finite_float(value: str) -> float:
     return parsed
 
 
+def _unexpected_keys(
+    value: dict[str, object], allowed: tuple[str, ...], pointer: str
+) -> list[str]:
+    return [
+        f"{pointer}/{_pointer_token(field)}" for field in value if field not in allowed
+    ]
+
+
+def _pointer_token(value: str) -> str:
+    escaped = value.replace("~", "~0").replace("/", "~1")
+    return json.dumps(escaped, ensure_ascii=False)[1:-1]
+
+
 def _validate_metric(metric: object, index: int) -> list[str]:
     pointer = f"/metrics/{index}"
     if not isinstance(metric, dict):
         return [pointer]
 
-    errors: list[str] = []
+    errors = _unexpected_keys(
+        metric,
+        ("name", "family", "value", "unit", "confidence_interval", "judge"),
+        pointer,
+    )
     for field in ("name", "family", "unit"):
-        if not isinstance(metric.get(field), str) or not metric[field]:
+        if not isinstance(metric.get(field), str) or not metric[field].strip():
             errors.append(f"{pointer}/{field}")
 
     family = metric.get("family")
@@ -75,6 +104,11 @@ def _validate_metric(metric: object, index: int) -> list[str]:
     if not isinstance(interval, dict):
         errors.append(f"{pointer}/confidence_interval")
     else:
+        errors.extend(
+            _unexpected_keys(
+                interval, ("low", "high"), f"{pointer}/confidence_interval"
+            )
+        )
         for bound in ("low", "high"):
             if not _is_number(interval.get(bound)):
                 errors.append(f"{pointer}/confidence_interval/{bound}")
@@ -88,8 +122,15 @@ def _validate_metric(metric: object, index: int) -> list[str]:
         if not isinstance(judge, dict):
             errors.append(f"{pointer}/judge")
         else:
+            errors.extend(
+                _unexpected_keys(
+                    judge,
+                    ("model", "prompt_digest", "config_digest"),
+                    f"{pointer}/judge",
+                )
+            )
             for field in ("model", "prompt_digest", "config_digest"):
-                if not isinstance(judge.get(field), str) or not judge[field]:
+                if not isinstance(judge.get(field), str) or not judge[field].strip():
                     errors.append(f"{pointer}/judge/{field}")
             for field in ("prompt_digest", "config_digest"):
                 value = judge.get(field)
@@ -105,12 +146,16 @@ def _validate_publication(record: dict[str, object]) -> list[str]:
     if not isinstance(publication, dict):
         return []
 
-    errors: list[str] = []
+    errors = _unexpected_keys(
+        publication,
+        ("publishable", "label", "register_b_satisfied"),
+        "/publication",
+    )
     publishable = publication.get("publishable")
     if not isinstance(publishable, bool):
         errors.append("/publication/publishable")
     label = publication.get("label")
-    if not isinstance(label, str) or not label:
+    if not isinstance(label, str) or label not in _PUBLICATION_LABELS:
         errors.append("/publication/label")
     if record.get("track") == "development" and publishable is True:
         errors.append("/publication/publishable")
@@ -118,9 +163,7 @@ def _validate_publication(record: dict[str, object]) -> list[str]:
         publication["register_b_satisfied"], bool
     ):
         errors.append("/publication/register_b_satisfied")
-    if label == "neutral" and (
-        publication.get("register_b_satisfied") is not True
-    ):
+    if label == "neutral" and (publication.get("register_b_satisfied") is not True):
         errors.append("/publication/register_b_satisfied")
     return errors
 
@@ -129,17 +172,62 @@ def _validate_history(record: dict[str, object]) -> list[str]:
     history = record.get("history")
     if not isinstance(history, dict):
         return []
+    errors = _unexpected_keys(history, ("supersedes",), "/history")
     if "supersedes" not in history:
-        return ["/history/supersedes"]
+        return errors + ["/history/supersedes"]
 
     supersedes = history["supersedes"]
     if supersedes is not None and (
-        not isinstance(supersedes, str) or not supersedes
+        not isinstance(supersedes, str) or not supersedes.strip()
     ):
-        return ["/history/supersedes"]
+        errors.append("/history/supersedes")
     if supersedes == record.get("record_id"):
-        return ["/record_id"]
-    return []
+        errors.append("/record_id")
+    return errors
+
+
+def _validate_records(records: list[object]) -> list[str]:
+    errors: list[str] = []
+    indexes: dict[str, int] = {}
+    links: dict[str, str] = {}
+    all_ids = {
+        item.get("record_id")
+        for item in records
+        if isinstance(item, dict) and isinstance(item.get("record_id"), str)
+    }
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        record_id = record.get("record_id")
+        if not isinstance(record_id, str) or not record_id.strip():
+            continue
+        if record_id in indexes:
+            errors.append(f"/{index}/record_id")
+            continue
+        indexes[record_id] = index
+        history = record.get("history")
+        if isinstance(history, dict):
+            supersedes = history.get("supersedes")
+            if isinstance(supersedes, str) and supersedes in all_ids:
+                links[record_id] = supersedes
+
+    cyclic: set[str] = set()
+    resolved: set[str] = set()
+    for start in links:
+        if start in resolved:
+            continue
+        path: list[str] = []
+        positions: dict[str, int] = {}
+        current = start
+        while current in links and current not in positions and current not in resolved:
+            positions[current] = len(path)
+            path.append(current)
+            current = links[current]
+        if current in positions:
+            cyclic.update(path[positions[current] :])
+        resolved.update(path)
+    errors.extend(f"/{indexes[record_id]}/history/supersedes" for record_id in cyclic)
+    return sorted(set(errors))
 
 
 def validate_record(record: object) -> list[str]:
@@ -147,12 +235,13 @@ def validate_record(record: object) -> list[str]:
     if not isinstance(record, dict):
         return ["/"]
 
-    errors = [f"/{field}" for field in _REQUIRED_FIELDS if field not in record]
+    errors = _unexpected_keys(record, _REQUIRED_FIELDS, "")
+    errors.extend(f"/{field}" for field in _REQUIRED_FIELDS if field not in record)
     if record.get("schema_version") != SCHEMA_VERSION:
         errors.append("/schema_version")
     for field in _STRING_FIELDS:
         if field in record and (
-            not isinstance(record[field], str) or not record[field]
+            not isinstance(record[field], str) or not record[field].strip()
         ):
             errors.append(f"/{field}")
     run_commit = record.get("run_commit")
@@ -184,8 +273,13 @@ def validate_record(record: object) -> list[str]:
             errors.append(f"/{field}")
     operator_entry = record.get("operator_entry")
     if isinstance(operator_entry, dict):
+        errors.extend(
+            _unexpected_keys(
+                operator_entry, ("operator", "disclosed"), "/operator_entry"
+            )
+        )
         operator = operator_entry.get("operator")
-        if not isinstance(operator, str) or not operator:
+        if not isinstance(operator, str) or not operator.strip():
             errors.append("/operator_entry/operator")
         if operator_entry.get("disclosed") is not True:
             errors.append("/operator_entry/disclosed")
@@ -216,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
             parse_constant=_reject_json_constant,
             parse_float=_parse_finite_float,
         )
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, RecursionError, ValueError):
         print(f"error: invalid JSON: {path}", file=sys.stderr)
         return 2
 
@@ -227,6 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"/{index}{error}" if error != "/" else f"/{index}"
                 for error in validate_record(record)
             )
+        errors.extend(_validate_records(payload))
     else:
         errors = validate_record(payload)
 
