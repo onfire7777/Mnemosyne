@@ -160,6 +160,18 @@ def test_build_submission_emits_the_canonical_envelope() -> None:
             "conflict_resolution": {"count": 1, "mean": 0.25},
         },
     }
+    assert list(submission) == [
+        "schema_version",
+        "dataset_revision",
+        "protocol_id",
+        "competencies",
+    ]
+    assert list(submission["competencies"]) == [
+        "retrieval",
+        "test_time_learning",
+        "long_range_understanding",
+        "conflict_resolution",
+    ]
     assert submission == build_submission(
         reversed(cases),
         dataset_revision="0123456789abcdef0123456789abcdef01234567",
