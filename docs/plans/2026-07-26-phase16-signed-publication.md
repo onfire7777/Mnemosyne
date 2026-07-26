@@ -13,8 +13,8 @@ schema, framework, service, database, or benchmark execution path.
 3. selects active entries whose status is `succeeded` and whose embedded result
    exists;
 4. rejects duplicate active `record_id` values or an empty active result set;
-5. passes those embedded records and the unchanged trace input to
-   `leaderboard.render.render_site`.
+5. verifies each trace file against its signed `trace_index_digest`, then passes
+   the embedded records and bound trace input to `leaderboard.render.render_site`.
 
 The existing ledger verifier remains authoritative for signatures, hashes,
 roster completeness, entry shape, result validation, and supersession

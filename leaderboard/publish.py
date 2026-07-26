@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -47,6 +48,16 @@ def publish_site(
         raise PublicationError("ledger has a duplicate active result")
 
     try:
+        for result in results:
+            record_id = str(result["record_id"])
+            trace = traces.get(record_id)
+            if trace is None:
+                raise PublicationError(f"missing trace source: {record_id}")
+            actual_digest = "sha256:" + hashlib.sha256(
+                Path(trace).read_bytes()
+            ).hexdigest()
+            if actual_digest != result["trace_index_digest"]:
+                raise PublicationError(f"trace digest mismatch: {record_id}")
         with tempfile.TemporaryDirectory() as temporary:
             result_path = Path(temporary) / "results.json"
             result_path.write_text(
