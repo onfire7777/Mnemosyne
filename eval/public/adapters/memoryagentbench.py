@@ -37,15 +37,20 @@ def score_cases(cases: object) -> dict[str, object]:
         case_id = case["case_id"]
         competency = case["competency"]
         score = case["score"]
-        if not isinstance(case_id, str) or not case_id.strip() or case_id in seen_ids:
+        if (
+            not isinstance(case_id, str)
+            or not case_id
+            or case_id != case_id.strip()
+            or case_id in seen_ids
+        ):
             raise MemoryAgentBenchError("case_id must be a unique non-empty string")
         if competency not in COMPETENCIES:
             raise MemoryAgentBenchError("competency is not canonical")
         if (
             isinstance(score, bool)
             or not isinstance(score, (int, float))
-            or not math.isfinite(score)
             or not 0 <= score <= 1
+            or not math.isfinite(score)
         ):
             raise MemoryAgentBenchError("score must be finite and between 0 and 1")
         seen_ids.add(case_id)
