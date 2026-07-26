@@ -18,6 +18,14 @@ and reports retrieval, test-time learning, long-range understanding, and
 conflict resolution separately without an aggregate headline. P13-MAB-B
 extends that merged scorer; it does not replace or duplicate it.
 
+PR #74 merged normally after exact-head CI, CodeRabbit, Greptile, and both
+review threads cleared on `e345e3b5`; post-merge main CI run `30217700006`
+succeeded. The merged validation boundary rejects oversized integers and
+whitespace-bearing identifiers. The previously reconciled Phase 16 L4 source
+package remains complete, while PBPP, Part-I, Register-A, identical-treatment,
+operator-entry, publication, protected Phase 12, and Phase 15 hardware gates
+remain unsatisfied.
+
 ## Controlling Sources
 
 - `.planning/ROADMAP.md` — Phase 13
@@ -96,8 +104,9 @@ own task and verification state.
   checks passed; one intervening runtime-lock fixture race passed on exact-node
   reproduction and the authoritative full rerun completed successfully)
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
-  normally. (the implementation head is pushed; reviewed successor commits and
-  PR delivery remain pending)
+  normally. (PR #76 exact-head CI and Greptile passed on `8346708b`; a
+  substantive CodeRabbit retry and current-main conflict reconciliation remain
+  pending)
 - [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
