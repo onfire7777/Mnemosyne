@@ -38,14 +38,14 @@
 **Files:**
 - Create: `leaderboard/ledger.py`
 
-- [ ] Reuse existing canonical hashing and Ed25519 key-loading patterns.
-- [ ] Implement entry construction/signing, durable append, full-ledger
+- [x] Reuse existing canonical hashing and Ed25519 key-loading patterns.
+- [x] Implement entry construction/signing, durable append, full-ledger
   verification, and stable fail-closed errors.
-- [ ] Preserve acknowledged bytes exactly; repair only an unacknowledged torn
+- [x] Preserve acknowledged bytes exactly; repair only an unacknowledged torn
   final fragment following the existing journal precedent.
-- [ ] Add `python -m leaderboard.ledger verify` with deterministic nonzero
+- [x] Add `python -m leaderboard.ledger verify` with deterministic nonzero
   failure behavior; do not add a project script or dependency.
-- [ ] Run focused tests until GREEN, then run Ruff and `git diff --check`.
+- [x] Run focused tests until GREEN, then run Ruff and `git diff --check`.
 
 ### Task 3: Verify and deliver the exact lease
 
