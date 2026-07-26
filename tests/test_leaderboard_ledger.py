@@ -1,5 +1,7 @@
 import copy
 import json
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -349,3 +351,56 @@ def test_verification_rejects_wrong_public_key(
 
     with pytest.raises(LedgerError, match="key fingerprint|signature"):
         verify_ledger(ledger_path, wrong_public_path)
+
+
+def test_append_repairs_only_a_torn_final_fragment(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    first = _append(ledger_path, private_key, entry_id="entry-complete")
+    acknowledged = ledger_path.read_bytes()
+    ledger_path.write_bytes(acknowledged + b'{"entry_id":"unacknowledged')
+
+    second = _append(ledger_path, private_key, entry_id="entry-after-repair")
+
+    assert ledger_path.read_bytes().startswith(acknowledged)
+    assert verify_ledger(ledger_path, public_key) == [first, second]
+
+
+def test_append_rejects_corruption_in_acknowledged_bytes(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    _append(ledger_path, private_key, entry_id="entry-complete")
+    ledger_path.write_bytes(b"not-json\n")
+
+    with pytest.raises(LedgerError, match="invalid JSON"):
+        _append(ledger_path, private_key, entry_id="entry-rejected")
+
+    assert ledger_path.read_bytes() == b"not-json\n"
+
+
+def test_module_verify_command_has_deterministic_exit_status(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    _append(ledger_path, private_key, entry_id="entry-cli")
+
+    command = [
+        sys.executable,
+        "-m",
+        "leaderboard.ledger",
+        "verify",
+        str(ledger_path),
+        str(public_key),
+    ]
+    valid = subprocess.run(command, capture_output=True, text=True, check=False)
+    ledger_path.write_bytes(ledger_path.read_bytes().replace(b"synthetic-entrant", b"mutated-entrant"))
+    invalid = subprocess.run(command, capture_output=True, text=True, check=False)
+
+    assert valid.returncode == 0
+    assert valid.stdout == "verified 1 ledger entry\n"
+    assert valid.stderr == ""
+    assert invalid.returncode == 1
+    assert invalid.stdout == ""
+    assert invalid.stderr.startswith("ledger verification failed: ")
