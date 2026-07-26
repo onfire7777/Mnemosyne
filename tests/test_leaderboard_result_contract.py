@@ -96,6 +96,7 @@ def test_rejects_whitespace_only_top_level_strings(field: str) -> None:
     ("field", "expected"),
     [
         ("name", "/metrics/0/name"),
+        ("family", "/metrics/0/family"),
         ("unit", "/metrics/0/unit"),
         ("judge.model", "/metrics/0/judge/model"),
         ("judge.prompt_digest", "/metrics/0/judge/prompt_digest"),

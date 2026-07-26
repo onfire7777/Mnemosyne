@@ -340,7 +340,7 @@ records outside the current input array.
 
 - [x] **Step 4: Verify and record disposition**
 
-The focused result-contract suite passes with 65 tests. Confirmed and fixed:
+The focused result-contract suite passes with 66 tests. Confirmed and fixed:
 JSON Pointer token escaping, diagnostic line injection, decoder recursion,
 top-level semantic-string coverage, single-record CLI coverage, non-object
 record pointers, external supersession-link preservation, and linear-time
