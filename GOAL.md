@@ -81,10 +81,10 @@ No other file may change.
 
 ### Task 2: Implement the minimum shared validator change
 
-- [ ] Extend the existing family allowlist without adding a dependency or a
+- [x] Extend the existing family allowlist without adding a dependency or a
   parallel validation path.
-- [ ] Make focused tests green without changing unrelated contracts.
-- [ ] Commit the implementation.
+- [x] Make focused tests green without changing unrelated contracts.
+- [x] Commit the implementation.
 
 ### Task 3: Review, verify, and deliver
 
