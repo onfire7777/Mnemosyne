@@ -49,7 +49,8 @@ A local-first "memory compiler." An append-only, content-addressed **evidence le
   named above plus live Git/GitHub/CBM/Gbrain checks for exact current status.
 
 ## 3. Strategic decisions you must honor
-- **PBPP is in force.** A public number may be published only if (a) produced by the pinned `eval/public/` harness, (b) shipped with the full artifact bundle, (c) reporting **retrieval-recall and LLM-judged-QA in SEPARATE columns** with judge model+prompt disclosed, and (d) never conflated with the private suite. Independent third-party reproduction is recorded as strengthening evidence when offered; it is not a publication prerequisite in v0.2.0. Private-suite numbers stay internal QA forever.
+
+- **PBPP is in force.** A public number may be published only if (a) produced by the pinned `eval/public/` harness, (b) shipped with the full artifact bundle, (c) reporting **retrieval-recall and LLM-judged-QA in SEPARATE columns** with judge model+prompt disclosed, (d) reproducible by construction from a clean checkout and pinned bundle with one documented command per RAIL-003, and (e) never conflated with the private suite. Independent third-party reproduction is recorded as strengthening evidence when offered; it is not a publication prerequisite in v0.2.0. Private-suite numbers stay internal QA forever.
 - **Neutrality is structural.** The leaderboard runs under independent governance with a hard firewall; the operator runs **every** system under **one identical harness**; Mnemosyne is entered under the same rules as everyone else; all raw artifacts are public. We win on reproducibility, not by controlling the scoreboard.
 - **Deterministic-first.** Lead with LongMemEval retrieval-recall + the HippoRAG multi-hop suite (MuSiQue/2Wiki/HotpotQA). Treat BEAM/QA as LLM-judged with a disclosed reader. Do **not** headline LoCoMo or DMR/MSC.
 
