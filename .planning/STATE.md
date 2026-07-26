@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: 12-04-02 lease sweep DELIVERED to main. Sixteen PRs #46–#61 merged 2026-07-24T17:55Z→2026-07-25T05:23Z, each on green required CI, ending at main@34effb4b: 12-04-02 qa_hard_v2 evaluator (#46), residual Leases A/C/D/E/F (#47–#51), Lease G + G-wire + G-consol external corroboration (#52–#54), Blueprint §7 Leases #19a/#19a.1/#19b counterfactual fidelity (#55–#57), #18 calibrated_confidence fuse (#58), #12 per-example conformal (#59), #13 AGM contraction (#60), #14 must_keep + pointer-to-original (#61). Delivery was verified by content rather than commit count: every product tree was byte-identical between main and the staging branch, which was retired 2026-07-25 along with the build fleet that drove the sweep. Blueprint §7 items #12/#13/#14/#18/#19 are marked closed with their merge SHAs. CAP-003/BENCH-005 remain Partial (no measured EM/F1 ≥ 0.85); 12-04-03 + production VM/Vault/W4–W5/headline remain operator-gated. Delivery vehicle: an autonomous 8-pod build fleet drove this sweep; it was retired 2026-07-25 and its staging branch deleted after verifying every product path was byte-identical to `main`. No repository content depends on it, and remaining Phase-12 work is operator measurement rather than agent-executable code.
+stopped_at: "Phase 12 source work is delivered but CAP-003/BENCH-005 and 12-04-03 remain operator-measurement gated; Phase 16 source preparation is merged through PR #72 at main@b9c475ad, with every real launch and publication gate still open."
 last_updated: "2026-07-26T18:20:00Z"
 last_activity: 2026-07-26
 progress:
