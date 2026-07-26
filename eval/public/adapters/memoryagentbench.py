@@ -1,4 +1,4 @@
-"""Deterministic, competency-separated MemoryAgentBench scoring."""
+"""Deterministic MemoryAgentBench scoring and submission-envelope contracts."""
 
 from __future__ import annotations
 
