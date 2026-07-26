@@ -99,7 +99,7 @@ def _append(
         else "2026-07-25T12:00:00Z",
         entrant_id=entrant_id,
         status=status,
-        run_id=f"run-{entry_id}" if status != "superseded" else None,
+        run_id=f"run-{entry_id}" if status not in {"no_run", "superseded"} else None,
         reason="synthetic non-success" if status != "succeeded" else None,
         result=result,
         supersedes=supersedes,
@@ -153,6 +153,33 @@ def test_publishes_only_active_successes(
     index = (destination / "index.html").read_text(encoding="utf-8")
     assert "result-success" in index
     assert "entry-failed" not in index
+
+
+def test_publishes_multiple_active_successes(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    roster = {"entrant-a", "entrant-b"}
+    traces: dict[str, Path] = {}
+    for entrant in sorted(roster):
+        record_id = f"result-{entrant}"
+        _append(
+            ledger,
+            private_key,
+            entry_id=f"entry-{entrant}",
+            entrant_id=entrant,
+            roster=roster,
+            result=_result(record_id),
+        )
+        traces[record_id] = _trace(tmp_path / f"{record_id}.jsonl")
+
+    destination = tmp_path / "site"
+    publish_site(ledger, public_key, traces, destination)
+
+    index = (destination / "index.html").read_text(encoding="utf-8")
+    assert "result-entrant-a" in index
+    assert "result-entrant-b" in index
 
 
 def test_excludes_a_superseded_success(
@@ -231,18 +258,19 @@ def test_rejects_an_invalid_signature_before_mutating_destination(
     assert sorted(destination.iterdir()) == [marker]
 
 
+@pytest.mark.parametrize("status", ["failed", "aborted", "discarded", "no_run"])
 def test_rejects_a_verified_ledger_without_an_active_success(
-    tmp_path: Path, key_paths: tuple[Path, Path]
+    tmp_path: Path, key_paths: tuple[Path, Path], status: str
 ) -> None:
     private_key, public_key = key_paths
     ledger = tmp_path / "runs.jsonl"
     _append(
         ledger,
         private_key,
-        entry_id="entry-failed",
+        entry_id=f"entry-{status}",
         entrant_id="synthetic-entrant",
         roster={"synthetic-entrant"},
-        status="failed",
+        status=status,
     )
 
     with pytest.raises(PublicationError, match="no active successful"):
@@ -309,3 +337,48 @@ def test_cli_publishes_valid_input_and_reports_invalid_input_without_traceback(
     assert "signature" in error
     assert "Traceback" not in error
     assert not (tmp_path / "other-site").exists()
+
+
+def test_cli_reports_usage_for_too_few_arguments(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main([]) == 2
+    assert capsys.readouterr().err == (
+        "usage: python -m leaderboard.publish "
+        "LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "mappings",
+    [
+        ["missing-separator"],
+        ["=trace.jsonl"],
+        ["result="],
+        ["result=one.jsonl", "result=two.jsonl"],
+    ],
+)
+def test_cli_rejects_invalid_trace_mappings_without_mutating_destination(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    mappings: list[str],
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    destination = tmp_path / "site"
+
+    assert main([str(ledger), str(public_key), str(destination), *mappings]) == 2
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: invalid trace mapping: ")
+    assert "Traceback" not in error
+    assert not destination.exists()

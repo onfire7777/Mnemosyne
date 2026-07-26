@@ -48,18 +48,14 @@ def publish_site(
 
     try:
         with tempfile.TemporaryDirectory() as temporary:
-            result_path = Path(temporary) / "results.jsonl"
+            result_path = Path(temporary) / "results.json"
             result_path.write_text(
-                "".join(
-                    json.dumps(
-                        result,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        ensure_ascii=False,
-                        allow_nan=False,
-                    )
-                    + "\n"
-                    for result in results
+                json.dumps(
+                    results,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                    allow_nan=False,
                 ),
                 encoding="utf-8",
             )
@@ -73,7 +69,8 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if len(args) < 4:
         print(
-            "usage: publish.py LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]",
+            "usage: python -m leaderboard.publish "
+            "LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]",
             file=sys.stderr,
         )
         return 2

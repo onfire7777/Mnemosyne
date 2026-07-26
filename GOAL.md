@@ -89,12 +89,12 @@ No other file may change.
 
 ### Task 3: Review, verify, and deliver
 
-- [ ] Run both native review stages and repair only confirmed findings with RED
+- [x] Run both native review stages and repair only confirmed findings with RED
   regressions for logic defects.
-- [ ] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
+- [x] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
   secret, and risky-file checks.
-- [ ] Commit explicit leased paths, push normally, and open or update the PR.
-- [ ] Require fresh exact-head CI and both reviewers to clear before normal
+- [x] Commit explicit leased paths, push normally, and open or update the PR.
+- [x] Require fresh exact-head CI and both reviewers to clear before normal
   merge; verify post-merge main CI.
 
 ## Completion

@@ -21,6 +21,13 @@ roster completeness, entry shape, result validation, and supersession
 invariants. The existing renderer remains authoritative for trace validation,
 deterministic HTML, and atomic publication.
 
+The supported CLI form is:
+
+```sh
+python -m leaderboard.publish \
+  LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]
+```
+
 ## TDD Tasks
 
 1. Add `tests/test_leaderboard_publish.py` with synthetic ephemeral keys and a
