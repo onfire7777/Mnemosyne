@@ -23,14 +23,14 @@
 **Files:**
 - Create: `tests/test_leaderboard_ledger.py`
 
-- [ ] Add synthetic fixtures for succeeded, failed, aborted, discarded,
+- [x] Add synthetic fixtures for succeeded, failed, aborted, discarded,
   `no_run`, and superseded entries.
-- [ ] Add RED tests for canonical JSONL, contiguous sequence/hash links,
+- [x] Add RED tests for canonical JSONL, contiguous sequence/hash links,
   signatures, required reasons, result validation, recorded absence, and
   append-only supersession.
-- [ ] Add RED tamper tests for mutation, deletion, reorder, duplicate IDs,
+- [x] Add RED tamper tests for mutation, deletion, reorder, duplicate IDs,
   unknown/repeated supersession, invalid result records, and wrong keys.
-- [ ] Run `uv run pytest -q tests/test_leaderboard_ledger.py` and confirm the
+- [x] Run `uv run pytest -q tests/test_leaderboard_ledger.py` and confirm the
   failure is the missing ledger implementation.
 
 ### Task 2: Implement the minimum signed append-only ledger
