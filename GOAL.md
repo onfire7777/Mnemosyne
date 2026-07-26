@@ -83,16 +83,17 @@ own task and verification state.
 
 - [x] Run both native review stages and repair confirmed findings.
 - [x] Complete local verification and exact-lease checks.
-- [x] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
-  normally.
+- [x] Push, open/update the PR, clear exact-head CI, CodeRabbit, Greptile, and
+  all review threads, then merge normally.
 - [x] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
-Completed 2026-07-26 after PR #74 merged normally as `main@f6ec163f`, exact-head
-CI and both reviewers cleared on `e345e3b5`, and post-merge main CI run
-`30217700006` succeeded. The merged review hardening keeps oversized integers
-and whitespace-bearing identifiers inside the fail-closed validation boundary.
+Completed 2026-07-26 after PR #74 merged normally as `main@f6ec163f`; exact-head
+CI, CodeRabbit, Greptile, and both review threads cleared on reviewed head
+`e345e3b5`; and post-merge main CI run `30217700006` succeeded. The merged
+review hardening keeps oversized integers and whitespace-bearing identifiers
+inside the fail-closed validation boundary.
 
 This package does not complete BENCH-006: the upstream-pinned dataset adapter,
 identical-harness execution, and real per-competency results remain
