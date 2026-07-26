@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from leaderboard.validate import validate_record
+from leaderboard.validate import _validate_records, validate_record
 
 
 class RenderError(ValueError):
@@ -75,6 +75,11 @@ def _load_results(path: Path) -> list[dict[str, Any]]:
             raise RenderError(f"duplicate result: {record_id}")
         seen.add(record_id)
         validated.append(record)
+    collection_errors = _validate_records(records)
+    if collection_errors:
+        raise RenderError(
+            "result contract invalid: " + ", ".join(collection_errors)
+        )
     return sorted(validated, key=lambda record: record["record_id"])
 
 
@@ -133,7 +138,14 @@ def _record_details(record: dict[str, Any]) -> str:
         f"{_escape(metric['value'])} {_escape(metric['unit'])}"
         "</li>"
         for metric in sorted(
-            record["metrics"], key=lambda metric: (metric["family"], metric["name"])
+            record["metrics"],
+            key=lambda metric: (
+                metric["family"],
+                metric["name"],
+                json.dumps(
+                    metric, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+                ),
+            ),
         )
     )
     immutable = "".join(

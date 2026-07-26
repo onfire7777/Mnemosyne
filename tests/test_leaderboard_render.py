@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from leaderboard.render import RenderError, render_site
+import leaderboard.render as renderer
+from leaderboard.render import RenderError, main, render_site
 
 
 def _result(record_id: str = "result-001") -> dict[str, object]:
@@ -185,6 +186,31 @@ def test_output_is_deterministic_for_logically_identical_input_orderings(
     assert all(raw.endswith(b"\n") and b"\r\n" not in raw for raw in _tree(first_output).values())
 
 
+def test_metric_ties_are_deterministic_for_logically_identical_orderings(
+    tmp_path: Path,
+) -> None:
+    first_record = _result()
+    tied_metric = dict(first_record["metrics"][0])
+    tied_metric["value"] = 0.5
+    first_record["metrics"] = [first_record["metrics"][0], tied_metric]
+    second_record = dict(first_record)
+    second_record["metrics"] = list(reversed(first_record["metrics"]))
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+
+    render_site(
+        _write_json(tmp_path / "first.json", first_record),
+        {"result-001": traces},
+        tmp_path / "first-site",
+    )
+    render_site(
+        _write_json(tmp_path / "second.json", second_record),
+        {"result-001": traces},
+        tmp_path / "second-site",
+    )
+
+    assert _tree(tmp_path / "first-site") == _tree(tmp_path / "second-site")
+
+
 def test_escapes_hostile_values_and_uses_only_safe_relative_links(
     tmp_path: Path,
 ) -> None:
@@ -248,6 +274,24 @@ def test_rejects_contract_invalid_and_duplicate_results(tmp_path: Path) -> None:
     assert not (tmp_path / "duplicate-site").exists()
 
 
+def test_rejects_cyclic_supersession_across_result_arrays(tmp_path: Path) -> None:
+    first = _result("result-a")
+    second = _result("result-b")
+    first["history"] = {"supersedes": "result-b"}
+    second["history"] = {"supersedes": "result-a"}
+    results = _write_json(tmp_path / "results.json", [first, second])
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+
+    with pytest.raises(RenderError, match="result contract"):
+        render_site(
+            results,
+            {"result-a": traces, "result-b": traces},
+            tmp_path / "site",
+        )
+
+    assert not (tmp_path / "site").exists()
+
+
 @pytest.mark.parametrize(
     ("raw", "match"),
     [
@@ -307,3 +351,54 @@ def test_failed_render_preserves_the_previous_output_byte_for_byte(
 
     assert _tree(output) == before
     assert not list(tmp_path.glob(".site-*"))
+
+
+def test_publication_failure_preserves_existing_site(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "index.html").write_bytes(b"previous output\n")
+    before = _tree(output)
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    real_replace = renderer.os.replace
+
+    def fail_new_install(source: Path, destination: Path) -> None:
+        if destination == output and "-backup-" not in source.name:
+            raise OSError("injected install failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(renderer.os, "replace", fail_new_install)
+
+    with pytest.raises(RenderError, match="failed to publish"):
+        render_site(results, {"result-001": traces}, output)
+
+    assert _tree(output) == before
+    assert not list(tmp_path.glob(".site-*"))
+
+
+def test_cli_reports_invalid_input_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{", encoding="utf-8")
+
+    assert main([str(invalid), str(tmp_path / "site"), "result-001=missing"]) == 2
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: invalid JSON:")
+    assert "Traceback" not in error
+
+
+def test_cli_renders_valid_input_and_rejects_duplicate_mappings(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    mapping = f"result-001={traces}"
+
+    assert main([str(results), str(tmp_path / "site"), mapping]) == 0
+    assert (tmp_path / "site" / "index.html").is_file()
+    assert main([str(results), str(tmp_path / "other-site"), mapping, mapping]) == 2
+    assert "invalid trace mapping" in capsys.readouterr().err
