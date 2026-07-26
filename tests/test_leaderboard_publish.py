@@ -7,8 +7,10 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import leaderboard.publish as publication
 from leaderboard.ledger import append_entry
 from leaderboard.publish import PublicationError, main, publish_site
+from leaderboard.render import render_site
 
 _TRACE_TEXT = (
     json.dumps(
@@ -287,6 +289,49 @@ def test_rejects_trace_evidence_not_bound_to_the_signed_result(
         )
 
     assert not destination.exists()
+
+
+def test_renders_the_verified_trace_snapshot(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    trace = _trace(tmp_path / "trace.jsonl")
+
+    def replace_source_then_render(
+        results: str | Path,
+        traces: dict[str, str | Path],
+        destination: str | Path,
+    ) -> None:
+        trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8")
+        render_site(results, traces, destination)
+
+    monkeypatch.setattr(publication, "render_site", replace_source_then_render)
+    destination = tmp_path / "site"
+    publish_site(
+        ledger,
+        public_key,
+        {"result-success": trace},
+        destination,
+    )
+
+    result_dir = hashlib.sha256(b"result-success").hexdigest()
+    trace_page = hashlib.sha256(b"question-001").hexdigest() + ".html"
+    page = (destination / "traces" / result_dir / trace_page).read_text(
+        encoding="utf-8"
+    )
+    assert "doc-1" in page
+    assert "unrelated" not in page
 
 
 @pytest.mark.parametrize("status", ["failed", "aborted", "discarded", "no_run"])

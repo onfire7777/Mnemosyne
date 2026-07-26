@@ -46,20 +46,30 @@ def publish_site(
     record_ids = [str(result["record_id"]) for result in results]
     if len(record_ids) != len(set(record_ids)):
         raise PublicationError("ledger has a duplicate active result")
+    unlinked = sorted(set(traces) - set(record_ids))
+    if unlinked:
+        raise PublicationError("unlinked trace source: " + ", ".join(unlinked))
 
     try:
-        for result in results:
-            record_id = str(result["record_id"])
-            trace = traces.get(record_id)
-            if trace is None:
-                raise PublicationError(f"missing trace source: {record_id}")
-            actual_digest = "sha256:" + hashlib.sha256(
-                Path(trace).read_bytes()
-            ).hexdigest()
-            if actual_digest != result["trace_index_digest"]:
-                raise PublicationError(f"trace digest mismatch: {record_id}")
         with tempfile.TemporaryDirectory() as temporary:
-            result_path = Path(temporary) / "results.json"
+            temporary_path = Path(temporary)
+            verified_traces: dict[str, Path] = {}
+            for index, result in enumerate(results):
+                record_id = str(result["record_id"])
+                trace = traces.get(record_id)
+                if trace is None:
+                    raise PublicationError(f"missing trace source: {record_id}")
+                trace_bytes = Path(trace).read_bytes()
+                actual_digest = (
+                    "sha256:" + hashlib.sha256(trace_bytes).hexdigest()
+                )
+                if actual_digest != result["trace_index_digest"]:
+                    raise PublicationError(f"trace digest mismatch: {record_id}")
+                verified_trace = temporary_path / f"trace-{index}.jsonl"
+                verified_trace.write_bytes(trace_bytes)
+                verified_traces[record_id] = verified_trace
+
+            result_path = temporary_path / "results.json"
             result_path.write_text(
                 json.dumps(
                     results,
@@ -70,7 +80,7 @@ def publish_site(
                 ),
                 encoding="utf-8",
             )
-            render_site(result_path, traces, destination)
+            render_site(result_path, verified_traces, destination)
     except (OSError, RenderError, TypeError, ValueError) as exc:
         raise PublicationError(str(exc)) from exc
 
