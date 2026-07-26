@@ -95,7 +95,14 @@ def _validate_metric(metric: object, index: int) -> list[str]:
             errors.append(f"{pointer}/{field}")
 
     family = metric.get("family")
-    if not isinstance(family, str) or family not in ("retrieval", "judged_qa"):
+    if not isinstance(family, str) or family not in (
+        "retrieval",
+        "judged_qa",
+        "security",
+        "calibration",
+        "performance",
+        "reproducibility",
+    ):
         errors.append(f"{pointer}/family")
     if not _is_number(metric.get("value")):
         errors.append(f"{pointer}/value")
@@ -264,7 +271,7 @@ def validate_record(record: object) -> list[str]:
                 family = metric.get("family")
                 if isinstance(family, str):
                     families.add(family)
-        if {"retrieval", "judged_qa"} <= families:
+        if len(families) > 1:
             errors.append("/metrics")
 
     for field in ("publication", "operator_entry", "history"):
