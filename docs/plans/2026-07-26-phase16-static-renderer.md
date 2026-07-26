@@ -116,6 +116,7 @@ git diff --check
 Task 3 full delivery gates:
 
 ```sh
+set -euo pipefail
 uv run --extra mcp pytest -q
 uv run ruff check .
 git diff --check
