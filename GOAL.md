@@ -1,115 +1,94 @@
-# Goal: Phase 16 L4 Launch-Readiness Gate — Completed
+# Goal: Phase 13 MemoryAgentBench Competency Contract
 
 ## Objective
 
-Implement P16-L4-A, the next dependency-ready production-code package after the
-merged metric-family taxonomy: a deterministic, fail-closed launch-readiness
-validator for the existing LEAD-003 gates.
+Implement P13-MAB-A, the first dependency-ready Phase 13 source package: a
+deterministic MemoryAgentBench scoring contract that reports retrieval,
+test-time learning, long-range understanding, and conflict resolution
+separately. It must never hide a weak competency behind an aggregate score.
 
-This package codifies evidence admission only. It must not run benchmarks,
-publish externally, access production, fabricate gate evidence, satisfy the
-protected Phase 12 attempt, or claim Phase 15 hardware proof.
+This is source preparation only. It must not download or run held-out datasets,
+tune on test data, publish a result, access production, satisfy the protected
+Phase 12 attempt, or claim Phase 15 hardware proof.
 
 ## Controlling Sources
 
-- `.planning/ROADMAP.md`
+- `.planning/ROADMAP.md` — Phase 13
+- `.planning/REQUIREMENTS.md` — BENCH-006 and RAIL-001..004
 - `.planning/STATE.md`
-- `.planning/REQUIREMENTS.md`
-- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` §2
-- `docs/governance/BOARD-STATUS.md`
-- `docs/plans/2026-07-25-phase16-result-contract.md`
-- `docs/plans/2026-07-25-phase16-run-ledger.md`
-- `docs/plans/2026-07-26-phase16-static-renderer.md`
-- `docs/plans/2026-07-26-phase16-signed-publication.md`
-- `docs/plans/2026-07-26-phase16-metric-taxonomy.md`
+- `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md` — Phase 2
+- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md`
+- `eval/public/` existing public-harness contracts
 
 ## Exact Lease
 
 - `GOAL.md`
-- `leaderboard/readiness.py`
-- `tests/test_leaderboard_readiness.py`
-- `docs/plans/2026-07-26-phase16-launch-readiness.md`
+- `eval/public/adapters/memoryagentbench.py`
+- `tests/test_public_memoryagentbench.py`
+- `docs/plans/2026-07-26-phase13-memoryagent-contract.md`
+
 No other tracked path may change. `GOAL.md` and the round plan may update their
-own task and verification state. RalphEx must not archive or rename `GOAL.md`
-before GitHub delivery and post-merge verification are complete.
+own task and verification state.
 
 ## Acceptance Contract
 
-- Accept one canonical JSON readiness record containing explicit PBPP,
-  Part-I-results, Register-A, identical-treatment, and operator-entry-label
-  evidence.
-- Return ready only when every gate is explicitly satisfied and each evidence
-  reference is a non-empty string.
-- Fail closed for missing, false, non-boolean, unknown, malformed, or duplicate
-  fields; never infer readiness from filenames, environment, network, or prior
-  runs.
-- Require the Mnemosyne entrant label to be exactly `operator-entry`.
-- Emit deterministic, sorted JSON with the readiness boolean and blocked gate
-  names; no timestamps, host data, secrets, or mutable external state.
-- Provide a small module CLI that reads one UTF-8 JSON file, returns 0 when
-  ready, 1 when valid-but-blocked, and 2 for invalid input.
-- Focused tests cover ready, each blocked gate, missing/unknown/mistyped fields,
-  empty evidence, operator-label mismatch, malformed/duplicate-key JSON, and
-  deterministic output.
+- Accept only a supplied, canonical in-memory sequence of scored cases; perform
+  no I/O, network access, dataset acquisition, judging, or benchmark execution.
+- Require exactly the four canonical competencies: `retrieval`,
+  `test_time_learning`, `long_range_understanding`, and
+  `conflict_resolution`.
+- Validate identifiers, finite numeric scores in `[0, 1]`, and non-empty
+  competency coverage; fail closed on malformed, missing, duplicate, unknown,
+  NaN, infinity, or boolean scores.
+- Emit deterministic per-competency counts and means in canonical order.
+- Do not emit an overall, composite, weighted, or averaged-across-competencies
+  headline.
+- Add focused RED tests first, then the smallest stdlib-only shared-flow
+  implementation.
+- Run both native review stages, focused tests, unrestricted MCP-extra full
+  pytest, full Ruff, diff, exact-lease, secret, and risky-file checks.
+- Commit and push intentionally, open/update a PR, require exact-head CI,
+  CodeRabbit, Greptile, clear review state and threads, then merge normally.
+- Verify exact post-merge main CI before refreshing CBM/Gbrain and admitting the
+  next lease-disjoint package.
 
 ## Operating Contract
 
-- Native RalphEx only: plan/task/review/monitor use `gpt-5.6-sol:low`,
-  executor Codex, external review none, maximum 12 rounds.
-- Work only in `/Users/admin/Mnemosyne.codex-phase16-launch-readiness` on
-  `codex/phase16-launch-readiness`.
-- Hermes dispatch remains 0; no Hermes fleet or legacy automation may bind.
-- Use CBM first for code reasoning, Gbrain for durable project knowledge, and
-  context-mode for command/log/document captures.
-- Apply Ponytail universally. Reuse stdlib JSON and existing validation/CLI
-  patterns; add no dependency or speculative abstraction.
-- Follow RED -> GREEN -> REFACTOR for behavior changes, then native review,
-  focused tests, unrestricted MCP-extra full pytest, Ruff, diff, lease,
-  secret, and risky-file checks.
-- Deliver only through branch push, PR, exact-head CI and review, normal merge,
-  and post-merge main verification. No direct-main, force, hook/check bypass,
-  review dismissal, or fabricated evidence.
-- Reconcile code, GitHub, canonical docs, planning state, CBM, and Gbrain only
-  when evidence changes. ADRs are only for durable architectural decisions.
+- Native RalphEx only: plan/task/review `gpt-5.6-sol:low`, Codex executor,
+  external review none, at most 12 iterations.
+- Work only in this Worktrunk checkout and exact lease.
+- Hermes dispatch remains zero; no fleet or legacy automation binding.
+- Apply Ponytail, TDD, receiving-review, systematic-debugging, and
+  verification-before-completion where triggered.
+- Use CBM first for code structure, context-mode for large outputs, and Gbrain
+  only after a coherent merged milestone.
+- Never direct-push main, force-push, bypass hooks/checks, dismiss reviews,
+  fabricate evidence, or run protected production/hardware gates.
 
 ## Tasks
 
-### Task 1: Freeze the launch-readiness contract
+### Task 1: Freeze the contract
 
-- [x] Add focused RED tests for canonical ready/blocked/invalid behavior and
-  deterministic CLI output.
+- [x] Add focused RED tests for the four separate competencies and fail-closed
+  boundary behavior.
 - [x] Commit the RED contract.
 
-### Task 2: Implement the minimum shared gate
+### Task 2: Implement the minimum scorer
 
-- [x] Add the stdlib-only validator and CLI in the leased module.
-- [x] Make focused tests green without reading protected or external state.
+- [x] Add the stdlib-only scorer in the leased adapter module.
+- [x] Make focused tests green.
 - [x] Commit the implementation.
 
-### Task 3: Review, verify, and deliver
+### Task 3: Review and deliver
 
-- [x] Run both native review stages and repair confirmed findings; add focused
-  regressions for behavior changes.
-- [x] Run focused tests, unrestricted full pytest with the MCP extra, full
-  Ruff, diff, exact-lease, secret, and risky-file checks.
-- [x] Commit explicit leased paths, push normally, and open/update the PR
-  (the pre-review branch is already pushed).
-- [x] Require fresh exact-head CI and both reviewers to clear before normal
-  merge; verify post-merge main CI.
-
-### Delivery evidence
-
-- PR #72 merged normally as `main@b9c475ad`.
-- Exact-head required checks and terminal CodeRabbit review cleared on
-  `bf984924`.
-- Post-merge main CI run `30213330409` completed successfully.
-- CBM was refreshed and the seven architecture decisions restored; Gbrain's
-  `default` and `mnemosyne-code` sources were synchronized to the merged head.
+- [x] Run both native review stages and repair confirmed findings.
+- [x] Complete local verification and exact-lease checks.
+- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
+  normally.
+- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
-Completed 2026-07-26 after normal merge, green post-merge main CI, CBM refresh,
-Gbrain source synchronization, and admission of the project-reconciliation
-documentation package. This closes the source package only; it does not satisfy
-PBPP, Part-I, Register-A, identical-treatment, operator-entry, or publication
-gates and does not make Phase 16 launch-complete.
+Finish only after normal merge and exact post-merge main CI. This package does
+not complete BENCH-006: the upstream-pinned dataset adapter, identical-harness
+execution, and real per-competency results remain evidence-gated follow-ups.
