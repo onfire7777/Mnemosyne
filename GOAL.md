@@ -1,15 +1,30 @@
-# Goal: Phase 13 MemoryAgentBench Competency Contract
+# Goal: Phase 13 MemoryAgentBench Upstream Submission Envelope
 
 ## Objective
 
-Implement P13-MAB-A, the first dependency-ready Phase 13 source package: a
-deterministic MemoryAgentBench scoring contract that reports retrieval,
-test-time learning, long-range understanding, and conflict resolution
-separately. It must never hide a weak competency behind an aggregate score.
+Implement P13-MAB-B, the next dependency-ready BENCH-006 source package: a
+deterministic, fail-closed submission envelope built from the already-validated
+four-competency MemoryAgentBench score result.
 
-This is source preparation only. It must not download or run held-out datasets,
-tune on test data, publish a result, access production, satisfy the protected
-Phase 12 attempt, or claim Phase 15 hardware proof.
+This package prepares an upstream submission path only. It must not download or
+run held-out datasets, tune on test data, invent measured results, publish a
+claim, access production, satisfy the protected Phase 12 attempt, or claim
+Phase 15 hardware proof.
+
+## Merged Baseline
+
+P13-MAB-A merged to `main` at `f6ec163f`. Its deterministic scorer validates
+and reports retrieval, test-time learning, long-range understanding, and
+conflict resolution separately without an aggregate headline. P13-MAB-B
+extends that merged scorer; it does not replace or duplicate it.
+
+PR #74 merged normally after exact-head CI, CodeRabbit, Greptile, and both
+review threads cleared on `e345e3b5`; post-merge main CI run `30217700006`
+succeeded. The merged validation boundary rejects oversized integers and
+whitespace-bearing identifiers. The previously reconciled Phase 16 L4 source
+package remains complete, while PBPP, Part-I, Register-A, identical-treatment,
+operator-entry, publication, protected Phase 12, and Phase 15 hardware gates
+remain unsatisfied.
 
 ## Controlling Sources
 
@@ -18,31 +33,34 @@ Phase 12 attempt, or claim Phase 15 hardware proof.
 - `.planning/STATE.md`
 - `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md` — Phase 2
 - `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md`
-- `eval/public/` existing public-harness contracts
+- `docs/plans/2026-07-26-phase13-memoryagent-contract.md`
+- `eval/public/adapters/memoryagentbench.py`
 
 ## Exact Lease
 
 - `GOAL.md`
 - `eval/public/adapters/memoryagentbench.py`
 - `tests/test_public_memoryagentbench.py`
-- `docs/plans/2026-07-26-phase13-memoryagent-contract.md`
+- `docs/plans/2026-07-26-phase13-memoryagent-upstream.md`
 
 No other tracked path may change. `GOAL.md` and the round plan may update their
 own task and verification state.
 
 ## Acceptance Contract
 
-- Accept only a supplied, canonical in-memory sequence of scored cases; perform
-  no I/O, network access, dataset acquisition, judging, or benchmark execution.
-- Require exactly the four canonical competencies: `retrieval`,
-  `test_time_learning`, `long_range_understanding`, and
-  `conflict_resolution`.
-- Validate identifiers, finite numeric scores in `[0, 1]`, and non-empty
-  competency coverage; fail closed on malformed, missing, duplicate, unknown,
-  NaN, infinity, or boolean scores.
-- Emit deterministic per-competency counts and means in canonical order.
-- Do not emit an overall, composite, weighted, or averaged-across-competencies
+- Reuse `score_cases`; do not duplicate competency validation or aggregation.
+- Accept only an exact lowercase 40-hex upstream dataset revision and an exact
+  non-empty protocol identifier without surrounding whitespace.
+- Emit one canonical submission mapping containing a fixed schema version,
+  pinned dataset revision, protocol identifier, and the four separate
+  competency results in canonical order.
+- Never emit an overall, composite, weighted, or averaged-across-competencies
   headline.
+- Reject malformed fields, booleans, non-finite values, missing/extra
+  competencies, unknown keys, unpinned revisions, and non-canonical whitespace
+  through `MemoryAgentBenchError`.
+- Output must be deterministic for equivalent case orderings and require no
+  filesystem, network, dataset, judge, CLI, or production access.
 - Add focused RED tests first, then the smallest stdlib-only shared-flow
   implementation.
 - Run both native review stages, focused tests, unrestricted MCP-extra full
@@ -67,52 +85,32 @@ own task and verification state.
 
 ## Tasks
 
-### Task 1: Freeze the contract
+### Task 1: Freeze the submission contract
 
-- [x] Add focused RED tests for the four separate competencies and fail-closed
-  boundary behavior.
+- [x] Add focused RED tests for the canonical envelope and fail-closed metadata.
 - [x] Commit the RED contract.
 
-### Task 2: Implement the minimum scorer
+### Task 2: Implement the minimum envelope
 
-- [x] Add the stdlib-only scorer in the leased adapter module.
-- [x] Make focused tests green.
+- [x] Add the stdlib-only submission builder in the leased adapter module.
+- [x] Make focused tests green without I/O or new dependencies.
 - [x] Commit the implementation.
 
 ### Task 3: Review and deliver
 
 - [x] Run both native review stages and repair confirmed findings.
-- [x] Complete local verification and exact-lease checks.
-- [x] Push, open/update the PR, clear exact-head CI, CodeRabbit, Greptile, and
-  all review threads, then merge normally.
-- [x] Verify post-merge main CI, then refresh CBM/Gbrain once.
+- [x] Complete local verification and exact-lease checks. (30 focused tests,
+  unrestricted MCP-extra full pytest, Ruff, diff, lease, secret, and risky-file
+  checks passed; one intervening runtime-lock fixture race passed on exact-node
+  reproduction and the authoritative full rerun completed successfully)
+- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
+  normally. (PR #76 exact-head CI and Greptile passed on `8346708b`; a
+  substantive CodeRabbit retry and current-main conflict reconciliation remain
+  pending)
+- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
-Completed 2026-07-26 after PR #74 merged normally as `main@f6ec163f`; exact-head
-CI, CodeRabbit, Greptile, and both review threads cleared on reviewed head
-`e345e3b5`; and post-merge main CI run `30217700006` succeeded. The merged
-review hardening keeps oversized integers and whitespace-bearing identifiers
-inside the fail-closed validation boundary.
-
-Local closure evidence:
-
-- `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_memoryagentbench.py`
-  — 20 passed.
-- `uv run ruff check eval/public/adapters/memoryagentbench.py tests/test_public_memoryagentbench.py`
-  — all checks passed.
-- `git diff --check` — clean.
-- Exact-head CI run `30217070318` on `e345e3b5` passed the unrestricted
-  MCP-extra test environment (`uv run --locked python -m pytest`) and full Ruff
-  (`uv run --locked ruff check .`).
-- `git diff --name-only 16af34d7..e345e3b5` returned exactly the four paths in
-  the Exact Lease; the risky-file scan returned no matches.
-- `gitleaks git --log-opts='16af34d7..f6ec163f' --no-banner` scanned all six
-  feature commits and found no leaks.
-
-This package does not complete BENCH-006: the upstream-pinned dataset adapter,
-identical-harness execution, and real per-competency results remain
-evidence-gated follow-ups. The previously reconciled Phase 16 L4 source package
-remains complete, while PBPP, Part-I, Register-A, identical-treatment,
-operator-entry, publication, protected Phase 12, and Phase 15 hardware gates
-remain unsatisfied.
+Finish only after normal merge and exact post-merge main CI. This package does
+not complete BENCH-006: upstream acceptance, identical-harness execution, and
+real per-competency results remain evidence-gated follow-ups.
