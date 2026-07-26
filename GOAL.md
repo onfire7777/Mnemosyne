@@ -75,9 +75,9 @@ own task and verification state.
 
 ### Task 2: Implement the minimum scorer
 
-- [ ] Add the stdlib-only scorer in the leased adapter module.
-- [ ] Make focused tests green.
-- [ ] Commit the implementation.
+- [x] Add the stdlib-only scorer in the leased adapter module.
+- [x] Make focused tests green.
+- [x] Commit the implementation.
 
 ### Task 3: Review and deliver
 
