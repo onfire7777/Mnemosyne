@@ -102,7 +102,13 @@ Local closure evidence:
 - `uv run ruff check eval/public/adapters/memoryagentbench.py tests/test_public_memoryagentbench.py`
   — all checks passed.
 - `git diff --check` — clean.
-- `gitleaks protect --staged --no-banner` — no leaks found.
+- Exact-head CI run `30217070318` on `e345e3b5` passed the unrestricted
+  MCP-extra test environment (`uv run --locked python -m pytest`) and full Ruff
+  (`uv run --locked ruff check .`).
+- `git diff --name-only 16af34d7..e345e3b5` returned exactly the four paths in
+  the Exact Lease; the risky-file scan returned no matches.
+- `gitleaks git --log-opts='16af34d7..f6ec163f' --no-banner` scanned all six
+  feature commits and found no leaks.
 
 This package does not complete BENCH-006: the upstream-pinned dataset adapter,
 identical-harness execution, and real per-competency results remain
