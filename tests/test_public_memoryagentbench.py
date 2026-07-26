@@ -7,7 +7,7 @@ import pytest
 from eval.public.adapters.memoryagentbench import MemoryAgentBenchError, score_cases
 
 
-def _case(case_id: str, competency: str, score: float) -> dict[str, object]:
+def _case(case_id: str, competency: str, score: object) -> dict[str, object]:
     return {"case_id": case_id, "competency": competency, "score": score}
 
 
@@ -79,6 +79,30 @@ def test_score_cases_requires_non_empty_coverage_for_all_four_competencies() -> 
                 _case("range-1", "long_range_understanding", 0.5),
             ]
         )
+
+
+def test_score_cases_rejects_scores_that_overflow_float_conversion() -> None:
+    cases = [
+        _case("retrieval-1", "retrieval", 10**1000),
+        _case("learning-1", "test_time_learning", 0.5),
+        _case("range-1", "long_range_understanding", 0.5),
+        _case("conflict-1", "conflict_resolution", 0.5),
+    ]
+
+    with pytest.raises(MemoryAgentBenchError):
+        score_cases(cases)
+
+
+def test_score_cases_rejects_identifiers_with_surrounding_whitespace() -> None:
+    cases = [
+        _case(" retrieval-1", "retrieval", 0.5),
+        _case("learning-1", "test_time_learning", 0.5),
+        _case("range-1", "long_range_understanding", 0.5),
+        _case("conflict-1", "conflict_resolution", 0.5),
+    ]
+
+    with pytest.raises(MemoryAgentBenchError):
+        score_cases(cases)
 
 
 @pytest.mark.parametrize(
