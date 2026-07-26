@@ -127,7 +127,28 @@ gates hold.
 **Requirements:** LEAD-001, LEAD-002, LEAD-003, GOV-001, RAIL-003, RAIL-004
 **Depends on:** Phases 10-12. The site and data pipeline no longer wait on full
 Phase 15 capability closure — see Sequencing below.
-**Plans:** Not planned
+**Plans:** 6/6 source packages complete; launch evidence remains open
+
+Source packages:
+
+- [x] `docs/plans/2026-07-25-phase16-result-contract.md` — closed result schema
+  and metric-family separation.
+- [x] `docs/plans/2026-07-25-phase16-run-ledger.md` — append-only signed run
+  ledger and verification.
+- [x] `docs/plans/2026-07-26-phase16-static-renderer.md` — deterministic static
+  site rendering from validated public artifacts.
+- [x] `docs/plans/2026-07-26-phase16-signed-publication.md` — fail-closed signed
+  publication path.
+- [x] `docs/plans/2026-07-26-phase16-metric-taxonomy.md` — explicit retrieval,
+  QA, security, calibration, performance, and reproducibility families.
+- [x] `docs/plans/2026-07-26-phase16-launch-readiness.md` — deterministic
+  LEAD-003 readiness admission.
+
+**Boundary:** These packages complete the current source implementation for
+L1-L4 preparation; they do not complete Phase 16 or authorize launch. Real
+entrant bundles, measured dimensions, PBPP/Part-I/Register-A evidence,
+identical-treatment evidence, operator-entry labeling, and publication approval
+remain required. No public or headline benchmark result is claimed.
 
 **Revised v0.2.0.** Launch is gated on Register A of
 `docs/governance/BOARD-STATUS.md` — pre-registration, an append-only signed run

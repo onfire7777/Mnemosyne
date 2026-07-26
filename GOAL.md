@@ -1,4 +1,4 @@
-# Goal: Phase 16 L4 Launch-Readiness Gate
+# Goal: Phase 16 L4 Launch-Readiness Gate — Completed
 
 ## Objective
 
@@ -92,18 +92,24 @@ before GitHub delivery and post-merge verification are complete.
   regressions for behavior changes.
 - [x] Run focused tests, unrestricted full pytest with the MCP extra, full
   Ruff, diff, exact-lease, secret, and risky-file checks.
-- [ ] Commit explicit leased paths, push normally, and open/update the PR
+- [x] Commit explicit leased paths, push normally, and open/update the PR
   (the pre-review branch is already pushed).
-- [ ] Require fresh exact-head CI and both reviewers to clear before normal
+- [x] Require fresh exact-head CI and both reviewers to clear before normal
   merge; verify post-merge main CI.
 
-### Remaining gates
+### Delivery evidence
 
-- Commit and push the review fixes, then open or update the PR.
-- Require exact-head CI and both reviewers, merge normally, and verify
-  post-merge main CI.
+- PR #72 merged normally as `main@b9c475ad`.
+- Exact-head required checks and terminal CodeRabbit review cleared on
+  `bf984924`.
+- Post-merge main CI run `30213330409` completed successfully.
+- CBM was refreshed and the seven architecture decisions restored; Gbrain's
+  `default` and `mnemosyne-code` sources were synchronized to the merged head.
 
 ## Completion
 
-Finish only after normal merge, green post-merge main CI, one CBM refresh, one
-Gbrain sync, and admission of the next dependency-ready lease-disjoint package.
+Completed 2026-07-26 after normal merge, green post-merge main CI, CBM refresh,
+Gbrain source synchronization, and admission of the project-reconciliation
+documentation package. This closes the source package only; it does not satisfy
+PBPP, Part-I, Register-A, identical-treatment, operator-entry, or publication
+gates and does not make Phase 16 launch-complete.

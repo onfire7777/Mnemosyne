@@ -4,8 +4,8 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: 12-04-02 lease sweep DELIVERED to main. Sixteen PRs #46–#61 merged 2026-07-24T17:55Z→2026-07-25T05:23Z, each on green required CI, ending at main@34effb4b: 12-04-02 qa_hard_v2 evaluator (#46), residual Leases A/C/D/E/F (#47–#51), Lease G + G-wire + G-consol external corroboration (#52–#54), Blueprint §7 Leases #19a/#19a.1/#19b counterfactual fidelity (#55–#57), #18 calibrated_confidence fuse (#58), #12 per-example conformal (#59), #13 AGM contraction (#60), #14 must_keep + pointer-to-original (#61). Delivery was verified by content rather than commit count: every product tree was byte-identical between main and the staging branch, which was retired 2026-07-25 along with the build fleet that drove the sweep. Blueprint §7 items #12/#13/#14/#18/#19 are marked closed with their merge SHAs. CAP-003/BENCH-005 remain Partial (no measured EM/F1 ≥ 0.85); 12-04-03 + production VM/Vault/W4–W5/headline remain operator-gated. Delivery vehicle: an autonomous 8-pod build fleet drove this sweep; it was retired 2026-07-25 and its staging branch deleted after verifying every product path was byte-identical to `main`. No repository content depends on it, and remaining Phase-12 work is operator measurement rather than agent-executable code.
-last_updated: "2026-07-25T18:00:00Z"
-last_activity: 2026-07-25
+last_updated: "2026-07-26T18:20:00Z"
+last_activity: 2026-07-26
 progress:
   total_phases: 7
   completed_phases: 2
@@ -32,14 +32,28 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Plan 12-04 closure — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held.
+**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the six Phase 16 L1-L4 source packages are merged through PR #72 (`main@b9c475ad`); they prepare the ledger, validation, rendering, publication, taxonomy, and readiness surfaces but do not satisfy or publish any launch gate.
 
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-25 — sixteen lease PRs (#46–#61) merged to `main` on green CI; team-vs-main product parity verified by tree hash; repo reconciled (merged worktrees pruned, `delivery/lease-G-consol` deleted, no stale refs).
+Last activity: 2026-07-26 — Phase 16 source packages merged through PR #72 at
+`main@b9c475ad`; the earlier Phase 12 lease sweep remains delivered and its
+operator-only measurement boundary is unchanged.
+
+## Parallel Phase 16 Source Status
+
+PRs #65–#72 merged the result contract, contract hardening, signed run ledger,
+static renderer, signed publication path, metric taxonomy, and deterministic
+launch-readiness validator. The current source-preparation packages are complete,
+but Phase 16 remains open: no real entrant bundle, measured leaderboard
+dimension, PBPP/Part-I/Register-A evidence, identical-treatment evidence,
+operator-entry evidence, or human-approved publication is claimed. The
+controlling details are in `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`,
+and the six `docs/plans/2026-07-25-phase16-*` /
+`docs/plans/2026-07-26-phase16-*` records.
 
 ## Performance Metrics
 

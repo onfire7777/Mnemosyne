@@ -630,9 +630,10 @@ the ledger through the normal GSD flow with its own traceability test.
 W1 blocks all measurement. W2 and W3 can proceed in parallel after W1. W4 depends
 on the adapters each capability needs (W2/W3 supply some). W5 delivers the
 answering plane and 8 GiB profile and can proceed in parallel once W1 lands, but
-its headline numbers depend on W1's retrieval fix. Human-owned governance,
-independent reproduction, and public wording remain gates on any external claim
-throughout.
+its headline numbers depend on W1's retrieval fix. PBPP, source-owned launch
+gates, and human-approved public wording remain gates on any external claim
+throughout. Independent reproduction and Register B governance are optional
+strengthening evidence under the current v0.2.0 credibility model.
 
 ---
 
