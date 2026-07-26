@@ -38,6 +38,14 @@ _STRING_FIELDS = (
     "trace_index_digest",
 )
 _PUBLICATION_LABELS = ("operator-run", "neutral")
+_METRIC_FAMILIES = (
+    "retrieval",
+    "judged_qa",
+    "security",
+    "calibration",
+    "performance",
+    "reproducibility",
+)
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
 _DIGEST_FIELDS = (
@@ -95,14 +103,7 @@ def _validate_metric(metric: object, index: int) -> list[str]:
             errors.append(f"{pointer}/{field}")
 
     family = metric.get("family")
-    if not isinstance(family, str) or family not in (
-        "retrieval",
-        "judged_qa",
-        "security",
-        "calibration",
-        "performance",
-        "reproducibility",
-    ):
+    if not isinstance(family, str) or family not in _METRIC_FAMILIES:
         errors.append(f"{pointer}/family")
     if not _is_number(metric.get("value")):
         errors.append(f"{pointer}/value")
@@ -269,7 +270,7 @@ def validate_record(record: object) -> list[str]:
             errors.extend(_validate_metric(metric, index))
             if isinstance(metric, dict):
                 family = metric.get("family")
-                if isinstance(family, str):
+                if family in _METRIC_FAMILIES:
                     families.add(family)
         if len(families) > 1:
             errors.append("/metrics")

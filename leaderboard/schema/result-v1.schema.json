@@ -171,40 +171,65 @@
       }
     },
     {
-      "not": {
-        "properties": {
-          "metrics": {
-            "allOf": [
-              {
-                "contains": {
-                  "properties": {
-                    "family": {
-                      "const": "retrieval"
-                    }
-                  },
-                  "required": [
-                    "family"
-                  ]
-                }
-              },
-              {
-                "contains": {
-                  "properties": {
-                    "family": {
-                      "const": "judged_qa"
-                    }
-                  },
-                  "required": [
-                    "family"
-                  ]
+      "properties": {
+        "metrics": {
+          "anyOf": [
+            {
+              "items": {
+                "properties": {
+                  "family": {
+                    "const": "retrieval"
+                  }
                 }
               }
-            ]
-          }
-        },
-        "required": [
-          "metrics"
-        ]
+            },
+            {
+              "items": {
+                "properties": {
+                  "family": {
+                    "const": "judged_qa"
+                  }
+                }
+              }
+            },
+            {
+              "items": {
+                "properties": {
+                  "family": {
+                    "const": "security"
+                  }
+                }
+              }
+            },
+            {
+              "items": {
+                "properties": {
+                  "family": {
+                    "const": "calibration"
+                  }
+                }
+              }
+            },
+            {
+              "items": {
+                "properties": {
+                  "family": {
+                    "const": "performance"
+                  }
+                }
+              }
+            },
+            {
+              "items": {
+                "properties": {
+                  "family": {
+                    "const": "reproducibility"
+                  }
+                }
+              }
+            }
+          ]
+        }
       }
     }
   ],
@@ -272,7 +297,11 @@
         "family": {
           "enum": [
             "retrieval",
-            "judged_qa"
+            "judged_qa",
+            "security",
+            "calibration",
+            "performance",
+            "reproducibility"
           ]
         },
         "value": {

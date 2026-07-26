@@ -27,6 +27,7 @@ evidence, Phase 15 hardware, Register A, reproduction, or launch gates.
 
 - `GOAL.md`
 - `leaderboard/validate.py`
+- `leaderboard/schema/result-v1.schema.json`
 - `tests/test_leaderboard_result_contract.py`
 - `docs/plans/2026-07-26-phase16-metric-taxonomy.md`
 
@@ -89,14 +90,21 @@ No other file may change.
 ### Task 3: Review, verify, and deliver
 
 - [x] Run both native review stages and repair only confirmed findings with RED
-  regressions for logic defects (no confirmed findings).
-- [x] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
-  secret, and risky-file checks (full pytest skipped - sandbox blocks `/bin/ps`
-  and loopback sockets; focused tests and all other checks passed).
-- [x] Commit explicit leased paths, push normally, and open or update the PR
-  (push/PR skipped - GitHub authentication is invalid and network is blocked).
-- [x] Require fresh exact-head CI and both reviewers to clear before normal
-  merge; verify post-merge main CI (skipped - external GitHub checks unavailable).
+  regressions for logic defects.
+- [ ] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
+  secret, and risky-file checks.
+- [ ] Commit explicit leased paths, push normally, and open or update the PR.
+- [ ] Require fresh exact-head CI and both reviewers to clear before normal
+  merge; verify post-merge main CI.
+
+### Remaining gates
+
+- Full MCP-extra suite must run in an environment that permits `/bin/ps` and
+  loopback sockets.
+- Branch push, PR, exact-head CI/review, merge, and post-merge main CI remain
+  blocked by unavailable GitHub authentication/network access.
+- Completion still requires the CBM refresh, Gbrain sync, and admission of the
+  next dependency-ready package listed below.
 
 ## Completion
 
