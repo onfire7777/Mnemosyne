@@ -18,7 +18,7 @@ forbids an aggregate headline.
 - [x] RED: freeze canonical ordering, validation, and separate reporting.
 - [x] GREEN: implement the smallest stdlib-only in-memory scorer.
 - [x] REVIEW: run both native stages and repair confirmed findings.
-- [ ] VERIFY: focused/full pytest, Ruff, diff, lease, secret, risky-file.
+- [x] VERIFY: focused/full pytest, Ruff, diff, lease, secret, risky-file.
 - [ ] INTEGRATE: branch push, PR, exact-head CI/reviews, normal merge, main CI.
 
 ## Non-Goals
