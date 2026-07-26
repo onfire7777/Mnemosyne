@@ -91,7 +91,7 @@ No other file may change.
 
 - [x] Run both native review stages and repair only confirmed findings with RED
   regressions for logic defects.
-- [ ] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
+- [x] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
   secret, and risky-file checks.
 - [ ] Commit explicit leased paths, push normally, and open or update the PR.
 - [ ] Require fresh exact-head CI and both reviewers to clear before normal
@@ -99,8 +99,6 @@ No other file may change.
 
 ### Remaining gates
 
-- Full MCP-extra suite must run in an environment that permits `/bin/ps` and
-  loopback sockets.
 - Branch push, PR, exact-head CI/review, merge, and post-merge main CI remain
   blocked by unavailable GitHub authentication/network access.
 - Completion still requires the CBM refresh, Gbrain sync, and admission of the
