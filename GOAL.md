@@ -83,9 +83,9 @@ before GitHub delivery and post-merge verification are complete.
 
 ### Task 2: Implement the minimum shared gate
 
-- [ ] Add the stdlib-only validator and CLI in the leased module.
-- [ ] Make focused tests green without reading protected or external state.
-- [ ] Commit the implementation.
+- [x] Add the stdlib-only validator and CLI in the leased module.
+- [x] Make focused tests green without reading protected or external state.
+- [x] Commit the implementation.
 
 ### Task 3: Review, verify, and deliver
 
