@@ -25,7 +25,7 @@ One-screen map of `docs/`. Lane discipline applies throughout: each document own
 | Document | Owns |
 | --- | --- |
 | [EXECUTION-PLAN-A-Memory-System.md](EXECUTION-PLAN-A-Memory-System.md) / `.pdf` | Building the world-best **capabilities** (S1 multi-hop synthesis, S2 upgrades, S3 security/calibration, S4 perf/scale close-out, S5 activation-memory research) |
-| [EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md](EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md) / `.pdf` | **Measurement and publication**: the `eval/public/` harness, the Public-Benchmark Publication Protocol (PBPP), third-party reproduction, and the neutral memory-benchmark leaderboard |
+| [EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md](EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md) / `.pdf` | **Measurement and publication**: the `eval/public/` harness, the Public-Benchmark Publication Protocol (PBPP), reproduction by construction, optional third-party evidence, and the neutral memory-benchmark leaderboard |
 
 Division of authority: Plan A builds, Plan B proves and publishes — no external claim originates in Plan A, and where either says "measured/published," Plan B is the authority. Both extend the performance blueprint's Waves and the standing dated specs. The original combined plan is archived (below).
 
