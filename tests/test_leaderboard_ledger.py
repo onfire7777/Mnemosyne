@@ -1,4 +1,5 @@
 import copy
+import base64
 import fcntl
 import json
 import multiprocessing
@@ -136,6 +137,17 @@ def test_verify_rejects_noncanonical_json_bytes(
     private_key, public_key = key_paths
     entry = _append(ledger_path, private_key, entry_id="entry-noncanonical")
     ledger_path.write_text(json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n")
+
+    with pytest.raises(LedgerError, match="non-canonical"):
+        verify_ledger(ledger_path, public_key)
+
+
+def test_verify_rejects_crlf_ledger_bytes(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    _append(ledger_path, private_key, entry_id="entry-crlf")
+    ledger_path.write_bytes(ledger_path.read_bytes().replace(b"\n", b"\r\n"))
 
     with pytest.raises(LedgerError, match="non-canonical"):
         verify_ledger(ledger_path, public_key)
@@ -325,6 +337,36 @@ def test_supersession_appends_without_rewriting_history(
     assert verify_ledger(ledger_path, public_key) == [original, correction]
 
 
+def test_rejects_cross_entrant_supersession(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-a",
+        timestamp="2026-07-25T12:00:00Z",
+        entrant_id="entrant-a",
+        status="failed",
+        run_id="run-a",
+        reason="synthetic failure",
+        roster={"entrant-a", "entrant-b"},
+    )
+
+    with pytest.raises(LedgerError, match="same entrant"):
+        append_entry(
+            ledger_path,
+            private_key,
+            entry_id="entry-b-correction",
+            timestamp="2026-07-25T12:01:00Z",
+            entrant_id="entrant-b",
+            status="superseded",
+            reason="cross-entrant correction",
+            supersedes="entry-a",
+            roster={"entrant-a", "entrant-b"},
+        )
+
+
 @pytest.mark.parametrize(
     ("target", "match"),
     [
@@ -393,6 +435,80 @@ def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> Non
             for entry in entries
         )
     )
+
+
+def _resign_entries_and_head(
+    ledger_path: Path,
+    private_key_path: Path,
+    entries: list[dict[str, object]],
+) -> None:
+    from leaderboard import ledger
+
+    private_key = ledger.load_private_key(private_key_path)
+    previous_digest = ledger.GENESIS_DIGEST
+    for entry in entries:
+        entry["previous_digest"] = previous_digest
+        entry["entry_digest"] = ledger._digest(entry)
+        entry["signature"] = base64.b64encode(
+            private_key.sign(ledger._signed_bytes(entry))
+        ).decode("ascii")
+        previous_digest = str(entry["entry_digest"])
+    _rewrite_entries(ledger_path, entries)
+
+    head_path = ledger_path.with_suffix(ledger_path.suffix + ".head.json")
+    head = json.loads(head_path.read_bytes())
+    head["sequence"] = entries[-1]["sequence"]
+    head["entry_digest"] = entries[-1]["entry_digest"]
+    head["signature"] = base64.b64encode(
+        private_key.sign(ledger._signed_bytes(head))
+    ).decode("ascii")
+    head_path.write_bytes(ledger._canonical(head) + b"\n")
+
+
+def test_verification_rejects_boolean_sequence(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    entries = [_append(ledger_path, private_key, entry_id="entry-boolean-sequence")]
+    entries[0]["sequence"] = False
+    _resign_entries_and_head(ledger_path, private_key, entries)
+
+    with pytest.raises(LedgerError, match="sequence"):
+        verify_ledger(ledger_path, public_key)
+
+
+def test_verification_rejects_off_roster_supersession(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    original = _append(ledger_path, private_key, entry_id="entry-original")
+    correction = append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-correction",
+        timestamp="2026-07-25T12:01:00Z",
+        entrant_id="synthetic-entrant",
+        status="superseded",
+        reason="synthetic correction",
+        supersedes="entry-original",
+        roster={"synthetic-entrant"},
+    )
+    entries = [original, correction]
+    entries[0]["entrant_id"] = "off-roster-entrant"
+    entries[1]["entrant_id"] = "off-roster-entrant"
+    _resign_entries_and_head(ledger_path, private_key, entries)
+
+    with pytest.raises(LedgerError, match="pre-registered roster"):
+        verify_ledger(ledger_path, public_key)
+
+
+def test_verification_rejects_missing_ledger_and_head(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    _, public_key = key_paths
+
+    with pytest.raises(LedgerError, match="missing"):
+        verify_ledger(ledger_path, public_key)
 
 
 def _seed_three_entries(
