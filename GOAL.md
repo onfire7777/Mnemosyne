@@ -83,12 +83,36 @@ own task and verification state.
 
 - [x] Run both native review stages and repair confirmed findings.
 - [x] Complete local verification and exact-lease checks.
-- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
-  normally.
-- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
+- [x] Push, open/update the PR, clear exact-head CI, CodeRabbit, Greptile, and
+  all review threads, then merge normally.
+- [x] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
-Finish only after normal merge and exact post-merge main CI. This package does
-not complete BENCH-006: the upstream-pinned dataset adapter, identical-harness
-execution, and real per-competency results remain evidence-gated follow-ups.
+Completed 2026-07-26 after PR #74 merged normally as `main@f6ec163f`; exact-head
+CI, CodeRabbit, Greptile, and both review threads cleared on reviewed head
+`e345e3b5`; and post-merge main CI run `30217700006` succeeded. The merged
+review hardening keeps oversized integers and whitespace-bearing identifiers
+inside the fail-closed validation boundary.
+
+Local closure evidence:
+
+- `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_memoryagentbench.py`
+  — 20 passed.
+- `uv run ruff check eval/public/adapters/memoryagentbench.py tests/test_public_memoryagentbench.py`
+  — all checks passed.
+- `git diff --check` — clean.
+- Exact-head CI run `30217070318` on `e345e3b5` passed the unrestricted
+  MCP-extra test environment (`uv run --locked python -m pytest`) and full Ruff
+  (`uv run --locked ruff check .`).
+- `git diff --name-only 16af34d7..e345e3b5` returned exactly the four paths in
+  the Exact Lease; the risky-file scan returned no matches.
+- `gitleaks git --log-opts='16af34d7..f6ec163f' --no-banner` scanned all six
+  feature commits and found no leaks.
+
+This package does not complete BENCH-006: the upstream-pinned dataset adapter,
+identical-harness execution, and real per-competency results remain
+evidence-gated follow-ups. The previously reconciled Phase 16 L4 source package
+remains complete, while PBPP, Part-I, Register-A, identical-treatment,
+operator-entry, publication, protected Phase 12, and Phase 15 hardware gates
+remain unsatisfied.
