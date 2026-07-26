@@ -114,6 +114,12 @@ def _set_nested(record: dict[str, object], section: str, field: str, value: obje
     nested[field] = value
 
 
+def _delete_nested(record: dict[str, object], section: str, field: str) -> None:
+    nested = record[section]
+    assert isinstance(nested, dict)
+    del nested[field]
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected"),
     [
@@ -143,6 +149,14 @@ def _set_nested(record: dict[str, object], section: str, field: str, value: obje
             "/publication/publishable",
         ),
         (
+            lambda record: _delete_nested(record, "publication", "label"),
+            "/publication/label",
+        ),
+        (
+            lambda record: _set_nested(record, "publication", "label", ""),
+            "/publication/label",
+        ),
+        (
             lambda record: record.update(history={}),
             "/history/supersedes",
         ),
@@ -157,6 +171,18 @@ def _set_nested(record: dict[str, object], section: str, field: str, value: obje
                 operator_entry={"operator": "synthetic-test"}
             ),
             "/operator_entry/disclosed",
+        ),
+        (
+            lambda record: _delete_nested(
+                record, "operator_entry", "operator"
+            ),
+            "/operator_entry/operator",
+        ),
+        (
+            lambda record: _set_nested(
+                record, "operator_entry", "operator", ""
+            ),
+            "/operator_entry/operator",
         ),
         (
             lambda record: record.update(
@@ -174,9 +200,13 @@ def _set_nested(record: dict[str, object], section: str, field: str, value: obje
         "non-sha256-build-fingerprint",
         "non-sha256-config-digest",
         "development-result-marked-publishable",
+        "publication-label-missing",
+        "publication-label-empty",
         "replacement-omits-supersedes",
         "superseded-record-reuses-record-id",
         "operator-entry-disclosure-missing",
+        "operator-name-missing",
+        "operator-name-empty",
         "neutral-label-without-register-b",
     ],
 )
@@ -186,6 +216,26 @@ def test_rejects_prohibited_result_mutations(
     record = copy.deepcopy(_retrieval_record())
     mutate(record)
     assert expected in validate_record(record)
+
+
+def test_schema_rejects_mixed_metric_families() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    forbidden_family_sets = [
+        {
+            item["contains"]["properties"]["family"]["const"]
+            for item in rule["not"]["properties"]["metrics"]["allOf"]
+        }
+        for rule in schema["allOf"]
+        if "not" in rule
+    ]
+
+    assert {"retrieval", "judged_qa"} in forbidden_family_sets
+    assert {"retrieval"} not in forbidden_family_sets
+    assert {"judged_qa"} not in forbidden_family_sets
 
 
 def test_cli_validates_one_record_and_arrays(tmp_path: Path) -> None:

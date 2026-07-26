@@ -109,9 +109,12 @@ def _validate_publication(record: dict[str, object]) -> list[str]:
     publishable = publication.get("publishable")
     if not isinstance(publishable, bool):
         errors.append("/publication/publishable")
+    label = publication.get("label")
+    if not isinstance(label, str) or not label:
+        errors.append("/publication/label")
     if record.get("track") == "development" and publishable is True:
         errors.append("/publication/publishable")
-    if publication.get("label") == "neutral" and (
+    if label == "neutral" and (
         publication.get("register_b_satisfied") is not True
     ):
         errors.append("/publication/register_b_satisfied")
@@ -174,10 +177,12 @@ def validate_record(record: object) -> list[str]:
         if field in record and (not isinstance(value, dict) or not value):
             errors.append(f"/{field}")
     operator_entry = record.get("operator_entry")
-    if isinstance(operator_entry, dict) and (
-        operator_entry.get("disclosed") is not True
-    ):
-        errors.append("/operator_entry/disclosed")
+    if isinstance(operator_entry, dict):
+        operator = operator_entry.get("operator")
+        if not isinstance(operator, str) or not operator:
+            errors.append("/operator_entry/operator")
+        if operator_entry.get("disclosed") is not True:
+            errors.append("/operator_entry/disclosed")
     errors.extend(_validate_publication(record))
     errors.extend(_validate_history(record))
     return sorted(set(errors))

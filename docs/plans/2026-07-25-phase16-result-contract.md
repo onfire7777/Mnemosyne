@@ -246,19 +246,19 @@ changes-requested or any required check is pending or failing.
 - Modify: `tests/test_leaderboard_result_contract.py`
 - Modify: this plan
 
-- [ ] **Step 1: Reproduce the three confirmed gaps**
+- [x] **Step 1: Reproduce the three confirmed gaps**
 
 Add focused failing cases for missing/empty `publication.label`, missing/empty
 `operator_entry.operator`, and a schema record that mixes `retrieval` with
 `judged_qa` metrics.
 
-- [ ] **Step 2: Make schema and CLI agree**
+- [x] **Step 2: Make schema and CLI agree**
 
 Require the two non-empty disclosure fields in `validate_record()` and add the
 smallest JSON Schema constraint that rejects mixed metric families while
 preserving records containing either family alone.
 
-- [ ] **Step 3: Verify and deliver the successor**
+- [x] **Step 3: Verify and deliver the successor**
 
 Run the focused tests, Ruff, schema parsing, diff/lease checks, and risky-file
 sweep. Commit and push the narrow fix, then recheck PR #65 on the new exact
