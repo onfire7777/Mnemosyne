@@ -29,6 +29,7 @@ protected Phase 12 attempt, or claim Phase 15 hardware proof.
 - `leaderboard/readiness.py`
 - `tests/test_leaderboard_readiness.py`
 - `docs/plans/2026-07-26-phase16-launch-readiness.md`
+- `README.md`
 
 No other tracked path may change. `GOAL.md` and the round plan may update their
 own task and verification state. RalphEx must not archive or rename `GOAL.md`
