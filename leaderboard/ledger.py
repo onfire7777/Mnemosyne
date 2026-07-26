@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
+from collections.abc import Collection
 from typing import Any, Iterator
 
 from cryptography.exceptions import InvalidSignature
@@ -31,6 +32,7 @@ GENESIS_DIGEST = "sha256:" + "0" * 64
 STATUSES = {"succeeded", "failed", "aborted", "discarded", "no_run", "superseded"}
 RUN_STATUSES = {"succeeded", "failed", "aborted", "discarded"}
 UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z\Z")
+HEAD_VERSION = "mnemosyne.leaderboard.ledger-head/v1"
 
 
 class LedgerError(ValueError):
@@ -57,6 +59,125 @@ def _digest(entry: dict[str, object]) -> str:
 
 def _signed_bytes(entry: dict[str, object]) -> bytes:
     return _canonical({key: value for key, value in entry.items() if key != "signature"})
+
+
+def _head_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".head.json")
+
+
+def _normalize_roster(roster: Collection[str]) -> list[str]:
+    if not roster or any(not isinstance(item, str) or not item.strip() for item in roster):
+        raise LedgerError("pre-registered roster must contain non-empty entrant IDs")
+    normalized = sorted(roster)
+    if len(normalized) != len(set(normalized)):
+        raise LedgerError("pre-registered roster contains duplicate entrant IDs")
+    return normalized
+
+
+def _load_head(path: Path) -> dict[str, object] | None:
+    head_path = _head_path(path)
+    try:
+        raw = head_path.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise LedgerError("ledger head could not be read") from exc
+    try:
+        head = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise LedgerError("ledger head contains invalid JSON") from exc
+    if not isinstance(head, dict) or raw != _canonical(head) + b"\n":
+        raise LedgerError("ledger head is not canonical JSON")
+    return head
+
+
+def _verify_head(
+    head: dict[str, object] | None,
+    entries: list[dict[str, object]],
+    public_key: Any,
+    fingerprint: str,
+    *,
+    require_complete_roster: bool,
+) -> list[str]:
+    if head is None:
+        if entries:
+            raise LedgerError("ledger head is missing")
+        return []
+    required = {
+        "version",
+        "sequence",
+        "entry_digest",
+        "roster",
+        "signer_key_fingerprint",
+        "signature",
+    }
+    if set(head) != required or head["version"] != HEAD_VERSION:
+        raise LedgerError("ledger head fields are invalid")
+    roster_value = head["roster"]
+    if not isinstance(roster_value, list):
+        raise LedgerError("ledger head roster is invalid")
+    roster = _normalize_roster(roster_value)
+    if head["signer_key_fingerprint"] != fingerprint:
+        raise LedgerError("ledger head key fingerprint is invalid")
+    try:
+        signature = base64.b64decode(str(head["signature"]), validate=True)
+        public_key.verify(signature, _signed_bytes(head))
+    except (binascii.Error, ValueError, InvalidSignature) as exc:
+        raise LedgerError("ledger head signature is invalid") from exc
+    if not entries:
+        raise LedgerError("ledger head does not match an empty ledger")
+    if (
+        head["sequence"] != len(entries) - 1
+        or head["entry_digest"] != entries[-1]["entry_digest"]
+    ):
+        raise LedgerError("ledger head does not match the final entry")
+    covered = {
+        str(entry["entrant_id"])
+        for entry in entries
+        if entry["status"] in RUN_STATUSES | {"no_run"}
+    }
+    unknown = covered - set(roster)
+    if unknown:
+        raise LedgerError(
+            "ledger entrant is absent from pre-registered roster: " + ", ".join(sorted(unknown))
+        )
+    if require_complete_roster:
+        missing = set(roster) - covered
+        if missing:
+            raise LedgerError(
+                "pre-registered roster entrant is omitted from ledger: "
+                + ", ".join(sorted(missing))
+            )
+    return roster
+
+
+def _write_head(
+    path: Path,
+    entry: dict[str, object],
+    roster: list[str],
+    private_key: Any,
+    fingerprint: str,
+) -> None:
+    head: dict[str, object] = {
+        "version": HEAD_VERSION,
+        "sequence": entry["sequence"],
+        "entry_digest": entry["entry_digest"],
+        "roster": roster,
+        "signer_key_fingerprint": fingerprint,
+        "signature": "",
+    }
+    head["signature"] = base64.b64encode(private_key.sign(_signed_bytes(head))).decode("ascii")
+    head_path = _head_path(path)
+    temporary = head_path.with_suffix(head_path.suffix + ".tmp")
+    try:
+        with temporary.open("wb") as handle:
+            handle.write(_canonical(head) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, head_path)
+        _fsync_dir(path.parent)
+    except OSError as exc:
+        raise LedgerError("ledger head could not be durably committed") from exc
 
 
 @contextmanager
@@ -203,8 +324,16 @@ def verify_ledger(ledger_path: Path, public_key_path: Path) -> list[dict[str, ob
     except EvidenceSignatureError as exc:
         raise LedgerError("ledger public key could not be loaded") from exc
     expected_fingerprint = _public_key_sha256(public_key)
-    entries = _load_entries(Path(ledger_path))
+    path = Path(ledger_path)
+    entries = _load_entries(path)
     _verify_entries(entries, public_key, expected_fingerprint)
+    _verify_head(
+        _load_head(path),
+        entries,
+        public_key,
+        expected_fingerprint,
+        require_complete_roster=True,
+    )
     return entries
 
 
@@ -220,6 +349,7 @@ def append_entry(
     reason: str | None = None,
     result: dict[str, object] | None = None,
     supersedes: str | None = None,
+    roster: Collection[str],
 ) -> dict[str, object]:
     """Validate, sign, durably append, and return one ledger entry."""
     path = Path(ledger_path)
@@ -229,11 +359,29 @@ def append_entry(
     except EvidenceSignatureError as exc:
         raise LedgerError("ledger private key could not be loaded") from exc
     public_key = private_key.public_key()
+    fingerprint = _public_key_sha256(public_key)
     with _ledger_lock(path):
+        head = _load_head(path)
         entries = _load_entries(path, repair_torn_tail=True)
         if entries:
             # Verification with the signing key prevents appending after acknowledged corruption.
-            _verify_entries(entries, public_key, _public_key_sha256(public_key))
+            _verify_entries(entries, public_key, fingerprint)
+            existing_roster = _verify_head(
+                head,
+                entries,
+                public_key,
+                fingerprint,
+                require_complete_roster=False,
+            )
+            normalized_roster = _normalize_roster(roster)
+            if normalized_roster != existing_roster:
+                raise LedgerError("pre-registered roster cannot change after the first entry")
+        else:
+            if head is not None:
+                raise LedgerError("ledger head does not match an empty ledger")
+            normalized_roster = _normalize_roster(roster)
+        if entrant_id not in normalized_roster:
+            raise LedgerError("ledger entrant is absent from pre-registered roster")
 
         entry: dict[str, object] = {
             "entry_id": entry_id,
@@ -247,7 +395,7 @@ def append_entry(
             "sequence": len(entries),
             "previous_digest": entries[-1]["entry_digest"] if entries else GENESIS_DIGEST,
             "entry_digest": "",
-            "signer_key_fingerprint": _public_key_sha256(public_key),
+            "signer_key_fingerprint": fingerprint,
             "signature": "",
         }
         seen_ids = {str(existing["entry_id"]) for existing in entries}
@@ -272,6 +420,7 @@ def append_entry(
                 handle.flush()
                 os.fsync(handle.fileno())
             _fsync_dir(path.parent)
+            _write_head(path, entry, normalized_roster, private_key, fingerprint)
         except OSError as exc:
             raise LedgerError("ledger entry could not be durably appended") from exc
         return entry

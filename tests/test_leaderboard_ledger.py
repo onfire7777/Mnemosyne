@@ -96,6 +96,7 @@ def _append(
         reason=reason,
         result=_result(f"result-{entry_id}") if status == "succeeded" and result is None else result,
         supersedes=supersedes,
+        roster={"synthetic-entrant"},
     )
 
 
@@ -166,6 +167,7 @@ def test_rejects_invalid_or_noncanonical_utc_timestamps(
             status="failed",
             run_id="run-invalid-timestamp",
             reason="synthetic failure",
+            roster={"synthetic-entrant"},
         )
 
 
@@ -239,11 +241,49 @@ def test_accepts_recorded_absence_without_fabricating_a_run(
         entrant_id="rostered-entrant",
         status="no_run",
         reason="adapter unavailable",
+        roster={"rostered-entrant"},
     )
 
     assert entry["run_id"] is None
     assert entry["result"] is None
     assert verify_ledger(ledger_path, public_key) == [entry]
+
+
+def test_recorded_absence_is_bound_to_complete_preregistered_roster(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-no-run",
+        timestamp="2026-07-25T12:00:00Z",
+        entrant_id="synthetic-entrant",
+        status="no_run",
+        reason="entrant was pre-registered but not run",
+        roster={"synthetic-entrant", "omitted-entrant"},
+    )
+
+    with pytest.raises(LedgerError, match="omitted-entrant"):
+        verify_ledger(ledger_path, public_key)
+
+
+def test_rejects_entrant_absent_from_preregistered_roster(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+
+    with pytest.raises(LedgerError, match="pre-registered roster"):
+        append_entry(
+            ledger_path,
+            private_key,
+            entry_id="entry-fabricated",
+            timestamp="2026-07-25T12:00:00Z",
+            entrant_id="fabricated-entrant",
+            status="no_run",
+            reason="fabricated absence",
+            roster={"actual-entrant"},
+        )
 
 
 def test_rejects_invalid_success_result(
@@ -277,6 +317,7 @@ def test_supersession_appends_without_rewriting_history(
         status="superseded",
         reason="result metadata was incorrect",
         supersedes="entry-original",
+        roster={"synthetic-entrant"},
     )
 
     assert ledger_path.read_bytes().startswith(original_bytes)
@@ -310,6 +351,7 @@ def test_rejects_unknown_or_self_supersession(
             status="superseded",
             reason="synthetic correction",
             supersedes=target,
+            roster={"synthetic-entrant"},
         )
 
 
@@ -327,6 +369,7 @@ def test_rejects_repeated_supersession(
         status="superseded",
         reason="first correction",
         supersedes="entry-original",
+        roster={"synthetic-entrant"},
     )
 
     with pytest.raises(LedgerError, match="already superseded"):
@@ -339,6 +382,7 @@ def test_rejects_repeated_supersession(
             status="superseded",
             reason="second correction",
             supersedes="entry-original",
+            roster={"synthetic-entrant"},
         )
 
 
@@ -388,6 +432,18 @@ def test_verification_rejects_tampering(
     _rewrite_entries(ledger_path, entries)
 
     with pytest.raises(LedgerError, match=match):
+        verify_ledger(ledger_path, public_key)
+
+
+def test_verification_rejects_deleted_final_entry(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    _seed_three_entries(ledger_path, private_key)
+    lines = ledger_path.read_bytes().splitlines(keepends=True)
+    ledger_path.write_bytes(b"".join(lines[:-1]))
+
+    with pytest.raises(LedgerError, match="head"):
         verify_ledger(ledger_path, public_key)
 
 
@@ -464,6 +520,7 @@ def _append_after_start(
         status="failed",
         run_id="run-concurrent",
         reason="synthetic failure",
+        roster={"synthetic-entrant"},
     )
 
 
