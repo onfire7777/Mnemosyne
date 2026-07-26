@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable, Mapping
 
 
@@ -16,6 +17,32 @@ COMPETENCIES = (
 
 class MemoryAgentBenchError(ValueError):
     """Raised when scored cases do not satisfy the canonical contract."""
+
+
+def build_submission(
+    cases: object,
+    *,
+    dataset_revision: object,
+    protocol_id: object,
+) -> dict[str, object]:
+    """Build the canonical upstream submission envelope."""
+    if not isinstance(dataset_revision, str) or re.fullmatch(
+        r"[0-9a-f]{40}", dataset_revision
+    ) is None:
+        raise MemoryAgentBenchError("dataset_revision must be a lowercase 40-hex pin")
+    if (
+        not isinstance(protocol_id, str)
+        or not protocol_id
+        or protocol_id != protocol_id.strip()
+    ):
+        raise MemoryAgentBenchError("protocol_id must be a canonical non-empty string")
+
+    return {
+        "schema_version": 1,
+        "dataset_revision": dataset_revision,
+        "protocol_id": protocol_id,
+        **score_cases(cases),
+    }
 
 
 def score_cases(cases: object) -> dict[str, object]:
