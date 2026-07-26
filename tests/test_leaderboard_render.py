@@ -418,6 +418,39 @@ def test_double_replace_failure_restores_existing_site_by_copy(
     assert not list(tmp_path.glob(".site-*"))
 
 
+def test_failed_restore_copy_removes_partial_site_and_preserves_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "index.html").write_bytes(b"previous output\n")
+    before = _tree(output)
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    real_replace = renderer.os.replace
+
+    def fail_install_and_restore(source: Path, destination: Path) -> None:
+        if destination == output and source != output:
+            raise OSError("injected replacement failure")
+        real_replace(source, destination)
+
+    def fail_partial_copy(source: Path, destination: Path) -> None:
+        destination.mkdir()
+        (destination / "partial.html").write_bytes(b"partial\n")
+        raise OSError("injected copy failure")
+
+    monkeypatch.setattr(renderer.os, "replace", fail_install_and_restore)
+    monkeypatch.setattr(renderer.shutil, "copytree", fail_partial_copy)
+
+    with pytest.raises(RenderError, match="backup preserved at"):
+        render_site(results, {"result-001": traces}, output)
+
+    assert not output.exists()
+    backups = list(tmp_path.glob(".site-backup-*"))
+    assert len(backups) == 1
+    assert _tree(backups[0]) == before
+
+
 def test_new_site_has_deployable_directory_permissions(tmp_path: Path) -> None:
     results = _write_json(tmp_path / "results.json", _result())
     traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
