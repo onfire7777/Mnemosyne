@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -213,6 +214,23 @@ def test_module_cli_propagates_process_exit_and_output(tmp_path: Path) -> None:
     assert completed.returncode == 1
     assert completed.stdout == '{"blocked_gates":["part_i_results"],"ready":false}\n'
     assert completed.stderr == ""
+
+
+def test_module_cli_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    path = tmp_path / "readiness.fifo"
+    os.mkfifo(path)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "leaderboard.readiness", str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=2,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr == "error: invalid readiness record\n"
 
 
 def _gate(record: dict[str, object], name: str) -> dict[str, object]:

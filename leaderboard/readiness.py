@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import sys
-from pathlib import Path
 from typing import Any
 
 
@@ -65,7 +66,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        with Path(args[0]).open("rb") as source:
+        with os.fdopen(os.open(args[0], os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ReadinessError("readiness record is not a regular file")
             encoded = source.read(MAX_INPUT_BYTES + 1)
         if len(encoded) > MAX_INPUT_BYTES:
             raise ReadinessError("readiness record is too large")
