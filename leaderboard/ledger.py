@@ -5,12 +5,16 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import fcntl
 import json
 import os
+import re
 import sys
+from contextlib import contextmanager
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from cryptography.exceptions import InvalidSignature
 
@@ -25,6 +29,8 @@ from mnemosyne.journal import _fsync_dir
 
 GENESIS_DIGEST = "sha256:" + "0" * 64
 STATUSES = {"succeeded", "failed", "aborted", "discarded", "no_run", "superseded"}
+RUN_STATUSES = {"succeeded", "failed", "aborted", "discarded"}
+UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z\Z")
 
 
 class LedgerError(ValueError):
@@ -53,6 +59,20 @@ def _signed_bytes(entry: dict[str, object]) -> bytes:
     return _canonical({key: value for key, value in entry.items() if key != "signature"})
 
 
+@contextmanager
+def _ledger_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    try:
+        with lock_path.open("a+b") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    except OSError as exc:
+        raise LedgerError("ledger lock could not be acquired") from exc
+
+
 def _load_entries(path: Path, *, repair_torn_tail: bool = False) -> list[dict[str, object]]:
     try:
         data = path.read_bytes()
@@ -65,6 +85,12 @@ def _load_entries(path: Path, *, repair_torn_tail: bool = False) -> list[dict[st
         if not repair_torn_tail:
             raise LedgerError("ledger has an unacknowledged torn final fragment")
         keep = data.rfind(b"\n") + 1
+        try:
+            json.loads(data[keep:])
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        else:
+            raise LedgerError("ledger has a complete unterminated final entry")
         try:
             with path.open("r+b") as handle:
                 handle.truncate(keep)
@@ -83,6 +109,8 @@ def _load_entries(path: Path, *, repair_torn_tail: bool = False) -> list[dict[st
             raise LedgerError(f"ledger line {index} contains invalid JSON") from exc
         if not isinstance(entry, dict):
             raise LedgerError(f"ledger line {index} must be a JSON object")
+        if raw != _canonical(entry):
+            raise LedgerError(f"ledger line {index} contains non-canonical JSON")
         entries.append(entry)
     return entries
 
@@ -117,10 +145,16 @@ def _validate_entry(
         raise LedgerError("ledger entry_id is required")
     if entry_id in seen_ids:
         raise LedgerError(f"duplicate ledger entry_id: {entry_id}")
-    for field in ("timestamp", "entrant_id"):
-        value = entry[field]
-        if not isinstance(value, str) or not value.strip():
-            raise LedgerError(f"ledger {field} is required")
+    timestamp = entry["timestamp"]
+    if not isinstance(timestamp, str) or UTC_TIMESTAMP.fullmatch(timestamp) is None:
+        raise LedgerError("ledger timestamp must be canonical RFC3339 UTC")
+    try:
+        datetime.fromisoformat(timestamp.removesuffix("Z"))
+    except ValueError as exc:
+        raise LedgerError("ledger timestamp must be canonical RFC3339 UTC") from exc
+    entrant_id = entry["entrant_id"]
+    if not isinstance(entrant_id, str) or not entrant_id.strip():
+        raise LedgerError("ledger entrant_id is required")
     if entry["sequence"] != sequence:
         raise LedgerError(f"ledger sequence is not contiguous at entry {entry_id}")
     if entry["previous_digest"] != previous_digest:
@@ -138,10 +172,12 @@ def _validate_entry(
         errors = validate_record(entry["result"])
         if errors:
             raise LedgerError("ledger result is invalid: " + ", ".join(errors))
-        if not isinstance(entry["run_id"], str) or not entry["run_id"].strip():
-            raise LedgerError("ledger run_id is required for succeeded entries")
     elif entry["result"] is not None:
         raise LedgerError(f"ledger result must be null for status {status}")
+    if status in RUN_STATUSES and (
+        not isinstance(entry["run_id"], str) or not entry["run_id"].strip()
+    ):
+        raise LedgerError(f"ledger run_id is required for {status} entries")
     if status == "no_run" and entry["run_id"] is not None:
         raise LedgerError("ledger run_id must be null for no_run entries")
 
@@ -188,56 +224,57 @@ def append_entry(
     """Validate, sign, durably append, and return one ledger entry."""
     path = Path(ledger_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    entries = _load_entries(path, repair_torn_tail=True)
     try:
         private_key = load_private_key(Path(private_key_path))
     except EvidenceSignatureError as exc:
         raise LedgerError("ledger private key could not be loaded") from exc
     public_key = private_key.public_key()
-    if entries:
-        # Verification with the signing key prevents appending after acknowledged corruption.
-        _verify_entries(entries, public_key, _public_key_sha256(public_key))
+    with _ledger_lock(path):
+        entries = _load_entries(path, repair_torn_tail=True)
+        if entries:
+            # Verification with the signing key prevents appending after acknowledged corruption.
+            _verify_entries(entries, public_key, _public_key_sha256(public_key))
 
-    entry: dict[str, object] = {
-        "entry_id": entry_id,
-        "timestamp": timestamp,
-        "entrant_id": entrant_id,
-        "status": status,
-        "run_id": run_id,
-        "reason": reason,
-        "result": result,
-        "supersedes": supersedes,
-        "sequence": len(entries),
-        "previous_digest": entries[-1]["entry_digest"] if entries else GENESIS_DIGEST,
-        "entry_digest": "",
-        "signer_key_fingerprint": _public_key_sha256(public_key),
-        "signature": "",
-    }
-    seen_ids = {str(existing["entry_id"]) for existing in entries}
-    superseded_ids = {
-        str(existing["supersedes"])
-        for existing in entries
-        if existing["status"] == "superseded"
-    }
-    _validate_entry(
-        entry,
-        sequence=len(entries),
-        previous_digest=str(entry["previous_digest"]),
-        seen_ids=seen_ids,
-        superseded_ids=superseded_ids,
-    )
-    entry["entry_digest"] = _digest(entry)
-    entry["signature"] = base64.b64encode(private_key.sign(_signed_bytes(entry))).decode("ascii")
-    line = _canonical(entry) + b"\n"
-    try:
-        with path.open("ab") as handle:
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
-        _fsync_dir(path.parent)
-    except OSError as exc:
-        raise LedgerError("ledger entry could not be durably appended") from exc
-    return entry
+        entry: dict[str, object] = {
+            "entry_id": entry_id,
+            "timestamp": timestamp,
+            "entrant_id": entrant_id,
+            "status": status,
+            "run_id": run_id,
+            "reason": reason,
+            "result": result,
+            "supersedes": supersedes,
+            "sequence": len(entries),
+            "previous_digest": entries[-1]["entry_digest"] if entries else GENESIS_DIGEST,
+            "entry_digest": "",
+            "signer_key_fingerprint": _public_key_sha256(public_key),
+            "signature": "",
+        }
+        seen_ids = {str(existing["entry_id"]) for existing in entries}
+        superseded_ids = {
+            str(existing["supersedes"])
+            for existing in entries
+            if existing["status"] == "superseded"
+        }
+        _validate_entry(
+            entry,
+            sequence=len(entries),
+            previous_digest=str(entry["previous_digest"]),
+            seen_ids=seen_ids,
+            superseded_ids=superseded_ids,
+        )
+        entry["entry_digest"] = _digest(entry)
+        entry["signature"] = base64.b64encode(private_key.sign(_signed_bytes(entry))).decode("ascii")
+        line = _canonical(entry) + b"\n"
+        try:
+            with path.open("ab") as handle:
+                handle.write(line)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_dir(path.parent)
+        except OSError as exc:
+            raise LedgerError("ledger entry could not be durably appended") from exc
+        return entry
 
 
 def _verify_entries(entries: list[dict[str, object]], public_key: Any, fingerprint: str) -> None:
