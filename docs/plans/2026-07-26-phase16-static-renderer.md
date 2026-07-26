@@ -134,12 +134,9 @@ artifacts, and unintended lockfile churn.
   `leaderboard.render` did not exist (`e193e7e9`).
 - Initial GREEN: the focused renderer suite and scoped Ruff passed in
   `cffe9ed5`.
-- Review repair: 19 focused renderer tests and the 85 renderer/result-contract
+- Review repair: 22 focused renderer tests and the 88 renderer/result-contract
   tests pass; full Ruff, `git diff --check`, exact-lease verification, and the
   leased-file secret/risky surface scan pass.
-- Full-suite gate remains pending in this restricted sandbox. Collection first
-  stops when `/bin/ps` is denied with `PermissionError: [Errno 1]`; excluding
-  the two collecting files reaches the suite but loopback socket tests are also
-  denied with `PermissionError: [Errno 1]`. These are environment gates, not
-  renderer failures, and no out-of-lease tests were changed or skipped in the
-  acceptance command.
+- Full-suite gate: `uv run --extra mcp pytest -q` passed unchanged in the
+  supervisor-owned persistent terminal after the restricted review sandbox
+  denied `/bin/ps` and loopback sockets. No tests were excluded or bypassed.

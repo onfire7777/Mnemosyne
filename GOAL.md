@@ -137,12 +137,12 @@ boundary change instead of widening the lease.
 
 ### Task 3: Verify, review, and prepare normal delivery
 
-- [ ] Run the focused renderer tests, full repository pytest with the MCP extra,
+- [x] Run the focused renderer tests, full repository pytest with the MCP extra,
   full Ruff, `git diff --check`, exact-lease verification, and secret/risky
   surface checks.
 - [x] Review the complete diff against every controlling source and acceptance
   item; repair confirmed findings inside the lease only.
-- [ ] Leave a deliberate leased commit ready for normal push/PR/exact-head gates.
+- [x] Leave a deliberate leased commit ready for normal push/PR/exact-head gates.
   Do not merge, bypass, dismiss, force-push, or modify `main`.
 
 ## Completion

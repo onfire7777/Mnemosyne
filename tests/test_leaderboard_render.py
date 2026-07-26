@@ -378,6 +378,75 @@ def test_publication_failure_preserves_existing_site(
     assert not list(tmp_path.glob(".site-*"))
 
 
+def test_rejects_symlink_destination_without_touching_target(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "index.html").write_bytes(b"unrelated data\n")
+    before = _tree(target)
+    output = tmp_path / "site"
+    output.symlink_to(target, target_is_directory=True)
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+
+    with pytest.raises(RenderError, match="symlink"):
+        render_site(results, {"result-001": traces}, output)
+
+    assert output.is_symlink()
+    assert _tree(target) == before
+    assert not list(tmp_path.glob(".site-*"))
+
+
+def test_cli_reports_publication_setup_failure_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    invalid_parent = tmp_path / "not-a-directory"
+    invalid_parent.write_text("file", encoding="utf-8")
+
+    assert (
+        main(
+            [
+                str(results),
+                str(invalid_parent / "site"),
+                f"result-001={traces}",
+            ]
+        )
+        == 2
+    )
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: failed to publish site:")
+    assert "Traceback" not in error
+
+
+def test_cli_reports_utf8_publication_failure_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = tmp_path / "traces.jsonl"
+    traces.write_text(
+        '{"question_id":"question-001","answer":"\\ud800"}\n',
+        encoding="utf-8",
+    )
+
+    assert (
+        main(
+            [
+                str(results),
+                str(tmp_path / "site"),
+                f"result-001={traces}",
+            ]
+        )
+        == 2
+    )
+
+    error = capsys.readouterr().err
+    assert error.startswith("error: failed to publish site:")
+    assert "Traceback" not in error
+    assert not list(tmp_path.glob(".site-*"))
+
+
 def test_cli_reports_invalid_input_without_traceback(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
