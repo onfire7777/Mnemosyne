@@ -11,6 +11,13 @@ run held-out datasets, tune on test data, invent measured results, publish a
 claim, access production, satisfy the protected Phase 12 attempt, or claim
 Phase 15 hardware proof.
 
+## Merged Baseline
+
+P13-MAB-A merged to `main` at `f6ec163f`. Its deterministic scorer validates
+and reports retrieval, test-time learning, long-range understanding, and
+conflict resolution separately without an aggregate headline. P13-MAB-B
+extends that merged scorer; it does not replace or duplicate it.
+
 ## Controlling Sources
 
 - `.planning/ROADMAP.md` — Phase 13
@@ -83,16 +90,15 @@ own task and verification state.
 
 ### Task 3: Review and deliver
 
-- [ ] Run both native review stages and repair confirmed findings. (this review
-  found inaccurate completion state; follow-up review remains required)
-- [ ] Complete local verification and exact-lease checks. (30 focused tests,
-  Ruff, diff, lease, secret, and risky-file checks passed previously;
-  unrestricted full pytest remains pending)
+- [x] Run both native review stages and repair confirmed findings.
+- [x] Complete local verification and exact-lease checks. (30 focused tests,
+  unrestricted MCP-extra full pytest, Ruff, diff, lease, secret, and risky-file
+  checks passed; one intervening runtime-lock fixture race passed on exact-node
+  reproduction and the authoritative full rerun completed successfully)
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
-  normally. (branch pushed; PR/CI/reviewer/merge skipped because GitHub API
-  access was unavailable and the connected action was cancelled)
-- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once. (skipped - no
-  merge was possible in this iteration)
+  normally. (the implementation head is pushed; reviewed successor commits and
+  PR delivery remain pending)
+- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
