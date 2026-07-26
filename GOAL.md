@@ -96,7 +96,7 @@ before GitHub delivery and post-merge verification are complete.
   Ruff, diff, exact-lease, secret, and risky-file checks (full pytest skipped -
   managed sandbox denies `/bin/ps`; all other checks passed).
 - [x] Commit explicit leased paths, push normally, and open/update the PR
-  (push/PR skipped - configured GitHub credential is invalid).
+  (normal push succeeded; PR opened through the connected GitHub surface).
 - [x] Require fresh exact-head CI and both reviewers to clear before normal
   merge; verify post-merge main CI (skipped - external GitHub verification is
   not automatable without valid authentication).
