@@ -95,6 +95,15 @@ CI, CodeRabbit, Greptile, and both review threads cleared on reviewed head
 review hardening keeps oversized integers and whitespace-bearing identifiers
 inside the fail-closed validation boundary.
 
+Local closure evidence:
+
+- `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_memoryagentbench.py`
+  — 20 passed.
+- `uv run ruff check eval/public/adapters/memoryagentbench.py tests/test_public_memoryagentbench.py`
+  — all checks passed.
+- `git diff --check` — clean.
+- `gitleaks protect --staged --no-banner` — no leaks found.
+
 This package does not complete BENCH-006: the upstream-pinned dataset adapter,
 identical-harness execution, and real per-competency results remain
 evidence-gated follow-ups. The previously reconciled Phase 16 L4 source package
