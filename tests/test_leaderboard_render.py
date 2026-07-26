@@ -1,5 +1,6 @@
 import hashlib
 import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -336,6 +337,20 @@ def test_rejects_duplicate_missing_and_unlinked_trace_sources(
         )
 
 
+def test_trace_jsonl_allows_literal_unicode_line_separator(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = tmp_path / "traces.jsonl"
+    traces.write_text(
+        '{"question_id":"question-001","answer":"line\u2028break"}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "site"
+
+    render_site(results, {"result-001": traces}, output)
+
+    assert (output / "index.html").is_file()
+
+
 def test_failed_render_preserves_the_previous_output_byte_for_byte(
     tmp_path: Path,
 ) -> None:
@@ -376,6 +391,41 @@ def test_publication_failure_preserves_existing_site(
 
     assert _tree(output) == before
     assert not list(tmp_path.glob(".site-*"))
+
+
+def test_double_replace_failure_restores_existing_site_by_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "index.html").write_bytes(b"previous output\n")
+    before = _tree(output)
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    real_replace = renderer.os.replace
+
+    def fail_install_and_restore(source: Path, destination: Path) -> None:
+        if destination == output and source != output:
+            raise OSError("injected replacement failure")
+        real_replace(source, destination)
+
+    monkeypatch.setattr(renderer.os, "replace", fail_install_and_restore)
+
+    with pytest.raises(RenderError, match="failed to publish"):
+        render_site(results, {"result-001": traces}, output)
+
+    assert _tree(output) == before
+    assert not list(tmp_path.glob(".site-*"))
+
+
+def test_new_site_has_deployable_directory_permissions(tmp_path: Path) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    output = tmp_path / "site"
+
+    render_site(results, {"result-001": traces}, output)
+
+    assert stat.S_IMODE(output.stat().st_mode) == 0o755
 
 
 def test_rejects_symlink_destination_without_touching_target(tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ import json
 import math
 import os
 import shutil
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -86,7 +87,7 @@ def _load_results(path: Path) -> list[dict[str, Any]]:
 def _load_traces(path: Path) -> list[dict[str, Any]]:
     traces: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for line_number, raw in enumerate(_read(path).splitlines(), 1):
+    for line_number, raw in enumerate(_read(path).split("\n"), 1):
         if not raw.strip():
             continue
         trace = _load_json(raw, path)
@@ -236,13 +237,18 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
     destination = destination.absolute()
     temporary: Path | None = None
     backup: Path | None = None
+    preserve_backup = False
     try:
         if destination.is_symlink():
             raise RenderError(f"destination may not be a symlink: {destination}")
         destination.parent.mkdir(parents=True, exist_ok=True)
+        destination_mode = (
+            stat.S_IMODE(destination.stat().st_mode) if destination.exists() else 0o755
+        )
         temporary = Path(
             tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent)
         )
+        temporary.chmod(destination_mode)
         backup = Path(
             tempfile.mkdtemp(
                 prefix=f".{destination.name}-backup-", dir=destination.parent
@@ -259,7 +265,16 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
             os.replace(temporary, destination)
         except OSError:
             if backup.exists():
-                os.replace(backup, destination)
+                try:
+                    os.replace(backup, destination)
+                except OSError:
+                    try:
+                        shutil.copytree(backup, destination)
+                    except OSError as restore_error:
+                        preserve_backup = True
+                        raise RenderError(
+                            f"failed to restore site; backup preserved at: {backup}"
+                        ) from restore_error
             raise
         shutil.rmtree(backup, ignore_errors=True)
     except RenderError:
@@ -269,7 +284,12 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
     finally:
         if temporary is not None and temporary.exists():
             shutil.rmtree(temporary)
-        if backup is not None and backup.exists() and destination.exists():
+        if (
+            backup is not None
+            and backup.exists()
+            and destination.exists()
+            and not preserve_backup
+        ):
             shutil.rmtree(backup, ignore_errors=True)
 
 
