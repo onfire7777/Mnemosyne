@@ -21,6 +21,7 @@ manufacture, or publish evidence.
 - `leaderboard/readiness.py`
 - `tests/test_leaderboard_readiness.py`
 - `docs/plans/2026-07-26-phase16-launch-readiness.md`
+
 ## Delivery
 
 - [x] Freeze canonical ready, blocked, invalid, and deterministic-output
