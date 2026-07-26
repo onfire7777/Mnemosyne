@@ -65,6 +65,54 @@ def _head_path(path: Path) -> Path:
     return path.with_suffix(path.suffix + ".head.json")
 
 
+def _pending_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".pending.json")
+
+
+def _write_pending(path: Path, prior_count: int) -> None:
+    pending_path = _pending_path(path)
+    temporary = pending_path.with_suffix(pending_path.suffix + ".tmp")
+    try:
+        with temporary.open("wb") as handle:
+            handle.write(_canonical({"prior_count": prior_count}) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, pending_path)
+        _fsync_dir(path.parent)
+    except OSError as exc:
+        raise LedgerError("ledger entry could not be durably appended") from exc
+
+
+def _load_pending(path: Path) -> int | None:
+    try:
+        raw = _pending_path(path).read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise LedgerError("ledger append intent could not be read") from exc
+    try:
+        pending = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise LedgerError("ledger append intent contains invalid JSON") from exc
+    if (
+        not isinstance(pending, dict)
+        or set(pending) != {"prior_count"}
+        or not isinstance(pending["prior_count"], int)
+        or pending["prior_count"] < 0
+        or raw != _canonical(pending) + b"\n"
+    ):
+        raise LedgerError("ledger append intent is invalid")
+    return pending["prior_count"]
+
+
+def _clear_pending(path: Path) -> None:
+    try:
+        _pending_path(path).unlink(missing_ok=True)
+        _fsync_dir(path.parent)
+    except OSError as exc:
+        raise LedgerError("ledger append intent could not be cleared") from exc
+
+
 def _normalize_roster(roster: Collection[str]) -> list[str]:
     if not roster or any(not isinstance(item, str) or not item.strip() for item in roster):
         raise LedgerError("pre-registered roster must contain non-empty entrant IDs")
@@ -282,7 +330,7 @@ def _validate_entry(
         raise LedgerError(f"ledger hash link is invalid at entry {entry_id}")
 
     status = entry["status"]
-    if status not in STATUSES:
+    if not isinstance(status, str) or status not in STATUSES:
         raise LedgerError(f"ledger status is invalid at entry {entry_id}")
     reason = entry["reason"]
     if status != "succeeded" and (not isinstance(reason, str) or not reason.strip()):
@@ -337,6 +385,56 @@ def verify_ledger(ledger_path: Path, public_key_path: Path) -> list[dict[str, ob
     return entries
 
 
+def _recover_pending_append(
+    path: Path,
+    head: dict[str, object] | None,
+    entries: list[dict[str, object]],
+    public_key: Any,
+    fingerprint: str,
+) -> list[dict[str, object]]:
+    prior_count = _load_pending(path)
+    if prior_count is None:
+        return entries
+    if (
+        head is not None
+        and entries
+        and head.get("sequence") == len(entries) - 1
+        and head.get("entry_digest") == entries[-1].get("entry_digest")
+    ):
+        _verify_entries(entries, public_key, fingerprint)
+        _verify_head(
+            head,
+            entries,
+            public_key,
+            fingerprint,
+            require_complete_roster=False,
+        )
+        _clear_pending(path)
+        return entries
+    if prior_count > len(entries):
+        raise LedgerError("ledger append intent exceeds ledger length")
+    prefix = entries[:prior_count]
+    _verify_entries(prefix, public_key, fingerprint)
+    _verify_head(
+        head,
+        prefix,
+        public_key,
+        fingerprint,
+        require_complete_roster=False,
+    )
+    keep = sum(len(_canonical(entry)) + 1 for entry in prefix)
+    try:
+        with path.open("r+b") as handle:
+            handle.truncate(keep)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_dir(path.parent)
+    except OSError as exc:
+        raise LedgerError("unacknowledged ledger append could not be repaired") from exc
+    _clear_pending(path)
+    return prefix
+
+
 def append_entry(
     ledger_path: Path,
     private_key_path: Path,
@@ -363,6 +461,7 @@ def append_entry(
     with _ledger_lock(path):
         head = _load_head(path)
         entries = _load_entries(path, repair_torn_tail=True)
+        entries = _recover_pending_append(path, head, entries, public_key, fingerprint)
         if entries:
             # Verification with the signing key prevents appending after acknowledged corruption.
             _verify_entries(entries, public_key, fingerprint)
@@ -414,6 +513,7 @@ def append_entry(
         entry["entry_digest"] = _digest(entry)
         entry["signature"] = base64.b64encode(private_key.sign(_signed_bytes(entry))).decode("ascii")
         line = _canonical(entry) + b"\n"
+        _write_pending(path, len(entries))
         try:
             with path.open("ab") as handle:
                 handle.write(line)
@@ -423,6 +523,7 @@ def append_entry(
             _write_head(path, entry, normalized_roster, private_key, fingerprint)
         except OSError as exc:
             raise LedgerError("ledger entry could not be durably appended") from exc
+        _clear_pending(path)
         return entry
 
 

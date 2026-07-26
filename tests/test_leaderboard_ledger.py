@@ -571,6 +571,49 @@ def test_append_reports_fsync_failure_without_rewriting_prefix(
     assert ledger_path.read_bytes().startswith(acknowledged)
 
 
+def test_append_recovers_complete_entry_left_before_head_commit(
+    ledger_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    first = _append(ledger_path, private_key, entry_id="entry-complete")
+    from leaderboard import ledger
+
+    write_head = ledger._write_head
+
+    def fail_write_head(*_args: object, **_kwargs: object) -> None:
+        raise LedgerError("synthetic head failure")
+
+    monkeypatch.setattr(ledger, "_write_head", fail_write_head)
+    with pytest.raises(LedgerError, match="head failure"):
+        _append(ledger_path, private_key, entry_id="entry-unacknowledged")
+
+    monkeypatch.setattr(ledger, "_write_head", write_head)
+    second = _append(ledger_path, private_key, entry_id="entry-after-recovery")
+
+    assert verify_ledger(ledger_path, public_key) == [first, second]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("status", []), ("status", {})],
+)
+def test_verification_rejects_unhashable_fields_with_ledger_error(
+    ledger_path: Path,
+    key_paths: tuple[Path, Path],
+    field: str,
+    value: object,
+) -> None:
+    private_key, public_key = key_paths
+    entries = [_append(ledger_path, private_key, entry_id="entry-malformed")]
+    entries[0][field] = value
+    _rewrite_entries(ledger_path, entries)
+
+    with pytest.raises(LedgerError, match=field):
+        verify_ledger(ledger_path, public_key)
+
+
 def test_append_rejects_corruption_in_acknowledged_bytes(
     ledger_path: Path, key_paths: tuple[Path, Path]
 ) -> None:
@@ -608,3 +651,30 @@ def test_module_verify_command_has_deterministic_exit_status(
     assert invalid.returncode == 1
     assert invalid.stdout == ""
     assert invalid.stderr.startswith("ledger verification failed: ")
+
+
+def test_module_verify_command_handles_unhashable_status(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    entries = [_append(ledger_path, private_key, entry_id="entry-cli")]
+    entries[0]["status"] = []
+    _rewrite_entries(ledger_path, entries)
+
+    invalid = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "leaderboard.ledger",
+            "verify",
+            str(ledger_path),
+            str(public_key),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert invalid.returncode == 1
+    assert invalid.stdout == ""
+    assert invalid.stderr == "ledger verification failed: ledger status is invalid at entry entry-cli\n"
