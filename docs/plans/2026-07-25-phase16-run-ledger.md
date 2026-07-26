@@ -53,9 +53,9 @@
 - Modify only files already named by this plan when a verified finding requires
   it.
 
-- [ ] Inspect `git diff --name-only` and reject any file outside the lease.
-- [ ] Inspect the complete diff and secret/risky-file surface.
-- [ ] Run:
+- [x] Inspect `git diff --name-only` and reject any file outside the lease.
+- [x] Inspect the complete diff and secret/risky-file surface.
+- [x] Run:
 
 ```sh
 uv run pytest -q tests/test_leaderboard_ledger.py
@@ -63,7 +63,7 @@ uv run ruff check leaderboard/ledger.py tests/test_leaderboard_ledger.py
 git diff --check
 ```
 
-- [ ] Run both configured native review stages and resolve confirmed findings
+- [x] Run both configured native review stages and resolve confirmed findings
   with a failing regression test before each logic fix.
 - [ ] Commit explicit paths, push normally, and open or update the pull request.
 - [ ] Monitor exact-head CI/review; merge normally only when every gate is
