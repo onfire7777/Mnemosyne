@@ -237,3 +237,30 @@ the product scope.
 Commit the narrow review fix, push the existing isolated branch normally, and
 monitor PR #65 on the new exact head. Do not merge while review is
 changes-requested or any required check is pending or failing.
+
+### Task 5: Close successor-head disclosure and schema gaps
+
+**Files:**
+- Modify: `leaderboard/schema/result-v1.schema.json`
+- Modify: `leaderboard/validate.py`
+- Modify: `tests/test_leaderboard_result_contract.py`
+- Modify: this plan
+
+- [ ] **Step 1: Reproduce the three confirmed gaps**
+
+Add focused failing cases for missing/empty `publication.label`, missing/empty
+`operator_entry.operator`, and a schema record that mixes `retrieval` with
+`judged_qa` metrics.
+
+- [ ] **Step 2: Make schema and CLI agree**
+
+Require the two non-empty disclosure fields in `validate_record()` and add the
+smallest JSON Schema constraint that rejects mixed metric families while
+preserving records containing either family alone.
+
+- [ ] **Step 3: Verify and deliver the successor**
+
+Run the focused tests, Ruff, schema parsing, diff/lease checks, and risky-file
+sweep. Commit and push the narrow fix, then recheck PR #65 on the new exact
+head. Do not cancel or bypass GitHub gates, and do not merge while any review
+thread or required check remains unresolved.
