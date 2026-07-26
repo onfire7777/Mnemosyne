@@ -129,11 +129,11 @@ boundary change instead of widening the lease.
 
 ### Task 2: Implement the minimal static renderer
 
-- [ ] Add `leaderboard/render.py` using only the standard library plus the existing
+- [x] Add `leaderboard/render.py` using only the standard library plus the existing
   validator.
-- [ ] Make the focused tests green with the smallest shared-flow implementation.
-- [ ] Keep all output deterministic, escaped, relative, and atomically published.
-- [ ] Do not add a framework, dependency, server, database, or new artifact schema.
+- [x] Make the focused tests green with the smallest shared-flow implementation.
+- [x] Keep all output deterministic, escaped, relative, and atomically published.
+- [x] Do not add a framework, dependency, server, database, or new artifact schema.
 
 ### Task 3: Verify, review, and prepare normal delivery
 
