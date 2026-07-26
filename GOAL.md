@@ -83,9 +83,9 @@ own task and verification state.
 
 - [x] Run both native review stages and repair confirmed findings.
 - [x] Complete local verification and exact-lease checks.
-- [x] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
+- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
   normally.
-- [x] Verify post-merge main CI, then refresh CBM/Gbrain once.
+- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
