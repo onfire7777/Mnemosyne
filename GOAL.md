@@ -95,8 +95,7 @@ boundary change instead of widening the lease.
 - Native RalphEx only. Plan, task, review, and monitoring use
   `gpt-5.6-sol:low`; executor is Codex; external review is `none`.
 - Hermes and legacy automation remain off and unbound.
-- Work only in the Worktrunk checkout
-  `/Users/admin/Mnemosyne.codex-phase16-static-renderer` on
+- Work only in the Worktrunk checkout on
   `codex/phase16-static-renderer`.
 - Ponytail governs every implementation choice. Apply relevant Superpowers
   TDD, review, debugging, and verification checkpoints and existing GSD

@@ -120,6 +120,18 @@ uv run --extra mcp pytest -q
 uv run ruff check .
 git diff --check
 git diff --name-only "$(git merge-base HEAD origin/main)"..HEAD
+git diff --name-only "$(git merge-base HEAD origin/main)"..HEAD |
+  while IFS= read -r path; do
+    case "$path" in
+      GOAL.md|leaderboard/render.py|tests/test_leaderboard_render.py|docs/plans/2026-07-26-phase16-static-renderer.md) ;;
+      *) echo "out-of-lease path: $path" >&2; exit 1 ;;
+    esac
+  done
+status=0
+rg -n -i '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|password\s*[:=]|api[_-]?key\s*[:=]|secret\s*[:=])' \
+  GOAL.md leaderboard/render.py tests/test_leaderboard_render.py \
+  docs/plans/2026-07-26-phase16-static-renderer.md || status=$?
+test "$status" -eq 1
 ```
 
 The changed-file set must remain a subset of `GOAL.md`,
