@@ -65,7 +65,7 @@ git diff --check
 
 - [x] Run both configured native review stages and resolve confirmed findings
   with a failing regression test before each logic fix.
-- [ ] Commit explicit paths, push normally, and open or update the pull request.
+- [x] Commit explicit paths, push normally, and open or update the pull request.
 - [ ] Monitor exact-head CI/review; merge normally only when every gate is
   green, review is clear, and GitHub reports mergeable.
 - [ ] Verify post-merge `main` CI, refresh CBM, sync the coherent Gbrain
