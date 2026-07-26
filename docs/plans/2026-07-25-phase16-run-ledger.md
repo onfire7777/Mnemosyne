@@ -66,6 +66,15 @@ git diff --check
 - [x] Run both configured native review stages and resolve confirmed findings
   with a failing regression test before each logic fix.
 - [x] Commit explicit paths, push normally, and open or update the pull request.
+- [x] Re-triage every active PR review thread at exact head `12b6fe37`.
+  Add RED regressions for active-disposition completeness, strict pending-intent
+  integers, and supersession `run_id`; clarify the canonical wire and recovery
+  contracts; and make concurrency/fsync tests deterministic. Reject external
+  anchoring, key rotation, out-of-lease helper promotion, and style-only
+  refactors as outside this package's accepted contract.
+- [x] Run the 72-test focused ledger suite, repository-wide
+  `uv run --extra mcp pytest -q`, full Ruff, and diff/lease/secret checks on the
+  successor repair.
 - [ ] Monitor exact-head CI/review; merge normally only when every gate is
   green, review is clear, and GitHub reports mergeable.
 - [ ] Verify post-merge `main` CI, refresh CBM, sync the coherent Gbrain

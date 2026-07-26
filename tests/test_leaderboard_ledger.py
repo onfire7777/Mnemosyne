@@ -136,7 +136,10 @@ def test_verify_rejects_noncanonical_json_bytes(
 ) -> None:
     private_key, public_key = key_paths
     entry = _append(ledger_path, private_key, entry_id="entry-noncanonical")
-    ledger_path.write_text(json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n")
+    ledger_path.write_text(
+        json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n",
+        encoding="utf-8",
+    )
 
     with pytest.raises(LedgerError, match="non-canonical"):
         verify_ledger(ledger_path, public_key)
@@ -215,6 +218,7 @@ def test_requires_reason_for_non_success_and_recorded_absence(
             private_key,
             entry_id=f"entry-{status}",
             status=status,
+            run_id=None if status == "no_run" else _DEFAULT_RUN_ID,
             reason=reason,
             result=None,
         )
@@ -348,10 +352,21 @@ def test_supersession_appends_without_rewriting_history(
         supersedes="entry-original",
         roster={"synthetic-entrant"},
     )
+    replacement = append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-replacement",
+        timestamp="2026-07-25T12:02:00Z",
+        entrant_id="synthetic-entrant",
+        status="succeeded",
+        run_id="run-replacement",
+        result=_result("result-replacement"),
+        roster={"synthetic-entrant"},
+    )
 
     assert ledger_path.read_bytes().startswith(original_bytes)
     assert correction["supersedes"] == original["entry_id"]
-    assert verify_ledger(ledger_path, public_key) == [original, correction]
+    assert verify_ledger(ledger_path, public_key) == [original, correction, replacement]
 
 
 def test_rejects_cross_entrant_supersession(
@@ -445,12 +460,61 @@ def test_rejects_repeated_supersession(
         )
 
 
+def test_rejects_supersession_run_id(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    _append(ledger_path, private_key, entry_id="entry-original")
+
+    with pytest.raises(LedgerError, match="run_id"):
+        append_entry(
+            ledger_path,
+            private_key,
+            entry_id="entry-correction",
+            timestamp="2026-07-25T12:01:00Z",
+            entrant_id="synthetic-entrant",
+            status="superseded",
+            run_id="run-stale",
+            reason="synthetic correction",
+            supersedes="entry-original",
+            roster={"synthetic-entrant"},
+        )
+
+
+def test_verification_requires_active_disposition_for_every_roster_entrant(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    _append(ledger_path, private_key, entry_id="entry-original")
+    append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-correction",
+        timestamp="2026-07-25T12:01:00Z",
+        entrant_id="synthetic-entrant",
+        status="superseded",
+        reason="synthetic correction",
+        supersedes="entry-original",
+        roster={"synthetic-entrant"},
+    )
+
+    with pytest.raises(LedgerError, match="omitted"):
+        verify_ledger(ledger_path, public_key)
+
+
 def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> None:
     ledger_path.write_text(
         "".join(
-            json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
+            json.dumps(
+                entry,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            + "\n"
             for entry in entries
-        )
+        ),
+        encoding="utf-8",
     )
 
 
@@ -492,6 +556,18 @@ def test_verification_rejects_boolean_sequence(
 
     with pytest.raises(LedgerError, match="sequence"):
         verify_ledger(ledger_path, public_key)
+
+
+def test_append_rejects_boolean_pending_prior_count(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    _append(ledger_path, private_key, entry_id="entry-complete")
+    pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
+    pending_path.write_text('{"prior_count":true}\n', encoding="utf-8")
+
+    with pytest.raises(LedgerError, match="append intent is invalid"):
+        _append(ledger_path, private_key, entry_id="entry-rejected")
 
 
 def test_verification_rejects_off_roster_supersession(
@@ -615,7 +691,7 @@ def test_append_repairs_only_a_torn_final_fragment(
     first = _append(ledger_path, private_key, entry_id="entry-complete")
     acknowledged = ledger_path.read_bytes()
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":1}\n')
+    pending_path.write_text('{"prior_count":1}\n', encoding="utf-8")
     ledger_path.write_bytes(acknowledged + b'{"entry_id":"unacknowledged')
 
     second = _append(ledger_path, private_key, entry_id="entry-after-repair")
@@ -657,9 +733,11 @@ def _append_after_start(
     private_key: str,
     started: Any,
     start: Any,
+    attempted: Any,
 ) -> None:
     started.set()
     start.wait()
+    _signal_lock_attempt(attempted)
     append_entry(
         Path(ledger_path),
         Path(private_key),
@@ -676,11 +754,24 @@ def _append_after_start(
 def _verify_after_start(
     ledger_path: str,
     public_key: str,
-    started: Any,
+    attempted: Any,
     result: Any,
 ) -> None:
-    started.set()
+    _signal_lock_attempt(attempted)
     result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
+
+
+def _signal_lock_attempt(attempted: Any) -> None:
+    from leaderboard import ledger
+
+    real_flock = ledger.fcntl.flock
+
+    def signal_then_flock(fd: int, operation: int) -> None:
+        if operation & fcntl.LOCK_EX:
+            attempted.set()
+        real_flock(fd, operation)
+
+    ledger.fcntl.flock = signal_then_flock
 
 
 def test_append_serializes_on_sibling_process_lock(
@@ -690,9 +781,10 @@ def test_append_serializes_on_sibling_process_lock(
     context = multiprocessing.get_context("spawn")
     started = context.Event()
     start = context.Event()
+    attempted = context.Event()
     process = context.Process(
         target=_append_after_start,
-        args=(str(ledger_path), str(private_key), started, start),
+        args=(str(ledger_path), str(private_key), started, start, attempted),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
     lock_path.touch()
@@ -702,7 +794,7 @@ def test_append_serializes_on_sibling_process_lock(
         process.start()
         assert started.wait(timeout=5)
         start.set()
-        process.join(timeout=1)
+        assert attempted.wait(timeout=5)
         assert process.is_alive()
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
@@ -717,19 +809,18 @@ def test_verify_serializes_on_sibling_process_lock(
     private_key, public_key = key_paths
     _append(ledger_path, private_key, entry_id="entry-existing")
     context = multiprocessing.get_context("spawn")
-    started = context.Event()
+    attempted = context.Event()
     result = context.Queue()
     process = context.Process(
         target=_verify_after_start,
-        args=(str(ledger_path), str(public_key), started, result),
+        args=(str(ledger_path), str(public_key), attempted, result),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
     with lock_path.open("a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         process.start()
-        assert started.wait(timeout=5)
-        process.join(timeout=1)
+        assert attempted.wait(timeout=5)
         assert process.is_alive()
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
@@ -746,14 +837,26 @@ def test_append_reports_fsync_failure_without_rewriting_prefix(
     private_key, _ = key_paths
     _append(ledger_path, private_key, entry_id="entry-complete")
     acknowledged = ledger_path.read_bytes()
+    acknowledged_stat = ledger_path.stat()
+    real_fsync = os.fsync
+    reached_ledger_fsync = False
 
-    def fail_fsync(_fd: int) -> None:
-        raise OSError("synthetic fsync failure")
+    def fail_fsync(fd: int) -> None:
+        nonlocal reached_ledger_fsync
+        descriptor_stat = os.fstat(fd)
+        if (
+            descriptor_stat.st_dev == acknowledged_stat.st_dev
+            and descriptor_stat.st_ino == acknowledged_stat.st_ino
+        ):
+            reached_ledger_fsync = True
+            raise OSError("synthetic fsync failure")
+        real_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", fail_fsync)
     with pytest.raises(LedgerError, match="durably appended"):
         _append(ledger_path, private_key, entry_id="entry-unacknowledged")
 
+    assert reached_ledger_fsync
     assert ledger_path.read_bytes().startswith(acknowledged)
 
 
