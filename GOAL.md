@@ -82,10 +82,10 @@ No other file may change.
 
 ### Task 2: Implement the minimum publication entrypoint
 
-- [ ] Add `leaderboard/publish.py` by composing the existing verifier and
+- [x] Add `leaderboard/publish.py` by composing the existing verifier and
   renderer.
-- [ ] Make focused tests green without changing existing contracts.
-- [ ] Commit the implementation.
+- [x] Make focused tests green without changing existing contracts.
+- [x] Commit the implementation.
 
 ### Task 3: Review, verify, and deliver
 
