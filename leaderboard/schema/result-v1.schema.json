@@ -162,6 +162,43 @@
           }
         }
       }
+    },
+    {
+      "not": {
+        "properties": {
+          "metrics": {
+            "allOf": [
+              {
+                "contains": {
+                  "properties": {
+                    "family": {
+                      "const": "retrieval"
+                    }
+                  },
+                  "required": [
+                    "family"
+                  ]
+                }
+              },
+              {
+                "contains": {
+                  "properties": {
+                    "family": {
+                      "const": "judged_qa"
+                    }
+                  },
+                  "required": [
+                    "family"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "required": [
+          "metrics"
+        ]
+      }
     }
   ],
   "$defs": {
