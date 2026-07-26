@@ -10,8 +10,9 @@ validation invariant.
 
 ## Design
 
-Reuse `leaderboard.validate._validate_metric`. Replace its two-value family
-allowlist with the six controlling LEAD-002 values:
+Reuse `leaderboard.validate._validate_metric` and the existing
+`leaderboard/schema/result-v1.schema.json` contract. Replace their two-value
+family allowlists with the six controlling LEAD-002 values:
 
 - `retrieval`
 - `judged_qa`
@@ -21,9 +22,10 @@ allowlist with the six controlling LEAD-002 values:
 - `reproducibility`
 
 No new schema version, dependency, abstraction, renderer behavior, or
-publication claim is needed. A later lease may render these validated families
-as distinct columns; this package only makes the contract capable of carrying
-them.
+publication claim is needed. The v1 schema and Python validator both preserve
+one family per record, and judge disclosure remains specific to `judged_qa`. A
+later lease may render these validated families as distinct columns; this
+package only makes the contract capable of carrying them.
 
 ## TDD Sequence
 
@@ -43,6 +45,6 @@ git diff --check
 git diff --name-only "$(git merge-base HEAD origin/main)"..HEAD
 ```
 
-Only the four paths in `GOAL.md` may change. Secret and risky-file checks must
+Only the five paths in `GOAL.md` may change. Secret and risky-file checks must
 be clean. Phase 12 protected evidence and Phase 15 hardware proof remain
 operator-owned gates and are not exercised here.

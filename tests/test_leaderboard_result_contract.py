@@ -92,6 +92,17 @@ def test_rejects_unknown_metric_family() -> None:
     assert validate_record(record) == ["/metrics/0/family"]
 
 
+def test_unknown_metric_family_does_not_add_mixed_family_error() -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    unknown_metric = copy.deepcopy(metrics[0])
+    unknown_metric["family"] = "unknown"
+    metrics.append(unknown_metric)
+
+    assert validate_record(record) == ["/metrics/1/family"]
+
+
 def test_rejects_mixed_additional_metric_families() -> None:
     record = _retrieval_record()
     metrics = record["metrics"]
@@ -328,18 +339,24 @@ def test_schema_rejects_mixed_metric_families() -> None:
     schema = json.loads(
         Path("leaderboard/schema/result-v1.schema.json").read_text(encoding="utf-8")
     )
-    forbidden_family_sets = [
-        {
-            item["contains"]["properties"]["family"]["const"]
-            for item in rule["not"]["properties"]["metrics"]["allOf"]
-        }
-        for rule in schema["allOf"]
-        if "not" in rule
-    ]
+    families = {
+        "retrieval",
+        "judged_qa",
+        "security",
+        "calibration",
+        "performance",
+        "reproducibility",
+    }
 
-    assert {"retrieval", "judged_qa"} in forbidden_family_sets
-    assert {"retrieval"} not in forbidden_family_sets
-    assert {"judged_qa"} not in forbidden_family_sets
+    assert set(schema["$defs"]["metric"]["properties"]["family"]["enum"]) == families
+    family_rules = next(
+        rule["properties"]["metrics"]["anyOf"]
+        for rule in schema["allOf"]
+        if "properties" in rule and "metrics" in rule["properties"]
+    )
+    assert {
+        rule["items"]["properties"]["family"]["const"] for rule in family_rules
+    } == families
 
 
 def test_schema_closes_object_boundaries_and_publication_labels() -> None:
