@@ -129,7 +129,7 @@ Anthropic's 2025–26 interpretability line is directly usable — with strict *
 ## 4. Cross-cutting: verification & quality
 - Every capability change adds a **regression cell** to `eval/` and keeps all §33 classes green.
 - No capability is "done" on a single run — point estimates carry Wilson/bootstrap CIs (existing harness convention).
-- Capability numbers stay **internal** until Plan B's PBPP + third-party reproduction clear them for any external claim.
+- Capability numbers stay **internal** until they clear Plan B's PBPP, including one-command reproduction from the pinned artifact bundle. Independent third-party reproduction is strengthening evidence, not a publication gate.
 
 ## 5. Risk register (system-specific)
 | Risk | Mitigation |
@@ -172,6 +172,6 @@ Titans (arXiv 2501.00663), Infini-attention (2404.07143), Nested Learning/Hope (
 **Anthropic:** global workspace / J-lens (transformer-circuits.pub/2026/workspace; github.com/anthropics/jacobian-lens), introspective awareness (transformer-circuits.pub/2025/introspection), persona vectors (2507.21509), scaling monosemanticity (2024), memory tool + context engineering (platform.claude.com docs; anthropic.com/engineering/effective-context-engineering-for-ai-agents).
 
 ## Appendix B — Dependency on Plan B
-Plan B (*Benchmarking & the Leaderboard*) owns: the `eval/public/` harness that measures S-i…S-vi, the Public-Benchmark Publication Protocol (PBPP) that governs any external claim about this system, the reproducibility artifact bundle, third-party reproduction, and the neutral leaderboard on which Mnemosyne is entered. This plan produces capabilities; Plan B proves and publishes them.
+Plan B (*Benchmarking & the Leaderboard*) owns: the `eval/public/` harness that measures S-i…S-vi, the Public-Benchmark Publication Protocol (PBPP) that governs any external claim about this system, the reproducibility artifact bundle, optional third-party reproduction evidence, and the neutral leaderboard on which Mnemosyne is entered. This plan produces capabilities; Plan B proves and publishes them.
 
 *This plan is additive to the attested v1.0 system. It does not modify the §31 rails or §33 gates.*
