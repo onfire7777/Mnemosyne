@@ -1,10 +1,13 @@
 import copy
 import json
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+import leaderboard.readiness as readiness
 from leaderboard.readiness import ReadinessError, evaluate, main
 
 
@@ -19,8 +22,7 @@ GATES = (
 
 def _record() -> dict[str, object]:
     record: dict[str, object] = {
-        gate: {"satisfied": True, "evidence": f"evidence/{gate}.json"}
-        for gate in GATES
+        gate: {"satisfied": True, "evidence": f"evidence/{gate}.json"} for gate in GATES
     }
     operator_entry = record["operator_entry"]
     assert isinstance(operator_entry, dict)
@@ -65,11 +67,14 @@ def test_blocked_gate_names_are_sorted() -> None:
     [
         lambda record: record.pop("pbpp"),
         lambda record: record.update(unexpected={}),
+        lambda record: record.update(pbpp=None),
         lambda record: _gate(record, "pbpp").pop("satisfied"),
+        lambda record: _gate(record, "pbpp").pop("evidence"),
         lambda record: _gate(record, "pbpp").update(unexpected=True),
         lambda record: _gate(record, "pbpp").update(satisfied="true"),
         lambda record: _gate(record, "pbpp").update(evidence=1),
         lambda record: _gate(record, "pbpp").update(evidence="   "),
+        lambda record: _gate(record, "operator_entry").pop("label"),
         lambda record: _gate(record, "operator_entry").update(label="Mnemosyne"),
     ],
 )
@@ -165,6 +170,49 @@ def test_cli_returns_two_for_unreadable_or_unparseable_input(
     output = capsys.readouterr()
     assert output.out == ""
     assert output.err == "error: invalid readiness record\n"
+
+
+def test_cli_rejects_input_larger_than_one_megabyte(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    record = _record()
+    _gate(record, "pbpp")["evidence"] = "x" * 1_048_576
+
+    assert main([str(_write(tmp_path / "large.json", record))]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "error: invalid readiness record\n"
+
+
+def test_cli_does_not_hide_unexpected_evaluation_value_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write(tmp_path / "ready.json", _record())
+
+    def fail(_record: object) -> dict[str, object]:
+        raise ValueError("programming error")
+
+    monkeypatch.setattr(readiness, "evaluate", fail)
+
+    with pytest.raises(ValueError, match="programming error"):
+        main([str(path)])
+
+
+def test_module_cli_propagates_process_exit_and_output(tmp_path: Path) -> None:
+    record = _record()
+    _gate(record, "part_i_results")["satisfied"] = False
+    path = _write(tmp_path / "blocked.json", record)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "leaderboard.readiness", str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stdout == '{"blocked_gates":["part_i_results"],"ready":false}\n'
+    assert completed.stderr == ""
 
 
 def _gate(record: dict[str, object], name: str) -> dict[str, object]:

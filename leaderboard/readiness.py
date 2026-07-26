@@ -15,6 +15,7 @@ GATES = (
     "identical_treatment",
     "operator_entry",
 )
+MAX_INPUT_BYTES = 1_048_576
 
 
 class ReadinessError(ValueError):
@@ -64,15 +65,28 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        raw = Path(args[0]).read_text(encoding="utf-8")
-        record = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
-        result = evaluate(record)
+        with Path(args[0]).open("rb") as source:
+            encoded = source.read(MAX_INPUT_BYTES + 1)
+        if len(encoded) > MAX_INPUT_BYTES:
+            raise ReadinessError("readiness record is too large")
+        raw = encoded.decode("utf-8")
     except (
         OSError,
         UnicodeError,
-        RecursionError,
-        ValueError,
+        ReadinessError,
     ):
+        print("error: invalid readiness record", file=sys.stderr)
+        return 2
+
+    try:
+        record = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
+    except (RecursionError, ValueError):
+        print("error: invalid readiness record", file=sys.stderr)
+        return 2
+
+    try:
+        result = evaluate(record)
+    except ReadinessError:
         print("error: invalid readiness record", file=sys.stderr)
         return 2
 
