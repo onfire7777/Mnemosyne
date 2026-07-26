@@ -127,6 +127,16 @@ decision, or blocker that cannot be repaired inside the lease.
    Ed25519 signature. Verification fails closed on malformed JSON, non-canonical
    data, gaps/reordering, duplicate identifiers, broken links, key mismatch, or
    invalid signatures.
+   The wire form is one newline-terminated UTF-8 JSON object per entry, with
+   lexicographically sorted keys, `,` and `:` separators, no insignificant
+   whitespace, literal non-ASCII characters, and finite JSON numbers only.
+   Timestamps use `YYYY-MM-DDTHH:MM:SS[.ffffff]Z` with one to six optional
+   fractional digits. A signer fingerprint is `sha256:` plus the lowercase hex
+   SHA-256 of the raw Ed25519 public key. `entry_digest` is the SHA-256 of the
+   canonical entry excluding `entry_digest` and `signature`; the base64 Ed25519
+   signature covers the canonical entry including `entry_digest` but excluding
+   `signature`. The signed head uses the same canonical encoding and excludes
+   only its `signature`.
 3. Run status supports `succeeded`, `failed`, `aborted`, and `discarded`.
    Successful entries must embed a record accepted by
    `leaderboard.validate.validate_record`; non-success entries must include a
@@ -140,10 +150,23 @@ decision, or blocker that cannot be repaired inside the lease.
    newline-terminated entry, flushes and fsyncs it, and never rewrites accepted
    history. A torn final fragment is rejected or repaired only if it was never
    acknowledged, following the existing journal precedent.
+   Under the sibling-process lock, append first fsyncs and atomically installs a
+   pending intent containing the prior entry count, then appends and fsyncs the
+   ledger and directory, then fsyncs and atomically installs the signed head,
+   and finally removes the pending intent and fsyncs the directory. Recovery
+   clears an intent when the signed head already acknowledges the complete
+   append; otherwise it verifies the authenticated prior prefix, truncates only
+   the unacknowledged suffix named by that intent, fsyncs the repaired file and
+   directory, and clears the intent. Without an authentic pending intent,
+   acknowledged or unterminated bytes are never truncated.
 7. Tests use synthetic records and ephemeral local Ed25519 keys only. They prove
    accepted status/absence/supersession flows and tamper, deletion, reorder,
    duplicate, invalid-result, and signature failures without network,
    protected-environment, external-custody, benchmark, or hardware access.
+   Deterministic sibling-process tests signal when append and verification
+   attempt the shared lock while another process holds it; both operations must
+   complete only after release, so verification cannot observe a mixed
+   ledger/head snapshot.
 8. No new dependency is added. Errors are stable and explicit enough for a
    deterministic nonzero CLI exit from `python -m leaderboard.ledger verify`.
 

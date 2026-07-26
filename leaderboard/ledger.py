@@ -97,7 +97,7 @@ def _load_pending(path: Path) -> int | None:
     if (
         not isinstance(pending, dict)
         or set(pending) != {"prior_count"}
-        or not isinstance(pending["prior_count"], int)
+        or type(pending["prior_count"]) is not int
         or pending["prior_count"] < 0
         or raw != _canonical(pending) + b"\n"
     ):
@@ -139,7 +139,7 @@ def _load_head(path: Path) -> dict[str, object] | None:
     return head
 
 
-def _verify_active_dispositions(entries: list[dict[str, object]]) -> None:
+def _verify_active_dispositions(entries: list[dict[str, object]]) -> set[str]:
     superseded_ids = {
         str(entry["supersedes"])
         for entry in entries
@@ -162,6 +162,7 @@ def _verify_active_dispositions(entries: list[dict[str, object]]) -> None:
             "ledger has contradictory active dispositions for entrant: "
             + ", ".join(contradictory)
         )
+    return set(active)
 
 
 def _verify_head(
@@ -210,12 +211,7 @@ def _verify_head(
         raise LedgerError(
             "ledger entrant is absent from pre-registered roster: " + ", ".join(sorted(unknown))
         )
-    _verify_active_dispositions(entries)
-    covered = {
-        str(entry["entrant_id"])
-        for entry in entries
-        if entry["status"] in RUN_STATUSES | {"no_run"}
-    }
+    covered = _verify_active_dispositions(entries)
     if require_complete_roster:
         missing = set(roster) - covered
         if missing:
@@ -311,7 +307,7 @@ def _validate_entry(
     *,
     sequence: int,
     previous_digest: str,
-    seen_entrants: dict[str, str],
+    entry_owners: dict[str, str],
     superseded_ids: set[str],
 ) -> None:
     required = {
@@ -334,7 +330,7 @@ def _validate_entry(
     entry_id = entry["entry_id"]
     if not isinstance(entry_id, str) or not entry_id.strip():
         raise LedgerError("ledger entry_id is required")
-    if entry_id in seen_entrants:
+    if entry_id in entry_owners:
         raise LedgerError(f"duplicate ledger entry_id: {entry_id}")
     timestamp = entry["timestamp"]
     if not isinstance(timestamp, str) or UTC_TIMESTAMP.fullmatch(timestamp) is None:
@@ -365,12 +361,11 @@ def _validate_entry(
             raise LedgerError("ledger result is invalid: " + ", ".join(errors))
     elif entry["result"] is not None:
         raise LedgerError(f"ledger result must be null for status {status}")
-    if status in RUN_STATUSES and (
-        not isinstance(entry["run_id"], str) or not entry["run_id"].strip()
-    ):
-        raise LedgerError(f"ledger run_id is required for {status} entries")
-    if status == "no_run" and entry["run_id"] is not None:
-        raise LedgerError("ledger run_id must be null for no_run entries")
+    if status in RUN_STATUSES:
+        if not isinstance(entry["run_id"], str) or not entry["run_id"].strip():
+            raise LedgerError(f"ledger run_id is required for {status} entries")
+    elif entry["run_id"] is not None:
+        raise LedgerError(f"ledger run_id must be null for {status} entries")
 
     target = entry["supersedes"]
     if status == "superseded":
@@ -378,11 +373,11 @@ def _validate_entry(
             raise LedgerError("ledger superseded entry requires a supersedes target")
         if target == entry_id:
             raise LedgerError("ledger entry cannot supersede itself")
-        if target not in seen_entrants:
+        if target not in entry_owners:
             raise LedgerError(f"unknown supersession target: {target}")
         if target in superseded_ids:
             raise LedgerError(f"ledger entry is already superseded: {target}")
-        if seen_entrants[target] != entrant_id:
+        if entry_owners[target] != entrant_id:
             raise LedgerError("ledger supersession must target the same entrant")
         superseded_ids.add(target)
     elif target is not None:
@@ -567,7 +562,7 @@ def append_entry(
             "signer_key_fingerprint": fingerprint,
             "signature": "",
         }
-        seen_entrants = {
+        entry_owners = {
             str(existing["entry_id"]): str(existing["entrant_id"]) for existing in entries
         }
         superseded_ids = {
@@ -579,7 +574,7 @@ def append_entry(
             entry,
             sequence=len(entries),
             previous_digest=str(entry["previous_digest"]),
-            seen_entrants=seen_entrants,
+            entry_owners=entry_owners,
             superseded_ids=superseded_ids,
         )
         _verify_active_dispositions([*entries, entry])
@@ -601,7 +596,7 @@ def append_entry(
 
 
 def _verify_entries(entries: list[dict[str, object]], public_key: Any, fingerprint: str) -> None:
-    seen_entrants: dict[str, str] = {}
+    entry_owners: dict[str, str] = {}
     superseded_ids: set[str] = set()
     previous_digest = GENESIS_DIGEST
     for sequence, entry in enumerate(entries):
@@ -609,7 +604,7 @@ def _verify_entries(entries: list[dict[str, object]], public_key: Any, fingerpri
             entry,
             sequence=sequence,
             previous_digest=previous_digest,
-            seen_entrants=seen_entrants,
+            entry_owners=entry_owners,
             superseded_ids=superseded_ids,
         )
         entry_id = str(entry["entry_id"])
@@ -623,7 +618,7 @@ def _verify_entries(entries: list[dict[str, object]], public_key: Any, fingerpri
             public_key.verify(signature, _signed_bytes(entry))
         except (binascii.Error, ValueError, InvalidSignature) as exc:
             raise LedgerError(f"ledger signature is invalid at entry {entry_id}") from exc
-        seen_entrants[entry_id] = str(entry["entrant_id"])
+        entry_owners[entry_id] = str(entry["entrant_id"])
         previous_digest = digest
 
 
