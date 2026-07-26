@@ -74,7 +74,7 @@ in headline claims while none had been run under our discipline. M4 replaced
 that blanket prohibition on 2026-07-10 with the stricter **Public-Benchmark
 Publication Protocol (PBPP)**:
 
-> **PBPP.** A public number may be published only if (a) produced by the pinned public harness in `eval/public/`, (b) the full artifact bundle (§M2) is released simultaneously, (c) retrieval-recall and LLM-judged-QA are reported in separate columns with judge model + prompt disclosed, (d) the private golden suite is never conflated with it, and (e) an independent third party reproduces it from the bundle. Private-suite numbers remain internal QA and are never headline public claims.
+> **PBPP.** A public number may be published only if (a) produced by the pinned public harness in `eval/public/`, (b) the full artifact bundle (§M2) is released simultaneously, (c) retrieval-recall and LLM-judged-QA are reported in separate columns with judge model + prompt disclosed, (d) the private golden suite is never conflated with it, and (e) one documented command reproduces it from the pinned bundle. Independent third-party reproduction is recorded when offered but does not gate publication. Private-suite numbers remain internal QA and are never headline public claims.
 
 This turns honesty into the moat: any future published number must be among the
 most reproducible in a field full of contested vendor claims. M4's two policy
