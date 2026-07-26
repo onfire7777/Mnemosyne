@@ -70,7 +70,14 @@ def _parse_finite_float(value: str) -> float:
 def _unexpected_keys(
     value: dict[str, object], allowed: tuple[str, ...], pointer: str
 ) -> list[str]:
-    return [f"{pointer}/{field}" for field in value if field not in allowed]
+    return [
+        f"{pointer}/{_pointer_token(field)}" for field in value if field not in allowed
+    ]
+
+
+def _pointer_token(value: str) -> str:
+    escaped = value.replace("~", "~0").replace("/", "~1")
+    return json.dumps(escaped, ensure_ascii=False)[1:-1]
 
 
 def _validate_metric(metric: object, index: int) -> list[str]:
@@ -205,16 +212,20 @@ def _validate_records(records: list[object]) -> list[str]:
                 links[record_id] = supersedes
 
     cyclic: set[str] = set()
+    resolved: set[str] = set()
     for start in links:
+        if start in resolved:
+            continue
         path: list[str] = []
         positions: dict[str, int] = {}
         current = start
-        while current in links and current not in positions:
+        while current in links and current not in positions and current not in resolved:
             positions[current] = len(path)
             path.append(current)
             current = links[current]
         if current in positions:
             cyclic.update(path[positions[current] :])
+        resolved.update(path)
     errors.extend(f"/{indexes[record_id]}/history/supersedes" for record_id in cyclic)
     return sorted(set(errors))
 
@@ -299,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
             parse_constant=_reject_json_constant,
             parse_float=_parse_finite_float,
         )
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, RecursionError, ValueError):
         print(f"error: invalid JSON: {path}", file=sys.stderr)
         return 2
 

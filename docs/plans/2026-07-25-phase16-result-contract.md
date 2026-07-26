@@ -33,7 +33,8 @@ contract, pytest, Ruff.
   implementation evidence changes their truth.
 - Plan/task/review model: `gpt-5.6-sol:low`; native Codex executor; no external
   review binding; no Hermes.
-- Work only on `codex/phase16-result-contract` in its Worktrunk checkout.
+- Work only on the active isolated Phase 16 result-contract successor branch in
+  its Worktrunk checkout (currently `codex/phase16-contract-hardening`).
   Never direct-push `main`, force-push, bypass hooks/checks, or merge unresolved
   failures.
 
@@ -311,3 +312,42 @@ or planning edits outside the exact lease.
 Status: implementation and local verification complete on the isolated branch;
 this review iteration found and fixed issues, so a successor-head review is
 required before any review-done signal or merge decision.
+
+### Task 7: Close successor-head diagnostic and coverage gaps
+
+**Files:**
+- Modify: `leaderboard/validate.py`
+- Modify: `tests/test_leaderboard_result_contract.py`
+- Modify: this plan
+
+- [x] **Step 1: Reproduce confirmed diagnostic failures**
+
+Add focused failing tests for unknown property names containing JSON Pointer
+reserved characters or newlines, and for excessively nested JSON that raises
+`RecursionError` in the standard-library decoder.
+
+- [x] **Step 2: Make diagnostics stable and fail closed**
+
+Escape dynamic JSON Pointer tokens and control characters before emitting them,
+and classify decoder recursion as invalid JSON with exit status 2 instead of
+leaking a traceback.
+
+- [x] **Step 3: Protect the named contract boundaries**
+
+Cover every required top-level semantic string, valid single-record CLI input,
+scalar array members, non-object records, and allowed supersession links to
+records outside the current input array.
+
+- [x] **Step 4: Verify and record disposition**
+
+The focused result-contract suite passes with 65 tests. Confirmed and fixed:
+JSON Pointer token escaping, diagnostic line injection, decoder recursion,
+top-level semantic-string coverage, single-record CLI coverage, non-object
+record pointers, external supersession-link preservation, and linear-time
+internal supersession-chain traversal. The suggested `eval/public/README.md`
+expansion is deferred because it is outside the exact write lease and the
+contract is not yet wired into that harness; the automated `jsonify` suggestion
+is inapplicable to a pytest fixture writing JSON input.
+
+Status: this review iteration found and fixed issues, so a successor-head review
+is required before any review-done signal or merge decision.
