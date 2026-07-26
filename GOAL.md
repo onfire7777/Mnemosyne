@@ -1,15 +1,15 @@
-# Goal: Phase 13 MemoryAgentBench Competency Contract
+# Goal: Phase 13 MemoryAgentBench Upstream Submission Envelope
 
 ## Objective
 
-Implement P13-MAB-A, the first dependency-ready Phase 13 source package: a
-deterministic MemoryAgentBench scoring contract that reports retrieval,
-test-time learning, long-range understanding, and conflict resolution
-separately. It must never hide a weak competency behind an aggregate score.
+Implement P13-MAB-B, the next dependency-ready BENCH-006 source package: a
+deterministic, fail-closed submission envelope built from the already-validated
+four-competency MemoryAgentBench score result.
 
-This is source preparation only. It must not download or run held-out datasets,
-tune on test data, publish a result, access production, satisfy the protected
-Phase 12 attempt, or claim Phase 15 hardware proof.
+This package prepares an upstream submission path only. It must not download or
+run held-out datasets, tune on test data, invent measured results, publish a
+claim, access production, satisfy the protected Phase 12 attempt, or claim
+Phase 15 hardware proof.
 
 ## Controlling Sources
 
@@ -18,31 +18,34 @@ Phase 12 attempt, or claim Phase 15 hardware proof.
 - `.planning/STATE.md`
 - `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md` — Phase 2
 - `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md`
-- `eval/public/` existing public-harness contracts
+- `docs/plans/2026-07-26-phase13-memoryagent-contract.md`
+- `eval/public/adapters/memoryagentbench.py`
 
 ## Exact Lease
 
 - `GOAL.md`
 - `eval/public/adapters/memoryagentbench.py`
 - `tests/test_public_memoryagentbench.py`
-- `docs/plans/2026-07-26-phase13-memoryagent-contract.md`
+- `docs/plans/2026-07-26-phase13-memoryagent-upstream.md`
 
 No other tracked path may change. `GOAL.md` and the round plan may update their
 own task and verification state.
 
 ## Acceptance Contract
 
-- Accept only a supplied, canonical in-memory sequence of scored cases; perform
-  no I/O, network access, dataset acquisition, judging, or benchmark execution.
-- Require exactly the four canonical competencies: `retrieval`,
-  `test_time_learning`, `long_range_understanding`, and
-  `conflict_resolution`.
-- Validate identifiers, finite numeric scores in `[0, 1]`, and non-empty
-  competency coverage; fail closed on malformed, missing, duplicate, unknown,
-  NaN, infinity, or boolean scores.
-- Emit deterministic per-competency counts and means in canonical order.
-- Do not emit an overall, composite, weighted, or averaged-across-competencies
+- Reuse `score_cases`; do not duplicate competency validation or aggregation.
+- Accept only an exact lowercase 40-hex upstream dataset revision and an exact
+  non-empty protocol identifier without surrounding whitespace.
+- Emit one canonical submission mapping containing a fixed schema version,
+  pinned dataset revision, protocol identifier, and the four separate
+  competency results in canonical order.
+- Never emit an overall, composite, weighted, or averaged-across-competencies
   headline.
+- Reject malformed fields, booleans, non-finite values, missing/extra
+  competencies, unknown keys, unpinned revisions, and non-canonical whitespace
+  through `MemoryAgentBenchError`.
+- Output must be deterministic for equivalent case orderings and require no
+  filesystem, network, dataset, judge, CLI, or production access.
 - Add focused RED tests first, then the smallest stdlib-only shared-flow
   implementation.
 - Run both native review stages, focused tests, unrestricted MCP-extra full
@@ -67,22 +70,21 @@ own task and verification state.
 
 ## Tasks
 
-### Task 1: Freeze the contract
+### Task 1: Freeze the submission contract
 
-- [x] Add focused RED tests for the four separate competencies and fail-closed
-  boundary behavior.
+- [x] Add focused RED tests for the canonical envelope and fail-closed metadata.
 - [x] Commit the RED contract.
 
-### Task 2: Implement the minimum scorer
+### Task 2: Implement the minimum envelope
 
-- [x] Add the stdlib-only scorer in the leased adapter module.
-- [x] Make focused tests green.
-- [x] Commit the implementation.
+- [ ] Add the stdlib-only submission builder in the leased adapter module.
+- [ ] Make focused tests green without I/O or new dependencies.
+- [ ] Commit the implementation.
 
 ### Task 3: Review and deliver
 
-- [x] Run both native review stages and repair confirmed findings.
-- [x] Complete local verification and exact-lease checks.
+- [ ] Run both native review stages and repair confirmed findings.
+- [ ] Complete local verification and exact-lease checks.
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
   normally.
 - [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
@@ -90,5 +92,5 @@ own task and verification state.
 ## Completion
 
 Finish only after normal merge and exact post-merge main CI. This package does
-not complete BENCH-006: the upstream-pinned dataset adapter, identical-harness
-execution, and real per-competency results remain evidence-gated follow-ups.
+not complete BENCH-006: upstream acceptance, identical-harness execution, and
+real per-competency results remain evidence-gated follow-ups.
