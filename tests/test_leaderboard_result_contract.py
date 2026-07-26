@@ -89,6 +89,16 @@ def test_rejects_inverted_confidence_interval() -> None:
     assert "/metrics/0/confidence_interval" in validate_record(record)
 
 
+@pytest.mark.parametrize("family", [[], {}])
+def test_rejects_unhashable_metric_family(family: object) -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    metrics[0]["family"] = family
+
+    assert validate_record(record) == ["/metrics/0/family"]
+
+
 def _delete(record: dict[str, object], field: str) -> None:
     del record[field]
 
@@ -190,6 +200,12 @@ def _delete_nested(record: dict[str, object], section: str, field: str) -> None:
             ),
             "/publication/register_b_satisfied",
         ),
+        (
+            lambda record: _set_nested(
+                record, "publication", "register_b_satisfied", "yes"
+            ),
+            "/publication/register_b_satisfied",
+        ),
     ],
     ids=[
         "missing-bundle-provenance",
@@ -208,6 +224,7 @@ def _delete_nested(record: dict[str, object], section: str, field: str) -> None:
         "operator-name-missing",
         "operator-name-empty",
         "neutral-label-without-register-b",
+        "non-boolean-register-b",
     ],
 )
 def test_rejects_prohibited_result_mutations(
@@ -258,6 +275,23 @@ def test_cli_reports_contract_violations(
 
     assert validate.main([str(path)]) == 1
     assert capsys.readouterr().err == "/bundle_digest\n"
+
+
+def test_cli_indexes_contract_violations_in_arrays(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "records.json"
+    first = _retrieval_record()
+    del first["bundle_digest"]
+    second = _judged_qa_record()
+    del second["trace_index_digest"]
+    path.write_text(json.dumps([first, second]), encoding="utf-8")
+
+    assert validate.main([str(path)]) == 1
+    assert (
+        capsys.readouterr().err
+        == "/0/bundle_digest\n/1/trace_index_digest\n"
+    )
 
 
 def test_cli_reports_unreadable_or_invalid_json(
