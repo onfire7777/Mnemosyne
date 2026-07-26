@@ -62,15 +62,18 @@ wiring, measurements, and publication out of scope.
   `build_disclosure(candidate_manifest: object, *, dataset_revision: object,
   protocol_id: object) -> dict[str, object]`.
 
-- [ ] Define `BeamDisclosureError(ValueError)`.
-- [ ] Validate the exact lowercase 40-hex dataset revision and canonical
+- [x] Define `BeamDisclosureError(ValueError)`.
+- [x] Validate the exact lowercase 40-hex dataset revision and canonical
   protocol identifier.
-- [ ] Require a mapping candidate, delegate its semantic validation to
+- [x] Require a mapping candidate, delegate its semantic validation to
   `validate_candidate_manifest`, translate validation errors to
   `BeamDisclosureError`, and copy candidate keys in sorted order.
-- [ ] Emit the fixed schema version `beam-reader-disclosure-v1`.
-- [ ] Run the focused suite and confirm GREEN.
-- [ ] Commit only the implementation and accurate task receipt.
+- [x] Emit the fixed schema version `beam-reader-disclosure-v1`.
+- [x] Run the focused suite and confirm GREEN: the authoritative
+  `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_beam.py`
+  completed with 16 passed, and focused Ruff passed.
+- [x] Commit only the implementation and accurate task receipt after the
+  supervisor repaired the Worktrunk metadata writable-root boundary.
 
 ### Task 3: Verify and deliver
 

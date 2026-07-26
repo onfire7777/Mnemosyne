@@ -87,10 +87,11 @@ own task and verification state.
 
 ### Task 2: Implement the minimum envelope
 
-- [ ] Add the stdlib-only BEAM disclosure builder using the existing manifest
+- [x] Add the stdlib-only BEAM disclosure builder using the existing manifest
   validator.
-- [ ] Make focused tests green without I/O or new dependencies.
-- [ ] Commit the implementation.
+- [x] Make focused tests green without I/O or new dependencies.
+- [x] Commit the implementation after the supervisor repaired the Worktrunk
+  metadata writable-root boundary.
 
 ### Task 3: Review and deliver
 
