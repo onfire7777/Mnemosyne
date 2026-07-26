@@ -19,7 +19,8 @@ forbids an aggregate headline.
 - [x] GREEN: implement the smallest stdlib-only in-memory scorer.
 - [x] REVIEW: run both native stages and repair confirmed findings.
 - [x] VERIFY: focused/full pytest, Ruff, diff, lease, secret, risky-file.
-- [ ] INTEGRATE: branch push, PR, exact-head CI/reviews, normal merge, main CI.
+- [x] INTEGRATE: PR #74, exact-head CI/reviews, normal merge at `f6ec163f`, and
+  post-merge main CI run `30217700006`.
 
 ## Non-Goals
 
