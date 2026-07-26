@@ -1,15 +1,15 @@
-# Goal: Phase 16 L2 Signed Publication Gate
+# Goal: Phase 16 L2 Metric-Family Taxonomy
 
 ## Objective
 
-Implement P16-L2-D, the first dependency-ready package after the merged result
-contract, signed run ledger, and static renderer: a fail-closed publication
-entrypoint that renders only active successful results from a verified signed
-ledger.
+Implement P16-L2-E, the next dependency-ready package after the merged signed
+publication gate: extend the validated leaderboard result contract from the
+existing retrieval and judged-QA families to the six distinct LEAD-002
+dimensions.
 
-This package advances LEAD-002's signed-data pipeline. It does not run a
-benchmark, access production, publish externally, or satisfy Phase 12 evidence,
-Phase 15 hardware, governance, reproduction, or launch gates.
+This package changes only the result taxonomy. It does not render a new table,
+run a benchmark, publish externally, access production, or satisfy Phase 12
+evidence, Phase 15 hardware, Register A, reproduction, or launch gates.
 
 ## Controlling Sources
 
@@ -20,37 +20,36 @@ Phase 15 hardware, governance, reproduction, or launch gates.
 - `docs/governance/CREDIBILITY-MODEL.md`
 - `docs/CODEX-HANDOFF-EXECUTION-PROMPT.md`
 - `docs/plans/2026-07-25-phase16-result-contract.md`
-- `docs/plans/2026-07-25-phase16-run-ledger.md`
-- `docs/plans/2026-07-26-phase16-static-renderer.md`
 - `docs/plans/2026-07-26-phase16-signed-publication.md`
+- `docs/plans/2026-07-26-phase16-metric-taxonomy.md`
 
 ## Exact Lease
 
 - `GOAL.md`
-- `leaderboard/publish.py`
-- `tests/test_leaderboard_publish.py`
-- `docs/plans/2026-07-26-phase16-signed-publication.md`
+- `leaderboard/validate.py`
+- `tests/test_leaderboard_result_contract.py`
+- `docs/plans/2026-07-26-phase16-metric-taxonomy.md`
 
 No other file may change.
 
 ## Acceptance Contract
 
-1. Reuse `leaderboard.ledger.verify_ledger` and
-   `leaderboard.render.render_site`; add no dependency or second schema.
-2. Accept a signed ledger, its public key, existing public trace JSONL, and a
-   destination directory.
-3. Fail closed before publication if ledger verification fails.
-4. Select only successful ledger entries that remain active after
-   supersession; reject duplicate active result records and a verified ledger
-   with no active successful result.
-5. Render the embedded result records through the existing atomic renderer.
-6. Never treat failed, aborted, discarded, recorded-absence, pending, or
-   superseded outcomes as publishable results.
-7. Provide a deterministic CLI with concise errors and no traceback for
-   expected invalid input.
-8. Prove the contract with focused RED/GREEN tests, then run the full repository
-   suite with the declared MCP extra, full Ruff, diff/lease, secret, and risky
-   file checks.
+- The result validator accepts exactly these metric families:
+  `retrieval`, `judged_qa`, `security`, `calibration`, `performance`, and
+  `reproducibility`.
+- The existing invariant that one result record contains one metric family is
+  preserved.
+- Existing judged-QA judge-disclosure validation remains unchanged; adding a
+  family does not weaken numeric, confidence-interval, publication, digest, or
+  history validation.
+- Unknown families and mixed-family records continue to fail closed with stable
+  JSON-pointer errors.
+- Focused RED regressions precede the minimum shared validator change.
+- Focused tests, the full repository suite with the MCP dependency surface,
+  full Ruff, diff, exact-lease, secret, and risky-file checks pass.
+- Native comprehensive and critical/major review stages clear before delivery.
+- Normal branch push, PR, exact-head CI/review, merge, and post-merge main CI
+  complete without bypass or dismissal.
 
 ## Operating Contract
 
@@ -58,13 +57,13 @@ No other file may change.
   `gpt-5.6-sol:low`; executor is Codex; external review is `none`.
 - Hermes and legacy automation remain off and unbound.
 - Work only in the Worktrunk checkout
-  `/Users/admin/Mnemosyne.codex-phase16-signed-publication` on
-  `codex/phase16-signed-publication`.
-- Ponytail governs implementation. Apply relevant Superpowers TDD, review,
-  debugging, and verification checkpoints and existing GSD state.
+  `/Users/admin/Mnemosyne.codex-phase16-metric-taxonomy` on
+  `codex/phase16-metric-taxonomy`.
+- Ponytail governs implementation. Apply relevant Superpowers TDD, receiving
+  review, debugging, and verification checkpoints and existing GSD state.
 - Use CBM first for code discovery, context-mode for retained captures, and
   Gbrain only for coherent committed or merged milestones. Add an ADR only for
-  a durable architecture decision.
+  a durable architectural decision.
 - Use normal GitHub branch, PR, exact-head CI/review, merge, and post-merge CI.
   Never direct-push main, force-push, bypass hooks/checks, dismiss reviews,
   fabricate evidence, run protected production work, or widen the lease.
@@ -73,28 +72,28 @@ No other file may change.
 
 ## Tasks
 
-### Task 1: Freeze the signed-publication contract with RED tests
+### Task 1: Freeze the six-family contract with RED tests
 
-- [x] Add focused tests proving ledger verification, active-success selection,
-  supersession behavior, fail-closed invalid input, and CLI behavior.
-- [x] Verify the focused test fails because `leaderboard.publish` is absent.
+- [x] Add focused tests for each newly admitted family and for preserved
+  unknown/mixed-family rejection.
+- [x] Verify the focused test fails against the current two-family validator.
 - [x] Commit the RED contract.
 
-### Task 2: Implement the minimum publication entrypoint
+### Task 2: Implement the minimum shared validator change
 
-- [x] Add `leaderboard/publish.py` by composing the existing verifier and
-  renderer.
-- [x] Make focused tests green without changing existing contracts.
-- [x] Commit the implementation.
+- [ ] Extend the existing family allowlist without adding a dependency or a
+  parallel validation path.
+- [ ] Make focused tests green without changing unrelated contracts.
+- [ ] Commit the implementation.
 
 ### Task 3: Review, verify, and deliver
 
-- [x] Run both native review stages and repair only confirmed findings with RED
+- [ ] Run both native review stages and repair only confirmed findings with RED
   regressions for logic defects.
-- [x] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
+- [ ] Run focused tests, full pytest with the MCP extra, full Ruff, diff, lease,
   secret, and risky-file checks.
-- [x] Commit explicit leased paths, push normally, and open or update the PR.
-- [x] Require fresh exact-head CI and both reviewers to clear before normal
+- [ ] Commit explicit leased paths, push normally, and open or update the PR.
+- [ ] Require fresh exact-head CI and both reviewers to clear before normal
   merge; verify post-merge main CI.
 
 ## Completion

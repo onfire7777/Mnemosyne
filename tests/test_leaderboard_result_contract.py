@@ -71,6 +71,39 @@ def test_accepts_minimal_disclosed_judged_qa_record() -> None:
 
 
 @pytest.mark.parametrize(
+    "family",
+    ["security", "calibration", "performance", "reproducibility"],
+)
+def test_accepts_additional_metric_family(family: str) -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    metrics[0]["family"] = family
+
+    assert validate_record(record) == []
+
+
+def test_rejects_unknown_metric_family() -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    metrics[0]["family"] = "unknown"
+
+    assert validate_record(record) == ["/metrics/0/family"]
+
+
+def test_rejects_mixed_additional_metric_families() -> None:
+    record = _retrieval_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    security_metric = copy.deepcopy(metrics[0])
+    security_metric["family"] = "security"
+    metrics.append(security_metric)
+
+    assert validate_record(record) == ["/metrics"]
+
+
+@pytest.mark.parametrize(
     "field",
     [
         "record_id",
