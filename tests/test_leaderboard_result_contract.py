@@ -391,6 +391,26 @@ def test_cli_validates_one_record_and_arrays(
     assert capsys.readouterr().err == ""
 
 
+@pytest.mark.parametrize(("depth", "expected"), [(1_000, 1), (1_001, 2)])
+def test_cli_enforces_json_nesting_boundary(
+    depth: int,
+    expected: int,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "records.json"
+    path.write_text("[" * (depth - 1) + "{}" + "]" * (depth - 1), encoding="utf-8")
+
+    assert validate.main([str(path)]) == expected
+    capsys.readouterr()
+
+
+def test_json_nesting_ignores_delimiters_inside_escaped_strings() -> None:
+    raw = json.dumps({"operator": r'escaped \"[{]}\" delimiters'})
+
+    assert validate._json_nesting_too_deep(raw) is False
+
+
 def test_rejects_unknown_fields_at_each_object_boundary() -> None:
     record = _judged_qa_record()
     metrics = record["metrics"]
