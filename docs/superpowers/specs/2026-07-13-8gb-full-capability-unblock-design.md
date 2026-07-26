@@ -162,10 +162,11 @@ P6, and the human-owned gates must also close without weakening custody.
 ### E — Governance and publication (resolves the P8 long-lead)
 
 - **E1.** Prepare the GOV-001 charter, role criteria, conflict-of-interest policy, outreach packet, and decision checklist for human action. The human operator owns outreach, recruitment, seating, and ratification.
-- **E2.** Maintain only an internal claim-requirements matrix. Public wording,
-  numbers, and leadership language remain unapproved hypotheses until PBPP,
-  physical acceptance, the source-owned launch gates, and human publication
-  approval are complete. Record independent reproduction as strengthening
+- **E2.** Maintain only an internal claim-requirements matrix. Public benchmark
+  numbers and leadership language remain unapproved hypotheses until PBPP, the
+  source-owned launch gates, and human publication approval are complete. An
+  8 GiB compatibility or performance claim additionally requires the physical
+  acceptance contract. Record independent reproduction as strengthening
   evidence when offered.
 - **E3.** Phase 13 external adapters + scheduled CI proceed after Phase 12 closes, contingent on D3.
 
