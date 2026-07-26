@@ -451,6 +451,47 @@ def test_failed_restore_copy_removes_partial_site_and_preserves_backup(
     assert _tree(backups[0]) == before
 
 
+def test_failed_partial_site_cleanup_reports_both_recovery_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "site"
+    output.mkdir()
+    (output / "index.html").write_bytes(b"previous output\n")
+    results = _write_json(tmp_path / "results.json", _result())
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+    real_replace = renderer.os.replace
+    real_rmtree = renderer.shutil.rmtree
+
+    def fail_install_and_restore(source: Path, destination: Path) -> None:
+        if destination == output and source != output:
+            raise OSError("injected replacement failure")
+        real_replace(source, destination)
+
+    def fail_partial_copy(source: Path, destination: Path) -> None:
+        destination.mkdir()
+        (destination / "partial.html").write_bytes(b"partial\n")
+        raise OSError("injected copy failure")
+
+    def fail_partial_cleanup(path: Path, *args: object, **kwargs: object) -> None:
+        if path == output:
+            raise OSError("injected cleanup failure")
+        real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr(renderer.os, "replace", fail_install_and_restore)
+    monkeypatch.setattr(renderer.shutil, "copytree", fail_partial_copy)
+    monkeypatch.setattr(renderer.shutil, "rmtree", fail_partial_cleanup)
+
+    with pytest.raises(
+        RenderError,
+        match=r"failed to remove partial site at: .*site; backup preserved at:",
+    ):
+        render_site(results, {"result-001": traces}, output)
+
+    assert (output / "partial.html").is_file()
+    backups = list(tmp_path.glob(".site-backup-*"))
+    assert len(backups) == 1
+
+
 def test_new_site_has_deployable_directory_permissions(tmp_path: Path) -> None:
     results = _write_json(tmp_path / "results.json", _result())
     traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
