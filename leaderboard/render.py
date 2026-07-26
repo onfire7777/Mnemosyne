@@ -272,6 +272,10 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
                         shutil.copytree(backup, destination)
                     except OSError as restore_error:
                         preserve_backup = True
+                        if destination.is_symlink() or destination.is_file():
+                            destination.unlink(missing_ok=True)
+                        elif destination.exists():
+                            shutil.rmtree(destination, ignore_errors=True)
                         raise RenderError(
                             f"failed to restore site; backup preserved at: {backup}"
                         ) from restore_error
