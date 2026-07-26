@@ -4,11 +4,24 @@ import math
 
 import pytest
 
-from eval.public.adapters.memoryagentbench import MemoryAgentBenchError, score_cases
+from eval.public.adapters.memoryagentbench import (
+    MemoryAgentBenchError,
+    build_submission,
+    score_cases,
+)
 
 
 def _case(case_id: str, competency: str, score: object) -> dict[str, object]:
     return {"case_id": case_id, "competency": competency, "score": score}
+
+
+def _complete_cases() -> list[dict[str, object]]:
+    return [
+        _case("retrieval-1", "retrieval", 1.0),
+        _case("learning-1", "test_time_learning", 0.5),
+        _case("range-1", "long_range_understanding", 0.75),
+        _case("conflict-1", "conflict_resolution", 0.25),
+    ]
 
 
 def test_score_cases_reports_each_competency_separately_in_canonical_order() -> None:
@@ -125,3 +138,69 @@ def test_score_cases_rejects_identifiers_with_surrounding_whitespace() -> None:
 def test_score_cases_rejects_non_canonical_input(cases: object) -> None:
     with pytest.raises(MemoryAgentBenchError):
         score_cases(cases)
+
+
+def test_build_submission_emits_the_canonical_envelope() -> None:
+    cases = _complete_cases()
+
+    submission = build_submission(
+        cases,
+        dataset_revision="0123456789abcdef0123456789abcdef01234567",
+        protocol_id="memoryagentbench-v1",
+    )
+
+    assert submission == {
+        "schema_version": 1,
+        "dataset_revision": "0123456789abcdef0123456789abcdef01234567",
+        "protocol_id": "memoryagentbench-v1",
+        "competencies": {
+            "retrieval": {"count": 1, "mean": 1.0},
+            "test_time_learning": {"count": 1, "mean": 0.5},
+            "long_range_understanding": {"count": 1, "mean": 0.75},
+            "conflict_resolution": {"count": 1, "mean": 0.25},
+        },
+    }
+    assert list(submission) == [
+        "schema_version",
+        "dataset_revision",
+        "protocol_id",
+        "competencies",
+    ]
+    assert list(submission["competencies"]) == [
+        "retrieval",
+        "test_time_learning",
+        "long_range_understanding",
+        "conflict_resolution",
+    ]
+    assert submission == build_submission(
+        reversed(cases),
+        dataset_revision="0123456789abcdef0123456789abcdef01234567",
+        protocol_id="memoryagentbench-v1",
+    )
+    assert not ({"overall", "composite", "mean", "score"} & submission.keys())
+
+
+@pytest.mark.parametrize(
+    ("dataset_revision", "protocol_id"),
+    [
+        ("0123456789abcdef0123456789abcdef0123456", "memoryagentbench-v1"),
+        ("0123456789abcdef0123456789abcdef012345678", "memoryagentbench-v1"),
+        ("0123456789ABCDEF0123456789ABCDEF01234567", "memoryagentbench-v1"),
+        (" 0123456789abcdef0123456789abcdef01234567", "memoryagentbench-v1"),
+        (None, "memoryagentbench-v1"),
+        ("0123456789abcdef0123456789abcdef01234567", ""),
+        ("0123456789abcdef0123456789abcdef01234567", " memoryagentbench-v1"),
+        ("0123456789abcdef0123456789abcdef01234567", "memoryagentbench-v1 "),
+        ("0123456789abcdef0123456789abcdef01234567", None),
+    ],
+)
+def test_build_submission_rejects_non_canonical_metadata(
+    dataset_revision: object,
+    protocol_id: object,
+) -> None:
+    with pytest.raises(MemoryAgentBenchError):
+        build_submission(
+            _complete_cases(),
+            dataset_revision=dataset_revision,
+            protocol_id=protocol_id,
+        )
