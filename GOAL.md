@@ -81,11 +81,11 @@ own task and verification state.
 
 ### Task 3: Review and deliver
 
-- [ ] Run both native review stages and repair confirmed findings.
-- [ ] Complete local verification and exact-lease checks.
-- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
+- [x] Run both native review stages and repair confirmed findings.
+- [x] Complete local verification and exact-lease checks.
+- [x] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
   normally.
-- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
+- [x] Verify post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
