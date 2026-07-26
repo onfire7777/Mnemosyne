@@ -261,6 +261,23 @@ def test_accepts_recorded_absence_without_fabricating_a_run(
     assert verify_ledger(ledger_path, public_key) == [entry]
 
 
+def test_rejects_run_while_recorded_absence_is_active(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    _append(
+        ledger_path,
+        private_key,
+        entry_id="entry-no-run",
+        status="no_run",
+        run_id=None,
+        reason="adapter unavailable",
+    )
+
+    with pytest.raises(LedgerError, match="contradictory active dispositions"):
+        _append(ledger_path, private_key, entry_id="entry-succeeded")
+
+
 def test_recorded_absence_is_bound_to_complete_preregistered_roster(
     ledger_path: Path, key_paths: tuple[Path, Path]
 ) -> None:
