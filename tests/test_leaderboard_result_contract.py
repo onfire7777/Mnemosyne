@@ -118,7 +118,9 @@ def _remove_judge_disclosure(record: dict[str, object]) -> None:
     metrics[0]["judge"] = {"model": "synthetic-judge-v1"}
 
 
-def _set_nested(record: dict[str, object], section: str, field: str, value: object) -> None:
+def _set_nested(
+    record: dict[str, object], section: str, field: str, value: object
+) -> None:
     nested = record[section]
     assert isinstance(nested, dict)
     nested[field] = value
@@ -153,9 +155,7 @@ def _delete_nested(record: dict[str, object], section: str, field: str) -> None:
             "/config_digest",
         ),
         (
-            lambda record: _set_nested(
-                record, "publication", "publishable", True
-            ),
+            lambda record: _set_nested(record, "publication", "publishable", True),
             "/publication/publishable",
         ),
         (
@@ -167,31 +167,35 @@ def _delete_nested(record: dict[str, object], section: str, field: str) -> None:
             "/publication/label",
         ),
         (
+            lambda record: _set_nested(record, "publication", "label", "independent"),
+            "/publication/label",
+        ),
+        (
+            lambda record: record.update(record_id="   "),
+            "/record_id",
+        ),
+        (
             lambda record: record.update(history={}),
             "/history/supersedes",
         ),
         (
-            lambda record: record.update(
-                history={"supersedes": record["record_id"]}
-            ),
+            lambda record: record.update(history={"supersedes": record["record_id"]}),
             "/record_id",
         ),
         (
-            lambda record: record.update(
-                operator_entry={"operator": "synthetic-test"}
-            ),
+            lambda record: record.update(operator_entry={"operator": "synthetic-test"}),
             "/operator_entry/disclosed",
         ),
         (
-            lambda record: _delete_nested(
-                record, "operator_entry", "operator"
-            ),
+            lambda record: _delete_nested(record, "operator_entry", "operator"),
             "/operator_entry/operator",
         ),
         (
-            lambda record: _set_nested(
-                record, "operator_entry", "operator", ""
-            ),
+            lambda record: _set_nested(record, "operator_entry", "operator", ""),
+            "/operator_entry/operator",
+        ),
+        (
+            lambda record: _set_nested(record, "operator_entry", "operator", "   "),
             "/operator_entry/operator",
         ),
         (
@@ -218,11 +222,14 @@ def _delete_nested(record: dict[str, object], section: str, field: str) -> None:
         "development-result-marked-publishable",
         "publication-label-missing",
         "publication-label-empty",
+        "publication-label-not-allowed",
+        "record-id-whitespace-only",
         "replacement-omits-supersedes",
         "superseded-record-reuses-record-id",
         "operator-entry-disclosure-missing",
         "operator-name-missing",
         "operator-name-empty",
+        "operator-name-whitespace-only",
         "neutral-label-without-register-b",
         "non-boolean-register-b",
     ],
@@ -237,9 +244,7 @@ def test_rejects_prohibited_result_mutations(
 
 def test_schema_rejects_mixed_metric_families() -> None:
     schema = json.loads(
-        Path("leaderboard/schema/result-v1.schema.json").read_text(
-            encoding="utf-8"
-        )
+        Path("leaderboard/schema/result-v1.schema.json").read_text(encoding="utf-8")
     )
     forbidden_family_sets = [
         {
@@ -255,6 +260,23 @@ def test_schema_rejects_mixed_metric_families() -> None:
     assert {"judged_qa"} not in forbidden_family_sets
 
 
+def test_schema_closes_object_boundaries_and_publication_labels() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v1.schema.json").read_text(encoding="utf-8")
+    )
+
+    assert schema["additionalProperties"] is False
+    for name in ("publication", "operator_entry", "history"):
+        assert schema["properties"][name]["additionalProperties"] is False
+    for name in ("metric", "judge", "confidenceInterval"):
+        assert schema["$defs"][name]["additionalProperties"] is False
+    assert schema["properties"]["publication"]["properties"]["label"]["enum"] == [
+        "operator-run",
+        "neutral",
+    ]
+    assert schema["$defs"]["nonEmptyString"]["pattern"] == r".*\S.*"
+
+
 def test_cli_validates_one_record_and_arrays(tmp_path: Path) -> None:
     path = tmp_path / "records.json"
     path.write_text(
@@ -263,6 +285,62 @@ def test_cli_validates_one_record_and_arrays(tmp_path: Path) -> None:
     )
 
     assert validate.main([str(path)]) == 0
+
+
+def test_rejects_unknown_fields_at_each_object_boundary() -> None:
+    record = _judged_qa_record()
+    metrics = record["metrics"]
+    assert isinstance(metrics, list)
+    metric = metrics[0]
+    assert isinstance(metric, dict)
+    judge = metric["judge"]
+    interval = metric["confidence_interval"]
+    assert isinstance(judge, dict)
+    assert isinstance(interval, dict)
+
+    mutations = [
+        (record, "unexpected", "/unexpected"),
+        (record["publication"], "unexpected", "/publication/unexpected"),
+        (record["operator_entry"], "unexpected", "/operator_entry/unexpected"),
+        (record["history"], "unexpected", "/history/unexpected"),
+        (metric, "unexpected", "/metrics/0/unexpected"),
+        (judge, "unexpected", "/metrics/0/judge/unexpected"),
+        (
+            interval,
+            "unexpected",
+            "/metrics/0/confidence_interval/unexpected",
+        ),
+    ]
+    for target, field, expected in mutations:
+        assert isinstance(target, dict)
+        target[field] = True
+        assert expected in validate_record(record)
+        del target[field]
+
+
+def test_cli_rejects_duplicate_record_ids(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "records.json"
+    record = _retrieval_record()
+    path.write_text(json.dumps([record, record]), encoding="utf-8")
+
+    assert validate.main([str(path)]) == 1
+    assert capsys.readouterr().err == "/1/record_id\n"
+
+
+def test_cli_rejects_internal_supersession_cycles(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "records.json"
+    first = _retrieval_record()
+    second = _judged_qa_record()
+    first["history"] = {"supersedes": second["record_id"]}
+    second["history"] = {"supersedes": first["record_id"]}
+    path.write_text(json.dumps([first, second]), encoding="utf-8")
+
+    assert validate.main([str(path)]) == 1
+    assert capsys.readouterr().err == "/0/history/supersedes\n/1/history/supersedes\n"
 
 
 def test_cli_reports_contract_violations(
@@ -288,10 +366,7 @@ def test_cli_indexes_contract_violations_in_arrays(
     path.write_text(json.dumps([first, second]), encoding="utf-8")
 
     assert validate.main([str(path)]) == 1
-    assert (
-        capsys.readouterr().err
-        == "/0/bundle_digest\n/1/trace_index_digest\n"
-    )
+    assert capsys.readouterr().err == "/0/bundle_digest\n/1/trace_index_digest\n"
 
 
 def test_cli_reports_unreadable_or_invalid_json(

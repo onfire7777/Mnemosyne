@@ -3,6 +3,7 @@
   "$id": "mnemosyne.leaderboard.result/v1",
   "title": "Mnemosyne public leaderboard result v1",
   "type": "object",
+  "additionalProperties": false,
   "required": [
     "schema_version",
     "record_id",
@@ -64,6 +65,7 @@
     },
     "publication": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "publishable",
         "label"
@@ -73,7 +75,10 @@
           "type": "boolean"
         },
         "label": {
-          "$ref": "#/$defs/nonEmptyString"
+          "enum": [
+            "operator-run",
+            "neutral"
+          ]
         },
         "register_b_satisfied": {
           "type": "boolean"
@@ -106,6 +111,7 @@
     },
     "operator_entry": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "operator",
         "disclosed"
@@ -121,6 +127,7 @@
     },
     "history": {
       "type": "object",
+      "additionalProperties": false,
       "$comment": "The standard-library validator rejects self-supersession.",
       "required": [
         "supersedes"
@@ -204,7 +211,8 @@
   "$defs": {
     "nonEmptyString": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": ".*\\S.*"
     },
     "sha256Digest": {
       "type": "string",
@@ -212,6 +220,7 @@
     },
     "confidenceInterval": {
       "type": "object",
+      "additionalProperties": false,
       "$comment": "The standard-library validator additionally enforces low <= high.",
       "required": [
         "low",
@@ -228,6 +237,7 @@
     },
     "judge": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "model",
         "prompt_digest",
@@ -247,6 +257,7 @@
     },
     "metric": {
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "name",
         "family",
