@@ -309,22 +309,6 @@ Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosy
 - [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
 - [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
 
-### Launch-readiness check
-
-Validate a supplied Phase 16 evidence record without running benchmarks,
-publishing results, or reading network or environment state:
-
-```bash
-uv run --locked python -m leaderboard.readiness readiness.json
-```
-
-The JSON object must contain exactly `pbpp`, `part_i_results`, `register_a`,
-`identical_treatment`, and `operator_entry`. Each gate requires a boolean
-`satisfied` and a non-empty string `evidence`; `operator_entry` also requires
-`"label": "operator-entry"`. The command emits deterministic compact JSON with
-`blocked_gates` and `ready`. Exit status is 0 when ready, 1 when valid but
-blocked, and 2 when the input is invalid or larger than 1 MiB.
-
 ### MCP tools (illustrative)
 
 `mcp_tools.py` exposes **59** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, the `profile_*` user-model tools, the working-memory tools (`working_seed` / `working_query` / `working_promote` / `working_expire`), and the prospective-memory tools (`schedule_intention` / `update_intention` / `cancel_intention` / `evaluate_intentions` / `list_intentions`).

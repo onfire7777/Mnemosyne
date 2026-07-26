@@ -21,18 +21,15 @@ manufacture, or publish evidence.
 - `leaderboard/readiness.py`
 - `tests/test_leaderboard_readiness.py`
 - `docs/plans/2026-07-26-phase16-launch-readiness.md`
-- `README.md`
-
 ## Delivery
 
 - [x] Freeze canonical ready, blocked, invalid, and deterministic-output
   behavior with RED tests.
 - [x] Implement one stdlib-only validator and CLI that reads only its input
   file.
-- [ ] Run native review and the full local verification matrix. The first review
-  produced focused repairs; focused tests, unrestricted MCP-extra full pytest,
-  Ruff, diff, lease, secret, and risky-file checks pass. The follow-up
-  critical/major review remains.
+- [x] Run native review and the full local verification matrix. Both review
+  stages are complete; focused tests, unrestricted MCP-extra full pytest, Ruff,
+  diff, lease, secret, and risky-file checks pass.
 - [ ] Push the review-fix commit, open or update the PR, require exact-head CI
   and both review bots, merge normally, and verify post-merge main CI. The
   pre-review branch is already pushed.
