@@ -12,6 +12,15 @@ rule, publication gate, or human-only governance boundary is changed here.
 Approval authorizes implementation, not an 8 GiB compatibility result or a
 benchmark/public claim.
 
+**Current governance reconciliation (2026-07-26):** The v0.2.0 credibility
+model makes independent reproduction strengthening evidence and moves external
+board seating to optional Register B. Neither is a source-completion or launch
+prerequisite. PBPP, Register A, identical treatment, operator-entry labeling,
+and human publication approval remain mandatory. Live execution status belongs
+to `.planning/STATE.md`, `.planning/ROADMAP.md`, and
+`.planning/REQUIREMENTS.md`; dated execution deltas below remain historical
+receipts.
+
 ## 0. Execution delta — 2026-07-14
 
 This dated delta supersedes only the mutable operational status in P5, P7, and
@@ -116,7 +125,7 @@ P6, and the human-owned gates must also close without weakening custody.
 | Grounding and parity | Zero unsupported CID/span output; reference→FP32→INT8 decoded span/abstention parity; exact-scale receipt remains 24/24. |
 | Invariant rails | Every §31 rail and §33 test class green on the exact merge candidate. |
 | Custody | Immutable manifests, TRAIN-only decontamination, one-shot ledgers, no held-out inspection/tuning, and exact-SHA CI evidence. |
-| Publication | No external claim until PBPP is complete and a genuine independent reproduction is on file; board/reproducer/publication acts remain human-owned. |
+| Publication | No external claim until PBPP and the source-owned Register A / launch gates are complete and the human operator approves publication. Independent reproduction and Register B governance strengthen the claim when offered but are not prerequisites. |
 
 ## 5. Workstreams
 
@@ -153,7 +162,12 @@ P6, and the human-owned gates must also close without weakening custody.
 ### E — Governance and publication (resolves the P8 long-lead)
 
 - **E1.** Prepare the GOV-001 charter, role criteria, conflict-of-interest policy, outreach packet, and decision checklist for human action. The human operator owns outreach, recruitment, seating, and ratification.
-- **E2.** Maintain only an internal claim-requirements matrix. Public wording, numbers, and leadership language remain unapproved hypotheses until PBPP, physical acceptance, and independent reproduction are complete and a human approves publication.
+- **E2.** Maintain only an internal claim-requirements matrix. Public benchmark
+  numbers and leadership language remain unapproved hypotheses until PBPP, the
+  source-owned launch gates, and human publication approval are complete. An
+  8 GiB compatibility or performance claim additionally requires the physical
+  acceptance contract. Record independent reproduction as strengthening
+  evidence when offered.
 - **E3.** Phase 13 external adapters + scheduled CI proceed after Phase 12 closes, contingent on D3.
 
 ## 6. Sequence
@@ -186,5 +200,6 @@ P6, and the human-owned gates must also close without weakening custody.
   CBM, GSD, and gbrain point to the same current evidence without duplicating
   an authority.
 - No external compatibility, performance, benchmark, or leadership claim is
-  made until PBPP and genuine independent reproduction are complete and the
-  human-owned publication decision is recorded.
+  made until PBPP and the source-owned launch gates are complete and the
+  human-owned publication decision is recorded. Independent reproduction is
+  recorded as strengthening evidence when offered.

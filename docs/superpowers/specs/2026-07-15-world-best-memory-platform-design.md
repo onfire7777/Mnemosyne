@@ -77,9 +77,11 @@ into four guarantees, each with a concrete mechanism:
 4. **No integrity trade-off — honesty is a hard rail.** Every headline-eligible
    number is produced under a frozen, published protocol on the real system,
    disclosed to match execution byte-for-byte, reported per category with **no
-   average that hides a weak column**, and independently reproducible before any
-   external claim (PBPP; §8, §10). We do not fake, round, blend, or headline an
-   unestablished number to appear complete.
+   average that hides a weak column**, and reproducible by construction from a
+   clean checkout and pinned bundle with one documented command (PBPP; §8,
+   §10). Independent reproduction is recorded as strengthening evidence when
+   offered. We do not fake, round, blend, or headline an unestablished number
+   to appear complete.
 
 **The reconciliation.** "Best in the world" and "8 GiB" are not in tension once
 the compact stack is made *the product* and parity is proven: the 8 GiB profile
@@ -494,11 +496,12 @@ prompt disclosed and the judge's acceptance rate on intentionally-wrong-but-topi
 answers reported, is never conflated with the private suite, discloses the
 executed engine/model/custody **byte-for-byte** (the current
 `postgres-recursive-ppr`-vs-local disclosure mismatch is audited and corrected),
-and is genuinely reproduced by an independent third party through the human-owned
-M3 process before any external claim. The self-reported 92–96% figures from some
-commercial systems are treated as unreproduced until independently reproduced
-under this harness; reproducibility is the axis on which the neutral leaderboard
-wins.
+and is reproducible by construction from a clean checkout and pinned bundle
+with one documented command. Genuine independent reproduction through the
+human-owned M3 process is recorded as strengthening evidence when offered, not
+as a publication prerequisite. The self-reported 92–96% figures from some
+commercial systems remain unverified until reproduced under the harness;
+reproducibility is the axis on which the leaderboard earns credibility.
 
 ---
 
@@ -586,7 +589,9 @@ and all providers; identical frozen artifacts across profiles.
 
 **Integrity gates (PBPP, §8.4):** neutral-harness production-stack numbers only;
 disclosure equals execution byte-for-byte; separate recall/QA columns with judge
-diagnostics; independent third-party reproduction before any external claim.
+diagnostics; one-command reproduction by construction from a clean checkout and
+pinned bundle. Independent third-party reproduction is optional strengthening
+evidence.
 
 ---
 
@@ -630,9 +635,10 @@ the ledger through the normal GSD flow with its own traceability test.
 W1 blocks all measurement. W2 and W3 can proceed in parallel after W1. W4 depends
 on the adapters each capability needs (W2/W3 supply some). W5 delivers the
 answering plane and 8 GiB profile and can proceed in parallel once W1 lands, but
-its headline numbers depend on W1's retrieval fix. Human-owned governance,
-independent reproduction, and public wording remain gates on any external claim
-throughout.
+its headline numbers depend on W1's retrieval fix. PBPP, source-owned launch
+gates, and human-approved public wording remain gates on any external claim
+throughout. Independent reproduction and Register B governance are optional
+strengthening evidence under the current v0.2.0 credibility model.
 
 ---
 
@@ -674,10 +680,10 @@ throughout.
 The §31 invariant rails and §33 test classes; the hardware-admission runbook and
 its work-class tiers; the Phase 12 candidate protocol; preregistration,
 one-attempt-per-protected-split, once-ever held-out runs, TRAIN-only decontaminated
-corpora, and digest pinning; PBPP; the human-owned governance / independent-
-reproduction / public-wording / publication boundaries. This design authorizes
-implementation planning of the workstreams in §11, not a benchmark result, an
-8 GiB-compatibility claim, or any public claim.
+corpora, and digest pinning; PBPP; optional independent-reproduction
+strengthening; and the human-owned public-wording / publication boundaries.
+This design authorizes implementation planning of the workstreams in §11, not a
+benchmark result, an 8 GiB-compatibility claim, or any public claim.
 
 ---
 

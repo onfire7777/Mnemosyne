@@ -42,8 +42,10 @@ success state after any rollback path.
 - Never auto-steal a stale or malformed lock, auto-repair unrelated certificate
   corruption, prune backups, overwrite an unowned LaunchAgent, force-push,
   delete custody data, or start a protected attempt.
-- Do not publish benchmark numbers or public claims from this work. External
-  governance and independent reproduction remain human-owned gates.
+- Do not publish benchmark numbers or public claims from this work. PBPP,
+  source-owned launch gates, and human publication approval remain mandatory;
+  optional external governance and independent reproduction must not be
+  impersonated by agents.
 
 ## Lifetime policy
 
