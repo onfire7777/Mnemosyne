@@ -264,3 +264,50 @@ Run the focused tests, Ruff, schema parsing, diff/lease checks, and risky-file
 sweep. Commit and push the narrow fix, then recheck PR #65 on the new exact
 head. Do not cancel or bypass GitHub gates, and do not merge while any review
 thread or required check remains unresolved.
+
+### Task 6: Resolve current-head review findings
+
+**Files:**
+- Modify: `leaderboard/schema/result-v1.schema.json`
+- Modify: `leaderboard/validate.py`
+- Modify: `tests/test_leaderboard_result_contract.py`
+- Modify: this plan
+
+- [x] **Step 1: Reproduce confirmed contract gaps**
+
+Add focused failing tests for unsupported publication labels, whitespace-only
+required strings, unknown object fields, duplicate record IDs in one array, and
+internal supersession cycles.
+
+- [x] **Step 2: Close the v1 record and array boundaries**
+
+Allow only `operator-run` and Register-B-gated `neutral` publication labels;
+require semantic strings to contain a non-whitespace character; reject unknown
+fields at every schema/validator object boundary; and reject duplicate IDs or
+cycles among records present in one input array. Preserve standalone
+supersession links to records outside the input because signed ledger resolution
+belongs to P16-L2-B.
+
+- [x] **Step 3: Verify the exact lease**
+
+The focused result-contract suite passes with 41 tests. The complete repository
+suite passes under the declared MCP optional dependency environment:
+`uv run --extra mcp pytest -q`. Scoped Ruff, Ruff format, schema parsing, and
+`git diff --check` pass. Repository-wide Ruff lint passes; repository-wide
+format checking reports 303 pre-existing out-of-lease files and is not a
+configured acceptance gate for this package.
+
+- [x] **Step 4: Record review disposition**
+
+Confirmed and fixed: label allowlisting, whitespace-only semantic strings,
+unknown fields, duplicate array identities, internal array cycles, positional
+string-field coupling, and this plan's stale review record. Rejected after
+source verification: evidence locator fields not required by this plan,
+bidirectional/dangling ledger enforcement reserved for P16-L2-B, a new runtime
+JSON Schema dependency forbidden by the no-new-dependency constraint,
+exhaustive branch testing beyond the named fail-closed rules, and documentation
+or planning edits outside the exact lease.
+
+Status: implementation and local verification complete on the isolated branch;
+this review iteration found and fixed issues, so a successor-head review is
+required before any review-done signal or merge decision.
