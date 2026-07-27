@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from collections.abc import Mapping
 
 from eval.public.runner import validate_candidate_manifest
@@ -43,5 +44,5 @@ def build_disclosure(
         "schema_version": _SCHEMA_VERSION,
         "dataset_revision": dataset_revision,
         "protocol_id": protocol_id,
-        "candidate_manifest": dict(sorted(manifest.items())),
+        "candidate_manifest": dict(sorted(deepcopy(manifest).items())),
     }
