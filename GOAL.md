@@ -103,8 +103,8 @@ own task and verification state.
 
 - [x] Add focused RED regressions for filesystem-free shared validation and
   nested-value isolation, then apply the smallest dependency-free fixes.
-- [ ] Run both native review stages and repair confirmed in-lease findings.
-- [x] Complete local verification and exact-lease checks. (18 focused tests,
+- [x] Run both native review stages and repair confirmed in-lease findings.
+- [x] Complete local verification and exact-lease checks. (22 focused tests,
   unrestricted MCP-extra full pytest, full Ruff, diff, exact-lease, secret,
   and risky-file checks passed.)
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge

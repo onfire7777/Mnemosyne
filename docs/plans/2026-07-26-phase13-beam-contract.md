@@ -95,9 +95,9 @@ wiring, measurements, and publication out of scope.
   the registry and returned nested values cannot alias caller-owned values.
 - [x] Expose the canonical in-memory protocol through the existing shared
   runner flow and deep-copy the validated disclosure manifest.
-- [ ] Run both native review stages and repair only reproduced in-lease issues.
+- [x] Run both native review stages and repair only reproduced in-lease issues.
 - [x] Run focused tests, unrestricted
-  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (18 focused tests,
+  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (22 focused tests,
   unrestricted full pytest, and full Ruff passed.)
 - [x] Run `git diff --check`, exact-lease, risky-file, and secret checks.
 - [ ] Commit deliberately, push normally, and open/update the PR.

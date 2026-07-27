@@ -34,15 +34,16 @@ def build_disclosure(
     if not isinstance(candidate_manifest, Mapping):
         raise BeamDisclosureError("candidate manifest must be a mapping")
 
-    manifest = dict(candidate_manifest)
     try:
+        manifest = deepcopy(dict(candidate_manifest))
         validate_candidate_manifest(manifest)
-    except ValueError as exc:
+        manifest = dict(sorted(manifest.items()))
+    except Exception as exc:
         raise BeamDisclosureError("candidate manifest is invalid") from exc
 
     return {
         "schema_version": _SCHEMA_VERSION,
         "dataset_revision": dataset_revision,
         "protocol_id": protocol_id,
-        "candidate_manifest": dict(sorted(deepcopy(manifest).items())),
+        "candidate_manifest": manifest,
     }
