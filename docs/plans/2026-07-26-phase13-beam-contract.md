@@ -97,7 +97,7 @@ wiring, measurements, and publication out of scope.
   runner flow and deep-copy the validated disclosure manifest.
 - [x] Run both native review stages and repair only reproduced in-lease issues.
 - [x] Run focused tests, unrestricted
-  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (22 focused tests,
+  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (23 focused tests,
   unrestricted full pytest, and full Ruff passed.)
 - [x] Run `git diff --check`, exact-lease, risky-file, and secret checks.
 - [ ] Commit deliberately, push normally, and open/update the PR.
