@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from copy import deepcopy
 from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -83,7 +84,7 @@ def _reader_judge_config(
 
 def test_build_reader_judge_config_emits_canonical_detached_metadata() -> None:
     reader, judge = _reader(), _judge()
-    expected = {
+    expected = deepcopy({
         "schema_version": "beam-reader-judge-config-v1",
         "reader": {
             key: reader[key]
@@ -111,7 +112,7 @@ def test_build_reader_judge_config_emits_canonical_detached_metadata() -> None:
                 "selector",
             )
         },
-    }
+    })
 
     config = beam.build_reader_judge_config(
         MappingProxyType(dict(reversed(reader.items()))),

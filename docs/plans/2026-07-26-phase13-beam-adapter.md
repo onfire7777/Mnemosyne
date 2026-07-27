@@ -34,9 +34,17 @@ for Task 2. The planned `.venv/bin/python` path is absent in this worktree.
 
 ## Task 2 — Implement
 
-- Reuse shared validation/canonicalization where it already exists.
-- Add only the minimum BEAM-specific source contract.
-- Keep the builder deterministic, detached, and free of I/O or execution.
+- [x] Reused the public bundle canonicalizer for exact config and prompt
+  digests rather than adding another serialization convention.
+- [x] Added only the minimum BEAM-specific exact-key, canonical-string,
+  pinned-revision, and digest validation contract.
+- [x] Kept the builder deterministic, detached, and free of I/O or execution.
+
+GREEN receipt: `PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
+tests/test_public_beam.py` passed all 36 tests. Focused Ruff passed
+`eval/public/adapters/beam.py` and `tests/test_public_beam.py` using the
+installed Ruff binary because the locked `uv run` could not populate its
+isolated cache without network access.
 
 ## Task 3 — Verify and deliver
 
