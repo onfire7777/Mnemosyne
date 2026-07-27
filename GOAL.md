@@ -91,10 +91,10 @@ own task and verification state.
 - [x] Complete native review and repair only reproduced in-lease findings.
   Five independent passes found and repaired mutable model pins, nested boolean
   metadata, direct validation coverage gaps, and stale task documentation.
-- [ ] Complete authoritative local verification and safety gates. Focused
-  pytest passes 52 tests and full Ruff passes. Unrestricted full pytest remains
-  blocked by the workspace sandbox denying `/bin/ps`; the sandboxed remainder
-  also reports unrelated production/runtime test failures.
+- [x] Complete authoritative local verification and safety gates. Focused
+  pytest passes 52 tests, full Ruff passes, and the clean-head unrestricted
+  `uv run --extra mcp pytest -q` suite exits 0. Diff, exact-lease, risky-file,
+  and secret checks pass.
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and
   merge normally.
 - [ ] Verify exact post-merge main CI, then refresh CBM/Gbrain once.
