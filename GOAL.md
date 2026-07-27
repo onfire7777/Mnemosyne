@@ -1,73 +1,58 @@
-# Goal: Phase 13 BEAM Reader Disclosure Contract
+# Goal: Phase 13 BEAM Reader and Judge Configuration Contract
 
 ## Objective
 
-Implement `P13-BEAM-A`, the next dependency-ready BENCH-006 source package: a
-deterministic, fail-closed BEAM disclosure envelope that reuses the public
-harness candidate-manifest validator and binds it to an exact dataset revision
-and frozen protocol identifier.
+Implement `P13-BEAM-B`, the next dependency-ready BENCH-006 source package:
+extend the existing BEAM disclosure adapter with a deterministic, fail-closed
+reader-and-judge configuration contract that reuses the public harness QA
+metadata conventions.
 
-This is source preparation only. It must not download or run BEAM, invoke a
-reader or judge, invent measured results, publish a claim, access production,
-satisfy the protected Phase 12 attempt, or claim Phase 15 hardware proof.
+This package prepares production source only. It must not download or run BEAM,
+invoke a reader or judge, invent measurements, publish a claim, access protected
+Phase 12 production evidence, or perform Phase 15 hardware proof.
 
-## Merged Baseline
+## Verified Baseline
 
-P13-MAB-A and P13-MAB-B are merged through `main@c78ee4e6`. They provide the
-four-competency MemoryAgentBench scorer and canonical upstream submission
-envelope. Exact post-merge main CI run `30223962377` succeeded.
-
-Phase 16's six source packages remain complete, while PBPP, Part-I, Register-A,
-identical-treatment, operator-entry, publication, protected Phase 12, and
-Phase 15 hardware gates remain unsatisfied.
+`main@2834834a` includes the merged P13-BEAM-A disclosure envelope. Exact
+post-merge main CI run `30232339515` succeeded. CBM was refreshed to 21,074
+nodes and 96,260 edges, and Gbrain source `mnemosyne-code` synced this milestone
+once.
 
 ## Controlling Sources
 
 - `.planning/ROADMAP.md` — Phase 13
 - `.planning/REQUIREMENTS.md` — BENCH-006 and RAIL-001..004
 - `.planning/STATE.md`
-- `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md`
-- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` — M1.5
-- `eval/public/runner.py` — existing candidate-manifest validation
+- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` — M1.5 and PBPP
+- `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md` — Phase 3
+- `eval/public/runner.py` and existing QA bundle metadata conventions
 
 ## Exact Lease
 
 - `GOAL.md`
-- `eval/public/runner.py`
 - `eval/public/adapters/beam.py`
 - `tests/test_public_beam.py`
-- `docs/plans/2026-07-26-phase13-beam-contract.md`
+- `docs/plans/2026-07-26-phase13-beam-adapter.md`
 
 No other tracked path may change. `GOAL.md` and the round plan may update their
 own task and verification state.
 
 ## Acceptance Contract
 
-- Reuse `validate_candidate_manifest`; do not duplicate its candidate, model,
-  prompt, decoding, custody, or digest validation.
-- Keep the shared candidate-manifest validator filesystem-free when callers
-  supply no explicit protocol, while preserving the separate registry-loading
-  verification path.
-- `canonical_qa_protocol()` is the public in-memory contract source;
-  `load_qa_protocol()` separately verifies the checked-in registry custody.
-- Accept only an exact lowercase 40-hex BEAM dataset revision and a non-empty
-  protocol identifier with no surrounding whitespace.
-- Emit one canonical mapping with a fixed schema version, dataset revision,
-  protocol identifier, and a canonical copy of the validated candidate
-  manifest.
-- Reject malformed manifests, unknown/missing manifest keys, booleans,
-  non-finite values, unpinned revisions, and non-canonical identifiers through
-  one BEAM-specific `ValueError` subtype.
-- Be deterministic for equivalent manifest mappings and require no filesystem,
-  network, dataset, model, judge, CLI, production, or hardware access.
-- Add focused RED tests first, observe the expected failures, then write the
-  smallest stdlib-only shared-flow implementation.
-- Run both native review stages, focused tests, unrestricted MCP-extra full
-  pytest, full Ruff, diff, exact-lease, secret, and risky-file checks.
-- Commit and push intentionally, open/update a PR, require exact-head CI,
-  CodeRabbit, Greptile, clear review state and threads, then merge normally.
-- Verify exact post-merge main CI before refreshing CBM/Gbrain and admitting the
-  next lease-disjoint package.
+- Reuse the existing public QA reader/judge/config metadata conventions; do not
+  invent a parallel bundle schema or duplicate shared validation.
+- Bind a fully disclosed reader model/config, judge model/prompt, and exact
+  content digests into one deterministic source-only BEAM contract.
+- Reject missing, extra, ambiguous, boolean, non-finite, unpinned, or
+  non-canonical metadata through the existing BEAM-specific error boundary.
+- Detach all returned nested values and canonicalize nested mapping order.
+- Require no filesystem, network, dataset, model, judge, CLI, production, or
+  hardware access.
+- Add focused RED tests first, observe the intended failures, then implement the
+  smallest standard-library/shared-flow change.
+- Run native all-Sol-low review, focused tests, unrestricted MCP-extra full
+  pytest, full Ruff, diff, exact-lease, risky-file, and secret checks.
+- Use the normal branch → PR → exact-head CI/reviews → normal merge flow.
 
 ## Operating Contract
 
@@ -84,35 +69,38 @@ own task and verification state.
 
 ## Tasks
 
-### Task 1: Freeze the disclosure contract
+### Task 1: Freeze the source-only configuration behavior
 
-- [x] Add focused RED tests for the canonical envelope and fail-closed inputs.
-- [x] Run the focused tests and record the expected missing-feature failure.
-- [x] Commit the RED contract after the supervisor repaired the Worktrunk
-  metadata writable-root boundary.
+- [x] Inspect the existing QA reader/judge/config shared conventions and record
+  the smallest reusable interface in the round plan.
+- [x] Add focused RED tests for canonical valid metadata and fail-closed inputs.
+- [x] Commit only the RED contract and accurate task receipt. The supervisor
+  repaired the linked-worktree Git metadata boundary after 13 expected
+  missing-feature failures, 23 existing passing tests, and clean focused Ruff.
 
-### Task 2: Implement the minimum envelope
+### Task 2: Implement the minimum shared-flow extension
 
-- [x] Add the stdlib-only BEAM disclosure builder using the existing manifest
-  validator.
-- [x] Make focused tests green without I/O or new dependencies.
-- [x] Commit the implementation after the supervisor repaired the Worktrunk
-  metadata writable-root boundary.
+- [x] Add the smallest dependency-free BEAM reader/judge configuration builder.
+- [x] Make focused tests green without I/O or execution.
+- [x] Commit only the implementation and accurate task receipt. Focused
+  verification passed 36 tests and clean Ruff without dataset, model, judge,
+  filesystem, or network execution.
 
 ### Task 3: Review and deliver
 
-- [x] Add focused RED regressions for filesystem-free shared validation and
-  nested-value isolation, then apply the smallest dependency-free fixes.
-- [x] Run both native review stages and repair confirmed in-lease findings.
-- [x] Complete local verification and exact-lease checks. (23 focused tests,
-  unrestricted MCP-extra full pytest, full Ruff, diff, exact-lease, secret,
-  and risky-file checks passed.)
-- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
-  normally.
-- [ ] Verify post-merge main CI, then refresh CBM/Gbrain once.
+- [x] Complete native review and repair only reproduced in-lease findings.
+  Five independent passes found and repaired mutable model pins, nested boolean
+  metadata, direct validation coverage gaps, and stale task documentation.
+- [x] Complete authoritative local verification and safety gates. Focused
+  pytest passes 52 tests, full Ruff passes, and the clean-head unrestricted
+  `uv run --extra mcp pytest -q` suite exits 0. Diff, exact-lease, risky-file,
+  and secret checks pass.
+- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and
+  merge normally.
+- [ ] Verify exact post-merge main CI, then refresh CBM/Gbrain once.
 
 ## Completion
 
 Finish only after normal merge and exact post-merge main CI. This package does
-not complete BENCH-006: actual BEAM execution, disclosed reader measurements,
-hardware evidence, and publication remain separate gated work.
+not complete BENCH-006; BEAM execution, measured results, and publication remain
+separate protected work.
