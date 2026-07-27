@@ -169,6 +169,7 @@ def test_build_reader_judge_config_emits_canonical_detached_metadata() -> None:
         ("reader", lambda value: {**value, "config_sha256": True}),
         ("reader", lambda value: {**value, "config": {"changed": 1}}),
         ("reader", lambda value: _with_content(value, "config", {"stream": True})),
+        ("reader", lambda value: _with_content(value, "config", {True: "stream"})),
         ("reader", lambda value: _with_content(value, "config", {})),
         ("reader", lambda value: _with_content(value, "config", [])),
         ("reader", lambda value: {**value, "config": {"temperature": math.nan}}),

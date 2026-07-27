@@ -54,6 +54,7 @@ def build_reader_judge_config(
 def _canonical_metadata(value: object, expected_keys: set[str]) -> dict[str, object]:
     if not isinstance(value, Mapping) or set(value) != expected_keys:
         raise ValueError("metadata fields are not canonical")
+    _reject_booleans(value)
     canonical = json.loads(
         json.dumps(dict(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
     )
@@ -64,8 +65,9 @@ def _canonical_metadata(value: object, expected_keys: set[str]) -> dict[str, obj
 def _reject_booleans(value: object) -> None:
     if isinstance(value, bool):
         raise ValueError("boolean metadata is not canonical")
-    if isinstance(value, dict):
-        for nested in value.values():
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            _reject_booleans(key)
             _reject_booleans(nested)
     elif isinstance(value, list):
         for nested in value:
