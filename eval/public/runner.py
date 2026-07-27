@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -140,17 +141,10 @@ def load_qa_protocol() -> dict[str, Any]:
     return protocol
 
 
-def validate_qa_protocol(protocol: Any) -> None:
-    expected_keys = {"abstention", "anchor_normalizer", "reader_schema", "candidate_manifest_schema", "decoding", "decomposer", "evidence_budget", "held_out_policy", "interval_methods", "model", "phase11_custody", "prompt", "retrieval_baselines", "scoring_profile", "split_roles", "version"}
-    if not isinstance(protocol, dict) or set(protocol) != expected_keys or protocol.get("version") != GROUNDED_PROTOCOL_VERSION:
-        raise ValueError("frozen QA protocol is missing or has the wrong version")
-    if protocol.get("retrieval_baselines") != _FROZEN_RETRIEVAL_BASELINES:
-        raise ValueError("frozen retrieval baselines may not be weakened")
-    if protocol.get("scoring_profile") != "qa-em-f1-v1":
-        raise ValueError("frozen QA scoring profile mismatch")
-    if protocol.get("held_out_policy") != {"development_use": False, "max_attempts": 1, "transport_retries": 0}:
-        raise ValueError("held-out split may not be used as development data")
-    expected = {
+def canonical_qa_protocol() -> dict[str, Any]:
+    """Return the frozen QA protocol without reading the registry."""
+    return deepcopy({
+        "version": GROUNDED_PROTOCOL_VERSION,
         "model": {"provider": "ollama", "selector": MODEL_SELECTOR, "content_sha256": MODEL_CONTENT_SHA256, "resolved_content_sha256_required": True},
         "decomposer": EXTRACTIVE_DECOMPOSER_SPEC,
         "prompt": {"roles": PROMPT_BUNDLES, "serializer": SERIALIZER_SPEC, "complete_role_custody_sha256_required": True},
@@ -162,13 +156,33 @@ def validate_qa_protocol(protocol: Any) -> None:
         "split_roles": {"synthetic": "development", "qa_hard_v2": "frozen-internal", "longmemeval-cleaned": "held-out-test", "hipporag-validation": "held-out-validation"},
         "interval_methods": {"exact_match": "wilson", "token_f1": "bootstrap"},
         "candidate_manifest_schema": {"external_post_commit": True, "no_overwrite": True, "required": ["candidate_version", "created_at_utc", "git_sha", "model_content_sha256", "decomposer_spec_sha256", "decomposer_implementation_sha256", "anchor_normalizer_sha256", "reader_schema_sha256", "prompt_sha256", "serializer_sha256", "decoding_sha256", "protocol_sha256", "evidence_budget", "abstention", "transport_retries"]},
-    }
-    if any(protocol.get(key) != value for key, value in expected.items()) or protocol.get("phase11_custody") != _FROZEN_PHASE11_CUSTODY:
+        "retrieval_baselines": _FROZEN_RETRIEVAL_BASELINES,
+        "scoring_profile": "qa-em-f1-v1",
+        "held_out_policy": {"development_use": False, "max_attempts": 1, "transport_retries": 0},
+        "phase11_custody": _FROZEN_PHASE11_CUSTODY,
+    })
+
+
+def validate_qa_protocol(protocol: Any) -> None:
+    expected = canonical_qa_protocol()
+    if (
+        not isinstance(protocol, dict)
+        or set(protocol) != set(expected)
+        or protocol.get("version") != GROUNDED_PROTOCOL_VERSION
+    ):
+        raise ValueError("frozen QA protocol is missing or has the wrong version")
+    if protocol.get("retrieval_baselines") != _FROZEN_RETRIEVAL_BASELINES:
+        raise ValueError("frozen retrieval baselines may not be weakened")
+    if protocol.get("scoring_profile") != "qa-em-f1-v1":
+        raise ValueError("frozen QA scoring profile mismatch")
+    if protocol.get("held_out_policy") != expected["held_out_policy"]:
+        raise ValueError("held-out split may not be used as development data")
+    if protocol != expected:
         raise ValueError("frozen QA protocol custody is not the exact canonical contract")
 
 
 def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None = None, *, expected_git_sha: str | None = None) -> None:
-    protocol = protocol or load_qa_protocol()
+    protocol = canonical_qa_protocol() if protocol is None else protocol
     validate_qa_protocol(protocol)
     required = set(protocol["candidate_manifest_schema"]["required"])
     if not isinstance(manifest, dict) or set(manifest) != required:
@@ -198,7 +212,7 @@ def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None =
 
 
 def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str]:
-    protocol = protocol or load_qa_protocol()
+    protocol = load_qa_protocol() if protocol is None else protocol
     validate_qa_protocol(protocol)
     return {
         "anchor_normalizer_sha256": hashlib.sha256(grounded_canonical(protocol["anchor_normalizer"])).hexdigest(),
