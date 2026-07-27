@@ -2,18 +2,28 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
 
 import eval.public.runner as runner
+import eval.public.adapters.beam as beam
 from eval.public.adapters.beam import BeamDisclosureError, build_disclosure
 from eval.public.runner import build_candidate_manifest
 
 _REVISION = "0123456789abcdef0123456789abcdef01234567"
 _PROTOCOL_ID = "beam-reader-v1"
+_READER_CONFIG_SHA256 = (
+    "f237707af93b5fdd0e191210aa9da6992995d546373fb29c77c7d1cb4141e775"
+)
+_JUDGE_PROMPT_SHA256 = (
+    "193a32ee207f71cf84a025d2a0969301c7744c2d880517572c9030286344a810"
+)
+_JUDGE_CONFIG_SHA256 = (
+    "b1f51b66ba819b951c93c13f1d5aafa84b5016e5e5bce87d1d36342ee9729093"
+)
 
 
 def _manifest() -> dict[str, object]:
@@ -33,6 +43,117 @@ def _build(candidate_manifest: object) -> dict[str, object]:
         dataset_revision=_REVISION,
         protocol_id=_PROTOCOL_ID,
     )
+
+
+def _reader() -> dict[str, object]:
+    return {
+        "name": "grounded-reader",
+        "provider": "ollama",
+        "selector": "qwen3:8b",
+        "model_revision": "qwen3:8b",
+        "model_content_sha256": "1" * 64,
+        "config": {"decoding": {"temperature": 0.0, "top_p": 1.0}},
+        "config_sha256": _READER_CONFIG_SHA256,
+    }
+
+
+def _judge() -> dict[str, object]:
+    return {
+        "name": "benchmark-owned-judge",
+        "provider": "ollama",
+        "selector": "judge-model@sha256:" + "2" * 64,
+        "model_revision": "sha256:" + "2" * 64,
+        "model_content_sha256": "2" * 64,
+        "prompt": {"rubric": "Answer only from supplied evidence."},
+        "prompt_sha256": _JUDGE_PROMPT_SHA256,
+        "config": {"temperature": 0.0},
+        "config_sha256": _JUDGE_CONFIG_SHA256,
+    }
+
+
+def _reader_judge_config(
+    reader: object | None = None,
+    judge: object | None = None,
+) -> dict[str, object]:
+    return beam.build_reader_judge_config(
+        _reader() if reader is None else reader,
+        _judge() if judge is None else judge,
+    )
+
+
+def test_build_reader_judge_config_emits_canonical_detached_metadata() -> None:
+    reader, judge = _reader(), _judge()
+    expected = {
+        "schema_version": "beam-reader-judge-config-v1",
+        "reader": {
+            key: reader[key]
+            for key in (
+                "config",
+                "config_sha256",
+                "model_content_sha256",
+                "model_revision",
+                "name",
+                "provider",
+                "selector",
+            )
+        },
+        "judge": {
+            key: judge[key]
+            for key in (
+                "config",
+                "config_sha256",
+                "model_content_sha256",
+                "model_revision",
+                "name",
+                "prompt",
+                "prompt_sha256",
+                "provider",
+                "selector",
+            )
+        },
+    }
+
+    config = beam.build_reader_judge_config(
+        MappingProxyType(dict(reversed(reader.items()))),
+        MappingProxyType(dict(reversed(judge.items()))),
+    )
+
+    assert config == expected
+    assert json.dumps(config) == json.dumps(expected)
+    reader["config"]["decoding"]["temperature"] = 1.0  # type: ignore[index]
+    judge["prompt"]["rubric"] = "mutated"  # type: ignore[index]
+    assert config == expected
+
+
+@pytest.mark.parametrize(
+    ("target", "mutation"),
+    [
+        ("reader", lambda value: {key: item for key, item in value.items() if key != "name"}),
+        ("reader", lambda value: {**value, "extra": "not canonical"}),
+        ("reader", lambda value: {**value, "model_revision": "latest"}),
+        ("reader", lambda value: {**value, "model_revision": "other@sha256:" + "1" * 64}),
+        ("reader", lambda value: {**value, "config_sha256": True}),
+        ("reader", lambda value: {**value, "config": {"temperature": math.nan}}),
+        ("judge", lambda value: {key: item for key, item in value.items() if key != "prompt"}),
+        ("judge", lambda value: {**value, "extra": "not canonical"}),
+        ("judge", lambda value: {**value, "model_revision": "latest"}),
+        ("judge", lambda value: {**value, "name": " benchmark-owned-judge"}),
+        ("judge", lambda value: {**value, "prompt_sha256": True}),
+        ("judge", lambda value: {**value, "config": {"temperature": math.inf}}),
+    ],
+)
+def test_build_reader_judge_config_fails_closed_for_noncanonical_metadata(
+    target: str,
+    mutation: Callable[[dict[str, object]], dict[str, object]],
+) -> None:
+    reader, judge = _reader(), _judge()
+    if target == "reader":
+        reader = mutation(reader)
+    else:
+        judge = mutation(judge)
+
+    with pytest.raises(BeamDisclosureError):
+        _reader_judge_config(reader, judge)
 
 
 def test_build_disclosure_emits_the_canonical_envelope() -> None:
