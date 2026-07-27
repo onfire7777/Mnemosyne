@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterator, Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -54,18 +56,18 @@ def test_build_disclosure_emits_the_canonical_envelope() -> None:
 
 def test_build_disclosure_is_deterministic_for_equivalent_candidate_mappings() -> None:
     manifest = _manifest()
-    reversed_manifest = dict(reversed(manifest.items()))
+    reversed_manifest = MappingProxyType(dict(reversed(manifest.items())))
 
     assert _build(manifest) == _build(reversed_manifest)
 
 
-def test_candidate_validation_does_not_load_the_registry(
+def test_build_disclosure_does_not_load_the_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manifest = _manifest()
     monkeypatch.setattr(runner, "ROOT", Path("/registry-must-not-be-read"))
 
-    runner.validate_candidate_manifest(manifest)
+    assert _build(manifest)["candidate_manifest"] == dict(sorted(manifest.items()))
 
 
 def test_candidate_validation_rejects_an_explicit_empty_protocol() -> None:
@@ -101,6 +103,33 @@ def test_build_disclosure_detaches_nested_candidate_values() -> None:
 
     assert disclosure["candidate_manifest"]["evidence_budget"]["max_records"] == 20  # type: ignore[index]
     assert disclosure["candidate_manifest"]["abstention"]["claims"] == []  # type: ignore[index]
+
+
+def test_build_disclosure_validates_the_detached_candidate() -> None:
+    class MutatingCopy(list[object]):
+        def __deepcopy__(self, memo: dict[int, object]) -> list[object]:
+            return ["mutated"]
+
+    manifest = _manifest()
+    manifest["abstention"]["claims"] = MutatingCopy()  # type: ignore[index]
+
+    with pytest.raises(BeamDisclosureError):
+        _build(manifest)
+
+
+def test_build_disclosure_wraps_mapping_conversion_errors() -> None:
+    class BrokenMapping(Mapping[str, object]):
+        def __getitem__(self, key: str) -> object:
+            raise RuntimeError("broken mapping")
+
+        def __iter__(self) -> Iterator[str]:
+            return iter(("candidate_version",))
+
+        def __len__(self) -> int:
+            return 1
+
+    with pytest.raises(BeamDisclosureError):
+        _build(BrokenMapping())
 
 
 @pytest.mark.parametrize(
