@@ -80,9 +80,11 @@ own task and verification state.
 
 ### Task 2: Implement the minimum shared-flow extension
 
-- [ ] Add the smallest dependency-free BEAM reader/judge configuration builder.
-- [ ] Make focused tests green without I/O or execution.
-- [ ] Commit only the implementation and accurate task receipt.
+- [x] Add the smallest dependency-free BEAM reader/judge configuration builder.
+- [x] Make focused tests green without I/O or execution.
+- [x] Commit only the implementation and accurate task receipt. Focused
+  verification passed 36 tests and clean Ruff without dataset, model, judge,
+  filesystem, or network execution.
 
 ### Task 3: Review and deliver
 
