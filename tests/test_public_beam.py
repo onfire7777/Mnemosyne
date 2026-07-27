@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -59,6 +60,19 @@ def test_build_disclosure_is_deterministic_for_equivalent_candidate_mappings() -
     reversed_manifest = MappingProxyType(dict(reversed(manifest.items())))
 
     assert _build(manifest) == _build(reversed_manifest)
+
+
+def test_build_disclosure_canonicalizes_nested_mapping_order() -> None:
+    manifest = _manifest()
+    reordered = dict(manifest)
+    reordered["evidence_budget"] = dict(
+        reversed(manifest["evidence_budget"].items())  # type: ignore[union-attr]
+    )
+    reordered["abstention"] = dict(
+        reversed(manifest["abstention"].items())  # type: ignore[union-attr]
+    )
+
+    assert json.dumps(_build(manifest)) == json.dumps(_build(reordered))
 
 
 def test_build_disclosure_does_not_load_the_registry(
