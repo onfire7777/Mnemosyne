@@ -68,6 +68,30 @@ def test_candidate_validation_does_not_load_the_registry(
     runner.validate_candidate_manifest(manifest)
 
 
+def test_candidate_validation_rejects_an_explicit_empty_protocol() -> None:
+    with pytest.raises(ValueError, match="frozen QA protocol"):
+        runner.validate_candidate_manifest(_manifest(), {})
+
+
+def test_canonical_protocol_returns_detached_nested_values() -> None:
+    protocol = runner.canonical_qa_protocol()
+    baseline = protocol["retrieval_baselines"]["hipporag-2wiki"]  # type: ignore[index]
+    original = baseline["recall_at_2"]  # type: ignore[index]
+
+    try:
+        baseline["recall_at_2"] = 999  # type: ignore[index]
+        assert (
+            runner.canonical_qa_protocol()["retrieval_baselines"]["hipporag-2wiki"][
+                "recall_at_2"
+            ]
+            == original
+        )
+        with pytest.raises(ValueError, match="retrieval baselines"):
+            runner.validate_qa_protocol(protocol)
+    finally:
+        baseline["recall_at_2"] = original  # type: ignore[index]
+
+
 def test_build_disclosure_detaches_nested_candidate_values() -> None:
     manifest = _manifest()
     disclosure = _build(manifest)

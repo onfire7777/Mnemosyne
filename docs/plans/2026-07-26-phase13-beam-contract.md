@@ -88,6 +88,8 @@ wiring, measurements, and publication out of scope.
 - Consumes: Tasks 1-2 committed behavior.
 - Produces: reviewed branch, normal PR, exact-head gates, normal merge, and
   exact post-merge main verification.
+- `canonical_qa_protocol()` supplies detached in-memory validation data;
+  `load_qa_protocol()` remains the explicit registry-custody verification path.
 
 - [x] Add focused RED regressions proving candidate validation does not read
   the registry and returned nested values cannot alias caller-owned values.
