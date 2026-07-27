@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from copy import deepcopy
@@ -30,8 +31,7 @@ _JUDGE_CONFIG_SHA256 = (
 def _manifest() -> dict[str, object]:
     return build_candidate_manifest(
         model_content_sha256=(
-            "500a1f067a9f782620b40bee6f7b0c89e"
-            "17ae61f686b92c24933e4ca4b2b8b41"
+            "500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41"
         ),
         git_sha="a" * 40,
         created_at_utc="2026-07-11T00:00:00Z",
@@ -50,8 +50,8 @@ def _reader() -> dict[str, object]:
     return {
         "name": "grounded-reader",
         "provider": "ollama",
-        "selector": "qwen3:8b",
-        "model_revision": "qwen3:8b",
+        "selector": "qwen3@sha256:" + "1" * 64,
+        "model_revision": "sha256:" + "1" * 64,
         "model_content_sha256": "1" * 64,
         "config": {"decoding": {"temperature": 0.0, "top_p": 1.0}},
         "config_sha256": _READER_CONFIG_SHA256,
@@ -82,37 +82,51 @@ def _reader_judge_config(
     )
 
 
+def _with_content(
+    value: dict[str, object],
+    key: str,
+    content: object,
+) -> dict[str, object]:
+    return {
+        **value,
+        key: content,
+        f"{key}_sha256": hashlib.sha256(beam._canonical(content)).hexdigest(),
+    }
+
+
 def test_build_reader_judge_config_emits_canonical_detached_metadata() -> None:
     reader, judge = _reader(), _judge()
-    expected = deepcopy({
-        "schema_version": "beam-reader-judge-config-v1",
-        "reader": {
-            key: reader[key]
-            for key in (
-                "config",
-                "config_sha256",
-                "model_content_sha256",
-                "model_revision",
-                "name",
-                "provider",
-                "selector",
-            )
-        },
-        "judge": {
-            key: judge[key]
-            for key in (
-                "config",
-                "config_sha256",
-                "model_content_sha256",
-                "model_revision",
-                "name",
-                "prompt",
-                "prompt_sha256",
-                "provider",
-                "selector",
-            )
-        },
-    })
+    expected = deepcopy(
+        {
+            "schema_version": "beam-reader-judge-config-v1",
+            "reader": {
+                key: reader[key]
+                for key in (
+                    "config",
+                    "config_sha256",
+                    "model_content_sha256",
+                    "model_revision",
+                    "name",
+                    "provider",
+                    "selector",
+                )
+            },
+            "judge": {
+                key: judge[key]
+                for key in (
+                    "config",
+                    "config_sha256",
+                    "model_content_sha256",
+                    "model_revision",
+                    "name",
+                    "prompt",
+                    "prompt_sha256",
+                    "provider",
+                    "selector",
+                )
+            },
+        }
+    )
 
     config = beam.build_reader_judge_config(
         MappingProxyType(dict(reversed(reader.items()))),
@@ -129,17 +143,52 @@ def test_build_reader_judge_config_emits_canonical_detached_metadata() -> None:
 @pytest.mark.parametrize(
     ("target", "mutation"),
     [
-        ("reader", lambda value: {key: item for key, item in value.items() if key != "name"}),
+        (
+            "reader",
+            lambda value: {key: item for key, item in value.items() if key != "name"},
+        ),
         ("reader", lambda value: {**value, "extra": "not canonical"}),
         ("reader", lambda value: {**value, "model_revision": "latest"}),
-        ("reader", lambda value: {**value, "model_revision": "other@sha256:" + "1" * 64}),
+        (
+            "reader",
+            lambda value: {**value, "model_revision": "other@sha256:" + "1" * 64},
+        ),
+        (
+            "reader",
+            lambda value: {**value, "selector": "latest", "model_revision": "latest"},
+        ),
+        (
+            "reader",
+            lambda value: {
+                **value,
+                "selector": "model@latest",
+                "model_revision": "latest",
+            },
+        ),
+        ("reader", lambda value: {**value, "model_content_sha256": "3" * 64}),
         ("reader", lambda value: {**value, "config_sha256": True}),
+        ("reader", lambda value: {**value, "config": {"changed": 1}}),
+        ("reader", lambda value: _with_content(value, "config", {"stream": True})),
+        ("reader", lambda value: _with_content(value, "config", {})),
+        ("reader", lambda value: _with_content(value, "config", [])),
         ("reader", lambda value: {**value, "config": {"temperature": math.nan}}),
-        ("judge", lambda value: {key: item for key, item in value.items() if key != "prompt"}),
+        (
+            "judge",
+            lambda value: {key: item for key, item in value.items() if key != "prompt"},
+        ),
         ("judge", lambda value: {**value, "extra": "not canonical"}),
         ("judge", lambda value: {**value, "model_revision": "latest"}),
         ("judge", lambda value: {**value, "name": " benchmark-owned-judge"}),
+        ("judge", lambda value: {**value, "model_content_sha256": "3" * 64}),
         ("judge", lambda value: {**value, "prompt_sha256": True}),
+        ("judge", lambda value: {**value, "prompt": {"changed": 1}}),
+        ("judge", lambda value: {**value, "config": {"changed": 1}}),
+        ("judge", lambda value: _with_content(value, "prompt", {"stream": True})),
+        ("judge", lambda value: _with_content(value, "config", {"stream": True})),
+        ("judge", lambda value: _with_content(value, "prompt", {})),
+        ("judge", lambda value: _with_content(value, "prompt", "rubric")),
+        ("judge", lambda value: _with_content(value, "config", {})),
+        ("judge", lambda value: _with_content(value, "config", ["temperature"])),
         ("judge", lambda value: {**value, "config": {"temperature": math.inf}}),
     ],
 )

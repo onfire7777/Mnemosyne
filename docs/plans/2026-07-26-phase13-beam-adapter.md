@@ -48,8 +48,17 @@ isolated cache without network access.
 
 ## Task 3 — Verify and deliver
 
-- Run focused and unrestricted full tests, full Ruff, native review, and all
+- [x] Run five independent review passes and repair every reproduced finding.
+- [ ] Run focused and unrestricted full tests, full Ruff, and all
   lease/diff/secret/risky-file checks.
-- Commit and push deliberately, open the normal PR, and require fresh exact-head
-  CI, CodeRabbit, Greptile, clear review state, and zero active threads.
-- Merge normally only after every gate clears; verify post-merge main CI.
+- [ ] Commit and push deliberately, open the normal PR, and require fresh
+  exact-head CI, CodeRabbit, Greptile, clear review state, and zero active
+  threads.
+- [ ] Merge normally only after every gate clears; verify post-merge main CI.
+
+Review receipt: five independent passes confirmed mutable model pins, nested
+boolean metadata acceptance, direct validation coverage gaps, and stale task
+documentation. Those findings are repaired. Focused pytest passes 52 tests and
+full Ruff passes. Unrestricted full pytest is not green in this workspace:
+`/bin/ps` is sandbox-denied and the sandboxed remainder reports unrelated
+production/runtime failures. Delivery and post-merge gates remain open.

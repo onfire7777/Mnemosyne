@@ -1,4 +1,4 @@
-"""Source-only BEAM reader disclosure envelope."""
+"""Source-only BEAM disclosure and reader/judge configuration contracts."""
 
 from __future__ import annotations
 
@@ -54,9 +54,22 @@ def build_reader_judge_config(
 def _canonical_metadata(value: object, expected_keys: set[str]) -> dict[str, object]:
     if not isinstance(value, Mapping) or set(value) != expected_keys:
         raise ValueError("metadata fields are not canonical")
-    return json.loads(
+    canonical = json.loads(
         json.dumps(dict(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
     )
+    _reject_booleans(canonical)
+    return canonical
+
+
+def _reject_booleans(value: object) -> None:
+    if isinstance(value, bool):
+        raise ValueError("boolean metadata is not canonical")
+    if isinstance(value, dict):
+        for nested in value.values():
+            _reject_booleans(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _reject_booleans(nested)
 
 
 def _validate_metadata(
@@ -77,21 +90,29 @@ def _validate_metadata(
     selector = value["selector"]
     revision = value["model_revision"]
     digest = value["model_content_sha256"]
-    if revision != selector and not selector.endswith(f"@{revision}"):
-        raise ValueError("model revision does not pin the selector")
-    if revision.startswith("sha256:") and revision != f"sha256:{digest}":
-        raise ValueError("model revision does not match model content")
+    if (
+        revision != f"sha256:{digest}"
+        or revision != selector
+        and not selector.endswith(f"@{revision}")
+    ):
+        raise ValueError("model selector is not pinned to its content")
 
     content = value[content_key]
     if not isinstance(content, dict) or not content:
         raise ValueError(f"{content_key} must be a non-empty object")
-    if hashlib.sha256(_canonical(content)).hexdigest() != value[f"{content_key}_sha256"]:
+    if (
+        hashlib.sha256(_canonical(content)).hexdigest()
+        != value[f"{content_key}_sha256"]
+    ):
         raise ValueError(f"{content_key} digest mismatch")
 
     if content_key != "config":
         if not isinstance(value["config"], dict) or not value["config"]:
             raise ValueError("config must be a non-empty object")
-        if hashlib.sha256(_canonical(value["config"])).hexdigest() != value["config_sha256"]:
+        if (
+            hashlib.sha256(_canonical(value["config"])).hexdigest()
+            != value["config_sha256"]
+        ):
             raise ValueError("config digest mismatch")
 
 
@@ -102,7 +123,10 @@ def build_disclosure(
     protocol_id: object,
 ) -> dict[str, object]:
     """Build the canonical source-only BEAM reader disclosure."""
-    if not isinstance(dataset_revision, str) or _REVISION.fullmatch(dataset_revision) is None:
+    if (
+        not isinstance(dataset_revision, str)
+        or _REVISION.fullmatch(dataset_revision) is None
+    ):
         raise BeamDisclosureError("dataset revision must be exact lowercase 40-hex")
     if (
         not isinstance(protocol_id, str)
