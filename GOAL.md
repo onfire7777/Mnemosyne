@@ -48,6 +48,8 @@ own task and verification state.
 - Keep the shared candidate-manifest validator filesystem-free when callers
   supply no explicit protocol, while preserving the separate registry-loading
   verification path.
+- `canonical_qa_protocol()` is the public in-memory contract source;
+  `load_qa_protocol()` separately verifies the checked-in registry custody.
 - Accept only an exact lowercase 40-hex BEAM dataset revision and a non-empty
   protocol identifier with no surrounding whitespace.
 - Emit one canonical mapping with a fixed schema version, dataset revision,

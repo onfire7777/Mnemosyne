@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
@@ -142,7 +143,7 @@ def load_qa_protocol() -> dict[str, Any]:
 
 def canonical_qa_protocol() -> dict[str, Any]:
     """Return the frozen QA protocol without reading the registry."""
-    return {
+    return deepcopy({
         "version": GROUNDED_PROTOCOL_VERSION,
         "model": {"provider": "ollama", "selector": MODEL_SELECTOR, "content_sha256": MODEL_CONTENT_SHA256, "resolved_content_sha256_required": True},
         "decomposer": EXTRACTIVE_DECOMPOSER_SPEC,
@@ -159,7 +160,7 @@ def canonical_qa_protocol() -> dict[str, Any]:
         "scoring_profile": "qa-em-f1-v1",
         "held_out_policy": {"development_use": False, "max_attempts": 1, "transport_retries": 0},
         "phase11_custody": _FROZEN_PHASE11_CUSTODY,
-    }
+    })
 
 
 def validate_qa_protocol(protocol: Any) -> None:
@@ -181,7 +182,7 @@ def validate_qa_protocol(protocol: Any) -> None:
 
 
 def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None = None, *, expected_git_sha: str | None = None) -> None:
-    protocol = protocol or canonical_qa_protocol()
+    protocol = canonical_qa_protocol() if protocol is None else protocol
     validate_qa_protocol(protocol)
     required = set(protocol["candidate_manifest_schema"]["required"])
     if not isinstance(manifest, dict) or set(manifest) != required:
@@ -211,7 +212,7 @@ def validate_candidate_manifest(manifest: Any, protocol: dict[str, Any] | None =
 
 
 def qa_protocol_digests(protocol: dict[str, Any] | None = None) -> dict[str, str]:
-    protocol = protocol or load_qa_protocol()
+    protocol = load_qa_protocol() if protocol is None else protocol
     validate_qa_protocol(protocol)
     return {
         "anchor_normalizer_sha256": hashlib.sha256(grounded_canonical(protocol["anchor_normalizer"])).hexdigest(),
