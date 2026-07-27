@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
+import eval.public.runner as runner
 from eval.public.adapters.beam import BeamDisclosureError, build_disclosure
 from eval.public.runner import build_candidate_manifest
 
@@ -55,6 +57,26 @@ def test_build_disclosure_is_deterministic_for_equivalent_candidate_mappings() -
     reversed_manifest = dict(reversed(manifest.items()))
 
     assert _build(manifest) == _build(reversed_manifest)
+
+
+def test_candidate_validation_does_not_load_the_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _manifest()
+    monkeypatch.setattr(runner, "ROOT", Path("/registry-must-not-be-read"))
+
+    runner.validate_candidate_manifest(manifest)
+
+
+def test_build_disclosure_detaches_nested_candidate_values() -> None:
+    manifest = _manifest()
+    disclosure = _build(manifest)
+
+    manifest["evidence_budget"]["max_records"] = 0  # type: ignore[index]
+    manifest["abstention"]["claims"].append("mutated")  # type: ignore[index,union-attr]
+
+    assert disclosure["candidate_manifest"]["evidence_budget"]["max_records"] == 20  # type: ignore[index]
+    assert disclosure["candidate_manifest"]["abstention"]["claims"] == []  # type: ignore[index]
 
 
 @pytest.mark.parametrize(

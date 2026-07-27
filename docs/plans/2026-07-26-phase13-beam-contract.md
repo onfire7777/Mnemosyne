@@ -15,7 +15,8 @@ wiring, measurements, and publication out of scope.
 
 ## Global Constraints
 
-- Exact lease: `GOAL.md`, `eval/public/adapters/beam.py`,
+- Exact lease: `GOAL.md`, `eval/public/runner.py`,
+  `eval/public/adapters/beam.py`,
   `tests/test_public_beam.py`, and this plan.
 - No new dependency or duplicated candidate-manifest validation.
 - No BEAM dataset, reader, judge, production, protected, or hardware run.
@@ -78,16 +79,23 @@ wiring, measurements, and publication out of scope.
 ### Task 3: Verify and deliver
 
 **Files:**
-- Modify only leased task/verification receipts if evidence changes.
+- Modify: `eval/public/runner.py`
+- Modify: `eval/public/adapters/beam.py`
+- Modify: `tests/test_public_beam.py`
+- Modify leased task/verification receipts when evidence changes.
 
 **Interfaces:**
 - Consumes: Tasks 1-2 committed behavior.
 - Produces: reviewed branch, normal PR, exact-head gates, normal merge, and
   exact post-merge main verification.
 
+- [x] Add focused RED regressions proving candidate validation does not read
+  the registry and returned nested values cannot alias caller-owned values.
+- [x] Expose the canonical in-memory protocol through the existing shared
+  runner flow and deep-copy the validated disclosure manifest.
 - [ ] Run both native review stages and repair only reproduced in-lease issues.
 - [x] Run focused tests, unrestricted
-  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (16 focused tests,
+  `uv run --extra mcp pytest -q`, and `uv run ruff check .`. (18 focused tests,
   unrestricted full pytest, and full Ruff passed.)
 - [x] Run `git diff --check`, exact-lease, risky-file, and secret checks.
 - [ ] Commit deliberately, push normally, and open/update the PR.

@@ -33,6 +33,7 @@ Phase 15 hardware gates remain unsatisfied.
 ## Exact Lease
 
 - `GOAL.md`
+- `eval/public/runner.py`
 - `eval/public/adapters/beam.py`
 - `tests/test_public_beam.py`
 - `docs/plans/2026-07-26-phase13-beam-contract.md`
@@ -44,6 +45,9 @@ own task and verification state.
 
 - Reuse `validate_candidate_manifest`; do not duplicate its candidate, model,
   prompt, decoding, custody, or digest validation.
+- Keep the shared candidate-manifest validator filesystem-free when callers
+  supply no explicit protocol, while preserving the separate registry-loading
+  verification path.
 - Accept only an exact lowercase 40-hex BEAM dataset revision and a non-empty
   protocol identifier with no surrounding whitespace.
 - Emit one canonical mapping with a fixed schema version, dataset revision,
@@ -95,8 +99,10 @@ own task and verification state.
 
 ### Task 3: Review and deliver
 
+- [x] Add focused RED regressions for filesystem-free shared validation and
+  nested-value isolation, then apply the smallest dependency-free fixes.
 - [ ] Run both native review stages and repair confirmed in-lease findings.
-- [x] Complete local verification and exact-lease checks. (16 focused tests,
+- [x] Complete local verification and exact-lease checks. (18 focused tests,
   unrestricted MCP-extra full pytest, full Ruff, diff, exact-lease, secret,
   and risky-file checks passed.)
 - [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and merge
