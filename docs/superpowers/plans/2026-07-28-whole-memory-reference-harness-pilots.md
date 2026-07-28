@@ -8,13 +8,18 @@
 **Goal:** Build the smallest auditable reference harness and development pilots
 for M01, M03, M10, M12, M13, M15, and M20 without running an official
 benchmark, publishing a result, or claiming certification or superiority.
+Freeze the contracts needed to preserve official upstream protocols unchanged
+and to add separately named enhanced successor tracks later, without blending
+their scores.
 
 **Architecture:** Extend the existing `eval/public` runner, CLI-only driver,
 bundle custody, scoring dispatch, and Phase 16 leaderboard contracts. Add one
 closed JSON ABI, one reference adapter, deterministic development fixtures,
 an isolated execution/metering boundary, and an additive result-v2 path.
 Preserve result-v1 bytes and the signed ledger. Do not build a parallel
-benchmark lifecycle.
+benchmark lifecycle. Store immutable per-attempt backend results as the
+evidence authority; comparison and future website views are derived,
+reproducible projections only.
 
 **Tech Stack:** Python 3.12 standard library, JSON Schema documents validated
 through repository-owned fail-closed code, existing `mneme` CLI,
@@ -41,6 +46,11 @@ Ed25519/ledger infrastructure.
   prerequisite, not a Python dependency.
 - All new suites are repository-named `*-development` suites. They must never
   use an upstream official benchmark name.
+- This pilot implements no official or enhanced benchmark cell. Its schemas
+  must nevertheless close `track_kind` to `OFFICIAL-UPSTREAM`,
+  `ENHANCED-SUCCESSOR`, or `DEVELOPMENT`; require official fidelity and
+  successor-difference manifests where applicable; and prohibit a blended
+  official/enhanced certified score.
 - Existing functional and safety rails are inherited unchanged. A diagnostic
   threshold cannot replace `M-DEDUP-EXACT=1.0`, `M-ASOF-ACC=1.0`,
   `M-ECE <= 0.05`, zero confident unanswerable assertions, zero protected
@@ -108,6 +118,17 @@ must exist for the claimed state.
 - Evidence definitions in the same compound schema: `FeasibilityRecord`,
   `BaselineManifest`, `PowerPlan`, `SoftwareDataBOM`, `SandboxReceipt`, and
   `ResourceReceipt`; each artifact carries its own schema ID and digest.
+- Result-v2 atomic identity:
+  `system_id`, `system_version`, `adapter_id`, `adapter_version`,
+  `track_kind`, `benchmark_id`, `benchmark_version`, `module_id`, `division`,
+  `resource_profile`, `backend_id`, `hardware_fingerprint`,
+  `model_policy_id`, `dataset_split_digest`, `run_id`, `attempt_id`, and
+  `seed`.
+- `OFFICIAL-UPSTREAM` records require pinned upstream protocol/data/split/
+  preprocessing/scorer/environment/revision digests.
+  `ENHANCED-SUCCESSOR` records require a parent official construct and a
+  digest-bound difference manifest. `DEVELOPMENT` records are never
+  publishable or upstream-comparable.
 - Response modes: `normal` and `forced`; forced answers are diagnostic.
 - Error codes: `INVALID_REQUEST`, `UNSUPPORTED_OPERATION`, `UNAUTHORIZED`,
   `CONFLICT`, `ORDER_VIOLATION`, `DEADLINE_EXCEEDED`, `RESOURCE_LIMIT`,
@@ -127,6 +148,11 @@ must exist for the claimed state.
 - [ ] Write the result-v2 schema and RED compatibility/ledger fixtures before
       any module implementation. These fixtures freeze the contract; Task 10
       later completes validator/ledger/render code without changing them.
+- [ ] Add RED fixtures proving atomic attempts cannot contain aggregate
+      metrics, official records fail without a complete fidelity manifest,
+      successor records fail without a parent/difference manifest, and no
+      projection can combine official and enhanced scores into a certified
+      result.
 - [ ] Freeze the M15 canonical projection and volatile-field exclusion list in
       golden tests before any module creates a bundle.
 - [ ] Add golden request/response objects for each operation and prove canonical
@@ -533,9 +559,17 @@ earn M15.
 - Version-dispatch validation; `result-v1` behavior is byte-for-byte
   unchanged.
 - Result-v2 adds module identity, separate `admission_state` and
-  `evidence_level`, division, native/emulated/unsupported disclosures, safety
-  gates, run/profile/resources, seeds/retries/aborts, custody/exposure and
-  signer-role labels, generic `trace_id`, and complete digest bindings.
+  `evidence_level`, track kind and lineage, atomic system/adapter/benchmark/
+  backend/hardware/model/split/run/attempt identity, division,
+  native/emulated/unsupported disclosures, safety gates,
+  run/profile/resources, seeds/retries/aborts, custody/exposure and signer-role
+  labels, generic `trace_id`, and complete digest bindings.
+- Atomic result rows contain only attempt-level outcomes. Any aggregate or
+  comparison is a derived projection that declares source record IDs, filters,
+  compatibility key, exclusions, metric version/unit, weighting,
+  numerator/denominator, uncertainty method, and missing/unsupported counts.
+  Official and enhanced records are never members of one certified
+  projection.
 - Preserve meanings:
   `build_fingerprint = sha256(build.json)`,
   `config_digest = sha256(config.json)`,
@@ -549,6 +583,16 @@ earn M15.
       resource-unverified handling, signer-role distinctions, and all four
       digest mismatches.
 - [ ] Add explicit schema-version dispatch. Never loosen the v1 schema.
+- [ ] Reject duplicate atomic identity keys and reject cross-attempt aggregate
+      fields in signed result rows.
+- [ ] Add projection tests for side-by-side system/backend filters,
+      confidence intervals, and cost/latency/peak-RSS/hardware groupings.
+      User-selected averages must disclose their exact records and formula,
+      remain exploratory, and reject incompatible track/scorer/division/
+      metric/resource semantics.
+- [ ] Prove a safety-gate failure remains visible and non-averageable through
+      every supported projection; missing, unsupported, failed, aborted, and
+      not-measured remain distinct.
 - [ ] Verify build, config, bundle, and trace-index payloads before render or
       publish.
 - [ ] Add cross-version supersession tests: append a linked v2 successor after
@@ -564,7 +608,9 @@ earn M15.
 
 **Acceptance evidence:** 100% valid fixture acceptance, 100% invalid fixture
 rejection, exact four-digest verification, immutable historical v1 ledger
-bytes, and fail-closed readiness/publication tests.
+bytes, unique atomic identities, official/successor lineage enforcement,
+reproducible projection fixtures, non-averageable safety-failure fixtures, and
+fail-closed readiness/publication tests.
 
 **Deferral:** If current renderer/publisher semantics cannot represent v2
 without weakening v1, land validator/ledger support only and keep rendering
@@ -693,5 +739,9 @@ claim is part of this plan.
 - M12 recurrence product work or M13 promotion-policy product work beyond a
   separately approved goal.
 - Website design, hosted publication, GitHub push/PR, or governance activation.
+- Detailed website UI, interaction design, ranking layout, and hosting. The
+  backend result/projection contract is in scope only so a later website can
+  render side-by-side systems, transparent filters/averages, intervals, and
+  resource views without changing evidence.
 - Any “best,” “whole-system certified,” neutral, independent, industry
   standard, launch-ready, or production-ready claim.

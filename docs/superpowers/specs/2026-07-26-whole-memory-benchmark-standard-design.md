@@ -91,6 +91,14 @@ converted into an artificial failure. A capability checklist is not a quality
 score, and no superiority claim is permitted before held-out, reproducible
 results exist.
 
+This is a comprehensive benchmark standard, not a gap-filling supplement.
+For every admitted upstream benchmark it preserves an `OFFICIAL-UPSTREAM`
+track that runs the upstream protocol unchanged for direct comparability, and
+it may define a separately named `ENHANCED-SUCCESSOR` track that tests the
+same construct more rigorously. Official and successor results are distinct
+evidence families: they are displayed side by side and are never blended into
+one certified score, leaderboard rank, or headline claim.
+
 Every capability in this specification must trace to:
 
 1. a benchmark module or an explicit `unsupported` disclosure;
@@ -111,8 +119,9 @@ Every capability in this specification must trace to:
    module is described as runnable.
 5. Support a standard 16 GB Apple Silicon development profile without claiming
    that every official full-scale external benchmark fits that profile.
-6. Reuse public benchmarks and existing repository contracts before creating
-   new data, metrics, or infrastructure.
+6. Preserve official upstream protocols unchanged while versioning stronger
+   successor tracks separately; reuse existing repository contracts before
+   creating new data, metrics, or infrastructure.
 7. Produce reproducible, tamper-evident artifacts suitable for public review.
 
 ### 2.2 Non-goals
@@ -1185,7 +1194,54 @@ missing-output treatment.
   development corpus is reported as full-corpus conformance, not population
   inference.
 
-### 9.5 Cross-capability scenarios
+### 9.5 Atomic result and comparison-projection contract
+
+The signed ledger stores one immutable atomic attempt record per:
+
+```text
+system_id, system_version, adapter_id, adapter_version,
+track_kind, benchmark_id, benchmark_version, module_id, division,
+resource_profile, backend_id, hardware_fingerprint, model_policy_id,
+dataset_split_digest, run_id, attempt_id, seed
+```
+
+`track_kind` is closed to `OFFICIAL-UPSTREAM`, `ENHANCED-SUCCESSOR`, or
+`DEVELOPMENT`. An official record also binds the upstream protocol, dataset,
+split, preprocessing, scorer, environment, and revision digests. A successor
+record binds its parent official construct and a machine-readable difference
+manifest. An atomic record carries raw outcomes, scorer outputs, safety gates,
+resource measurements, retry/abort state, custody, and all artifact digests;
+it never contains a cross-attempt or cross-system average.
+
+Aggregates and comparison pages are reproducible projections over selected
+atomic records, not new evidence or mutable ledger rows. A projection must
+publish its filter, compatible-record set, exclusions, metric version and
+unit, weighting formula, numerator/denominator, uncertainty method, missing
+and unsupported counts, and source record IDs. It may compare or average only
+records with compatible track, benchmark/scorer version, division, metric
+semantics, and declared resource treatment. Backend, hardware, model policy,
+and resource-profile differences remain visible grouping/filter dimensions;
+they are never silently pooled.
+
+The future website may provide side-by-side systems, filters, transparent
+user-selected averages, confidence intervals, and cost/latency/RAM/hardware
+views. Such user-selected averages are labeled exploratory, never official,
+certified, or headline results. They must be exactly reproducible from the
+listed atomic records. Official-upstream and enhanced-successor scores remain
+separate even when a user selects both for one view.
+
+Safety-gate failures are non-averageable. Any selected failed gate remains
+prominent at the system, module, and attempt level and cannot be offset by
+quality, coverage, efficiency, another backend, or another seed. Missing,
+unsupported, failed, aborted, and not-measured are distinct states; none is
+silently converted to zero or omitted from a denominator.
+
+Detailed website information architecture, interaction design, and hosting
+belong to a separate future specification. That surface is a read-only
+projection of validated result/ledger/publication contracts and may not alter
+their evidence semantics.
+
+### 9.6 Cross-capability scenarios
 
 Single-module tests are necessary but insufficient. The following scenarios
 must use one event history and preserve every constituent rail:
@@ -1237,7 +1293,7 @@ passing constituent smokes cannot imply joint conformance.
    runs. Audit selection has random and cause-based components.
 9. Include unanswerable, conflicting, poisoned, cross-tenant, deleted,
    overloaded-trigger, and benign-control cases, plus the cross-capability
-   scenarios in Section 9.5.
+   scenarios in Section 9.6.
 10. Correct results only by signed supersession or revocation. A leak
     quarantines the affected round and produces a superseding record.
 11. `Certification-held-out` requires a custodian independent of the
@@ -1357,6 +1413,7 @@ dimensions; no stage requires or implies a composite or superiority claim.
 Current modules use the admission states in Section 4 only. Public reports
 pair those states with:
 
+- track (`OFFICIAL-UPSTREAM`, `ENHANCED-SUCCESSOR`, or `DEVELOPMENT`);
 - division (`COMPONENT-CLOSED`, `AGENT-CLOSED`, `SYSTEM-OPEN`, or
   `HOSTED-OUTCOME`);
 - capability (`native`, `emulated`, or `unsupported`);
@@ -1373,7 +1430,30 @@ quality failures.
 
 ## 15. Public benchmark reuse
 
-The implementation plan should prefer faithful adapters over new data:
+Every admitted public suite has two explicitly separate possible tracks:
+
+1. **`OFFICIAL-UPSTREAM`:** run the official protocol unchanged. Pin and
+   preserve the upstream dataset and split, preprocessing, prompt/model policy
+   where prescribed, scorer, aggregation, environment, and release/commit.
+   The adapter may translate transport only; it may not change task content,
+   labels, budgets, scoring, exclusions, or aggregation. Any required change
+   makes the run non-official.
+2. **`ENHANCED-SUCCESSOR`:** a separately named and versioned Mnemosyne
+   successor may test the same ability with stronger controls, harder or
+   adversarial cases, better temporal/provenance/safety coverage, larger
+   scale, or improved statistics. It must publish the parent construct,
+   difference manifest, construct-validity rationale, fixtures/generator,
+   scorer, anti-gaming controls, and baseline bridge. It never inherits the
+   official name or score.
+
+Official and enhanced results are published in separate columns and evidence
+families. Neither may replace the other, and no certified aggregate, rank, or
+headline average may combine them. This separation preserves direct external
+comparability while allowing the standard to improve rigor rather than merely
+fill omitted capability gaps.
+
+The implementation program should prefer faithful official adapters and
+source-grounded successor tracks over unrelated new data:
 
 - [LoCoMo](https://github.com/snap-research/locomo)
 - [LongMemEval](https://github.com/xiaowu0162/LongMemEval)
@@ -1404,6 +1484,8 @@ contract is approved; name-only coverage is not implementation.
 Completed design corrections:
 
 - [x] Whole-memory intent is explicit.
+- [x] Official upstream protocols and enhanced successor tracks are separate;
+      their scores cannot be blended into one certified result.
 - [x] All 24 capabilities map to modules.
 - [x] Universal outcomes are separated from advanced disclosures.
 - [x] All 20 modules define contract, data, scorer, gate, replay, resource
@@ -1415,6 +1497,8 @@ Completed design corrections:
       governance, custody, appeals, signing, and human approval are explicit.
 - [x] Existing result-v1/ledger/publication contracts are reused and preserved;
       result-v2 is an additive migration.
+- [x] Atomic attempt records are authoritative; comparison views and
+      user-selected averages are transparent, reproducible projections.
 - [x] Cross-capability scenarios and the live requirements matrix are explicit.
 - [x] No implementation or completion status is implied.
 - [x] No superiority claim is made before held-out reproducible results.
