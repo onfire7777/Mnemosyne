@@ -32,10 +32,10 @@ Live GitHub and process state could not be refreshed in the planner sandbox, so 
 - [x] Run the focused test and record an expected RED failure caused solely by the missing schema and adapter—not malformed fixtures or unrelated failures.
 
 ### Task 2: Implement the smallest fail-closed ABI
-- [ ] Add the draft-2020-12 compound schema with protocol ID `wmbs/0.1-draft`, closed operation/envelope/evidence definitions, explicit bounds and enums, digest formats, and `additionalProperties:false` at every object boundary.
-- [ ] Add a standard-library-only canonicalizer and validator in `whole_memory_reference.py`, reusing the repository’s sorted compact UTF-8 JSON convention with `allow_nan=False`. Reject booleans in numeric fields, unknown fields/codes, non-finite numbers, and non-canonical timestamps.
-- [ ] Add only the in-memory state required for ordering, unique request IDs, identical idempotent replay, conflicting-key rejection, deadline checks, and terminal finalization. Do not create a general schema framework, persistence layer, runner, scorer, or entrant adapter.
-- [ ] Run the focused suite and Ruff until green, and keep exact schema/golden-vector SHA-256 values frozen in test assertions.
+- [x] Add the draft-2020-12 compound schema with protocol ID `wmbs/0.1-draft`, closed operation/envelope/evidence definitions, explicit bounds and enums, digest formats, and `additionalProperties:false` at every object boundary.
+- [x] Add a standard-library-only canonicalizer and validator in `whole_memory_reference.py`, reusing the repository’s sorted compact UTF-8 JSON convention with `allow_nan=False`. Reject booleans in numeric fields, unknown fields/codes, non-finite numbers, and non-canonical timestamps.
+- [x] Add only the in-memory state required for ordering, unique request IDs, identical idempotent replay, conflicting-key rejection, deadline checks, and terminal finalization. Do not create a general schema framework, persistence layer, runner, scorer, or entrant adapter.
+- [x] Run the focused suite and Ruff until green, and keep exact schema/golden-vector SHA-256 values frozen in test assertions.
 
 ### Task 3: Verify and deliver source rather than another plan
 - [ ] Run the focused test, Ruff, complete single-worker pytest suite, diff check, exact-lease check, risky-file scan, and changed-file secret scan. Confirm there are no skips or expected failures hiding ABI behavior.

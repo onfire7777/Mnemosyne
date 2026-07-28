@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib
 import math
 from collections.abc import Callable
@@ -655,6 +656,14 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
     assert (
         abi.canonical_sha256(left)
         == "06d1ac940bec12987f319657ce46130daa57ab2d831421ddb892eba6a4509692"
+    )
+
+
+@requires_abi
+def test_schema_sha256_is_frozen() -> None:
+    assert (
+        hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
+        == "e5239b2cdc9694a15b87c02d7afbe89628245f8cbd6268dc7aceec1afff23155"
     )
 
 
