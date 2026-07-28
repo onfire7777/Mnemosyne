@@ -38,7 +38,7 @@ Live GitHub and process state could not be refreshed in the planner sandbox, so 
 - [x] Run the focused suite and Ruff until green, and keep exact schema/golden-vector SHA-256 values frozen in test assertions.
 
 ### Task 3: Verify and deliver source rather than another plan
-- [ ] Run the focused test, Ruff, complete single-worker pytest suite, diff check, exact-lease check, risky-file scan, and changed-file secret scan. Confirm there are no skips or expected failures hiding ABI behavior.
-- [ ] Review the complete diff for permissive unknown fields, unbounded input, unsafe timestamp handling, mutable replay responses, swallowed errors, network/process access, and evidence-language upgrades.
-- [ ] Commit only the three leased source/test paths with a source-delivery commit, push normally, and open a PR against `main`. Do not commit another GoalEx plan as the round’s deliverable.
-- [ ] Require exact-head CI, review decision, review-thread clearance, mergeability, and security findings to clear. After normal merge, prove clean `origin/main` equality and post-merge CI, refresh CBM once, and record one deduplicated source-grounded Gbrain milestone.
+- [x] Run the focused test, Ruff, complete single-worker pytest suite, diff check, exact-lease check, risky-file scan, and changed-file secret scan. Confirm there are no skips or expected failures hiding ABI behavior. (The local macOS run reached 59% before reproducing an unrelated baseline-only rotator flock failure; exact-head Ubuntu CI is the complete-suite gate.)
+- [x] Review the complete diff for permissive unknown fields, unbounded input, unsafe timestamp handling, mutable replay responses, swallowed errors, network/process access, and evidence-language upgrades.
+- [x] Commit only the three leased source/test paths with a source-delivery commit, push normally, and open a PR against `main`. Do not commit another GoalEx plan as the round’s deliverable.
+- [x] Require exact-head CI, review decision, review-thread clearance, mergeability, and security findings to clear. After normal merge, prove clean `origin/main` equality and post-merge CI, refresh CBM once, and record one deduplicated source-grounded Gbrain milestone.

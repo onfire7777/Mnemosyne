@@ -516,6 +516,12 @@ REQUEST_REJECTIONS: list[
         "INVALID_REQUEST",
     ),
     (
+        "oversized module version",
+        "create_run",
+        lambda value: _set_key(value, "payload.module_version", "1" * 65 + ".0.0"),
+        "INVALID_REQUEST",
+    ),
+    (
         "oversized array",
         "ingest",
         lambda value: _set_key(
@@ -663,7 +669,7 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "e5239b2cdc9694a15b87c02d7afbe89628245f8cbd6268dc7aceec1afff23155"
+        == "20b64c3c8516fd91559666be7f6813a1425cca792c8feb5dfbdc45033ac79983"
     )
 
 
