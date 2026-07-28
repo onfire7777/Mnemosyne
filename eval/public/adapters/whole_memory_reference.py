@@ -8,7 +8,7 @@ from collections.abc import Callable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 VOLATILE_FIELDS = {
@@ -24,6 +24,7 @@ _SCHEMA = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
 _DEFINITIONS: dict[str, dict[str, Any]] = _SCHEMA["$defs"]
 _OPERATIONS = ("negotiate", "create_run", "ingest", "retrieve", "answer", "finalize")
 _UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+_MAX_REQUESTS = 10_000
 
 
 class WholeMemoryValidationError(ValueError):
@@ -32,7 +33,7 @@ class WholeMemoryValidationError(ValueError):
         self.code = code
 
 
-def _fail(message: str, *, code: str = "INVALID_REQUEST") -> None:
+def _fail(message: str, *, code: str = "INVALID_REQUEST") -> NoReturn:
     raise WholeMemoryValidationError(message, code=code)
 
 
@@ -43,7 +44,10 @@ def _resolve(schema: Mapping[str, Any]) -> Mapping[str, Any]:
     prefix = "#/$defs/"
     if not isinstance(reference, str) or not reference.startswith(prefix):
         _fail("schema contains an unsupported reference")
-    return _DEFINITIONS[reference.removeprefix(prefix)]
+    resolved = _DEFINITIONS.get(reference.removeprefix(prefix))
+    if resolved is None:
+        _fail("schema references an unknown definition")
+    return resolved
 
 
 def _type_matches(value: object, expected: str) -> bool:
@@ -200,6 +204,7 @@ class ProtocolValidator:
         self._now = now or (lambda: datetime.now(UTC))
         self._request_ids: set[str] = set()
         self._replays: dict[str, tuple[bytes, object]] = {}
+        self._scope: tuple[str, str, str] | None = None
         self._phase = "new"
         self.last_sequence = 0
 
@@ -214,6 +219,9 @@ class ProtocolValidator:
         assert isinstance(validated, dict)
         context = validated["context"]
         assert isinstance(context, dict)
+        scope = tuple(str(context[key]) for key in ("tenant_id", "run_id", "attempt_id"))
+        if self._scope is not None and scope != self._scope:
+            _fail("request scope changed", code="CONFLICT")
         deadline = _parse_utc_timestamp(str(context["deadline_utc"]), "$.context.deadline_utc")
         if deadline <= self._now():
             _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
@@ -234,9 +242,13 @@ class ProtocolValidator:
             _fail("request sequence did not advance", code="ORDER_VIOLATION")
         if not self._operation_allowed(str(operation)):
             _fail("operation is invalid in the current phase", code="ORDER_VIOLATION")
+        if len(self._replays) >= _MAX_REQUESTS:
+            _fail("request retention limit reached", code="RESOURCE_LIMIT")
 
         self._request_ids.add(request_id)
         self._replays[idempotency_key] = (request_bytes, deepcopy(validated))
+        if self._scope is None:
+            self._scope = scope
         self.last_sequence = sequence
         if operation == "negotiate":
             self._phase = "negotiated"
