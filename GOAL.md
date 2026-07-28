@@ -103,21 +103,33 @@ For every GoalEx round:
 1. Refresh canonical `main`, worktrees, dirty state, active tasks/processes,
    open PRs, reviews, CI, usage, and resource gates.
 2. Reject any task that is dependency-blocked, operator-gated, leased, stale,
-   or broader than an approved plan.
-3. Select exactly one highest-value task with an explicit file lease. Until
-   exact leases are proven disjoint, keep a single active implementation lease.
-4. Reuse existing code and contracts, then standard library/platform features,
-   then installed dependencies; add only the minimum tested change.
-5. Use TDD for behavior changes, inspect all callers for bug fixes, and run the
-   focused check before the applicable full gate.
-6. Review trust boundaries, secrets, supply chain, failure modes, evidence
-   language, and result-v1 compatibility.
-7. Use the normal branch, commit, push, PR, review, exact-head CI, and merge
-   flow. Never force-push, bypass hooks, dismiss unresolved findings, or write
-   directly to `main`.
-8. Refresh CBM after merged code changes. Store only source-grounded current
-   ADRs. Sync Gbrain only after a meaningful merged or planning milestone.
-9. Reassess from canonical evidence before choosing the next round.
+   broader than an approved plan, or merely housekeeping when substantive
+   dependency-ready product or benchmark engineering exists.
+3. Select exactly one highest-value task on an isolated Worktrunk branch with
+   an explicit file lease. Preserve unowned dirty work and prevent redundant
+   writers.
+4. Apply Ponytail fully: reuse current contracts/code, then stdlib/platform,
+   then installed dependencies; make the smallest tested root-cause change
+   without speculative abstractions or dependencies.
+5. Use context-mode for large output and resumable analysis. Refresh/query CBM
+   before broad code reads, run impact analysis for risky diffs, and update ADRs
+   only for genuine source-grounded architecture decisions.
+6. Use GSD as lifecycle authority and only the relevant Superpowers checkpoint:
+   approved design/planning, isolated worktrees, TDD, debugging, execution,
+   review, verification, or branch completion.
+7. Review trust boundaries, secrets, supply chain, failure modes, evidence
+   language, and result compatibility. Push normally; require a PR, exact-head
+   tests, review/thread/mergeability clearance, and post-merge `main` proof.
+   Never force-push, bypass hooks, dismiss findings, or write directly to main.
+8. After merge, safely fast-forward canonical local `main`, prove it equals
+   clean `origin/main`, refresh CBM once, and sync one deduplicated durable
+   Gbrain milestone rather than transient session facts.
+9. Update only affected GSD state, plans, canonical docs, architecture/ADRs,
+   benchmark contracts, and the real owner-discovered wiki. Never create a
+   second wiki, roadmap, memory owner, or duplicate canonical content.
+10. Self-repair routine transport, sandbox, CI, auth-independent, worktree, and
+    review issues. Escalate only safety, authority, protected-environment, or
+    product-direction decisions, then reassess the next lease-disjoint package.
 
 ## Runtime Contract
 
