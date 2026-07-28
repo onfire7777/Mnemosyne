@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import json
 import math
+import re
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -12,9 +14,10 @@ from typing import Any
 import pytest
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
-SCHEMA_PATH = Path("eval/public/schema/wmbs-0.1-draft.schema.json")
-ADAPTER_PATH = Path("eval/public/adapters/whole_memory_reference.py")
-ERROR_CODES = {
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_PATH = REPO_ROOT / "eval/public/schema/wmbs-0.1-draft.schema.json"
+ADAPTER_PATH = REPO_ROOT / "eval/public/adapters/whole_memory_reference.py"
+ERROR_CODES = (
     "INVALID_REQUEST",
     "UNSUPPORTED_OPERATION",
     "UNAUTHORIZED",
@@ -24,7 +27,7 @@ ERROR_CODES = {
     "RESOURCE_LIMIT",
     "DEPENDENCY_UNAVAILABLE",
     "INTERNAL_ERROR",
-}
+)
 VOLATILE_FIELDS = {
     "wall_time_ms",
     "rss_samples_bytes",
@@ -476,6 +479,27 @@ def test_error_envelope_rejects_unknown_codes() -> None:
     assert _error_code(exc) == "INVALID_REQUEST"
 
 
+@requires_abi
+def test_event_error_rejects_codes_outside_closed_set() -> None:
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.validate_definition(
+            "event_error", {"code": "UNKNOWN", "message": "closed"}
+        )
+
+    assert _error_code(exc) == "INVALID_REQUEST"
+
+
+@requires_abi
+def test_usage_counters_reject_oversized_values() -> None:
+    response = deepcopy(GOLDEN_RESPONSES["finalize"])
+    response["payload"]["usage"]["tokens"] = 2**64  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.validate_definition("finalize_response", response)
+
+    assert _error_code(exc) == "INVALID_REQUEST"
+
+
 REQUEST_REJECTIONS: list[
     tuple[str, str, Callable[[dict[str, object]], dict[str, object]], str]
 ] = [
@@ -669,8 +693,32 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "20b64c3c8516fd91559666be7f6813a1425cca792c8feb5dfbdc45033ac79983"
+        == "cbf79292ef6e9840b2b148e1457699e6aace33e10f9389895c661b1aa3d29376"
     )
+
+
+@requires_abi
+def test_schema_patterns_are_portable_and_closed() -> None:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    patterns: list[str] = []
+
+    def collect(value: object) -> None:
+        if isinstance(value, dict):
+            pattern = value.get("pattern")
+            if isinstance(pattern, str):
+                patterns.append(pattern)
+            for nested in value.values():
+                collect(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect(nested)
+
+    collect(schema)
+
+    assert patterns
+    assert all(pattern.startswith("^") and pattern.endswith("$") for pattern in patterns)
+    assert all(not pattern.startswith("(?") for pattern in patterns)
+    assert re.search(schema["$defs"]["sha256"]["pattern"], "x" + DIGEST_A) is None
 
 
 @requires_abi
@@ -731,6 +779,62 @@ def test_identical_idempotent_replay_does_not_advance_state() -> None:
 
     assert replay == first
     assert validator.last_sequence == 2
+
+
+@requires_abi
+def test_validator_rejects_cross_scope_requests() -> None:
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    request = deepcopy(GOLDEN_REQUESTS["create_run"])
+    request["context"]["tenant_id"] = "tenant-0002"  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_request(request)
+
+    assert _error_code(exc) == "CONFLICT"
+
+
+@requires_abi
+def test_validator_bounds_retained_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(abi, "_MAX_REQUESTS", 1)
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_request(GOLDEN_REQUESTS["create_run"])
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("value", "expected_code"),
+    [
+        (None, "INVALID_REQUEST"),
+        ({"operation": "purge"}, "UNSUPPORTED_OPERATION"),
+    ],
+)
+def test_validator_entry_guards_fail_closed(
+    value: object, expected_code: str
+) -> None:
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        _validator().validate_request(value)
+
+    assert _error_code(exc) == expected_code
+
+
+@requires_abi
+def test_unknown_definition_and_reference_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(abi.WholeMemoryValidationError) as unknown:
+        abi.validate_definition("missing", {})
+    assert _error_code(unknown) == "INVALID_REQUEST"
+
+    monkeypatch.setitem(abi._DEFINITIONS, "broken", {"$ref": "#/$defs/missing"})
+    with pytest.raises(abi.WholeMemoryValidationError) as reference:
+        abi.validate_definition("broken", {})
+    assert _error_code(reference) == "INVALID_REQUEST"
 
 
 STATE_REJECTIONS = [
