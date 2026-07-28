@@ -124,10 +124,10 @@ For every GoalEx round:
 - Dedicated worktree:
   `/Users/admin/.codex/worktrees/9697/Mnemosyne`
 - Branch: `codex/goalex-whole-memory-pilot`
-- GoalEx executor: `gpt-5.6-sol:medium`
-- GoalEx review: `gpt-5.6-sol:medium`
-- GoalEx planner/verifier: documented default Fable architecture; do not
-  misrepresent it as Sol.
+- GoalEx planner/verifier: isolated derived launcher
+  `.goalex/bin/goalex-sol` using `gpt-5.6-sol:medium`.
+- Bounded RalphEx plan, task, and review stages: `gpt-5.6-sol:medium`.
+- Claude/Fable planning, dual planning, dual review, and Hermes are disabled.
 - Bounded guards: at most 20 rounds per process, three consecutive execution
   failures, three consecutive no-commit stalls, 15-minute idle timeout, and
   two-hour per-session timeout.
