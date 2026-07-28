@@ -25,9 +25,9 @@ remain owned by:
 - live GitHub PR, review, and CI state
 
 The proposed whole-memory standard and pilot plan become executable authority
-only after their current owner lands them on canonical `main`. Until both files
-exist in this branch with their hardened authority and pilot contracts, the
-program is admission-blocked:
+only after their current owner provides a clean exact-commit handoff or lands
+them on canonical `main`. Both files now exist in this branch from the verified
+clean handoff `2b71711df205a27fdf69a47b97a55f4afd4ac89f`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -39,13 +39,13 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**Admission blocked — owner landing required.**
+**Admitted — WMBS-A/WMB-P1 authority and contract freeze.**
 
-The hardened whole-memory specification and pilot plan exist only as dirty
-owner work in the benchmark-spec worktree. The first selected work item is
-WMBS-A/WMB-P1: freeze authority, traceability, the closed ABI, and fail-closed
-validation for the minimal non-ranking development pilot. It is dependency
-ready only after those documents land on canonical `main`.
+The benchmark-spec owner completed a clean, validated, local-only handoff at
+`2b71711df205a27fdf69a47b97a55f4afd4ac89f`. The committed documents were
+imported byte-for-byte; the owner worktree remains untouched. The first selected
+work item is WMBS-A/WMB-P1: freeze authority, traceability, the closed ABI, and
+fail-closed validation for the minimal non-ranking development pilot.
 
 ## Scope
 
@@ -137,7 +137,8 @@ For every GoalEx round:
 
 The whole-memory pilot milestone requires all of:
 
-- owner-landed hardened specification and implementation plan;
+- owner-landed or exact-commit-handed-off hardened specification and
+  implementation plan;
 - reviewed closed ABI, deterministic fixtures/generators, scorers, baselines,
   inferential plan, sandbox/metering contract, BOM/rights disclosures, resource
   receipts, and result-v1-compatible additive evidence contract;
