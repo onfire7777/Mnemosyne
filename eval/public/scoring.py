@@ -97,6 +97,21 @@ def _score_wmbs_m01(
     if not isinstance(fixture, dict):
         raise ScoringError("M01 scoring fixture is missing")
     trace = traces[0]
+    expected_fields = {
+        "case_id",
+        "clean_run_payloads",
+        "exported_rows",
+        "receipts",
+        "restart_replay_payload",
+        "scoring_family",
+        "stored_projection",
+    }
+    unknown = set(trace) - expected_fields
+    if unknown:
+        raise ScoringError(f"unknown M01 trace fields: {sorted(unknown)}")
+    missing = expected_fields - set(trace)
+    if missing:
+        raise ScoringError(f"missing M01 trace fields: {sorted(missing)}")
     measured = {
         "capture": m01.score_capture(
             fixture, trace.get("receipts"), trace.get("exported_rows")

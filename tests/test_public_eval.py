@@ -13,7 +13,7 @@ from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
 from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
-from eval.public.scoring import score_profile
+from eval.public.scoring import ScoringError, score_profile
 
 
 def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
@@ -68,6 +68,28 @@ def test_whole_memory_development_suite_round_trips_bundle(
     _refresh_digest(attacked, "build.json")
     with pytest.raises(BundleError, match="system seam"):
         verify_bundle(attacked)
+
+
+def test_m01_bundle_rejects_unknown_trace_claim_fields(tmp_path: Path) -> None:
+    out = tmp_path / "m01-unknown-trace-field"
+    run_public_suite("wmbs-m01-development", out)
+
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
+    traces[0]["official_score"] = 1.0
+    (out / "traces.jsonl").write_text(
+        "".join(
+            json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
+            for trace in traces
+        )
+    )
+    _refresh_digest(out, "traces.jsonl")
+
+    with pytest.raises(BundleError, match="generalized scoring") as exc_info:
+        verify_bundle(out)
+    assert isinstance(exc_info.value.__cause__, ScoringError)
+    assert "unknown M01 trace fields" in str(exc_info.value.__cause__)
 
 
 def test_deterministic_action_registry_is_bound_to_frozen_fixture_custody() -> None:
