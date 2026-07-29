@@ -63,7 +63,13 @@ def _type_matches(value: object, expected: str) -> bool:
     if expected == "string":
         return isinstance(value, str)
     if expected == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            or isinstance(value, float)
+            and math.isfinite(value)
+            and value.is_integer()
+        )
     if expected == "number":
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if expected == "boolean":
@@ -150,9 +156,9 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
         if len(value) > schema.get("maxItems", len(value)):
             _fail(f"{path} has too many items")
         if schema.get("uniqueItems"):
-            encoded = [canonical_json(item) for item in value]
-            if len(encoded) != len(set(encoded)):
-                _fail(f"{path} must contain unique items")
+            for index, item in enumerate(value):
+                if any(_json_equal(item, prior) for prior in value[:index]):
+                    _fail(f"{path} must contain unique items")
         for index, item in enumerate(value):
             _validate(item, schema.get("items", {}), f"{path}[{index}]")
 

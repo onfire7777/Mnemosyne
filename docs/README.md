@@ -50,10 +50,6 @@ Internal governance lane for the neutral memory-benchmark leaderboard: the gover
 
 goalex round plans (e.g. the W3 prospective-memory model-determinism plan); mostly completed or transient working plans, with finished ones under [`plans/completed/`](plans/completed/). Once landed, they are superseded by the merged code and the `.planning/` trackers.
 
-## Coordination (`coordination/`)
-
-- [2026-07-28-remaining-dependency-write-lease-map.md](coordination/2026-07-28-remaining-dependency-write-lease-map.md) — dated, derived snapshot of dependency waves and write leases. `GOAL.md` and `.planning/` remain canonical.
-
 ## Archive (`_archive/`)
 
 Superseded documents, retained verbatim with a supersession banner — e.g. `EXECUTION-PLAN-World-Best-Memory-and-Leaderboard.md` (the combined plan split into Plans A + B).
