@@ -42,7 +42,19 @@ unchanged result-v1 boundary, and the explicit result-v2 deferral.
 
 ### Task 3: Merge and prove post-merge state
 
-- [ ] Merge the cleared PR normally without bypassing protections, then identify the resulting merge SHA and verify the remediation head is its ancestor.
-- [ ] Safely fast-forward the clean canonical `/Users/admin/Mnemosyne` checkout, proving local `main` equals clean `origin/main`. Do not touch the benchmark-spec or signed-publication worktrees.
-- [ ] Require the post-merge CI run on the exact merge SHA to finish green. Refresh CBM once and record one deduplicated, source-grounded Gbrain milestone.
-- [ ] Reassess the authoritative pilot plan only after this proof. If no new blocker or lease exists, leave result-v2 compatibility and ledger support as the next dependency-ready increment without implementing it in this round.
+- [x] Merge the cleared PR normally without bypassing protections, then identify the resulting merge SHA and verify the remediation head is its ancestor.
+- [x] Safely fast-forward the clean canonical `/Users/admin/Mnemosyne` checkout, proving local `main` equals clean `origin/main`. Do not touch the benchmark-spec or signed-publication worktrees.
+- [x] Require the post-merge CI run on the exact merge SHA to finish green. Refresh CBM once and record one deduplicated, source-grounded Gbrain milestone.
+- [x] Reassess the authoritative pilot plan only after this proof. If no new blocker or lease exists, leave result-v2 compatibility and ledger support as the next dependency-ready increment without implementing it in this round.
+
+Task 3 receipt: PR #80 merged normally as
+`28805ccf54f99f098a5abc23fe6f1155400d0f22`; remediation head
+`0d42f9436397a04e12ceaa3bdbd60d925e2640e9` is its ancestor. Canonical
+`/Users/admin/Mnemosyne` was cleanly fast-forwarded so local `main` equals
+`origin/main` at the merge SHA, without touching the benchmark-spec or
+signed-publication worktrees. Exact-merge CI run `30484986865` completed green
+across all required jobs. CBM was refreshed once after proof, and Gbrain
+milestone `milestones/whole-memory-abi-remediation-merged` was recorded after a
+deduplication search. Reassessment found no new blocker or overlapping lease;
+result-v2 compatibility fixtures and local ledger support remain the next
+dependency-ready increment, and neither was implemented in this round.
