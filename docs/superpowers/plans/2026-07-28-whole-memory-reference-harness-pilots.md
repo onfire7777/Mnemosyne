@@ -122,7 +122,8 @@ ledger fixtures remain open.
   `FinalizeReceipt`, and closed `ErrorEnvelope`.
 - Evidence definitions in the same compound schema: `FeasibilityRecord`,
   `BaselineManifest`, `PowerPlan`, `SoftwareDataBOM`, `SandboxReceipt`, and
-  `ResourceReceipt`; each artifact carries its own schema ID and digest.
+  `ResourceReceipt`, plus the identity/result-bound `SmokeReceipt` required for
+  `PILOT-READY-DEV`; each artifact carries its own schema ID and digest.
 - Result-v2 atomic identity:
   `system_id`, `system_version`, `adapter_id`, `adapter_version`,
   `track_kind`, `benchmark_id`, `benchmark_version`, `module_id`, `division`,

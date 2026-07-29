@@ -111,13 +111,16 @@ responses and negative create/finalize receipts preserve the prior phase;
 retries use a fresh request ID and idempotency key. Response binding also
 enforces exact ingest event order, receipt scope, retrieval `top_k`, and forced
 answer behavior. Finalize is rejected while any accepted active request still
-awaits its first frozen response.
+awaits its first frozen response. A first response must arrive before the
+request deadline; an already-frozen identical response remains replayable after
+that deadline.
 `WholeMemoryValidationError.code` carries one of the closed protocol error
 codes.
 
 The specification's `?` fields may be omitted or explicitly null. Portable
 events require `valid_to`, when both interval endpoints exist, to be no earlier
-than `valid_from`.
+than `valid_from`, and `content_sha256` is SHA-256 over the event content's
+UTF-8 bytes.
 Retrieval hits use contiguous ranks `1..N` in response order and unique
 `stable_item_id` values. Accepted and deduplicated ingest statuses must be
 acknowledged and error-free; rejected statuses must be unacknowledged, carry an
@@ -129,7 +132,8 @@ the absolute ID `urn:wmbs:0.1-draft`. Its public evidence IDs are:
 `urn:wmbs:0.1-draft#PowerPlan`,
 `urn:wmbs:0.1-draft#SoftwareDataBOM`,
 `urn:wmbs:0.1-draft#SandboxReceipt`,
-`urn:wmbs:0.1-draft#ResourceReceipt`, and
+`urn:wmbs:0.1-draft#ResourceReceipt`,
+`urn:wmbs:0.1-draft#SmokeReceipt`, and
 `urn:wmbs:0.1-draft#FeasibilityRecord`.
 Each evidence artifact's `artifact_sha256` is the canonical SHA-256 of that
 artifact with the `artifact_sha256` field omitted. `validate_definition`
@@ -140,8 +144,9 @@ resolves every non-null digest reference against supplied content.
 `CONTRACT-READY` requires the contract artifacts but no resource receipt.
 `PILOT-READY-DEV` additionally requires a finalized attempt, a completed
 resource receipt for the same SUT boundary, and content-bound offline L16-DEV
-sandbox controls. `RUN-READY-*` remains rejected until profile-specific signed
-evidence exists.
+sandbox controls. Its passing `SmokeReceipt` binds the exact module identity,
+sandbox receipt, resource receipt, and supplied result artifact.
+`RUN-READY-*` remains rejected until profile-specific signed evidence exists.
 
 `SandboxReceipt` records the digest-bound profile, environment allowlist,
 syscall policy, UID/GID, mounts, locale/timezone, cleanup and log-redaction

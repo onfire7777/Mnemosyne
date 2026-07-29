@@ -37,6 +37,7 @@ _EVIDENCE_DEFINITIONS = {
     "SoftwareDataBOM",
     "SandboxReceipt",
     "ResourceReceipt",
+    "SmokeReceipt",
     "FeasibilityRecord",
 }
 _FEASIBILITY_REFERENCE_FIELDS = (
@@ -47,6 +48,7 @@ _FEASIBILITY_REFERENCE_FIELDS = (
     "power_plan_ref",
     "sandbox_receipt_ref",
     "resource_receipt_ref",
+    "smoke_receipt_ref",
     "software_data_bom_ref",
 )
 _TYPED_FEASIBILITY_REFERENCES = {
@@ -54,12 +56,13 @@ _TYPED_FEASIBILITY_REFERENCES = {
     "power_plan_ref": "PowerPlan",
     "sandbox_receipt_ref": "SandboxReceipt",
     "resource_receipt_ref": "ResourceReceipt",
+    "smoke_receipt_ref": "SmokeReceipt",
     "software_data_bom_ref": "SoftwareDataBOM",
 }
 _CONTRACT_REFERENCE_FIELDS = tuple(
     field
     for field in _FEASIBILITY_REFERENCE_FIELDS
-    if field != "resource_receipt_ref"
+    if field not in {"resource_receipt_ref", "smoke_receipt_ref"}
 )
 _READINESS_STATES = {
     "PILOT-READY-DEV",
@@ -214,6 +217,14 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
             if key in properties:
                 _validate(nested, properties[key], f"{path}.{key}")
         if schema is _DEFINITIONS["portable_event"]:
+            content = value.get("content")
+            content_sha256 = value.get("content_sha256")
+            if (
+                isinstance(content, str)
+                and isinstance(content_sha256, str)
+                and hashlib.sha256(content.encode()).hexdigest() != content_sha256
+            ):
+                _fail(f"{path}.content_sha256 does not match content")
             valid_from = value.get("valid_from")
             valid_to = value.get("valid_to")
             if (
@@ -440,7 +451,17 @@ def validate_definition(definition: str, value: object) -> object:
                     network = ipaddress.ip_network(item, strict=False)
                 except ValueError:
                     _fail("$.egress IP ranges must be valid CIDR networks")
-                if not network.is_global:
+                if (
+                    not network.is_global
+                    or not network.network_address.is_global
+                    or not network.broadcast_address.is_global
+                    or network.is_multicast
+                    or network.is_unspecified
+                    or network.is_loopback
+                    or network.is_link_local
+                    or network.is_reserved
+                    or network.is_private
+                ):
                     _fail("$.egress IP ranges must be globally routable")
     if definition == "FeasibilityRecord":
         assert isinstance(value, Mapping)
@@ -515,11 +536,13 @@ def validate_evidence_bundle(
             _fail("run readiness requires profile-specific signed evidence")
         sandbox_receipt = resolved["sandbox_receipt_ref"]
         resource_receipt = resolved["resource_receipt_ref"]
+        smoke_receipt = resolved["smoke_receipt_ref"]
         if (
             not isinstance(sandbox_receipt, Mapping)
             or not isinstance(resource_receipt, Mapping)
+            or not isinstance(smoke_receipt, Mapping)
         ):
-            _fail("pilot readiness requires sandbox and resource receipts")
+            _fail("pilot readiness requires sandbox, resource, and smoke receipts")
         profile_ref = sandbox_receipt.get("profile_ref")
         if not isinstance(profile_ref, str):
             _fail("pilot readiness requires a sandbox profile")
@@ -545,6 +568,36 @@ def validate_evidence_bundle(
             _fail("pilot readiness requires enforced offline L16 controls")
         if resource_receipt.get("abort_status") != "completed":
             _fail("readiness requires a completed resource receipt")
+        if smoke_receipt.get("identity") != record.get("identity"):
+            _fail("smoke receipt does not match the feasibility identity")
+        if smoke_receipt.get("outcome") != "passed":
+            _fail("pilot readiness requires a passing smoke receipt")
+        if smoke_receipt.get("sandbox_receipt_sha256") != sandbox_receipt.get(
+            "artifact_sha256"
+        ):
+            _fail("smoke receipt does not match the sandbox receipt")
+        if smoke_receipt.get("resource_receipt_sha256") != resource_receipt.get(
+            "artifact_sha256"
+        ):
+            _fail("smoke receipt does not match the resource receipt")
+        result_ref = smoke_receipt.get("result_ref")
+        if not isinstance(result_ref, str):
+            _fail("smoke receipt does not bind a result")
+        result = artifacts.get(result_ref)
+        if result is None:
+            _fail("smoke result does not resolve to a supplied artifact")
+        result_id, separator, result_digest = result_ref.rpartition("@sha256:")
+        if not separator or not result_id:
+            _fail("smoke result is not a digest reference")
+        if canonical_sha256(result) != result_digest:
+            _fail("smoke result does not match the supplied artifact")
+        if (
+            not isinstance(result, Mapping)
+            or result.get("identity") != smoke_receipt.get("identity")
+            or result.get("attempt_state") != "finalized"
+            or result.get("outcome") != "passed"
+        ):
+            _fail("smoke result does not prove the exact passing attempt")
         result_contract = record["result_contract"]
         if (
             not isinstance(result_contract, Mapping)
@@ -660,6 +713,12 @@ class ProtocolValidator:
                     code="CONFLICT",
                 )
             return deepcopy(validated_response)
+
+        deadline = _parse_utc_timestamp(
+            str(context["deadline_utc"]), "$.context.deadline_utc"
+        )
+        if deadline <= self._now():
+            _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
 
         if definition == "error_response":
             self._responses[idempotency_key] = response_fingerprint
