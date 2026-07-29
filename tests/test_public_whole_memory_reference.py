@@ -55,6 +55,9 @@ DEADLINE = "2026-07-29T00:00:00Z"
 DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
 DIGEST_C = "c" * 64
+L16_PROFILE_DIGEST = (
+    "aef321c0ac53c043ddebfde8b3a8b27cafc145443700867cc0bbe9ef892cee40"
+)
 
 
 def _context(
@@ -290,6 +293,16 @@ def _rebind_artifact(artifact: dict[str, object]) -> dict[str, object]:
     return artifact
 
 
+def _sandbox_profile_digest(receipt: dict[str, object]) -> str:
+    return abi.canonical_sha256(
+        {
+            key: value
+            for key, value in receipt.items()
+            if key not in {"schema_id", "artifact_sha256", "profile_ref"}
+        }
+    )
+
+
 EVIDENCE_FIXTURES = {
     "BaselineManifest": _artifact(
         "urn:wmbs:0.1-draft#BaselineManifest",
@@ -350,8 +363,9 @@ EVIDENCE_FIXTURES = {
     ),
     "SandboxReceipt": _artifact(
         "urn:wmbs:0.1-draft#SandboxReceipt",
-        profile_ref="sandbox-l16-dev@sha256:" + DIGEST_B,
+        profile_ref="sandbox-l16-dev@sha256:" + L16_PROFILE_DIGEST,
         sut_boundary="adapter-process",
+        root_filesystem="read-only",
         uid=65534,
         gid=65534,
         mounts=["inputs:ro", "outputs:rw"],
@@ -381,7 +395,7 @@ EVIDENCE_FIXTURES = {
     ),
     "ResourceReceipt": _artifact(
         "urn:wmbs:0.1-draft#ResourceReceipt",
-        profile_sha256=DIGEST_B,
+        profile_sha256=L16_PROFILE_DIGEST,
         sut_boundary="adapter-process",
         wall_time_ms=10,
         peak_rss_bytes=1024,
@@ -991,6 +1005,178 @@ def test_pilot_readiness_binds_resource_receipt_to_sandbox_profile() -> None:
 
 
 @requires_abi
+def test_pilot_readiness_rejects_unbound_sandbox_profile_digest() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    sandbox = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["SandboxReceipt"],
+            "profile_ref": "sandbox-l16-dev@sha256:" + DIGEST_C,
+        }
+    )
+    resource = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["ResourceReceipt"],
+            "profile_sha256": DIGEST_C,
+        }
+    )
+    for field, artifact in (
+        ("sandbox_receipt_ref", sandbox),
+        ("resource_receipt_ref", resource),
+    ):
+        old_ref = record[field]
+        assert isinstance(old_ref, str)
+        artifacts.pop(old_ref)
+        new_ref = f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
+        record[field] = new_ref
+        artifacts[new_ref] = artifact
+    record = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="sandbox profile digest does not match its declared controls",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+@pytest.mark.parametrize("abort_status", ["aborted", "failed"])
+def test_pilot_readiness_requires_completed_resource_receipt(
+    abort_status: str,
+) -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    resource = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["ResourceReceipt"],
+            "abort_status": abort_status,
+        }
+    )
+    old_ref = record["resource_receipt_ref"]
+    assert isinstance(old_ref, str)
+    artifacts.pop(old_ref)
+    new_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    record["resource_receipt_ref"] = new_ref
+    artifacts[new_ref] = resource
+    record = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="readiness requires a completed resource receipt",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_requires_the_same_sut_boundary_for_metering() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    resource = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["ResourceReceipt"],
+            "sut_boundary": "different-process",
+        }
+    )
+    old_ref = record["resource_receipt_ref"]
+    assert isinstance(old_ref, str)
+    artifacts.pop(old_ref)
+    new_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    record["resource_receipt_ref"] = new_ref
+    artifacts[new_ref] = resource
+    record = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="resource receipt does not match the sandbox SUT boundary",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("sandbox_changes", "resource_changes"),
+    [
+        ({"syscall_policy": "unavailable"}, {}),
+        (
+            {
+                "egress": {
+                    "mode": "metered-allowlist",
+                    "endpoints": [
+                        {
+                            "endpoint": "external",
+                            "dns_names": ["example.com"],
+                            "ip_ranges": ["93.184.216.34/32"],
+                            "protocols": ["https"],
+                        }
+                    ],
+                    "block_cloud_metadata": True,
+                    "block_private_ranges": True,
+                }
+            },
+            {},
+        ),
+        ({}, {"network_bytes": 1}),
+    ],
+)
+def test_pilot_readiness_requires_enforced_offline_l16_controls(
+    sandbox_changes: dict[str, object],
+    resource_changes: dict[str, object],
+) -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    sandbox = _rebind_artifact(
+        {**EVIDENCE_FIXTURES["SandboxReceipt"], **sandbox_changes}
+    )
+    profile_digest = _sandbox_profile_digest(sandbox)
+    sandbox["profile_ref"] = "sandbox-l16-dev@sha256:" + profile_digest
+    sandbox = _rebind_artifact(sandbox)
+    resource = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["ResourceReceipt"],
+            "profile_sha256": profile_digest,
+            **resource_changes,
+        }
+    )
+    for field, artifact in (
+        ("sandbox_receipt_ref", sandbox),
+        ("resource_receipt_ref", resource),
+    ):
+        old_ref = record[field]
+        assert isinstance(old_ref, str)
+        artifacts.pop(old_ref)
+        new_ref = f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
+        record[field] = new_ref
+        artifacts[new_ref] = artifact
+    record = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="pilot readiness requires enforced offline L16 controls",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
 def test_evidence_bundle_rejects_typed_reference_schema_mismatch() -> None:
     record, artifacts = _resolved_feasibility_bundle()
     power_ref = record["power_plan_ref"]
@@ -1088,6 +1274,64 @@ def test_sandbox_receipt_rejects_egress_mode_allowlist_mismatch(
 
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_definition("SandboxReceipt", receipt)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    "ip_range",
+    ["10.0.0.0/8", "127.0.0.1/32", "169.254.169.254/32", "::1/128"],
+)
+def test_sandbox_receipt_rejects_non_public_egress_ranges(
+    ip_range: str,
+) -> None:
+    receipt = deepcopy(EVIDENCE_FIXTURES["SandboxReceipt"])
+    receipt["egress"] = {
+        "mode": "metered-allowlist",
+        "endpoints": [
+            {
+                "endpoint": "forbidden",
+                "dns_names": ["example.invalid"],
+                "ip_ranges": [ip_range],
+                "protocols": ["https"],
+            }
+        ],
+        "block_cloud_metadata": True,
+        "block_private_ranges": True,
+    }
+    receipt = _rebind_artifact(receipt)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="egress IP ranges must be globally routable",
+    ):
+        abi.validate_definition("SandboxReceipt", receipt)
+
+
+@requires_abi
+@pytest.mark.parametrize("module_id", ["M00", "M21", "M99"])
+def test_module_ids_are_closed_to_the_twenty_defined_modules(
+    module_id: str,
+) -> None:
+    request = deepcopy(GOLDEN_REQUESTS["create_run"])
+    request["payload"]["module_id"] = module_id  # type: ignore[index]
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("create_run_request", request)
+
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    record["identity"]["module_id"] = module_id  # type: ignore[index]
+    record = _rebind_artifact(record)
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("FeasibilityRecord", record)
+
+
+@requires_abi
+def test_result_custody_is_closed_to_the_three_disclosure_labels() -> None:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    record["result_contract"]["custody"] = "certified"  # type: ignore[index]
+    record = _rebind_artifact(record)
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("FeasibilityRecord", record)
 
 
 @requires_abi
@@ -1249,7 +1493,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "0bc0519087bf0e9d0f1b2af4d0a234257a788a6dded0290e0f07f7e1de68dc18"
+        == "c628b7a1c0f40117ea54f9d759b5308f46debaec988f515d1fec2609f1d7312e"
     )
 
 
@@ -1574,6 +1818,22 @@ def test_validator_rejects_oversized_response_before_schema_walk(
         validator.validate_response(request, response)
 
     assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
+def test_validator_accepts_response_at_exact_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validator = _validator()
+    for operation in ("negotiate", "create_run"):
+        _complete_exchange(validator, operation)
+    request = GOLDEN_REQUESTS["retrieve"]
+    response = GOLDEN_RESPONSES["retrieve"]
+    validator.validate_request(request)
+    response_size = len(abi.canonical_json(response))
+    monkeypatch.setattr(abi, "_MAX_RESPONSE_BYTES", response_size, raising=False)
+
+    assert validator.validate_response(request, response) == response
 
 
 @requires_abi
@@ -2041,6 +2301,30 @@ def test_validator_entry_guards_fail_closed(value: object, expected_code: str) -
         _validator().validate_request(value)
 
     assert _error_code(exc) == expected_code
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("request_value", "expected_code"),
+    [
+        (None, "INVALID_REQUEST"),
+        ({"operation": "purge"}, "UNSUPPORTED_OPERATION"),
+        (GOLDEN_REQUESTS["negotiate"], "CONFLICT"),
+    ],
+)
+def test_response_entry_guards_fail_closed_without_mutating_state(
+    request_value: object,
+    expected_code: str,
+) -> None:
+    validator = _validator()
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_response(request_value, GOLDEN_RESPONSES["negotiate"])
+
+    assert _error_code(exc) == expected_code
+    assert validator.last_sequence == 0
+    assert validator._replays == {}
+    assert validator._responses == {}
 
 
 @requires_abi

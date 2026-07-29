@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import math
 import re
@@ -283,6 +284,16 @@ def canonical_artifact_sha256(value: Mapping[str, object]) -> str:
     )
 
 
+def _sandbox_profile_sha256(receipt: Mapping[str, object]) -> str:
+    return canonical_sha256(
+        {
+            key: item
+            for key, item in receipt.items()
+            if key not in {"schema_id", "artifact_sha256", "profile_ref"}
+        }
+    )
+
+
 def _validate_artifact_digest(definition: str, value: object) -> None:
     if definition not in _EVIDENCE_DEFINITIONS:
         return
@@ -419,6 +430,18 @@ def validate_definition(definition: str, value: object) -> object:
         assert isinstance(endpoints, list)
         if (egress["mode"] == "deny") != (not endpoints):
             _fail("$.egress mode does not match its endpoint allowlist")
+        for endpoint in endpoints:
+            assert isinstance(endpoint, Mapping)
+            ip_ranges = endpoint["ip_ranges"]
+            assert isinstance(ip_ranges, list)
+            for item in ip_ranges:
+                assert isinstance(item, str)
+                try:
+                    network = ipaddress.ip_network(item, strict=False)
+                except ValueError:
+                    _fail("$.egress IP ranges must be valid CIDR networks")
+                if not network.is_global:
+                    _fail("$.egress IP ranges must be globally routable")
     if definition == "FeasibilityRecord":
         assert isinstance(value, Mapping)
         dispositions = _feasibility_dispositions(value)
@@ -503,8 +526,23 @@ def validate_evidence_bundle(
         profile_id, separator, profile_digest = profile_ref.rpartition("@sha256:")
         if not separator or profile_id != "sandbox-l16-dev":
             _fail("pilot readiness requires the L16-DEV sandbox profile")
+        if _sandbox_profile_sha256(sandbox_receipt) != profile_digest:
+            _fail("sandbox profile digest does not match its declared controls")
         if resource_receipt.get("profile_sha256") != profile_digest:
             _fail("resource receipt does not match the sandbox profile")
+        if resource_receipt.get("sut_boundary") != sandbox_receipt.get("sut_boundary"):
+            _fail("resource receipt does not match the sandbox SUT boundary")
+        egress = sandbox_receipt.get("egress")
+        if (
+            sandbox_receipt.get("syscall_policy") == "unavailable"
+            or not isinstance(egress, Mapping)
+            or egress.get("mode") != "deny"
+            or egress.get("endpoints") != []
+            or sandbox_receipt.get("secrets") != "none"
+            or sandbox_receipt.get("model_proxy") != "disabled"
+            or resource_receipt.get("network_bytes") != 0
+        ):
+            _fail("pilot readiness requires enforced offline L16 controls")
         if resource_receipt.get("abort_status") != "completed":
             _fail("readiness requires a completed resource receipt")
         result_contract = record["result_contract"]
