@@ -824,6 +824,24 @@ def test_validator_rejects_oversized_request_bytes(
 
 
 @requires_abi
+def test_validator_rejects_cumulative_retained_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    retained = validator._retained_bytes
+    monkeypatch.setattr(abi, "_MAX_RETAINED_BYTES", retained + 1)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_request(GOLDEN_REQUESTS["ingest"])
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+    assert validator.last_sequence == 2
+    assert validator._retained_bytes == retained
+
+
+@requires_abi
 @pytest.mark.parametrize(
     ("value", "expected_code"),
     [
