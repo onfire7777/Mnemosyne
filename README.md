@@ -345,7 +345,7 @@ Mnemosyne/
 │   └── providers/           # ProviderRegistry + adapter plumbing (adapter classes live in retrieval.py)
 ├── sql/schema.sql           # canonical 28-table PostgreSQL schema
 ├── tests/                   # invariant, parity, contract, and completion suites
-├── eval/                    # §33 eval harness (recall@k / nDCG / ECE / latency SLOs) + eval/public signed-session action evaluator
+├── eval/                    # §33 harness + public evaluator and wmbs/0.1-draft common ABI (see eval/public/README.md)
 ├── infra/                   # Keycloak (OIDC), Vault, C2PA, provider compose stack
 ├── rust/mneme-providers/    # Provider sidecar for compact embed/rerank contracts
 ├── rust/mnemosyne-native/   # Optional PyO3 native retrieval kernels

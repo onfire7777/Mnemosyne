@@ -136,6 +136,25 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
         for key, nested in value.items():
             if key in properties:
                 _validate(nested, properties[key], f"{path}.{key}")
+        if schema is _DEFINITIONS["portable_event"]:
+            valid_from = value["valid_from"]
+            valid_to = value["valid_to"]
+            if (
+                isinstance(valid_from, str)
+                and isinstance(valid_to, str)
+                and _parse_utc_timestamp(valid_to, f"{path}.valid_to")
+                < _parse_utc_timestamp(valid_from, f"{path}.valid_from")
+            ):
+                _fail(f"{path}.valid_to precedes valid_from")
+        elif schema is _DEFINITIONS["retrieval_envelope"]:
+            hits = value["hits"]
+            assert isinstance(hits, list)
+            ranks = [hit["rank"] for hit in hits]
+            stable_item_ids = [hit["stable_item_id"] for hit in hits]
+            if ranks != list(range(1, len(hits) + 1)):
+                _fail(f"{path}.hits must have contiguous ascending ranks")
+            if len(stable_item_ids) != len(set(stable_item_ids)):
+                _fail(f"{path}.hits must have unique stable item IDs")
 
 
 def _parse_utc_timestamp(value: str, path: str) -> datetime:
@@ -234,6 +253,7 @@ class ProtocolValidator:
     def validate_request(self, request: object) -> object:
         if not isinstance(request, dict):
             _fail("request must be an object")
+        _enforce_canonical_size(request, _MAX_REQUEST_BYTES)
         operation = request.get("operation")
         if operation not in _OPERATIONS:
             _fail("unsupported operation", code="UNSUPPORTED_OPERATION")
@@ -249,7 +269,6 @@ class ProtocolValidator:
         if deadline <= self._now():
             _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
 
-        _enforce_canonical_size(validated, _MAX_REQUEST_BYTES)
         request_bytes = canonical_json(validated)
         idempotency_key = str(context["idempotency_key"])
         replay = self._replays.get(idempotency_key)

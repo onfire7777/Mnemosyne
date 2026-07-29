@@ -1,11 +1,11 @@
 # Plan: Deliver the Whole-Memory Common ABI
 
 ## Overview
-Execute the approved dependency-first portion of WMBS-A/WMB-P1 in `/Users/admin/.codex/worktrees/9697/Mnemosyne` on `codex/goalex-whole-memory-pilot`. Current verified HEAD is `7395e05742de79b53db03bf6494548b9caf4af5e`, the working tree is clean, and the branch is nine commits ahead of `origin/main`. Rounds 10 and 11 created planning documents but none of the planned ABI artifacts exist.
+Completed 2026-07-28. The ABI source head `8d64f554c565edeb0c43868ff6d436e6e09df33a` was merged by PR #79 at main merge `a95fe4d291093253f8ce49adff32ba875a35e884`. The delivered artifacts are the compound schema, standard-library reference validator, and focused contract suite listed below. Result-v2 remains the next dependency after post-merge review remediation.
 
 The governing sources are `GOAL.md`, specification §§0, 4, 6.2, 6.5, 13, and 14 in `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`, and Task 1 of `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`. Reuse canonical JSON behavior from `eval/public/bundle.py` and strict validation conventions from `eval/public/adapters/beam.py`.
 
-The exact implementation lease is:
+The historical source-delivery lease was:
 
 - `eval/public/schema/wmbs-0.1-draft.schema.json`
 - `eval/public/adapters/whole_memory_reference.py`
@@ -15,7 +15,11 @@ Use Python 3.12 standard library only. Do not create another plan, modify result
 
 Live GitHub and process state could not be refreshed in the planner sandbox, so the executor must fail closed if an overlapping PR, process, or worktree lease is discovered.
 
-## Validation Commands
+The post-merge review-remediation lease is limited to the three delivered
+artifacts plus `GOAL.md`, `README.md`, this receipt, `eval/public/README.md`,
+and `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`.
+
+## Historical Source-Delivery Validation Commands
 - `set -euo pipefail; test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"; test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"; test -z "$(git status --porcelain)"`
 - `git fetch --prune origin && git merge-base --is-ancestor origin/main HEAD`
 - `gh pr list --repo onfire7777/Mnemosyne --state open --json number,title,headRefName,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup`
@@ -23,6 +27,9 @@ Live GitHub and process state could not be refreshed in the planner sandbox, so 
 - `uv run --locked ruff check eval/public/adapters/whole_memory_reference.py tests/test_public_whole_memory_reference.py`
 - `uv run --locked python -m pytest`
 - `git diff --check && git diff --cached --check && while IFS= read -r path; do test -z "$(git diff --no-index --check /dev/null "$path" || true)"; done < <(git ls-files --others --exclude-standard) && paths="$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|tests/test_public_whole_memory_reference\.py)$')"`
+
+## Post-Merge Review Validation Command
+- `paths="$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(GOAL\.md|README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|tests/test_public_whole_memory_reference\.py)$')"`
 
 ### Task 1: Prove the lease and freeze the contract in RED tests
 - [x] Refresh `origin/main`, open PRs, worktrees, dirty state, and active GoalEx/RalphEx/test processes. Stop with `DEFERRED-CONFLICT` if another live writer owns any leased path; never read or consume uncommitted content from the benchmark-spec or signed-publication worktrees. (Executor receipt, 2026-07-28: clean branch at `17cd1c78`, no open PR, and no competing process or worktree owner for the three leased paths; the active GoalEx/RalphEx processes were this loop.)

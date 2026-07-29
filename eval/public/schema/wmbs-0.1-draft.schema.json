@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "wmbs/0.1-draft",
+  "$id": "urn:wmbs:0.1-draft",
   "title": "Whole-Memory Benchmark Standard common ABI",
   "$defs": {
     "nonempty_string": {
@@ -536,6 +536,7 @@
       }
     },
     "BaselineManifest": {
+      "$anchor": "BaselineManifest",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -555,7 +556,7 @@
         "budget"
       ],
       "properties": {
-        "schema_id": {"const": "wmbs/0.1-draft#BaselineManifest"},
+        "schema_id": {"const": "urn:wmbs:0.1-draft#BaselineManifest"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "tokenizer": {"$ref": "#/$defs/digest_reference"},
         "chunking": {"$ref": "#/$defs/chunking"},
@@ -572,6 +573,7 @@
       }
     },
     "PowerPlan": {
+      "$anchor": "PowerPlan",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -592,7 +594,7 @@
         "rerun_rule"
       ],
       "properties": {
-        "schema_id": {"const": "wmbs/0.1-draft#PowerPlan"},
+        "schema_id": {"const": "urn:wmbs:0.1-draft#PowerPlan"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "primary_endpoint": {"$ref": "#/$defs/short_string"},
         "denominator": {"$ref": "#/$defs/short_string"},
@@ -658,6 +660,7 @@
       }
     },
     "SoftwareDataBOM": {
+      "$anchor": "SoftwareDataBOM",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -673,7 +676,7 @@
         "secret_requirements"
       ],
       "properties": {
-        "schema_id": {"const": "wmbs/0.1-draft#SoftwareDataBOM"},
+        "schema_id": {"const": "urn:wmbs:0.1-draft#SoftwareDataBOM"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "software": {
           "type": "array",
@@ -708,6 +711,7 @@
       }
     },
     "SandboxReceipt": {
+      "$anchor": "SandboxReceipt",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -732,7 +736,7 @@
         "usage_counters"
       ],
       "properties": {
-        "schema_id": {"const": "wmbs/0.1-draft#SandboxReceipt"},
+        "schema_id": {"const": "urn:wmbs:0.1-draft#SandboxReceipt"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "profile_sha256": {"$ref": "#/$defs/sha256"},
         "sut_boundary": {"$ref": "#/$defs/nonempty_string"},
@@ -759,6 +763,7 @@
       }
     },
     "ResourceReceipt": {
+      "$anchor": "ResourceReceipt",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -783,7 +788,7 @@
         "abort_status"
       ],
       "properties": {
-        "schema_id": {"const": "wmbs/0.1-draft#ResourceReceipt"},
+        "schema_id": {"const": "urn:wmbs:0.1-draft#ResourceReceipt"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "profile_sha256": {"$ref": "#/$defs/sha256"},
         "sut_boundary": {"$ref": "#/$defs/nonempty_string"},
@@ -840,17 +845,15 @@
         "canonical_payload": {"const": "m15-v1"},
         "volatile_fields": {
           "type": "array",
-          "maxItems": 64,
-          "uniqueItems": true,
-          "items": {"enum": ["wall_time_ms", "rss_samples_bytes", "signature", "path", "runtime_timestamp_utc"]}
+          "const": ["path", "rss_samples_bytes", "runtime_timestamp_utc", "signature", "wall_time_ms"]
         },
-        "run_count": {"type": "integer", "minimum": 2, "maximum": 1000},
+        "run_count": {"const": 5},
         "seed_encoding": {"const": "decimal"},
         "float_rule": {"const": "finite-json"},
         "order_rule": {"const": "sorted-keys"},
         "time_rule": {"const": "utc-z"},
         "locale": {"const": "C"},
-        "clean_process_replay": {"type": "boolean"},
+        "clean_process_replay": {"const": true},
         "artifact_digest": {"const": "sha256"}
       }
     },
@@ -878,6 +881,7 @@
       }
     },
     "FeasibilityRecord": {
+      "$anchor": "FeasibilityRecord",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -899,7 +903,7 @@
         "feasibility_disposition"
       ],
       "properties": {
-        "schema_id": {"const": "wmbs/0.1-draft#FeasibilityRecord"},
+        "schema_id": {"const": "urn:wmbs:0.1-draft#FeasibilityRecord"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "identity": {"$ref": "#/$defs/feasibility_identity"},
         "adapter_contract_ref": {"$ref": "#/$defs/digest_reference"},

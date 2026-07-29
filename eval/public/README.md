@@ -80,3 +80,47 @@ candidate manifest, QA-only `build.json`, reader custody, and current checkout
 must all name the same 40-hex commit. Reproduction reuses the retained canonical
 `candidate-manifest.json`; verifying from another commit fails closed instead
 of silently treating different code as the frozen candidate.
+
+## Whole-memory common ABI (development draft)
+
+The `wmbs/0.1-draft` compound schema and standard-library reference validator
+live at
+[`schema/wmbs-0.1-draft.schema.json`](schema/wmbs-0.1-draft.schema.json) and
+[`adapters/whole_memory_reference.py`](adapters/whole_memory_reference.py).
+They define the closed development-only lifecycle
+`negotiate → create_run → ingest/retrieve/answer → finalize`; finalization is
+terminal.
+
+The adapter exports `canonical_json`, `canonical_sha256`,
+`canonical_projection`, `validate_definition`, and `ProtocolValidator`.
+Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation
+requires canonical UTC deadlines, one stable tenant/run/attempt scope,
+monotonically increasing sequences, unique request IDs, and identical content
+for idempotent replay. `WholeMemoryValidationError.code` carries one of the
+closed protocol error codes.
+
+Portable events require `valid_to` to be null or no earlier than `valid_from`.
+Retrieval hits use contiguous ranks `1..N` in response order and unique
+`stable_item_id` values.
+
+The protocol version remains `wmbs/0.1-draft`; the compound JSON Schema uses
+the absolute ID `urn:wmbs:0.1-draft`. Its public evidence IDs are:
+`urn:wmbs:0.1-draft#BaselineManifest`,
+`urn:wmbs:0.1-draft#PowerPlan`,
+`urn:wmbs:0.1-draft#SoftwareDataBOM`,
+`urn:wmbs:0.1-draft#SandboxReceipt`,
+`urn:wmbs:0.1-draft#ResourceReceipt`, and
+`urn:wmbs:0.1-draft#FeasibilityRecord`.
+
+M15 replay freezes canonical payload `m15-v1`, exactly five runs, and required
+clean-process replay. Canonical projection excludes only `path`,
+`rss_samples_bytes`, `runtime_timestamp_utc`, `signature`, and `wall_time_ms`.
+
+The in-memory validator admits at most 10,000 requests, 16 MiB per request, and
+64 MiB of retained canonical request bytes. It performs no persistence,
+network, model, benchmark, ranking, or publication work. Run its contract suite
+with:
+
+```bash
+uv run --locked python -m pytest tests/test_public_whole_memory_reference.py -q
+```
