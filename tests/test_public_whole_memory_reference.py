@@ -10,6 +10,7 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -17,6 +18,11 @@ PROTOCOL_VERSION = "wmbs/0.1-draft"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = REPO_ROOT / "eval/public/schema/wmbs-0.1-draft.schema.json"
 ADAPTER_PATH = REPO_ROOT / "eval/public/adapters/whole_memory_reference.py"
+SCHEMA = (
+    json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    if SCHEMA_PATH.is_file()
+    else {}
+)
 ERROR_CODES = (
     "INVALID_REQUEST",
     "UNSUPPORTED_OPERATION",
@@ -232,6 +238,24 @@ GOLDEN_RESPONSES = {
     },
 }
 
+REJECTED_INGEST_RESPONSE = {
+    "operation": "ingest",
+    "payload": {
+        "statuses": [
+            {
+                "event_id": "event-0002",
+                "outcome": "rejected",
+                "durability": "not_acknowledged",
+                "evidence_handle": None,
+                "error": {
+                    "code": "INVALID_REQUEST",
+                    "message": "event was rejected",
+                },
+            }
+        ]
+    },
+}
+
 ERROR_ENVELOPES = {
     code: {
         "error": {
@@ -252,7 +276,7 @@ def _artifact(schema_id: str, **fields: object) -> dict[str, object]:
 
 EVIDENCE_FIXTURES = {
     "BaselineManifest": _artifact(
-        "wmbs/0.1-draft#BaselineManifest",
+        "urn:wmbs:0.1-draft#BaselineManifest",
         tokenizer="tokenizer@sha256:" + DIGEST_A,
         chunking={"size": 512, "overlap": 64},
         embedding_model="embedding@sha256:" + DIGEST_B,
@@ -267,7 +291,7 @@ EVIDENCE_FIXTURES = {
         budget={"wall_time_seconds": 60, "memory_bytes": 1_073_741_824},
     ),
     "PowerPlan": _artifact(
-        "wmbs/0.1-draft#PowerPlan",
+        "urn:wmbs:0.1-draft#PowerPlan",
         primary_endpoint="exact_match",
         denominator="admitted_examples",
         independence_unit="fixture",
@@ -283,7 +307,7 @@ EVIDENCE_FIXTURES = {
         rerun_rule="preregistered-only",
     ),
     "SoftwareDataBOM": _artifact(
-        "wmbs/0.1-draft#SoftwareDataBOM",
+        "urn:wmbs:0.1-draft#SoftwareDataBOM",
         software=[{"name": "python", "version": "3.12", "license": "PSF-2.0"}],
         datasets=[
             {
@@ -309,7 +333,7 @@ EVIDENCE_FIXTURES = {
         secret_requirements=[],
     ),
     "SandboxReceipt": _artifact(
-        "wmbs/0.1-draft#SandboxReceipt",
+        "urn:wmbs:0.1-draft#SandboxReceipt",
         profile_sha256=DIGEST_B,
         sut_boundary="adapter-process",
         uid=65534,
@@ -329,7 +353,7 @@ EVIDENCE_FIXTURES = {
         usage_counters="harness-owned",
     ),
     "ResourceReceipt": _artifact(
-        "wmbs/0.1-draft#ResourceReceipt",
+        "urn:wmbs:0.1-draft#ResourceReceipt",
         profile_sha256=DIGEST_B,
         sut_boundary="adapter-process",
         wall_time_ms=10,
@@ -350,7 +374,7 @@ EVIDENCE_FIXTURES = {
     ),
 }
 EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
-    "wmbs/0.1-draft#FeasibilityRecord",
+    "urn:wmbs:0.1-draft#FeasibilityRecord",
     identity={
         "module_id": "M01",
         "module_version": "0.1.0",
@@ -362,11 +386,11 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
     scorer_ref="exact-match@sha256:" + DIGEST_C,
     inherited_rails=["RAIL-001", "RAIL-002"],
     baseline_manifest_ref=(
-        "wmbs/0.1-draft#BaselineManifest@sha256:"
+        "urn:wmbs:0.1-draft#BaselineManifest@sha256:"
         + EVIDENCE_FIXTURES["BaselineManifest"]["artifact_sha256"]  # type: ignore[operator]
     ),
     power_plan_ref=(
-        "wmbs/0.1-draft#PowerPlan@sha256:"
+        "urn:wmbs:0.1-draft#PowerPlan@sha256:"
         + EVIDENCE_FIXTURES["PowerPlan"]["artifact_sha256"]  # type: ignore[operator]
     ),
     replay_protocol={
@@ -382,15 +406,15 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
         "artifact_digest": "sha256",
     },
     sandbox_receipt_ref=(
-        "wmbs/0.1-draft#SandboxReceipt@sha256:"
+        "urn:wmbs:0.1-draft#SandboxReceipt@sha256:"
         + EVIDENCE_FIXTURES["SandboxReceipt"]["artifact_sha256"]  # type: ignore[operator]
     ),
     resource_receipt_ref=(
-        "wmbs/0.1-draft#ResourceReceipt@sha256:"
+        "urn:wmbs:0.1-draft#ResourceReceipt@sha256:"
         + EVIDENCE_FIXTURES["ResourceReceipt"]["artifact_sha256"]  # type: ignore[operator]
     ),
     software_data_bom_ref=(
-        "wmbs/0.1-draft#SoftwareDataBOM@sha256:"
+        "urn:wmbs:0.1-draft#SoftwareDataBOM@sha256:"
         + EVIDENCE_FIXTURES["SoftwareDataBOM"]["artifact_sha256"]  # type: ignore[operator]
     ),
     result_contract={
@@ -435,6 +459,59 @@ def _set_key(
     return mutated
 
 
+def _at_path(value: object, path: tuple[str | int, ...]) -> object:
+    target = value
+    for part in path:
+        target = target[part]  # type: ignore[index]
+    return target
+
+
+def _resolved_schema(schema: dict[str, object]) -> dict[str, object]:
+    reference = schema.get("$ref")
+    if isinstance(reference, str):
+        return SCHEMA["$defs"][reference.removeprefix("#/$defs/")]
+    return schema
+
+
+def _object_instances(
+    schema: dict[str, object],
+    value: object,
+    path: tuple[str | int, ...] = (),
+) -> list[tuple[tuple[str | int, ...], dict[str, object]]]:
+    schema = _resolved_schema(schema)
+    options = schema.get("anyOf")
+    if isinstance(options, list):
+        for option in options:
+            resolved = _resolved_schema(option)
+            expected = resolved.get("type")
+            if (expected == "null" and value is None) or (
+                expected != "null" and value is not None
+            ):
+                return _object_instances(resolved, value, path)
+        return []
+    if isinstance(value, dict):
+        instances = [(path, schema)]
+        properties = schema.get("properties", {})
+        for key, nested in value.items():
+            nested_schema = properties.get(key)
+            if isinstance(nested_schema, dict):
+                instances.extend(
+                    _object_instances(nested_schema, nested, (*path, key))
+                )
+        return instances
+    if isinstance(value, list):
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            return [
+                instance
+                for index, nested in enumerate(value)
+                for instance in _object_instances(
+                    item_schema, nested, (*path, index)
+                )
+            ]
+    return []
+
+
 def _error_code(exc: pytest.ExceptionInfo[Exception]) -> str:
     return exc.value.code  # type: ignore[attr-defined,no-any-return]
 
@@ -457,6 +534,44 @@ def test_golden_responses_are_closed_and_valid(
     definition: str, payload: dict[str, object]
 ) -> None:
     assert abi.validate_definition(f"{definition}_response", payload) == payload
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("definition", "payload"),
+    [
+        *[
+            (f"{operation}_request", payload)
+            for operation, payload in GOLDEN_REQUESTS.items()
+        ],
+        *[
+            (f"{operation}_response", payload)
+            for operation, payload in GOLDEN_RESPONSES.items()
+        ],
+        ("ingest_response", REJECTED_INGEST_RESPONSE),
+        *EVIDENCE_FIXTURES.items(),
+        *[("error_response", payload) for payload in ERROR_ENVELOPES.values()],
+    ],
+)
+def test_every_reachable_object_rejects_missing_and_unknown_fields(
+    definition: str, payload: dict[str, object]
+) -> None:
+    schema = SCHEMA["$defs"][definition]
+    instances = _object_instances(schema, payload)
+    assert instances
+
+    for path, object_schema in instances:
+        assert object_schema.get("additionalProperties") is False
+        for field in object_schema.get("required", []):
+            missing = deepcopy(payload)
+            _at_path(missing, path).pop(field)  # type: ignore[union-attr]
+            with pytest.raises(abi.WholeMemoryValidationError):
+                abi.validate_definition(definition, missing)
+
+        unknown = deepcopy(payload)
+        _at_path(unknown, path)["__unknown__"] = True  # type: ignore[index]
+        with pytest.raises(abi.WholeMemoryValidationError):
+            abi.validate_definition(definition, unknown)
 
 
 @requires_abi
@@ -568,6 +683,34 @@ REQUEST_REJECTIONS: list[
         "retrieve",
         lambda value: _set_key(
             value, "context.deadline_utc", "2026-07-29T00:00:00+01:00"
+        ),
+        "INVALID_REQUEST",
+    ),
+    (
+        "invalid nullable shape",
+        "ingest",
+        lambda value: _set_key(value, "payload.ordered_events.0.valid_to", {}),
+        "INVALID_REQUEST",
+    ),
+    (
+        "constant mismatch",
+        "retrieve",
+        lambda value: _set_key(value, "operation", "answer"),
+        "INVALID_REQUEST",
+    ),
+    (
+        "empty required array",
+        "negotiate",
+        lambda value: _set_key(value, "payload.supported_protocol_versions", []),
+        "INVALID_REQUEST",
+    ),
+    (
+        "duplicate unique array value",
+        "negotiate",
+        lambda value: _set_key(
+            value,
+            "payload.supported_protocol_versions",
+            [PROTOCOL_VERSION, PROTOCOL_VERSION],
         ),
         "INVALID_REQUEST",
     ),
@@ -693,7 +836,7 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "cbf79292ef6e9840b2b148e1457699e6aace33e10f9389895c661b1aa3d29376"
+        == "9d6ce6735aab32a90c7778c15235679292ce8d6735218a502e1539c81edc497e"
     )
 
 
@@ -701,9 +844,12 @@ def test_schema_sha256_is_frozen() -> None:
 def test_schema_patterns_are_portable_and_closed() -> None:
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     patterns: list[str] = []
+    objects: list[dict[str, object]] = []
 
     def collect(value: object) -> None:
         if isinstance(value, dict):
+            if value.get("type") == "object":
+                objects.append(value)
             pattern = value.get("pattern")
             if isinstance(pattern, str):
                 patterns.append(pattern)
@@ -716,9 +862,42 @@ def test_schema_patterns_are_portable_and_closed() -> None:
     collect(schema)
 
     assert patterns
+    assert objects
+    assert all(item.get("additionalProperties") is False for item in objects)
     assert all(pattern.startswith("^") and pattern.endswith("$") for pattern in patterns)
     assert all(not pattern.startswith("(?") for pattern in patterns)
     assert re.search(schema["$defs"]["sha256"]["pattern"], "x" + DIGEST_A) is None
+
+
+@requires_abi
+def test_evidence_schema_ids_resolve_to_public_anchors() -> None:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert urlsplit(schema["$id"]).scheme
+
+    for definition in EVIDENCE_FIXTURES:
+        subschema = schema["$defs"][definition]
+        assert subschema["$anchor"] == definition
+        assert (
+            subschema["properties"]["schema_id"]["const"]
+            == f"{schema['$id']}#{definition}"
+        )
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("volatile_fields", []),
+        ("run_count", 2),
+        ("clean_process_replay", False),
+    ],
+)
+def test_m15_replay_protocol_is_frozen(field: str, value: object) -> None:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    record["replay_protocol"][field] = value  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("FeasibilityRecord", record)
 
 
 @requires_abi
@@ -782,6 +961,21 @@ def test_identical_idempotent_replay_does_not_advance_state() -> None:
 
 
 @requires_abi
+def test_idempotent_replay_is_isolated_from_caller_mutation() -> None:
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    request = GOLDEN_REQUESTS["create_run"]
+    expected = deepcopy(request)
+
+    first = validator.validate_request(request)
+    first["payload"]["module_id"] = "M99"  # type: ignore[index]
+    replay = validator.validate_request(deepcopy(request))
+    replay["payload"]["module_id"] = "M98"  # type: ignore[index]
+
+    assert validator.validate_request(deepcopy(request)) == expected
+
+
+@requires_abi
 def test_validator_rejects_cross_scope_requests() -> None:
     validator = _validator()
     validator.validate_request(GOLDEN_REQUESTS["negotiate"])
@@ -824,6 +1018,35 @@ def test_validator_rejects_oversized_request_bytes(
 
 
 @requires_abi
+def test_validator_rejects_oversized_malformed_request_before_schema_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = deepcopy(GOLDEN_REQUESTS["negotiate"])
+    request["unexpected"] = "x" * 1_024
+    monkeypatch.setattr(abi, "_MAX_REQUEST_BYTES", 512)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        _validator().validate_request(request)
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
+def test_validator_accepts_request_at_exact_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = GOLDEN_REQUESTS["negotiate"]
+    size = len(abi.canonical_json(request))
+    monkeypatch.setattr(abi, "_MAX_REQUEST_BYTES", size)
+
+    assert _validator().validate_request(request) == request
+    monkeypatch.setattr(abi, "_MAX_REQUEST_BYTES", size - 1)
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        _validator().validate_request(request)
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
 def test_validator_rejects_cumulative_retained_bytes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -839,6 +1062,89 @@ def test_validator_rejects_cumulative_retained_bytes(
     assert _error_code(exc) == "RESOURCE_LIMIT"
     assert validator.last_sequence == 2
     assert validator._retained_bytes == retained
+
+
+@requires_abi
+def test_validator_accepts_request_at_exact_retained_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = GOLDEN_REQUESTS["negotiate"]
+    size = len(abi.canonical_json(request))
+    monkeypatch.setattr(abi, "_MAX_RETAINED_BYTES", size)
+
+    assert _validator().validate_request(request) == request
+    monkeypatch.setattr(abi, "_MAX_RETAINED_BYTES", size - 1)
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        _validator().validate_request(request)
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("definition", "mutation"),
+    [
+        (
+            "ingest_request",
+            lambda value: _set_key(
+                value, "payload.ordered_events.0.valid_to", "2026-07-27T12:00:00Z"
+            ),
+        ),
+        (
+            "retrieve_response",
+            lambda value: _set_key(
+                value,
+                "payload.hits",
+                [
+                    value["payload"]["hits"][0],  # type: ignore[index]
+                    {
+                        **value["payload"]["hits"][0],  # type: ignore[index]
+                        "rank": 2,
+                    },
+                ],
+            ),
+        ),
+        (
+            "retrieve_response",
+            lambda value: _set_key(
+                value,
+                "payload.hits",
+                [
+                    {
+                        **value["payload"]["hits"][0],  # type: ignore[index]
+                        "rank": 2,
+                        "stable_item_id": "item-0002",
+                    }
+                ],
+            ),
+        ),
+    ],
+)
+def test_cross_field_semantics_fail_closed(
+    definition: str,
+    mutation: Callable[[dict[str, object]], dict[str, object]],
+) -> None:
+    source = (
+        GOLDEN_REQUESTS["ingest"]
+        if definition == "ingest_request"
+        else GOLDEN_RESPONSES["retrieve"]
+    )
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition(definition, mutation(deepcopy(source)))
+
+
+@requires_abi
+def test_cross_field_semantics_accept_valid_boundaries() -> None:
+    ingest = deepcopy(GOLDEN_REQUESTS["ingest"])
+    event = ingest["payload"]["ordered_events"][0]  # type: ignore[index]
+    event["valid_to"] = event["valid_from"]
+    assert abi.validate_definition("ingest_request", ingest) == ingest
+
+    retrieve = deepcopy(GOLDEN_RESPONSES["retrieve"])
+    second = deepcopy(retrieve["payload"]["hits"][0])  # type: ignore[index]
+    second.update({"rank": 2, "stable_item_id": "item-0002"})
+    retrieve["payload"]["hits"].append(second)  # type: ignore[index]
+    assert abi.validate_definition("retrieve_response", retrieve) == retrieve
 
 
 @requires_abi
@@ -874,6 +1180,7 @@ def test_unknown_definition_and_reference_fail_closed(
 
 STATE_REJECTIONS = [
     ("stale deadline", "DEADLINE_EXCEEDED"),
+    ("deadline equal to now", "DEADLINE_EXCEEDED"),
     ("duplicate request id", "CONFLICT"),
     ("conflicting idempotency reuse", "CONFLICT"),
     ("sequence regression", "ORDER_VIOLATION"),
@@ -892,9 +1199,13 @@ def test_stateful_rejections_are_closed(case: str, expected_code: str) -> None:
     validator = _validator()
     validator.validate_request(GOLDEN_REQUESTS["negotiate"])
 
-    if case == "stale deadline":
+    if case in {"stale deadline", "deadline equal to now"}:
         request = deepcopy(GOLDEN_REQUESTS["create_run"])
-        request["context"]["deadline_utc"] = "2026-07-28T11:59:59Z"  # type: ignore[index]
+        request["context"]["deadline_utc"] = (  # type: ignore[index]
+            "2026-07-28T11:59:59Z"
+            if case == "stale deadline"
+            else "2026-07-28T12:00:00Z"
+        )
     elif case == "duplicate request id":
         validator.validate_request(GOLDEN_REQUESTS["create_run"])
         request = deepcopy(GOLDEN_REQUESTS["ingest"])

@@ -96,6 +96,11 @@ must exist for the claimed state.
 
 ### Task 1: Freeze the closed ABI and fail-closed validator
 
+**Status:** Closed-ABI slice completed at source head
+`8d64f554c565edeb0c43868ff6d436e6e09df33a`, merged by PR #79 at
+`a95fe4d291093253f8ce49adff32ba875a35e884`. Result-v2 compatibility and
+ledger fixtures remain open.
+
 **Files:**
 
 - Create: `eval/public/schema/wmbs-0.1-draft.schema.json`
@@ -137,11 +142,11 @@ must exist for the claimed state.
   and the result-v2 fields, four digest meanings, version dispatch, and
   append-only cross-version supersession semantics described in Task 10.
 
-- [ ] Write failing tests for every required field, unknown-field rejection,
+- [x] Write failing tests for every required field, unknown-field rejection,
       timezone-aware UTC normalization, bounded strings/arrays, finite numbers,
       duplicate request/idempotency behavior, sequence monotonicity, deadline
       failure, and exact error-code closure.
-- [ ] Write failing evidence-record tests for all fourteen feasibility fields,
+- [x] Write failing evidence-record tests for all fourteen feasibility fields,
       SPDX/license and data-rights declarations, PII/consent/takedown fields,
       baseline pins, inferential fields, sandbox/meter provenance, and
       digest-bound cross-references.
@@ -153,22 +158,22 @@ must exist for the claimed state.
       successor records fail without a parent/difference manifest, and no
       projection can combine official and enhanced scores into a certified
       result.
-- [ ] Freeze the M15 canonical projection and volatile-field exclusion list in
+- [x] Freeze the M15 canonical projection and volatile-field exclusion list in
       golden tests before any module creates a bundle.
-- [ ] Add golden request/response objects for each operation and prove canonical
+- [x] Add golden request/response objects for each operation and prove canonical
       JSON equality independent of input mapping order.
-- [ ] Run
+- [x] Run
       `PYTHONPATH=src uv run --extra mcp pytest -q
       tests/test_public_whole_memory_reference.py` and capture the expected RED
       failure because the schema/adapter do not exist.
-- [ ] Add the compound schema and the minimum standard-library validator in
+- [x] Add the compound schema and the minimum standard-library validator in
       `whole_memory_reference.py`; do not add a general schema framework.
-- [ ] Implement only protocol validation and canonicalization. Do not call
+- [x] Implement only protocol validation and canonicalization. Do not call
       Mnemosyne or score a module in this task.
-- [ ] Re-run the focused test and Ruff:
+- [x] Re-run the focused test and Ruff:
       `uv run ruff check eval/public/adapters/whole_memory_reference.py
       tests/test_public_whole_memory_reference.py`.
-- [ ] Record `sha256` for the schema and golden vectors in the test receipt.
+- [x] Record `sha256` for the schema and golden vectors in the test receipt.
 
 **Acceptance evidence:**
 
