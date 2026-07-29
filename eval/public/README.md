@@ -91,6 +91,21 @@ They define the closed development-only lifecycle
 `negotiate → create_run → ingest/retrieve/answer → finalize`; finalization is
 terminal.
 
+The M01 capture/durability and M10 calibration/abstention reference cores also
+run through the common bundle custody path:
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m01-development --out-dir /tmp/wmbs-m01
+uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m01
+uv run --locked mneme eval-public --suite wmbs-m10-development --out-dir /tmp/wmbs-m10
+uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m10
+```
+
+Both suites remain `PROPOSED`, `ENHANCED-SUCCESSOR`, development-only reference
+runs. They exercise harness-owned deterministic cores rather than a real SUT,
+remain non-publishable and non-comparable to upstream tracks, and support no
+benchmark superiority claim.
+
 `finalize.reason` is closed to `completed` or `cancelled`. A successful
 `cancelled` finalization is terminal and uses identical idempotent request and
 response replay. Closed errors and negative finalize receipts leave the attempt

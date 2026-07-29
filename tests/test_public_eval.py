@@ -30,6 +30,46 @@ def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
     assert suite["independent_external_reproduction"] is False
 
 
+@pytest.mark.parametrize(
+    "suite_name",
+    ("wmbs-m01-development", "wmbs-m10-development"),
+)
+def test_whole_memory_development_suite_round_trips_bundle(
+    tmp_path: Path, suite_name: str
+) -> None:
+    source = tmp_path / f"{suite_name}-source"
+    reproduced = tmp_path / f"{suite_name}-reproduced"
+
+    result = run_public_suite(suite_name, source)
+    assert result["system_seam"] == "harness-owned-reference-core"
+    assert verify_bundle(source) == {
+        "family": "whole-memory-development",
+        "suite": suite_name,
+        "valid": True,
+    }
+
+    metadata = json.loads((source / "benchmark.json").read_text())["metadata"]
+    assert metadata["admission_state"] == "PROPOSED"
+    assert metadata["track_kind"] == "ENHANCED-SUCCESSOR"
+    assert metadata["publishable"] is False
+    assert metadata["pbpp_headline_eligible"] is False
+    assert metadata["independent_external_reproduction"] is False
+    assert metadata["upstream_comparable"] is False
+
+    reproduced_result = reproduce_bundle(source, reproduced)
+    assert reproduced_result["system_seam"] == "harness-owned-reference-core"
+    assert verify_bundle(reproduced)["valid"] is True
+
+    attacked = tmp_path / f"{suite_name}-wrong-seam"
+    shutil.copytree(source, attacked)
+    build = json.loads((attacked / "build.json").read_text())
+    build["system_seam"] = "public-cli-subprocess"
+    _rewrite_json(attacked / "build.json", build)
+    _refresh_digest(attacked, "build.json")
+    with pytest.raises(BundleError, match="system seam"):
+        verify_bundle(attacked)
+
+
 def test_deterministic_action_registry_is_bound_to_frozen_fixture_custody() -> None:
     registry = load_registry()
     expected = {

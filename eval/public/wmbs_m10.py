@@ -1,14 +1,10 @@
-"""Standalone M10 calibration/abstention pilot core (new-file, unwired).
+"""Standalone M10 calibration/abstention pilot core.
 
 This module implements only the deterministic pieces the M10 development
 pilot needs: a seeded fixture generator, a harness-owned deterministic
-reader, four retrieval baselines, and a pure scorer. It is intentionally
-**not** wired into ``eval/public/adapters/whole_memory_reference.py``,
-``eval/public/scoring.py``, ``eval/public/runner.py``, or
-``eval/public/registry.json`` -- those files are outside this lease and
-remain untouched. See ``INTEGRATION_DEPENDENCIES`` below for the exact
-follow-up work an owner with a broader lease would need to complete before
-this pilot can run through the shared harness.
+reader, four retrieval baselines, and a pure scorer. The development-only
+full-context reference path is wired into the shared public bundle harness;
+real-SUT and closed common-ABI fixture bindings remain follow-up work.
 
 Scope discipline (see the governing design and plan documents):
 
@@ -110,15 +106,6 @@ INTEGRATION_DEPENDENCIES: tuple[str, ...] = (
     "into the RetrievalEnvelope/AnswerEnvelope shapes this module "
     "consumes and emits, so an external system (not only these four "
     "reference baselines) can be scored.",
-    "eval/public/scoring.py must register a wmbs-m10-v1 scoring profile "
-    "that calls score_records() from this module so `mneme eval-public` "
-    "can dispatch to it.",
-    "eval/public/registry.json must add the wmbs-m10-development suite "
-    "id once the above wiring exists; no registry row is created by "
-    "this lease.",
-    "eval/public/runner.py must route a wmbs-m10-development suite "
-    "through run_public_suite/write_bundle so M15 canonical replay and "
-    "bundle custody cover this pilot's outputs.",
     "This module's fixture generator (generate_fixture) is a fully "
     "self-contained, deterministic, standalone generator: it does not "
     "call, import, or otherwise depend on the shared M02-M04 event "

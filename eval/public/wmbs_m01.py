@@ -26,13 +26,11 @@ This module owns exactly two things, per the design specification at
 
 Admission state: PROPOSED. This module makes no official, superiority,
 pilot-ready, operator, hardware, protected, network, model, or database
-claim, and it runs no measured benchmark. It does not implement, wire, or
-call any of the following -- they remain explicit integration dependencies
-for the single lifecycle owner:
+claim, and it runs no measured benchmark. The deterministic golden reference
+path is wired into the shared public bundle harness, but it does not implement,
+wire, or call any of the following:
 
-- CLI metadata pass-through (`src/mnemosyne/cli.py`, `eval/harness/cli_driver.py`).
-- Shared adapter wiring (`eval/public/adapters/whole_memory_reference.py`).
-- Shared scoring registration (`eval/public/scoring.py`, `score_profile`).
+- Real-SUT CLI metadata pass-through.
 - SQLite or PostgreSQL persistence and crash-durability execution.
 - Sandbox execution, resource metering, and any measured benchmark run.
 
