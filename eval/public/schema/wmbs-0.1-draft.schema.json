@@ -590,6 +590,130 @@
         "memory_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
       }
     },
+    "AdapterContract": {
+      "$anchor": "AdapterContract",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "artifact_sha256",
+        "protocol_id",
+        "operations",
+        "error_codes",
+        "deadline_semantics",
+        "retry_semantics",
+        "idempotency_semantics",
+        "ordering_semantics",
+        "state_transition_semantics"
+      ],
+      "properties": {
+        "schema_id": {"const": "urn:wmbs:0.1-draft#AdapterContract"},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "protocol_id": {"const": "wmbs/0.1-draft"},
+        "operations": {
+          "const": ["negotiate", "create_run", "ingest", "retrieve", "answer", "finalize"]
+        },
+        "error_codes": {
+          "const": [
+            "INVALID_REQUEST",
+            "UNSUPPORTED_OPERATION",
+            "UNAUTHORIZED",
+            "CONFLICT",
+            "ORDER_VIOLATION",
+            "DEADLINE_EXCEEDED",
+            "RESOURCE_LIMIT",
+            "DEPENDENCY_UNAVAILABLE",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "deadline_semantics": {"const": "first-response-before-deadline"},
+        "retry_semantics": {"const": "fresh-key-after-closed-error"},
+        "idempotency_semantics": {"const": "identical-replay"},
+        "ordering_semantics": {"const": "strictly-increasing-sequence"},
+        "state_transition_semantics": {"const": "response-committed"}
+      }
+    },
+    "DataSourceContract": {
+      "$anchor": "DataSourceContract",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "artifact_sha256",
+        "source_kind",
+        "source_id",
+        "schema_ref",
+        "seed_domain",
+        "golden_fixture_refs",
+        "license_id",
+        "redistribution"
+      ],
+      "properties": {
+        "schema_id": {"const": "urn:wmbs:0.1-draft#DataSourceContract"},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "source_kind": {"enum": ["pinned-dataset", "deterministic-synthetic"]},
+        "source_id": {"$ref": "#/$defs/identifier"},
+        "schema_ref": {"$ref": "#/$defs/digest_reference"},
+        "seed_domain": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+        },
+        "golden_fixture_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/digest_reference"}
+        },
+        "license_id": {"$ref": "#/$defs/nonempty_string"},
+        "redistribution": {"enum": ["allowed", "restricted", "prohibited"]}
+      }
+    },
+    "ScorerContract": {
+      "$anchor": "ScorerContract",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "artifact_sha256",
+        "scorer_id",
+        "executable_argv",
+        "golden_vector_refs",
+        "numeric_precision",
+        "canonicalization",
+        "failure_exit_codes"
+      ],
+      "properties": {
+        "schema_id": {"const": "urn:wmbs:0.1-draft#ScorerContract"},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "scorer_id": {"$ref": "#/$defs/identifier"},
+        "executable_argv": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "items": {"$ref": "#/$defs/short_string"}
+        },
+        "golden_vector_refs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/digest_reference"}
+        },
+        "numeric_precision": {"const": "finite-json"},
+        "canonicalization": {"const": "sorted-compact-utf8"},
+        "failure_exit_codes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 255,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 1, "maximum": 255}
+        }
+      }
+    },
     "BaselineManifest": {
       "$anchor": "BaselineManifest",
       "type": "object",
@@ -895,6 +1019,8 @@
       "required": [
         "schema_id",
         "artifact_sha256",
+        "identity",
+        "result_ref",
         "profile_sha256",
         "sut_boundary",
         "wall_time_ms",
@@ -916,6 +1042,8 @@
       "properties": {
         "schema_id": {"const": "urn:wmbs:0.1-draft#ResourceReceipt"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "identity": {"$ref": "#/$defs/feasibility_identity"},
+        "result_ref": {"$ref": "#/$defs/result_reference"},
         "profile_sha256": {"$ref": "#/$defs/sha256"},
         "sut_boundary": {"$ref": "#/$defs/nonempty_string"},
         "wall_time_ms": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
