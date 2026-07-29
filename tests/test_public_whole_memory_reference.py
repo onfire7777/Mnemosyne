@@ -836,7 +836,7 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "9d6ce6735aab32a90c7778c15235679292ce8d6735218a502e1539c81edc497e"
+        == "0f172d642bf831b20d4718013d0d2ab53a3575306cb6ac054655a7bc23a12c1a"
     )
 
 
@@ -1032,6 +1032,29 @@ def test_validator_rejects_oversized_malformed_request_before_schema_walk(
 
 
 @requires_abi
+def test_validator_rejects_deeply_nested_malformed_request_without_crashing() -> None:
+    nested: dict[str, object] = {}
+    for _ in range(1_200):
+        nested = {"nested": nested}
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        _validator().validate_request({"operation": "negotiate", "unexpected": nested})
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
+def test_validator_rejects_cyclic_malformed_request_without_hanging() -> None:
+    request: dict[str, object] = {"operation": "negotiate"}
+    request["unexpected"] = request
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        _validator().validate_request(request)
+
+    assert _error_code(exc) == "INVALID_REQUEST"
+
+
+@requires_abi
 def test_validator_accepts_request_at_exact_byte_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1145,6 +1168,100 @@ def test_cross_field_semantics_accept_valid_boundaries() -> None:
     second.update({"rank": 2, "stable_item_id": "item-0002"})
     retrieve["payload"]["hits"].append(second)  # type: ignore[index]
     assert abi.validate_definition("retrieve_response", retrieve) == retrieve
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("outcome", "durability", "evidence_handle", "error"),
+    [
+        ("accepted", "not_acknowledged", "evidence-0001", None),
+        (
+            "accepted",
+            "acknowledged",
+            "evidence-0001",
+            {"code": "INVALID_REQUEST", "message": "contradiction"},
+        ),
+        (
+            "rejected",
+            "acknowledged",
+            None,
+            {"code": "INVALID_REQUEST", "message": "rejected"},
+        ),
+        (
+            "rejected",
+            "not_acknowledged",
+            "evidence-0001",
+            {"code": "INVALID_REQUEST", "message": "rejected"},
+        ),
+        ("rejected", "not_acknowledged", None, None),
+    ],
+)
+def test_ingest_status_outcome_matrix_fails_closed(
+    outcome: str,
+    durability: str,
+    evidence_handle: str | None,
+    error: dict[str, str] | None,
+) -> None:
+    response = deepcopy(GOLDEN_RESPONSES["ingest"])
+    response["payload"]["statuses"][0].update(  # type: ignore[index]
+        {
+            "outcome": outcome,
+            "durability": durability,
+            "evidence_handle": evidence_handle,
+            "error": error,
+        }
+    )
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("ingest_response", response)
+
+
+@requires_abi
+def test_protocol_validator_binds_ingest_receipt_to_request_event_order() -> None:
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    request = deepcopy(GOLDEN_REQUESTS["ingest"])
+    second_event = deepcopy(request["payload"]["ordered_events"][0])  # type: ignore[index]
+    second_event["event_id"] = "event-0002"
+    request["payload"]["ordered_events"].append(second_event)  # type: ignore[index]
+    validator.validate_request(request)
+
+    response = deepcopy(GOLDEN_RESPONSES["ingest"])
+    second_status = deepcopy(response["payload"]["statuses"][0])  # type: ignore[index]
+    second_status.update({"event_id": "event-0002", "outcome": "deduplicated"})
+    response["payload"]["statuses"].append(second_status)  # type: ignore[index]
+    assert validator.validate_response(request, response) == response
+
+    for event_ids in (
+        ["event-0001"],
+        ["event-0002", "event-0001"],
+        ["event-0001", "unrelated-event"],
+    ):
+        malformed = deepcopy(response)
+        malformed["payload"]["statuses"] = [  # type: ignore[index]
+            {
+                **response["payload"]["statuses"][index],  # type: ignore[index]
+                "event_id": event_id,
+            }
+            for index, event_id in enumerate(event_ids)
+        ]
+        with pytest.raises(abi.WholeMemoryValidationError):
+            validator.validate_response(request, malformed)
+
+
+@requires_abi
+def test_protocol_validator_binds_receipt_scope_to_request_context() -> None:
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    request = GOLDEN_REQUESTS["create_run"]
+    validator.validate_request(request)
+    response = deepcopy(GOLDEN_RESPONSES["create_run"])
+
+    assert validator.validate_response(request, response) == response
+    response["payload"]["attempt_id"] = "other-attempt"  # type: ignore[index]
+    with pytest.raises(abi.WholeMemoryValidationError):
+        validator.validate_response(request, response)
 
 
 @requires_abi

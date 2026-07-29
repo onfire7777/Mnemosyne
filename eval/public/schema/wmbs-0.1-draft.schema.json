@@ -297,7 +297,24 @@
         "error": {
           "anyOf": [{"$ref": "#/$defs/event_error"}, {"type": "null"}]
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "outcome": {"enum": ["accepted", "deduplicated"]},
+            "durability": {"const": "acknowledged"},
+            "error": {"type": "null"}
+          }
+        },
+        {
+          "properties": {
+            "outcome": {"const": "rejected"},
+            "durability": {"const": "not_acknowledged"},
+            "evidence_handle": {"type": "null"},
+            "error": {"$ref": "#/$defs/event_error"}
+          }
+        }
+      ]
     },
     "ingest_receipt": {
       "type": "object",

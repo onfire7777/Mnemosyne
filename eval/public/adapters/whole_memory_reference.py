@@ -27,6 +27,8 @@ _UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _MAX_REQUESTS = 10_000
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_RETAINED_BYTES = 64 * 1024 * 1024
+_MAX_JSON_DEPTH = 64
+_STRING_CHUNK_SIZE = 64 * 1024
 
 
 class WholeMemoryValidationError(ValueError):
@@ -155,6 +157,17 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
                 _fail(f"{path}.hits must have contiguous ascending ranks")
             if len(stable_item_ids) != len(set(stable_item_ids)):
                 _fail(f"{path}.hits must have unique stable item IDs")
+        elif schema is _DEFINITIONS["ingest_status"]:
+            outcome = value["outcome"]
+            if outcome == "rejected":
+                if (
+                    value["durability"] != "not_acknowledged"
+                    or value["evidence_handle"] is not None
+                    or value["error"] is None
+                ):
+                    _fail(f"{path} has contradictory rejected-event status")
+            elif value["durability"] != "acknowledged" or value["error"] is not None:
+                _fail(f"{path} has contradictory accepted-event status")
 
 
 def _parse_utc_timestamp(value: str, path: str) -> datetime:
@@ -201,7 +214,60 @@ def canonical_sha256(value: object) -> str:
 
 
 def _enforce_canonical_size(value: object, maximum: int) -> None:
-    _reject_non_finite(value)
+    active: set[int] = set()
+    frames: list[tuple[object, int, int]] = []
+    current = value
+    depth = 0
+    minimum_size = 1  # canonical_json appends one newline
+
+    while True:
+        if isinstance(current, float) and not math.isfinite(current):
+            _fail("canonical JSON cannot contain non-finite numbers")
+        if isinstance(current, str):
+            try:
+                for start in range(0, len(current), _STRING_CHUNK_SIZE):
+                    minimum_size += len(
+                        current[start : start + _STRING_CHUNK_SIZE].encode()
+                    )
+                    if minimum_size > maximum:
+                        _fail(
+                            "request exceeds the byte limit",
+                            code="RESOURCE_LIMIT",
+                        )
+            except UnicodeEncodeError as exc:
+                _fail(f"value is not canonical JSON: {exc}")
+        elif isinstance(current, dict):
+            if depth >= _MAX_JSON_DEPTH:
+                _fail("request exceeds the nesting limit", code="RESOURCE_LIMIT")
+            identity = id(current)
+            if identity in active:
+                _fail("value is not canonical JSON: circular reference")
+            active.add(identity)
+            children = (item for pair in current.items() for item in pair)
+            frames.append((children, depth + 1, identity))
+        elif isinstance(current, list):
+            if depth >= _MAX_JSON_DEPTH:
+                _fail("request exceeds the nesting limit", code="RESOURCE_LIMIT")
+            identity = id(current)
+            if identity in active:
+                _fail("value is not canonical JSON: circular reference")
+            active.add(identity)
+            frames.append((iter(current), depth + 1, identity))
+        elif current is not None and not isinstance(current, (bool, int, float)):
+            _fail(f"value is not canonical JSON: unsupported {type(current).__name__}")
+
+        while frames:
+            children, child_depth, identity = frames[-1]
+            try:
+                current = next(children)  # type: ignore[arg-type]
+                depth = child_depth
+                break
+            except StopIteration:
+                active.remove(identity)
+                frames.pop()
+        else:
+            break
+
     size = 1  # canonical_json appends one newline
     try:
         chunks = json.JSONEncoder(
@@ -214,7 +280,7 @@ def _enforce_canonical_size(value: object, maximum: int) -> None:
             size += len(chunk.encode())
             if size > maximum:
                 break
-    except (TypeError, ValueError) as exc:
+    except (RecursionError, TypeError, UnicodeEncodeError, ValueError) as exc:
         _fail(f"value is not canonical JSON: {exc}")
     if size > maximum:
         _fail("request exceeds the byte limit", code="RESOURCE_LIMIT")
@@ -303,6 +369,41 @@ class ProtocolValidator:
         elif operation == "finalize":
             self._phase = "finalized"
         return deepcopy(validated)
+
+    def validate_response(self, request: object, response: object) -> object:
+        if not isinstance(request, dict):
+            _fail("request must be an object")
+        operation = request.get("operation")
+        if operation not in _OPERATIONS:
+            _fail("unsupported operation", code="UNSUPPORTED_OPERATION")
+        _enforce_canonical_size(request, _MAX_REQUEST_BYTES)
+        validated_request = validate_definition(f"{operation}_request", request)
+        assert isinstance(validated_request, dict)
+        context = validated_request["context"]
+        assert isinstance(context, dict)
+        replay = self._replays.get(str(context["idempotency_key"]))
+        request_bytes = canonical_json(validated_request)
+        if replay is None or replay[0] != request_bytes:
+            _fail("response does not match an accepted request", code="CONFLICT")
+
+        validated_response = validate_definition(f"{operation}_response", response)
+        assert isinstance(validated_response, dict)
+        payload = validated_response["payload"]
+        assert isinstance(payload, dict)
+        if operation == "ingest":
+            request_payload = validated_request["payload"]
+            assert isinstance(request_payload, dict)
+            event_ids = [
+                event["event_id"] for event in request_payload["ordered_events"]
+            ]
+            status_ids = [status["event_id"] for status in payload["statuses"]]
+            if status_ids != event_ids:
+                _fail("ingest statuses do not match request event order")
+        elif operation in {"create_run", "finalize"}:
+            for key in ("run_id", "attempt_id"):
+                if payload[key] != context[key]:
+                    _fail(f"response {key} does not match request context")
+        return deepcopy(validated_response)
 
     def _operation_allowed(self, operation: str) -> bool:
         if self._phase == "new":
