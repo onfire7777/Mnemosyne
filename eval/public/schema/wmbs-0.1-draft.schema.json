@@ -304,6 +304,7 @@
           }
         },
         {
+          "required": ["error"],
           "properties": {
             "outcome": {"const": "rejected"},
             "durability": {"const": "not_acknowledged"},
@@ -403,7 +404,22 @@
           "items": {"$ref": "#/$defs/identifier"}
         },
         "adapter_metadata": {"$ref": "#/$defs/adapter_metadata"}
-      }
+      },
+      "oneOf": [
+        {
+          "required": ["answer_text"],
+          "properties": {
+            "answer_text": {"$ref": "#/$defs/nonempty_string"},
+            "abstained": {"const": false}
+          }
+        },
+        {
+          "properties": {
+            "answer_text": {"type": "null"},
+            "abstained": {"const": true}
+          }
+        }
+      ]
     },
     "usage_receipt": {
       "type": "object",

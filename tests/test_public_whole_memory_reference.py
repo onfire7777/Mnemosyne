@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
+from jsonschema import Draft202012Validator
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -836,7 +837,7 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "44641509b7c8de49eff5d39ac02b6c4b34bbd4849be0508f310c3e16e4bf015b"
+        == "fbd5356920da26bcdc496f2827881300dc4496e7e75455e3d1f43e73f8db1867"
     )
 
 
@@ -1048,6 +1049,33 @@ def test_response_binding_enforces_retrieval_budget_and_forced_answer() -> None:
     )
     with pytest.raises(abi.WholeMemoryValidationError):
         validator.validate_response(forced, abstained)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("abstained", "answer_text"),
+    [(False, None), (True, "contradictory answer")],
+)
+def test_normal_answer_response_enforces_answer_abstention_consistency(
+    abstained: bool,
+    answer_text: str | None,
+) -> None:
+    response = deepcopy(GOLDEN_RESPONSES["answer"])
+    response["payload"].update(  # type: ignore[union-attr]
+        {"abstained": abstained, "answer_text": answer_text}
+    )
+    validator = Draft202012Validator(SCHEMA).evolve(
+        schema=SCHEMA["$defs"]["answer_response"]
+    )
+    assert list(validator.iter_errors(response))
+
+    protocol_validator = _validator()
+    for operation in ("negotiate", "create_run"):
+        _complete_exchange(protocol_validator, operation)
+    request = GOLDEN_REQUESTS["answer"]
+    protocol_validator.validate_request(request)
+    with pytest.raises(abi.WholeMemoryValidationError):
+        protocol_validator.validate_response(request, response)
 
 
 @requires_abi
@@ -1399,6 +1427,25 @@ def test_ingest_status_outcome_matrix_fails_closed(
 
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_definition("ingest_response", response)
+
+
+@requires_abi
+def test_draft_2020_12_schema_requires_rejected_ingest_error() -> None:
+    response = deepcopy(GOLDEN_RESPONSES["ingest"])
+    status = response["payload"]["statuses"][0]  # type: ignore[index]
+    status.update(  # type: ignore[union-attr]
+        {
+            "outcome": "rejected",
+            "durability": "not_acknowledged",
+            "evidence_handle": None,
+        }
+    )
+    status.pop("error")  # type: ignore[union-attr]
+
+    validator = Draft202012Validator(SCHEMA).evolve(
+        schema=SCHEMA["$defs"]["ingest_response"]
+    )
+    assert list(validator.iter_errors(response))
 
 
 @requires_abi
