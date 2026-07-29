@@ -1,6 +1,6 @@
 {
   "calibration_artifact": {
-    "artifact_sha256": "960bf98510b968fb2a3f3f255ec61f3514f0ab764e58641141023b4f0089ec47",
+    "artifact_sha256": "52814b7019f3c58495305dfc9cb75341e57265f57839f4cb3d1b4bd04769a167",
     "baseline_manifests": {
       "bm25": {
         "artifact_sha256": "f3a90a9315a65453e1c79e32275ed3b93fa03959c370b535ba99b4f46bee6481",
@@ -208,6 +208,7 @@
     "calibration_split_manifest_sha256": "74655e1c8c58ca31d79989b812efe530608927e2c500f2ae577a0f2455d04e9a",
     "derivation_rule": "useful_coverage_floor = round(calibration_metrics['no-memory']['useful_coverage'] + 0.10, 4). The no-memory baseline has zero retrieval evidence by construction, so its useful_coverage on the calibration partition is 0.0 unless it both answers and stays under the fixed risk ceiling -- which it structurally cannot do without evidence. The fixed +0.10 margin is the only free parameter in this rule, and it is applied exactly once, here, to freeze the floor into this artifact; it is never recomputed per scoring run from whatever the baseline/scorer code currently does.",
     "schema_id": "wmbs-m10-development/calibration-artifact/0.1",
+    "scored_split_manifest_sha256": "100b5ad0286b7b5725d8b773948d5b63490b4c2ae90b6421835dad361ff92cbf",
     "useful_coverage_floor": 0.1
   },
   "cases": [
