@@ -177,7 +177,9 @@ set -euo pipefail
 test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"
 test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
-git merge-base --is-ancestor 8d64f554c565edeb0c43868ff6d436e6e09df33a main
+git fetch --prune origin
+test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
+git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md

@@ -105,10 +105,10 @@ ledger fixtures remain open.
 
 - Create: `eval/public/schema/wmbs-0.1-draft.schema.json`
 - Create: `eval/public/adapters/whole_memory_reference.py`
-- Create: `leaderboard/schema/result-v2.schema.json`
+- Deferred to Task 10: `leaderboard/schema/result-v2.schema.json`
 - Create: `tests/test_public_whole_memory_reference.py`
-- Modify: `tests/test_leaderboard_result_contract.py`
-- Modify: `tests/test_leaderboard_ledger.py`
+- Deferred to Task 10: `tests/test_leaderboard_result_contract.py`
+- Deferred to Task 10: `tests/test_leaderboard_ledger.py`
 
 **Interfaces:**
 

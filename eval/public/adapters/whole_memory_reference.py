@@ -345,7 +345,8 @@ def _resolve_artifact_reference(
     _, separator, expected_digest = reference.rpartition("@sha256:")
     if not separator:
         _fail(f"{path} is not a digest reference")
-    if isinstance(artifact, Mapping) and "artifact_sha256" in artifact:
+    schema_id = artifact.get("schema_id") if isinstance(artifact, Mapping) else None
+    if schema_id == reference.rpartition("@sha256:")[0]:
         actual_digest = canonical_artifact_sha256(artifact)
     else:
         actual_digest = canonical_sha256(artifact)
@@ -528,6 +529,17 @@ def validate_definition(definition: str, value: object) -> object:
                     or network.is_link_local
                     or network.is_reserved
                     or network.is_private
+                    or any(
+                        network.overlaps(ipaddress.ip_network(block))
+                        for block in (
+                            "10.0.0.0/8",
+                            "100.64.0.0/10",
+                            "172.16.0.0/12",
+                            "192.168.0.0/16",
+                            "fc00::/7",
+                        )
+                        if network.version == ipaddress.ip_network(block).version
+                    )
                 ):
                     _fail("$.egress IP ranges must be globally routable")
     if definition == "FeasibilityRecord":
