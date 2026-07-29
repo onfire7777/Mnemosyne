@@ -8,12 +8,21 @@ This module owns exactly two things, per the design specification at
 1. A deterministic, seed-pinned generator for a bounded development fixture
    containing mixed events, exact duplicates, near duplicates, malformed
    rows, stable event IDs, and restart boundaries. The frozen output is
-   committed at `eval/public/fixtures/wmbs-m01-development.json`.
+   committed at `eval/public/fixtures/wmbs-m01-development.json` as the
+   exact `canonical_json()` bytes of `generate_fixture(DEFAULT_SEED)`
+   (`fixture_sha256=e6db3c36963179123fc5aa4c760631c7841438e5f276e9c322cca3ce99a2ad5f`)
+   -- the committed file's raw bytes, not merely a re-serialization of its
+   parsed value, are what `generate_fixture` reproduces.
 2. A pure, stdlib-only scorer that consumes normalized fixture expectations
-   plus externally supplied capture/replay receipts and scores zero
-   acknowledged-write loss, zero exact-duplicate materialization, schema
-   outcome accuracy, provenance-field retention, and canonical replay
-   equality, including a reopen/export projection case.
+   plus externally supplied capture receipts and a reopen/export
+   durable-state projection, and scores zero acknowledged-write loss (rows
+   expected to become durable only), rejection-receipt completeness (rows
+   expected to be rejected, scored separately so a missing rejection
+   receipt is never mislabeled as acknowledged-write loss), zero
+   exact-duplicate materialization (bound to the durable-state export, not
+   the capture receipt's claimed outcome), schema outcome accuracy,
+   provenance-field retention, and canonical replay equality over a closed
+   receipt-field projection, including a reopen/export projection case.
 
 Admission state: PROPOSED. This module makes no official, superiority,
 pilot-ready, operator, hardware, protected, network, model, or database
@@ -87,6 +96,60 @@ _MALFORMATION_KINDS = (
 )
 
 _SENTINEL_MISSING = object()
+
+_TOP_LEVEL_FIXTURE_KEYS = frozenset(
+    {
+        "fixture_id",
+        "schema_id",
+        "module_id",
+        "generator_id",
+        "generator_version",
+        "seed",
+        "base_event_count",
+        "exact_duplicate_count",
+        "near_duplicate_count",
+        "malformed_count",
+        "total_row_count",
+        "exact_duplicate_ratio",
+        "near_duplicate_ratio",
+        "restart_boundary_row_ids",
+        "rows",
+        "fixture_sha256",
+    }
+)
+
+_COMMON_ROW_KEYS = frozenset(
+    {
+        "fixture_row_id",
+        "row_kind",
+        "restart_boundary_before",
+        "event_id",
+        "raw_event",
+        "expected_outcome",
+        "expected_error_code",
+        "relation",
+    }
+)
+
+_ROW_KIND_EXTRA_KEYS: dict[str, frozenset[str]] = {
+    "primary": frozenset(),
+    "exact_duplicate": frozenset({"retry_received_at"}),
+    "near_duplicate": frozenset(),
+    "malformed": frozenset({"malformation_kind"}),
+}
+
+_ROW_KIND_COUNT_FIELDS: dict[str, str] = {
+    "primary": "base_event_count",
+    "exact_duplicate": "exact_duplicate_count",
+    "near_duplicate": "near_duplicate_count",
+    "malformed": "malformed_count",
+}
+
+_CANONICAL_REPLAY_SEMANTIC_FIELDS = ("fixture_row_id", "outcome", "durability", "error")
+_CANONICAL_REPLAY_VOLATILE_FIELDS = ("evidence_handle",)
+_CANONICAL_REPLAY_KNOWN_FIELDS = frozenset(
+    _CANONICAL_REPLAY_SEMANTIC_FIELDS
+) | frozenset(_CANONICAL_REPLAY_VOLATILE_FIELDS)
 
 
 class WmbsM01Error(ValueError):
@@ -218,8 +281,11 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
         retry_ingestion_time = tail_time + timedelta(
             seconds=_EVENT_STEP_SECONDS * position
         )
+        # Replay the complete original raw event unchanged: an "exact
+        # duplicate" that mutates any field of raw_event (including
+        # ingestion_time) is not actually exact. Retry timing is recorded
+        # on the row, outside raw_event, where it belongs.
         raw_event = dict(source_row["raw_event"])
-        raw_event["ingestion_time"] = _format_ts(retry_ingestion_time)
         row_id = _next_row_id()
         is_boundary = position == 0
         if is_boundary:
@@ -231,6 +297,7 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
                 "restart_boundary_before": is_boundary,
                 "event_id": source_row["event_id"],
                 "raw_event": raw_event,
+                "retry_received_at": _format_ts(retry_ingestion_time),
                 "expected_outcome": "deduplicated",
                 "expected_error_code": None,
                 "relation": {
@@ -324,6 +391,7 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
         "rows": rows,
     }
     fixture["fixture_sha256"] = _fixture_digest(fixture)
+    validate_fixture(fixture)
     return fixture
 
 
@@ -332,15 +400,112 @@ def _fixture_digest(fixture_without_digest: Mapping[str, Any]) -> str:
     return canonical_sha256(payload)
 
 
+def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Fail-closed structural validation of a fixture, before it is scored.
+
+    Checks, in order: the top-level key set is closed (schema identity is
+    part of this -- `schema_id`/`module_id` must be present and correct),
+    every row has a closed key set for its `row_kind`, `fixture_row_id`
+    values are unique, declared row counts match the actual rows, and the
+    recorded digest matches. Returns `fixture` unchanged on success.
+
+    This does not validate `raw_event` contents: `malformed` rows
+    deliberately violate the portable-event schema, since that is the
+    scorer input they exist to exercise.
+    """
+    if not isinstance(fixture, Mapping):
+        raise WmbsM01Error("fixture payload must be a mapping")
+
+    top_level_keys = set(fixture)
+    missing_top_level = _TOP_LEVEL_FIXTURE_KEYS - top_level_keys
+    unknown_top_level = top_level_keys - _TOP_LEVEL_FIXTURE_KEYS
+    if missing_top_level or unknown_top_level:
+        raise WmbsM01Error(
+            "fixture has a non-closed top-level key set: "
+            f"missing={sorted(missing_top_level)} unknown={sorted(unknown_top_level)}"
+        )
+
+    if fixture["schema_id"] != FIXTURE_SCHEMA_ID:
+        raise WmbsM01Error(
+            f"fixture schema_id {fixture['schema_id']!r} does not match "
+            f"{FIXTURE_SCHEMA_ID!r}"
+        )
+    if fixture["module_id"] != MODULE_ID:
+        raise WmbsM01Error(
+            f"fixture module_id {fixture['module_id']!r} does not match {MODULE_ID!r}"
+        )
+
+    rows = fixture["rows"]
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        raise WmbsM01Error("fixture rows must be a sequence")
+
+    row_ids: list[str] = []
+    kind_counts: dict[str, int] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise WmbsM01Error(f"fixture row[{index}] must be a mapping")
+        row_id = row.get("fixture_row_id")
+        if not isinstance(row_id, str) or not row_id:
+            raise WmbsM01Error(f"fixture row[{index}] has an invalid fixture_row_id")
+        row_ids.append(row_id)
+
+        kind = row.get("row_kind")
+        extra_keys = _ROW_KIND_EXTRA_KEYS.get(kind)
+        if extra_keys is None:
+            raise WmbsM01Error(
+                f"fixture row {row_id!r} has an unknown row_kind: {kind!r}"
+            )
+        allowed_keys = _COMMON_ROW_KEYS | extra_keys
+        row_keys = set(row)
+        missing_row = allowed_keys - row_keys
+        unknown_row = row_keys - allowed_keys
+        if missing_row or unknown_row:
+            raise WmbsM01Error(
+                f"fixture row {row_id!r} has a non-closed key set: "
+                f"missing={sorted(missing_row)} unknown={sorted(unknown_row)}"
+            )
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+
+    if len(row_ids) != len(set(row_ids)):
+        raise WmbsM01Error("fixture rows contain duplicate fixture_row_id values")
+
+    declared_total = fixture["total_row_count"]
+    if declared_total != (
+        fixture["base_event_count"]
+        + fixture["exact_duplicate_count"]
+        + fixture["near_duplicate_count"]
+        + fixture["malformed_count"]
+    ):
+        raise WmbsM01Error(
+            "fixture total_row_count does not match the sum of its parts"
+        )
+    if len(rows) != declared_total:
+        raise WmbsM01Error(
+            f"fixture declares {declared_total} rows but contains {len(rows)}"
+        )
+    for kind, count_field in _ROW_KIND_COUNT_FIELDS.items():
+        actual = kind_counts.get(kind, 0)
+        declared = fixture[count_field]
+        if actual != declared:
+            raise WmbsM01Error(
+                f"fixture {count_field}={declared} does not match {actual} "
+                f"observed {kind!r} rows"
+            )
+
+    recorded_digest = fixture.get("fixture_sha256")
+    expected_digest = _fixture_digest(fixture)
+    if recorded_digest != expected_digest:
+        raise WmbsM01Error("fixture digest mismatch; the frozen fixture was mutated")
+
+    return fixture
+
+
 def load_fixture(path: Path = FIXTURE_PATH) -> dict[str, Any]:
-    """Load and digest-verify the frozen fixture at `path`."""
+    """Load and fully validate (schema, counts, uniqueness, keys, digest)."""
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise WmbsM01Error("fixture payload must be a JSON object")
-    recorded = payload.get("fixture_sha256")
-    expected = _fixture_digest(payload)
-    if recorded != expected:
-        raise WmbsM01Error("fixture digest mismatch; the frozen fixture was mutated")
+    validate_fixture(payload)
     return payload
 
 
@@ -351,6 +516,7 @@ def load_fixture(path: Path = FIXTURE_PATH) -> dict[str, Any]:
 
 def normalize_fixture(fixture: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     """Project each fixture row to its scored expectation, keyed by row ID."""
+    validate_fixture(fixture)
     normalized: dict[str, dict[str, Any]] = {}
     for row in fixture["rows"]:
         row_id = row["fixture_row_id"]
@@ -371,6 +537,7 @@ def _materialized_provenance(fixture: Mapping[str, Any]) -> dict[str, dict[str, 
     with their `primary` source and must not materialize a second record.
     `malformed` rows are excluded: they are expected to be rejected.
     """
+    validate_fixture(fixture)
     materialized: dict[str, dict[str, Any]] = {}
     for row in fixture["rows"]:
         if row["row_kind"] in ("primary", "near_duplicate"):
@@ -430,12 +597,18 @@ def perfect_export_rows(fixture: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def _index_receipts(
     receipts: Sequence[Mapping[str, Any]],
+    known_row_ids: Sequence[str] | set[str],
 ) -> dict[str, Mapping[str, Any]]:
+    known = known_row_ids if isinstance(known_row_ids, set) else set(known_row_ids)
     indexed: dict[str, Mapping[str, Any]] = {}
     for receipt in receipts:
         row_id = receipt.get("fixture_row_id")
         if not isinstance(row_id, str) or not row_id:
             raise WmbsM01Error("capture receipt is missing fixture_row_id")
+        if row_id not in known:
+            raise WmbsM01Error(
+                f"capture receipt references unknown fixture_row_id: {row_id!r}"
+            )
         if row_id in indexed:
             raise WmbsM01Error(f"duplicate capture receipt for {row_id}")
         indexed[row_id] = receipt
@@ -450,17 +623,21 @@ def _index_receipts(
 def score_acknowledged_write_loss(
     fixture: Mapping[str, Any], receipts: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
+    """Rows expected to become durable (`accepted`/`deduplicated`) only.
+
+    A missing or non-acknowledged receipt for a `rejected`-expected row is
+    not scored here: see `score_rejection_receipt_completeness`, which is
+    the correct home for that failure mode.
+    """
     normalized = normalize_fixture(fixture)
-    receipts_by_row = _index_receipts(receipts)
+    receipts_by_row = _index_receipts(receipts, set(normalized))
     lost_rows: list[str] = []
     for row_id, expectation in normalized.items():
-        receipt = receipts_by_row.get(row_id)
-        if receipt is None:
-            lost_rows.append(row_id)
+        if expectation["expected_outcome"] not in ("accepted", "deduplicated"):
             continue
-        if expectation["expected_outcome"] in ("accepted", "deduplicated"):
-            if receipt.get("durability") != "acknowledged":
-                lost_rows.append(row_id)
+        receipt = receipts_by_row.get(row_id)
+        if receipt is None or receipt.get("durability") != "acknowledged":
+            lost_rows.append(row_id)
     return {
         "metric": "M01-ACK-LOSS",
         "loss_count": len(lost_rows),
@@ -469,24 +646,72 @@ def score_acknowledged_write_loss(
     }
 
 
-def score_exact_duplicate_materialization(
+def score_rejection_receipt_completeness(
     fixture: Mapping[str, Any], receipts: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
+    """Rows expected to be `rejected` must still receive a receipt.
+
+    A missing receipt for such a row is not acknowledged-write loss (that
+    row was never supposed to become durable): it is the harness silently
+    swallowing the row instead of returning a rejection receipt. This is a
+    distinct completeness dimension, kept separate from
+    `score_acknowledged_write_loss` so the two failure modes cannot be
+    conflated or averaged away.
+    """
     normalized = normalize_fixture(fixture)
-    receipts_by_row = _index_receipts(receipts)
-    materialized_rows: list[str] = []
+    receipts_by_row = _index_receipts(receipts, set(normalized))
+    incomplete_rows: list[str] = []
     for row_id, expectation in normalized.items():
-        if expectation["row_kind"] != "exact_duplicate":
+        if expectation["expected_outcome"] != "rejected":
             continue
-        receipt = receipts_by_row.get(row_id)
-        if receipt is not None and receipt.get("outcome") == "accepted":
-            materialized_rows.append(row_id)
+        if row_id not in receipts_by_row:
+            incomplete_rows.append(row_id)
+    return {
+        "metric": "M01-REJECTION-RECEIPT-COMPLETENESS",
+        "incomplete_count": len(incomplete_rows),
+        "incomplete_row_ids": tuple(sorted(incomplete_rows)),
+        "passed": len(incomplete_rows) == 0,
+    }
+
+
+def score_exact_duplicate_materialization(
+    fixture: Mapping[str, Any], exported_rows: Sequence[Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Prove zero duplicate materializations from the durable-state export.
+
+    A capture receipt claiming `outcome == "deduplicated"` is not proof
+    that the store holds zero duplicate materializations: the receipt could
+    be wrong, or the store could materialize a second record despite it.
+    This binds `M-DEDUP-EXACT` to the reopened/exported durable-state
+    projection (`exported_rows`, e.g. from `perfect_export_rows` or a real
+    reopen/export call) and counts materializations per canonical event
+    identity (`event_id`), for every identity that a fixture-defined
+    exact-duplicate row targets.
+    """
+    normalized = normalize_fixture(fixture)
+    exact_duplicate_event_ids = {
+        expectation["event_id"]
+        for expectation in normalized.values()
+        if expectation["row_kind"] == "exact_duplicate"
+    }
+    materialization_counts: dict[str, int] = {}
+    for row in exported_rows:
+        event_id = row.get("event_id")
+        if event_id is None:
+            continue
+        materialization_counts[event_id] = materialization_counts.get(event_id, 0) + 1
+
+    materialized_event_ids = sorted(
+        event_id
+        for event_id in exact_duplicate_event_ids
+        if materialization_counts.get(event_id, 0) > 1
+    )
     return {
         "metric": "M-DEDUP-EXACT",
-        "materialized_count": len(materialized_rows),
-        "materialized_row_ids": tuple(sorted(materialized_rows)),
-        "score": 1.0 if not materialized_rows else 0.0,
-        "passed": not materialized_rows,
+        "materialized_count": len(materialized_event_ids),
+        "materialized_event_ids": tuple(materialized_event_ids),
+        "score": 1.0 if not materialized_event_ids else 0.0,
+        "passed": not materialized_event_ids,
     }
 
 
@@ -494,7 +719,7 @@ def score_schema_outcome_accuracy(
     fixture: Mapping[str, Any], receipts: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
     normalized = normalize_fixture(fixture)
-    receipts_by_row = _index_receipts(receipts)
+    receipts_by_row = _index_receipts(receipts, set(normalized))
     total = len(normalized)
     correct = 0
     mismatches: list[str] = []
@@ -595,16 +820,58 @@ def score_reopen_export_projection(
     }
 
 
+def canonical_replay_projection(
+    receipts: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Project a capture-receipt payload to the closed M01 replay ABI.
+
+    Allowlists exactly the semantic capture-receipt fields (`fixture_row_id`,
+    `outcome`, `durability`, `error`) that must be byte-identical across five
+    clean runs and one crash/restart replay, per
+    `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+    Task 4 ("Canonical replay projection excludes runtime timestamps and host
+    paths") and Task 9 (volatile-field exclusion list). It explicitly
+    excludes only the volatile runtime field this pilot's receipt shape can
+    carry -- `evidence_handle`, a runtime-generated per-attempt pointer, the
+    M01 analogue of Task 9's "runtime-generated receipt IDs".
+
+    Any field outside both sets is unrecognized and rejected fail-closed:
+    hashing an arbitrary caller payload would let an unreviewed field either
+    silently break reproducibility (if semantic) or silently mask a real
+    divergence (if actually volatile but never declared so).
+    """
+    projected: list[dict[str, Any]] = []
+    for index, receipt in enumerate(receipts):
+        if not isinstance(receipt, Mapping):
+            raise WmbsM01Error(f"canonical replay payload[{index}] must be a mapping")
+        unknown = set(receipt) - _CANONICAL_REPLAY_KNOWN_FIELDS
+        if unknown:
+            raise WmbsM01Error(
+                f"canonical replay payload[{index}] has unrecognized field(s): "
+                f"{sorted(unknown)}"
+            )
+        projected.append(
+            {field: receipt.get(field) for field in _CANONICAL_REPLAY_SEMANTIC_FIELDS}
+        )
+    return projected
+
+
 def score_canonical_replay_equality(
-    clean_run_payloads: Sequence[Any], restart_replay_payload: Any
+    clean_run_payloads: Sequence[Sequence[Mapping[str, Any]]],
+    restart_replay_payload: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     if len(clean_run_payloads) < MIN_CLEAN_REPLAY_RUNS:
         raise WmbsM01Error(
             f"canonical replay equality requires at least {MIN_CLEAN_REPLAY_RUNS} clean runs, "
             f"got {len(clean_run_payloads)}"
         )
-    clean_digests = tuple(canonical_sha256(payload) for payload in clean_run_payloads)
-    restart_digest = canonical_sha256(restart_replay_payload)
+    clean_digests = tuple(
+        canonical_sha256(canonical_replay_projection(payload))
+        for payload in clean_run_payloads
+    )
+    restart_digest = canonical_sha256(
+        canonical_replay_projection(restart_replay_payload)
+    )
     unique_digests = set(clean_digests) | {restart_digest}
     return {
         "metric": "M01-CANONICAL-REPLAY-EQUALITY",
@@ -616,25 +883,35 @@ def score_canonical_replay_equality(
 
 
 def score_capture(
-    fixture: Mapping[str, Any], receipts: Sequence[Mapping[str, Any]]
+    fixture: Mapping[str, Any],
+    receipts: Sequence[Mapping[str, Any]],
+    exported_rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Aggregate the three receipt-only capture dimensions.
+    """Aggregate the four capture dimensions this pilot scores together.
 
-    Provenance retention, reopen/export projection, and canonical replay
-    equality are scored separately because they take projection/replay
-    inputs that a receipt-only run does not necessarily produce.
+    `exact_duplicate_materialization` is bound to `exported_rows` (the
+    reopened/exported durable-state projection), not to `receipts` alone: a
+    receipt claiming `deduplicated` is not proof of zero materialization.
+    Provenance retention and canonical replay equality are scored
+    separately because they take projection/replay inputs shaped
+    differently from a single capture run's receipts plus export.
     """
     acknowledged_write_loss = score_acknowledged_write_loss(fixture, receipts)
-    exact_duplicate_materialization = score_exact_duplicate_materialization(
+    rejection_receipt_completeness = score_rejection_receipt_completeness(
         fixture, receipts
+    )
+    exact_duplicate_materialization = score_exact_duplicate_materialization(
+        fixture, exported_rows
     )
     schema_outcome_accuracy = score_schema_outcome_accuracy(fixture, receipts)
     return {
         "acknowledged_write_loss": acknowledged_write_loss,
+        "rejection_receipt_completeness": rejection_receipt_completeness,
         "exact_duplicate_materialization": exact_duplicate_materialization,
         "schema_outcome_accuracy": schema_outcome_accuracy,
         "passed": (
             acknowledged_write_loss["passed"]
+            and rejection_receipt_completeness["passed"]
             and exact_duplicate_materialization["passed"]
             and schema_outcome_accuracy["passed"]
         ),
