@@ -169,7 +169,7 @@
       "additionalProperties": false,
       "required": ["reason"],
       "properties": {
-        "reason": {"$ref": "#/$defs/short_string"}
+        "reason": {"enum": ["completed", "cancelled"]}
       }
     },
     "negotiate_request": {
