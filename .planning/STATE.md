@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 source work is delivered but CAP-003/BENCH-005 and 12-04-03 remain operator-measurement gated; Phase 16 source preparation is merged through PR #72 at main@b9c475ad, with every real launch and publication gate still open."
-last_updated: "2026-07-26T18:20:00Z"
-last_activity: 2026-07-26
+stopped_at: "Whole-memory closed ABI and remediation are merged through PR #80 at main@28805ccf; fresh-main M01/M10 common-harness integration is the next dependency-ready increment. Result-v2, sandbox enforcement, Phase 12 measurement, and Phase 16 launch/publication gates remain open."
+last_updated: "2026-07-29T20:53:36Z"
+last_activity: 2026-07-29
 progress:
   total_phases: 7
   completed_phases: 2
@@ -54,6 +54,19 @@ operator-entry evidence, or human-approved publication is claimed. The
 controlling details are in `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`,
 and the six `docs/plans/2026-07-25-phase16-*` /
 `docs/plans/2026-07-26-phase16-*` records.
+
+## Whole-Memory Pilot Status
+
+PR #79 merged the closed ABI at
+`main@a95fe4d291093253f8ce49adff32ba875a35e884`; bounded remediation head
+`0d42f9436397a04e12ceaa3bdbd60d925e2640e9` merged by PR #80 at
+`main@28805ccf54f99f098a5abc23fe6f1155400d0f22`, and exact-merge CI run
+`30484986865` completed green. The next safe action is fresh-main
+common-harness integration of the reviewed M01 and M10 development cores,
+followed by the narrow M03 valid-time slice and the M01→M03→M10 replay path.
+Result-v2 remains blocked by the protected signed-publication lease, and the
+sandbox branch remains quarantined until real enforcement exists. No benchmark,
+launch, or publication gate advanced.
 
 ## Performance Metrics
 
