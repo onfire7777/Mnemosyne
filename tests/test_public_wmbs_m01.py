@@ -47,10 +47,17 @@ def test_fixture_file_exists_and_is_self_describing() -> None:
 
 
 def test_generate_fixture_reproduces_committed_bytes_from_pinned_seed() -> None:
+    """The frozen fixture file is committed as canonical JSON bytes.
+
+    This compares the generator's canonical serialization against the raw
+    bytes actually on disk, not against a re-serialization of parsed JSON:
+    a byte-reproduction claim that only compares two independently
+    re-encoded values does not prove the committed file matches the
+    generator.
+    """
     regenerated = wmbs_m01.generate_fixture(wmbs_m01.DEFAULT_SEED)
-    committed = _load_committed_fixture()
-    assert regenerated == committed
-    assert wmbs_m01.canonical_json(regenerated) == wmbs_m01.canonical_json(committed)
+    committed_bytes = FIXTURE_PATH.read_bytes()
+    assert wmbs_m01.canonical_json(regenerated) == committed_bytes
 
 
 def test_generate_fixture_is_seed_sensitive() -> None:
@@ -120,6 +127,13 @@ def test_primary_events_have_stable_unique_event_ids_and_monotonic_times() -> No
 
 
 def test_exact_duplicate_rows_replay_the_source_event_verbatim() -> None:
+    """The replayed `raw_event` is byte-identical to the source event.
+
+    Retry timing is not part of the replayed event: mutating
+    `ingestion_time` inside `raw_event` would mean the "exact duplicate"
+    replay is not actually exact. Retry timing is recorded separately on
+    the row, outside `raw_event`.
+    """
     fixture = wmbs_m01.load_fixture()
     primaries_by_id = {
         row["event_id"]: row for row in fixture["rows"] if row["row_kind"] == "primary"
@@ -134,14 +148,20 @@ def test_exact_duplicate_rows_replay_the_source_event_verbatim() -> None:
         assert dup["relation"]["kind"] == "exact_duplicate_of"
         assert dup["event_id"] == source_id
         source = primaries_by_id[source_id]
-        assert dup["raw_event"]["content"] == source["raw_event"]["content"]
-        assert (
-            dup["raw_event"]["content_sha256"] == source["raw_event"]["content_sha256"]
-        )
-        assert dup["raw_event"]["event_time"] == source["raw_event"]["event_time"]
-        assert (
-            dup["raw_event"]["ingestion_time"] != source["raw_event"]["ingestion_time"]
-        )
+        assert dup["raw_event"] == source["raw_event"]
+        assert "retry_received_at" not in dup["raw_event"]
+        assert isinstance(dup["retry_received_at"], str)
+        assert dup["retry_received_at"] != source["raw_event"]["ingestion_time"]
+
+
+def test_exact_duplicate_retry_timing_is_distinct_per_replay() -> None:
+    fixture = wmbs_m01.load_fixture()
+    exact_duplicates = [
+        row for row in fixture["rows"] if row["row_kind"] == "exact_duplicate"
+    ]
+    retry_times = [row["retry_received_at"] for row in exact_duplicates]
+    assert len(retry_times) == len(exact_duplicates)
+    assert len(retry_times) == len(set(retry_times))
 
 
 def test_near_duplicate_rows_are_distinct_accepted_events() -> None:
@@ -203,9 +223,11 @@ def test_restart_boundaries_are_recorded_and_referenced() -> None:
 def test_golden_payload_1_perfect_run_passes_all_capture_dimensions() -> None:
     fixture = wmbs_m01.load_fixture()
     receipts = wmbs_m01.perfect_receipts(fixture)
-    result = wmbs_m01.score_capture(fixture, receipts)
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    result = wmbs_m01.score_capture(fixture, receipts, exported)
     assert result["passed"] is True
     assert result["acknowledged_write_loss"]["loss_count"] == 0
+    assert result["rejection_receipt_completeness"]["incomplete_count"] == 0
     assert result["exact_duplicate_materialization"]["materialized_count"] == 0
     assert result["schema_outcome_accuracy"]["accuracy"] == 1.0
 
@@ -228,7 +250,8 @@ def test_golden_payload_2_acknowledged_write_loss_is_detected() -> None:
     assert loss["loss_count"] == 1
     assert target["fixture_row_id"] in loss["lost_row_ids"]
 
-    result = wmbs_m01.score_capture(fixture, receipts)
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    result = wmbs_m01.score_capture(fixture, receipts, exported)
     assert result["passed"] is False
 
 
@@ -245,12 +268,76 @@ def test_golden_payload_2b_a_missing_receipt_is_also_acknowledged_write_loss() -
     assert target["fixture_row_id"] in loss["lost_row_ids"]
 
 
+def test_golden_payload_2c_a_missing_rejected_receipt_is_not_acknowledged_write_loss() -> (
+    None
+):
+    """A missing receipt for a `rejected`-expected row is a distinct failure.
+
+    It must not be mislabeled as acknowledged-write loss, which is scoped to
+    rows that were expected to become durable (`accepted`/`deduplicated`).
+    """
+    fixture = wmbs_m01.load_fixture()
+    target = _row(fixture, "malformed")
+    receipts = [
+        receipt
+        for receipt in wmbs_m01.perfect_receipts(fixture)
+        if receipt["fixture_row_id"] != target["fixture_row_id"]
+    ]
+
+    loss = wmbs_m01.score_acknowledged_write_loss(fixture, receipts)
+    assert loss["passed"] is True
+    assert target["fixture_row_id"] not in loss["lost_row_ids"]
+
+    completeness = wmbs_m01.score_rejection_receipt_completeness(fixture, receipts)
+    assert completeness["passed"] is False
+    assert completeness["incomplete_count"] == 1
+    assert target["fixture_row_id"] in completeness["incomplete_row_ids"]
+
+
+def test_rejection_receipt_completeness_passes_for_a_perfect_run() -> None:
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    completeness = wmbs_m01.score_rejection_receipt_completeness(fixture, receipts)
+    assert completeness["passed"] is True
+    assert completeness["incomplete_count"] == 0
+    assert completeness["incomplete_row_ids"] == ()
+
+
 # ---------------------------------------------------------------------------
 # Scorer: golden payload 3 — exact duplicate materialization is detected
 # ---------------------------------------------------------------------------
 
 
 def test_golden_payload_3_exact_duplicate_materialization_is_detected() -> None:
+    """A receipt claiming `deduplicated` is not proof of zero materialization.
+
+    This binds `M-DEDUP-EXACT` to the reopened/exported durable-state
+    projection and counts materializations per canonical event identity
+    (`event_id`), rather than trusting the capture receipt's outcome.
+    """
+    fixture = wmbs_m01.load_fixture()
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    target = _row(fixture, "exact_duplicate")
+    duplicated_record = next(
+        record for record in exported if record["event_id"] == target["event_id"]
+    )
+    exported = [*exported, dict(duplicated_record)]
+
+    dedup = wmbs_m01.score_exact_duplicate_materialization(fixture, exported)
+    assert dedup["passed"] is False
+    assert dedup["materialized_count"] == 1
+    assert dedup["score"] == 0.0
+    assert target["event_id"] in dedup["materialized_event_ids"]
+
+
+def test_exact_duplicate_materialization_ignores_the_untrustworthy_receipt_outcome() -> (
+    None
+):
+    """A receipt lying about `outcome` must not move this metric.
+
+    The exported durable state is the only evidence this scorer trusts, per
+    the fix to `M-DEDUP-EXACT`.
+    """
     fixture = wmbs_m01.load_fixture()
     receipts = wmbs_m01.perfect_receipts(fixture)
     target = _row(fixture, "exact_duplicate")
@@ -259,11 +346,10 @@ def test_golden_payload_3_exact_duplicate_materialization_is_detected() -> None:
             receipt["outcome"] = "accepted"
             receipt["error"] = None
 
-    dedup = wmbs_m01.score_exact_duplicate_materialization(fixture, receipts)
-    assert dedup["passed"] is False
-    assert dedup["materialized_count"] == 1
-    assert dedup["score"] == 0.0
-    assert target["fixture_row_id"] in dedup["materialized_row_ids"]
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    dedup = wmbs_m01.score_exact_duplicate_materialization(fixture, exported)
+    assert dedup["passed"] is True
+    assert dedup["materialized_count"] == 0
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +472,83 @@ def test_reopen_export_projection_detects_duplicate_exported_rows() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Canonical replay projection — closed ABI, not an arbitrary-payload hash
+# ---------------------------------------------------------------------------
+
+
+def test_canonical_replay_projection_allowlists_semantic_fields_and_drops_volatile() -> (
+    None
+):
+    receipt = {
+        "fixture_row_id": "row-00000",
+        "outcome": "accepted",
+        "durability": "acknowledged",
+        "evidence_handle": "evidence-row-00000",
+        "error": None,
+    }
+    projected = wmbs_m01.canonical_replay_projection([receipt])
+    assert projected == [
+        {
+            "fixture_row_id": "row-00000",
+            "outcome": "accepted",
+            "durability": "acknowledged",
+            "error": None,
+        }
+    ]
+
+
+def test_canonical_replay_projection_rejects_an_unrecognized_field() -> None:
+    receipt = {
+        "fixture_row_id": "row-00000",
+        "outcome": "accepted",
+        "durability": "acknowledged",
+        "evidence_handle": None,
+        "error": None,
+        "wall_clock_ns": 12345,
+    }
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection([receipt])
+
+
+def test_canonical_replay_equality_ignores_the_volatile_evidence_handle_field() -> None:
+    """A per-run evidence handle is a runtime-generated pointer, not semantic.
+
+    A fully faithful implementation may legitimately mint a fresh handle on
+    every run; canonical replay equality must not fail because of it.
+    """
+    fixture = wmbs_m01.load_fixture()
+    base = wmbs_m01.perfect_receipts(fixture)
+    clean_runs = []
+    for run_index in range(5):
+        run = copy.deepcopy(base)
+        for receipt in run:
+            if receipt["evidence_handle"] is not None:
+                receipt["evidence_handle"] = (
+                    f"{receipt['evidence_handle']}-run{run_index}"
+                )
+        clean_runs.append(run)
+    restart_run = copy.deepcopy(base)
+    for receipt in restart_run:
+        if receipt["evidence_handle"] is not None:
+            receipt["evidence_handle"] = f"{receipt['evidence_handle']}-restart"
+
+    result = wmbs_m01.score_canonical_replay_equality(clean_runs, restart_run)
+    assert result["passed"] is True
+    assert result["unique_digest_count"] == 1
+
+
+def test_canonical_replay_equality_rejects_a_payload_with_an_unrecognized_field() -> (
+    None
+):
+    fixture = wmbs_m01.load_fixture()
+    payload = wmbs_m01.perfect_receipts(fixture)
+    payload[0]["host_path"] = "/tmp/whatever"
+    clean_runs = [copy.deepcopy(payload) for _ in range(5)]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.score_canonical_replay_equality(clean_runs, copy.deepcopy(payload))
+
+
+# ---------------------------------------------------------------------------
 # Canonical replay equality
 # ---------------------------------------------------------------------------
 
@@ -444,6 +607,116 @@ def test_index_receipts_rejects_a_duplicate_fixture_row_id() -> None:
     receipts.append(dict(receipts[0]))
     with pytest.raises(wmbs_m01.WmbsM01Error):
         wmbs_m01.score_schema_outcome_accuracy(fixture, receipts)
+
+
+def test_index_receipts_rejects_an_unknown_fixture_row_id() -> None:
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    receipts.append(
+        {
+            "fixture_row_id": "row-99999",
+            "outcome": "accepted",
+            "durability": "acknowledged",
+            "evidence_handle": "evidence-row-99999",
+            "error": None,
+        }
+    )
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.score_schema_outcome_accuracy(fixture, receipts)
+
+
+def test_index_receipts_rejects_an_unknown_row_id_in_acknowledged_write_loss() -> None:
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    receipts.append(
+        {
+            "fixture_row_id": "row-99999",
+            "outcome": "accepted",
+            "durability": "acknowledged",
+            "evidence_handle": "evidence-row-99999",
+            "error": None,
+        }
+    )
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.score_acknowledged_write_loss(fixture, receipts)
+
+
+# ---------------------------------------------------------------------------
+# Fixture validation — schema identity, counts, uniqueness, closed keys, digest
+# ---------------------------------------------------------------------------
+
+
+def test_validate_fixture_accepts_the_committed_fixture() -> None:
+    fixture = _load_committed_fixture()
+    assert wmbs_m01.validate_fixture(fixture) is fixture
+
+
+def test_validate_fixture_rejects_a_wrong_schema_id() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["schema_id"] = "not-the-real-schema"
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_an_unknown_top_level_key() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["unexpected_field"] = "surprise"
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_a_missing_top_level_key() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    del fixture["seed"]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_a_declared_count_mismatch() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["base_event_count"] = fixture["base_event_count"] - 1
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_duplicate_fixture_row_ids() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["rows"][1]["fixture_row_id"] = fixture["rows"][0]["fixture_row_id"]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_an_unknown_row_key() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["rows"][0]["unexpected_row_field"] = "surprise"
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_a_missing_row_key() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    del fixture["rows"][0]["expected_error_code"]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_an_unknown_row_kind() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["rows"][0]["row_kind"] = "not_a_real_kind"
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_validate_fixture_rejects_a_tampered_digest() -> None:
+    fixture = copy.deepcopy(_load_committed_fixture())
+    fixture["rows"][0]["raw_event"]["content"] = "tampered content"
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.validate_fixture(fixture)
+
+
+def test_generate_fixture_output_passes_validate_fixture() -> None:
+    fixture = wmbs_m01.generate_fixture(wmbs_m01.DEFAULT_SEED)
+    assert wmbs_m01.validate_fixture(fixture) is fixture
 
 
 # ---------------------------------------------------------------------------
