@@ -931,6 +931,29 @@
         "abort_status": {"enum": ["completed", "aborted", "failed"]}
       }
     },
+    "SmokeReceipt": {
+      "$anchor": "SmokeReceipt",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_id",
+        "artifact_sha256",
+        "identity",
+        "outcome",
+        "sandbox_receipt_sha256",
+        "resource_receipt_sha256",
+        "result_ref"
+      ],
+      "properties": {
+        "schema_id": {"const": "urn:wmbs:0.1-draft#SmokeReceipt"},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "identity": {"$ref": "#/$defs/feasibility_identity"},
+        "outcome": {"enum": ["passed", "failed"]},
+        "sandbox_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "resource_receipt_sha256": {"$ref": "#/$defs/sha256"},
+        "result_ref": {"$ref": "#/$defs/digest_reference"}
+      }
+    },
     "feasibility_identity": {
       "type": "object",
       "additionalProperties": false,
@@ -1025,6 +1048,7 @@
         "replay_protocol",
         "sandbox_receipt_ref",
         "resource_receipt_ref",
+        "smoke_receipt_ref",
         "software_data_bom_ref",
         "result_contract",
         "deferral_condition",
@@ -1072,6 +1096,12 @@
         "resource_receipt_ref": {
           "anyOf": [
             {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#ResourceReceipt@sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
+        },
+        "smoke_receipt_ref": {
+          "anyOf": [
+            {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#SmokeReceipt@sha256:[0-9a-f]{64}$"},
             {"type": "null"}
           ]
         },

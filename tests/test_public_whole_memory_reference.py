@@ -55,6 +55,7 @@ DEADLINE = "2026-07-29T00:00:00Z"
 DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
 DIGEST_C = "c" * 64
+CONTENT_DIGEST = "b38a5228f3971be99ca2e8fbe4459f7fc1299b97e694970b68fb7240cfdfcdb1"
 L16_PROFILE_DIGEST = (
     "aef321c0ac53c043ddebfde8b3a8b27cafc145443700867cc0bbe9ef892cee40"
 )
@@ -130,7 +131,7 @@ GOLDEN_REQUESTS = {
                     "ingestion_time": "2026-07-28T12:00:01Z",
                     "valid_from": "2026-07-28T12:00:00Z",
                     "valid_to": None,
-                    "content_sha256": DIGEST_A,
+                    "content_sha256": CONTENT_DIGEST,
                     "modality_handle": None,
                     "public_metadata": {"source": "golden"},
                 }
@@ -414,6 +415,24 @@ EVIDENCE_FIXTURES = {
         abort_status="completed",
     ),
 }
+SMOKE_RESULT = {
+    "identity": {
+        "module_id": "M01",
+        "module_version": "0.1.0",
+        "source_commit": "1" * 40,
+        "owner_ids": ["WMB-P1", "M15"],
+    },
+    "attempt_state": "finalized",
+    "outcome": "passed",
+}
+EVIDENCE_FIXTURES["SmokeReceipt"] = _artifact(
+    "urn:wmbs:0.1-draft#SmokeReceipt",
+    identity=deepcopy(SMOKE_RESULT["identity"]),
+    outcome="passed",
+    sandbox_receipt_sha256=EVIDENCE_FIXTURES["SandboxReceipt"]["artifact_sha256"],
+    resource_receipt_sha256=EVIDENCE_FIXTURES["ResourceReceipt"]["artifact_sha256"],
+    result_ref="result-v1@sha256:" + abi.canonical_sha256(SMOKE_RESULT),
+)
 EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
     "urn:wmbs:0.1-draft#FeasibilityRecord",
     identity={
@@ -451,6 +470,7 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
         + EVIDENCE_FIXTURES["SandboxReceipt"]["artifact_sha256"]  # type: ignore[operator]
     ),
     resource_receipt_ref=None,
+    smoke_receipt_ref=None,
     software_data_bom_ref=(
         "urn:wmbs:0.1-draft#SoftwareDataBOM@sha256:"
         + EVIDENCE_FIXTURES["SoftwareDataBOM"]["artifact_sha256"]  # type: ignore[operator]
@@ -490,6 +510,7 @@ def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]
         ("power_plan_ref", "PowerPlan"),
         ("sandbox_receipt_ref", "SandboxReceipt"),
         ("resource_receipt_ref", "ResourceReceipt"),
+        ("smoke_receipt_ref", "SmokeReceipt"),
         ("software_data_bom_ref", "SoftwareDataBOM"),
     ]:
         artifact = EVIDENCE_FIXTURES[definition]
@@ -498,6 +519,9 @@ def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]
         )
         record[field] = reference
         artifacts[reference] = artifact
+    smoke_result_ref = EVIDENCE_FIXTURES["SmokeReceipt"]["result_ref"]
+    assert isinstance(smoke_result_ref, str)
+    artifacts[smoke_result_ref] = SMOKE_RESULT
     return record, artifacts
 
 
@@ -834,8 +858,20 @@ def test_request_shape_rejections_fail_closed(
 
 
 @requires_abi
+def test_portable_event_digest_binds_utf8_content() -> None:
+    request = deepcopy(GOLDEN_REQUESTS["ingest"])
+    request["payload"]["ordered_events"][0]["content_sha256"] = "0" * 64  # type: ignore[index]
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="content_sha256 does not match content",
+    ):
+        abi.validate_definition("ingest_request", request)
+
+
+@requires_abi
 @pytest.mark.parametrize(("definition", "payload"), EVIDENCE_FIXTURES.items())
-def test_all_six_evidence_definitions_are_digest_bound_and_valid(
+def test_all_evidence_definitions_are_digest_bound_and_valid(
     definition: str, payload: dict[str, object]
 ) -> None:
     assert abi.validate_definition(definition, payload) == payload
@@ -900,6 +936,63 @@ def test_evidence_bundle_resolves_every_feasibility_reference() -> None:
     }
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_evidence_bundle(record, changed)
+
+
+@requires_abi
+def test_pilot_readiness_binds_smoke_to_exact_module_and_result() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    record = _rebind_artifact(record)
+    assert abi.validate_evidence_bundle(record, artifacts) == record
+
+    mismatched = deepcopy(record)
+    mismatched["identity"]["module_id"] = "M20"  # type: ignore[index]
+    mismatched = _rebind_artifact(mismatched)
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="smoke receipt does not match the feasibility identity",
+    ):
+        abi.validate_evidence_bundle(mismatched, artifacts)
+
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    missing_result = deepcopy(artifacts)
+    result_ref = EVIDENCE_FIXTURES["SmokeReceipt"]["result_ref"]
+    assert isinstance(result_ref, str)
+    missing_result.pop(result_ref)
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="smoke result does not resolve",
+    ):
+        abi.validate_evidence_bundle(record, missing_result)
+
+    mismatched_result = deepcopy(SMOKE_RESULT)
+    mismatched_result["identity"]["module_id"] = "M20"  # type: ignore[index]
+    replacement_result_ref = (
+        "result-v1@sha256:" + abi.canonical_sha256(mismatched_result)
+    )
+    smoke = deepcopy(EVIDENCE_FIXTURES["SmokeReceipt"])
+    smoke["result_ref"] = replacement_result_ref
+    smoke = _rebind_artifact(smoke)
+    rebound_record = deepcopy(record)
+    rebound_record["smoke_receipt_ref"] = (
+        f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    )
+    rebound_record = _rebind_artifact(rebound_record)
+    mismatched_artifacts = deepcopy(artifacts)
+    mismatched_artifacts[rebound_record["smoke_receipt_ref"]] = smoke
+    mismatched_artifacts[replacement_result_ref] = mismatched_result
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="smoke result does not prove the exact passing attempt",
+    ):
+        abi.validate_evidence_bundle(rebound_record, mismatched_artifacts)
 
 
 @requires_abi
@@ -1174,6 +1267,37 @@ def test_pilot_readiness_requires_enforced_offline_l16_controls(
         match="pilot readiness requires enforced offline L16 controls",
     ):
         abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    "ip_range",
+    ["0.0.0.0/0", "::/0", "224.0.0.0/4", "ff00::/8", "100.64.0.0/10"],
+)
+def test_sandbox_receipt_rejects_cidrs_containing_non_public_addresses(
+    ip_range: str,
+) -> None:
+    receipt = deepcopy(EVIDENCE_FIXTURES["SandboxReceipt"])
+    receipt["egress"] = {
+        "mode": "metered-allowlist",
+        "endpoints": [
+            {
+                "endpoint": "external",
+                "dns_names": ["example.com"],
+                "ip_ranges": [ip_range],
+                "protocols": ["https"],
+            }
+        ],
+        "block_cloud_metadata": True,
+        "block_private_ranges": True,
+    }
+    receipt = _rebind_artifact(receipt)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="globally routable",
+    ):
+        abi.validate_definition("SandboxReceipt", receipt)
 
 
 @requires_abi
@@ -1493,7 +1617,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "c628b7a1c0f40117ea54f9d759b5308f46debaec988f515d1fec2609f1d7312e"
+        == "1dc5e1cb5e9a265d3e4274d94eeb0d122da2c09a1c79102a8a7fc88fdf26c58c"
     )
 
 
@@ -1925,6 +2049,26 @@ def test_identical_idempotent_replay_survives_original_deadline() -> None:
     current_time[0] = datetime(2026, 7, 30, 12, tzinfo=UTC)
 
     assert validator.validate_request(deepcopy(request)) == first
+
+
+@requires_abi
+def test_first_response_must_arrive_before_deadline_but_frozen_replay_survives() -> None:
+    current_time = [datetime(2026, 7, 28, 12, tzinfo=UTC)]
+    validator = abi.ProtocolValidator(now=lambda: current_time[0])
+    request = deepcopy(GOLDEN_REQUESTS["negotiate"])
+    request["context"]["deadline_utc"] = "2026-07-28T12:00:01Z"  # type: ignore[index]
+    validator.validate_request(request)
+    current_time[0] = datetime(2026, 7, 28, 12, 0, 1, tzinfo=UTC)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as expired:
+        validator.validate_response(request, GOLDEN_RESPONSES["negotiate"])
+    assert _error_code(expired) == "DEADLINE_EXCEEDED"
+    assert validator._responses == {}
+
+    current_time[0] = datetime(2026, 7, 28, 12, 0, 0, tzinfo=UTC)
+    response = validator.validate_response(request, GOLDEN_RESPONSES["negotiate"])
+    current_time[0] = datetime(2026, 7, 28, 12, 0, 2, tzinfo=UTC)
+    assert validator.validate_response(request, deepcopy(response)) == response
 
 
 @requires_abi
