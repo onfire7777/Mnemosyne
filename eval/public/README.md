@@ -96,12 +96,16 @@ The adapter exports `canonical_json`, `canonical_sha256`,
 Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation
 requires canonical UTC deadlines, one stable tenant/run/attempt scope,
 monotonically increasing sequences, unique request IDs, and identical content
-for idempotent replay. `WholeMemoryValidationError.code` carries one of the
-closed protocol error codes.
+for idempotent replay. `ProtocolValidator.validate_response` binds receipts to
+accepted requests, including exact ingest event order and receipt scope.
+`WholeMemoryValidationError.code` carries one of the closed protocol error
+codes.
 
 Portable events require `valid_to` to be null or no earlier than `valid_from`.
 Retrieval hits use contiguous ranks `1..N` in response order and unique
-`stable_item_id` values.
+`stable_item_id` values. Accepted and deduplicated ingest statuses must be
+acknowledged and error-free; rejected statuses must be unacknowledged, carry an
+error, and omit an evidence handle.
 
 The protocol version remains `wmbs/0.1-draft`; the compound JSON Schema uses
 the absolute ID `urn:wmbs:0.1-draft`. Its public evidence IDs are:
@@ -116,10 +120,10 @@ M15 replay freezes canonical payload `m15-v1`, exactly five runs, and required
 clean-process replay. Canonical projection excludes only `path`,
 `rss_samples_bytes`, `runtime_timestamp_utc`, `signature`, and `wall_time_ms`.
 
-The in-memory validator admits at most 10,000 requests, 16 MiB per request, and
-64 MiB of retained canonical request bytes. It performs no persistence,
-network, model, benchmark, ranking, or publication work. Run its contract suite
-with:
+The in-memory validator admits at most 10,000 requests, 16 MiB per request, 64
+levels of JSON nesting, and 64 MiB of retained canonical request bytes. It
+performs no persistence, network, model, benchmark, ranking, or publication
+work. Run its contract suite with:
 
 ```bash
 uv run --locked python -m pytest tests/test_public_whole_memory_reference.py -q
