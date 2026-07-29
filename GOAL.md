@@ -1,106 +1,184 @@
-# Goal: Phase 13 BEAM Reader and Judge Configuration Contract
+# Goal: Whole-Memory Pilot and Dependency-Ready Mnemosyne Continuation
 
 ## Objective
 
-Implement `P13-BEAM-B`, the next dependency-ready BENCH-006 source package:
-extend the existing BEAM disclosure adapter with a deterministic, fail-closed
-reader-and-judge configuration contract that reuses the public harness QA
-metadata conventions.
+Continuously advance the authoritative Mnemosyne program from this dedicated
+GoalEx worktree. First land and implement the smallest trustworthy whole-memory
+reference-harness pilot authorized by the owner-landed hardened specification
+and implementation plan. After that pilot is merged and exact-head CI is green,
+reassess the canonical GSD roadmap and advance only the highest-value
+dependency-ready, lease-disjoint source task.
 
-This package prepares production source only. It must not download or run BEAM,
-invoke a reader or judge, invent measurements, publish a claim, access protected
-Phase 12 production evidence, or perform Phase 15 hardware proof.
+GoalEx is the cross-task coordinator. RalphEx may execute one bounded round
+under GoalEx, but RalphEx never selects the program direction.
 
-## Verified Baseline
+## Authority
 
-`main@2834834a` includes the merged P13-BEAM-A disclosure envelope. Exact
-post-merge main CI run `30232339515` succeeded. CBM was refreshed to 21,074
-nodes and 96,260 edges, and Gbrain source `mnemosyne-code` synced this milestone
-once.
+This goal does not create a second roadmap. Task status and dependency order
+remain owned by:
 
-## Controlling Sources
-
-- `.planning/ROADMAP.md` — Phase 13
-- `.planning/REQUIREMENTS.md` — BENCH-006 and RAIL-001..004
 - `.planning/STATE.md`
-- `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` — M1.5 and PBPP
-- `docs/superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md` — Phase 3
-- `eval/public/runner.py` and existing QA bundle metadata conventions
+- `.planning/ROADMAP.md`
+- `.planning/REQUIREMENTS.md`
+- `.planning/MILESTONES.md`
+- approved repository plans and specifications
+- live GitHub PR, review, and CI state
 
-## Exact Lease
+The proposed whole-memory standard and pilot plan become executable authority
+only after their current owner provides a clean exact-commit handoff or lands
+them on canonical `main`. Both files now exist in this branch from the latest
+verified clean handoff `605ecd3ddf7faf308f664f0869e5e2eb431afa7d`:
 
-- `GOAL.md`
-- `eval/public/adapters/beam.py`
-- `tests/test_public_beam.py`
-- `docs/plans/2026-07-26-phase13-beam-adapter.md`
+- `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
+- `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 
-No other tracked path may change. `GOAL.md` and the round plan may update their
-own task and verification state.
+Do not copy, edit, commit, stash, reset, or otherwise consume uncommitted work
+from `/Users/admin/Mnemosyne.codex-whole-memory-benchmark-spec`. Do not touch
+`/Users/admin/Mnemosyne.codex-phase16-signed-publication`; both are external
+leases until their owners land or hand them off.
 
-## Acceptance Contract
+## Current Phase
 
-- Reuse the existing public QA reader/judge/config metadata conventions; do not
-  invent a parallel bundle schema or duplicate shared validation.
-- Bind a fully disclosed reader model/config, judge model/prompt, and exact
-  content digests into one deterministic source-only BEAM contract.
-- Reject missing, extra, ambiguous, boolean, non-finite, unpinned, or
-  non-canonical metadata through the existing BEAM-specific error boundary.
-- Detach all returned nested values and canonicalize nested mapping order.
-- Require no filesystem, network, dataset, model, judge, CLI, production, or
-  hardware access.
-- Add focused RED tests first, observe the intended failures, then implement the
-  smallest standard-library/shared-flow change.
-- Run native all-Sol-low review, focused tests, unrestricted MCP-extra full
-  pytest, full Ruff, diff, exact-lease, risky-file, and secret checks.
-- Use the normal branch → PR → exact-head CI/reviews → normal merge flow.
+**Admitted — WMBS-A/WMB-P1 authority and contract freeze.**
 
-## Operating Contract
+The benchmark-spec owner completed a clean, validated, local-only handoff at
+`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`. The committed documents were
+imported byte-for-byte; the owner worktree remains untouched. The first selected
+work item is WMBS-A/WMB-P1: freeze authority, traceability, the closed ABI, and
+fail-closed validation for the minimal non-ranking development pilot.
 
-- Native RalphEx only: plan/task/review `gpt-5.6-sol:low`, Codex executor,
-  external review none, workspace-write, at most 12 iterations.
-- Work only in this Worktrunk checkout and exact lease.
-- Hermes dispatch remains zero; no fleet or legacy automation binding.
-- Apply Ponytail, TDD, receiving-review, systematic-debugging, and
-  verification-before-completion where triggered.
-- Use CBM first for code structure, context-mode for large output, and Gbrain
-  only after a coherent merged milestone.
-- Never direct-push main, force-push, bypass hooks/checks, dismiss reviews,
-  fabricate evidence, or run protected production/hardware gates.
+## Scope
 
-## Tasks
+Once the activation gate passes:
 
-### Task 1: Freeze the source-only configuration behavior
+1. Reconcile the landed whole-memory standard against the current GSD state,
+   roadmap, requirements, blueprint, PBPP, public harness, result-v1, ledger,
+   custody, and publication contracts.
+2. Execute the owner-approved pilot plan in dependency order with one active
+   exact implementation lease at a time.
+3. Prefer the smallest feasible pilot: closed ABI and validators, development
+   sandbox/metering receipt, existing public-runner registration, and only the
+   explicitly authorized M01/M03-valid-time/M10/M12/M13/M15/M20 development
+   cells.
+4. Preserve official-suite comparability and keep official, enhanced, and
+   exploratory evidence separate.
+5. After each normally merged round, refresh live `main`, GitHub gates, CBM,
+   and durable Gbrain knowledge before selecting another task.
+6. After the pilot is merged, continue only with the next dependency-ready
+   source phase already present in the canonical GSD roadmap.
 
-- [x] Inspect the existing QA reader/judge/config shared conventions and record
-  the smallest reusable interface in the round plan.
-- [x] Add focused RED tests for canonical valid metadata and fail-closed inputs.
-- [x] Commit only the RED contract and accurate task receipt. The supervisor
-  repaired the linked-worktree Git metadata boundary after 13 expected
-  missing-feature failures, 23 existing passing tests, and clean focused Ruff.
+## Non-Goals
 
-### Task 2: Implement the minimum shared-flow extension
+- No benchmark ranking, certification, superiority, launch, or production
+  claim without held-out reproducible evidence and the required human approval.
+- No official external benchmark substitution with synthetic or development
+  fixtures.
+- No production, hardware, custody, protected-dataset, paid-provider, or
+  operator evidence fabrication.
+- No publication, leaderboard activation, or result-v1 reinterpretation.
+- No parallel benchmark lifecycle, runner, evidence store, result ledger, or
+  roadmap.
+- No Hermes fleet enablement and no direct writes to canonical `main`.
+- No speculative implementation of all twenty modules.
 
-- [x] Add the smallest dependency-free BEAM reader/judge configuration builder.
-- [x] Make focused tests green without I/O or execution.
-- [x] Commit only the implementation and accurate task receipt. Focused
-  verification passed 36 tests and clean Ruff without dataset, model, judge,
-  filesystem, or network execution.
+## Approval and Operator Gates
 
-### Task 3: Review and deliver
+The following remain blocked unless their owning canonical contract and human
+operator supply the required evidence:
 
-- [x] Complete native review and repair only reproduced in-lease findings.
-  Five independent passes found and repaired mutable model pins, nested boolean
-  metadata, direct validation coverage gaps, and stale task documentation.
-- [x] Complete authoritative local verification and safety gates. Focused
-  pytest passes 52 tests, full Ruff passes, and the clean-head unrestricted
-  `uv run --extra mcp pytest -q` suite exits 0. Diff, exact-lease, risky-file,
-  and secret checks pass.
-- [ ] Push, open/update the PR, clear exact-head CI and both reviewers, and
-  merge normally.
-- [ ] Verify exact post-merge main CI, then refresh CBM/Gbrain once.
+- Tier-B production validation and real-provider-forbid-local receipts.
+- Protected or licensed dataset access and official external-suite execution.
+- P32/H8 or other hardware-profile measurements.
+- PBPP publication eligibility, signed custody, neutral/independent review
+  labels, and public leaderboard activation.
+- Any comparative or superiority claim.
 
-## Completion
+An unavailable gate is recorded with its owner, missing evidence, and next safe
+action. It is never widened, bypassed, averaged away, or relabeled as complete.
 
-Finish only after normal merge and exact post-merge main CI. This package does
-not complete BENCH-006; BEAM execution, measured results, and publication remain
-separate protected work.
+## Bounded Task-Selection Rules
+
+For every GoalEx round:
+
+1. Refresh canonical `main`, worktrees, dirty state, active tasks/processes,
+   open PRs, reviews, CI, usage, and resource gates.
+2. Reject any task that is dependency-blocked, operator-gated, leased, stale,
+   broader than an approved plan, or merely housekeeping when substantive
+   dependency-ready product or benchmark engineering exists.
+3. Select exactly one highest-value task on an isolated Worktrunk branch with
+   an explicit file lease. Preserve unowned dirty work and prevent redundant
+   writers.
+4. Apply Ponytail fully: reuse current contracts/code, then stdlib/platform,
+   then installed dependencies; make the smallest tested root-cause change
+   without speculative abstractions or dependencies.
+5. Use context-mode for large output and resumable analysis. Refresh/query CBM
+   before broad code reads, run impact analysis for risky diffs, and update ADRs
+   only for genuine source-grounded architecture decisions.
+6. Use GSD as lifecycle authority and only the relevant Superpowers checkpoint:
+   approved design/planning, isolated worktrees, TDD, debugging, execution,
+   review, verification, or branch completion.
+7. Review trust boundaries, secrets, supply chain, failure modes, evidence
+   language, and result compatibility. Push normally; require a PR, exact-head
+   tests, review/thread/mergeability clearance, and post-merge `main` proof.
+   Never force-push, bypass hooks, dismiss findings, or write directly to main.
+8. After merge, safely fast-forward canonical local `main`, prove it equals
+   clean `origin/main`, refresh CBM once, and sync one deduplicated durable
+   Gbrain milestone rather than transient session facts.
+9. Update only affected GSD state, plans, canonical docs, architecture/ADRs,
+   benchmark contracts, and the real owner-discovered wiki. Never create a
+   second wiki, roadmap, memory owner, or duplicate canonical content.
+10. Self-repair routine transport, sandbox, CI, auth-independent, worktree, and
+    review issues. Escalate only safety, authority, protected-environment, or
+    product-direction decisions, then reassess the next lease-disjoint package.
+
+## Runtime Contract
+
+- Dedicated worktree:
+  `/Users/admin/.codex/worktrees/9697/Mnemosyne`
+- Branch: `codex/goalex-whole-memory-pilot`
+- GoalEx planner/verifier: isolated derived launcher
+  `.goalex/bin/goalex-sol` using `gpt-5.6-sol:medium`.
+- Bounded RalphEx plan, task, and review stages: `gpt-5.6-sol:medium`.
+- Claude/Fable planning, dual planning, dual review, and Hermes are disabled.
+- Bounded guards: at most 20 rounds per process, three consecutive execution
+  failures, three consecutive no-commit stalls, 15-minute idle timeout, and
+  two-hour per-session timeout.
+- Hermes fleet remains off.
+
+## Success Evidence
+
+The whole-memory pilot milestone requires all of:
+
+- owner-landed or exact-commit-handed-off hardened specification and
+  implementation plan;
+- reviewed closed ABI, deterministic fixtures/generators, scorers, baselines,
+  inferential plan, sandbox/metering contract, BOM/rights disclosures, resource
+  receipts, and result-v1-compatible additive evidence contract;
+- only honest development labels such as `PILOT-READY-DEV`,
+  `publishable:false`, and `pbpp_headline_eligible:false`;
+- focused and applicable full tests, Ruff, documentation/reference checks,
+  security review, diff/lease/risky-file/secret checks;
+- normal PR review, exact-head CI, merge, and exact post-merge main CI;
+- refreshed CBM and a source-grounded Gbrain milestone.
+
+The continuous program completes only when no approved dependency-ready source
+task remains. Operator-gated work may remain blocked, but its owner and missing
+evidence must be explicit.
+
+## Verification
+
+```bash
+set -euo pipefail
+test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"
+test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
+test -z "$(git status --porcelain)"
+test -f .planning/STATE.md
+test -f .planning/ROADMAP.md
+test -f .planning/REQUIREMENTS.md
+test -f docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
+test -f docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md
+grep -q 'Proposed subordinate standard' \
+  docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
+grep -q 'Whole-Memory Reference Harness and Pilot Modules Implementation Plan' \
+  docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md
+```
