@@ -442,6 +442,7 @@
           }
         },
         {
+          "required": ["answer_text"],
           "properties": {
             "answer_text": {"type": "null"},
             "abstained": {"const": true}
@@ -939,7 +940,21 @@
         },
         "block_cloud_metadata": {"const": true},
         "block_private_ranges": {"const": true}
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "mode": {"const": "deny"},
+            "endpoints": {"maxItems": 0}
+          }
+        },
+        {
+          "properties": {
+            "mode": {"const": "metered-allowlist"},
+            "endpoints": {"minItems": 1}
+          }
+        }
+      ]
     },
     "SandboxReceipt": {
       "$anchor": "SandboxReceipt",
