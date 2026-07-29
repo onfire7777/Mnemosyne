@@ -91,6 +91,11 @@ They define the closed development-only lifecycle
 `negotiate → create_run → ingest/retrieve/answer → finalize`; finalization is
 terminal.
 
+`finalize.reason` is closed to `completed` or `cancelled`. A successful
+`cancelled` finalization is terminal and uses identical idempotent request and
+response replay. Closed errors and negative finalize receipts leave the attempt
+active.
+
 The adapter exports `canonical_json`, `canonical_sha256`,
 `canonical_projection`, `validate_definition`, and `ProtocolValidator`.
 Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation

@@ -20,9 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = REPO_ROOT / "eval/public/schema/wmbs-0.1-draft.schema.json"
 ADAPTER_PATH = REPO_ROOT / "eval/public/adapters/whole_memory_reference.py"
 SCHEMA = (
-    json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    if SCHEMA_PATH.is_file()
-    else {}
+    json.loads(SCHEMA_PATH.read_text(encoding="utf-8")) if SCHEMA_PATH.is_file() else {}
 )
 ERROR_CODES = (
     "INVALID_REQUEST",
@@ -496,9 +494,7 @@ def _object_instances(
         for key, nested in value.items():
             nested_schema = properties.get(key)
             if isinstance(nested_schema, dict):
-                instances.extend(
-                    _object_instances(nested_schema, nested, (*path, key))
-                )
+                instances.extend(_object_instances(nested_schema, nested, (*path, key)))
         return instances
     if isinstance(value, list):
         item_schema = schema.get("items")
@@ -506,9 +502,7 @@ def _object_instances(
             return [
                 instance
                 for index, nested in enumerate(value)
-                for instance in _object_instances(
-                    item_schema, nested, (*path, index)
-                )
+                for instance in _object_instances(item_schema, nested, (*path, index))
             ]
     return []
 
@@ -598,9 +592,7 @@ def test_error_envelope_rejects_unknown_codes() -> None:
 @requires_abi
 def test_event_error_rejects_codes_outside_closed_set() -> None:
     with pytest.raises(abi.WholeMemoryValidationError) as exc:
-        abi.validate_definition(
-            "event_error", {"code": "UNKNOWN", "message": "closed"}
-        )
+        abi.validate_definition("event_error", {"code": "UNKNOWN", "message": "closed"})
 
     assert _error_code(exc) == "INVALID_REQUEST"
 
@@ -614,6 +606,22 @@ def test_usage_counters_reject_oversized_values() -> None:
         abi.validate_definition("finalize_response", response)
 
     assert _error_code(exc) == "INVALID_REQUEST"
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("abstained", "answer_text"),
+    [(True, "contradiction"), (False, None)],
+)
+def test_definition_validator_rejects_contradictory_answers(
+    abstained: bool, answer_text: str | None
+) -> None:
+    response = deepcopy(GOLDEN_RESPONSES["answer"])
+    response["payload"]["abstained"] = abstained  # type: ignore[index]
+    response["payload"]["answer_text"] = answer_text  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("answer_response", response)
 
 
 REQUEST_REJECTIONS: list[
@@ -675,7 +683,9 @@ REQUEST_REJECTIONS: list[
         "malformed digest",
         "ingest",
         lambda value: _set_key(
-            value, "payload.ordered_events", [{**value["payload"]["ordered_events"][0], "content_sha256": "bad"}]  # type: ignore[index]
+            value,
+            "payload.ordered_events",
+            [{**value["payload"]["ordered_events"][0], "content_sha256": "bad"}],  # type: ignore[index]
         ),
         "INVALID_REQUEST",
     ),
@@ -771,9 +781,7 @@ def test_feasibility_record_covers_all_fourteen_categories() -> None:
 
     for category in sorted(categories):
         with pytest.raises(abi.WholeMemoryValidationError) as exc:
-            abi.validate_definition(
-                "FeasibilityRecord", _drop_key(record, category)
-            )
+            abi.validate_definition("FeasibilityRecord", _drop_key(record, category))
         assert _error_code(exc) == "INVALID_REQUEST"
 
 
@@ -795,9 +803,7 @@ def test_feasibility_record_covers_all_fourteen_categories() -> None:
         ),
         (
             "SoftwareDataBOM",
-            lambda value: _set_key(
-                value, "datasets.0.declared_license", "not-spdx"
-            ),
+            lambda value: _set_key(value, "datasets.0.declared_license", "not-spdx"),
         ),
         (
             "SandboxReceipt",
@@ -834,10 +840,37 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 
 
 @requires_abi
+@pytest.mark.parametrize("function_name", ["canonical_json", "canonical_projection"])
+def test_canonical_helpers_reject_cycles_without_recursion_errors(
+    function_name: str,
+) -> None:
+    value: dict[str, object] = {}
+    value["self"] = value
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        getattr(abi, function_name)(value)
+
+
+@requires_abi
+@pytest.mark.parametrize("function_name", ["canonical_json", "canonical_projection"])
+def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
+    function_name: str,
+) -> None:
+    value: dict[str, object] = {}
+    for _ in range(1_200):
+        value = {"nested": value}
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        getattr(abi, function_name)(value)
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "fbd5356920da26bcdc496f2827881300dc4496e7e75455e3d1f43e73f8db1867"
+        == "0aa17bec2c4314b1d0353aca637be8b7d2b6a2ad9b9dfe79ebfc136f451be334"
     )
 
 
@@ -865,7 +898,9 @@ def test_schema_patterns_are_portable_and_closed() -> None:
     assert patterns
     assert objects
     assert all(item.get("additionalProperties") is False for item in objects)
-    assert all(pattern.startswith("^") and pattern.endswith("$") for pattern in patterns)
+    assert all(
+        pattern.startswith("^") and pattern.endswith("$") for pattern in patterns
+    )
     assert all(not pattern.startswith("(?") for pattern in patterns)
     assert re.search(schema["$defs"]["sha256"]["pattern"], "x" + DIGEST_A) is None
 
@@ -987,6 +1022,39 @@ def test_failed_finalize_response_preserves_active_phase() -> None:
     )
 
     assert validator.validate_request(retrieve) == retrieve
+
+
+@requires_abi
+def test_cancellation_is_closed_terminal_and_idempotent() -> None:
+    invalid = deepcopy(GOLDEN_REQUESTS["finalize"])
+    invalid["payload"]["reason"] = "arbitrary"  # type: ignore[index]
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("finalize_request", invalid)
+
+    validator = _validator()
+    for operation in ("negotiate", "create_run"):
+        _complete_exchange(validator, operation)
+    cancellation = deepcopy(GOLDEN_REQUESTS["finalize"])
+    cancellation["payload"]["reason"] = "cancelled"  # type: ignore[index]
+    validator.validate_request(cancellation)
+    validator.validate_response(cancellation, GOLDEN_RESPONSES["finalize"])
+
+    assert validator.validate_request(deepcopy(cancellation)) == cancellation
+    assert (
+        validator.validate_response(
+            deepcopy(cancellation), deepcopy(GOLDEN_RESPONSES["finalize"])
+        )
+        == GOLDEN_RESPONSES["finalize"]
+    )
+    with pytest.raises(abi.WholeMemoryValidationError) as terminal:
+        validator.validate_request(
+            _request(
+                "retrieve",
+                deepcopy(GOLDEN_REQUESTS["retrieve"]["payload"]),  # type: ignore[arg-type]
+                sequence=7,
+            )
+        )
+    assert _error_code(terminal) == "ORDER_VIOLATION"
 
 
 @requires_abi
@@ -1135,6 +1203,9 @@ def test_spec_optional_fields_may_be_omitted(
     paths: tuple[str, ...],
 ) -> None:
     value = deepcopy(source)
+    if definition == "answer_response":
+        value["payload"]["abstained"] = True  # type: ignore[index]
+        value["payload"]["answer_text"] = None  # type: ignore[index]
     for path in paths:
         value = _drop_key(value, path)
 
@@ -1504,9 +1575,7 @@ def test_protocol_validator_binds_receipt_scope_to_request_context() -> None:
         ({"operation": "purge"}, "UNSUPPORTED_OPERATION"),
     ],
 )
-def test_validator_entry_guards_fail_closed(
-    value: object, expected_code: str
-) -> None:
+def test_validator_entry_guards_fail_closed(value: object, expected_code: str) -> None:
     with pytest.raises(abi.WholeMemoryValidationError) as exc:
         _validator().validate_request(value)
 

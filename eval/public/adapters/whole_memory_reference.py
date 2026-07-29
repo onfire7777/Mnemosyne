@@ -83,6 +83,16 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
                 continue
             return
         _fail(f"{path} does not match any allowed shape")
+    if "oneOf" in schema:
+        matches = 0
+        for option in schema["oneOf"]:
+            try:
+                _validate(value, option, path)
+            except WholeMemoryValidationError:
+                continue
+            matches += 1
+        if matches != 1:
+            _fail(f"{path} must match exactly one allowed shape")
 
     expected = schema.get("type")
     if isinstance(expected, list):
@@ -168,8 +178,7 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
                 ):
                     _fail(f"{path} has contradictory rejected-event status")
             elif (
-                value["durability"] != "acknowledged"
-                or value.get("error") is not None
+                value["durability"] != "acknowledged" or value.get("error") is not None
             ):
                 _fail(f"{path} has contradictory accepted-event status")
 
@@ -186,20 +195,8 @@ def _parse_utc_timestamp(value: str, path: str) -> datetime:
     return parsed
 
 
-def _reject_non_finite(value: object) -> None:
-    if isinstance(value, float) and not math.isfinite(value):
-        _fail("canonical JSON cannot contain non-finite numbers")
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            _reject_non_finite(key)
-            _reject_non_finite(nested)
-    elif isinstance(value, list):
-        for nested in value:
-            _reject_non_finite(nested)
-
-
 def canonical_json(value: object) -> bytes:
-    _reject_non_finite(value)
+    _enforce_canonical_size(value, _MAX_RETAINED_BYTES, label="value")
     try:
         encoded = json.dumps(
             value,
@@ -293,15 +290,20 @@ def _enforce_canonical_size(
 
 
 def canonical_projection(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {
-            key: canonical_projection(nested)
-            for key, nested in value.items()
-            if key not in VOLATILE_FIELDS
-        }
-    if isinstance(value, list):
-        return [canonical_projection(nested) for nested in value]
-    return deepcopy(value)
+    _enforce_canonical_size(value, _MAX_RETAINED_BYTES, label="projection")
+
+    def project(nested: object) -> object:
+        if isinstance(nested, Mapping):
+            return {
+                key: project(item)
+                for key, item in nested.items()
+                if key not in VOLATILE_FIELDS
+            }
+        if isinstance(nested, list):
+            return [project(item) for item in nested]
+        return deepcopy(nested)
+
+    return project(value)
 
 
 def validate_definition(definition: str, value: object) -> object:
@@ -336,10 +338,14 @@ class ProtocolValidator:
         assert isinstance(validated, dict)
         context = validated["context"]
         assert isinstance(context, dict)
-        scope = tuple(str(context[key]) for key in ("tenant_id", "run_id", "attempt_id"))
+        scope = tuple(
+            str(context[key]) for key in ("tenant_id", "run_id", "attempt_id")
+        )
         if self._scope is not None and scope != self._scope:
             _fail("request scope changed", code="CONFLICT")
-        deadline = _parse_utc_timestamp(str(context["deadline_utc"]), "$.context.deadline_utc")
+        deadline = _parse_utc_timestamp(
+            str(context["deadline_utc"]), "$.context.deadline_utc"
+        )
         if deadline <= self._now():
             _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
 
@@ -348,7 +354,9 @@ class ProtocolValidator:
         replay = self._replays.get(idempotency_key)
         if replay is not None:
             if replay[0] != request_bytes:
-                _fail("idempotency key was reused for different content", code="CONFLICT")
+                _fail(
+                    "idempotency key was reused for different content", code="CONFLICT"
+                )
             return deepcopy(replay[1])
 
         request_id = str(context["request_id"])
