@@ -98,8 +98,11 @@ must exist for the claimed state.
 
 **Status:** Closed-ABI slice completed at source head
 `8d64f554c565edeb0c43868ff6d436e6e09df33a`, merged by PR #79 at
-`a95fe4d291093253f8ce49adff32ba875a35e884`. Result-v2 compatibility and
-ledger fixtures remain open.
+`a95fe4d291093253f8ce49adff32ba875a35e884`. Its bounded remediation merged by
+PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
+`30484986865` green. Result-v2 compatibility fixtures and local ledger support
+remain the next dependency-ready increment; neither was implemented during the
+remediation round.
 
 **Files:**
 
