@@ -15,11 +15,15 @@ Use Python 3.12 standard library only. Do not create another plan, modify result
 
 Live GitHub and process state could not be refreshed in the planner sandbox, so the executor must fail closed if an overlapping PR, process, or worktree lease is discovered.
 
-The post-merge review-remediation lease is limited to the three delivered
-artifacts plus `GOAL.md`, `README.md`, `docs/README.md`, this receipt, `eval/public/README.md`,
+The retained post-merge review-remediation payload is exactly the three
+delivered artifacts plus `GOAL.md`, `README.md`, this receipt,
+`eval/public/README.md`,
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`,
 `infra/scripts/runtime-exclusive-lock.sh`, and
-`tests/test_runtime_exclusive_lock.py`.
+`tests/test_runtime_exclusive_lock.py`. Earlier intermediate commits touched
+`docs/README.md`, a temporary coordination map, and
+`tests/test_production_mcp_client_cert_rotator.py`; none remains in the
+cumulative diff.
 
 ## Historical Source-Delivery Validation Commands
 - `set -euo pipefail; test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"; test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"; test -z "$(git status --porcelain)"`
