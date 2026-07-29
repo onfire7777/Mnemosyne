@@ -8,7 +8,7 @@ PR #79 already delivered the closed common ABI. Do not repeat rounds 10–12, st
 
 ## Validation Commands
 
-- `git fetch --prune origin && set -euo pipefail; test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"; test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"; test -z "$(git status --porcelain)"; test "$(git rev-parse main)" = "$(git rev-parse origin/main)"; git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 HEAD`
+- `set -euo pipefail; git fetch --prune origin; test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"; test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"; test -z "$(git status --porcelain)"; test "$(git rev-parse main)" = "$(git rev-parse origin/main)"; git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 HEAD`
 - `gh pr list --repo onfire7777/Mnemosyne --state open --json number,title,headRefName,headRefOid,mergeStateStatus,reviewDecision,statusCheckRollup`
 - `git diff --check main...HEAD && uv run ruff check eval/public/adapters/whole_memory_reference.py tests/test_public_whole_memory_reference.py tests/test_runtime_exclusive_lock.py`
 - `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_whole_memory_reference.py tests/test_runtime_exclusive_lock.py`
