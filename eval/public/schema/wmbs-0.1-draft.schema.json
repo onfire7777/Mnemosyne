@@ -41,6 +41,10 @@
       "maxLength": 512,
       "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
     },
+    "result_reference": {
+      "type": "string",
+      "pattern": "^result-v[12]@sha256:[0-9a-f]{64}$"
+    },
     "spdx_expression": {
       "enum": [
         "0BSD",
@@ -951,7 +955,7 @@
         "outcome": {"enum": ["passed", "failed"]},
         "sandbox_receipt_sha256": {"$ref": "#/$defs/sha256"},
         "resource_receipt_sha256": {"$ref": "#/$defs/sha256"},
-        "result_ref": {"$ref": "#/$defs/digest_reference"}
+        "result_ref": {"$ref": "#/$defs/result_reference"}
       }
     },
     "feasibility_identity": {

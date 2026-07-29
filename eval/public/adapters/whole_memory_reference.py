@@ -278,7 +278,6 @@ def canonical_json(value: object) -> bytes:
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
-            ensure_ascii=False,
         )
     except (TypeError, ValueError) as exc:
         _fail(f"value is not canonical JSON: {exc}")
@@ -397,7 +396,6 @@ def _enforce_canonical_size(
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
-            ensure_ascii=False,
         ).iterencode(value)
         for chunk in chunks:
             size += len(chunk.encode())
@@ -601,8 +599,10 @@ def validate_evidence_bundle(
         result_contract = record["result_contract"]
         if (
             not isinstance(result_contract, Mapping)
-            or result_contract.get("attempt_state") != "finalized"
+            or result_id != result_contract.get("schema_version")
         ):
+            _fail("smoke result does not match the feasibility result contract")
+        if result_contract.get("attempt_state") != "finalized":
             _fail("pilot readiness requires a finalized attempt")
     return deepcopy(record)
 
