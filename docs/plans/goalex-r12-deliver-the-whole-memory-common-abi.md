@@ -37,7 +37,7 @@ cumulative diff.
 
 ## Post-Merge Review Validation Command
 
-- `paths="$({ git diff --name-only main; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(GOAL\.md|README\.md|docs/README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|infra/scripts/runtime-exclusive-lock\.sh|tests/test_public_whole_memory_reference\.py|tests/test_runtime_exclusive_lock\.py)$')"`
+- `paths="$({ git diff --name-only main; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(GOAL\.md|README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|infra/scripts/runtime-exclusive-lock\.sh|tests/test_public_whole_memory_reference\.py|tests/test_runtime_exclusive_lock\.py)$')"`
 
 ### Task 1: Prove the lease and freeze the contract in RED tests
 
