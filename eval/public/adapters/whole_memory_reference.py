@@ -38,10 +38,6 @@ _EVIDENCE_DEFINITIONS = {
     "ResourceReceipt",
     "FeasibilityRecord",
 }
-_SCHEMA_ID_TO_DEFINITION = {
-    f"urn:wmbs:0.1-draft#{definition}": definition
-    for definition in _EVIDENCE_DEFINITIONS
-}
 _FEASIBILITY_REFERENCE_FIELDS = (
     "adapter_contract_ref",
     "data_source_ref",
@@ -52,12 +48,25 @@ _FEASIBILITY_REFERENCE_FIELDS = (
     "resource_receipt_ref",
     "software_data_bom_ref",
 )
+_TYPED_FEASIBILITY_REFERENCES = {
+    "baseline_manifest_ref": "BaselineManifest",
+    "power_plan_ref": "PowerPlan",
+    "sandbox_receipt_ref": "SandboxReceipt",
+    "resource_receipt_ref": "ResourceReceipt",
+    "software_data_bom_ref": "SoftwareDataBOM",
+}
+_CONTRACT_REFERENCE_FIELDS = tuple(
+    field
+    for field in _FEASIBILITY_REFERENCE_FIELDS
+    if field != "resource_receipt_ref"
+)
 _READINESS_STATES = {
     "PILOT-READY-DEV",
     "RUN-READY-OFFICIAL-LOCAL",
     "RUN-READY-HOSTED-X",
     "RUN-READY-P32-OPS",
 }
+_ADMISSION_STATES = _READINESS_STATES | {"CONTRACT-READY"}
 
 
 class WholeMemoryValidationError(ValueError):
@@ -412,9 +421,11 @@ def validate_definition(definition: str, value: object) -> object:
     if definition == "FeasibilityRecord":
         assert isinstance(value, Mapping)
         dispositions = _feasibility_dispositions(value)
-        if dispositions & _READINESS_STATES:
-            _fail("readiness requires resolved evidence via validate_evidence_bundle")
-        if "PROPOSED" in dispositions and all(
+        if dispositions & _ADMISSION_STATES:
+            _fail("admission requires resolved evidence via validate_evidence_bundle")
+        if "PROPOSED" in dispositions and dispositions.isdisjoint(
+            _ADMISSION_STATES
+        ) and all(
             value[field] is not None for field in _FEASIBILITY_REFERENCE_FIELDS
         ):
             _fail("PROPOSED requires at least one absent feasibility artifact")
@@ -429,7 +440,9 @@ def validate_evidence_bundle(
     _validate(record, schema, "$")
     _validate_artifact_digest("FeasibilityRecord", record)
     dispositions = _feasibility_dispositions(record)
-    if "PROPOSED" in dispositions and all(
+    if "PROPOSED" in dispositions and dispositions.isdisjoint(
+        _ADMISSION_STATES
+    ) and all(
         record[field] is not None for field in _FEASIBILITY_REFERENCE_FIELDS
     ):
         _fail("PROPOSED requires at least one absent feasibility artifact")
@@ -452,19 +465,28 @@ def validate_evidence_bundle(
             actual_digest = canonical_sha256(artifact)
         if actual_digest != expected_digest:
             _fail(f"$.{field} does not match the supplied artifact")
-        definition = _SCHEMA_ID_TO_DEFINITION.get(schema_id)
-        if definition is not None:
-            validate_definition(definition, artifact)
+        expected_definition = _TYPED_FEASIBILITY_REFERENCES.get(field)
+        if expected_definition is not None:
+            expected_schema_id = f"urn:wmbs:0.1-draft#{expected_definition}"
+            if schema_id != expected_schema_id:
+                _fail(f"$.{field} does not reference {expected_definition}")
+            validate_definition(expected_definition, artifact)
         resolved[field] = artifact
 
+    required_fields: tuple[str, ...] = ()
     if dispositions & _READINESS_STATES:
+        required_fields = _FEASIBILITY_REFERENCE_FIELDS
+    elif "CONTRACT-READY" in dispositions:
+        required_fields = _CONTRACT_REFERENCE_FIELDS
+    if required_fields:
         missing = [
             field
-            for field in _FEASIBILITY_REFERENCE_FIELDS
+            for field in required_fields
             if field not in resolved
         ]
         if missing:
-            _fail(f"readiness is missing resolved artifacts: {', '.join(missing)}")
+            _fail(f"admission is missing resolved artifacts: {', '.join(missing)}")
+    if dispositions & _READINESS_STATES:
         resource_receipt = resolved["resource_receipt_ref"]
         if (
             not isinstance(resource_receipt, Mapping)
