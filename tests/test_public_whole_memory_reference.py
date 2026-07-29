@@ -826,6 +826,38 @@ def test_evidence_definitions_reject_invalid_or_unbound_values(
 
 
 @requires_abi
+@pytest.mark.parametrize(
+    ("field", "license_expression"),
+    [
+        ("software.0.license", "0BSD"),
+        ("datasets.0.declared_license", "MIT OR Apache-2.0"),
+        (
+            "datasets.0.concluded_license",
+            "GPL-2.0-only WITH Classpath-exception-2.0",
+        ),
+    ],
+)
+def test_software_data_bom_accepts_approved_spdx_expressions(
+    field: str, license_expression: str
+) -> None:
+    abi.validate_definition(
+        "SoftwareDataBOM",
+        _set_key(EVIDENCE_FIXTURES["SoftwareDataBOM"], field, license_expression),
+    )
+
+
+@requires_abi
+def test_software_data_bom_rejects_unknown_spdx_identifier() -> None:
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.validate_definition(
+            "SoftwareDataBOM",
+            _set_key(EVIDENCE_FIXTURES["SoftwareDataBOM"], "software.0.license", "FOO"),
+        )
+
+    assert _error_code(exc) == "INVALID_REQUEST"
+
+
+@requires_abi
 def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> None:
     left = {"b": [2, 3], "a": 1}
     right = {"a": 1, "b": [2, 3]}
@@ -870,7 +902,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "6452bfd3002160776b3d0011788c7ec765e83e7d2f1500b7b3a4dc3147d165e0"
+        == "24f4aae5785516f5a4c9977d7bb30d027c632b4d7cf9d47eae69f935e6cc6f02"
     )
 
 
@@ -1271,6 +1303,19 @@ def test_identical_idempotent_replay_does_not_advance_state() -> None:
 
     assert replay == first
     assert validator.last_sequence == 2
+
+
+@requires_abi
+def test_identical_idempotent_replay_survives_original_deadline() -> None:
+    current_time = [datetime(2026, 7, 28, 12, tzinfo=UTC)]
+    validator = abi.ProtocolValidator(now=lambda: current_time[0])
+    request = GOLDEN_REQUESTS["negotiate"]
+
+    first = validator.validate_request(request)
+    validator.validate_response(request, GOLDEN_RESPONSES["negotiate"])
+    current_time[0] = datetime(2026, 7, 30, 12, tzinfo=UTC)
+
+    assert validator.validate_request(deepcopy(request)) == first
 
 
 @requires_abi

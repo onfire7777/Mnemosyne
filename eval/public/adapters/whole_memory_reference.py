@@ -376,12 +376,6 @@ class ProtocolValidator:
         )
         if self._scope is not None and scope != self._scope:
             _fail("request scope changed", code="CONFLICT")
-        deadline = _parse_utc_timestamp(
-            str(context["deadline_utc"]), "$.context.deadline_utc"
-        )
-        if deadline <= self._now():
-            _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
-
         request_bytes = canonical_json(validated)
         idempotency_key = str(context["idempotency_key"])
         replay = self._replays.get(idempotency_key)
@@ -391,6 +385,12 @@ class ProtocolValidator:
                     "idempotency key was reused for different content", code="CONFLICT"
                 )
             return deepcopy(replay[1])
+
+        deadline = _parse_utc_timestamp(
+            str(context["deadline_utc"]), "$.context.deadline_utc"
+        )
+        if deadline <= self._now():
+            _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
 
         request_id = str(context["request_id"])
         if request_id in self._request_ids:
