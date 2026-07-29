@@ -97,11 +97,18 @@ Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation
 requires canonical UTC deadlines, one stable tenant/run/attempt scope,
 monotonically increasing sequences, unique request IDs, and identical content
 for idempotent replay. `ProtocolValidator.validate_response` binds receipts to
-accepted requests, including exact ingest event order and receipt scope.
+accepted requests, freezes the first closed response for idempotent replay, and
+commits lifecycle transitions only after successful responses. Closed error
+responses and negative create/finalize receipts preserve the prior phase;
+retries use a fresh request ID and idempotency key. Response binding also
+enforces exact ingest event order, receipt scope, retrieval `top_k`, and forced
+answer behavior.
 `WholeMemoryValidationError.code` carries one of the closed protocol error
 codes.
 
-Portable events require `valid_to` to be null or no earlier than `valid_from`.
+The specification's `?` fields may be omitted or explicitly null. Portable
+events require `valid_to`, when both interval endpoints exist, to be no earlier
+than `valid_from`.
 Retrieval hits use contiguous ranks `1..N` in response order and unique
 `stable_item_id` values. Accepted and deduplicated ingest statuses must be
 acknowledged and error-free; rejected statuses must be unacknowledged, carry an
@@ -120,9 +127,9 @@ M15 replay freezes canonical payload `m15-v1`, exactly five runs, and required
 clean-process replay. Canonical projection excludes only `path`,
 `rss_samples_bytes`, `runtime_timestamp_utc`, `signature`, and `wall_time_ms`.
 
-The in-memory validator admits at most 10,000 requests, 16 MiB per request, 64
-levels of JSON nesting, and 64 MiB of retained canonical request bytes. It
-performs no persistence, network, model, benchmark, ranking, or publication
+The in-memory validator admits at most 10,000 requests, 16 MiB per request or
+response, 64 levels of JSON nesting, and 64 MiB of retained canonical request
+bytes. It performs no persistence, network, model, benchmark, ranking, or publication
 work. Run its contract suite with:
 
 ```bash

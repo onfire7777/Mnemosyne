@@ -436,10 +436,10 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
 
 def _drop_key(value: dict[str, object], dotted_key: str) -> dict[str, object]:
     mutated = deepcopy(value)
-    target: dict[str, object] = mutated
+    target: Any = mutated
     parts = dotted_key.split(".")
     for part in parts[:-1]:
-        target = target[part]  # type: ignore[assignment]
+        target = target[int(part)] if isinstance(target, list) else target[part]
     target.pop(parts[-1])
     return mutated
 
@@ -836,7 +836,7 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "0f172d642bf831b20d4718013d0d2ab53a3575306cb6ac054655a7bc23a12c1a"
+        == "44641509b7c8de49eff5d39ac02b6c4b34bbd4849be0508f310c3e16e4bf015b"
     )
 
 
@@ -931,6 +931,188 @@ def _validator() -> Any:
     return abi.ProtocolValidator(now=lambda: datetime(2026, 7, 28, 12, tzinfo=UTC))
 
 
+def _complete_exchange(validator: Any, operation: str) -> None:
+    request = GOLDEN_REQUESTS[operation]
+    validator.validate_request(request)
+    validator.validate_response(request, GOLDEN_RESPONSES[operation])
+
+
+@requires_abi
+def test_lifecycle_transitions_commit_only_after_successful_responses() -> None:
+    validator = _validator()
+    negotiate = GOLDEN_REQUESTS["negotiate"]
+    validator.validate_request(negotiate)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as pending:
+        validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    assert _error_code(pending) == "ORDER_VIOLATION"
+
+    validator.validate_response(negotiate, GOLDEN_RESPONSES["negotiate"])
+    create = GOLDEN_REQUESTS["create_run"]
+    validator.validate_request(create)
+    rejected = deepcopy(GOLDEN_RESPONSES["create_run"])
+    rejected["payload"]["accepted"] = False  # type: ignore[index]
+    validator.validate_response(create, rejected)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as inactive:
+        validator.validate_request(GOLDEN_REQUESTS["ingest"])
+    assert _error_code(inactive) == "ORDER_VIOLATION"
+
+    retry = _request("create_run", deepcopy(create["payload"]), sequence=3)  # type: ignore[arg-type]
+    validator.validate_request(retry)
+    validator.validate_response(retry, GOLDEN_RESPONSES["create_run"])
+    ingest = _request(
+        "ingest",
+        deepcopy(GOLDEN_REQUESTS["ingest"]["payload"]),  # type: ignore[arg-type]
+        sequence=4,
+    )
+    assert validator.validate_request(ingest) == ingest
+
+
+@requires_abi
+def test_failed_finalize_response_preserves_active_phase() -> None:
+    validator = _validator()
+    for operation in ("negotiate", "create_run"):
+        _complete_exchange(validator, operation)
+    finalize = GOLDEN_REQUESTS["finalize"]
+    validator.validate_request(finalize)
+    failed = deepcopy(GOLDEN_RESPONSES["finalize"])
+    failed["payload"]["finalized"] = False  # type: ignore[index]
+    validator.validate_response(finalize, failed)
+    retrieve = _request(
+        "retrieve",
+        deepcopy(GOLDEN_REQUESTS["retrieve"]["payload"]),  # type: ignore[arg-type]
+        sequence=7,
+    )
+
+    assert validator.validate_request(retrieve) == retrieve
+
+
+@requires_abi
+def test_response_replay_is_frozen_and_closed_errors_do_not_advance_state() -> None:
+    validator = _validator()
+    request = GOLDEN_REQUESTS["negotiate"]
+    validator.validate_request(request)
+    response = ERROR_ENVELOPES["INTERNAL_ERROR"]
+
+    assert validator.validate_response(request, response) == response
+    assert validator.validate_response(request, deepcopy(response)) == response
+    conflicting = deepcopy(ERROR_ENVELOPES["DEPENDENCY_UNAVAILABLE"])
+    with pytest.raises(abi.WholeMemoryValidationError) as conflict:
+        validator.validate_response(request, conflicting)
+    assert _error_code(conflict) == "CONFLICT"
+    with pytest.raises(abi.WholeMemoryValidationError) as inactive:
+        validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    assert _error_code(inactive) == "ORDER_VIOLATION"
+
+
+@requires_abi
+def test_response_replay_rejects_contradictory_success_receipts() -> None:
+    validator = _validator()
+    _complete_exchange(validator, "negotiate")
+    request = GOLDEN_REQUESTS["create_run"]
+    validator.validate_request(request)
+    validator.validate_response(request, GOLDEN_RESPONSES["create_run"])
+    conflicting = deepcopy(GOLDEN_RESPONSES["create_run"])
+    conflicting["payload"]["accepted"] = False  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError) as conflict:
+        validator.validate_response(request, conflicting)
+
+    assert _error_code(conflict) == "CONFLICT"
+
+
+@requires_abi
+def test_response_binding_enforces_retrieval_budget_and_forced_answer() -> None:
+    validator = _validator()
+    for operation in ("negotiate", "create_run"):
+        _complete_exchange(validator, operation)
+
+    retrieve = deepcopy(GOLDEN_REQUESTS["retrieve"])
+    retrieve["payload"]["top_k"] = 1  # type: ignore[index]
+    validator.validate_request(retrieve)
+    oversized = deepcopy(GOLDEN_RESPONSES["retrieve"])
+    second = deepcopy(oversized["payload"]["hits"][0])  # type: ignore[index]
+    second.update({"rank": 2, "stable_item_id": "item-0002"})
+    oversized["payload"]["hits"].append(second)  # type: ignore[index]
+    with pytest.raises(abi.WholeMemoryValidationError):
+        validator.validate_response(retrieve, oversized)
+
+    answer = GOLDEN_REQUESTS["answer"]
+    forced = deepcopy(answer)
+    forced["payload"]["response_mode"] = "forced"  # type: ignore[index]
+    validator.validate_request(forced)
+    abstained = deepcopy(GOLDEN_RESPONSES["answer"])
+    abstained["payload"].update(  # type: ignore[union-attr]
+        {"abstained": True, "answer_text": None}
+    )
+    with pytest.raises(abi.WholeMemoryValidationError):
+        validator.validate_response(forced, abstained)
+
+
+@requires_abi
+def test_validator_rejects_oversized_response_before_schema_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validator = _validator()
+    for operation in ("negotiate", "create_run"):
+        _complete_exchange(validator, operation)
+    request = GOLDEN_REQUESTS["retrieve"]
+    validator.validate_request(request)
+    response = deepcopy(GOLDEN_RESPONSES["retrieve"])
+    response["payload"]["hits"][0]["content_or_handle"] = "x" * 1_024  # type: ignore[index]
+    response["unexpected"] = True
+    monkeypatch.setattr(abi, "_MAX_RESPONSE_BYTES", 512, raising=False)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_response(request, response)
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("definition", "source", "paths"),
+    [
+        (
+            "ingest_request",
+            GOLDEN_REQUESTS["ingest"],
+            (
+                "payload.ordered_events.0.valid_from",
+                "payload.ordered_events.0.valid_to",
+                "payload.ordered_events.0.modality_handle",
+            ),
+        ),
+        (
+            "ingest_response",
+            GOLDEN_RESPONSES["ingest"],
+            ("payload.statuses.0.evidence_handle", "payload.statuses.0.error"),
+        ),
+        ("retrieve_response", GOLDEN_RESPONSES["retrieve"], ("payload.hits.0.score",)),
+        (
+            "answer_response",
+            GOLDEN_RESPONSES["answer"],
+            ("payload.answer_text", "payload.confidence"),
+        ),
+        (
+            "error_response",
+            ERROR_ENVELOPES["INTERNAL_ERROR"],
+            ("error.details_sha256",),
+        ),
+    ],
+)
+def test_spec_optional_fields_may_be_omitted(
+    definition: str,
+    source: dict[str, object],
+    paths: tuple[str, ...],
+) -> None:
+    value = deepcopy(source)
+    for path in paths:
+        value = _drop_key(value, path)
+
+    assert abi.validate_definition(definition, value) == value
+
+
 @requires_abi
 def test_state_machine_accepts_frozen_operation_order() -> None:
     validator = _validator()
@@ -945,12 +1127,15 @@ def test_state_machine_accepts_frozen_operation_order() -> None:
         assert validator.validate_request(GOLDEN_REQUESTS[operation])["operation"] == (
             operation
         )
+        validator.validate_response(
+            GOLDEN_REQUESTS[operation], GOLDEN_RESPONSES[operation]
+        )
 
 
 @requires_abi
 def test_identical_idempotent_replay_does_not_advance_state() -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    _complete_exchange(validator, "negotiate")
     request = GOLDEN_REQUESTS["create_run"]
 
     first = validator.validate_request(request)
@@ -963,7 +1148,7 @@ def test_identical_idempotent_replay_does_not_advance_state() -> None:
 @requires_abi
 def test_idempotent_replay_is_isolated_from_caller_mutation() -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    _complete_exchange(validator, "negotiate")
     request = GOLDEN_REQUESTS["create_run"]
     expected = deepcopy(request)
 
@@ -978,7 +1163,7 @@ def test_idempotent_replay_is_isolated_from_caller_mutation() -> None:
 @requires_abi
 def test_validator_rejects_cross_scope_requests() -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    _complete_exchange(validator, "negotiate")
     request = deepcopy(GOLDEN_REQUESTS["create_run"])
     request["context"]["tenant_id"] = "tenant-0002"  # type: ignore[index]
 
@@ -992,7 +1177,7 @@ def test_validator_rejects_cross_scope_requests() -> None:
 def test_validator_bounds_retained_requests(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(abi, "_MAX_REQUESTS", 1)
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    _complete_exchange(validator, "negotiate")
 
     with pytest.raises(abi.WholeMemoryValidationError) as exc:
         validator.validate_request(GOLDEN_REQUESTS["create_run"])
@@ -1005,8 +1190,8 @@ def test_validator_rejects_oversized_request_bytes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
-    validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    _complete_exchange(validator, "negotiate")
+    _complete_exchange(validator, "create_run")
     monkeypatch.setattr(abi, "_MAX_REQUEST_BYTES", 512)
     request = deepcopy(GOLDEN_REQUESTS["ingest"])
     request["payload"]["ordered_events"][0]["content"] = "x" * 1_024  # type: ignore[index]
@@ -1074,8 +1259,8 @@ def test_validator_rejects_cumulative_retained_bytes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
-    validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    _complete_exchange(validator, "negotiate")
+    _complete_exchange(validator, "create_run")
     retained = validator._retained_bytes
     monkeypatch.setattr(abi, "_MAX_RETAINED_BYTES", retained + 1)
 
@@ -1219,8 +1404,8 @@ def test_ingest_status_outcome_matrix_fails_closed(
 @requires_abi
 def test_protocol_validator_binds_ingest_receipt_to_request_event_order() -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
-    validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    _complete_exchange(validator, "negotiate")
+    _complete_exchange(validator, "create_run")
     request = deepcopy(GOLDEN_REQUESTS["ingest"])
     second_event = deepcopy(request["payload"]["ordered_events"][0])  # type: ignore[index]
     second_event["event_id"] = "event-0002"
@@ -1253,7 +1438,7 @@ def test_protocol_validator_binds_ingest_receipt_to_request_event_order() -> Non
 @requires_abi
 def test_protocol_validator_binds_receipt_scope_to_request_context() -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    _complete_exchange(validator, "negotiate")
     request = GOLDEN_REQUESTS["create_run"]
     validator.validate_request(request)
     response = deepcopy(GOLDEN_RESPONSES["create_run"])
@@ -1314,7 +1499,7 @@ STATE_REJECTIONS = [
 )
 def test_stateful_rejections_are_closed(case: str, expected_code: str) -> None:
     validator = _validator()
-    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    _complete_exchange(validator, "negotiate")
 
     if case in {"stale deadline", "deadline equal to now"}:
         request = deepcopy(GOLDEN_REQUESTS["create_run"])
@@ -1324,22 +1509,22 @@ def test_stateful_rejections_are_closed(case: str, expected_code: str) -> None:
             else "2026-07-28T12:00:00Z"
         )
     elif case == "duplicate request id":
-        validator.validate_request(GOLDEN_REQUESTS["create_run"])
+        _complete_exchange(validator, "create_run")
         request = deepcopy(GOLDEN_REQUESTS["ingest"])
         request["context"]["request_id"] = "request-0002"  # type: ignore[index]
     elif case == "conflicting idempotency reuse":
-        validator.validate_request(GOLDEN_REQUESTS["create_run"])
+        _complete_exchange(validator, "create_run")
         request = deepcopy(GOLDEN_REQUESTS["ingest"])
         request["context"]["idempotency_key"] = "idempotency-0002"  # type: ignore[index]
     elif case == "sequence regression":
-        validator.validate_request(GOLDEN_REQUESTS["create_run"])
+        _complete_exchange(validator, "create_run")
         request = deepcopy(GOLDEN_REQUESTS["ingest"])
         request["context"]["sequence"] = 1  # type: ignore[index]
     elif case == "invalid operation order":
         request = GOLDEN_REQUESTS["retrieve"]
     else:
         for operation in ("create_run", "finalize"):
-            validator.validate_request(GOLDEN_REQUESTS[operation])
+            _complete_exchange(validator, operation)
         request = deepcopy(GOLDEN_REQUESTS["retrieve"])
         request["context"].update(  # type: ignore[union-attr]
             {
