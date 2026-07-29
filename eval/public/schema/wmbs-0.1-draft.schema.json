@@ -1201,13 +1201,13 @@
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "identity": {"$ref": "#/$defs/feasibility_identity"},
         "adapter_contract_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [{"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#AdapterContract@sha256:[0-9a-f]{64}$"}, {"type": "null"}]
         },
         "data_source_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [{"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#DataSourceContract@sha256:[0-9a-f]{64}$"}, {"type": "null"}]
         },
         "scorer_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [{"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#ScorerContract@sha256:[0-9a-f]{64}$"}, {"type": "null"}]
         },
         "inherited_rails": {
           "type": "array",

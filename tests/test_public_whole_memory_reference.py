@@ -279,17 +279,7 @@ def _artifact(schema_id: str, **fields: object) -> dict[str, object]:
 
 def _rebind_artifact(artifact: dict[str, object]) -> dict[str, object]:
     artifact = deepcopy(artifact)
-    payload = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
-    artifact["artifact_sha256"] = hashlib.sha256(
-        json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-            ensure_ascii=False,
-        ).encode()
-        + b"\n"
-    ).hexdigest()
+    artifact["artifact_sha256"] = abi.canonical_artifact_sha256(artifact)
     return artifact
 
 
@@ -524,9 +514,9 @@ EVIDENCE_FIXTURES["SmokeReceipt"] = _artifact(
 EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
     "urn:wmbs:0.1-draft#FeasibilityRecord",
     identity=deepcopy(FEASIBILITY_IDENTITY),
-    adapter_contract_ref="wmbs/0.1-draft@sha256:" + DIGEST_A,
-    data_source_ref="synthetic-golden@sha256:" + DIGEST_B,
-    scorer_ref="exact-match@sha256:" + DIGEST_C,
+    adapter_contract_ref="urn:wmbs:0.1-draft#AdapterContract@sha256:" + DIGEST_A,
+    data_source_ref="urn:wmbs:0.1-draft#DataSourceContract@sha256:" + DIGEST_B,
+    scorer_ref="urn:wmbs:0.1-draft#ScorerContract@sha256:" + DIGEST_C,
     inherited_rails=["RAIL-001", "RAIL-002"],
     baseline_manifest_ref=(
         "urn:wmbs:0.1-draft#BaselineManifest@sha256:"
@@ -1685,7 +1675,7 @@ def test_pilot_readiness_requires_enforced_offline_l16_controls(
 @requires_abi
 @pytest.mark.parametrize(
     "ip_range",
-    ["0.0.0.0/0", "::/0", "224.0.0.0/4", "ff00::/8", "100.64.0.0/10"],
+    ["0.0.0.0/0", "::/0", "8.0.0.0/6", "224.0.0.0/4", "ff00::/8", "100.64.0.0/10"],
 )
 def test_sandbox_receipt_rejects_cidrs_containing_non_public_addresses(
     ip_range: str,
@@ -1810,14 +1800,17 @@ def test_contract_ready_rejects_semantically_invalid_contract_artifacts() -> Non
     assert isinstance(old_ref, str)
     artifacts.pop(old_ref)
     invalid = {"protocol": PROTOCOL_VERSION}
-    new_ref = "adapter-contract@sha256:" + abi.canonical_sha256(invalid)
+    new_ref = (
+        "urn:wmbs:0.1-draft#AdapterContract@sha256:"
+        + abi.canonical_sha256(invalid)
+    )
     record["adapter_contract_ref"] = new_ref
     record = _rebind_artifact(record)
     artifacts[new_ref] = invalid
 
     with pytest.raises(
         abi.WholeMemoryValidationError,
-        match="does not reference AdapterContract",
+        match="is missing",
     ):
         abi.validate_evidence_bundle(record, artifacts)
 
@@ -2105,7 +2098,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "69fb47f1469fea77e94e19bb2f7aabc98412c65a61a5fdb19a2662d1038c84c0"
+        == "b937d68b406be93db23a4c3df463ebcc971c4c157d40635a0f59eee4891111d5"
     )
 
 
