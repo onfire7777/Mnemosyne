@@ -624,6 +624,146 @@ def test_score_records_confidence_validation_runs_before_metric_computation() ->
 
 
 # ---------------------------------------------------------------------------
+# AnswerEnvelope shape validation (local-record trust boundary)
+# ---------------------------------------------------------------------------
+
+
+def test_answer_envelope_from_dict_accepts_well_formed_record() -> None:
+    record = m10.AnswerEnvelope.from_dict(
+        {
+            "answer_text": "open",
+            "abstained": False,
+            "confidence": None,
+            "evidence_handles": ["h0"],
+        }
+    )
+    assert record.answer_text == "open"
+    assert record.abstained is False
+    assert record.action_handles == []
+    assert record.adapter_metadata == {}
+
+
+def test_answer_envelope_from_dict_rejects_string_abstained_value() -> None:
+    """Adversarial regression: coercive string abstained value."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": None,
+                "abstained": "false",
+                "confidence": None,
+                "evidence_handles": [],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_abstained_true_with_answer_text() -> None:
+    """Adversarial regression: contradictory answer envelope."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": True,
+                "confidence": None,
+                "evidence_handles": [],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_abstained_false_with_null_answer_text() -> (
+    None
+):
+    """Adversarial regression: contradictory answer envelope."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": None,
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": [],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_missing_required_field() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {"answer_text": "open", "abstained": False, "confidence": None}
+        )
+
+
+def test_answer_envelope_from_dict_rejects_non_bool_evidence_handles() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": "h0",
+            }
+        )
+
+
+def test_score_records_rejects_string_abstained_value_before_scoring() -> None:
+    """Adversarial regression: a directly-constructed envelope bypasses
+    ``from_dict`` entirely, so ``score_records`` must independently
+    enforce the closed contract rather than relying on ``bool()``
+    coercion (which would treat the truthy string "true" the same as
+    ``True`` and "" the same as ``False``).
+    """
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text=None, abstained="true", confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_abstained_true_with_non_null_answer_text() -> None:
+    """Adversarial regression: contradictory envelope constructed directly."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open", abstained=True, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_abstained_false_with_null_answer_text() -> None:
+    """Adversarial regression: contradictory envelope constructed directly."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text=None, abstained=False, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_shape_validation_runs_before_metric_computation() -> None:
+    """One malformed record must fail closed even if others look fine."""
+    case_good = _manual_case(
+        case_id="case-shape-good",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    case_bad = _manual_case(
+        case_id="case-shape-bad",
+        question="What is the value of fact `owner` for item item-manual-00?",
+        facts=(_fact(key="owner", value="alice"),),
+        gold_answer="alice",
+        expected_abstain=False,
+    )
+    record_good = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=None, evidence_handles=[]
+    )
+    record_bad = m10.AnswerEnvelope(
+        answer_text="alice", abstained=True, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case_good, case_bad], [record_good, record_bad])
+
+
+# ---------------------------------------------------------------------------
 # Complete confidence coverage requirement (Finding 2)
 # ---------------------------------------------------------------------------
 
@@ -852,6 +992,72 @@ def test_useful_coverage_floor_from_fixture_rejects_tampered_artifact() -> None:
     tampered_fixture["calibration_artifact"] = tampered_artifact
     with pytest.raises(ValueError):
         m10.useful_coverage_floor_from_fixture(tampered_fixture)
+
+
+def test_useful_coverage_floor_from_fixture_rejects_rehashed_floor_splice() -> None:
+    """Adversarial regression: self-consistent tamper must still fail closed.
+
+    An attacker edits ``useful_coverage_floor`` and correctly recomputes
+    ``artifact_sha256`` over the edited body. ``verify_calibration_artifact``
+    alone is fooled (the digest matches the tampered body it was computed
+    from), but ``useful_coverage_floor_from_fixture`` must still reject it
+    once the artifact is checked against independently recomputed
+    calibration data derived from the fixture's own cases.
+    """
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    tampered_body = {
+        key: value for key, value in artifact.items() if key != "artifact_sha256"
+    }
+    tampered_body["useful_coverage_floor"] = 999.0
+    rehashed = {
+        **tampered_body,
+        "artifact_sha256": m10.canonical_sha256(tampered_body),
+    }
+
+    m10.verify_calibration_artifact(rehashed)  # self-digest check alone passes
+
+    tampered_fixture = {**fixture, "calibration_artifact": rehashed}
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(tampered_fixture)
+
+
+def test_useful_coverage_floor_from_fixture_rejects_stale_artifact_splice() -> None:
+    """Adversarial regression: a valid-but-stale artifact must fail closed.
+
+    A genuinely valid, self-consistent ``calibration_artifact`` (produced
+    by a real prior call to ``generate_fixture``) is spliced into a
+    fixture whose calibration-partition case content has since changed.
+    ``verify_calibration_artifact`` cannot detect this -- the artifact was
+    never edited, only the fixture it now sits inside was -- so
+    ``useful_coverage_floor_from_fixture`` must independently recompute
+    from the fixture's actual calibration cases to catch it.
+    """
+    original_fixture = m10.generate_fixture()
+    stale_artifact = original_fixture["calibration_artifact"]
+    m10.verify_calibration_artifact(stale_artifact)  # still self-consistent
+
+    cases = [dict(case) for case in original_fixture["cases"]]
+    mutated_any = False
+    for index, case in enumerate(cases):
+        if case["partition"] == "calibration" and case["category"] == "answerable":
+            cases[index] = {
+                **case,
+                "facts": [
+                    {**fact, "value": "value-999"} for fact in case["facts"]
+                ],
+            }
+            mutated_any = True
+            break
+    assert mutated_any, "expected an answerable calibration case to mutate"
+
+    spliced_fixture = {
+        **original_fixture,
+        "cases": cases,
+        "calibration_artifact": stale_artifact,
+    }
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(spliced_fixture)
 
 
 def test_fixture_file_on_disk_calibration_artifact_matches_generator() -> None:
