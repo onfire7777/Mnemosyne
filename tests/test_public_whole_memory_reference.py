@@ -529,7 +529,7 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
     ),
     result_contract={
         "schema_version": "result-v1",
-        "metric_family": "development",
+        "metric_family": "reproducibility",
         "attempt_state": "finalized",
         "custody": "development-public",
         "compatibility": "no-v1-mutation",
@@ -1021,6 +1021,159 @@ def test_pilot_readiness_binds_smoke_to_exact_module_and_result() -> None:
         match="smoke result does not resolve",
     ):
         abi.validate_evidence_bundle(record, missing_result)
+
+@requires_abi
+def test_pilot_readiness_rejects_result_v1_without_atomic_identity() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    smoke_ref = record["smoke_receipt_ref"]
+    resource_ref = record["resource_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    assert isinstance(resource_ref, str)
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    resource = deepcopy(artifacts.pop(resource_ref))
+    old_result_ref = smoke["result_ref"]
+    assert isinstance(old_result_ref, str)
+    result = deepcopy(artifacts.pop(old_result_ref))
+    result.update(
+        {
+            "system": "unrelated-system",
+            "track": "official",
+            "benchmark": "unrelated-benchmark",
+            "benchmark_version": "99.0.0",
+            "run_commit": "f" * 40,
+            "publication": {
+                "publishable": True,
+                "label": "neutral",
+                "register_b_satisfied": True,
+            },
+        }
+    )
+    result_ref = "result-v1@sha256:" + abi.canonical_sha256(result)
+    resource["result_ref"] = result_ref
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke["result_ref"] = result_ref
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["resource_receipt_ref"] = resource_ref
+    record["smoke_receipt_ref"] = smoke_ref
+    record = _rebind_artifact(record)
+    artifacts[result_ref] = result
+    artifacts[resource_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="smoke result does not match the feasibility identity",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        (
+            "mounts",
+            [
+                "host-home:rw",
+                "repository:rw",
+                "docker-socket:rw",
+                "signing-key:rw",
+                "grader:rw",
+            ],
+        ),
+        ("environment_allowlist", ["AWS_SECRET_ACCESS_KEY", "HOME", "PATH"]),
+    ],
+)
+def test_pilot_readiness_rejects_unsafe_l16_profile(
+    field: str, value: list[str]
+) -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    sandbox_ref = record["sandbox_receipt_ref"]
+    resource_ref = record["resource_receipt_ref"]
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(sandbox_ref, str)
+    assert isinstance(resource_ref, str)
+    assert isinstance(smoke_ref, str)
+    sandbox = deepcopy(artifacts.pop(sandbox_ref))
+    resource = deepcopy(artifacts.pop(resource_ref))
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    sandbox[field] = value
+    sandbox["profile_ref"] = (
+        "sandbox-l16-dev@sha256:" + _sandbox_profile_digest(sandbox)
+    )
+    sandbox = _rebind_artifact(sandbox)
+    sandbox_ref = f"{sandbox['schema_id']}@sha256:{sandbox['artifact_sha256']}"
+    profile_digest = _sandbox_profile_digest(sandbox)
+    resource["profile_sha256"] = profile_digest
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke["sandbox_receipt_sha256"] = sandbox["artifact_sha256"]
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["sandbox_receipt_ref"] = sandbox_ref
+    record["resource_receipt_ref"] = resource_ref
+    record["smoke_receipt_ref"] = smoke_ref
+    record = _rebind_artifact(record)
+    artifacts[sandbox_ref] = sandbox
+    artifacts[resource_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="pilot readiness requires enforced offline L16 controls",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_rejects_multiple_l16_workers() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    resource_ref = record["resource_receipt_ref"]
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(resource_ref, str)
+    assert isinstance(smoke_ref, str)
+    resource = deepcopy(artifacts.pop(resource_ref))
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    resource["workers"] = 2
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["resource_receipt_ref"] = resource_ref
+    record["smoke_receipt_ref"] = smoke_ref
+    record = _rebind_artifact(record)
+    artifacts[resource_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="pilot readiness requires enforced offline L16 controls",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
 
 @requires_abi
 def test_pilot_readiness_binds_smoke_result_to_declared_contract() -> None:

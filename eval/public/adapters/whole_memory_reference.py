@@ -80,6 +80,8 @@ _READINESS_STATES = {
 }
 _RUN_READINESS_STATES = _READINESS_STATES - {"PILOT-READY-DEV"}
 _ADMISSION_STATES = _READINESS_STATES | {"CONTRACT-READY"}
+_L16_DEV_MOUNTS = {"inputs:ro", "outputs:rw"}
+_L16_DEV_ENVIRONMENT = {"LANG", "PATH", "TZ"}
 
 
 class WholeMemoryValidationError(ValueError):
@@ -562,14 +564,21 @@ def validate_evidence_bundle(
         if resource_receipt.get("sut_boundary") != sandbox_receipt.get("sut_boundary"):
             _fail("resource receipt does not match the sandbox SUT boundary")
         egress = sandbox_receipt.get("egress")
+        mounts = sandbox_receipt.get("mounts")
+        environment = sandbox_receipt.get("environment_allowlist")
         if (
             sandbox_receipt.get("syscall_policy") == "unavailable"
+            or not isinstance(mounts, list)
+            or set(mounts) != _L16_DEV_MOUNTS
+            or not isinstance(environment, list)
+            or set(environment) != _L16_DEV_ENVIRONMENT
             or not isinstance(egress, Mapping)
             or egress.get("mode") != "deny"
             or egress.get("endpoints") != []
             or sandbox_receipt.get("secrets") != "none"
             or sandbox_receipt.get("model_proxy") != "disabled"
             or resource_receipt.get("network_bytes") != 0
+            or resource_receipt.get("workers") != 1
         ):
             _fail("pilot readiness requires enforced offline L16 controls")
         if resource_receipt.get("abort_status") != "completed":
@@ -612,6 +621,27 @@ def validate_evidence_bundle(
                     "result-v1 validation failed: "
                     + ", ".join(result_errors[:10])
                 )
+            identity = record.get("identity")
+            publication = result.get("publication")
+            metrics = result.get("metrics")
+            if (
+                not isinstance(identity, Mapping)
+                or not isinstance(publication, Mapping)
+                or not isinstance(metrics, list)
+                or result.get("track") != "development"
+                or result.get("benchmark")
+                != f"whole-memory-{identity.get('module_id')}"
+                or result.get("benchmark_version") != identity.get("module_version")
+                or result.get("run_commit") != identity.get("source_commit")
+                or publication.get("publishable") is not False
+                or publication.get("label") != "operator-run"
+                or any(
+                    not isinstance(metric, Mapping)
+                    or metric.get("family") != result_contract.get("metric_family")
+                    for metric in metrics
+                )
+            ):
+                _fail("smoke result does not match the feasibility identity")
         else:
             _fail("result-v2 validation is not implemented")
         if result_contract.get("attempt_state") != "finalized":
