@@ -66,6 +66,7 @@ _READINESS_STATES = {
     "RUN-READY-HOSTED-X",
     "RUN-READY-P32-OPS",
 }
+_RUN_READINESS_STATES = _READINESS_STATES - {"PILOT-READY-DEV"}
 _ADMISSION_STATES = _READINESS_STATES | {"CONTRACT-READY"}
 
 
@@ -487,12 +488,31 @@ def validate_evidence_bundle(
         if missing:
             _fail(f"admission is missing resolved artifacts: {', '.join(missing)}")
     if dispositions & _READINESS_STATES:
+        if dispositions & _RUN_READINESS_STATES:
+            _fail("run readiness requires profile-specific signed evidence")
+        sandbox_receipt = resolved["sandbox_receipt_ref"]
         resource_receipt = resolved["resource_receipt_ref"]
         if (
-            not isinstance(resource_receipt, Mapping)
-            or resource_receipt.get("abort_status") != "completed"
+            not isinstance(sandbox_receipt, Mapping)
+            or not isinstance(resource_receipt, Mapping)
         ):
+            _fail("pilot readiness requires sandbox and resource receipts")
+        profile_ref = sandbox_receipt.get("profile_ref")
+        if not isinstance(profile_ref, str):
+            _fail("pilot readiness requires a sandbox profile")
+        profile_id, separator, profile_digest = profile_ref.rpartition("@sha256:")
+        if not separator or profile_id != "sandbox-l16-dev":
+            _fail("pilot readiness requires the L16-DEV sandbox profile")
+        if resource_receipt.get("profile_sha256") != profile_digest:
+            _fail("resource receipt does not match the sandbox profile")
+        if resource_receipt.get("abort_status") != "completed":
             _fail("readiness requires a completed resource receipt")
+        result_contract = record["result_contract"]
+        if (
+            not isinstance(result_contract, Mapping)
+            or result_contract.get("attempt_state") != "finalized"
+        ):
+            _fail("pilot readiness requires a finalized attempt")
     return deepcopy(record)
 
 

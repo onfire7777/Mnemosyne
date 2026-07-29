@@ -869,9 +869,9 @@ def test_evidence_bundle_resolves_every_feasibility_reference() -> None:
     record, artifacts = _resolved_feasibility_bundle()
     record["feasibility_disposition"] = {
         "development": "PILOT-READY-DEV",
-        "official_local": "RUN-READY-OFFICIAL-LOCAL",
-        "hosted_service": "RUN-READY-HOSTED-X",
-        "production_operations": "RUN-READY-P32-OPS",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
     }
     record = _rebind_artifact(record)
 
@@ -886,6 +886,108 @@ def test_evidence_bundle_resolves_every_feasibility_reference() -> None:
     }
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_evidence_bundle(record, changed)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    "dispositions",
+    [
+        {
+            "development": "PILOT-READY-DEV",
+            "official_local": "RUN-READY-OFFICIAL-LOCAL",
+            "hosted_service": "DEFERRED",
+            "production_operations": "DEFERRED",
+        },
+        {
+            "development": "DEFERRED",
+            "official_local": "RUN-READY-OFFICIAL-LOCAL",
+            "hosted_service": "DEFERRED",
+            "production_operations": "DEFERRED",
+        },
+    ],
+)
+def test_evidence_bundle_rejects_unprovable_run_readiness(
+    dispositions: dict[str, str],
+) -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = dispositions
+    record = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="run readiness requires profile-specific signed evidence",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_requires_finalized_l16_profile_receipt() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+
+    record["result_contract"]["attempt_state"] = "created"  # type: ignore[index]
+    created = _rebind_artifact(record)
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="pilot readiness requires a finalized attempt",
+    ):
+        abi.validate_evidence_bundle(created, artifacts)
+
+    record["result_contract"]["attempt_state"] = "finalized"  # type: ignore[index]
+    sandbox = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["SandboxReceipt"],
+            "profile_ref": "sandbox-official-local@sha256:" + DIGEST_B,
+        }
+    )
+    old_ref = record["sandbox_receipt_ref"]
+    assert isinstance(old_ref, str)
+    artifacts.pop(old_ref)
+    new_ref = f"{sandbox['schema_id']}@sha256:{sandbox['artifact_sha256']}"
+    record["sandbox_receipt_ref"] = new_ref
+    artifacts[new_ref] = sandbox
+    wrong_profile = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="pilot readiness requires the L16-DEV sandbox profile",
+    ):
+        abi.validate_evidence_bundle(wrong_profile, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_binds_resource_receipt_to_sandbox_profile() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    resource = _rebind_artifact(
+        {
+            **EVIDENCE_FIXTURES["ResourceReceipt"],
+            "profile_sha256": DIGEST_C,
+        }
+    )
+    old_ref = record["resource_receipt_ref"]
+    assert isinstance(old_ref, str)
+    artifacts.pop(old_ref)
+    new_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    record["resource_receipt_ref"] = new_ref
+    artifacts[new_ref] = resource
+    record = _rebind_artifact(record)
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="resource receipt does not match the sandbox profile",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
 
 
 @requires_abi
