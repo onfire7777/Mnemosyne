@@ -40,6 +40,7 @@ MAX_METADATA_BYTES = 2048
 PUBLICATION_WAIT_SECONDS = 0.25
 GROUP_DRAIN_WAIT_SECONDS = 5.0
 GROUP_PROBE_TIMEOUT_SECONDS = 2.0
+SIGNAL_EXIT_WAIT_SECONDS = 2.0
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]"
 OPERATION = re.compile(r"[a-z][a-z0-9-]{0,63}")
 TOKEN = re.compile(r"[0-9a-f]{64}")
@@ -731,8 +732,11 @@ def run_child(command, child_holder, received_signal, forward, state):
         raise LockFailure
     child_holder[0] = child
     try:
+        signal_deadline = None
+        signal_escalated = False
         if received_signal[0] is not None:
             forward(received_signal[0], None)
+            signal_deadline = time.monotonic() + SIGNAL_EXIT_WAIT_SECONDS
         while True:
             members = process_group_snapshot(child.pid)
             leader_state = members.get(child.pid)
@@ -740,6 +744,21 @@ def run_child(command, child_holder, received_signal, forward, state):
                 raise ChildStateUncertain
             if leader_state.startswith("Z"):
                 break
+            if received_signal[0] is not None:
+                now = time.monotonic()
+                if signal_deadline is None:
+                    signal_deadline = now + SIGNAL_EXIT_WAIT_SECONDS
+                elif now >= signal_deadline:
+                    if signal_escalated:
+                        raise ChildStateUncertain
+                    try:
+                        os.killpg(child.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    except OSError:
+                        raise ChildStateUncertain
+                    signal_escalated = True
+                    signal_deadline = now + SIGNAL_EXIT_WAIT_SECONDS
             time.sleep(0.05)
         drain_deadline = time.monotonic() + GROUP_DRAIN_WAIT_SECONDS
         while True:

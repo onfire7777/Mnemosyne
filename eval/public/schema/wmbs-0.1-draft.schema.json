@@ -597,6 +597,7 @@
       "required": [
         "schema_id",
         "artifact_sha256",
+        "adapter_schema_id",
         "protocol_id",
         "operations",
         "error_codes",
@@ -609,6 +610,7 @@
       "properties": {
         "schema_id": {"const": "urn:wmbs:0.1-draft#AdapterContract"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "adapter_schema_id": {"$ref": "#/$defs/digest_reference"},
         "protocol_id": {"const": "wmbs/0.1-draft"},
         "operations": {
           "const": ["negotiate", "create_run", "ingest", "retrieve", "answer", "finalize"]
@@ -652,7 +654,7 @@
         "schema_id": {"const": "urn:wmbs:0.1-draft#DataSourceContract"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "source_kind": {"enum": ["pinned-dataset", "deterministic-synthetic"]},
-        "source_id": {"$ref": "#/$defs/identifier"},
+        "source_id": {"$ref": "#/$defs/digest_reference"},
         "schema_ref": {"$ref": "#/$defs/digest_reference"},
         "seed_domain": {
           "type": "array",
@@ -689,7 +691,7 @@
       "properties": {
         "schema_id": {"const": "urn:wmbs:0.1-draft#ScorerContract"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
-        "scorer_id": {"$ref": "#/$defs/identifier"},
+        "scorer_id": {"$ref": "#/$defs/digest_reference"},
         "executable_argv": {
           "type": "array",
           "minItems": 1,
@@ -726,7 +728,7 @@
         "embedding_model",
         "index_parameters",
         "top_k",
-        "prompt_sha256",
+        "prompt_ref",
         "context_order",
         "truncation",
         "cache_state",
@@ -742,7 +744,7 @@
         "embedding_model": {"$ref": "#/$defs/digest_reference"},
         "index_parameters": {"$ref": "#/$defs/index_parameters"},
         "top_k": {"type": "integer", "minimum": 1, "maximum": 1000},
-        "prompt_sha256": {"$ref": "#/$defs/sha256"},
+        "prompt_ref": {"$ref": "#/$defs/digest_reference"},
         "context_order": {"enum": ["rank-ascending", "rank-descending", "source-order"]},
         "truncation": {"enum": ["head", "tail", "none"]},
         "cache_state": {"enum": ["cold", "warm"]},
@@ -848,9 +850,9 @@
         "software",
         "datasets",
         "oci_digest",
-        "lockfile_sha256",
-        "sbom_sha256",
-        "build_provenance_sha256",
+        "lockfile_ref",
+        "sbom_ref",
+        "build_provenance_ref",
         "external_services",
         "secret_requirements"
       ],
@@ -872,9 +874,9 @@
         "oci_digest": {
           "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
         },
-        "lockfile_sha256": {"$ref": "#/$defs/sha256"},
-        "sbom_sha256": {"$ref": "#/$defs/sha256"},
-        "build_provenance_sha256": {"$ref": "#/$defs/sha256"},
+        "lockfile_ref": {"$ref": "#/$defs/digest_reference"},
+        "sbom_ref": {"$ref": "#/$defs/digest_reference"},
+        "build_provenance_ref": {"$ref": "#/$defs/digest_reference"},
         "external_services": {
           "type": "array",
           "maxItems": 1000,
@@ -962,6 +964,7 @@
         "process_limit",
         "file_limit",
         "output_limit_bytes",
+        "disk_limit_bytes",
         "wall_deadline_seconds",
         "locale",
         "timezone",
@@ -1002,6 +1005,7 @@
         "process_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "file_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "output_limit_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "disk_limit_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "wall_deadline_seconds": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "locale": {"$ref": "#/$defs/short_string"},
         "timezone": {"const": "UTC"},
@@ -1028,6 +1032,9 @@
         "host_free_memory_bytes",
         "swap_bytes",
         "disk_bytes",
+        "host_os",
+        "host_arch",
+        "host_memory_bytes",
         "cpu",
         "gpu",
         "workers",
@@ -1051,6 +1058,9 @@
         "host_free_memory_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "swap_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
         "disk_bytes": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "host_os": {"$ref": "#/$defs/nonempty_string"},
+        "host_arch": {"$ref": "#/$defs/nonempty_string"},
+        "host_memory_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "cpu": {"$ref": "#/$defs/nonempty_string"},
         "gpu": {"$ref": "#/$defs/nonempty_string"},
         "workers": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},

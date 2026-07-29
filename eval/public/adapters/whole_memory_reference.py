@@ -32,6 +32,7 @@ _MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _MAX_RETAINED_BYTES = 64 * 1024 * 1024
 _MAX_JSON_DEPTH = 64
+_MAX_RESULT_V1_METRICS = 1000
 _STRING_CHUNK_SIZE = 64 * 1024
 _EVIDENCE_DEFINITIONS = {
     "AdapterContract",
@@ -82,6 +83,34 @@ _RUN_READINESS_STATES = _READINESS_STATES - {"PILOT-READY-DEV"}
 _ADMISSION_STATES = _READINESS_STATES | {"CONTRACT-READY"}
 _L16_DEV_MOUNTS = {"inputs:ro", "outputs:rw"}
 _L16_DEV_ENVIRONMENT = {"LANG", "PATH", "TZ"}
+_L16_DEV_PROFILE = {
+    "profile_id": "sandbox-l16-dev",
+    "host_os": "macOS",
+    "host_arch": "Apple Silicon",
+    "host_memory_bytes": 16 * 1024 * 1024 * 1024,
+    "cpu": "Apple Silicon",
+    "max_wall_time_ms": 20 * 60 * 1000,
+    "max_peak_rss_bytes": 4 * 1024 * 1024 * 1024,
+    "max_disk_bytes": 2 * 1024 * 1024 * 1024,
+    "max_workers": 2,
+}
+_CONTRACT_NESTED_REFERENCE_FIELDS = {
+    "AdapterContract": ("adapter_schema_id",),
+    "DataSourceContract": ("source_id", "schema_ref"),
+    "ScorerContract": ("scorer_id",),
+    "BaselineManifest": ("tokenizer", "embedding_model", "prompt_ref"),
+    "SandboxReceipt": ("profile_ref",),
+    "SoftwareDataBOM": (
+        "oci_digest",
+        "lockfile_ref",
+        "sbom_ref",
+        "build_provenance_ref",
+    ),
+}
+_CONTRACT_NESTED_REFERENCE_LIST_FIELDS = {
+    "DataSourceContract": ("golden_fixture_refs",),
+    "ScorerContract": ("golden_vector_refs",),
+}
 
 
 class WholeMemoryValidationError(ValueError):
@@ -304,14 +333,46 @@ def canonical_artifact_sha256(value: Mapping[str, object]) -> str:
     )
 
 
-def _sandbox_profile_sha256(receipt: Mapping[str, object]) -> str:
-    return canonical_sha256(
-        {
-            key: item
-            for key, item in receipt.items()
-            if key not in {"schema_id", "artifact_sha256", "profile_ref"}
-        }
-    )
+def _resolve_artifact_reference(
+    reference: str,
+    artifacts: Mapping[str, object],
+    *,
+    path: str,
+) -> object:
+    artifact = artifacts.get(reference)
+    if artifact is None:
+        _fail(f"{path} contract artifact reference does not resolve")
+    _, separator, expected_digest = reference.rpartition("@sha256:")
+    if not separator:
+        _fail(f"{path} is not a digest reference")
+    if isinstance(artifact, Mapping) and "artifact_sha256" in artifact:
+        actual_digest = canonical_artifact_sha256(artifact)
+    else:
+        actual_digest = canonical_sha256(artifact)
+    if actual_digest != expected_digest:
+        _fail(f"{path} does not match the supplied artifact")
+    return artifact
+
+
+def _contract_artifact_references(
+    definition: str, artifact: object
+) -> list[tuple[str, str]]:
+    assert isinstance(artifact, Mapping)
+    references: list[tuple[str, str]] = []
+    for field in _CONTRACT_NESTED_REFERENCE_FIELDS.get(definition, ()):
+        reference = artifact[field]
+        if reference is not None:
+            assert isinstance(reference, str)
+            references.append((f"$.{field}", reference))
+    for field in _CONTRACT_NESTED_REFERENCE_LIST_FIELDS.get(definition, ()):
+        values = artifact[field]
+        assert isinstance(values, list)
+        references.extend(
+            (f"$.{field}[{index}]", reference)
+            for index, reference in enumerate(values)
+            if isinstance(reference, str)
+        )
+    return references
 
 
 def _validate_artifact_digest(definition: str, value: object) -> None:
@@ -504,18 +565,12 @@ def validate_evidence_bundle(
         if reference is None:
             continue
         assert isinstance(reference, str)
-        artifact = artifacts.get(reference)
-        if artifact is None:
-            _fail(f"$.{field} does not resolve to a supplied artifact")
-        schema_id, separator, expected_digest = reference.rpartition("@sha256:")
+        schema_id, separator, _ = reference.rpartition("@sha256:")
         if not separator:
             _fail(f"$.{field} is not a digest reference")
-        if isinstance(artifact, Mapping) and "artifact_sha256" in artifact:
-            actual_digest = canonical_artifact_sha256(artifact)
-        else:
-            actual_digest = canonical_sha256(artifact)
-        if actual_digest != expected_digest:
-            _fail(f"$.{field} does not match the supplied artifact")
+        artifact = _resolve_artifact_reference(
+            reference, artifacts, path=f"$.{field}"
+        )
         expected_definition = _TYPED_FEASIBILITY_REFERENCES.get(field)
         if expected_definition is not None:
             expected_schema_id = f"urn:wmbs:0.1-draft#{expected_definition}"
@@ -537,6 +592,24 @@ def validate_evidence_bundle(
         ]
         if missing:
             _fail(f"admission is missing resolved artifacts: {', '.join(missing)}")
+    nested_artifacts: dict[str, object] = {}
+    for field in required_fields:
+        definition = _TYPED_FEASIBILITY_REFERENCES[field]
+        artifact = resolved[field]
+        for path, reference in _contract_artifact_references(definition, artifact):
+            nested_artifacts[reference] = _resolve_artifact_reference(
+                reference,
+                artifacts,
+                path=f"$.{field}{path.removeprefix('$')}",
+            )
+    if required_fields:
+        adapter_contract = resolved["adapter_contract_ref"]
+        assert isinstance(adapter_contract, Mapping)
+        expected_schema_ref = (
+            f"{_SCHEMA['$id']}@sha256:{canonical_sha256(_SCHEMA)}"
+        )
+        if adapter_contract["adapter_schema_id"] != expected_schema_ref:
+            _fail("adapter contract does not bind the loaded ABI schema")
     if dispositions & _READINESS_STATES:
         if dispositions & _RUN_READINESS_STATES:
             _fail("run readiness requires profile-specific signed evidence")
@@ -555,8 +628,9 @@ def validate_evidence_bundle(
         profile_id, separator, profile_digest = profile_ref.rpartition("@sha256:")
         if not separator or profile_id != "sandbox-l16-dev":
             _fail("pilot readiness requires the L16-DEV sandbox profile")
-        if _sandbox_profile_sha256(sandbox_receipt) != profile_digest:
-            _fail("sandbox profile digest does not match its declared controls")
+        profile = nested_artifacts.get(profile_ref)
+        if profile != _L16_DEV_PROFILE:
+            _fail("pilot readiness requires the pinned L16-DEV profile")
         if resource_receipt.get("profile_sha256") != profile_digest:
             _fail("resource receipt does not match the sandbox profile")
         if resource_receipt.get("identity") != record.get("identity"):
@@ -581,6 +655,26 @@ def validate_evidence_bundle(
             or resource_receipt.get("workers") != 1
         ):
             _fail("pilot readiness requires enforced offline L16 controls")
+        if (
+            sandbox_receipt.get("memory_limit_bytes")
+            > _L16_DEV_PROFILE["max_peak_rss_bytes"]
+            or sandbox_receipt.get("disk_limit_bytes")
+            > _L16_DEV_PROFILE["max_disk_bytes"]
+            or sandbox_receipt.get("wall_deadline_seconds") * 1000
+            > _L16_DEV_PROFILE["max_wall_time_ms"]
+            or resource_receipt.get("host_os") != _L16_DEV_PROFILE["host_os"]
+            or resource_receipt.get("host_arch") != _L16_DEV_PROFILE["host_arch"]
+            or resource_receipt.get("host_memory_bytes")
+            != _L16_DEV_PROFILE["host_memory_bytes"]
+            or resource_receipt.get("cpu") != _L16_DEV_PROFILE["cpu"]
+            or resource_receipt.get("wall_time_ms")
+            > sandbox_receipt.get("wall_deadline_seconds") * 1000
+            or resource_receipt.get("peak_rss_bytes")
+            > sandbox_receipt.get("memory_limit_bytes")
+            or resource_receipt.get("disk_bytes")
+            > sandbox_receipt.get("disk_limit_bytes")
+        ):
+            _fail("resource receipt does not satisfy the pinned L16-DEV profile")
         if resource_receipt.get("abort_status") != "completed":
             _fail("readiness requires a completed resource receipt")
         if smoke_receipt.get("identity") != record.get("identity"):
@@ -615,6 +709,9 @@ def validate_evidence_bundle(
         ):
             _fail("smoke result does not match the feasibility result contract")
         if result_id == "result-v1":
+            metrics = result.get("metrics")
+            if isinstance(metrics, list) and len(metrics) > _MAX_RESULT_V1_METRICS:
+                _fail("result-v1 metrics exceed the closed limit")
             result_errors = validate_result_v1(result)
             if result_errors:
                 _fail(
