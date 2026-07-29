@@ -70,7 +70,14 @@ _SCORED_SEEDS: tuple[int, ...] = (2, 3, 4)
 _BASE_TIME = datetime(2026, 7, 20, 0, 0, 0, tzinfo=UTC)
 
 _QUESTION_TEMPLATE = "What is the value of fact `{key}` for item {item_id}?"
-_QUESTION_RE = re.compile(r"value of fact `(?P<key>[^`]+)` for item (?P<item>[\w-]+)")
+# Full canonical grammar match (Finding 3): the entire question string must
+# match this template exactly, anchored start-to-end. A question that only
+# *contains* the pattern as a substring (e.g. with garbage prefix/suffix) is
+# malformed and must not be treated as if it were well-formed -- see
+# `read_answer` for the fail-closed handling this enables.
+_QUESTION_GRAMMAR_RE = re.compile(
+    r"\AWhat is the value of fact `(?P<key>[^`]+)` for item (?P<item>[\w-]+)\?\Z"
+)
 _FACT_PREFIX = "fact:"
 
 _RISK_CEILING = 0.05
@@ -112,6 +119,15 @@ INTEGRATION_DEPENDENCIES: tuple[str, ...] = (
     "eval/public/runner.py must route a wmbs-m10-development suite "
     "through run_public_suite/write_bundle so M15 canonical replay and "
     "bundle custody cover this pilot's outputs.",
+    "This module's fixture generator (generate_fixture) is a fully "
+    "self-contained, deterministic, standalone generator: it does not "
+    "call, import, or otherwise depend on the shared M02-M04 event "
+    "generator used elsewhere in the harness. Wiring this pilot so its "
+    "facts/questions are drawn from that shared event generator (instead "
+    "of this module's own synthetic fixture) is an unresolved external "
+    "integration gate outside this lease -- it is not attempted, faked, "
+    "or partially wired here, and this pilot's PROPOSED/development-only "
+    "status reflects that gap.",
 )
 
 
@@ -407,12 +423,15 @@ def _event_digest(fact: FactInstance) -> str:
 
 
 def _question_digest(case: Case) -> str:
-    return canonical_sha256(
-        {
-            "question": case.question,
-            "facts": [fact.to_dict() for fact in case.facts],
-        }
-    )
+    """Hash canonical question identity/text alone (Finding 4).
+
+    Deliberately excludes ``case.facts``: fact/event content already has
+    its own digest via ``_event_digest``, and conflating the two axes here
+    would mean a question's digest changes whenever unrelated evidence
+    changes, defeating the split-manifest disjointness check this digest
+    exists to support.
+    """
+    return canonical_sha256({"question": case.question})
 
 
 def _split_manifest(
@@ -457,7 +476,7 @@ def generate_fixture() -> dict[str, object]:
     calibration_cases = [case for case in all_cases if case.partition == "calibration"]
     scored_cases = [case for case in all_cases if case.partition == "scored"]
 
-    return {
+    fixture: dict[str, object] = {
         "schema_id": FIXTURE_SCHEMA_ID,
         "generator_id": GENERATOR_ID,
         "generator_version": GENERATOR_VERSION,
@@ -474,6 +493,11 @@ def generate_fixture() -> dict[str, object]:
             "scored": _split_manifest(scored_cases, _SCORED_SEEDS, "scored"),
         },
     }
+    # Finding 1: freeze the digest-bound calibration artifact as part of the
+    # fixture itself, so it is checked into git alongside the cases it was
+    # derived from rather than recomputed ad hoc by a gate at scoring time.
+    fixture["calibration_artifact"] = build_calibration_artifact(fixture)
+    return fixture
 
 
 def load_cases(fixture: dict[str, object]) -> list[Case]:
@@ -705,25 +729,57 @@ def read_answer(
     Never inspects fixture-only fields such as ``gold_answer``. Confidence
     is always ``None``: this reader does not synthesize a numeric
     certainty signal it was not given.
+
+    A question that does not fully match the canonical grammar is
+    malformed. Normal mode abstains immediately, without scanning the
+    retrieval envelope at all -- there is no canonical ``target_key``/
+    ``target_item`` to filter hits against, so scanning unfiltered hits
+    would silently fail open onto unrelated evidence (Finding 3). Forced
+    mode must still return an answer, so it falls back to the same
+    explicit, deterministic "unknown" sentinel used when there is no
+    evidence at all, instead of guessing from unfiltered hits.
     """
 
     if response_mode not in RESPONSE_MODES:
         raise ValueError(f"unknown response_mode: {response_mode!r}")
 
-    match = _QUESTION_RE.search(question)
-    target_key = match.group("key") if match else None
-    target_item = match.group("item") if match else None
+    match = _QUESTION_GRAMMAR_RE.fullmatch(question)
+    if match is None:
+        if response_mode == "normal":
+            return AnswerEnvelope(
+                answer_text=None,
+                abstained=True,
+                confidence=None,
+                evidence_handles=[],
+                adapter_metadata={
+                    "mode": response_mode,
+                    "abstain_reason": "malformed_question",
+                },
+            )
+        return AnswerEnvelope(
+            answer_text="unknown",
+            abstained=False,
+            confidence=None,
+            evidence_handles=[],
+            adapter_metadata={
+                "mode": response_mode,
+                "fallback_reason": "malformed_question",
+            },
+        )
+
+    target_key = match.group("key")
+    target_item = match.group("item")
 
     verified_values: list[tuple[int, str, str]] = []  # (rank, value, evidence_handle)
     any_matching_values: list[tuple[int, str, str]] = []
     for hit in retrieval_envelope.hits:
-        if target_item is not None and hit.stable_item_id != target_item:
+        if hit.stable_item_id != target_item:
             continue
         parsed = _extract_fact(hit.content_or_handle)
         if parsed is None:
             continue
         key, value = parsed
-        if target_key is not None and key != target_key:
+        if key != target_key:
             continue
         evidence_handle = hit.evidence_handles[0] if hit.evidence_handles else ""
         any_matching_values.append((hit.rank, value, evidence_handle))
@@ -799,10 +855,60 @@ _ASSERTABLE_CATEGORIES = frozenset(
 )
 
 
+class ConfidenceValidationError(ValueError):
+    """A record supplied a confidence value outside the closed contract.
+
+    Finding 5: confidence must be a real (non-bool), finite number in the
+    closed interval ``[0, 1]``. This is checked for every record before any
+    metric computation runs, so an invalid value cannot silently corrupt
+    Brier/ECE.
+    """
+
+
+def _validate_confidence(confidence: object, *, case_id: str) -> None:
+    if confidence is None:
+        return
+    if isinstance(confidence, bool):
+        raise ConfidenceValidationError(
+            f"case {case_id!r}: confidence must be a real number in the "
+            f"closed interval [0, 1], not a bool ({confidence!r})"
+        )
+    if not isinstance(confidence, (int, float)):
+        raise ConfidenceValidationError(
+            f"case {case_id!r}: confidence must be a real number in the "
+            f"closed interval [0, 1], got {type(confidence).__name__}"
+        )
+    if not math.isfinite(confidence):
+        raise ConfidenceValidationError(
+            f"case {case_id!r}: confidence must be finite, got {confidence!r}"
+        )
+    if not (0.0 <= confidence <= 1.0):
+        raise ConfidenceValidationError(
+            f"case {case_id!r}: confidence must be in the closed interval "
+            f"[0, 1], got {confidence!r}"
+        )
+
+
 def _is_correct(case: Case, record: AnswerEnvelope) -> bool:
     if case.category not in _ASSERTABLE_CATEGORIES:
         return False
     return record.answer_text == case.gold_answer
+
+
+CALIBRATION_COVERAGE_RULE = (
+    "Local scoring contract (Finding 2): numeric calibration (Brier score, "
+    "ECE) is scored only over the answered (non-abstained) population of a "
+    "given score_records() call -- the population that actually asserts an "
+    "answer, and therefore the only population a confidence value makes a "
+    "claim about. It requires a real `confidence` value on every answered "
+    "record in that population. If even one answered record has "
+    "`confidence=None`, `numeric_calibration` is 'unsupported' and "
+    "brier_score/ece are both None: partial confidence coverage can never "
+    "yield a gating-eligible metric, closing the incentive to supply "
+    "confidence only on easy/correct answered cases. Confidence values on "
+    "abstained records are ignored for this computation: an abstention "
+    "makes no assertion, so there is nothing for Brier/ECE to calibrate."
+)
 
 
 def score_records(cases: list[Case], records: list[AnswerEnvelope]) -> ScoreReport:
@@ -810,6 +916,9 @@ def score_records(cases: list[Case], records: list[AnswerEnvelope]) -> ScoreRepo
         raise ValueError(
             "cases and records must be the same length and aligned by index"
         )
+
+    for case, record in zip(cases, records, strict=True):
+        _validate_confidence(record.confidence, case_id=case.case_id)
 
     total = len(cases)
     answered = [r for r in records if not r.abstained]
@@ -853,12 +962,19 @@ def score_records(cases: list[Case], records: list[AnswerEnvelope]) -> ScoreRepo
     else:
         useful_coverage = coverage
 
-    has_confidence = any(record.confidence is not None for record in records)
-    if has_confidence:
+    # Finding 2 / CALIBRATION_COVERAGE_RULE: calibration is only "supported"
+    # when every answered record carries a confidence value. Partial
+    # coverage (some answered records confident, others None) must not be
+    # gameable into a passing calibration metric, so it is treated exactly
+    # like no coverage at all.
+    complete_answered_confidence = bool(answered) and all(
+        record.confidence is not None for record in answered
+    )
+    if complete_answered_confidence:
         scored_pairs = [
             (record.confidence, 1.0 if _is_correct(case, record) else 0.0)
             for case, record in zip(cases, records, strict=True)
-            if record.confidence is not None
+            if not record.abstained
         ]
         brier_score = sum(
             (conf - outcome) ** 2 for conf, outcome in scored_pairs
@@ -912,13 +1028,22 @@ def _expected_calibration_error(
 
 
 def calibrate_useful_coverage_floor(calibration_cases: list[Case]) -> float:
-    """Freeze the useful-coverage floor from calibration-partition baselines only.
+    """Derive the useful-coverage floor from calibration-partition baselines only.
 
     Deliberately touches only ``calibration_cases`` and the weakest
     baseline (no-memory, which by construction has zero information), so
     an "always abstain" policy -- whose useful coverage is always 0.0 --
     cannot pass once this floor is strictly positive. This never reads the
     other partition or a submitted-system output.
+
+    This function is the raw derivation step used once, by
+    ``build_calibration_artifact``, to freeze the floor into a digest-bound
+    artifact. It is *not* the sanctioned entry point for gating a report's
+    ``useful_coverage`` (Finding 1): callers that need the floor for gating
+    must use ``useful_coverage_floor_from_fixture`` instead, which verifies
+    the frozen artifact's digest before returning a floor, rather than
+    trusting a fresh recomputation from whatever this function's code
+    currently does.
     """
 
     no_memory_records = run_baseline(
@@ -926,3 +1051,119 @@ def calibrate_useful_coverage_floor(calibration_cases: list[Case]) -> float:
     )
     no_memory_report = score_records(calibration_cases, no_memory_records)
     return round(no_memory_report.useful_coverage + _USEFUL_COVERAGE_MARGIN, 4)
+
+
+# ---------------------------------------------------------------------------
+# Calibration artifact (Finding 1)
+# ---------------------------------------------------------------------------
+
+CALIBRATION_ARTIFACT_SCHEMA_ID = "wmbs-m10-development/calibration-artifact/0.1"
+
+USEFUL_COVERAGE_DERIVATION_RULE = (
+    "useful_coverage_floor = round(calibration_metrics['no-memory']"
+    "['useful_coverage'] + 0.10, 4). The no-memory baseline has zero "
+    "retrieval evidence by construction, so its useful_coverage on the "
+    "calibration partition is 0.0 unless it both answers and stays under "
+    "the fixed risk ceiling -- which it structurally cannot do without "
+    "evidence. The fixed +0.10 margin is the only free parameter in this "
+    "rule, and it is applied exactly once, here, to freeze the floor into "
+    "this artifact; it is never recomputed per scoring run from whatever "
+    "the baseline/scorer code currently does."
+)
+
+
+def _score_report_to_dict(report: ScoreReport) -> dict[str, object]:
+    return {
+        "total_cases": report.total_cases,
+        "answered_count": report.answered_count,
+        "abstained_count": report.abstained_count,
+        "assertion_accuracy": report.assertion_accuracy,
+        "abstention_precision": report.abstention_precision,
+        "abstention_recall": report.abstention_recall,
+        "coverage": report.coverage,
+        "risk_coverage_operating_point": report.risk_coverage_operating_point,
+        "useful_coverage": report.useful_coverage,
+        "confident_unanswerable_count": report.confident_unanswerable_count,
+        "numeric_calibration": report.numeric_calibration,
+        "brier_score": report.brier_score,
+        "ece": report.ece,
+    }
+
+
+def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
+    """Freeze the full evidence bundle the useful-coverage floor derives from.
+
+    Deterministic, pure function of the calibration partition of
+    ``fixture``. Touches only ``calibration_cases`` and the four reference
+    baselines' own manifests/outputs on that partition -- never the scored
+    partition or a submitted system's output.
+
+    The returned dict contains all four baseline manifests, each
+    baseline's calibration-partition metrics, the derivation rule, and the
+    resulting floor, and is digest-bound (``artifact_sha256``): any caller
+    that wants to *use* ``useful_coverage_floor`` for gating must call
+    ``verify_calibration_artifact`` (or the convenience wrapper
+    ``useful_coverage_floor_from_fixture``) first, rather than trusting an
+    unverified or freshly recomputed number.
+    """
+
+    calibration_cases = [
+        case for case in load_cases(fixture) if case.partition == "calibration"
+    ]
+    baseline_manifests = {
+        baseline_id: baseline_manifest(baseline_id) for baseline_id in BASELINE_IDS
+    }
+    calibration_metrics: dict[str, object] = {}
+    for baseline_id in BASELINE_IDS:
+        records = run_baseline(baseline_id, calibration_cases, response_mode="normal")
+        report = score_records(calibration_cases, records)
+        calibration_metrics[baseline_id] = _score_report_to_dict(report)
+
+    no_memory_useful_coverage = calibration_metrics["no-memory"]["useful_coverage"]
+    assert isinstance(no_memory_useful_coverage, float)
+    floor = round(no_memory_useful_coverage + _USEFUL_COVERAGE_MARGIN, 4)
+
+    body = {
+        "schema_id": CALIBRATION_ARTIFACT_SCHEMA_ID,
+        "calibration_split_manifest_sha256": fixture["split_manifests"]["calibration"][
+            "manifest_sha256"
+        ],
+        "baseline_manifests": baseline_manifests,
+        "calibration_metrics": calibration_metrics,
+        "derivation_rule": USEFUL_COVERAGE_DERIVATION_RULE,
+        "useful_coverage_floor": floor,
+    }
+    return {**body, "artifact_sha256": canonical_sha256(body)}
+
+
+def verify_calibration_artifact(artifact: dict[str, object]) -> None:
+    """Raise ``ValueError`` if ``artifact`` was tampered with or is stale."""
+
+    if "artifact_sha256" not in artifact:
+        raise ValueError("calibration artifact is missing artifact_sha256")
+    body = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+    expected = canonical_sha256(body)
+    if artifact["artifact_sha256"] != expected:
+        raise ValueError(
+            "calibration artifact digest mismatch: artifact has been "
+            "tampered with, is stale, or was not produced by "
+            "build_calibration_artifact"
+        )
+
+
+def useful_coverage_floor_from_fixture(fixture: dict[str, object]) -> float:
+    """Return the frozen useful-coverage floor after verifying its digest.
+
+    This is the sanctioned entry point for gating ``ScoreReport
+    .useful_coverage`` against the floor (Finding 1): it never recomputes
+    the floor from whatever baseline/scorer code currently does -- it only
+    reads the frozen value out of ``fixture["calibration_artifact"]`` after
+    confirming that artifact's self-digest still matches its contents.
+    """
+
+    artifact = fixture["calibration_artifact"]
+    assert isinstance(artifact, dict)
+    verify_calibration_artifact(artifact)
+    floor = artifact["useful_coverage_floor"]
+    assert isinstance(floor, float)
+    return floor
