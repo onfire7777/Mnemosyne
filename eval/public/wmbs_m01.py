@@ -820,7 +820,13 @@ def score_reopen_export_projection(
     }
 
 
+def _expected_replay_row_ids(fixture: Mapping[str, Any]) -> tuple[str, ...]:
+    validate_fixture(fixture)
+    return tuple(row["fixture_row_id"] for row in fixture["rows"])
+
+
 def canonical_replay_projection(
+    fixture: Mapping[str, Any],
     receipts: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     """Project a capture-receipt payload to the closed M01 replay ABI.
@@ -835,28 +841,66 @@ def canonical_replay_projection(
     carry -- `evidence_handle`, a runtime-generated per-attempt pointer, the
     M01 analogue of Task 9's "runtime-generated receipt IDs".
 
-    Any field outside both sets is unrecognized and rejected fail-closed:
-    hashing an arbitrary caller payload would let an unreviewed field either
-    silently break reproducibility (if semantic) or silently mask a real
-    divergence (if actually volatile but never declared so).
+    Two fail-closed requirements guard this projection against a payload
+    that only looks complete:
+
+    1. Every entry's key set must be exactly `_CANONICAL_REPLAY_KNOWN_FIELDS`
+       -- both a missing semantic/volatile field and an unrecognized extra
+       field are rejected. A payload of bare `{"fixture_row_id": ...}"
+       entries is not a receipt: hashing it as one would silently coerce
+       missing `outcome`/`durability`/`error` to `None` and call that a
+       passing replay.
+    2. The projected `fixture_row_id` sequence must equal, in order, the
+       frozen fixture's own row-ID sequence (`_expected_replay_row_ids`).
+       An empty payload, a payload missing rows, a payload with duplicated
+       or extra row IDs, or rows out of order all fail this check --
+       otherwise five empty lists plus an empty restart replay would hash
+       identically and "pass" canonical replay equality despite replaying
+       nothing.
     """
+    expected_row_ids = _expected_replay_row_ids(fixture)
+    if not isinstance(receipts, Sequence) or isinstance(receipts, (str, bytes)):
+        raise WmbsM01Error("canonical replay payload must be a sequence")
+
     projected: list[dict[str, Any]] = []
+    actual_row_ids: list[Any] = []
     for index, receipt in enumerate(receipts):
         if not isinstance(receipt, Mapping):
             raise WmbsM01Error(f"canonical replay payload[{index}] must be a mapping")
-        unknown = set(receipt) - _CANONICAL_REPLAY_KNOWN_FIELDS
-        if unknown:
+        receipt_keys = set(receipt)
+        missing = _CANONICAL_REPLAY_KNOWN_FIELDS - receipt_keys
+        unknown = receipt_keys - _CANONICAL_REPLAY_KNOWN_FIELDS
+        if missing or unknown:
             raise WmbsM01Error(
-                f"canonical replay payload[{index}] has unrecognized field(s): "
-                f"{sorted(unknown)}"
+                f"canonical replay payload[{index}] has a non-closed field set: "
+                f"missing={sorted(missing)} unknown={sorted(unknown)}"
             )
+        actual_row_ids.append(receipt.get("fixture_row_id"))
         projected.append(
             {field: receipt.get(field) for field in _CANONICAL_REPLAY_SEMANTIC_FIELDS}
         )
+
+    if tuple(actual_row_ids) != expected_row_ids:
+        expected_set = set(expected_row_ids)
+        actual_set = set(actual_row_ids)
+        seen: set[Any] = set()
+        duplicated = sorted(
+            {row_id for row_id in actual_row_ids if row_id in seen or seen.add(row_id)}
+        )
+        raise WmbsM01Error(
+            "canonical replay payload does not cover the frozen fixture's "
+            "complete ordered row-ID set: "
+            f"missing={sorted(expected_set - actual_set)} "
+            f"extra={sorted(actual_set - expected_set)} "
+            f"duplicated={duplicated} "
+            f"same_membership_wrong_order={actual_set == expected_set}"
+        )
+
     return projected
 
 
 def score_canonical_replay_equality(
+    fixture: Mapping[str, Any],
     clean_run_payloads: Sequence[Sequence[Mapping[str, Any]]],
     restart_replay_payload: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -866,11 +910,11 @@ def score_canonical_replay_equality(
             f"got {len(clean_run_payloads)}"
         )
     clean_digests = tuple(
-        canonical_sha256(canonical_replay_projection(payload))
+        canonical_sha256(canonical_replay_projection(fixture, payload))
         for payload in clean_run_payloads
     )
     restart_digest = canonical_sha256(
-        canonical_replay_projection(restart_replay_payload)
+        canonical_replay_projection(fixture, restart_replay_payload)
     )
     unique_digests = set(clean_digests) | {restart_digest}
     return {
@@ -887,14 +931,23 @@ def score_capture(
     receipts: Sequence[Mapping[str, Any]],
     exported_rows: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Aggregate the four capture dimensions this pilot scores together.
+    """Aggregate the five capture dimensions this pilot scores together.
 
     `exact_duplicate_materialization` is bound to `exported_rows` (the
     reopened/exported durable-state projection), not to `receipts` alone: a
     receipt claiming `deduplicated` is not proof of zero materialization.
-    Provenance retention and canonical replay equality are scored
-    separately because they take projection/replay inputs shaped
-    differently from a single capture run's receipts plus export.
+    `reopen_export_completeness` binds this same `exported_rows` input to
+    `score_reopen_export_projection`, which independently requires exactly
+    one durable materialization for every identity `perfect_export_rows`
+    expects (missing => acknowledged-write loss the receipts alone did not
+    reveal; duplicated or unexpected => a distinct materialization defect).
+    Without this, a capture run with perfect-looking receipts but an empty
+    or incomplete durable-state export would still be scored `passed`,
+    because the other three dimensions only ever inspect `receipts`, never
+    what was actually reopened/exported. Provenance retention and canonical
+    replay equality are scored separately because they take
+    projection/replay inputs shaped differently from a single capture run's
+    receipts plus export.
     """
     acknowledged_write_loss = score_acknowledged_write_loss(fixture, receipts)
     rejection_receipt_completeness = score_rejection_receipt_completeness(
@@ -904,15 +957,18 @@ def score_capture(
         fixture, exported_rows
     )
     schema_outcome_accuracy = score_schema_outcome_accuracy(fixture, receipts)
+    reopen_export_completeness = score_reopen_export_projection(fixture, exported_rows)
     return {
         "acknowledged_write_loss": acknowledged_write_loss,
         "rejection_receipt_completeness": rejection_receipt_completeness,
         "exact_duplicate_materialization": exact_duplicate_materialization,
         "schema_outcome_accuracy": schema_outcome_accuracy,
+        "reopen_export_completeness": reopen_export_completeness,
         "passed": (
             acknowledged_write_loss["passed"]
             and rejection_receipt_completeness["passed"]
             and exact_duplicate_materialization["passed"]
             and schema_outcome_accuracy["passed"]
+            and reopen_export_completeness["passed"]
         ),
     }

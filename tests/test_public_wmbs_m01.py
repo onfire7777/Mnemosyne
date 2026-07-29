@@ -230,6 +230,68 @@ def test_golden_payload_1_perfect_run_passes_all_capture_dimensions() -> None:
     assert result["rejection_receipt_completeness"]["incomplete_count"] == 0
     assert result["exact_duplicate_materialization"]["materialized_count"] == 0
     assert result["schema_outcome_accuracy"]["accuracy"] == 1.0
+    assert result["reopen_export_completeness"]["passed"] is True
+
+
+# ---------------------------------------------------------------------------
+# Adversarial regression: score_capture must not trust receipts alone when
+# the durable-state export is empty or incomplete (prior bypass).
+# ---------------------------------------------------------------------------
+
+
+def test_score_capture_rejects_an_empty_export_despite_perfect_receipts() -> None:
+    """Perfect-looking receipts with zero durable materializations must fail.
+
+    Prior to the fix, `score_capture(..., exported_rows=[])` scored `passed`
+    because `exact_duplicate_materialization` only flags *duplicate*
+    materializations (count > 1), never *missing* ones (count == 0), and the
+    other three dimensions never inspect `exported_rows` at all. This proves
+    the aggregate gate now requires exactly one durable materialization per
+    expected accepted identity, independent of what the receipts claim.
+    """
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+
+    result = wmbs_m01.score_capture(fixture, receipts, [])
+
+    assert result["passed"] is False
+    assert result["reopen_export_completeness"]["passed"] is False
+    assert len(result["reopen_export_completeness"]["missing_event_ids"]) == (
+        wmbs_m01.BASE_EVENT_COUNT + wmbs_m01.NEAR_DUPLICATE_COUNT
+    )
+    # The receipt-only dimensions still look perfect: this is exactly the
+    # bypass surface the fix closes by adding an independent, export-bound
+    # completeness check rather than relaxing the existing ones.
+    assert result["acknowledged_write_loss"]["passed"] is True
+    assert result["rejection_receipt_completeness"]["passed"] is True
+    assert result["schema_outcome_accuracy"]["passed"] is True
+
+
+def test_score_capture_rejects_a_partially_exported_but_perfect_receipt_run() -> None:
+    """A single dropped export row must fail the aggregate, not just a submetric."""
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    dropped_event_id = exported[0]["event_id"]
+    exported = exported[1:]
+
+    result = wmbs_m01.score_capture(fixture, receipts, exported)
+
+    assert result["passed"] is False
+    assert dropped_event_id in result["reopen_export_completeness"]["missing_event_ids"]
+
+
+def test_score_capture_still_rejects_a_duplicate_materialization() -> None:
+    """The pre-existing duplicate-materialization gate must keep working."""
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    exported = [*exported, dict(exported[0])]
+
+    result = wmbs_m01.score_capture(fixture, receipts, exported)
+
+    assert result["passed"] is False
+    assert result["reopen_export_completeness"]["passed"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -479,35 +541,25 @@ def test_reopen_export_projection_detects_duplicate_exported_rows() -> None:
 def test_canonical_replay_projection_allowlists_semantic_fields_and_drops_volatile() -> (
     None
 ):
-    receipt = {
-        "fixture_row_id": "row-00000",
-        "outcome": "accepted",
-        "durability": "acknowledged",
-        "evidence_handle": "evidence-row-00000",
-        "error": None,
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    receipts[0]["evidence_handle"] = "evidence-row-00000"
+    projected = wmbs_m01.canonical_replay_projection(fixture, receipts)
+    assert projected[0] == {
+        "fixture_row_id": receipts[0]["fixture_row_id"],
+        "outcome": receipts[0]["outcome"],
+        "durability": receipts[0]["durability"],
+        "error": receipts[0]["error"],
     }
-    projected = wmbs_m01.canonical_replay_projection([receipt])
-    assert projected == [
-        {
-            "fixture_row_id": "row-00000",
-            "outcome": "accepted",
-            "durability": "acknowledged",
-            "error": None,
-        }
-    ]
+    assert "evidence_handle" not in projected[0]
 
 
 def test_canonical_replay_projection_rejects_an_unrecognized_field() -> None:
-    receipt = {
-        "fixture_row_id": "row-00000",
-        "outcome": "accepted",
-        "durability": "acknowledged",
-        "evidence_handle": None,
-        "error": None,
-        "wall_clock_ns": 12345,
-    }
+    fixture = wmbs_m01.load_fixture()
+    receipts = wmbs_m01.perfect_receipts(fixture)
+    receipts[0]["wall_clock_ns"] = 12345
     with pytest.raises(wmbs_m01.WmbsM01Error):
-        wmbs_m01.canonical_replay_projection([receipt])
+        wmbs_m01.canonical_replay_projection(fixture, receipts)
 
 
 def test_canonical_replay_equality_ignores_the_volatile_evidence_handle_field() -> None:
@@ -532,7 +584,7 @@ def test_canonical_replay_equality_ignores_the_volatile_evidence_handle_field() 
         if receipt["evidence_handle"] is not None:
             receipt["evidence_handle"] = f"{receipt['evidence_handle']}-restart"
 
-    result = wmbs_m01.score_canonical_replay_equality(clean_runs, restart_run)
+    result = wmbs_m01.score_canonical_replay_equality(fixture, clean_runs, restart_run)
     assert result["passed"] is True
     assert result["unique_digest_count"] == 1
 
@@ -545,7 +597,97 @@ def test_canonical_replay_equality_rejects_a_payload_with_an_unrecognized_field(
     payload[0]["host_path"] = "/tmp/whatever"
     clean_runs = [copy.deepcopy(payload) for _ in range(5)]
     with pytest.raises(wmbs_m01.WmbsM01Error):
-        wmbs_m01.score_canonical_replay_equality(clean_runs, copy.deepcopy(payload))
+        wmbs_m01.score_canonical_replay_equality(
+            fixture, clean_runs, copy.deepcopy(payload)
+        )
+
+
+# ---------------------------------------------------------------------------
+# Adversarial regression: canonical replay equality must bind to the frozen
+# fixture's complete ordered row-ID set and a closed receipt shape (prior
+# bypass: empty payloads and fixture_row_id-only payloads both "passed").
+# ---------------------------------------------------------------------------
+
+
+def test_canonical_replay_projection_rejects_an_empty_payload() -> None:
+    fixture = wmbs_m01.load_fixture()
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, [])
+
+
+def test_canonical_replay_equality_rejects_five_empty_runs_plus_empty_restart() -> None:
+    """Five empty clean runs plus an empty restart replay must not "pass".
+
+    Prior to the fix, `canonical_sha256([])` was identical across all six
+    payloads, so this replayed-nothing case scored a false pass.
+    """
+    fixture = wmbs_m01.load_fixture()
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.score_canonical_replay_equality(fixture, [[] for _ in range(5)], [])
+
+
+def test_canonical_replay_projection_rejects_a_payload_missing_required_fields() -> (
+    None
+):
+    """A payload of bare `{"fixture_row_id": ...}` entries is not a receipt.
+
+    Prior to the fix, missing `outcome`/`durability`/`error` silently
+    defaulted to `None` via `.get()` instead of being rejected as a
+    non-closed receipt shape.
+    """
+    fixture = wmbs_m01.load_fixture()
+    bare = [{"fixture_row_id": row["fixture_row_id"]} for row in fixture["rows"]]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, bare)
+
+
+def test_canonical_replay_equality_rejects_fixture_row_id_only_payloads() -> None:
+    fixture = wmbs_m01.load_fixture()
+    bare = [{"fixture_row_id": row["fixture_row_id"]} for row in fixture["rows"]]
+    clean_runs = [copy.deepcopy(bare) for _ in range(5)]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.score_canonical_replay_equality(
+            fixture, clean_runs, copy.deepcopy(bare)
+        )
+
+
+def test_canonical_replay_projection_rejects_a_missing_row() -> None:
+    fixture = wmbs_m01.load_fixture()
+    payload = wmbs_m01.perfect_receipts(fixture)[1:]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, payload)
+
+
+def test_canonical_replay_projection_rejects_a_duplicated_row() -> None:
+    fixture = wmbs_m01.load_fixture()
+    payload = wmbs_m01.perfect_receipts(fixture)
+    payload[1] = dict(payload[0])
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, payload)
+
+
+def test_canonical_replay_projection_rejects_an_extra_row() -> None:
+    fixture = wmbs_m01.load_fixture()
+    payload = wmbs_m01.perfect_receipts(fixture)
+    payload.append(
+        {
+            "fixture_row_id": "row-99999",
+            "outcome": "accepted",
+            "durability": "acknowledged",
+            "evidence_handle": None,
+            "error": None,
+        }
+    )
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, payload)
+
+
+def test_canonical_replay_projection_rejects_wrong_order() -> None:
+    fixture = wmbs_m01.load_fixture()
+    payload = wmbs_m01.perfect_receipts(fixture)
+    payload[0], payload[1] = payload[1], payload[0]
+    with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, payload)
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +703,7 @@ def test_canonical_replay_equality_passes_for_five_identical_runs_plus_restart()
     clean_runs = [copy.deepcopy(payload) for _ in range(5)]
     restart_run = copy.deepcopy(payload)
 
-    result = wmbs_m01.score_canonical_replay_equality(clean_runs, restart_run)
+    result = wmbs_m01.score_canonical_replay_equality(fixture, clean_runs, restart_run)
     assert result["passed"] is True
     assert result["unique_digest_count"] == 1
     assert len(result["clean_run_digests"]) == 5
@@ -574,7 +716,7 @@ def test_canonical_replay_equality_fails_when_a_run_diverges() -> None:
     clean_runs[-1][0]["outcome"] = "rejected"
     restart_run = copy.deepcopy(payload)
 
-    result = wmbs_m01.score_canonical_replay_equality(clean_runs, restart_run)
+    result = wmbs_m01.score_canonical_replay_equality(fixture, clean_runs, restart_run)
     assert result["passed"] is False
     assert result["unique_digest_count"] > 1
 
@@ -584,7 +726,7 @@ def test_canonical_replay_equality_requires_the_minimum_run_count() -> None:
     payload = wmbs_m01.perfect_receipts(fixture)
     with pytest.raises(wmbs_m01.WmbsM01Error):
         wmbs_m01.score_canonical_replay_equality(
-            [copy.deepcopy(payload) for _ in range(4)], payload
+            fixture, [copy.deepcopy(payload) for _ in range(4)], payload
         )
 
 
