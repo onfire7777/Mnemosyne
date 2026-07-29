@@ -703,6 +703,153 @@ def test_answer_envelope_from_dict_rejects_non_bool_evidence_handles() -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# AnswerEnvelope closed-ABI adversarial regressions
+# ---------------------------------------------------------------------------
+
+
+def test_answer_envelope_from_dict_rejects_unknown_field() -> None:
+    """Adversarial regression: an unrecognized top-level key must fail
+    closed rather than being silently ignored by a non-closed loader."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "unexpected_field": "surprise",
+            }
+        )
+
+
+def test_answer_envelope_from_dict_raises_wmbs_m10_error_base_type() -> None:
+    """`AnswerEnvelopeValidationError` must be catchable as `WmbsM10Error`."""
+    with pytest.raises(m10.WmbsM10Error):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "unexpected_field": "surprise",
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_empty_answer_text() -> None:
+    """Adversarial regression: empty-string answer_text is not a genuine
+    assertion and must not silently pass as a well-formed answered
+    record."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+            }
+        )
+
+
+def test_score_records_rejects_empty_answer_text() -> None:
+    """The same nonempty-answer-text rule applies at the score_records
+    trust boundary, not only at AnswerEnvelope.from_dict."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="", abstained=False, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_answer_envelope_from_dict_rejects_duplicate_evidence_handles() -> None:
+    """Adversarial regression: duplicate evidence handles must fail closed."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0", "h0"],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_empty_evidence_handle_string() -> None:
+    """Adversarial regression: an empty-string handle is not a valid
+    identifier and must fail closed."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0", ""],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_duplicate_action_handles() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "action_handles": ["a0", "a0"],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_unknown_metadata_key() -> None:
+    """Adversarial regression: adapter_metadata is closed to the local
+    contract's own vocabulary, not an arbitrary str-to-str bag."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "adapter_metadata": {"unexpected": "value"},
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_invalid_mode_metadata_value() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "adapter_metadata": {"mode": "bogus-mode"},
+            }
+        )
+
+
+def test_answer_envelope_from_dict_accepts_known_metadata_keys() -> None:
+    record = m10.AnswerEnvelope.from_dict(
+        {
+            "answer_text": None,
+            "abstained": True,
+            "confidence": None,
+            "evidence_handles": [],
+            "adapter_metadata": {
+                "mode": "normal",
+                "abstain_reason": "malformed_question",
+            },
+        }
+    )
+    assert record.adapter_metadata == {
+        "mode": "normal",
+        "abstain_reason": "malformed_question",
+    }
+
+
 def test_score_records_rejects_string_abstained_value_before_scoring() -> None:
     """Adversarial regression: a directly-constructed envelope bypasses
     ``from_dict`` entirely, so ``score_records`` must independently
@@ -1066,6 +1213,118 @@ def test_fixture_file_on_disk_calibration_artifact_matches_generator() -> None:
         on_disk["calibration_artifact"]
         == m10.generate_fixture()["calibration_artifact"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Calibration split manifest recomputation-binding adversarial regressions
+# ---------------------------------------------------------------------------
+
+
+def test_build_calibration_artifact_rejects_rehashed_forged_split_digest() -> None:
+    """Adversarial regression: a forged calibration split manifest that is
+    correctly self-rehashed (so it is internally consistent on its own)
+    must still be rejected, because it does not match a manifest
+    independently recomputed from this fixture's own calibration cases.
+    """
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["calibration"]
+    forged_body = {**stored, "case_count": stored["case_count"] + 1}
+    del forged_body["manifest_sha256"]
+    forged_manifest = {
+        **forged_body,
+        "manifest_sha256": m10.canonical_sha256(forged_body),
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "calibration": forged_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_changed_manifest_body() -> None:
+    """Adversarial regression: editing the stored manifest body without
+    rehashing must also fail closed (caught by the whole-manifest
+    comparison against the recomputed manifest, not by a separate
+    self-digest check)."""
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["calibration"]
+    tampered = {
+        **stored,
+        "question_digests": [*stored["question_digests"], "0" * 64],
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {**fixture["split_manifests"], "calibration": tampered},
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_overlapping_partitions() -> None:
+    """Adversarial regression: a calibration case duplicating a scored
+    case's question/event content must be rejected by the disjointness
+    check, even when the forged calibration split manifest is made fully
+    self-consistent with the forged (overlapping) calibration cases so
+    the whole-manifest comparison alone would pass.
+    """
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    scored_case = next(case for case in cases if case["partition"] == "scored")
+    duplicated = {
+        **scored_case,
+        "case_id": "case-forged-overlap",
+        "partition": "calibration",
+    }
+    forged_cases = cases + [duplicated]
+
+    calibration_cases = [
+        m10.Case.from_dict(case)
+        for case in forged_cases
+        if case["partition"] == "calibration"
+    ]
+    forged_manifest = m10._split_manifest(
+        calibration_cases, m10._CALIBRATION_SEEDS, "calibration"
+    )
+
+    forged_fixture = {
+        **fixture,
+        "cases": forged_cases,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "calibration": forged_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_self_consistent_empty_calibration_partition() -> (
+    None
+):
+    """Adversarial regression: an incomplete (empty) calibration partition
+    must be rejected even when the stored split manifest is forged to be
+    self-consistent with that empty partition."""
+    fixture = m10.generate_fixture()
+    cases = [case for case in fixture["cases"] if case["partition"] != "calibration"]
+    empty_manifest = m10._split_manifest([], m10._CALIBRATION_SEEDS, "calibration")
+    forged_fixture = {
+        **fixture,
+        "cases": cases,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "calibration": empty_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_calibration_split_manifest_error_is_a_wmbs_m10_error() -> None:
+    assert issubclass(m10.CalibrationSplitManifestError, m10.WmbsM10Error)
 
 
 def test_risk_coverage_operating_point_reports_coverage_and_risk() -> None:
