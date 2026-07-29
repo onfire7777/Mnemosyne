@@ -753,6 +753,56 @@
         }
       }
     },
+    "egress_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint", "dns_names", "ip_ranges", "protocols"],
+      "properties": {
+        "endpoint": {"$ref": "#/$defs/short_string"},
+        "dns_names": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/short_string"}
+        },
+        "ip_ranges": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/short_string"}
+        },
+        "protocols": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["http", "https"]}
+        }
+      }
+    },
+    "egress_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "endpoints",
+        "block_cloud_metadata",
+        "block_private_ranges"
+      ],
+      "properties": {
+        "mode": {"enum": ["deny", "metered-allowlist"]},
+        "endpoints": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/egress_endpoint"}
+        },
+        "block_cloud_metadata": {"const": true},
+        "block_private_ranges": {"const": true}
+      }
+    },
     "SandboxReceipt": {
       "$anchor": "SandboxReceipt",
       "type": "object",
@@ -760,11 +810,13 @@
       "required": [
         "schema_id",
         "artifact_sha256",
-        "profile_sha256",
+        "profile_ref",
         "sut_boundary",
         "uid",
         "gid",
         "mounts",
+        "environment_allowlist",
+        "syscall_policy",
         "egress",
         "secrets",
         "privilege",
@@ -774,6 +826,10 @@
         "file_limit",
         "output_limit_bytes",
         "wall_deadline_seconds",
+        "locale",
+        "timezone",
+        "cleanup",
+        "log_redaction",
         "scorer_isolation",
         "model_proxy",
         "usage_counters"
@@ -781,7 +837,7 @@
       "properties": {
         "schema_id": {"const": "urn:wmbs:0.1-draft#SandboxReceipt"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
-        "profile_sha256": {"$ref": "#/$defs/sha256"},
+        "profile_ref": {"$ref": "#/$defs/digest_reference"},
         "sut_boundary": {"$ref": "#/$defs/nonempty_string"},
         "uid": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "gid": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
@@ -791,7 +847,16 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/short_string"}
         },
-        "egress": {"enum": ["deny", "metered-allowlist"]},
+        "environment_allowlist": {
+          "type": "array",
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/short_string"}
+        },
+        "syscall_policy": {
+          "enum": ["default-deny-allowlist", "platform-sandbox", "unavailable"]
+        },
+        "egress": {"$ref": "#/$defs/egress_policy"},
         "secrets": {"enum": ["none", "allowlisted"]},
         "privilege": {"enum": ["unprivileged"]},
         "cpu_limit": {"type": "number", "minimum": 0.01, "maximum": 9007199254740991},
@@ -800,6 +865,10 @@
         "file_limit": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "output_limit_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "wall_deadline_seconds": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "locale": {"$ref": "#/$defs/short_string"},
+        "timezone": {"const": "UTC"},
+        "cleanup": {"const": "ephemeral-destroyed"},
+        "log_redaction": {"const": "secrets-and-direct-personal-data"},
         "scorer_isolation": {"enum": ["separate-process", "separate-container"]},
         "model_proxy": {"enum": ["disabled", "harness-owned"]},
         "usage_counters": {"const": "harness-owned"}
@@ -949,9 +1018,15 @@
         "schema_id": {"const": "urn:wmbs:0.1-draft#FeasibilityRecord"},
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "identity": {"$ref": "#/$defs/feasibility_identity"},
-        "adapter_contract_ref": {"$ref": "#/$defs/digest_reference"},
-        "data_source_ref": {"$ref": "#/$defs/digest_reference"},
-        "scorer_ref": {"$ref": "#/$defs/digest_reference"},
+        "adapter_contract_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
+        "data_source_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
+        "scorer_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
         "inherited_rails": {
           "type": "array",
           "minItems": 1,
@@ -959,12 +1034,22 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/identifier"}
         },
-        "baseline_manifest_ref": {"$ref": "#/$defs/digest_reference"},
-        "power_plan_ref": {"$ref": "#/$defs/digest_reference"},
+        "baseline_manifest_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
+        "power_plan_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
         "replay_protocol": {"$ref": "#/$defs/replay_protocol"},
-        "sandbox_receipt_ref": {"$ref": "#/$defs/digest_reference"},
-        "resource_receipt_ref": {"$ref": "#/$defs/digest_reference"},
-        "software_data_bom_ref": {"$ref": "#/$defs/digest_reference"},
+        "sandbox_receipt_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
+        "resource_receipt_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
+        "software_data_bom_ref": {
+          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+        },
         "result_contract": {"$ref": "#/$defs/result_contract"},
         "deferral_condition": {"$ref": "#/$defs/nonempty_string"},
         "feasibility_disposition": {"$ref": "#/$defs/feasibility_disposition"}
