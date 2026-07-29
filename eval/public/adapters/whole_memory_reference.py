@@ -11,6 +11,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
+from leaderboard.validate import validate_record as validate_result_v1
+
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 VOLATILE_FIELDS = {
     "wall_time_ms",
@@ -32,6 +34,9 @@ _MAX_RETAINED_BYTES = 64 * 1024 * 1024
 _MAX_JSON_DEPTH = 64
 _STRING_CHUNK_SIZE = 64 * 1024
 _EVIDENCE_DEFINITIONS = {
+    "AdapterContract",
+    "DataSourceContract",
+    "ScorerContract",
     "BaselineManifest",
     "PowerPlan",
     "SoftwareDataBOM",
@@ -52,6 +57,9 @@ _FEASIBILITY_REFERENCE_FIELDS = (
     "software_data_bom_ref",
 )
 _TYPED_FEASIBILITY_REFERENCES = {
+    "adapter_contract_ref": "AdapterContract",
+    "data_source_ref": "DataSourceContract",
+    "scorer_ref": "ScorerContract",
     "baseline_manifest_ref": "BaselineManifest",
     "power_plan_ref": "PowerPlan",
     "sandbox_receipt_ref": "SandboxReceipt",
@@ -333,19 +341,17 @@ def _enforce_canonical_size(
         if isinstance(current, float) and not math.isfinite(current):
             _fail("canonical JSON cannot contain non-finite numbers")
         if isinstance(current, str):
-            try:
-                minimum_size += 2
-                for start in range(0, len(current), _STRING_CHUNK_SIZE):
-                    minimum_size += len(
-                        current[start : start + _STRING_CHUNK_SIZE].encode()
+            minimum_size += 2
+            for start in range(0, len(current), _STRING_CHUNK_SIZE):
+                escaped = json.encoder.encode_basestring_ascii(
+                    current[start : start + _STRING_CHUNK_SIZE]
+                )
+                minimum_size += len(escaped) - 2
+                if minimum_size > maximum:
+                    _fail(
+                        f"{label} exceeds the byte limit",
+                        code="RESOURCE_LIMIT",
                     )
-                    if minimum_size > maximum:
-                        _fail(
-                            f"{label} exceeds the byte limit",
-                            code="RESOURCE_LIMIT",
-                        )
-            except UnicodeEncodeError as exc:
-                _fail(f"value is not canonical JSON: {exc}")
         elif isinstance(current, dict):
             if any(not isinstance(key, str) for key in current):
                 _fail("value is not canonical JSON: object keys must be strings")
@@ -551,6 +557,8 @@ def validate_evidence_bundle(
             _fail("sandbox profile digest does not match its declared controls")
         if resource_receipt.get("profile_sha256") != profile_digest:
             _fail("resource receipt does not match the sandbox profile")
+        if resource_receipt.get("identity") != record.get("identity"):
+            _fail("resource receipt does not match the feasibility identity")
         if resource_receipt.get("sut_boundary") != sandbox_receipt.get("sut_boundary"):
             _fail("resource receipt does not match the sandbox SUT boundary")
         egress = sandbox_receipt.get("egress")
@@ -581,6 +589,8 @@ def validate_evidence_bundle(
         result_ref = smoke_receipt.get("result_ref")
         if not isinstance(result_ref, str):
             _fail("smoke receipt does not bind a result")
+        if resource_receipt.get("result_ref") != result_ref:
+            _fail("resource receipt does not match the smoke result")
         result = artifacts.get(result_ref)
         if result is None:
             _fail("smoke result does not resolve to a supplied artifact")
@@ -589,19 +599,21 @@ def validate_evidence_bundle(
             _fail("smoke result is not a digest reference")
         if canonical_sha256(result) != result_digest:
             _fail("smoke result does not match the supplied artifact")
-        if (
-            not isinstance(result, Mapping)
-            or result.get("identity") != smoke_receipt.get("identity")
-            or result.get("attempt_state") != "finalized"
-            or result.get("outcome") != "passed"
-        ):
-            _fail("smoke result does not prove the exact passing attempt")
         result_contract = record["result_contract"]
         if (
             not isinstance(result_contract, Mapping)
             or result_id != result_contract.get("schema_version")
         ):
             _fail("smoke result does not match the feasibility result contract")
+        if result_id == "result-v1":
+            result_errors = validate_result_v1(result)
+            if result_errors:
+                _fail(
+                    "result-v1 validation failed: "
+                    + ", ".join(result_errors[:10])
+                )
+        else:
+            _fail("result-v2 validation is not implemented")
         if result_contract.get("attempt_state") != "finalized":
             _fail("pilot readiness requires a finalized attempt")
     return deepcopy(record)
@@ -718,7 +730,17 @@ class ProtocolValidator:
             str(context["deadline_utc"]), "$.context.deadline_utc"
         )
         if deadline <= self._now():
-            _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
+            error = validated_response.get("error")
+            if (
+                definition != "error_response"
+                or not isinstance(error, Mapping)
+                or error.get("code") != "DEADLINE_EXCEEDED"
+            ):
+                _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
+            self._responses[idempotency_key] = response_fingerprint
+            if self._pending_transition == idempotency_key:
+                self._pending_transition = None
+            return deepcopy(validated_response)
 
         if definition == "error_response":
             self._responses[idempotency_key] = response_fingerprint

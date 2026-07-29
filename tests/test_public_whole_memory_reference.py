@@ -306,7 +306,70 @@ def _sandbox_profile_digest(receipt: dict[str, object]) -> str:
     )
 
 
+FEASIBILITY_IDENTITY = {
+    "module_id": "M01",
+    "module_version": "0.1.0",
+    "source_commit": "1" * 40,
+    "owner_ids": ["WMB-P1", "M15"],
+}
+SMOKE_RESULT = {
+    "schema_version": "mnemosyne.leaderboard.result/v1",
+    "record_id": "m01-development-smoke-001",
+    "system": "reference-system",
+    "track": "development",
+    "benchmark": "whole-memory-M01",
+    "benchmark_version": "0.1.0",
+    "run_commit": "1" * 40,
+    "build_fingerprint": "sha256:" + DIGEST_A,
+    "config_digest": "sha256:" + DIGEST_B,
+    "bundle_digest": "sha256:" + DIGEST_C,
+    "trace_index_digest": "sha256:" + DIGEST_A,
+    "metrics": [
+        {
+            "name": "smoke_pass",
+            "family": "reproducibility",
+            "value": 1.0,
+            "unit": "boolean",
+            "confidence_interval": {"low": 1.0, "high": 1.0},
+        }
+    ],
+    "publication": {"publishable": False, "label": "operator-run"},
+    "operator_entry": {"operator": "reference-harness", "disclosed": True},
+    "history": {"supersedes": None},
+}
+SMOKE_RESULT_REF = "result-v1@sha256:" + abi.canonical_sha256(SMOKE_RESULT)
+
 EVIDENCE_FIXTURES = {
+    "AdapterContract": _artifact(
+        "urn:wmbs:0.1-draft#AdapterContract",
+        protocol_id=PROTOCOL_VERSION,
+        operations=list(GOLDEN_REQUESTS),
+        error_codes=list(ERROR_CODES),
+        deadline_semantics="first-response-before-deadline",
+        retry_semantics="fresh-key-after-closed-error",
+        idempotency_semantics="identical-replay",
+        ordering_semantics="strictly-increasing-sequence",
+        state_transition_semantics="response-committed",
+    ),
+    "DataSourceContract": _artifact(
+        "urn:wmbs:0.1-draft#DataSourceContract",
+        source_kind="deterministic-synthetic",
+        source_id="synthetic-golden",
+        schema_ref="synthetic-schema@sha256:" + DIGEST_A,
+        seed_domain=[7, 11],
+        golden_fixture_refs=["synthetic-fixtures@sha256:" + DIGEST_B],
+        license_id="CC0-1.0",
+        redistribution="allowed",
+    ),
+    "ScorerContract": _artifact(
+        "urn:wmbs:0.1-draft#ScorerContract",
+        scorer_id="exact-match",
+        executable_argv=["python", "-m", "scorer"],
+        golden_vector_refs=["scorer-vectors@sha256:" + DIGEST_C],
+        numeric_precision="finite-json",
+        canonicalization="sorted-compact-utf8",
+        failure_exit_codes=[1, 2],
+    ),
     "BaselineManifest": _artifact(
         "urn:wmbs:0.1-draft#BaselineManifest",
         tokenizer="tokenizer@sha256:" + DIGEST_A,
@@ -398,6 +461,8 @@ EVIDENCE_FIXTURES = {
     ),
     "ResourceReceipt": _artifact(
         "urn:wmbs:0.1-draft#ResourceReceipt",
+        identity=deepcopy(FEASIBILITY_IDENTITY),
+        result_ref=SMOKE_RESULT_REF,
         profile_sha256=L16_PROFILE_DIGEST,
         sut_boundary="adapter-process",
         wall_time_ms=10,
@@ -417,32 +482,17 @@ EVIDENCE_FIXTURES = {
         abort_status="completed",
     ),
 }
-SMOKE_RESULT = {
-    "identity": {
-        "module_id": "M01",
-        "module_version": "0.1.0",
-        "source_commit": "1" * 40,
-        "owner_ids": ["WMB-P1", "M15"],
-    },
-    "attempt_state": "finalized",
-    "outcome": "passed",
-}
 EVIDENCE_FIXTURES["SmokeReceipt"] = _artifact(
     "urn:wmbs:0.1-draft#SmokeReceipt",
-    identity=deepcopy(SMOKE_RESULT["identity"]),
+    identity=deepcopy(FEASIBILITY_IDENTITY),
     outcome="passed",
     sandbox_receipt_sha256=EVIDENCE_FIXTURES["SandboxReceipt"]["artifact_sha256"],
     resource_receipt_sha256=EVIDENCE_FIXTURES["ResourceReceipt"]["artifact_sha256"],
-    result_ref="result-v1@sha256:" + abi.canonical_sha256(SMOKE_RESULT),
+    result_ref=SMOKE_RESULT_REF,
 )
 EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
     "urn:wmbs:0.1-draft#FeasibilityRecord",
-    identity={
-        "module_id": "M01",
-        "module_version": "0.1.0",
-        "source_commit": "1" * 40,
-        "owner_ids": ["WMB-P1", "M15"],
-    },
+    identity=deepcopy(FEASIBILITY_IDENTITY),
     adapter_contract_ref="wmbs/0.1-draft@sha256:" + DIGEST_A,
     data_source_ref="synthetic-golden@sha256:" + DIGEST_B,
     scorer_ref="exact-match@sha256:" + DIGEST_C,
@@ -497,14 +547,13 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
 def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]]:
     record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
     artifacts: dict[str, object] = {}
-    for field, artifact in [
-        ("adapter_contract_ref", {"protocol": "wmbs/0.1-draft"}),
-        ("data_source_ref", {"fixture": "synthetic-golden"}),
-        ("scorer_ref", {"command": "score-exact-match"}),
+    for field, definition in [
+        ("adapter_contract_ref", "AdapterContract"),
+        ("data_source_ref", "DataSourceContract"),
+        ("scorer_ref", "ScorerContract"),
     ]:
-        reference = (
-            f"{field.removesuffix('_ref')}@sha256:{abi.canonical_sha256(artifact)}"
-        )
+        artifact = EVIDENCE_FIXTURES[definition]
+        reference = f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
         record[field] = reference
         artifacts[reference] = artifact
     for field, definition in [
@@ -957,7 +1006,7 @@ def test_pilot_readiness_binds_smoke_to_exact_module_and_result() -> None:
     mismatched = _rebind_artifact(mismatched)
     with pytest.raises(
         abi.WholeMemoryValidationError,
-        match="smoke receipt does not match the feasibility identity",
+        match="resource receipt does not match the feasibility identity",
     ):
         abi.validate_evidence_bundle(mismatched, artifacts)
 
@@ -972,30 +1021,6 @@ def test_pilot_readiness_binds_smoke_to_exact_module_and_result() -> None:
         match="smoke result does not resolve",
     ):
         abi.validate_evidence_bundle(record, missing_result)
-
-    mismatched_result = deepcopy(SMOKE_RESULT)
-    mismatched_result["identity"]["module_id"] = "M20"  # type: ignore[index]
-    replacement_result_ref = (
-        "result-v1@sha256:" + abi.canonical_sha256(mismatched_result)
-    )
-    smoke = deepcopy(EVIDENCE_FIXTURES["SmokeReceipt"])
-    smoke["result_ref"] = replacement_result_ref
-    smoke = _rebind_artifact(smoke)
-    rebound_record = deepcopy(record)
-    rebound_record["smoke_receipt_ref"] = (
-        f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
-    )
-    rebound_record = _rebind_artifact(rebound_record)
-    mismatched_artifacts = deepcopy(artifacts)
-    mismatched_artifacts[rebound_record["smoke_receipt_ref"]] = smoke
-    mismatched_artifacts[replacement_result_ref] = mismatched_result
-
-    with pytest.raises(
-        abi.WholeMemoryValidationError,
-        match="smoke result does not prove the exact passing attempt",
-    ):
-        abi.validate_evidence_bundle(rebound_record, mismatched_artifacts)
-
 
 @requires_abi
 def test_pilot_readiness_binds_smoke_result_to_declared_contract() -> None:
@@ -1016,14 +1041,68 @@ def test_pilot_readiness_binds_smoke_result_to_declared_contract() -> None:
     smoke["result_ref"] = result_ref
     smoke = _rebind_artifact(smoke)
     smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    resource_ref = record["resource_receipt_ref"]
+    assert isinstance(resource_ref, str)
+    resource = deepcopy(artifacts.pop(resource_ref))
+    resource["result_ref"] = result_ref
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
     record["smoke_receipt_ref"] = smoke_ref
+    record["resource_receipt_ref"] = resource_ref
     record = _rebind_artifact(record)
     artifacts[result_ref] = result
+    artifacts[resource_ref] = resource
     artifacts[smoke_ref] = smoke
 
     with pytest.raises(
         abi.WholeMemoryValidationError,
         match="smoke result does not match the feasibility result contract",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_rejects_invalid_result_v1() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    old_result_ref = smoke["result_ref"]
+    assert isinstance(old_result_ref, str)
+    invalid_result = deepcopy(artifacts.pop(old_result_ref))
+    invalid_result.pop("metrics")
+    result_ref = "result-v1@sha256:" + abi.canonical_sha256(invalid_result)
+    smoke["result_ref"] = result_ref
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    resource_ref = record["resource_receipt_ref"]
+    assert isinstance(resource_ref, str)
+    resource = deepcopy(artifacts.pop(resource_ref))
+    resource["result_ref"] = result_ref
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["smoke_receipt_ref"] = smoke_ref
+    record["resource_receipt_ref"] = resource_ref
+    record = _rebind_artifact(record)
+    artifacts[result_ref] = invalid_result
+    artifacts[resource_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="result-v1 validation failed",
     ):
         abi.validate_evidence_bundle(record, artifacts)
 
@@ -1138,6 +1217,40 @@ def test_pilot_readiness_binds_resource_receipt_to_sandbox_profile() -> None:
     with pytest.raises(
         abi.WholeMemoryValidationError,
         match="resource receipt does not match the sandbox profile",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_binds_resource_receipt_to_feasibility_identity() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    old_ref = record["resource_receipt_ref"]
+    assert isinstance(old_ref, str)
+    resource = deepcopy(artifacts.pop(old_ref))
+    resource["identity"]["module_id"] = "M20"  # type: ignore[index]
+    resource = _rebind_artifact(resource)
+    new_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    record["resource_receipt_ref"] = new_ref
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["smoke_receipt_ref"] = smoke_ref
+    record = _rebind_artifact(record)
+    artifacts[new_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="resource receipt does not match the feasibility identity",
     ):
         abi.validate_evidence_bundle(record, artifacts)
 
@@ -1386,6 +1499,32 @@ def test_contract_ready_requires_resolved_contract_artifacts() -> None:
     missing.pop(adapter_ref)
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_evidence_bundle(record, missing)
+
+
+@requires_abi
+def test_contract_ready_rejects_semantically_invalid_contract_artifacts() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["resource_receipt_ref"] = None
+    record["feasibility_disposition"] = {
+        "development": "CONTRACT-READY",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    old_ref = record["adapter_contract_ref"]
+    assert isinstance(old_ref, str)
+    artifacts.pop(old_ref)
+    invalid = {"protocol": PROTOCOL_VERSION}
+    new_ref = "adapter-contract@sha256:" + abi.canonical_sha256(invalid)
+    record["adapter_contract_ref"] = new_ref
+    record = _rebind_artifact(record)
+    artifacts[new_ref] = invalid
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="does not reference AdapterContract",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
 
 
 @requires_abi
@@ -1671,7 +1810,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "c9eabd4bf5bc24a845dae9b9df076f7886cd0afb7e25cead4f05337bb127ce26"
+        == "a5ee1d5a7a426a4936e9ec1a62bf8e27cfd73d7521f0327c673df1758a209157"
     )
 
 
@@ -2126,6 +2265,27 @@ def test_first_response_must_arrive_before_deadline_but_frozen_replay_survives()
 
 
 @requires_abi
+def test_deadline_error_closes_pending_transition_and_allows_fresh_retry() -> None:
+    current_time = [datetime(2026, 7, 28, 12, tzinfo=UTC)]
+    validator = abi.ProtocolValidator(now=lambda: current_time[0])
+    request = deepcopy(GOLDEN_REQUESTS["negotiate"])
+    request["context"]["deadline_utc"] = "2026-07-28T12:00:01Z"  # type: ignore[index]
+    validator.validate_request(request)
+    current_time[0] = datetime(2026, 7, 28, 12, 0, 1, tzinfo=UTC)
+
+    deadline_response = ERROR_ENVELOPES["DEADLINE_EXCEEDED"]
+    assert validator.validate_response(request, deadline_response) == deadline_response
+
+    retry = _request(
+        "negotiate",
+        deepcopy(GOLDEN_REQUESTS["negotiate"]["payload"]),  # type: ignore[arg-type]
+        sequence=2,
+    )
+    retry["context"]["deadline_utc"] = "2026-07-28T12:00:02Z"  # type: ignore[index]
+    assert validator.validate_request(retry) == retry
+
+
+@requires_abi
 def test_idempotent_replay_is_isolated_from_caller_mutation() -> None:
     validator = _validator()
     _complete_exchange(validator, "negotiate")
@@ -2216,6 +2376,26 @@ def test_canonical_size_guard_stops_before_traversing_oversized_primitive_list(
 
     assert _error_code(exc) == "RESOURCE_LIMIT"
     assert value.visited < len(value)
+
+
+@requires_abi
+def test_canonical_size_guard_rejects_escaped_string_before_full_encoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value = "\x00" * 20
+    monkeypatch.setattr(abi, "_MAX_RETAINED_BYTES", 64)
+    original = json.JSONEncoder.iterencode
+
+    def fail_if_called(self: json.JSONEncoder, value: object):  # type: ignore[no-untyped-def]
+        raise AssertionError("full encoder reached")
+        yield from original(self, value)
+
+    monkeypatch.setattr(json.JSONEncoder, "iterencode", fail_if_called)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.canonical_json(value)
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
 
 
 @requires_abi
