@@ -16,7 +16,7 @@ Use Python 3.12 standard library only. Do not create another plan, modify result
 Live GitHub and process state could not be refreshed in the planner sandbox, so the executor must fail closed if an overlapping PR, process, or worktree lease is discovered.
 
 The post-merge review-remediation lease is limited to the three delivered
-artifacts plus `GOAL.md`, `README.md`, this receipt, `eval/public/README.md`,
+artifacts plus `GOAL.md`, `README.md`, `docs/README.md`, this receipt, `eval/public/README.md`,
 and `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`.
 
 ## Historical Source-Delivery Validation Commands
@@ -29,7 +29,7 @@ and `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 - `git diff --check && git diff --cached --check && while IFS= read -r path; do test -z "$(git diff --no-index --check /dev/null "$path" || true)"; done < <(git ls-files --others --exclude-standard) && paths="$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|tests/test_public_whole_memory_reference\.py)$')"`
 
 ## Post-Merge Review Validation Command
-- `paths="$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(GOAL\.md|README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|tests/test_public_whole_memory_reference\.py)$')"`
+- `paths="$({ git diff --name-only; git diff --cached --name-only; git ls-files --others --exclude-standard; } | sort -u)" && test -z "$(printf '%s\n' "$paths" | rg -v '^(GOAL\.md|README\.md|docs/README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|tests/test_public_whole_memory_reference\.py)$')"`
 
 ### Task 1: Prove the lease and freeze the contract in RED tests
 - [x] Refresh `origin/main`, open PRs, worktrees, dirty state, and active GoalEx/RalphEx/test processes. Stop with `DEFERRED-CONFLICT` if another live writer owns any leased path; never read or consume uncommitted content from the benchmark-spec or signed-publication worktrees. (Executor receipt, 2026-07-28: clean branch at `17cd1c78`, no open PR, and no competing process or worktree owner for the three leased paths; the active GoalEx/RalphEx processes were this loop.)
@@ -41,7 +41,7 @@ and `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 ### Task 2: Implement the smallest fail-closed ABI
 - [x] Add the draft-2020-12 compound schema with protocol ID `wmbs/0.1-draft`, closed operation/envelope/evidence definitions, explicit bounds and enums, digest formats, and `additionalProperties:false` at every object boundary.
 - [x] Add a standard-library-only canonicalizer and validator in `whole_memory_reference.py`, reusing the repository’s sorted compact UTF-8 JSON convention with `allow_nan=False`. Reject booleans in numeric fields, unknown fields/codes, non-finite numbers, and non-canonical timestamps.
-- [x] Add only the in-memory state required for ordering, unique request IDs, identical request/response replay, conflicting-key rejection, deadline checks, response-committed lifecycle transitions, and terminal finalization. Do not create a general schema framework, persistence layer, runner, scorer, or entrant adapter. (Post-merge review remediation, 2026-07-28: lifecycle transitions now wait for successful receipts; closed errors and negative create/finalize receipts preserve the prior phase.)
+- [x] Add only the in-memory state required for ordering, unique request IDs, identical request/response replay, conflicting-key rejection, deadline checks, response-committed lifecycle transitions, and terminal finalization. Do not create a general schema framework, persistence layer, runner, scorer, or entrant adapter. (Post-merge review remediation, 2026-07-28: lifecycle transitions now wait for successful receipts; closed errors and negative create/finalize receipts preserve the prior phase; finalize waits for every accepted active request to receive a frozen response.)
 - [x] Run the focused suite and Ruff until green, and keep exact schema/golden-vector SHA-256 values frozen in test assertions.
 
 ### Task 3: Verify and deliver source rather than another plan
