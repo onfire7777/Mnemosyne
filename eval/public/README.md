@@ -97,7 +97,8 @@ response replay. Closed errors and negative finalize receipts leave the attempt
 active.
 
 The adapter exports `canonical_json`, `canonical_sha256`,
-`canonical_projection`, `validate_definition`, and `ProtocolValidator`.
+`canonical_artifact_sha256`, `canonical_projection`, `validate_definition`,
+`validate_evidence_bundle`, and `ProtocolValidator`.
 Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation
 requires canonical UTC deadlines, one stable tenant/run/attempt scope,
 monotonically increasing sequences, unique request IDs, and identical content
@@ -130,6 +131,19 @@ the absolute ID `urn:wmbs:0.1-draft`. Its public evidence IDs are:
 `urn:wmbs:0.1-draft#SandboxReceipt`,
 `urn:wmbs:0.1-draft#ResourceReceipt`, and
 `urn:wmbs:0.1-draft#FeasibilityRecord`.
+Each evidence artifact's `artifact_sha256` is the canonical SHA-256 of that
+artifact with the `artifact_sha256` field omitted. `validate_definition`
+checks this self-digest. A `PROPOSED` feasibility record keeps all fourteen
+categories present but uses `null` for at least one absent artifact.
+Readiness labels are accepted only by `validate_evidence_bundle`, which
+resolves every non-null digest reference against supplied content and requires
+a completed resource receipt.
+
+`SandboxReceipt` records the digest-bound profile, environment allowlist,
+syscall policy, UID/GID, mounts, locale/timezone, cleanup and log-redaction
+policy, resource limits, scorer/model isolation, and a default-deny or metered
+endpoint/DNS/IP/protocol allowlist. Cloud metadata and private ranges remain
+blocked in both egress modes.
 
 M15 replay freezes canonical payload `m15-v1`, exactly five runs, and required
 clean-process replay. Canonical projection excludes only `path`,

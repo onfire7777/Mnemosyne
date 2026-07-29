@@ -30,6 +30,34 @@ _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _MAX_RETAINED_BYTES = 64 * 1024 * 1024
 _MAX_JSON_DEPTH = 64
 _STRING_CHUNK_SIZE = 64 * 1024
+_EVIDENCE_DEFINITIONS = {
+    "BaselineManifest",
+    "PowerPlan",
+    "SoftwareDataBOM",
+    "SandboxReceipt",
+    "ResourceReceipt",
+    "FeasibilityRecord",
+}
+_SCHEMA_ID_TO_DEFINITION = {
+    f"urn:wmbs:0.1-draft#{definition}": definition
+    for definition in _EVIDENCE_DEFINITIONS
+}
+_FEASIBILITY_REFERENCE_FIELDS = (
+    "adapter_contract_ref",
+    "data_source_ref",
+    "scorer_ref",
+    "baseline_manifest_ref",
+    "power_plan_ref",
+    "sandbox_receipt_ref",
+    "resource_receipt_ref",
+    "software_data_bom_ref",
+)
+_READINESS_STATES = {
+    "PILOT-READY-DEV",
+    "RUN-READY-OFFICIAL-LOCAL",
+    "RUN-READY-HOSTED-X",
+    "RUN-READY-P32-OPS",
+}
 
 
 class WholeMemoryValidationError(ValueError):
@@ -239,6 +267,28 @@ def canonical_sha256(value: object) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
 
 
+def canonical_artifact_sha256(value: Mapping[str, object]) -> str:
+    return canonical_sha256(
+        {key: item for key, item in value.items() if key != "artifact_sha256"}
+    )
+
+
+def _validate_artifact_digest(definition: str, value: object) -> None:
+    if definition not in _EVIDENCE_DEFINITIONS:
+        return
+    if not isinstance(value, Mapping):
+        _fail("evidence artifact must be an object")
+    if value["artifact_sha256"] != canonical_artifact_sha256(value):
+        _fail("$.artifact_sha256 does not bind the canonical artifact")
+
+
+def _feasibility_dispositions(value: Mapping[str, object]) -> set[object]:
+    dispositions = value["feasibility_disposition"]
+    if not isinstance(dispositions, Mapping):
+        _fail("$.feasibility_disposition must be an object")
+    return set(dispositions.values())
+
+
 def _enforce_canonical_size(
     value: object, maximum: int, *, label: str = "request"
 ) -> None:
@@ -350,7 +400,78 @@ def validate_definition(definition: str, value: object) -> object:
         _fail(f"unknown definition: {definition}")
     _enforce_canonical_size(value, _MAX_RETAINED_BYTES, label="value")
     _validate(value, schema, "$")
+    _validate_artifact_digest(definition, value)
+    if definition == "SandboxReceipt":
+        assert isinstance(value, Mapping)
+        egress = value["egress"]
+        assert isinstance(egress, Mapping)
+        endpoints = egress["endpoints"]
+        assert isinstance(endpoints, list)
+        if (egress["mode"] == "deny") != (not endpoints):
+            _fail("$.egress mode does not match its endpoint allowlist")
+    if definition == "FeasibilityRecord":
+        assert isinstance(value, Mapping)
+        dispositions = _feasibility_dispositions(value)
+        if dispositions & _READINESS_STATES:
+            _fail("readiness requires resolved evidence via validate_evidence_bundle")
+        if "PROPOSED" in dispositions and all(
+            value[field] is not None for field in _FEASIBILITY_REFERENCE_FIELDS
+        ):
+            _fail("PROPOSED requires at least one absent feasibility artifact")
     return deepcopy(value)
+
+
+def validate_evidence_bundle(
+    record: Mapping[str, object], artifacts: Mapping[str, object]
+) -> object:
+    schema = _DEFINITIONS["FeasibilityRecord"]
+    _enforce_canonical_size(record, _MAX_RETAINED_BYTES, label="value")
+    _validate(record, schema, "$")
+    _validate_artifact_digest("FeasibilityRecord", record)
+    dispositions = _feasibility_dispositions(record)
+    if "PROPOSED" in dispositions and all(
+        record[field] is not None for field in _FEASIBILITY_REFERENCE_FIELDS
+    ):
+        _fail("PROPOSED requires at least one absent feasibility artifact")
+
+    resolved: dict[str, object] = {}
+    for field in _FEASIBILITY_REFERENCE_FIELDS:
+        reference = record[field]
+        if reference is None:
+            continue
+        assert isinstance(reference, str)
+        artifact = artifacts.get(reference)
+        if artifact is None:
+            _fail(f"$.{field} does not resolve to a supplied artifact")
+        schema_id, separator, expected_digest = reference.rpartition("@sha256:")
+        if not separator:
+            _fail(f"$.{field} is not a digest reference")
+        if isinstance(artifact, Mapping) and "artifact_sha256" in artifact:
+            actual_digest = canonical_artifact_sha256(artifact)
+        else:
+            actual_digest = canonical_sha256(artifact)
+        if actual_digest != expected_digest:
+            _fail(f"$.{field} does not match the supplied artifact")
+        definition = _SCHEMA_ID_TO_DEFINITION.get(schema_id)
+        if definition is not None:
+            validate_definition(definition, artifact)
+        resolved[field] = artifact
+
+    if dispositions & _READINESS_STATES:
+        missing = [
+            field
+            for field in _FEASIBILITY_REFERENCE_FIELDS
+            if field not in resolved
+        ]
+        if missing:
+            _fail(f"readiness is missing resolved artifacts: {', '.join(missing)}")
+        resource_receipt = resolved["resource_receipt_ref"]
+        if (
+            not isinstance(resource_receipt, Mapping)
+            or resource_receipt.get("abort_status") != "completed"
+        ):
+            _fail("readiness requires a completed resource receipt")
+    return deepcopy(record)
 
 
 class ProtocolValidator:

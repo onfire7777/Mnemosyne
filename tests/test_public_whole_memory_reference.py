@@ -270,7 +270,24 @@ ERROR_ENVELOPES = {
 
 
 def _artifact(schema_id: str, **fields: object) -> dict[str, object]:
-    return {"schema_id": schema_id, "artifact_sha256": DIGEST_A, **fields}
+    artifact = {"schema_id": schema_id, "artifact_sha256": DIGEST_A, **fields}
+    return _rebind_artifact(artifact)
+
+
+def _rebind_artifact(artifact: dict[str, object]) -> dict[str, object]:
+    artifact = deepcopy(artifact)
+    payload = {key: value for key, value in artifact.items() if key != "artifact_sha256"}
+    artifact["artifact_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+            ensure_ascii=False,
+        ).encode()
+        + b"\n"
+    ).hexdigest()
+    return artifact
 
 
 EVIDENCE_FIXTURES = {
@@ -333,12 +350,19 @@ EVIDENCE_FIXTURES = {
     ),
     "SandboxReceipt": _artifact(
         "urn:wmbs:0.1-draft#SandboxReceipt",
-        profile_sha256=DIGEST_B,
+        profile_ref="sandbox-l16-dev@sha256:" + DIGEST_B,
         sut_boundary="adapter-process",
         uid=65534,
         gid=65534,
         mounts=["inputs:ro", "outputs:rw"],
-        egress="deny",
+        environment_allowlist=["LANG", "PATH", "TZ"],
+        syscall_policy="platform-sandbox",
+        egress={
+            "mode": "deny",
+            "endpoints": [],
+            "block_cloud_metadata": True,
+            "block_private_ranges": True,
+        },
         secrets="none",
         privilege="unprivileged",
         cpu_limit=1.0,
@@ -347,6 +371,10 @@ EVIDENCE_FIXTURES = {
         file_limit=128,
         output_limit_bytes=1_048_576,
         wall_deadline_seconds=60,
+        locale="C",
+        timezone="UTC",
+        cleanup="ephemeral-destroyed",
+        log_redaction="secrets-and-direct-personal-data",
         scorer_isolation="separate-process",
         model_proxy="disabled",
         usage_counters="harness-owned",
@@ -408,10 +436,7 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
         "urn:wmbs:0.1-draft#SandboxReceipt@sha256:"
         + EVIDENCE_FIXTURES["SandboxReceipt"]["artifact_sha256"]  # type: ignore[operator]
     ),
-    resource_receipt_ref=(
-        "urn:wmbs:0.1-draft#ResourceReceipt@sha256:"
-        + EVIDENCE_FIXTURES["ResourceReceipt"]["artifact_sha256"]  # type: ignore[operator]
-    ),
+    resource_receipt_ref=None,
     software_data_bom_ref=(
         "urn:wmbs:0.1-draft#SoftwareDataBOM@sha256:"
         + EVIDENCE_FIXTURES["SoftwareDataBOM"]["artifact_sha256"]  # type: ignore[operator]
@@ -774,6 +799,142 @@ def test_all_six_evidence_definitions_are_digest_bound_and_valid(
 
 
 @requires_abi
+def test_evidence_artifact_digest_rejects_content_tampering() -> None:
+    manifest = deepcopy(EVIDENCE_FIXTURES["BaselineManifest"])
+    manifest["top_k"] = 6
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.validate_definition("BaselineManifest", manifest)
+
+    assert _error_code(exc) == "INVALID_REQUEST"
+
+
+@requires_abi
+def test_proposed_feasibility_record_allows_an_explicitly_missing_artifact() -> None:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    record["resource_receipt_ref"] = None
+    record = _rebind_artifact(record)
+
+    assert abi.validate_definition("FeasibilityRecord", record) == record
+
+
+@requires_abi
+def test_readiness_requires_resolved_digest_bound_artifacts() -> None:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "RUN-READY-OFFICIAL-LOCAL",
+        "hosted_service": "RUN-READY-HOSTED-X",
+        "production_operations": "RUN-READY-P32-OPS",
+    }
+    record = _rebind_artifact(record)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.validate_definition("FeasibilityRecord", record)
+
+    assert _error_code(exc) == "INVALID_REQUEST"
+
+
+@requires_abi
+def test_evidence_bundle_resolves_every_feasibility_reference() -> None:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    artifacts: dict[str, object] = {}
+    for field, artifact in [
+        ("adapter_contract_ref", {"protocol": "wmbs/0.1-draft"}),
+        ("data_source_ref", {"fixture": "synthetic-golden"}),
+        ("scorer_ref", {"command": "score-exact-match"}),
+    ]:
+        digest = hashlib.sha256(
+            json.dumps(
+                artifact,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+                ensure_ascii=False,
+            ).encode()
+            + b"\n"
+        ).hexdigest()
+        reference = f"{field.removesuffix('_ref')}@sha256:{digest}"
+        record[field] = reference
+        artifacts[reference] = artifact
+    for field, definition in [
+        ("baseline_manifest_ref", "BaselineManifest"),
+        ("power_plan_ref", "PowerPlan"),
+        ("sandbox_receipt_ref", "SandboxReceipt"),
+        ("resource_receipt_ref", "ResourceReceipt"),
+        ("software_data_bom_ref", "SoftwareDataBOM"),
+    ]:
+        artifact = EVIDENCE_FIXTURES[definition]
+        reference = (
+            f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
+        )
+        record[field] = reference
+        artifacts[reference] = artifact
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "RUN-READY-OFFICIAL-LOCAL",
+        "hosted_service": "RUN-READY-HOSTED-X",
+        "production_operations": "RUN-READY-P32-OPS",
+    }
+    record = _rebind_artifact(record)
+
+    assert abi.validate_evidence_bundle(record, artifacts) == record
+
+    changed = deepcopy(artifacts)
+    baseline_ref = record["baseline_manifest_ref"]
+    assert isinstance(baseline_ref, str)
+    changed[baseline_ref] = {
+        **EVIDENCE_FIXTURES["BaselineManifest"],
+        "top_k": 6,
+    }
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_evidence_bundle(record, changed)
+
+
+@requires_abi
+def test_sandbox_receipt_records_the_complete_isolation_policy() -> None:
+    receipt = deepcopy(EVIDENCE_FIXTURES["SandboxReceipt"])
+
+    assert abi.validate_definition("SandboxReceipt", receipt) == receipt
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    "egress",
+    [
+        {
+            "mode": "metered-allowlist",
+            "endpoints": [],
+            "block_cloud_metadata": True,
+            "block_private_ranges": True,
+        },
+        {
+            "mode": "deny",
+            "endpoints": [
+                {
+                    "endpoint": "model-proxy",
+                    "dns_names": ["proxy.example"],
+                    "ip_ranges": ["192.0.2.10/32"],
+                    "protocols": ["https"],
+                }
+            ],
+            "block_cloud_metadata": True,
+            "block_private_ranges": True,
+        },
+    ],
+)
+def test_sandbox_receipt_rejects_egress_mode_allowlist_mismatch(
+    egress: dict[str, object],
+) -> None:
+    receipt = deepcopy(EVIDENCE_FIXTURES["SandboxReceipt"])
+    receipt["egress"] = egress
+    receipt = _rebind_artifact(receipt)
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("SandboxReceipt", receipt)
+
+
+@requires_abi
 def test_feasibility_record_covers_all_fourteen_categories() -> None:
     record = EVIDENCE_FIXTURES["FeasibilityRecord"]
     categories = {
@@ -835,8 +996,14 @@ def test_evidence_definitions_reject_invalid_or_unbound_values(
     definition: str,
     mutation: Callable[[dict[str, object]], dict[str, object]],
 ) -> None:
+    mutated = mutation(EVIDENCE_FIXTURES[definition])
+    if isinstance(mutated, dict):
+        try:
+            mutated = _rebind_artifact(mutated)
+        except ValueError:
+            pass  # Non-finite JSON must fail before artifact digest validation.
     with pytest.raises(abi.WholeMemoryValidationError) as exc:
-        abi.validate_definition(definition, mutation(EVIDENCE_FIXTURES[definition]))
+        abi.validate_definition(definition, mutated)
 
     assert _error_code(exc) == "INVALID_REQUEST"
 
@@ -858,7 +1025,9 @@ def test_software_data_bom_accepts_approved_spdx_expressions(
 ) -> None:
     abi.validate_definition(
         "SoftwareDataBOM",
-        _set_key(EVIDENCE_FIXTURES["SoftwareDataBOM"], field, license_expression),
+        _rebind_artifact(
+            _set_key(EVIDENCE_FIXTURES["SoftwareDataBOM"], field, license_expression)
+        ),
     )
 
 
@@ -867,7 +1036,13 @@ def test_software_data_bom_rejects_unknown_spdx_identifier() -> None:
     with pytest.raises(abi.WholeMemoryValidationError) as exc:
         abi.validate_definition(
             "SoftwareDataBOM",
-            _set_key(EVIDENCE_FIXTURES["SoftwareDataBOM"], "software.0.license", "FOO"),
+            _rebind_artifact(
+                _set_key(
+                    EVIDENCE_FIXTURES["SoftwareDataBOM"],
+                    "software.0.license",
+                    "FOO",
+                )
+            ),
         )
 
     assert _error_code(exc) == "INVALID_REQUEST"
@@ -918,7 +1093,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "24f4aae5785516f5a4c9977d7bb30d027c632b4d7cf9d47eae69f935e6cc6f02"
+        == "b37bc87376efbde961e4bede553040e63b3cf1df17b1f9376f5d71610efee7aa"
     )
 
 
@@ -979,6 +1154,7 @@ def test_evidence_schema_ids_resolve_to_public_anchors() -> None:
 def test_m15_replay_protocol_is_frozen(field: str, value: object) -> None:
     record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
     record["replay_protocol"][field] = value  # type: ignore[index]
+    record = _rebind_artifact(record)
 
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_definition("FeasibilityRecord", record)
@@ -988,6 +1164,7 @@ def test_m15_replay_protocol_is_frozen(field: str, value: object) -> None:
 def test_schema_constants_keep_booleans_distinct_from_numbers() -> None:
     record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
     record["replay_protocol"]["clean_process_replay"] = 1  # type: ignore[index]
+    record = _rebind_artifact(record)
 
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_definition("FeasibilityRecord", record)
