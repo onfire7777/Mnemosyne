@@ -1035,20 +1035,35 @@
           "items": {"$ref": "#/$defs/identifier"}
         },
         "baseline_manifest_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [
+            {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#BaselineManifest@sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
         },
         "power_plan_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [
+            {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#PowerPlan@sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
         },
         "replay_protocol": {"$ref": "#/$defs/replay_protocol"},
         "sandbox_receipt_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [
+            {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#SandboxReceipt@sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
         },
         "resource_receipt_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [
+            {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#ResourceReceipt@sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
         },
         "software_data_bom_ref": {
-          "anyOf": [{"$ref": "#/$defs/digest_reference"}, {"type": "null"}]
+          "anyOf": [
+            {"type": "string", "pattern": "^urn:wmbs:0\\.1-draft#SoftwareDataBOM@sha256:[0-9a-f]{64}$"},
+            {"type": "null"}
+          ]
         },
         "result_contract": {"$ref": "#/$defs/result_contract"},
         "deferral_condition": {"$ref": "#/$defs/nonempty_string"},

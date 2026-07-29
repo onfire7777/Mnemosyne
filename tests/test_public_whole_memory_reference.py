@@ -458,6 +458,35 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
 )
 
 
+def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]]:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    artifacts: dict[str, object] = {}
+    for field, artifact in [
+        ("adapter_contract_ref", {"protocol": "wmbs/0.1-draft"}),
+        ("data_source_ref", {"fixture": "synthetic-golden"}),
+        ("scorer_ref", {"command": "score-exact-match"}),
+    ]:
+        reference = (
+            f"{field.removesuffix('_ref')}@sha256:{abi.canonical_sha256(artifact)}"
+        )
+        record[field] = reference
+        artifacts[reference] = artifact
+    for field, definition in [
+        ("baseline_manifest_ref", "BaselineManifest"),
+        ("power_plan_ref", "PowerPlan"),
+        ("sandbox_receipt_ref", "SandboxReceipt"),
+        ("resource_receipt_ref", "ResourceReceipt"),
+        ("software_data_bom_ref", "SoftwareDataBOM"),
+    ]:
+        artifact = EVIDENCE_FIXTURES[definition]
+        reference = (
+            f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
+        )
+        record[field] = reference
+        artifacts[reference] = artifact
+    return record, artifacts
+
+
 def _drop_key(value: dict[str, object], dotted_key: str) -> dict[str, object]:
     mutated = deepcopy(value)
     target: Any = mutated
@@ -837,39 +866,7 @@ def test_readiness_requires_resolved_digest_bound_artifacts() -> None:
 
 @requires_abi
 def test_evidence_bundle_resolves_every_feasibility_reference() -> None:
-    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
-    artifacts: dict[str, object] = {}
-    for field, artifact in [
-        ("adapter_contract_ref", {"protocol": "wmbs/0.1-draft"}),
-        ("data_source_ref", {"fixture": "synthetic-golden"}),
-        ("scorer_ref", {"command": "score-exact-match"}),
-    ]:
-        digest = hashlib.sha256(
-            json.dumps(
-                artifact,
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-                ensure_ascii=False,
-            ).encode()
-            + b"\n"
-        ).hexdigest()
-        reference = f"{field.removesuffix('_ref')}@sha256:{digest}"
-        record[field] = reference
-        artifacts[reference] = artifact
-    for field, definition in [
-        ("baseline_manifest_ref", "BaselineManifest"),
-        ("power_plan_ref", "PowerPlan"),
-        ("sandbox_receipt_ref", "SandboxReceipt"),
-        ("resource_receipt_ref", "ResourceReceipt"),
-        ("software_data_bom_ref", "SoftwareDataBOM"),
-    ]:
-        artifact = EVIDENCE_FIXTURES[definition]
-        reference = (
-            f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
-        )
-        record[field] = reference
-        artifacts[reference] = artifact
+    record, artifacts = _resolved_feasibility_bundle()
     record["feasibility_disposition"] = {
         "development": "PILOT-READY-DEV",
         "official_local": "RUN-READY-OFFICIAL-LOCAL",
@@ -889,6 +886,63 @@ def test_evidence_bundle_resolves_every_feasibility_reference() -> None:
     }
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_evidence_bundle(record, changed)
+
+
+@requires_abi
+def test_evidence_bundle_rejects_typed_reference_schema_mismatch() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    power_ref = record["power_plan_ref"]
+    assert isinstance(power_ref, str)
+    record["baseline_manifest_ref"] = power_ref
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    record = _rebind_artifact(record)
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_contract_ready_requires_resolved_contract_artifacts() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["resource_receipt_ref"] = None
+    record["feasibility_disposition"] = {
+        "development": "CONTRACT-READY",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    record = _rebind_artifact(record)
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("FeasibilityRecord", record)
+
+    assert abi.validate_evidence_bundle(record, artifacts) == record
+
+    adapter_ref = record["adapter_contract_ref"]
+    assert isinstance(adapter_ref, str)
+    missing = dict(artifacts)
+    missing.pop(adapter_ref)
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_evidence_bundle(record, missing)
+
+
+@requires_abi
+def test_mixed_feasibility_dispositions_are_independent() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "PROPOSED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    record = _rebind_artifact(record)
+
+    assert abi.validate_evidence_bundle(record, artifacts) == record
 
 
 @requires_abi
@@ -1093,7 +1147,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "b37bc87376efbde961e4bede553040e63b3cf1df17b1f9376f5d71610efee7aa"
+        == "0bc0519087bf0e9d0f1b2af4d0a234257a788a6dded0290e0f07f7e1de68dc18"
     )
 
 
