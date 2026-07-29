@@ -25,6 +25,8 @@ _DEFINITIONS: dict[str, dict[str, Any]] = _SCHEMA["$defs"]
 _OPERATIONS = ("negotiate", "create_run", "ingest", "retrieve", "answer", "finalize")
 _UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _MAX_REQUESTS = 10_000
+_MAX_REQUEST_BYTES = 16 * 1024 * 1024
+_MAX_RETAINED_BYTES = 64 * 1024 * 1024
 
 
 class WholeMemoryValidationError(ValueError):
@@ -179,6 +181,26 @@ def canonical_sha256(value: object) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
 
 
+def _enforce_canonical_size(value: object, maximum: int) -> None:
+    _reject_non_finite(value)
+    size = 1  # canonical_json appends one newline
+    try:
+        chunks = json.JSONEncoder(
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+            ensure_ascii=False,
+        ).iterencode(value)
+        for chunk in chunks:
+            size += len(chunk.encode())
+            if size > maximum:
+                break
+    except (TypeError, ValueError) as exc:
+        _fail(f"value is not canonical JSON: {exc}")
+    if size > maximum:
+        _fail("request exceeds the byte limit", code="RESOURCE_LIMIT")
+
+
 def canonical_projection(value: object) -> object:
     if isinstance(value, Mapping):
         return {
@@ -205,6 +227,7 @@ class ProtocolValidator:
         self._request_ids: set[str] = set()
         self._replays: dict[str, tuple[bytes, object]] = {}
         self._scope: tuple[str, str, str] | None = None
+        self._retained_bytes = 0
         self._phase = "new"
         self.last_sequence = 0
 
@@ -226,6 +249,7 @@ class ProtocolValidator:
         if deadline <= self._now():
             _fail("request deadline has elapsed", code="DEADLINE_EXCEEDED")
 
+        _enforce_canonical_size(validated, _MAX_REQUEST_BYTES)
         request_bytes = canonical_json(validated)
         idempotency_key = str(context["idempotency_key"])
         replay = self._replays.get(idempotency_key)
@@ -244,9 +268,12 @@ class ProtocolValidator:
             _fail("operation is invalid in the current phase", code="ORDER_VIOLATION")
         if len(self._replays) >= _MAX_REQUESTS:
             _fail("request retention limit reached", code="RESOURCE_LIMIT")
+        if self._retained_bytes + len(request_bytes) > _MAX_RETAINED_BYTES:
+            _fail("request retention byte limit reached", code="RESOURCE_LIMIT")
 
         self._request_ids.add(request_id)
         self._replays[idempotency_key] = (request_bytes, deepcopy(validated))
+        self._retained_bytes += len(request_bytes)
         if self._scope is None:
             self._scope = scope
         self.last_sequence = sequence

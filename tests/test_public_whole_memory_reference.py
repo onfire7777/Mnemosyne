@@ -807,6 +807,23 @@ def test_validator_bounds_retained_requests(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 @requires_abi
+def test_validator_rejects_oversized_request_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validator = _validator()
+    validator.validate_request(GOLDEN_REQUESTS["negotiate"])
+    validator.validate_request(GOLDEN_REQUESTS["create_run"])
+    monkeypatch.setattr(abi, "_MAX_REQUEST_BYTES", 512)
+    request = deepcopy(GOLDEN_REQUESTS["ingest"])
+    request["payload"]["ordered_events"][0]["content"] = "x" * 1_024  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_request(request)
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+
+
+@requires_abi
 @pytest.mark.parametrize(
     ("value", "expected_code"),
     [
