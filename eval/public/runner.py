@@ -21,6 +21,7 @@ from eval.public.adapters import (
     pm_bench_triggerbench,
     qa_smoke,
     smoke,
+    whole_memory_reference,
     working_memory_action_probe,
 )
 from eval.public.assets import AssetSpec, load_asset_set
@@ -54,6 +55,8 @@ _ADAPTERS = {
     "hipporag-reader-qa": hipporag_multihop.run_reader_qa,
     "qa-smoke": qa_smoke.run,
     "smoke": smoke.run,
+    "wmbs-m01-reference": whole_memory_reference.run_m01_development,
+    "wmbs-m10-reference": whole_memory_reference.run_m10_development,
     "pm-bench-triggerbench": pm_bench_triggerbench.run,
     "working-memory-action": working_memory_action_probe.run,
 }
@@ -73,6 +76,8 @@ _PROFILE_CONTRACTS = {
     "pm-bench-action-v1": ("deterministic-action", "wilson"),
     "triggerbench-action-v1": ("deterministic-action", "wilson"),
     "working-memory-action-v1": ("deterministic-action", "bootstrap"),
+    "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
 }
 
 _FROZEN_RETRIEVAL_BASELINES = {
@@ -377,15 +382,18 @@ def run_public_suite(
         if key in os.environ
     }
     allowed_env.update(runtime_env)
-    with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
-        mnemo = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
-        cli: Any = (
-            ActionCLI(mnemo)
-            if suite["adapter"] == "pm-bench-triggerbench"
-            else mnemo
-        )
-        with patch.dict(os.environ, allowed_env, clear=True):
-            result = adapter(adapter_input, cli)
+    if suite.get("system_seam") == "harness-owned-reference-core":
+        result = adapter(adapter_input, None)
+    else:
+        with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
+            mnemo = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
+            cli: Any = (
+                ActionCLI(mnemo)
+                if suite["adapter"] == "pm-bench-triggerbench"
+                else mnemo
+            )
+            with patch.dict(os.environ, allowed_env, clear=True):
+                result = adapter(adapter_input, cli)
     if len(result) == 2:
         traces, measured = result
         benchmark = adapter_input
@@ -416,6 +424,12 @@ def run_public_suite(
                 f"{suite_name}: fixture operating point threshold diverges from "
                 "the authenticated evaluation seam"
             )
+        from eval.public.scoring import score_profile
+
+        measured = score_profile(
+            suite["scoring_profile"], _scoring_labels(benchmark), traces
+        )
+    elif suite["family"] == "whole-memory-development":
         from eval.public.scoring import score_profile
 
         measured = score_profile(
@@ -468,7 +482,7 @@ def run_public_suite(
         "pbpp_headline_eligible": False,
         "publishable": False,
         "suite": suite_name,
-        "system_seam": "public-cli-subprocess",
+        "system_seam": suite.get("system_seam", "public-cli-subprocess"),
     }
 
 

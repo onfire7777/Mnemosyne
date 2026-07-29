@@ -8,6 +8,7 @@ import random
 import string
 import unicodedata
 from collections import Counter
+from dataclasses import asdict
 from typing import Any
 
 from eval.harness.metrics import wilson_interval
@@ -23,6 +24,10 @@ class ScoringError(ValueError):
 
 
 def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[str, Any]]) -> dict[str, Any]:
+    if profile == "wmbs-m01-v1":
+        return _score_wmbs_m01(labels, traces)
+    if profile == "wmbs-m10-v1":
+        return _score_wmbs_m10(labels, traces)
     if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
         return _score_pm_action(profile, labels, traces)
     if profile == "working-memory-action-v1":
@@ -74,6 +79,104 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
             },
         }
     raise ScoringError(f"unknown scoring profile: {profile}")
+
+
+def _score_wmbs_m01(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m01 as m01
+
+    if (
+        len(labels) != 1
+        or len(traces) != 1
+        or labels[0].get("case_id") != m01.MODULE_ID
+        or traces[0].get("case_id") != m01.MODULE_ID
+    ):
+        raise ScoringError("M01 requires one trace bound to the M01 fixture")
+    fixture = labels[0].get("fixture")
+    if not isinstance(fixture, dict):
+        raise ScoringError("M01 scoring fixture is missing")
+    trace = traces[0]
+    measured = {
+        "capture": m01.score_capture(
+            fixture, trace.get("receipts"), trace.get("exported_rows")
+        ),
+        "canonical_replay_equality": m01.score_canonical_replay_equality(
+            fixture,
+            trace.get("clean_run_payloads"),
+            trace.get("restart_replay_payload"),
+        ),
+        "provenance_retention": m01.score_provenance_retention(
+            fixture, trace.get("stored_projection")
+        ),
+    }
+    return json.loads(
+        json.dumps(
+            {
+                "family": "whole-memory-development",
+                "finite_corpus_only": True,
+                "interval": {"method": "descriptive"},
+                "metrics": measured,
+                "passed": all(row["passed"] for row in measured.values()),
+                "profile": "wmbs-m01-v1",
+                "profile_version": 1,
+                "total": 1,
+                "trace_count": 1,
+            },
+            allow_nan=False,
+        )
+    )
+
+
+def _score_wmbs_m10(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m10 as m10
+
+    def index(rows: list[dict[str, Any]], kind: str) -> dict[str, dict[str, Any]]:
+        indexed: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            case_id = row.get("case_id")
+            if not isinstance(case_id, str) or not case_id or case_id in indexed:
+                raise ScoringError(f"duplicate or missing M10 {kind} case ID")
+            indexed[case_id] = row
+        return indexed
+
+    expected, observed = index(labels, "label"), index(traces, "trace")
+    if not expected or set(expected) != set(observed):
+        raise ScoringError("M10 labels and traces do not match")
+    cases = [m10.Case.from_dict(expected[key]["case"]) for key in sorted(expected)]
+    records = [
+        m10.AnswerEnvelope.from_dict(
+            {
+                field: value
+                for field, value in observed[key].items()
+                if field not in {"case_id", "scoring_family"}
+            }
+        )
+        for key in sorted(expected)
+    ]
+    artifacts = [expected[key].get("calibration_artifact") for key in sorted(expected)]
+    if not artifacts or any(artifact != artifacts[0] for artifact in artifacts[1:]):
+        raise ScoringError("M10 labels do not share one calibration artifact")
+    artifact = artifacts[0]
+    if not isinstance(artifact, dict):
+        raise ScoringError("M10 calibration artifact is missing")
+    m10.verify_calibration_artifact(artifact)
+    report = asdict(m10.score_records(cases, records))
+    floor = artifact["useful_coverage_floor"]
+    return {
+        "family": "whole-memory-development",
+        "finite_corpus_disclosure": m10.FINITE_CORPUS_DISCLOSURE,
+        "interval": {"method": "descriptive"},
+        "metrics": report,
+        "meets_useful_coverage_floor": report["useful_coverage"] >= floor,
+        "profile": "wmbs-m10-v1",
+        "profile_version": 1,
+        "total": len(cases),
+        "trace_count": len(records),
+        "useful_coverage_floor": floor,
+    }
 
 
 def _score_pm_action(
