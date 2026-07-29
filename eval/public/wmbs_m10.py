@@ -450,19 +450,20 @@ class AnswerEnvelope:
 
         answer_text = data["answer_text"]
         abstained = data["abstained"]
-        _validate_answer_envelope_shape(answer_text=answer_text, abstained=abstained)
-
         confidence = data["confidence"]
-        _validate_confidence(confidence, case_id="<from_dict>")
-
         evidence_handles = data["evidence_handles"]
-        _validate_handle_list(evidence_handles, field_name="evidence_handles")
-
         action_handles = data.get("action_handles", [])
-        _validate_handle_list(action_handles, field_name="action_handles")
-
         adapter_metadata = data.get("adapter_metadata", {})
-        _validate_adapter_metadata(adapter_metadata)
+
+        _validate_answer_envelope_contract(
+            answer_text=answer_text,
+            abstained=abstained,
+            confidence=confidence,
+            evidence_handles=evidence_handles,
+            action_handles=action_handles,
+            adapter_metadata=adapter_metadata,
+            case_id="<from_dict>",
+        )
 
         return cls(
             answer_text=answer_text,  # type: ignore[arg-type]
@@ -1082,6 +1083,39 @@ def _validate_confidence(confidence: object, *, case_id: str) -> None:
         )
 
 
+def _validate_answer_envelope_contract(
+    *,
+    answer_text: object,
+    abstained: object,
+    confidence: object,
+    evidence_handles: object,
+    action_handles: object,
+    adapter_metadata: object,
+    case_id: str,
+) -> None:
+    """Apply the full closed ``AnswerEnvelope`` contract to one record.
+
+    This is the single validator both ``AnswerEnvelope.from_dict`` (the
+    loading-a-raw-record trust boundary) and ``score_records`` (the
+    scoring-an-already-constructed-envelope trust boundary) call, so
+    ``score_records`` cannot be bypassed by a caller constructing an
+    ``AnswerEnvelope`` directly: dataclasses do not enforce field types or
+    invariants at construction time, so a directly-built envelope with
+    duplicate/empty handles or an unrecognized ``adapter_metadata`` key
+    would otherwise sail through ``score_records`` even though the exact
+    same shape would be rejected by ``from_dict``. No second, weaker
+    validator exists for this boundary -- both call sites share this one.
+    """
+
+    _validate_answer_envelope_shape(
+        answer_text=answer_text, abstained=abstained, case_id=case_id
+    )
+    _validate_confidence(confidence, case_id=case_id)
+    _validate_handle_list(evidence_handles, field_name="evidence_handles")
+    _validate_handle_list(action_handles, field_name="action_handles")
+    _validate_adapter_metadata(adapter_metadata)
+
+
 def _is_correct(case: Case, record: AnswerEnvelope) -> bool:
     if case.category not in _ASSERTABLE_CATEGORIES:
         return False
@@ -1111,12 +1145,15 @@ def score_records(cases: list[Case], records: list[AnswerEnvelope]) -> ScoreRepo
         )
 
     for case, record in zip(cases, records, strict=True):
-        _validate_answer_envelope_shape(
+        _validate_answer_envelope_contract(
             answer_text=record.answer_text,
             abstained=record.abstained,
+            confidence=record.confidence,
+            evidence_handles=record.evidence_handles,
+            action_handles=record.action_handles,
+            adapter_metadata=record.adapter_metadata,
             case_id=case.case_id,
         )
-        _validate_confidence(record.confidence, case_id=case.case_id)
 
     total = len(cases)
     answered = [r for r in records if not r.abstained]
@@ -1271,41 +1308,105 @@ USEFUL_COVERAGE_DERIVATION_RULE = (
 
 
 class CalibrationSplitManifestError(WmbsM10Error):
-    """The calibration split manifest fails independent recomputation.
+    """Either split manifest, or the case seed assignments, fail custody.
 
-    Raised by ``_verify_calibration_split_manifest`` when the calibration
-    partition is empty, the scored partition is empty, the stored
-    ``fixture["split_manifests"]["calibration"]`` does not exactly match a
-    manifest independently recomputed from this fixture's own calibration
-    cases (a forged, rehashed, stale, or otherwise inconsistent stored
-    manifest), or the calibration and scored partitions are not disjoint
-    by question digest or event digest.
+    Raised by ``_verify_split_manifests`` when: the calibration partition
+    is empty; the scored partition is empty; any case's ``seed`` does not
+    belong to the frozen seed set for its own partition, or the observed
+    per-partition seed set does not exactly equal the frozen seed set
+    (missing or extra/unknown seed values); the deterministic per-seed,
+    per-category case count implied by the frozen fixture contract
+    (``_CASES_PER_CATEGORY`` cases for every ``(seed, category)`` pair) is
+    not met (duplicated, moved, or mutated case seed assignment); the
+    stored ``fixture["split_manifests"]["calibration"]`` or
+    ``fixture["split_manifests"]["scored"]`` does not exactly match a
+    manifest independently recomputed from this fixture's own cases (a
+    forged, rehashed, stale, or otherwise inconsistent stored manifest);
+    or the calibration and scored partitions are not disjoint by question
+    digest or event digest.
     """
 
 
-def _verify_calibration_split_manifest(
+def _verify_case_seed_coverage(
+    cases: list[Case], expected_seeds: tuple[int, ...], *, partition: str
+) -> None:
+    """Bind every case's actual ``seed`` to the frozen fixture contract.
+
+    Independent of (and a strict superset of) manifest-digest comparison:
+    a case's ``seed`` field is not hashed into either the question digest
+    (``_question_digest``, identity/text only) or the event digest
+    (``_event_digest``, fact content only), so mutating, duplicating, or
+    relocating a case's ``seed`` value changes neither digest and would
+    otherwise pass an unmodified whole-manifest comparison silently. This
+    check closes that gap by requiring, for ``cases`` drawn from a single
+    partition:
+
+    1. The exact observed seed set equals ``expected_seeds`` -- rejects a
+       missing seed (fewer distinct values than expected) and an
+       extra/unknown seed (a value outside the frozen set, e.g. a scored
+       seed appearing in the calibration partition or vice versa).
+    2. Every ``(seed, category)`` pair among ``expected_seeds`` x
+       ``CATEGORIES`` has exactly ``_CASES_PER_CATEGORY`` cases -- rejects
+       a duplicated case (a slot with too many), a moved case (one slot
+       gains at another's expense), and a mutated-but-still-in-set seed
+       (e.g. seed 0 relabeled to seed 1 within calibration), all of which
+       preserve the seed-set membership check in (1) but break this exact
+       per-slot count.
+    """
+
+    observed_seeds = {case.seed for case in cases}
+    if observed_seeds != set(expected_seeds):
+        raise CalibrationSplitManifestError(
+            f"{partition} partition observed seed set "
+            f"{sorted(observed_seeds)} does not exactly equal the frozen "
+            f"{partition} seed set {sorted(expected_seeds)}: missing, "
+            "extra, or unknown seed assignment(s) detected"
+        )
+
+    slot_counts: dict[tuple[int, str], int] = {}
+    for case in cases:
+        slot = (case.seed, case.category)
+        slot_counts[slot] = slot_counts.get(slot, 0) + 1
+
+    for seed in expected_seeds:
+        for category in CATEGORIES:
+            actual = slot_counts.get((seed, category), 0)
+            if actual != _CASES_PER_CATEGORY:
+                raise CalibrationSplitManifestError(
+                    f"{partition} partition seed={seed} category="
+                    f"{category!r} has {actual} case(s), expected exactly "
+                    f"{_CASES_PER_CATEGORY}: duplicated, moved, or "
+                    "mutated case seed assignment detected"
+                )
+
+
+def _verify_split_manifests(
     fixture: dict[str, object],
     *,
     calibration_cases: list[Case],
     scored_cases: list[Case],
-) -> dict[str, object]:
-    """Independently recompute and validate the calibration split manifest.
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Independently recompute and validate both split manifests.
 
-    Never trusts ``fixture["split_manifests"]["calibration"]`` as a source
-    of the digest embedded in the calibration artifact -- that stored
-    manifest is only ever used here as a *claim* to be checked against a
-    manifest recomputed from ``calibration_cases`` (loaded from
+    Never trusts ``fixture["split_manifests"]["calibration"]`` or
+    ``fixture["split_manifests"]["scored"]`` as a source of the digests
+    embedded in the calibration artifact -- both stored manifests are only
+    ever used here as *claims* to be checked, each against a manifest
+    recomputed from this fixture's own cases (loaded from
     ``fixture["cases"]``, the one independent custody anchor) and the
-    frozen ``_CALIBRATION_SEEDS`` module constant. ``fixture["seeds"]`` is
-    deliberately not consulted: it is exactly as forgeable as
-    ``fixture["split_manifests"]`` itself, so using it as an input to the
-    recomputation would let an attacker forge both sides of the
-    comparison in lockstep.
+    frozen ``_CALIBRATION_SEEDS``/``_SCORED_SEEDS`` module constants.
+    ``fixture["seeds"]`` is deliberately not consulted: it is exactly as
+    forgeable as ``fixture["split_manifests"]`` itself, so using it as an
+    input to the recomputation would let an attacker forge both sides of
+    the comparison in lockstep. Before either manifest is recomputed, each
+    partition's actual case seed assignments are bound against the frozen
+    contract by ``_verify_case_seed_coverage`` -- a check the manifest
+    digests alone cannot express (see that function's docstring).
 
-    Returns the recomputed (trusted) manifest so the caller sources the
-    embedded ``calibration_split_manifest_sha256`` from it directly,
-    rather than from the untrusted stored copy -- even when the stored
-    copy happens to match.
+    Returns the recomputed (trusted) ``(calibration, scored)`` manifests
+    so the caller sources both embedded ``*_split_manifest_sha256``
+    values from them directly, rather than from the untrusted stored
+    copies -- even when a stored copy happens to match.
     """
 
     if not calibration_cases:
@@ -1320,6 +1421,11 @@ def _verify_calibration_split_manifest(
             "partition disjointness"
         )
 
+    _verify_case_seed_coverage(
+        calibration_cases, _CALIBRATION_SEEDS, partition="calibration"
+    )
+    _verify_case_seed_coverage(scored_cases, _SCORED_SEEDS, partition="scored")
+
     recomputed_calibration = _split_manifest(
         calibration_cases, _CALIBRATION_SEEDS, "calibration"
     )
@@ -1331,6 +1437,11 @@ def _verify_calibration_split_manifest(
         if isinstance(stored_split_manifests, dict)
         else None
     )
+    stored_scored = (
+        stored_split_manifests.get("scored")
+        if isinstance(stored_split_manifests, dict)
+        else None
+    )
     if stored_calibration != recomputed_calibration:
         raise CalibrationSplitManifestError(
             "stored calibration split manifest does not match the "
@@ -1339,6 +1450,14 @@ def _verify_calibration_split_manifest(
             "stored manifest (and/or its digest) was forged, is stale "
             "relative to the fixture's cases, or is otherwise "
             "inconsistent"
+        )
+    if stored_scored != recomputed_scored:
+        raise CalibrationSplitManifestError(
+            "stored scored split manifest does not match the manifest "
+            "independently recomputed from this fixture's own scored "
+            "cases and the frozen scored seeds: the stored manifest "
+            "(and/or its digest) was forged, is stale relative to the "
+            "fixture's cases, or is otherwise inconsistent"
         )
 
     calibration_question_digests = set(recomputed_calibration["question_digests"])
@@ -1357,7 +1476,7 @@ def _verify_calibration_split_manifest(
             "digest: the partitions must be disjoint"
         )
 
-    return recomputed_calibration
+    return recomputed_calibration, recomputed_scored
 
 
 def _score_report_to_dict(report: ScoreReport) -> dict[str, object]:
@@ -1383,11 +1502,14 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
 
     Deterministic, pure function of ``fixture``'s own ``cases``. Touches
     ``calibration_cases`` for the baseline manifests/outputs the floor is
-    derived from, and additionally reads ``scored_cases`` -- but only to
-    independently recompute and verify the calibration split manifest
-    (see ``_verify_calibration_split_manifest``); the scored partition's
-    content never contributes to any baseline metric or to the floor
-    itself, and a submitted system's output is never touched here.
+    derived from, and additionally reads ``scored_cases`` -- both to
+    independently recompute and verify both split manifests (see
+    ``_verify_split_manifests``, which also binds every case's seed to
+    the frozen per-partition seed set and per-seed/category coverage) and
+    to bind the scored manifest's own digest into this artifact; the
+    scored partition's content never contributes to any baseline metric
+    or to the floor itself, and a submitted system's output is never
+    touched here.
 
     The returned dict contains all four baseline manifests, each
     baseline's calibration-partition metrics, the derivation rule, and the
@@ -1395,15 +1517,23 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
     that wants to *use* ``useful_coverage_floor`` for gating must call
     ``verify_calibration_artifact`` (or the convenience wrapper
     ``useful_coverage_floor_from_fixture``) first, rather than trusting an
-    unverified or freshly recomputed number.
+    unverified or freshly recomputed number. The artifact also binds
+    ``scored_split_manifest_sha256`` -- the independently recomputed
+    scored-partition manifest digest -- as a canonical joint split-custody
+    projection alongside the calibration digest, so a caller cannot treat
+    the scored manifest as a lower-trust field that is only ever used for
+    overlap-set computation and never itself verified against this
+    fixture's own scored cases.
     """
 
     all_cases = load_cases(fixture)
     calibration_cases = [case for case in all_cases if case.partition == "calibration"]
     scored_cases = [case for case in all_cases if case.partition == "scored"]
 
-    recomputed_calibration_manifest = _verify_calibration_split_manifest(
-        fixture, calibration_cases=calibration_cases, scored_cases=scored_cases
+    recomputed_calibration_manifest, recomputed_scored_manifest = (
+        _verify_split_manifests(
+            fixture, calibration_cases=calibration_cases, scored_cases=scored_cases
+        )
     )
 
     baseline_manifests = {
@@ -1422,6 +1552,9 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
     body = {
         "schema_id": CALIBRATION_ARTIFACT_SCHEMA_ID,
         "calibration_split_manifest_sha256": recomputed_calibration_manifest[
+            "manifest_sha256"
+        ],
+        "scored_split_manifest_sha256": recomputed_scored_manifest[
             "manifest_sha256"
         ],
         "baseline_manifests": baseline_manifests,

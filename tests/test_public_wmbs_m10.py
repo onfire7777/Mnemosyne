@@ -885,6 +885,108 @@ def test_score_records_rejects_abstained_false_with_null_answer_text() -> None:
         m10.score_records([case], [record])
 
 
+def test_score_records_rejects_direct_construction_with_duplicate_evidence_handles() -> (
+    None
+):
+    """A directly-constructed ``AnswerEnvelope`` with duplicate evidence
+    handles bypasses ``AnswerEnvelope.from_dict`` entirely -- dataclasses
+    do not validate field contents at construction time -- so
+    ``score_records`` must independently enforce the same closed
+    handle-list rule via the shared ``_validate_answer_envelope_contract``
+    validator, not a weaker or absent check."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0", "h0"],
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_empty_evidence_handle() -> (
+    None
+):
+    """Adversarial regression: an empty-string evidence handle in a
+    directly-constructed envelope must fail closed at score_records."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0", ""],
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_duplicate_action_handles() -> (
+    None
+):
+    """Adversarial regression: duplicate action handles on a
+    directly-constructed envelope must fail closed at score_records."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0"],
+        action_handles=["a0", "a0"],
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_unknown_metadata_key() -> (
+    None
+):
+    """Adversarial regression: a directly-constructed envelope can smuggle
+    an unrecognized adapter_metadata key past dataclass construction;
+    score_records must still reject it via the same closed vocabulary
+    from_dict enforces."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0"],
+        adapter_metadata={"unexpected": "value"},
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_invalid_mode_metadata() -> (
+    None
+):
+    """Adversarial regression: a directly-constructed envelope with an
+    out-of-vocabulary adapter_metadata['mode'] value must fail closed at
+    score_records, exactly as from_dict already does."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0"],
+        adapter_metadata={"mode": "bogus-mode"},
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_and_from_dict_share_the_same_validator_function() -> None:
+    """Both trust boundaries must call the exact same validator function,
+    so a caller cannot rely on a weaker duplicated check ever creeping
+    into ``score_records`` in isolation from ``AnswerEnvelope.from_dict``."""
+    import inspect
+
+    from_dict_source = inspect.getsource(m10.AnswerEnvelope.from_dict)
+    score_records_source = inspect.getsource(m10.score_records)
+    assert "_validate_answer_envelope_contract" in from_dict_source
+    assert "_validate_answer_envelope_contract" in score_records_source
+
+
 def test_score_records_shape_validation_runs_before_metric_computation() -> None:
     """One malformed record must fail closed even if others look fine."""
     case_good = _manual_case(
@@ -1321,6 +1423,218 @@ def test_build_calibration_artifact_rejects_self_consistent_empty_calibration_pa
     }
     with pytest.raises(m10.CalibrationSplitManifestError):
         m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_rehashed_forged_scored_split_digest() -> (
+    None
+):
+    """Adversarial regression: a forged scored split manifest that is
+    correctly self-rehashed (so it is internally consistent on its own)
+    must still be rejected, because it does not match a manifest
+    independently recomputed from this fixture's own scored cases. Prior
+    behavior only ever consumed the stored scored manifest for
+    overlap-set computation and never verified it against the fixture's
+    own scored cases; this closes that gap symmetrically with the
+    calibration-side check.
+    """
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["scored"]
+    forged_body = {**stored, "case_count": stored["case_count"] + 1}
+    del forged_body["manifest_sha256"]
+    forged_manifest = {
+        **forged_body,
+        "manifest_sha256": m10.canonical_sha256(forged_body),
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "scored": forged_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_edited_unrehashed_scored_manifest_body() -> (
+    None
+):
+    """Editing the stored scored manifest body without rehashing must
+    also fail closed (caught by the whole-manifest comparison against the
+    recomputed scored manifest, not by a separate self-digest check)."""
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["scored"]
+    tampered = {
+        **stored,
+        "question_digests": [*stored["question_digests"], "0" * 64],
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {**fixture["split_manifests"], "scored": tampered},
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_calibration_artifact_binds_scored_split_manifest_digest() -> None:
+    """The scored partition's own independently recomputed manifest
+    digest is bound into the calibration artifact -- as a canonical joint
+    split-custody projection alongside the calibration digest -- rather
+    than left as a field the artifact never itself verifies or binds."""
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    assert (
+        artifact["scored_split_manifest_sha256"]
+        == fixture["split_manifests"]["scored"]["manifest_sha256"]
+    )
+
+
+def test_useful_coverage_floor_from_fixture_rejects_tampered_scored_manifest() -> None:
+    """A tampered-but-rehashed scored split manifest must also be caught
+    by the sanctioned gating entry point, not only by
+    ``build_calibration_artifact`` directly."""
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["scored"]
+    forged_body = {**stored, "case_count": stored["case_count"] + 1}
+    del forged_body["manifest_sha256"]
+    forged_manifest = {
+        **forged_body,
+        "manifest_sha256": m10.canonical_sha256(forged_body),
+    }
+    tampered_fixture = {
+        **fixture,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "scored": forged_manifest,
+        },
+    }
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(tampered_fixture)
+
+
+# ---------------------------------------------------------------------------
+# Case seed assignment binding adversarial regressions
+# ---------------------------------------------------------------------------
+
+
+def _first_case_index(
+    cases: list[dict[str, object]], *, partition: str, seed: int, category: str
+) -> int:
+    for index, case in enumerate(cases):
+        if (
+            case["partition"] == partition
+            and case["seed"] == seed
+            and case["category"] == category
+        ):
+            return index
+    raise AssertionError(f"no case found for {partition}/{seed}/{category}")
+
+
+def test_build_calibration_artifact_rejects_mutated_case_seed_within_partition() -> (
+    None
+):
+    """A calibration case's seed is mutated from 0 to 1, another seed
+    already in the frozen calibration seed set. The observed seed-set
+    check alone would not catch this (both values remain in-set); only
+    the per-(seed, category) coverage count does, since seed 0's slot for
+    this category now has one too few cases and seed 1's has one too
+    many."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    cases[index] = {**cases[index], "seed": 1}
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_case_seed_moved_across_partition_boundary() -> (
+    None
+):
+    """A calibration-partition case's seed is changed to a scored-only
+    seed value while the case itself stays inside the calibration
+    partition: the observed calibration seed set no longer exactly
+    equals the frozen calibration seed set."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    cases[index] = {**cases[index], "seed": 2}
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_missing_seed_in_calibration_partition() -> (
+    None
+):
+    """Every case for calibration seed 1 is dropped: the observed
+    calibration seed set is missing a frozen seed value entirely."""
+    fixture = m10.generate_fixture()
+    cases = [
+        case
+        for case in fixture["cases"]
+        if not (case["partition"] == "calibration" and case["seed"] == 1)
+    ]
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_extra_unknown_seed_in_calibration_partition() -> (
+    None
+):
+    """An extra case carrying a seed value outside both frozen seed sets
+    is injected into the calibration partition."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    template_index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    extra_case = {
+        **cases[template_index],
+        "case_id": "case-forged-extra-seed",
+        "seed": 99,
+    }
+    mutated_fixture = {**fixture, "cases": cases + [extra_case]}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_duplicated_case_in_seed_category_slot() -> (
+    None
+):
+    """An extra case duplicates an already-full (seed, category) slot
+    without introducing any new or missing seed value, so only the
+    per-slot coverage count check catches it, not the seed-set check."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    template_index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    duplicate_case = {**cases[template_index], "case_id": "case-forged-duplicate"}
+    mutated_fixture = {**fixture, "cases": cases + [duplicate_case]}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_missing_seed_in_scored_partition_too() -> (
+    None
+):
+    """The case-seed-assignment binding applies symmetrically to the
+    scored partition, not only to calibration."""
+    fixture = m10.generate_fixture()
+    cases = [
+        case
+        for case in fixture["cases"]
+        if not (case["partition"] == "scored" and case["seed"] == 4)
+    ]
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
 
 
 def test_calibration_split_manifest_error_is_a_wmbs_m10_error() -> None:
