@@ -261,7 +261,20 @@ class RetrievalEnvelope:
         return {"hits": [hit.to_dict() for hit in self.hits]}
 
 
-class AnswerEnvelopeValidationError(ValueError):
+class WmbsM10Error(ValueError):
+    """Base error for every local wmbs-m10 contract/ABI violation.
+
+    All validation failures this module raises -- answer-envelope shape,
+    confidence bounds, and calibration-split-manifest integrity -- are (or
+    subclass) this error, so a caller that wants to catch "this local
+    record/artifact violates the wmbs-m10 contract" has a single type to
+    catch. It subclasses ``ValueError`` so existing ``pytest.raises
+    (ValueError)`` call sites for this module's more specific error
+    subclasses remain valid.
+    """
+
+
+class AnswerEnvelopeValidationError(WmbsM10Error):
     """A local answer record violates the closed AnswerEnvelope contract.
 
     Enforced at two trust boundaries: ``AnswerEnvelope.from_dict`` (loading
@@ -277,6 +290,67 @@ class AnswerEnvelopeValidationError(ValueError):
 _REQUIRED_ANSWER_ENVELOPE_FIELDS = frozenset(
     {"answer_text", "abstained", "confidence", "evidence_handles"}
 )
+_OPTIONAL_ANSWER_ENVELOPE_FIELDS = frozenset({"action_handles", "adapter_metadata"})
+_ALLOWED_ANSWER_ENVELOPE_FIELDS = (
+    _REQUIRED_ANSWER_ENVELOPE_FIELDS | _OPTIONAL_ANSWER_ENVELOPE_FIELDS
+)
+
+# The closed vocabulary of ``adapter_metadata`` keys this module's own
+# reader (``read_answer``) ever emits. A local record's metadata is
+# validated against this same closed set rather than accepted as an
+# arbitrary str-to-str bag, so an adapter cannot smuggle unbounded or
+# unvetted keys through a field this module treats as diagnostic-only.
+_ALLOWED_ADAPTER_METADATA_KEYS = frozenset({"mode", "abstain_reason", "fallback_reason"})
+
+
+def _validate_adapter_metadata(metadata: object) -> None:
+    if not isinstance(metadata, dict) or not all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in metadata.items()
+    ):
+        raise AnswerEnvelopeValidationError(
+            "local answer record adapter_metadata must be a dict of str "
+            "to str"
+        )
+    unknown_keys = set(metadata) - _ALLOWED_ADAPTER_METADATA_KEYS
+    if unknown_keys:
+        raise AnswerEnvelopeValidationError(
+            "local answer record adapter_metadata has unknown key(s) "
+            f"{sorted(unknown_keys)}; allowed keys are "
+            f"{sorted(_ALLOWED_ADAPTER_METADATA_KEYS)}"
+        )
+    mode = metadata.get("mode")
+    if mode is not None and mode not in RESPONSE_MODES:
+        raise AnswerEnvelopeValidationError(
+            "local answer record adapter_metadata['mode'] must be one of "
+            f"{RESPONSE_MODES}, got {mode!r}"
+        )
+
+
+def _validate_handle_list(handles: object, *, field_name: str) -> None:
+    """Reject a non-list, non-str-item, empty-string, or duplicate handle.
+
+    Applied to both ``evidence_handles`` and ``action_handles``: both are
+    lists of opaque identifier handles under the same closed ABI, so both
+    must be unique and nonempty-per-entry for the same reason.
+    """
+
+    if not isinstance(handles, list) or not all(
+        isinstance(item, str) for item in handles
+    ):
+        raise AnswerEnvelopeValidationError(
+            f"local answer record {field_name} must be a list of str"
+        )
+    if any(item == "" for item in handles):
+        raise AnswerEnvelopeValidationError(
+            f"local answer record {field_name} must not contain empty "
+            "handles"
+        )
+    if len(handles) != len(set(handles)):
+        raise AnswerEnvelopeValidationError(
+            f"local answer record {field_name} must not contain "
+            "duplicate handles"
+        )
 
 
 def _validate_answer_envelope_shape(
@@ -312,6 +386,11 @@ def _validate_answer_envelope_shape(
             f"case {case_id!r}: abstained=False requires a non-null "
             "answer_text"
         )
+    if not abstained and answer_text == "":
+        raise AnswerEnvelopeValidationError(
+            f"case {case_id!r}: abstained=False requires a nonempty "
+            "answer_text"
+        )
 
 
 @dataclass(frozen=True)
@@ -342,13 +421,25 @@ class AnswerEnvelope:
         checked against the closed contract before an ``AnswerEnvelope``
         is constructed, so a malformed local record fails closed here
         rather than silently coercing into something ``score_records``
-        would misinterpret.
+        would misinterpret. The contract is closed in both directions:
+        every required field must be present (checked below) and no
+        field outside ``_ALLOWED_ANSWER_ENVELOPE_FIELDS`` may appear at
+        all -- an adapter cannot smuggle an extra key through this
+        boundary on the assumption that an unrecognized field is silently
+        ignored.
         """
 
         if not isinstance(data, dict):
             raise AnswerEnvelopeValidationError(
                 f"local answer record must be a dict, not "
                 f"{type(data).__name__}"
+            )
+        unknown = set(data) - _ALLOWED_ANSWER_ENVELOPE_FIELDS
+        if unknown:
+            raise AnswerEnvelopeValidationError(
+                "local answer record has unknown field(s) "
+                f"{sorted(unknown)}; allowed fields are "
+                f"{sorted(_ALLOWED_ANSWER_ENVELOPE_FIELDS)}"
             )
         missing = _REQUIRED_ANSWER_ENVELOPE_FIELDS - set(data)
         if missing:
@@ -365,30 +456,13 @@ class AnswerEnvelope:
         _validate_confidence(confidence, case_id="<from_dict>")
 
         evidence_handles = data["evidence_handles"]
-        if not isinstance(evidence_handles, list) or not all(
-            isinstance(item, str) for item in evidence_handles
-        ):
-            raise AnswerEnvelopeValidationError(
-                "local answer record evidence_handles must be a list of str"
-            )
+        _validate_handle_list(evidence_handles, field_name="evidence_handles")
 
         action_handles = data.get("action_handles", [])
-        if not isinstance(action_handles, list) or not all(
-            isinstance(item, str) for item in action_handles
-        ):
-            raise AnswerEnvelopeValidationError(
-                "local answer record action_handles must be a list of str"
-            )
+        _validate_handle_list(action_handles, field_name="action_handles")
 
         adapter_metadata = data.get("adapter_metadata", {})
-        if not isinstance(adapter_metadata, dict) or not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in adapter_metadata.items()
-        ):
-            raise AnswerEnvelopeValidationError(
-                "local answer record adapter_metadata must be a dict of "
-                "str to str"
-            )
+        _validate_adapter_metadata(adapter_metadata)
 
         return cls(
             answer_text=answer_text,  # type: ignore[arg-type]
@@ -974,7 +1048,7 @@ _ASSERTABLE_CATEGORIES = frozenset(
 )
 
 
-class ConfidenceValidationError(ValueError):
+class ConfidenceValidationError(WmbsM10Error):
     """A record supplied a confidence value outside the closed contract.
 
     Finding 5: confidence must be a real (non-bool), finite number in the
@@ -1196,6 +1270,96 @@ USEFUL_COVERAGE_DERIVATION_RULE = (
 )
 
 
+class CalibrationSplitManifestError(WmbsM10Error):
+    """The calibration split manifest fails independent recomputation.
+
+    Raised by ``_verify_calibration_split_manifest`` when the calibration
+    partition is empty, the scored partition is empty, the stored
+    ``fixture["split_manifests"]["calibration"]`` does not exactly match a
+    manifest independently recomputed from this fixture's own calibration
+    cases (a forged, rehashed, stale, or otherwise inconsistent stored
+    manifest), or the calibration and scored partitions are not disjoint
+    by question digest or event digest.
+    """
+
+
+def _verify_calibration_split_manifest(
+    fixture: dict[str, object],
+    *,
+    calibration_cases: list[Case],
+    scored_cases: list[Case],
+) -> dict[str, object]:
+    """Independently recompute and validate the calibration split manifest.
+
+    Never trusts ``fixture["split_manifests"]["calibration"]`` as a source
+    of the digest embedded in the calibration artifact -- that stored
+    manifest is only ever used here as a *claim* to be checked against a
+    manifest recomputed from ``calibration_cases`` (loaded from
+    ``fixture["cases"]``, the one independent custody anchor) and the
+    frozen ``_CALIBRATION_SEEDS`` module constant. ``fixture["seeds"]`` is
+    deliberately not consulted: it is exactly as forgeable as
+    ``fixture["split_manifests"]`` itself, so using it as an input to the
+    recomputation would let an attacker forge both sides of the
+    comparison in lockstep.
+
+    Returns the recomputed (trusted) manifest so the caller sources the
+    embedded ``calibration_split_manifest_sha256`` from it directly,
+    rather than from the untrusted stored copy -- even when the stored
+    copy happens to match.
+    """
+
+    if not calibration_cases:
+        raise CalibrationSplitManifestError(
+            "calibration partition is empty: cannot derive a calibration "
+            "split manifest or useful-coverage floor from zero "
+            "calibration cases"
+        )
+    if not scored_cases:
+        raise CalibrationSplitManifestError(
+            "scored partition is empty: cannot verify calibration/scored "
+            "partition disjointness"
+        )
+
+    recomputed_calibration = _split_manifest(
+        calibration_cases, _CALIBRATION_SEEDS, "calibration"
+    )
+    recomputed_scored = _split_manifest(scored_cases, _SCORED_SEEDS, "scored")
+
+    stored_split_manifests = fixture.get("split_manifests")
+    stored_calibration = (
+        stored_split_manifests.get("calibration")
+        if isinstance(stored_split_manifests, dict)
+        else None
+    )
+    if stored_calibration != recomputed_calibration:
+        raise CalibrationSplitManifestError(
+            "stored calibration split manifest does not match the "
+            "manifest independently recomputed from this fixture's own "
+            "calibration cases and the frozen calibration seeds: the "
+            "stored manifest (and/or its digest) was forged, is stale "
+            "relative to the fixture's cases, or is otherwise "
+            "inconsistent"
+        )
+
+    calibration_question_digests = set(recomputed_calibration["question_digests"])
+    calibration_event_digests = set(recomputed_calibration["event_digests"])
+    scored_question_digests = set(recomputed_scored["question_digests"])
+    scored_event_digests = set(recomputed_scored["event_digests"])
+
+    if not calibration_question_digests.isdisjoint(scored_question_digests):
+        raise CalibrationSplitManifestError(
+            "calibration and scored partitions share at least one "
+            "question digest: the partitions must be disjoint"
+        )
+    if not calibration_event_digests.isdisjoint(scored_event_digests):
+        raise CalibrationSplitManifestError(
+            "calibration and scored partitions share at least one event "
+            "digest: the partitions must be disjoint"
+        )
+
+    return recomputed_calibration
+
+
 def _score_report_to_dict(report: ScoreReport) -> dict[str, object]:
     return {
         "total_cases": report.total_cases,
@@ -1217,10 +1381,13 @@ def _score_report_to_dict(report: ScoreReport) -> dict[str, object]:
 def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
     """Freeze the full evidence bundle the useful-coverage floor derives from.
 
-    Deterministic, pure function of the calibration partition of
-    ``fixture``. Touches only ``calibration_cases`` and the four reference
-    baselines' own manifests/outputs on that partition -- never the scored
-    partition or a submitted system's output.
+    Deterministic, pure function of ``fixture``'s own ``cases``. Touches
+    ``calibration_cases`` for the baseline manifests/outputs the floor is
+    derived from, and additionally reads ``scored_cases`` -- but only to
+    independently recompute and verify the calibration split manifest
+    (see ``_verify_calibration_split_manifest``); the scored partition's
+    content never contributes to any baseline metric or to the floor
+    itself, and a submitted system's output is never touched here.
 
     The returned dict contains all four baseline manifests, each
     baseline's calibration-partition metrics, the derivation rule, and the
@@ -1231,9 +1398,14 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
     unverified or freshly recomputed number.
     """
 
-    calibration_cases = [
-        case for case in load_cases(fixture) if case.partition == "calibration"
-    ]
+    all_cases = load_cases(fixture)
+    calibration_cases = [case for case in all_cases if case.partition == "calibration"]
+    scored_cases = [case for case in all_cases if case.partition == "scored"]
+
+    recomputed_calibration_manifest = _verify_calibration_split_manifest(
+        fixture, calibration_cases=calibration_cases, scored_cases=scored_cases
+    )
+
     baseline_manifests = {
         baseline_id: baseline_manifest(baseline_id) for baseline_id in BASELINE_IDS
     }
@@ -1249,7 +1421,7 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
 
     body = {
         "schema_id": CALIBRATION_ARTIFACT_SCHEMA_ID,
-        "calibration_split_manifest_sha256": fixture["split_manifests"]["calibration"][
+        "calibration_split_manifest_sha256": recomputed_calibration_manifest[
             "manifest_sha256"
         ],
         "baseline_manifests": baseline_manifests,
