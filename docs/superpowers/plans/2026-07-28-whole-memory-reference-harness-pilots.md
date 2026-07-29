@@ -101,8 +101,10 @@ must exist for the claimed state.
 `a95fe4d291093253f8ce49adff32ba875a35e884`. Its bounded remediation merged by
 PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
 `30484986865` green. Result-v2 compatibility fixtures and local ledger support
-remain the next dependency-ready increment; neither was implemented during the
-remediation round.
+remain unimplemented and blocked by the protected signed-publication lease. The
+next dependency-ready increment is fresh-main common-harness integration of the
+reviewed M01 and M10 development cores. The sandbox branch stays quarantined
+until real OCI, filesystem, network, and write-boundary enforcement exists.
 
 **Files:**
 

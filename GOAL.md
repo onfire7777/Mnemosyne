@@ -26,8 +26,9 @@ remain owned by:
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
-`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`, and the first closed-ABI slice was
-merged by PR #79 at `a95fe4d291093253f8ce49adff32ba875a35e884`:
+`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`; the first closed-ABI slice merged
+by PR #79 at `a95fe4d291093253f8ce49adff32ba875a35e884`, and its bounded remediation
+merged by PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -39,14 +40,21 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**ABI slice delivered — post-merge remediation before result-v2.**
+**ABI slice and remediation delivered — M01/M10 harness integration next.**
 
 WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
 reference validation landed at source head
-`8d64f554c565edeb0c43868ff6d436e6e09df33a`. The current bounded work is
-post-merge review remediation. The next dependency-ready slice is result-v2;
-the remaining pilot fixtures, scorers, sandbox receipts, and module execution
-are not complete and retain their existing gates.
+`8d64f554c565edeb0c43868ff6d436e6e09df33a`; remediation head
+`0d42f9436397a04e12ceaa3bdbd60d925e2640e9` merged by PR #80, and exact-merge
+CI run `30484986865` passed on
+`main@28805ccf54f99f098a5abc23fe6f1155400d0f22`. The next dependency-ready
+slice is the fresh-main common-harness integration of the reviewed M01 and M10
+development cores, followed by the narrow M03 valid-time slice and the
+M01→M03→M10 replay path. Result-v2 remains blocked by the protected
+signed-publication lease. The sandbox lane remains quarantined until it
+provides real OCI, filesystem, network, and write-boundary enforcement.
+Remaining receipts, measured cells, and module execution retain their existing
+gates.
 
 ## Scope
 
@@ -148,11 +156,13 @@ For every GoalEx round:
 
 ## Success Evidence
 
-Achieved for the closed-ABI slice:
+Achieved for the closed-ABI slice and bounded remediation:
 
 - owner-landed hardened specification and implementation plan;
 - merged compound schema, reference validator, and focused contract fixtures;
 - normal PR #79 review, exact-head CI, merge, and post-merge main proof.
+- normal PR #80 remediation review, exact-head clearance, merge, exact-merge CI
+  run `30484986865`, refreshed CBM, and a deduplicated Gbrain milestone.
 
 The remaining whole-memory pilot milestone still requires:
 
@@ -179,7 +189,8 @@ test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
 test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
-git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
+test "$(git rev-parse main)" = "28805ccf54f99f098a5abc23fe6f1155400d0f22"
+git merge-base --is-ancestor 0d42f9436397a04e12ceaa3bdbd60d925e2640e9 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
