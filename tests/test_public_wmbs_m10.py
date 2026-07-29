@@ -1674,3 +1674,82 @@ def test_integration_dependencies_document_shared_event_generator_gate() -> None
     assert "M02-M04" in combined
     assert "event generator" in combined
     assert "unresolved" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# Raw fixture boundary custody
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_seed", ["0", 0.0, False])
+def test_load_cases_rejects_coercive_seed_types(bad_seed: object) -> None:
+    fixture = m10.generate_fixture()
+    fixture["cases"][0]["seed"] = bad_seed
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("case_id", 1),
+        ("category", 1),
+        ("question", 1),
+        ("observation_time", 1),
+        ("gold_answer", 1),
+        ("expected_abstain", "false"),
+        ("partition", 1),
+    ],
+)
+def test_load_cases_rejects_wrong_case_field_types(
+    field: str, bad_value: object
+) -> None:
+    fixture = m10.generate_fixture()
+    fixture["cases"][0][field] = bad_value
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_load_cases_rejects_unknown_or_missing_case_fields() -> None:
+    fixture = m10.generate_fixture()
+    fixture["cases"][0]["unexpected"] = "surprise"
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+    fixture = m10.generate_fixture()
+    del fixture["cases"][0]["question"]
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_load_cases_rejects_unknown_or_malformed_fact_fields() -> None:
+    fixture = m10.generate_fixture()
+    fact = next(case["facts"][0] for case in fixture["cases"] if case["facts"])
+    fact["unexpected"] = "surprise"
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+    fixture = m10.generate_fixture()
+    fact = next(case["facts"][0] for case in fixture["cases"] if case["facts"])
+    fact["provenance_status"] = "trusted-ish"
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_floor_verifier_rejects_forged_top_level_seed_declaration() -> None:
+    fixture = m10.generate_fixture()
+    fixture["seeds"] = {"calibration": [999], "scored": [888]}
+    with pytest.raises(m10.FixtureValidationError):
+        m10.useful_coverage_floor_from_fixture(fixture)
+
+
+def test_build_artifact_rejects_extra_unknown_category_even_if_manifests_match() -> None:
+    fixture = m10.generate_fixture()
+    extra = {
+        **fixture["cases"][0],
+        "case_id": "case-forged-unknown-category",
+        "category": "unknown",
+    }
+    fixture["cases"].append(extra)
+    with pytest.raises(m10.FixtureValidationError):
+        m10.build_calibration_artifact(fixture)

@@ -155,6 +155,73 @@ def canonical_sha256(value: object) -> str:
 # ---------------------------------------------------------------------------
 
 
+class WmbsM10Error(ValueError):
+    """Base error for every local wmbs-m10 contract/ABI violation."""
+
+
+class FixtureValidationError(WmbsM10Error):
+    """The local M10 fixture violates its closed raw-data contract."""
+
+
+_FACT_FIELDS = frozenset(
+    {
+        "stable_item_id",
+        "key",
+        "value",
+        "observed_at",
+        "provenance_status",
+        "evidence_handle",
+    }
+)
+_CASE_FIELDS = frozenset(
+    {
+        "case_id",
+        "category",
+        "seed",
+        "question",
+        "observation_time",
+        "facts",
+        "gold_answer",
+        "expected_abstain",
+        "partition",
+    }
+)
+_FIXTURE_FIELDS = frozenset(
+    {
+        "schema_id",
+        "generator_id",
+        "generator_version",
+        "categories",
+        "seeds",
+        "cases",
+        "split_manifests",
+        "calibration_artifact",
+    }
+)
+_FIXTURE_REQUIRED_FIELDS = _FIXTURE_FIELDS - {"calibration_artifact"}
+
+
+def _require_exact_fields(
+    data: object, expected: frozenset[str], *, label: str
+) -> dict[str, object]:
+    if not isinstance(data, dict):
+        raise FixtureValidationError(f"{label} must be an object")
+    missing = expected - set(data)
+    unknown = set(data) - expected
+    if missing or unknown:
+        raise FixtureValidationError(
+            f"{label} fields are not closed: missing={sorted(missing)}, "
+            f"unknown={sorted(unknown)}"
+        )
+    return data
+
+
+def _require_string(value: object, *, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise FixtureValidationError(f"{label} must be a nonempty string")
+    return value
+
+
 @dataclass(frozen=True)
 class FactInstance:
     stable_item_id: str
@@ -176,13 +243,27 @@ class FactInstance:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "FactInstance":
+        data = _require_exact_fields(data, _FACT_FIELDS, label="fact")
+        provenance_status = _require_string(
+            data["provenance_status"], label="fact.provenance_status"
+        )
+        if provenance_status not in {"verified", "unverified", "unavailable"}:
+            raise FixtureValidationError(
+                "fact.provenance_status is outside the closed enum"
+            )
         return cls(
-            stable_item_id=str(data["stable_item_id"]),
-            key=str(data["key"]),
-            value=str(data["value"]),
-            observed_at=str(data["observed_at"]),
-            provenance_status=str(data["provenance_status"]),  # type: ignore[arg-type]
-            evidence_handle=str(data["evidence_handle"]),
+            stable_item_id=_require_string(
+                data["stable_item_id"], label="fact.stable_item_id"
+            ),
+            key=_require_string(data["key"], label="fact.key"),
+            value=_require_string(data["value"], label="fact.value"),
+            observed_at=_require_string(
+                data["observed_at"], label="fact.observed_at"
+            ),
+            provenance_status=provenance_status,  # type: ignore[arg-type]
+            evidence_handle=_require_string(
+                data["evidence_handle"], label="fact.evidence_handle"
+            ),
         )
 
     def content(self) -> str:
@@ -216,18 +297,41 @@ class Case:
 
     @classmethod
     def from_dict(cls, data: dict[str, object]) -> "Case":
+        data = _require_exact_fields(data, _CASE_FIELDS, label="case")
         facts_raw = data["facts"]
-        assert isinstance(facts_raw, list)
+        if not isinstance(facts_raw, list):
+            raise FixtureValidationError("case.facts must be a list")
+        seed = data["seed"]
+        if type(seed) is not int:
+            raise FixtureValidationError("case.seed must be an int, not bool/coercible")
+        category = _require_string(data["category"], label="case.category")
+        if category not in CATEGORIES:
+            raise FixtureValidationError("case.category is outside the closed enum")
+        partition = _require_string(data["partition"], label="case.partition")
+        if partition not in {"calibration", "scored"}:
+            raise FixtureValidationError("case.partition is outside the closed enum")
+        gold_answer = data["gold_answer"]
+        if gold_answer is not None and (
+            not isinstance(gold_answer, str) or not gold_answer
+        ):
+            raise FixtureValidationError(
+                "case.gold_answer must be a nonempty string or null"
+            )
+        expected_abstain = data["expected_abstain"]
+        if type(expected_abstain) is not bool:
+            raise FixtureValidationError("case.expected_abstain must be a bool")
         return cls(
-            case_id=str(data["case_id"]),
-            category=str(data["category"]),
-            seed=int(data["seed"]),  # type: ignore[arg-type]
-            question=str(data["question"]),
-            observation_time=str(data["observation_time"]),
+            case_id=_require_string(data["case_id"], label="case.case_id"),
+            category=category,
+            seed=seed,
+            question=_require_string(data["question"], label="case.question"),
+            observation_time=_require_string(
+                data["observation_time"], label="case.observation_time"
+            ),
             facts=tuple(FactInstance.from_dict(item) for item in facts_raw),
-            gold_answer=data["gold_answer"],  # type: ignore[assignment]
-            expected_abstain=bool(data["expected_abstain"]),
-            partition=str(data.get("partition", "scored")),
+            gold_answer=gold_answer,
+            expected_abstain=expected_abstain,
+            partition=partition,
         )
 
 
@@ -259,19 +363,6 @@ class RetrievalEnvelope:
 
     def to_dict(self) -> dict[str, object]:
         return {"hits": [hit.to_dict() for hit in self.hits]}
-
-
-class WmbsM10Error(ValueError):
-    """Base error for every local wmbs-m10 contract/ABI violation.
-
-    All validation failures this module raises -- answer-envelope shape,
-    confidence bounds, and calibration-split-manifest integrity -- are (or
-    subclass) this error, so a caller that wants to catch "this local
-    record/artifact violates the wmbs-m10 contract" has a single type to
-    catch. It subclasses ``ValueError`` so existing ``pytest.raises
-    (ValueError)`` call sites for this module's more specific error
-    subclasses remain valid.
-    """
 
 
 class AnswerEnvelopeValidationError(WmbsM10Error):
@@ -695,8 +786,34 @@ def generate_fixture() -> dict[str, object]:
 
 
 def load_cases(fixture: dict[str, object]) -> list[Case]:
+    if not isinstance(fixture, dict):
+        raise FixtureValidationError("fixture must be an object")
+    missing = _FIXTURE_REQUIRED_FIELDS - set(fixture)
+    unknown = set(fixture) - _FIXTURE_FIELDS
+    if missing or unknown:
+        raise FixtureValidationError(
+            "fixture fields are not closed: "
+            f"missing={sorted(missing)}, unknown={sorted(unknown)}"
+        )
+    if fixture["schema_id"] != FIXTURE_SCHEMA_ID:
+        raise FixtureValidationError("fixture.schema_id does not match")
+    if fixture["generator_id"] != GENERATOR_ID:
+        raise FixtureValidationError("fixture.generator_id does not match")
+    if fixture["generator_version"] != GENERATOR_VERSION:
+        raise FixtureValidationError("fixture.generator_version does not match")
+    if fixture["categories"] != list(CATEGORIES):
+        raise FixtureValidationError("fixture.categories does not match the closed enum")
+    expected_seeds = {
+        "calibration": list(_CALIBRATION_SEEDS),
+        "scored": list(_SCORED_SEEDS),
+    }
+    if fixture["seeds"] != expected_seeds:
+        raise FixtureValidationError("fixture.seeds does not match frozen seed sets")
+    if not isinstance(fixture["split_manifests"], dict):
+        raise FixtureValidationError("fixture.split_manifests must be an object")
     cases_raw = fixture["cases"]
-    assert isinstance(cases_raw, list)
+    if not isinstance(cases_raw, list):
+        raise FixtureValidationError("fixture.cases must be a list")
     return [Case.from_dict(item) for item in cases_raw]
 
 
@@ -1363,8 +1480,20 @@ def _verify_case_seed_coverage(
             "extra, or unknown seed assignment(s) detected"
         )
 
+    expected_total = len(expected_seeds) * len(CATEGORIES) * _CASES_PER_CATEGORY
+    if len(cases) != expected_total:
+        raise CalibrationSplitManifestError(
+            f"{partition} partition has {len(cases)} cases, expected exactly "
+            f"{expected_total}"
+        )
+
     slot_counts: dict[tuple[int, str], int] = {}
     for case in cases:
+        if case.category not in CATEGORIES:
+            raise CalibrationSplitManifestError(
+                f"{partition} partition contains unknown category "
+                f"{case.category!r}"
+            )
         slot = (case.seed, case.category)
         slot_counts[slot] = slot_counts.get(slot, 0) + 1
 
