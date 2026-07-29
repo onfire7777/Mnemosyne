@@ -438,9 +438,12 @@ class ProtocolValidator:
         elif operation == "answer":
             request_payload = validated_request["payload"]
             assert isinstance(request_payload, dict)
-            if request_payload["response_mode"] == "forced" and (
-                payload["abstained"] or payload.get("answer_text") is None
+            answer_text = payload.get("answer_text")
+            if (payload["abstained"] and answer_text is not None) or (
+                not payload["abstained"] and answer_text is None
             ):
+                _fail("answer response contradicts its abstention status")
+            if request_payload["response_mode"] == "forced" and payload["abstained"]:
                 _fail("forced answer response must contain an answer")
         elif operation in {"create_run", "finalize"}:
             for key in ("run_id", "attempt_id"):
