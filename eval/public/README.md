@@ -80,3 +80,99 @@ candidate manifest, QA-only `build.json`, reader custody, and current checkout
 must all name the same 40-hex commit. Reproduction reuses the retained canonical
 `candidate-manifest.json`; verifying from another commit fails closed instead
 of silently treating different code as the frozen candidate.
+
+## Whole-memory common ABI (development draft)
+
+The `wmbs/0.1-draft` compound schema and standard-library reference validator
+live at
+[`schema/wmbs-0.1-draft.schema.json`](schema/wmbs-0.1-draft.schema.json) and
+[`adapters/whole_memory_reference.py`](adapters/whole_memory_reference.py).
+They define the closed development-only lifecycle
+`negotiate → create_run → ingest/retrieve/answer → finalize`; finalization is
+terminal.
+
+`finalize.reason` is closed to `completed` or `cancelled`. A successful
+`cancelled` finalization is terminal and uses identical idempotent request and
+response replay. Closed errors and negative finalize receipts leave the attempt
+active.
+
+The adapter exports `canonical_json`, `canonical_sha256`,
+`canonical_artifact_sha256`, `canonical_projection`, `validate_definition`,
+`validate_evidence_bundle`, and `ProtocolValidator`.
+Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation
+requires canonical UTC deadlines, one stable tenant/run/attempt scope,
+monotonically increasing sequences, unique request IDs, and identical content
+for idempotent replay. Canonical Python mappings require string keys, and schema
+constants preserve JSON type distinctions such as `true` versus `1`.
+`ProtocolValidator.validate_response` binds receipts to
+accepted requests, freezes the first closed response for idempotent replay, and
+commits lifecycle transitions only after successful responses. Closed error
+responses and negative create/finalize receipts preserve the prior phase;
+retries use a fresh request ID and idempotency key. Response binding also
+enforces exact ingest event order, receipt scope, retrieval `top_k`, and forced
+answer behavior. Finalize is rejected while any accepted active request still
+awaits its first frozen response. A first response must arrive before the
+request deadline; an already-frozen identical response remains replayable after
+that deadline.
+`WholeMemoryValidationError.code` carries one of the closed protocol error
+codes.
+
+The specification's `?` fields may be omitted or explicitly null. Portable
+events require `valid_to`, when both interval endpoints exist, to be no earlier
+than `valid_from`, and `content_sha256` is SHA-256 over the event content's
+UTF-8 bytes.
+Retrieval hits use contiguous ranks `1..N` in response order and unique
+`stable_item_id` values. Accepted and deduplicated ingest statuses must be
+acknowledged and error-free; rejected statuses must be unacknowledged, carry an
+error, and omit an evidence handle.
+
+The protocol version remains `wmbs/0.1-draft`; the compound JSON Schema uses
+the absolute ID `urn:wmbs:0.1-draft`. Its public evidence IDs are:
+`urn:wmbs:0.1-draft#AdapterContract`,
+`urn:wmbs:0.1-draft#DataSourceContract`,
+`urn:wmbs:0.1-draft#ScorerContract`,
+`urn:wmbs:0.1-draft#BaselineManifest`,
+`urn:wmbs:0.1-draft#PowerPlan`,
+`urn:wmbs:0.1-draft#SoftwareDataBOM`,
+`urn:wmbs:0.1-draft#SandboxReceipt`,
+`urn:wmbs:0.1-draft#ResourceReceipt`,
+`urn:wmbs:0.1-draft#SmokeReceipt`, and
+`urn:wmbs:0.1-draft#FeasibilityRecord`.
+Each evidence artifact's `artifact_sha256` is the canonical SHA-256 of that
+artifact with the `artifact_sha256` field omitted. `validate_definition`
+checks this self-digest. A `PROPOSED` feasibility record keeps all fourteen
+categories present but uses `null` for at least one absent artifact.
+Readiness labels are accepted only by `validate_evidence_bundle`, which
+resolves every required top-level and nested digest reference against supplied
+content. `CONTRACT-READY` binds the loaded ABI schema plus the referenced data,
+scorer, baseline, sandbox-profile, and supply-chain artifacts, but requires no
+resource receipt.
+`PILOT-READY-DEV` additionally requires a finalized attempt, a completed
+resource receipt for the same SUT boundary, and content-bound offline L16-DEV
+sandbox controls. The pinned L16-DEV profile requires a 16 GiB Apple Silicon
+macOS host, and measured wall time, peak RSS, disk use, and worker count must
+remain within its declared ceilings. Its passing `SmokeReceipt` binds the exact
+module identity, sandbox receipt, resource receipt, and supplied result
+artifact. Result-v1 smoke evidence is limited to 1,000 metrics before the
+legacy validator runs.
+`RUN-READY-*` remains rejected until profile-specific signed evidence exists.
+
+`SandboxReceipt` records the digest-bound profile, environment allowlist,
+syscall policy, UID/GID, mounts, locale/timezone, cleanup and log-redaction
+policy, resource limits, scorer/model isolation, and a default-deny or metered
+endpoint/DNS/IP/protocol allowlist. Cloud metadata and private ranges remain
+blocked in both egress modes; allowlisted CIDRs must be valid and globally
+routable.
+
+M15 replay freezes canonical payload `m15-v1`, exactly five runs, and required
+clean-process replay. Canonical projection excludes only `path`,
+`rss_samples_bytes`, `runtime_timestamp_utc`, `signature`, and `wall_time_ms`.
+
+The in-memory validator admits at most 10,000 requests, 16 MiB per request or
+response, 64 levels of JSON nesting, and 64 MiB of retained canonical request
+bytes. It performs no persistence, network, model, benchmark, ranking, or publication
+work. Run its contract suite with:
+
+```bash
+uv run --locked python -m pytest tests/test_public_whole_memory_reference.py -q
+```

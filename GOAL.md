@@ -24,10 +24,10 @@ remain owned by:
 - approved repository plans and specifications
 - live GitHub PR, review, and CI state
 
-The proposed whole-memory standard and pilot plan become executable authority
-only after their current owner provides a clean exact-commit handoff or lands
-them on canonical `main`. Both files now exist in this branch from the latest
-verified clean handoff `605ecd3ddf7faf308f664f0869e5e2eb431afa7d`:
+The whole-memory standard and pilot plan are executable authority on canonical
+`main`. They were imported from verified clean handoff
+`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`, and the first closed-ABI slice was
+merged by PR #79 at `a95fe4d291093253f8ce49adff32ba875a35e884`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -39,13 +39,14 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**Admitted — WMBS-A/WMB-P1 authority and contract freeze.**
+**ABI slice delivered — post-merge remediation before result-v2.**
 
-The benchmark-spec owner completed a clean, validated, local-only handoff at
-`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`. The committed documents were
-imported byte-for-byte; the owner worktree remains untouched. The first selected
-work item is WMBS-A/WMB-P1: freeze authority, traceability, the closed ABI, and
-fail-closed validation for the minimal non-ranking development pilot.
+WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
+reference validation landed at source head
+`8d64f554c565edeb0c43868ff6d436e6e09df33a`. The current bounded work is
+post-merge review remediation. The next dependency-ready slice is result-v2;
+the remaining pilot fixtures, scorers, sandbox receipts, and module execution
+are not complete and retain their existing gates.
 
 ## Scope
 
@@ -137,8 +138,8 @@ For every GoalEx round:
   `/Users/admin/.codex/worktrees/9697/Mnemosyne`
 - Branch: `codex/goalex-whole-memory-pilot`
 - GoalEx planner/verifier: isolated derived launcher
-  `.goalex/bin/goalex-sol` using `gpt-5.6-sol:medium`.
-- Bounded RalphEx plan, task, and review stages: `gpt-5.6-sol:medium`.
+  `.goalex/bin/goalex-sol` using `gpt-5.6-sol:low`.
+- Bounded RalphEx plan, task, and review stages: `gpt-5.6-sol:low`.
 - Claude/Fable planning, dual planning, dual review, and Hermes are disabled.
 - Bounded guards: at most 20 rounds per process, three consecutive execution
   failures, three consecutive no-commit stalls, 15-minute idle timeout, and
@@ -147,11 +148,15 @@ For every GoalEx round:
 
 ## Success Evidence
 
-The whole-memory pilot milestone requires all of:
+Achieved for the closed-ABI slice:
 
-- owner-landed or exact-commit-handed-off hardened specification and
-  implementation plan;
-- reviewed closed ABI, deterministic fixtures/generators, scorers, baselines,
+- owner-landed hardened specification and implementation plan;
+- merged compound schema, reference validator, and focused contract fixtures;
+- normal PR #79 review, exact-head CI, merge, and post-merge main proof.
+
+The remaining whole-memory pilot milestone still requires:
+
+- reviewed deterministic fixtures/generators, scorers, baselines,
   inferential plan, sandbox/metering contract, BOM/rights disclosures, resource
   receipts, and result-v1-compatible additive evidence contract;
 - only honest development labels such as `PILOT-READY-DEV`,
@@ -172,6 +177,9 @@ set -euo pipefail
 test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"
 test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
+git fetch --prune origin
+test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
+git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
