@@ -532,6 +532,22 @@ def test_golden_responses_are_closed_and_valid(
 
 
 @requires_abi
+def test_reference_validator_accepts_integral_float_as_json_schema_integer() -> None:
+    request = deepcopy(GOLDEN_REQUESTS["negotiate"])
+    request["context"]["sequence"] = 1.0  # type: ignore[index]
+
+    assert abi.validate_definition("negotiate_request", request) == request
+
+
+@requires_abi
+def test_reference_validator_uses_json_numeric_equality_for_unique_items() -> None:
+    schema = {"type": "array", "items": {"type": "number"}, "uniqueItems": True}
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi._validate([1, 1.0], schema, "$")
+
+
+@requires_abi
 @pytest.mark.parametrize(
     ("definition", "payload"),
     [
