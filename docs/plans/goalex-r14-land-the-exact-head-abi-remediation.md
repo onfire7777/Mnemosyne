@@ -11,12 +11,24 @@ Do not start result-v2, execute benchmark cells, alter result-v1/leaderboard beh
 - `git diff --check origin/main...HEAD && uv run ruff check eval/public/adapters/whole_memory_reference.py tests/test_public_whole_memory_reference.py tests/test_runtime_exclusive_lock.py`
 - `PYTHONPATH=src uv run --extra mcp pytest -q tests/test_public_whole_memory_reference.py tests/test_runtime_exclusive_lock.py`
 - `uv run --locked python -m pytest`
-- `git diff --name-only origin/main...HEAD | rg -v '^(GOAL\.md|README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/plans/goalex-r13-deliver-the-post-merge-abi-remediation\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0\.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|infra/scripts/runtime-exclusive-lock\.sh|tests/test_public_whole_memory_reference\.py|tests/test_runtime_exclusive_lock\.py)$' | test "$(wc -l | tr -d ' ')" = 0`
+- `git diff --name-only origin/main...HEAD | rg -v '^(GOAL\.md|README\.md|docs/plans/goalex-r12-deliver-the-whole-memory-common-abi\.md|docs/plans/goalex-r13-deliver-the-post-merge-abi-remediation\.md|docs/plans/goalex-r14-land-the-exact-head-abi-remediation\.md|docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots\.md|eval/public/README\.md|eval/public/schema/wmbs-0\.1-draft\.schema\.json|eval/public/adapters/whole_memory_reference\.py|infra/scripts/runtime-exclusive-lock\.sh|tests/test_public_whole_memory_reference\.py|tests/test_runtime_exclusive_lock\.py)$' | test "$(wc -l | tr -d ' ')" = 0`
 
 ### Task 1: Reconcile the immutable delivery head
-- [ ] Fetch current refs and inspect the branch PR, checks, reviews, unresolved threads, mergeability, worktrees, dirty states, and active GoalEx/RalphEx/test processes. Stop on an overlapping writer or unexpected path.
-- [ ] Pin delivery to the current remote head SHA. If GitHub reports a different PR head, reconcile by normal push or by inspecting the newer remote content; never force-push, rebase the published branch, or widen the lease silently.
-- [ ] Create one PR against `main` only if none exists. Otherwise update the existing PR description with the exact lease, focused/full verification receipts, unchanged result-v1 boundary, and explicit result-v2 deferral.
+- [x] Fetch current refs and inspect the branch PR, checks, reviews, unresolved threads, mergeability, worktrees, dirty states, and active GoalEx/RalphEx/test processes. Stop on an overlapping writer or unexpected path.
+- [x] Pin delivery to the current remote head SHA. If GitHub reports a different PR head, reconcile by normal push or by inspecting the newer remote content; never force-push, rebase the published branch, or widen the lease silently.
+- [x] Create one PR against `main` only if none exists. Otherwise update the existing PR description with the exact lease, focused/full verification receipts, unchanged result-v1 boundary, and explicit result-v2 deferral.
+
+Task 1 receipt: refs were fetched and PR #80 matched the published remediation
+head `eb1e15be6b35b41f64b6b9b0b76663218b5313fb`. The PR targets `main`, is
+mergeable, has no unresolved review threads, and the latest CodeRabbit review
+approved that exact head; its temporary blocked state was the still-running
+unit check. Every registered worktree and active GoalEx/RalphEx/test process
+was inspected. Active benchmark and signed-publication writers use disjoint
+worktrees and paths, so no overlapping writer or unexpected lease path was
+found. The existing PR description was refreshed after the normal task commit
+and push to identify the new immutable head, the exact twelve-path lease, the
+focused and full-suite receipts, the unchanged result-v1 boundary, and the
+explicit result-v2 deferral.
 
 ### Task 2: Clear exact-head gates
 - [ ] Run diff hygiene, exact-lease validation, focused Ruff/tests, the applicable full suite, risky-file inspection, and a changed-file secret scan on the exact pushed SHA.
