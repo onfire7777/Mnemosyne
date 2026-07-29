@@ -109,10 +109,7 @@
         "actor_label",
         "event_time",
         "ingestion_time",
-        "valid_from",
-        "valid_to",
         "content_sha256",
-        "modality_handle",
         "public_metadata"
       ],
       "properties": {
@@ -286,7 +283,7 @@
     "ingest_status": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["event_id", "outcome", "durability", "evidence_handle", "error"],
+      "required": ["event_id", "outcome", "durability"],
       "properties": {
         "event_id": {"$ref": "#/$defs/identifier"},
         "outcome": {"enum": ["accepted", "deduplicated", "rejected"]},
@@ -335,7 +332,6 @@
       "required": [
         "rank",
         "stable_item_id",
-        "score",
         "content_or_handle",
         "evidence_handles",
         "observed_at",
@@ -381,9 +377,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "answer_text",
         "abstained",
-        "confidence",
         "evidence_handles",
         "action_handles",
         "adapter_metadata"
@@ -508,7 +502,7 @@
     "error_envelope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["code", "retriable", "message", "details_sha256"],
+      "required": ["code", "retriable", "message"],
       "properties": {
         "code": {"$ref": "#/$defs/error_code"},
         "retriable": {"type": "boolean"},

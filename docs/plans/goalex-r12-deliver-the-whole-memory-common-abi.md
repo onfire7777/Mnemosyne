@@ -41,7 +41,7 @@ and `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 ### Task 2: Implement the smallest fail-closed ABI
 - [x] Add the draft-2020-12 compound schema with protocol ID `wmbs/0.1-draft`, closed operation/envelope/evidence definitions, explicit bounds and enums, digest formats, and `additionalProperties:false` at every object boundary.
 - [x] Add a standard-library-only canonicalizer and validator in `whole_memory_reference.py`, reusing the repository’s sorted compact UTF-8 JSON convention with `allow_nan=False`. Reject booleans in numeric fields, unknown fields/codes, non-finite numbers, and non-canonical timestamps.
-- [x] Add only the in-memory state required for ordering, unique request IDs, identical idempotent replay, conflicting-key rejection, deadline checks, and terminal finalization. Do not create a general schema framework, persistence layer, runner, scorer, or entrant adapter.
+- [x] Add only the in-memory state required for ordering, unique request IDs, identical request/response replay, conflicting-key rejection, deadline checks, response-committed lifecycle transitions, and terminal finalization. Do not create a general schema framework, persistence layer, runner, scorer, or entrant adapter. (Post-merge review remediation, 2026-07-28: lifecycle transitions now wait for successful receipts; closed errors and negative create/finalize receipts preserve the prior phase.)
 - [x] Run the focused suite and Ruff until green, and keep exact schema/golden-vector SHA-256 values frozen in test assertions.
 
 ### Task 3: Verify and deliver source rather than another plan

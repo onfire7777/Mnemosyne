@@ -26,6 +26,7 @@ _OPERATIONS = ("negotiate", "create_run", "ingest", "retrieve", "answer", "final
 _UTC_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _MAX_REQUESTS = 10_000
 _MAX_REQUEST_BYTES = 16 * 1024 * 1024
+_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _MAX_RETAINED_BYTES = 64 * 1024 * 1024
 _MAX_JSON_DEPTH = 64
 _STRING_CHUNK_SIZE = 64 * 1024
@@ -139,8 +140,8 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
             if key in properties:
                 _validate(nested, properties[key], f"{path}.{key}")
         if schema is _DEFINITIONS["portable_event"]:
-            valid_from = value["valid_from"]
-            valid_to = value["valid_to"]
+            valid_from = value.get("valid_from")
+            valid_to = value.get("valid_to")
             if (
                 isinstance(valid_from, str)
                 and isinstance(valid_to, str)
@@ -162,11 +163,14 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
             if outcome == "rejected":
                 if (
                     value["durability"] != "not_acknowledged"
-                    or value["evidence_handle"] is not None
-                    or value["error"] is None
+                    or value.get("evidence_handle") is not None
+                    or value.get("error") is None
                 ):
                     _fail(f"{path} has contradictory rejected-event status")
-            elif value["durability"] != "acknowledged" or value["error"] is not None:
+            elif (
+                value["durability"] != "acknowledged"
+                or value.get("error") is not None
+            ):
                 _fail(f"{path} has contradictory accepted-event status")
 
 
@@ -213,7 +217,9 @@ def canonical_sha256(value: object) -> str:
     return hashlib.sha256(canonical_json(value)).hexdigest()
 
 
-def _enforce_canonical_size(value: object, maximum: int) -> None:
+def _enforce_canonical_size(
+    value: object, maximum: int, *, label: str = "request"
+) -> None:
     active: set[int] = set()
     frames: list[tuple[object, int, int]] = []
     current = value
@@ -231,14 +237,14 @@ def _enforce_canonical_size(value: object, maximum: int) -> None:
                     )
                     if minimum_size > maximum:
                         _fail(
-                            "request exceeds the byte limit",
+                            f"{label} exceeds the byte limit",
                             code="RESOURCE_LIMIT",
                         )
             except UnicodeEncodeError as exc:
                 _fail(f"value is not canonical JSON: {exc}")
         elif isinstance(current, dict):
             if depth >= _MAX_JSON_DEPTH:
-                _fail("request exceeds the nesting limit", code="RESOURCE_LIMIT")
+                _fail(f"{label} exceeds the nesting limit", code="RESOURCE_LIMIT")
             identity = id(current)
             if identity in active:
                 _fail("value is not canonical JSON: circular reference")
@@ -247,7 +253,7 @@ def _enforce_canonical_size(value: object, maximum: int) -> None:
             frames.append((children, depth + 1, identity))
         elif isinstance(current, list):
             if depth >= _MAX_JSON_DEPTH:
-                _fail("request exceeds the nesting limit", code="RESOURCE_LIMIT")
+                _fail(f"{label} exceeds the nesting limit", code="RESOURCE_LIMIT")
             identity = id(current)
             if identity in active:
                 _fail("value is not canonical JSON: circular reference")
@@ -283,7 +289,7 @@ def _enforce_canonical_size(value: object, maximum: int) -> None:
     except (RecursionError, TypeError, UnicodeEncodeError, ValueError) as exc:
         _fail(f"value is not canonical JSON: {exc}")
     if size > maximum:
-        _fail("request exceeds the byte limit", code="RESOURCE_LIMIT")
+        _fail(f"{label} exceeds the byte limit", code="RESOURCE_LIMIT")
 
 
 def canonical_projection(value: object) -> object:
@@ -311,8 +317,10 @@ class ProtocolValidator:
         self._now = now or (lambda: datetime.now(UTC))
         self._request_ids: set[str] = set()
         self._replays: dict[str, tuple[bytes, object]] = {}
+        self._responses: dict[str, tuple[int, bytes]] = {}
         self._scope: tuple[str, str, str] | None = None
         self._retained_bytes = 0
+        self._pending_transition: str | None = None
         self._phase = "new"
         self.last_sequence = 0
 
@@ -362,12 +370,8 @@ class ProtocolValidator:
         if self._scope is None:
             self._scope = scope
         self.last_sequence = sequence
-        if operation == "negotiate":
-            self._phase = "negotiated"
-        elif operation == "create_run":
-            self._phase = "active"
-        elif operation == "finalize":
-            self._phase = "finalized"
+        if operation in {"negotiate", "create_run", "finalize"}:
+            self._pending_transition = idempotency_key
         return deepcopy(validated)
 
     def validate_response(self, request: object, response: object) -> object:
@@ -377,6 +381,7 @@ class ProtocolValidator:
         if operation not in _OPERATIONS:
             _fail("unsupported operation", code="UNSUPPORTED_OPERATION")
         _enforce_canonical_size(request, _MAX_REQUEST_BYTES)
+        _enforce_canonical_size(response, _MAX_RESPONSE_BYTES, label="response")
         validated_request = validate_definition(f"{operation}_request", request)
         assert isinstance(validated_request, dict)
         context = validated_request["context"]
@@ -386,8 +391,34 @@ class ProtocolValidator:
         if replay is None or replay[0] != request_bytes:
             _fail("response does not match an accepted request", code="CONFLICT")
 
-        validated_response = validate_definition(f"{operation}_response", response)
+        definition = (
+            "error_response"
+            if isinstance(response, dict) and "error" in response
+            else f"{operation}_response"
+        )
+        validated_response = validate_definition(definition, response)
         assert isinstance(validated_response, dict)
+        response_bytes = canonical_json(validated_response)
+        response_fingerprint = (
+            len(response_bytes),
+            hashlib.sha256(response_bytes).digest(),
+        )
+        idempotency_key = str(context["idempotency_key"])
+        prior_response = self._responses.get(idempotency_key)
+        if prior_response is not None:
+            if prior_response != response_fingerprint:
+                _fail(
+                    "accepted request produced a conflicting response",
+                    code="CONFLICT",
+                )
+            return deepcopy(validated_response)
+
+        if definition == "error_response":
+            self._responses[idempotency_key] = response_fingerprint
+            if self._pending_transition == idempotency_key:
+                self._pending_transition = None
+            return deepcopy(validated_response)
+
         payload = validated_response["payload"]
         assert isinstance(payload, dict)
         if operation == "ingest":
@@ -399,13 +430,36 @@ class ProtocolValidator:
             status_ids = [status["event_id"] for status in payload["statuses"]]
             if status_ids != event_ids:
                 _fail("ingest statuses do not match request event order")
+        elif operation == "retrieve":
+            request_payload = validated_request["payload"]
+            assert isinstance(request_payload, dict)
+            if len(payload["hits"]) > request_payload["top_k"]:
+                _fail("retrieve response exceeds the requested top_k")
+        elif operation == "answer":
+            request_payload = validated_request["payload"]
+            assert isinstance(request_payload, dict)
+            if request_payload["response_mode"] == "forced" and (
+                payload["abstained"] or payload.get("answer_text") is None
+            ):
+                _fail("forced answer response must contain an answer")
         elif operation in {"create_run", "finalize"}:
             for key in ("run_id", "attempt_id"):
                 if payload[key] != context[key]:
                     _fail(f"response {key} does not match request context")
+        self._responses[idempotency_key] = response_fingerprint
+        if self._pending_transition == idempotency_key:
+            self._pending_transition = None
+            if operation == "negotiate":
+                self._phase = "negotiated"
+            elif operation == "create_run" and payload["accepted"]:
+                self._phase = "active"
+            elif operation == "finalize" and payload["finalized"]:
+                self._phase = "finalized"
         return deepcopy(validated_response)
 
     def _operation_allowed(self, operation: str) -> bool:
+        if self._pending_transition is not None:
+            return False
         if self._phase == "new":
             return operation == "negotiate"
         if self._phase == "negotiated":
