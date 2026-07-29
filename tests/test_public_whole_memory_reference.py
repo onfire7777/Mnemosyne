@@ -870,7 +870,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "0aa17bec2c4314b1d0353aca637be8b7d2b6a2ad9b9dfe79ebfc136f451be334"
+        == "6452bfd3002160776b3d0011788c7ec765e83e7d2f1500b7b3a4dc3147d165e0"
     )
 
 
@@ -931,6 +931,15 @@ def test_evidence_schema_ids_resolve_to_public_anchors() -> None:
 def test_m15_replay_protocol_is_frozen(field: str, value: object) -> None:
     record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
     record["replay_protocol"][field] = value  # type: ignore[index]
+
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("FeasibilityRecord", record)
+
+
+@requires_abi
+def test_schema_constants_keep_booleans_distinct_from_numbers() -> None:
+    record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
+    record["replay_protocol"]["clean_process_replay"] = 1  # type: ignore[index]
 
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_definition("FeasibilityRecord", record)
@@ -1022,6 +1031,26 @@ def test_failed_finalize_response_preserves_active_phase() -> None:
     )
 
     assert validator.validate_request(retrieve) == retrieve
+
+
+@requires_abi
+@pytest.mark.parametrize("operation", ["ingest", "retrieve", "answer"])
+def test_finalize_waits_for_every_accepted_active_response(operation: str) -> None:
+    validator = _validator()
+    for setup_operation in ("negotiate", "create_run"):
+        _complete_exchange(validator, setup_operation)
+    validator.validate_request(GOLDEN_REQUESTS[operation])
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        validator.validate_request(GOLDEN_REQUESTS["finalize"])
+
+    assert _error_code(exc) == "ORDER_VIOLATION"
+    validator.validate_response(
+        GOLDEN_REQUESTS[operation], GOLDEN_RESPONSES[operation]
+    )
+    assert validator.validate_request(GOLDEN_REQUESTS["finalize"])[
+        "operation"
+    ] == "finalize"
 
 
 @requires_abi
@@ -1316,6 +1345,28 @@ def test_validator_rejects_oversized_malformed_request_before_schema_walk(
 
 
 @requires_abi
+def test_canonical_size_guard_stops_before_traversing_oversized_primitive_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class CountingList(list[object]):
+        visited = 0
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            for item in super().__iter__():
+                self.visited += 1
+                yield item
+
+    value = CountingList([0] * 100)
+    monkeypatch.setattr(abi, "_MAX_RETAINED_BYTES", 16)
+
+    with pytest.raises(abi.WholeMemoryValidationError) as exc:
+        abi.canonical_json(value)
+
+    assert _error_code(exc) == "RESOURCE_LIMIT"
+    assert value.visited < len(value)
+
+
+@requires_abi
 def test_validator_rejects_deeply_nested_malformed_request_without_crashing() -> None:
     nested: dict[str, object] = {}
     for _ in range(1_200):
@@ -1534,7 +1585,6 @@ def test_protocol_validator_binds_ingest_receipt_to_request_event_order() -> Non
     second_status = deepcopy(response["payload"]["statuses"][0])  # type: ignore[index]
     second_status.update({"event_id": "event-0002", "outcome": "deduplicated"})
     response["payload"]["statuses"].append(second_status)  # type: ignore[index]
-    assert validator.validate_response(request, response) == response
 
     for event_ids in (
         ["event-0001"],
@@ -1549,22 +1599,39 @@ def test_protocol_validator_binds_ingest_receipt_to_request_event_order() -> Non
             }
             for index, event_id in enumerate(event_ids)
         ]
-        with pytest.raises(abi.WholeMemoryValidationError):
+        with pytest.raises(
+            abi.WholeMemoryValidationError,
+            match="ingest statuses do not match request event order",
+        ):
             validator.validate_response(request, malformed)
+    assert validator.validate_response(request, response) == response
 
 
 @requires_abi
-def test_protocol_validator_binds_receipt_scope_to_request_context() -> None:
+@pytest.mark.parametrize("field", ["run_id", "attempt_id"])
+def test_protocol_validator_binds_receipt_scope_to_request_context(field: str) -> None:
     validator = _validator()
     _complete_exchange(validator, "negotiate")
     request = GOLDEN_REQUESTS["create_run"]
     validator.validate_request(request)
     response = deepcopy(GOLDEN_RESPONSES["create_run"])
 
+    malformed = deepcopy(response)
+    malformed["payload"][field] = f"other-{field}"  # type: ignore[index]
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match=rf"response {field} does not match request context",
+    ):
+        validator.validate_response(request, malformed)
     assert validator.validate_response(request, response) == response
-    response["payload"]["attempt_id"] = "other-attempt"  # type: ignore[index]
+
+
+@requires_abi
+def test_canonical_inputs_reject_non_string_object_keys() -> None:
     with pytest.raises(abi.WholeMemoryValidationError):
-        validator.validate_response(request, response)
+        abi.canonical_json({1: "value"})
+    with pytest.raises(abi.WholeMemoryValidationError):
+        abi.validate_definition("public_metadata", {1: "value"})
 
 
 @requires_abi

@@ -308,6 +308,7 @@ Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosy
 - [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 28-table schema, RLS, and bitemporal design
 - [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
 - [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
+- [Whole-memory common ABI](eval/public/README.md#whole-memory-common-abi-development-draft) — development-only, non-ranking `wmbs/0.1-draft` schema and reference validator
 
 ### MCP tools (illustrative)
 

@@ -101,13 +101,16 @@ The adapter exports `canonical_json`, `canonical_sha256`,
 Canonical JSON is sorted, compact UTF-8 with one trailing newline. Validation
 requires canonical UTC deadlines, one stable tenant/run/attempt scope,
 monotonically increasing sequences, unique request IDs, and identical content
-for idempotent replay. `ProtocolValidator.validate_response` binds receipts to
+for idempotent replay. Canonical Python mappings require string keys, and schema
+constants preserve JSON type distinctions such as `true` versus `1`.
+`ProtocolValidator.validate_response` binds receipts to
 accepted requests, freezes the first closed response for idempotent replay, and
 commits lifecycle transitions only after successful responses. Closed error
 responses and negative create/finalize receipts preserve the prior phase;
 retries use a fresh request ID and idempotency key. Response binding also
 enforces exact ingest event order, receipt scope, retrieval `top_k`, and forced
-answer behavior.
+answer behavior. Finalize is rejected while any accepted active request still
+awaits its first frozen response.
 `WholeMemoryValidationError.code` carries one of the closed protocol error
 codes.
 

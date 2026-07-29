@@ -880,7 +880,7 @@
         "order_rule": {"const": "sorted-keys"},
         "time_rule": {"const": "utc-z"},
         "locale": {"const": "C"},
-        "clean_process_replay": {"const": true},
+        "clean_process_replay": {"type": "boolean", "const": true},
         "artifact_digest": {"const": "sha256"}
       }
     },

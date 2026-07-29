@@ -73,6 +73,23 @@ def _type_matches(value: object, expected: str) -> bool:
     return False
 
 
+def _json_equal(left: object, right: object) -> bool:
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left == right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    if isinstance(left, list) and isinstance(right, list):
+        return len(left) == len(right) and all(
+            _json_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
+    if isinstance(left, dict) and isinstance(right, dict):
+        return left.keys() == right.keys() and all(
+            _json_equal(left[key], right[key]) for key in left
+        )
+    return type(left) is type(right) and left == right
+
+
 def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
     schema = _resolve(raw_schema)
     if "anyOf" in schema:
@@ -101,9 +118,11 @@ def _validate(value: object, raw_schema: Mapping[str, Any], path: str) -> None:
     elif isinstance(expected, str) and not _type_matches(value, expected):
         _fail(f"{path} must be {expected}")
 
-    if "const" in schema and value != schema["const"]:
+    if "const" in schema and not _json_equal(value, schema["const"]):
         _fail(f"{path} must equal {schema['const']!r}")
-    if "enum" in schema and value not in schema["enum"]:
+    if "enum" in schema and not any(
+        _json_equal(value, option) for option in schema["enum"]
+    ):
         _fail(f"{path} is not in the closed enum")
 
     if isinstance(value, str):
@@ -228,6 +247,7 @@ def _enforce_canonical_size(
             _fail("canonical JSON cannot contain non-finite numbers")
         if isinstance(current, str):
             try:
+                minimum_size += 2
                 for start in range(0, len(current), _STRING_CHUNK_SIZE):
                     minimum_size += len(
                         current[start : start + _STRING_CHUNK_SIZE].encode()
@@ -240,6 +260,11 @@ def _enforce_canonical_size(
             except UnicodeEncodeError as exc:
                 _fail(f"value is not canonical JSON: {exc}")
         elif isinstance(current, dict):
+            if any(not isinstance(key, str) for key in current):
+                _fail("value is not canonical JSON: object keys must be strings")
+            minimum_size += 2 + len(current) + max(0, len(current) - 1)
+            if minimum_size > maximum:
+                _fail(f"{label} exceeds the byte limit", code="RESOURCE_LIMIT")
             if depth >= _MAX_JSON_DEPTH:
                 _fail(f"{label} exceeds the nesting limit", code="RESOURCE_LIMIT")
             identity = id(current)
@@ -249,6 +274,9 @@ def _enforce_canonical_size(
             children = (item for pair in current.items() for item in pair)
             frames.append((children, depth + 1, identity))
         elif isinstance(current, list):
+            minimum_size += 2 + max(0, len(current) - 1)
+            if minimum_size > maximum:
+                _fail(f"{label} exceeds the byte limit", code="RESOURCE_LIMIT")
             if depth >= _MAX_JSON_DEPTH:
                 _fail(f"{label} exceeds the nesting limit", code="RESOURCE_LIMIT")
             identity = id(current)
@@ -258,6 +286,10 @@ def _enforce_canonical_size(
             frames.append((iter(current), depth + 1, identity))
         elif current is not None and not isinstance(current, (bool, int, float)):
             _fail(f"value is not canonical JSON: unsupported {type(current).__name__}")
+        else:
+            minimum_size += 1
+            if minimum_size > maximum:
+                _fail(f"{label} exceeds the byte limit", code="RESOURCE_LIMIT")
 
         while frames:
             children, child_depth, identity = frames[-1]
@@ -310,6 +342,7 @@ def validate_definition(definition: str, value: object) -> object:
     schema = _DEFINITIONS.get(definition)
     if schema is None:
         _fail(f"unknown definition: {definition}")
+    _enforce_canonical_size(value, _MAX_RETAINED_BYTES, label="value")
     _validate(value, schema, "$")
     return deepcopy(value)
 
@@ -470,6 +503,10 @@ class ProtocolValidator:
 
     def _operation_allowed(self, operation: str) -> bool:
         if self._pending_transition is not None:
+            return False
+        if operation == "finalize" and any(
+            key not in self._responses for key in self._replays
+        ):
             return False
         if self._phase == "new":
             return operation == "negotiate"
