@@ -136,14 +136,19 @@ artifact with the `artifact_sha256` field omitted. `validate_definition`
 checks this self-digest. A `PROPOSED` feasibility record keeps all fourteen
 categories present but uses `null` for at least one absent artifact.
 Readiness labels are accepted only by `validate_evidence_bundle`, which
-resolves every non-null digest reference against supplied content and requires
-a completed resource receipt.
+resolves every non-null digest reference against supplied content.
+`CONTRACT-READY` requires the contract artifacts but no resource receipt.
+`PILOT-READY-DEV` additionally requires a finalized attempt, a completed
+resource receipt for the same SUT boundary, and content-bound offline L16-DEV
+sandbox controls. `RUN-READY-*` remains rejected until profile-specific signed
+evidence exists.
 
 `SandboxReceipt` records the digest-bound profile, environment allowlist,
 syscall policy, UID/GID, mounts, locale/timezone, cleanup and log-redaction
 policy, resource limits, scorer/model isolation, and a default-deny or metered
 endpoint/DNS/IP/protocol allowlist. Cloud metadata and private ranges remain
-blocked in both egress modes.
+blocked in both egress modes; allowlisted CIDRs must be valid and globally
+routable.
 
 M15 replay freezes canonical payload `m15-v1`, exactly five runs, and required
 clean-process replay. Canonical projection excludes only `path`,

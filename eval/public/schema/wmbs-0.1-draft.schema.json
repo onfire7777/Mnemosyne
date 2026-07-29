@@ -21,6 +21,14 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
     },
+    "module_id": {
+      "enum": [
+        "M01", "M02", "M03", "M04", "M05",
+        "M06", "M07", "M08", "M09", "M10",
+        "M11", "M12", "M13", "M14", "M15",
+        "M16", "M17", "M18", "M19", "M20"
+      ]
+    },
     "sha256": {
       "type": "string",
       "minLength": 64,
@@ -100,7 +108,7 @@
       "additionalProperties": false,
       "required": ["module_id", "module_version", "division", "track", "seed"],
       "properties": {
-        "module_id": {"type": "string", "pattern": "^M[0-9]{2}$"},
+        "module_id": {"$ref": "#/$defs/module_id"},
         "module_version": {"type": "string", "maxLength": 64, "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
         "division": {
           "enum": ["COMPONENT-CLOSED", "AGENT-CLOSED", "SYSTEM-OPEN", "HOSTED-OUTCOME"]
@@ -812,6 +820,7 @@
         "artifact_sha256",
         "profile_ref",
         "sut_boundary",
+        "root_filesystem",
         "uid",
         "gid",
         "mounts",
@@ -839,6 +848,7 @@
         "artifact_sha256": {"$ref": "#/$defs/sha256"},
         "profile_ref": {"$ref": "#/$defs/digest_reference"},
         "sut_boundary": {"$ref": "#/$defs/nonempty_string"},
+        "root_filesystem": {"const": "read-only"},
         "uid": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "gid": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
         "mounts": {
@@ -926,7 +936,7 @@
       "additionalProperties": false,
       "required": ["module_id", "module_version", "source_commit", "owner_ids"],
       "properties": {
-        "module_id": {"type": "string", "pattern": "^M[0-9]{2}$"},
+        "module_id": {"$ref": "#/$defs/module_id"},
         "module_version": {"type": "string", "maxLength": 64, "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
         "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         "owner_ids": {
@@ -977,7 +987,13 @@
         "schema_version": {"enum": ["result-v1", "result-v2"]},
         "metric_family": {"$ref": "#/$defs/identifier"},
         "attempt_state": {"enum": ["created", "running", "finalized", "failed", "aborted"]},
-        "custody": {"$ref": "#/$defs/identifier"},
+        "custody": {
+          "enum": [
+            "development-public",
+            "operator-held-out",
+            "certification-held-out"
+          ]
+        },
         "compatibility": {"enum": ["no-v1-mutation", "additive-v2"]}
       }
     },
