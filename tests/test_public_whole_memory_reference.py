@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 import pytest
 from jsonschema import Draft202012Validator
 
+from eval.public import bundle as public_bundle
+
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = REPO_ROOT / "eval/public/schema/wmbs-0.1-draft.schema.json"
@@ -996,6 +998,49 @@ def test_pilot_readiness_binds_smoke_to_exact_module_and_result() -> None:
 
 
 @requires_abi
+def test_pilot_readiness_binds_smoke_result_to_declared_contract() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    old_result_ref = smoke["result_ref"]
+    assert isinstance(old_result_ref, str)
+    result = artifacts.pop(old_result_ref)
+    result_ref = "result-v2@sha256:" + abi.canonical_sha256(result)
+    smoke["result_ref"] = result_ref
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["smoke_receipt_ref"] = smoke_ref
+    record = _rebind_artifact(record)
+    artifacts[result_ref] = result
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="smoke result does not match the feasibility result contract",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_smoke_receipt_schema_rejects_unknown_result_contract() -> None:
+    smoke = deepcopy(EVIDENCE_FIXTURES["SmokeReceipt"])
+    smoke["result_ref"] = "unrelated-format@sha256:" + DIGEST_A
+    smoke = _rebind_artifact(smoke)
+    validator = Draft202012Validator(SCHEMA).evolve(
+        schema=SCHEMA["$defs"]["SmokeReceipt"]
+    )
+
+    assert list(validator.iter_errors(smoke))
+
+
+@requires_abi
 @pytest.mark.parametrize(
     "dispositions",
     [
@@ -1587,6 +1632,15 @@ def test_canonical_json_is_mapping_order_independent_with_stable_sha256() -> Non
 
 
 @requires_abi
+def test_canonical_json_matches_public_bundle_for_non_ascii_text() -> None:
+    value = {"content": "café"}
+    expected = b'{"content":"caf\\u00e9"}\n'
+
+    assert public_bundle._canonical(value) == expected
+    assert abi.canonical_json(value) == expected
+
+
+@requires_abi
 @pytest.mark.parametrize("function_name", ["canonical_json", "canonical_projection"])
 def test_canonical_helpers_reject_cycles_without_recursion_errors(
     function_name: str,
@@ -1617,7 +1671,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "1dc5e1cb5e9a265d3e4274d94eeb0d122da2c09a1c79102a8a7fc88fdf26c58c"
+        == "c9eabd4bf5bc24a845dae9b9df076f7886cd0afb7e25cead4f05337bb127ce26"
     )
 
 
