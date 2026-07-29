@@ -261,6 +261,59 @@ class RetrievalEnvelope:
         return {"hits": [hit.to_dict() for hit in self.hits]}
 
 
+class AnswerEnvelopeValidationError(ValueError):
+    """A local answer record violates the closed AnswerEnvelope contract.
+
+    Enforced at two trust boundaries: ``AnswerEnvelope.from_dict`` (loading
+    a raw local record, e.g. from a JSON results file) and
+    ``score_records`` (scoring an already-constructed envelope, which a
+    caller can build directly with a coercive or contradictory shape since
+    dataclasses do not validate field types at construction time). Neither
+    boundary relies on ``bool()``/``str()`` coercion or a bare ``assert``:
+    every violation raises this error before any metric computation runs.
+    """
+
+
+_REQUIRED_ANSWER_ENVELOPE_FIELDS = frozenset(
+    {"answer_text", "abstained", "confidence", "evidence_handles"}
+)
+
+
+def _validate_answer_envelope_shape(
+    *, answer_text: object, abstained: object, case_id: str = "<unknown>"
+) -> None:
+    """Reject a coercive or contradictory ``(answer_text, abstained)`` pair.
+
+    ``isinstance(abstained, bool)`` is checked *before* the
+    abstained/answer_text consistency checks below on purpose: a truthy
+    non-bool value such as ``"false"`` would otherwise silently satisfy
+    ``not abstained and answer_text is None`` under Python's normal
+    truthiness rules, which is exactly the ``bool()``-coercion failure
+    mode this validator exists to close.
+    """
+
+    if not isinstance(abstained, bool):
+        raise AnswerEnvelopeValidationError(
+            f"case {case_id!r}: abstained must be a bool, not "
+            f"{type(abstained).__name__} ({abstained!r})"
+        )
+    if answer_text is not None and not isinstance(answer_text, str):
+        raise AnswerEnvelopeValidationError(
+            f"case {case_id!r}: answer_text must be str or None, not "
+            f"{type(answer_text).__name__}"
+        )
+    if abstained and answer_text is not None:
+        raise AnswerEnvelopeValidationError(
+            f"case {case_id!r}: abstained=True requires answer_text=None, "
+            f"got answer_text={answer_text!r}"
+        )
+    if not abstained and answer_text is None:
+        raise AnswerEnvelopeValidationError(
+            f"case {case_id!r}: abstained=False requires a non-null "
+            "answer_text"
+        )
+
+
 @dataclass(frozen=True)
 class AnswerEnvelope:
     answer_text: str | None
@@ -279,6 +332,72 @@ class AnswerEnvelope:
             "action_handles": self.action_handles,
             "adapter_metadata": self.adapter_metadata,
         }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, object]) -> "AnswerEnvelope":
+        """Validating loader for a local (system-output) answer record.
+
+        This is the harness-side trust boundary for records that were not
+        produced by this module's own ``read_answer``: every field is
+        checked against the closed contract before an ``AnswerEnvelope``
+        is constructed, so a malformed local record fails closed here
+        rather than silently coercing into something ``score_records``
+        would misinterpret.
+        """
+
+        if not isinstance(data, dict):
+            raise AnswerEnvelopeValidationError(
+                f"local answer record must be a dict, not "
+                f"{type(data).__name__}"
+            )
+        missing = _REQUIRED_ANSWER_ENVELOPE_FIELDS - set(data)
+        if missing:
+            raise AnswerEnvelopeValidationError(
+                "local answer record is missing required field(s): "
+                f"{sorted(missing)}"
+            )
+
+        answer_text = data["answer_text"]
+        abstained = data["abstained"]
+        _validate_answer_envelope_shape(answer_text=answer_text, abstained=abstained)
+
+        confidence = data["confidence"]
+        _validate_confidence(confidence, case_id="<from_dict>")
+
+        evidence_handles = data["evidence_handles"]
+        if not isinstance(evidence_handles, list) or not all(
+            isinstance(item, str) for item in evidence_handles
+        ):
+            raise AnswerEnvelopeValidationError(
+                "local answer record evidence_handles must be a list of str"
+            )
+
+        action_handles = data.get("action_handles", [])
+        if not isinstance(action_handles, list) or not all(
+            isinstance(item, str) for item in action_handles
+        ):
+            raise AnswerEnvelopeValidationError(
+                "local answer record action_handles must be a list of str"
+            )
+
+        adapter_metadata = data.get("adapter_metadata", {})
+        if not isinstance(adapter_metadata, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in adapter_metadata.items()
+        ):
+            raise AnswerEnvelopeValidationError(
+                "local answer record adapter_metadata must be a dict of "
+                "str to str"
+            )
+
+        return cls(
+            answer_text=answer_text,  # type: ignore[arg-type]
+            abstained=abstained,  # type: ignore[arg-type]
+            confidence=confidence,  # type: ignore[arg-type]
+            evidence_handles=evidence_handles,  # type: ignore[arg-type]
+            action_handles=action_handles,  # type: ignore[arg-type]
+            adapter_metadata=adapter_metadata,  # type: ignore[arg-type]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -918,6 +1037,11 @@ def score_records(cases: list[Case], records: list[AnswerEnvelope]) -> ScoreRepo
         )
 
     for case, record in zip(cases, records, strict=True):
+        _validate_answer_envelope_shape(
+            answer_text=record.answer_text,
+            abstained=record.abstained,
+            case_id=case.case_id,
+        )
         _validate_confidence(record.confidence, case_id=case.case_id)
 
     total = len(cases)
@@ -1137,7 +1261,20 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
 
 
 def verify_calibration_artifact(artifact: dict[str, object]) -> None:
-    """Raise ``ValueError`` if ``artifact`` was tampered with or is stale."""
+    """Raise ``ValueError`` if ``artifact`` is internally inconsistent.
+
+    This checks only that ``artifact_sha256`` matches the rest of
+    ``artifact``'s own contents -- i.e. that the artifact has not been
+    edited *without* also rehashing it. That is a necessary sanity check
+    but it is **not** authenticity: an attacker who edits
+    ``useful_coverage_floor`` (or any other field) and correctly
+    recomputes ``artifact_sha256`` over the edited body passes this check
+    every time, since the digest is stored inside the same untrusted
+    object it is supposed to protect. Callers that need to gate on the
+    floor must use ``useful_coverage_floor_from_fixture`` instead, which
+    additionally binds the artifact to independently recomputed data from
+    the fixture it claims to describe.
+    """
 
     if "artifact_sha256" not in artifact:
         raise ValueError("calibration artifact is missing artifact_sha256")
@@ -1155,15 +1292,49 @@ def useful_coverage_floor_from_fixture(fixture: dict[str, object]) -> float:
     """Return the frozen useful-coverage floor after verifying its digest.
 
     This is the sanctioned entry point for gating ``ScoreReport
-    .useful_coverage`` against the floor (Finding 1): it never recomputes
-    the floor from whatever baseline/scorer code currently does -- it only
-    reads the frozen value out of ``fixture["calibration_artifact"]`` after
-    confirming that artifact's self-digest still matches its contents.
+    .useful_coverage`` against the floor (Finding 1, hardened): the
+    artifact's self-digest alone proves only that the artifact was not
+    edited without rehashing -- it says nothing about whether the artifact
+    actually describes *this* fixture's calibration partition. Two
+    exploits pass the self-digest check alone:
+
+    1. Rehashed-floor splice: edit ``useful_coverage_floor`` (or any other
+       artifact field) and recompute ``artifact_sha256`` over the edited
+       body.
+    2. Stale-artifact splice: take a previously valid, still
+       self-consistent ``calibration_artifact`` and embed it in a fixture
+       whose calibration cases (and therefore whose true calibration split
+       manifest, baseline metrics, and floor) have since changed.
+
+    Both are closed here by independently rebuilding the calibration
+    artifact from ``fixture``'s own calibration cases -- the calibration
+    split manifest digest, the four baseline manifests, every baseline's
+    calibration-partition metrics, and the derived floor -- via the exact
+    same pure derivation ``build_calibration_artifact`` uses, and requiring
+    an exact match against the stored artifact. Nothing inside the
+    untrusted ``fixture["calibration_artifact"]`` is trusted as evidence
+    of its own authenticity; only ``fixture["cases"]`` (the independent
+    custody anchor -- see ``test_fixture_file_on_disk_matches_generator_
+    output``, which pins the checked-in fixture file to this same
+    deterministic generator) drives the recomputation.
     """
 
     artifact = fixture["calibration_artifact"]
     assert isinstance(artifact, dict)
     verify_calibration_artifact(artifact)
+
+    rebuilt = build_calibration_artifact(fixture)
+    if rebuilt != artifact:
+        raise ValueError(
+            "calibration artifact does not match independently "
+            "recomputed calibration data derived from this fixture's own "
+            "calibration cases (split manifest digest, baseline "
+            "manifests, calibration metrics, and/or useful_coverage_"
+            "floor): the artifact was tampered with, is stale relative "
+            "to the fixture's calibration cases, or was not produced by "
+            "build_calibration_artifact for this exact fixture"
+        )
+
     floor = artifact["useful_coverage_floor"]
     assert isinstance(floor, float)
     return floor
