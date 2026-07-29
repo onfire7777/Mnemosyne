@@ -807,6 +807,18 @@ def test_definition_validator_rejects_contradictory_answers(
         abi.validate_definition("answer_response", response)
 
 
+@requires_abi
+def test_answer_schema_requires_explicit_null_text_when_abstained() -> None:
+    response = deepcopy(GOLDEN_RESPONSES["answer"])
+    response["payload"]["abstained"] = True  # type: ignore[index]
+    response["payload"].pop("answer_text")  # type: ignore[union-attr]
+    validator = Draft202012Validator(SCHEMA).evolve(
+        schema=SCHEMA["$defs"]["answer_response"]
+    )
+
+    assert list(validator.iter_errors(response))
+
+
 REQUEST_REJECTIONS: list[
     tuple[str, str, Callable[[dict[str, object]], dict[str, object]], str]
 ] = [
@@ -1874,6 +1886,41 @@ def test_sandbox_receipt_rejects_egress_mode_allowlist_mismatch(
 
 @requires_abi
 @pytest.mark.parametrize(
+    "egress",
+    [
+        {
+            "mode": "metered-allowlist",
+            "endpoints": [],
+            "block_cloud_metadata": True,
+            "block_private_ranges": True,
+        },
+        {
+            "mode": "deny",
+            "endpoints": [
+                {
+                    "endpoint": "model-proxy",
+                    "dns_names": ["proxy.example"],
+                    "ip_ranges": ["192.0.2.10/32"],
+                    "protocols": ["https"],
+                }
+            ],
+            "block_cloud_metadata": True,
+            "block_private_ranges": True,
+        },
+    ],
+)
+def test_egress_schema_encodes_mode_allowlist_invariant(
+    egress: dict[str, object],
+) -> None:
+    validator = Draft202012Validator(SCHEMA).evolve(
+        schema=SCHEMA["$defs"]["egress_policy"]
+    )
+
+    assert list(validator.iter_errors(egress))
+
+
+@requires_abi
+@pytest.mark.parametrize(
     "ip_range",
     ["10.0.0.0/8", "127.0.0.1/32", "169.254.169.254/32", "::1/128"],
 )
@@ -2098,7 +2145,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "b937d68b406be93db23a4c3df463ebcc971c4c157d40635a0f59eee4891111d5"
+        == "a6e368e6655a3d8c645b02fac83e76f8585530dc844ffa9b99bb16eed6729590"
     )
 
 
@@ -2463,7 +2510,7 @@ def test_validator_accepts_response_at_exact_byte_limit(
         (
             "answer_response",
             GOLDEN_RESPONSES["answer"],
-            ("payload.answer_text", "payload.confidence"),
+            ("payload.confidence",),
         ),
         (
             "error_response",
