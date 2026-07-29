@@ -785,10 +785,17 @@ def generate_fixture() -> dict[str, object]:
     return fixture
 
 
-def load_cases(fixture: dict[str, object]) -> list[Case]:
+def _load_cases(
+    fixture: dict[str, object], *, require_calibration_artifact: bool
+) -> list[Case]:
     if not isinstance(fixture, dict):
         raise FixtureValidationError("fixture must be an object")
-    missing = _FIXTURE_REQUIRED_FIELDS - set(fixture)
+    required = (
+        _FIXTURE_FIELDS
+        if require_calibration_artifact
+        else _FIXTURE_REQUIRED_FIELDS
+    )
+    missing = required - set(fixture)
     unknown = set(fixture) - _FIXTURE_FIELDS
     if missing or unknown:
         raise FixtureValidationError(
@@ -811,10 +818,35 @@ def load_cases(fixture: dict[str, object]) -> list[Case]:
         raise FixtureValidationError("fixture.seeds does not match frozen seed sets")
     if not isinstance(fixture["split_manifests"], dict):
         raise FixtureValidationError("fixture.split_manifests must be an object")
+    if require_calibration_artifact and not isinstance(
+        fixture["calibration_artifact"], dict
+    ):
+        raise FixtureValidationError("fixture.calibration_artifact must be an object")
     cases_raw = fixture["cases"]
     if not isinstance(cases_raw, list):
         raise FixtureValidationError("fixture.cases must be a list")
-    return [Case.from_dict(item) for item in cases_raw]
+    cases = [Case.from_dict(item) for item in cases_raw]
+    if require_calibration_artifact:
+        calibration_cases = [
+            case for case in cases if case.partition == "calibration"
+        ]
+        scored_cases = [case for case in cases if case.partition == "scored"]
+        try:
+            _verify_case_seed_coverage(
+                calibration_cases, _CALIBRATION_SEEDS, partition="calibration"
+            )
+            _verify_case_seed_coverage(
+                scored_cases, _SCORED_SEEDS, partition="scored"
+            )
+        except CalibrationSplitManifestError as exc:
+            raise FixtureValidationError(str(exc)) from exc
+    return cases
+
+
+def load_cases(fixture: dict[str, object]) -> list[Case]:
+    """Load a complete public fixture after closed-contract validation."""
+
+    return _load_cases(fixture, require_calibration_artifact=True)
 
 
 def fixture_digest(fixture: dict[str, object]) -> str:
@@ -1655,7 +1687,7 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
     fixture's own scored cases.
     """
 
-    all_cases = load_cases(fixture)
+    all_cases = _load_cases(fixture, require_calibration_artifact=False)
     calibration_cases = [case for case in all_cases if case.partition == "calibration"]
     scored_cases = [case for case in all_cases if case.partition == "scored"]
 
@@ -1753,6 +1785,7 @@ def useful_coverage_floor_from_fixture(fixture: dict[str, object]) -> float:
     deterministic generator) drives the recomputation.
     """
 
+    load_cases(fixture)
     artifact = fixture["calibration_artifact"]
     assert isinstance(artifact, dict)
     verify_calibration_artifact(artifact)
