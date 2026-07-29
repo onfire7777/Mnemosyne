@@ -1327,6 +1327,59 @@ def test_signal_after_leader_exit_is_forwarded_while_group_drains(
     assert forwarded == [(CompletedChild.pid, signal.SIGTERM)]
 
 
+def test_forwarded_signal_escalates_when_group_leader_ignores_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    namespace = _coordinator_namespace()
+    child_holder = [None]
+    received_signal = [signal.SIGINT]
+    forwarded: list[tuple[int, int]] = []
+    snapshot_calls = 0
+
+    class CompletedChild:
+        pid = 4242
+
+        @staticmethod
+        def wait() -> int:
+            assert child_holder[0] is None
+            return -signal.SIGKILL
+
+    monkeypatch.setattr(
+        namespace["subprocess"], "Popen", lambda *_args, **_kwargs: CompletedChild()
+    )
+
+    def forward(signum: int, _frame: object) -> None:
+        forwarded.append((CompletedChild.pid, signum))
+
+    def group_snapshot(_group_id: int) -> dict[int, str]:
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        if snapshot_calls > 4:
+            raise AssertionError("signal forwarding never escalated")
+        state = "Z" if forwarded[-1][1] == signal.SIGKILL else "S"
+        return {CompletedChild.pid: state}
+
+    ticks = iter([0.0, 2.0, 2.0])
+    namespace["SIGNAL_EXIT_WAIT_SECONDS"] = 1.0
+    namespace["process_group_snapshot"] = group_snapshot
+    namespace["process_group_exists"] = lambda _group_id: False
+    monkeypatch.setattr(namespace["time"], "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(namespace["time"], "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        namespace["os"],
+        "killpg",
+        lambda group_id, signum: forwarded.append((group_id, signum)),
+    )
+
+    assert namespace["run_child"](
+        ["/unused"], child_holder, received_signal, forward, {"owner": 9}
+    ) == (-signal.SIGKILL, signal.SIGINT)
+    assert forwarded == [
+        (CompletedChild.pid, signal.SIGINT),
+        (CompletedChild.pid, signal.SIGKILL),
+    ]
+
+
 def test_post_exit_group_drain_is_bounded_fail_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
