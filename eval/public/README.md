@@ -128,6 +128,9 @@ error, and omit an evidence handle.
 
 The protocol version remains `wmbs/0.1-draft`; the compound JSON Schema uses
 the absolute ID `urn:wmbs:0.1-draft`. Its public evidence IDs are:
+`urn:wmbs:0.1-draft#AdapterContract`,
+`urn:wmbs:0.1-draft#DataSourceContract`,
+`urn:wmbs:0.1-draft#ScorerContract`,
 `urn:wmbs:0.1-draft#BaselineManifest`,
 `urn:wmbs:0.1-draft#PowerPlan`,
 `urn:wmbs:0.1-draft#SoftwareDataBOM`,
@@ -140,12 +143,18 @@ artifact with the `artifact_sha256` field omitted. `validate_definition`
 checks this self-digest. A `PROPOSED` feasibility record keeps all fourteen
 categories present but uses `null` for at least one absent artifact.
 Readiness labels are accepted only by `validate_evidence_bundle`, which
-resolves every non-null digest reference against supplied content.
-`CONTRACT-READY` requires the contract artifacts but no resource receipt.
+resolves every required top-level and nested digest reference against supplied
+content. `CONTRACT-READY` binds the loaded ABI schema plus the referenced data,
+scorer, baseline, sandbox-profile, and supply-chain artifacts, but requires no
+resource receipt.
 `PILOT-READY-DEV` additionally requires a finalized attempt, a completed
 resource receipt for the same SUT boundary, and content-bound offline L16-DEV
-sandbox controls. Its passing `SmokeReceipt` binds the exact module identity,
-sandbox receipt, resource receipt, and supplied result artifact.
+sandbox controls. The pinned L16-DEV profile requires a 16 GiB Apple Silicon
+macOS host, and measured wall time, peak RSS, disk use, and worker count must
+remain within its declared ceilings. Its passing `SmokeReceipt` binds the exact
+module identity, sandbox receipt, resource receipt, and supplied result
+artifact. Result-v1 smoke evidence is limited to 1,000 metrics before the
+legacy validator runs.
 `RUN-READY-*` remains rejected until profile-specific signed evidence exists.
 
 `SandboxReceipt` records the digest-bound profile, environment allowlist,

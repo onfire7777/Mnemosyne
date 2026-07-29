@@ -58,9 +58,6 @@ DIGEST_A = "a" * 64
 DIGEST_B = "b" * 64
 DIGEST_C = "c" * 64
 CONTENT_DIGEST = "b38a5228f3971be99ca2e8fbe4459f7fc1299b97e694970b68fb7240cfdfcdb1"
-L16_PROFILE_DIGEST = (
-    "aef321c0ac53c043ddebfde8b3a8b27cafc145443700867cc0bbe9ef892cee40"
-)
 
 
 def _context(
@@ -296,14 +293,43 @@ def _rebind_artifact(artifact: dict[str, object]) -> dict[str, object]:
     return artifact
 
 
-def _sandbox_profile_digest(receipt: dict[str, object]) -> str:
-    return abi.canonical_sha256(
-        {
-            key: value
-            for key, value in receipt.items()
-            if key not in {"schema_id", "artifact_sha256", "profile_ref"}
-        }
-    )
+def _plain_reference(identifier: str, artifact: object) -> str:
+    return f"{identifier}@sha256:{abi.canonical_sha256(artifact)}"
+
+
+L16_PROFILE = {
+    "profile_id": "sandbox-l16-dev",
+    "host_os": "macOS",
+    "host_arch": "Apple Silicon",
+    "host_memory_bytes": 16 * 1024 * 1024 * 1024,
+    "cpu": "Apple Silicon",
+    "max_wall_time_ms": 20 * 60 * 1000,
+    "max_peak_rss_bytes": 4 * 1024 * 1024 * 1024,
+    "max_disk_bytes": 2 * 1024 * 1024 * 1024,
+    "max_workers": 2,
+}
+NESTED_ARTIFACTS = {
+    "urn:wmbs:0.1-draft": SCHEMA,
+    "synthetic-generator": {"kind": "deterministic", "version": "1"},
+    "synthetic-schema": {"type": "object", "required": ["input", "expected"]},
+    "synthetic-fixtures": [{"input": "hello", "expected": "hello"}],
+    "exact-match-scorer": {"module": "scorer", "version": "1"},
+    "scorer-vectors": [{"actual": "hello", "expected": "hello", "score": 1.0}],
+    "tokenizer": {"name": "whitespace", "version": "1"},
+    "embedding": {"name": "none", "version": "1"},
+    "prompt": "Answer from the supplied memory only.",
+    "lockfile": "version = 1\n",
+    "sbom": {"format": "CycloneDX", "components": []},
+    "build-provenance": {"builder": "reference-harness", "reproducible": True},
+    "sandbox-l16-dev": L16_PROFILE,
+}
+NESTED_ARTIFACT_REFS = {
+    identifier: _plain_reference(identifier, artifact)
+    for identifier, artifact in NESTED_ARTIFACTS.items()
+}
+L16_PROFILE_DIGEST = NESTED_ARTIFACT_REFS["sandbox-l16-dev"].rsplit(
+    ":", 1
+)[1]
 
 
 FEASIBILITY_IDENTITY = {
@@ -342,6 +368,7 @@ SMOKE_RESULT_REF = "result-v1@sha256:" + abi.canonical_sha256(SMOKE_RESULT)
 EVIDENCE_FIXTURES = {
     "AdapterContract": _artifact(
         "urn:wmbs:0.1-draft#AdapterContract",
+        adapter_schema_id=NESTED_ARTIFACT_REFS["urn:wmbs:0.1-draft"],
         protocol_id=PROTOCOL_VERSION,
         operations=list(GOLDEN_REQUESTS),
         error_codes=list(ERROR_CODES),
@@ -354,30 +381,30 @@ EVIDENCE_FIXTURES = {
     "DataSourceContract": _artifact(
         "urn:wmbs:0.1-draft#DataSourceContract",
         source_kind="deterministic-synthetic",
-        source_id="synthetic-golden",
-        schema_ref="synthetic-schema@sha256:" + DIGEST_A,
+        source_id=NESTED_ARTIFACT_REFS["synthetic-generator"],
+        schema_ref=NESTED_ARTIFACT_REFS["synthetic-schema"],
         seed_domain=[7, 11],
-        golden_fixture_refs=["synthetic-fixtures@sha256:" + DIGEST_B],
+        golden_fixture_refs=[NESTED_ARTIFACT_REFS["synthetic-fixtures"]],
         license_id="CC0-1.0",
         redistribution="allowed",
     ),
     "ScorerContract": _artifact(
         "urn:wmbs:0.1-draft#ScorerContract",
-        scorer_id="exact-match",
+        scorer_id=NESTED_ARTIFACT_REFS["exact-match-scorer"],
         executable_argv=["python", "-m", "scorer"],
-        golden_vector_refs=["scorer-vectors@sha256:" + DIGEST_C],
+        golden_vector_refs=[NESTED_ARTIFACT_REFS["scorer-vectors"]],
         numeric_precision="finite-json",
         canonicalization="sorted-compact-utf8",
         failure_exit_codes=[1, 2],
     ),
     "BaselineManifest": _artifact(
         "urn:wmbs:0.1-draft#BaselineManifest",
-        tokenizer="tokenizer@sha256:" + DIGEST_A,
+        tokenizer=NESTED_ARTIFACT_REFS["tokenizer"],
         chunking={"size": 512, "overlap": 64},
-        embedding_model="embedding@sha256:" + DIGEST_B,
+        embedding_model=NESTED_ARTIFACT_REFS["embedding"],
         index_parameters={"metric": "cosine"},
         top_k=5,
-        prompt_sha256=DIGEST_C,
+        prompt_ref=NESTED_ARTIFACT_REFS["prompt"],
         context_order="rank-ascending",
         truncation="tail",
         cache_state="cold",
@@ -421,9 +448,9 @@ EVIDENCE_FIXTURES = {
             }
         ],
         oci_digest=None,
-        lockfile_sha256=DIGEST_B,
-        sbom_sha256=DIGEST_C,
-        build_provenance_sha256=DIGEST_A,
+        lockfile_ref=NESTED_ARTIFACT_REFS["lockfile"],
+        sbom_ref=NESTED_ARTIFACT_REFS["sbom"],
+        build_provenance_ref=NESTED_ARTIFACT_REFS["build-provenance"],
         external_services=[],
         secret_requirements=[],
     ),
@@ -450,6 +477,7 @@ EVIDENCE_FIXTURES = {
         process_limit=16,
         file_limit=128,
         output_limit_bytes=1_048_576,
+        disk_limit_bytes=1_073_741_824,
         wall_deadline_seconds=60,
         locale="C",
         timezone="UTC",
@@ -470,7 +498,10 @@ EVIDENCE_FIXTURES = {
         host_free_memory_bytes=8_589_934_592,
         swap_bytes=0,
         disk_bytes=0,
-        cpu="1 logical core",
+        host_os="macOS",
+        host_arch="Apple Silicon",
+        host_memory_bytes=16 * 1024 * 1024 * 1024,
+        cpu="Apple Silicon",
         gpu="none",
         workers=1,
         network_bytes=0,
@@ -546,7 +577,10 @@ EVIDENCE_FIXTURES["FeasibilityRecord"] = _artifact(
 
 def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]]:
     record = deepcopy(EVIDENCE_FIXTURES["FeasibilityRecord"])
-    artifacts: dict[str, object] = {}
+    artifacts = {
+        NESTED_ARTIFACT_REFS[identifier]: artifact
+        for identifier, artifact in NESTED_ARTIFACTS.items()
+    }
     for field, definition in [
         ("adapter_contract_ref", "AdapterContract"),
         ("data_source_ref", "DataSourceContract"),
@@ -1113,13 +1147,8 @@ def test_pilot_readiness_rejects_unsafe_l16_profile(
     resource = deepcopy(artifacts.pop(resource_ref))
     smoke = deepcopy(artifacts.pop(smoke_ref))
     sandbox[field] = value
-    sandbox["profile_ref"] = (
-        "sandbox-l16-dev@sha256:" + _sandbox_profile_digest(sandbox)
-    )
     sandbox = _rebind_artifact(sandbox)
     sandbox_ref = f"{sandbox['schema_id']}@sha256:{sandbox['artifact_sha256']}"
-    profile_digest = _sandbox_profile_digest(sandbox)
-    resource["profile_sha256"] = profile_digest
     resource = _rebind_artifact(resource)
     resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
     smoke["sandbox_receipt_sha256"] = sandbox["artifact_sha256"]
@@ -1261,6 +1290,47 @@ def test_pilot_readiness_rejects_invalid_result_v1() -> None:
 
 
 @requires_abi
+def test_pilot_readiness_rejects_excessive_result_v1_metrics() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    old_result_ref = smoke["result_ref"]
+    assert isinstance(old_result_ref, str)
+    result = deepcopy(artifacts.pop(old_result_ref))
+    result["metrics"] = result["metrics"] * 1001
+    result_ref = "result-v1@sha256:" + abi.canonical_sha256(result)
+    smoke["result_ref"] = result_ref
+    resource_ref = record["resource_receipt_ref"]
+    assert isinstance(resource_ref, str)
+    resource = deepcopy(artifacts.pop(resource_ref))
+    resource["result_ref"] = result_ref
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["smoke_receipt_ref"] = smoke_ref
+    record["resource_receipt_ref"] = resource_ref
+    record = _rebind_artifact(record)
+    artifacts[result_ref] = result
+    artifacts[resource_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="result-v1 metrics exceed the closed limit",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
 def test_smoke_receipt_schema_rejects_unknown_result_contract() -> None:
     smoke = deepcopy(EVIDENCE_FIXTURES["SmokeReceipt"])
     smoke["result_ref"] = "unrelated-format@sha256:" + DIGEST_A
@@ -1339,7 +1409,7 @@ def test_pilot_readiness_requires_finalized_l16_profile_receipt() -> None:
 
     with pytest.raises(
         abi.WholeMemoryValidationError,
-        match="pilot readiness requires the L16-DEV sandbox profile",
+        match="contract artifact reference does not resolve",
     ):
         abi.validate_evidence_bundle(wrong_profile, artifacts)
 
@@ -1370,6 +1440,41 @@ def test_pilot_readiness_binds_resource_receipt_to_sandbox_profile() -> None:
     with pytest.raises(
         abi.WholeMemoryValidationError,
         match="resource receipt does not match the sandbox profile",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
+
+
+@requires_abi
+def test_pilot_readiness_rejects_incompatible_l16_host_and_usage() -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["feasibility_disposition"] = {
+        "development": "PILOT-READY-DEV",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    resource_ref = record["resource_receipt_ref"]
+    assert isinstance(resource_ref, str)
+    resource = deepcopy(artifacts.pop(resource_ref))
+    resource["cpu"] = "Intel Xeon Linux"
+    resource["peak_rss_bytes"] = 10**15
+    resource = _rebind_artifact(resource)
+    resource_ref = f"{resource['schema_id']}@sha256:{resource['artifact_sha256']}"
+    smoke_ref = record["smoke_receipt_ref"]
+    assert isinstance(smoke_ref, str)
+    smoke = deepcopy(artifacts.pop(smoke_ref))
+    smoke["resource_receipt_sha256"] = resource["artifact_sha256"]
+    smoke = _rebind_artifact(smoke)
+    smoke_ref = f"{smoke['schema_id']}@sha256:{smoke['artifact_sha256']}"
+    record["resource_receipt_ref"] = resource_ref
+    record["smoke_receipt_ref"] = smoke_ref
+    record = _rebind_artifact(record)
+    artifacts[resource_ref] = resource
+    artifacts[smoke_ref] = smoke
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="resource receipt does not satisfy the pinned L16-DEV profile",
     ):
         abi.validate_evidence_bundle(record, artifacts)
 
@@ -1443,7 +1548,7 @@ def test_pilot_readiness_rejects_unbound_sandbox_profile_digest() -> None:
 
     with pytest.raises(
         abi.WholeMemoryValidationError,
-        match="sandbox profile digest does not match its declared controls",
+        match="contract artifact reference does not resolve",
     ):
         abi.validate_evidence_bundle(record, artifacts)
 
@@ -1551,13 +1656,10 @@ def test_pilot_readiness_requires_enforced_offline_l16_controls(
     sandbox = _rebind_artifact(
         {**EVIDENCE_FIXTURES["SandboxReceipt"], **sandbox_changes}
     )
-    profile_digest = _sandbox_profile_digest(sandbox)
-    sandbox["profile_ref"] = "sandbox-l16-dev@sha256:" + profile_digest
     sandbox = _rebind_artifact(sandbox)
     resource = _rebind_artifact(
         {
             **EVIDENCE_FIXTURES["ResourceReceipt"],
-            "profile_sha256": profile_digest,
             **resource_changes,
         }
     )
@@ -1652,6 +1754,46 @@ def test_contract_ready_requires_resolved_contract_artifacts() -> None:
     missing.pop(adapter_ref)
     with pytest.raises(abi.WholeMemoryValidationError):
         abi.validate_evidence_bundle(record, missing)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "urn:wmbs:0.1-draft",
+        "synthetic-generator",
+        "synthetic-schema",
+        "synthetic-fixtures",
+        "exact-match-scorer",
+        "scorer-vectors",
+        "tokenizer",
+        "embedding",
+        "prompt",
+        "lockfile",
+        "sbom",
+        "build-provenance",
+        "sandbox-l16-dev",
+    ],
+)
+def test_contract_ready_requires_resolved_nested_contract_artifacts(
+    identifier: str,
+) -> None:
+    record, artifacts = _resolved_feasibility_bundle()
+    record["resource_receipt_ref"] = None
+    record["feasibility_disposition"] = {
+        "development": "CONTRACT-READY",
+        "official_local": "DEFERRED",
+        "hosted_service": "DEFERRED",
+        "production_operations": "DEFERRED",
+    }
+    record = _rebind_artifact(record)
+    artifacts.pop(NESTED_ARTIFACT_REFS[identifier])
+
+    with pytest.raises(
+        abi.WholeMemoryValidationError,
+        match="contract artifact reference does not resolve",
+    ):
+        abi.validate_evidence_bundle(record, artifacts)
 
 
 @requires_abi
@@ -1963,7 +2105,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "a5ee1d5a7a426a4936e9ec1a62bf8e27cfd73d7521f0327c673df1758a209157"
+        == "69fb47f1469fea77e94e19bb2f7aabc98412c65a61a5fdb19a2662d1038c84c0"
     )
 
 
