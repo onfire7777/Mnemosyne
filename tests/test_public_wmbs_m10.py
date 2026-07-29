@@ -1753,3 +1753,45 @@ def test_build_artifact_rejects_extra_unknown_category_even_if_manifests_match()
     fixture["cases"].append(extra)
     with pytest.raises(m10.FixtureValidationError):
         m10.build_calibration_artifact(fixture)
+
+
+@pytest.mark.parametrize("case_count", [99, 101])
+def test_load_cases_rejects_noncanonical_corpus_size(case_count: int) -> None:
+    fixture = m10.generate_fixture()
+    if case_count < len(fixture["cases"]):
+        fixture["cases"] = fixture["cases"][:case_count]
+    else:
+        fixture["cases"].append(
+            {**fixture["cases"][0], "case_id": "case-forged-extra"}
+        )
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_load_cases_requires_calibration_artifact() -> None:
+    fixture = m10.generate_fixture()
+    del fixture["calibration_artifact"]
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_floor_verifier_missing_artifact_fails_with_fixture_error() -> None:
+    fixture = m10.generate_fixture()
+    del fixture["calibration_artifact"]
+    with pytest.raises(m10.FixtureValidationError):
+        m10.useful_coverage_floor_from_fixture(fixture)
+
+
+@pytest.mark.parametrize("bad_artifact", [None, [], "artifact", 1])
+def test_load_cases_rejects_non_object_calibration_artifact(
+    bad_artifact: object,
+) -> None:
+    fixture = m10.generate_fixture()
+    fixture["calibration_artifact"] = bad_artifact
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_generate_fixture_uses_private_pre_artifact_path() -> None:
+    fixture = m10.generate_fixture()
+    assert isinstance(fixture["calibration_artifact"], dict)
