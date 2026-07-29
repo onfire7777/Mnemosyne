@@ -40,9 +40,20 @@ process-lock case failed at its 10-second marker on both this branch and clean
 regression.
 
 ### Task 2: Prove the remediation
-- [ ] Run the focused ABI/runtime-lock tests and Ruff. Verify lifecycle transitions remain response-committed, active requests require frozen responses before finalization, replay remains immutable, deadlines and request retention stay bounded, lock failures fail closed, and no evidence label is upgraded.
-- [ ] Run the complete applicable test suite. Diagnose failures against clean `main`; fix only regressions introduced by this remediation, and record unrelated baseline failures literally rather than weakening or skipping tests.
-- [ ] Run diff checks, exact-lease validation, risky-file inspection, and a changed-file secret scan. Review trust boundaries for unbounded input, permissive schema fields, unsafe timestamps, mutable replay state, process/network access, lock bypass, and result/publication claims.
+- [x] Run the focused ABI/runtime-lock tests and Ruff. Verify lifecycle transitions remain response-committed, active requests require frozen responses before finalization, replay remains immutable, deadlines and request retention stay bounded, lock failures fail closed, and no evidence label is upgraded.
+- [x] Run the complete applicable test suite. Diagnose failures against clean `main`; fix only regressions introduced by this remediation, and record unrelated baseline failures literally rather than weakening or skipping tests.
+- [x] Run diff checks, exact-lease validation, risky-file inspection, and a changed-file secret scan. Review trust boundaries for unbounded input, permissive schema fields, unsafe timestamps, mutable replay state, process/network access, lock bypass, and result/publication claims.
+
+Task 2 validation receipt: Diff checks, Ruff, and the focused ABI/runtime-lock
+suite pass. The complete-suite receipt and clean-`main` diagnosis are recorded
+under Task 1; a redundant rerun advanced to 8% without failures before the
+outer runner terminated it with SIGTERM. Exact-lease validation confirms the
+documented eleven paths. No oversized or risky-named changed files, added
+secret patterns, permissive schema objects, or new Python command/network
+sinks were found. Review confirmed bounded canonical input and retained state,
+strict UTC timestamps, immutable replay fingerprints and defensive copies,
+response-committed lifecycle transitions, frozen responses before finalization,
+fail-closed lock uncertainty, and unchanged non-publishable evidence labels.
 
 ### Task 3: Land through normal review
 - [ ] Push the current branch normally, recreating its upstream if necessary, and open or update one PR against `main`. Do not force-push, bypass hooks, dismiss findings, or write directly to `main`.
