@@ -33,6 +33,22 @@
       "maxLength": 512,
       "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$"
     },
+    "spdx_expression": {
+      "enum": [
+        "0BSD",
+        "Apache-2.0",
+        "CC-BY-4.0",
+        "CC-BY-SA-4.0",
+        "CC0-1.0",
+        "GPL-2.0-only",
+        "GPL-2.0-only WITH Classpath-exception-2.0",
+        "MIT",
+        "MIT OR Apache-2.0",
+        "NOASSERTION",
+        "NONE",
+        "PSF-2.0"
+      ]
+    },
     "timestamp": {
       "type": "string",
       "format": "utc-timestamp",
@@ -651,7 +667,7 @@
       "properties": {
         "name": {"$ref": "#/$defs/short_string"},
         "version": {"$ref": "#/$defs/short_string"},
-        "license": {"type": "string", "pattern": "^[A-Z][A-Za-z0-9.+-]{0,63}$"}
+        "license": {"$ref": "#/$defs/spdx_expression"}
       }
     },
     "dataset_item": {
@@ -673,8 +689,8 @@
       ],
       "properties": {
         "name": {"$ref": "#/$defs/short_string"},
-        "declared_license": {"type": "string", "pattern": "^[A-Z][A-Za-z0-9.+-]{0,63}$"},
-        "concluded_license": {"type": "string", "pattern": "^[A-Z][A-Za-z0-9.+-]{0,63}$"},
+        "declared_license": {"$ref": "#/$defs/spdx_expression"},
+        "concluded_license": {"$ref": "#/$defs/spdx_expression"},
         "redistribution": {"enum": ["allowed", "restricted", "prohibited"]},
         "lineage": {"$ref": "#/$defs/nonempty_string"},
         "modifications": {"$ref": "#/$defs/nonempty_string"},
