@@ -196,7 +196,11 @@ def _score_wmbs_m03_valid_time(
             ]
             current = trace.get("current_objects")
             current_exact &= current == expected_current
-            replay_exact &= trace.get("current_replay_objects") == current
+            replay_exact &= (
+                trace.get("replay_case_id") == f"{timeline_id}:{seed}:replay"
+                and trace.get("replay_current_objects") == current
+                and trace.get("replay_history") == trace.get("history")
+            )
             historical_only = {
                 value.format(seed=seed)
                 for query in timeline["history"]
