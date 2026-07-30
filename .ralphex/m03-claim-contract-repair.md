@@ -48,12 +48,12 @@ Repair the two confirmed independent-review findings on clean candidate
 
 ### Task 2: Verify the stable claim-boundary candidate
 
-- [ ] Review `7e9cd01f...HEAD` for exact eight-path lease, canonical 5x5
+- [x] Review `7e9cd01f...HEAD` for exact eight-path lease, canonical 5x5
       runtime enforcement, explicit claim custody, authorization-first
       ordering, UTC rules, fresh replay, deterministic ties, secrets, risky
       files, and dependency churn.
-- [ ] Run the complete whole-memory reference test file once, the focused M03
+- [x] Run the complete whole-memory reference test file once, the focused M03
       CLI/runtime selection, focused Ruff, and `git diff --check`.
-- [ ] Commit only an in-lease verification adjustment if required and report
+- [x] Commit only an in-lease verification adjustment if required and report
       the exact clean candidate SHA. Leave docs, push, PR, CI, merge, CBM, and
       Gbrain to the integration owner.
