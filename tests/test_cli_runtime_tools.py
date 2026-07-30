@@ -40,7 +40,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
 from mnemosyne.mcp_tools import MemoryTools
-from mnemosyne.models import Evidence, Relation
+from mnemosyne.models import Assertion, Evidence, Relation
 from mnemosyne.oidc_jwks import load_oidc_jwks
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.production_parity import build_parity_row_readiness, parity_routes_for_lanes
@@ -15521,6 +15521,118 @@ def test_supersede_valid_from_validation_occurs_after_authorization(
             new={"object_value": "denied"},
             valid_from="not-a-timestamp",
         )
+
+
+def test_cli_supersede_valid_from_normalizes_utc(tmp_path: Path) -> None:
+    store = tmp_path / "mnemosyne.json"
+    original = _assert_timeline_fact(
+        store,
+        object_value="original",
+        valid_from="2026-06-01T00:00:00Z",
+    )
+    replacement = run_cli(
+        store,
+        "supersede",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--id",
+        original["id"],
+        "--new",
+        json.dumps({"object_value": "replacement", "trust_tier": 0}),
+        "--valid-from",
+        "2026-06-10T02:30:00+02:00",
+    )
+    record = run_cli(store, "get", "--tenant", TENANT, "--id", replacement["id"])
+    assert record["record"]["valid_from"] == "2026-06-10T00:30:00Z"
+
+
+@pytest.mark.parametrize("valid_from", ["2026-06-10T00:00:00", "not-a-timestamp"])
+def test_cli_supersede_valid_from_rejects_naive_or_malformed_timestamp(
+    tmp_path: Path,
+    valid_from: str,
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    original = _assert_timeline_fact(
+        store,
+        object_value="original",
+        valid_from="2026-06-01T00:00:00Z",
+    )
+    result = run_raw_cli(
+        store,
+        "supersede",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--id",
+        original["id"],
+        "--new",
+        json.dumps({"object_value": "replacement", "trust_tier": 0}),
+        "--valid-from",
+        valid_from,
+    )
+    assert result.returncode != 0
+    assert "valid_from must be an ISO 8601 timestamp with timezone" in result.stderr
+
+
+def test_cli_supersede_omitted_valid_from_preserves_wall_clock_behavior(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    original = _assert_timeline_fact(
+        store,
+        object_value="original",
+        valid_from="2026-06-01T00:00:00Z",
+    )
+    before = datetime.now(UTC)
+    replacement = run_cli(
+        store,
+        "supersede",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--id",
+        original["id"],
+        "--new",
+        json.dumps({"object_value": "replacement", "trust_tier": 0}),
+    )
+    after = datetime.now(UTC)
+    record = run_cli(store, "get", "--tenant", TENANT, "--id", replacement["id"])
+    valid_from = datetime.fromisoformat(
+        record["record"]["valid_from"].replace("Z", "+00:00")
+    )
+    assert before <= valid_from <= after
+
+
+def test_graph_as_of_preserves_distinct_valid_scopes(tmp_path: Path) -> None:
+    engine = LocalMemoryEngine(store_path=tmp_path / "mnemosyne.json")
+    tools = MemoryTools(engine)
+    for object_value, scope, valid_from in (
+        ("email", {"channel": "email"}, datetime(2026, 6, 1, tzinfo=UTC)),
+        ("sms", {"channel": "sms"}, datetime(2026, 6, 10, tzinfo=UTC)),
+    ):
+        engine.upsert_assertion(
+            Assertion(
+                tenant_id=TENANT,
+                subject="notification",
+                predicate="uses",
+                object=object_value,
+                scope=scope,
+                valid_from=valid_from,
+            )
+        )
+
+    result = tools.graph_as_of(
+        TENANT,
+        "notification",
+        "uses",
+        "2026-06-11T00:00:00Z",
+    )
+
+    assert [item["object"] for item in result["assertions"]] == ["email", "sms"]
 
 
 def test_cli_assert_omitted_valid_from_preserves_wall_clock_behavior(

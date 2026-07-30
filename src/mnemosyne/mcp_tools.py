@@ -14,7 +14,7 @@ from mnemosyne.engine import (
     TriggerEvaluationContext,
     WorkingMemoryItem,
 )
-from mnemosyne.ids import new_id
+from mnemosyne.ids import canonical_json, new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
@@ -1836,9 +1836,15 @@ class MemoryTools:
         if moment is None:
             raise ValueError("graph_as_of requires an ISO timestamp")
         assertions = self.engine.as_of(subject, predicate, moment, tenant_id=tenant_id, branch=branch)
-        if assertions:
-            latest_valid_from = max(item.valid_from for item in assertions)
-            assertions = [item for item in assertions if item.valid_from == latest_valid_from]
+        latest_by_scope: dict[str, datetime] = {}
+        for item in assertions:
+            scope_key = canonical_json(item.scope)
+            latest_by_scope[scope_key] = max(latest_by_scope.get(scope_key, item.valid_from), item.valid_from)
+        assertions = [
+            item
+            for item in assertions
+            if item.valid_from == latest_by_scope[canonical_json(item.scope)]
+        ]
         return {"subject": subject, "predicate": predicate, "time": time, "assertions": [item.to_dict() for item in assertions]}
 
     def trajectory_log(

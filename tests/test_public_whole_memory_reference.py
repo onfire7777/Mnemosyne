@@ -17,7 +17,7 @@ from jsonschema import Draft202012Validator
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public import bundle as public_bundle
-from eval.public.scoring import score_profile
+from eval.public.scoring import ScoringError, score_profile
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -3176,3 +3176,43 @@ def test_m03_valid_time_development_adapter_and_scorer(tmp_path: Path) -> None:
     assert measured["publishable"] is False
     assert measured["comparability"] == "proposed-non-comparable"
     assert measured["full_bitemporal_m03"] is False
+    assert all(trace["replay_case_id"].endswith(":replay") for trace in traces)
+
+
+def test_m03_valid_time_scorer_rejects_incomplete_matrix(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, _ = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+
+    with pytest.raises(ScoringError, match="canonical matrix"):
+        score_profile(
+            "wmbs-m03-valid-time-v1",
+            [{"case_id": "M03", "fixture": fixture}],
+            traces[:-1],
+        )
+
+
+def test_m03_valid_time_scorer_fails_replay_mismatch(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, _ = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+    traces[0]["replay_current_objects"] = ["different"]
+
+    measured = score_profile(
+        "wmbs-m03-valid-time-v1",
+        [{"case_id": "M03", "fixture": fixture}],
+        traces,
+    )
+
+    assert measured["metrics"]["deterministic_tied_time_replay"] == 0.0
+    assert measured["passed"] is False
