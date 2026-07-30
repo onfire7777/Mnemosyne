@@ -3,9 +3,12 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from eval.harness.cli_driver import MnemoCLI
+from eval.public.action_cli import ActionCLI
 from eval.public.adapters.pm_bench_triggerbench import (
     ActionProbeError,
     TRIGGER_DIMENSIONS,
@@ -15,6 +18,9 @@ from eval.public.adapters.pm_bench_triggerbench import (
     recompute_metrics,
     run,
 )
+from eval.public.runner import load_registry
+
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "eval" / "public" / "fixtures"
 
 
 def _task(index: int, trigger_type: str, update: str = "none") -> dict[str, object]:
@@ -558,3 +564,182 @@ def _keys(value: object) -> set[str]:
     if isinstance(value, (list, tuple)):
         return {key for child in value for key in _keys(child)}
     return set()
+
+
+_SCHEMA_COST_KEYS = {"cost_usd", "setup_cost_usd", "indexing_cost_usd"}
+
+
+def _cost_evidence_keys(value: object) -> set[str]:
+    """WMBS schema-defined cost fields present at any nesting depth."""
+    return _keys(value) & _SCHEMA_COST_KEYS
+
+
+def _load_committed_fixture(name: str) -> dict[str, object]:
+    return json.loads((_FIXTURES_DIR / name).read_text())
+
+
+def test_committed_pm_bench_and_triggerbench_fixtures_freeze_shape_seed_and_custody() -> None:
+    """Freeze the honest development-evidence shape of the two committed fixtures.
+
+    PM-Bench is exactly 1 case / 7 steps and TriggerBench is exactly 20 cases /
+    20 steps, both seed 7, and neither registry entry carries a baseline
+    artifact/control — this is development-only evidence, not a measured claim.
+    """
+    registry = load_registry()
+    for suite_name, fixture_name, expected_cases, expected_steps in (
+        ("pm-bench-development", "pm-bench-development.json", 1, 7),
+        ("triggerbench-development", "triggerbench-development.json", 20, 20),
+    ):
+        suite = registry[suite_name]
+        assert "baseline" not in suite
+        raw = _load_committed_fixture(fixture_name)
+        normalized = normalize(raw)
+        assert len(normalized["cases"]) == expected_cases
+        assert sum(len(case["steps"]) for case in normalized["cases"]) == expected_steps
+        assert normalized["seed"] == 7
+        assert normalized["publishable"] is False
+        assert normalized["headline_eligible"] is False
+        assert normalized["independent_reproduction"] is False
+        assert normalized["upstream_comparable"] is False
+
+
+def test_committed_fixtures_run_and_freeze_lateness_and_cost_gaps() -> None:
+    """Run the committed fixtures through the public adapter seam and freeze the
+    honest scoring gaps: this single, perfectly-served run reports zero
+    ``late`` safety-counter hits (not "never possible" — a controlled
+    mutation below against the exact committed PM-Bench fixture shows
+    ``late`` is directly reachable, so the zero reflects an easy fixture
+    rather than an inert counter), no key anywhere in the metrics or trace
+    payloads carries a WMBS schema-defined cost field, and
+    ``regularity: recurring`` is
+    retained for classification.
+    """
+    assert _cost_evidence_keys(
+        {"nested": {"cost_usd": 1, "setup_cost_usd": 2, "indexing_cost_usd": 3}}
+    ) == _SCHEMA_COST_KEYS
+    assert not _cost_evidence_keys({"billing": 1, "note": "cost is unmeasured"})
+
+    pm = _load_committed_fixture("pm-bench-development.json")
+    pm_benchmark, pm_traces, pm_metrics = run(pm, _cli(pm))
+    assert "late" in pm_metrics["safety_counts"]
+    assert pm_metrics["safety_counts"]["late"] == 0
+    assert not _cost_evidence_keys(pm_metrics)
+    assert not _cost_evidence_keys(pm_traces)
+
+    late_probe = copy.deepcopy(pm)
+    late_case = late_probe["cases"][0]
+    late_step = late_case["steps"][1]
+    late_step["available_actions"].append(
+        {"action_id": "action-0", "opaque_token": "opaque-action-0"}
+    )
+    late_cli = _cli(late_probe)
+    late_key = (late_case["tenant_id"], late_case["session_id"])
+    late_cli.responses[late_key][1] = ["action-0"]
+    with pytest.raises(ActionProbeError, match="late"):
+        run(late_probe, late_cli)
+
+    regularity_rows = {
+        row["value"]: row
+        for row in pm_metrics["category_rows"]
+        if row["dimension"] == "regularity"
+    }
+    assert set(regularity_rows) == {"one_shot", "recurring"}
+    assert regularity_rows["recurring"]["steps"] == 1
+    for flag in (
+        "publishable",
+        "headline_eligible",
+        "independent_reproduction",
+        "upstream_comparable",
+    ):
+        assert pm_benchmark[flag] is False
+
+    tb = _load_committed_fixture("triggerbench-development.json")
+    tb_benchmark, tb_traces, tb_metrics = run(tb, _cli(tb))
+    assert "late" in tb_metrics["safety_counts"]
+    assert tb_metrics["safety_counts"]["late"] == 0
+    assert not _cost_evidence_keys(tb_metrics)
+    assert not _cost_evidence_keys(tb_traces)
+    for flag in (
+        "publishable",
+        "headline_eligible",
+        "independent_reproduction",
+        "upstream_comparable",
+    ):
+        assert tb_benchmark[flag] is False
+
+
+def test_action_cli_represents_pm_bench_lifecycle_and_ticks_without_forwarding_regularity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drive the committed PM-Bench fixture through ``ActionCLI`` (the real
+    schedule/update/cancel/evaluate translation layer) and freeze that:
+
+    - task creation, update (override/reschedule), and cancellation translate
+      into ``intention-schedule``/``intention-update``/``intention-cancel``
+      calls at the mocked ``MnemoCLI.run`` seam (subprocess transport is not
+      exercised);
+    - the per-step ``intention-evaluate --evaluated-at`` clock advances through
+      seven distinct virtual timestamps (virtual-time/tick behavior represented);
+    - ``regularity``/"recurring" never appears in the recorded
+      ``intention-schedule`` arguments, even though task-1 carries
+      ``regularity: recurring`` — ActionCLI does not forward it.
+    """
+    pm = _load_committed_fixture("pm-bench-development.json")
+    commands: list[tuple[str, tuple[str, ...]]] = []
+    counters = {"cid": 0, "iid": 0}
+    due_queue = {
+        case["tenant_id"]: [list(step["expected_due_action_ids"]) for step in case["steps"]]
+        for case in pm["cases"]
+    }
+
+    def fake_run(self: MnemoCLI, command: str, *args: str, **kwargs: object) -> SimpleNamespace:
+        commands.append((command, args))
+        if command == "capture":
+            counters["cid"] += 1
+            return SimpleNamespace(json={"cid": f"cid-{counters['cid']}"})
+        if command == "intention-schedule":
+            counters["iid"] += 1
+            return SimpleNamespace(json={"intention_id": f"int-{counters['iid']}"})
+        if command in {"intention-cancel", "intention-update"}:
+            return SimpleNamespace(json={})
+        if command == "intention-evaluate":
+            tenant = args[args.index("--tenant") + 1]
+            due = due_queue[tenant].pop(0)
+            return SimpleNamespace(json={"intentions": [{"action": {"ref": a}} for a in due]})
+        raise AssertionError(f"unexpected mnemo command: {command}")
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "unused-parent.store.json")))
+    _, _, metrics = run(pm, cli)
+
+    fired = {command for command, _ in commands}
+    assert {
+        "intention-schedule",
+        "intention-update",
+        "intention-cancel",
+        "intention-evaluate",
+    } <= fired
+    schedule_calls = [args for command, args in commands if command == "intention-schedule"]
+    assert len(schedule_calls) == 5
+    assert not any(
+        "regularity" in arg or "recurring" in arg
+        for args in schedule_calls
+        for arg in args
+    )
+    evaluated_times = [
+        args[args.index("--evaluated-at") + 1]
+        for command, args in commands
+        if command == "intention-evaluate"
+    ]
+    assert len(evaluated_times) == 7
+    assert len(set(evaluated_times)) == 7
+    assert metrics["safety_counts"] == {
+        "miss": 0,
+        "early": 0,
+        "late": 0,
+        "lure": 0,
+        "duplicate": 0,
+        "cancelled_action": 0,
+        "stale_preupdate_action": 0,
+        "dependency_violation": 0,
+    }

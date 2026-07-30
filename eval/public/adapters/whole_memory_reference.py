@@ -7,11 +7,16 @@ import math
 import re
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from leaderboard.validate import validate_record as validate_result_v1
+
+if TYPE_CHECKING:
+    from eval.harness.cli_driver import MnemoCLI
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 VOLATILE_FIELDS = {
@@ -34,6 +39,14 @@ _MAX_RETAINED_BYTES = 64 * 1024 * 1024
 _MAX_JSON_DEPTH = 64
 _MAX_RESULT_V1_METRICS = 1000
 _STRING_CHUNK_SIZE = 64 * 1024
+_M03_TIMELINE_IDS = (
+    "ordered-events",
+    "late-event",
+    "retroactive-correction",
+    "exact-boundary",
+    "tied-valid-time",
+)
+_M03_SEEDS = (11, 23, 37, 53, 71)
 _EVIDENCE_DEFINITIONS = {
     "AdapterContract",
     "DataSourceContract",
@@ -73,6 +86,161 @@ _CONTRACT_REFERENCE_FIELDS = tuple(
     for field in _FEASIBILITY_REFERENCE_FIELDS
     if field not in {"resource_receipt_ref", "smoke_receipt_ref"}
 )
+
+
+def run_m01_development(
+    benchmark: dict[str, Any], _cli: object
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Produce the deterministic M01 reference trace for bundle custody."""
+    from eval.public import wmbs_m01 as m01
+
+    fixture = dict(m01.validate_fixture(benchmark))
+    receipts = m01.perfect_receipts(fixture)
+    return [
+        {
+            "case_id": m01.MODULE_ID,
+            "clean_run_payloads": [receipts for _ in range(m01.MIN_CLEAN_REPLAY_RUNS)],
+            "exported_rows": m01.perfect_export_rows(fixture),
+            "receipts": receipts,
+            "restart_replay_payload": receipts,
+            "scoring_family": "whole-memory-development",
+            "stored_projection": m01.perfect_stored_projection(fixture),
+        }
+    ], {}
+
+
+def run_m10_development(
+    benchmark: dict[str, Any], _cli: object
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Produce deterministic M10 full-context reference traces."""
+    from eval.public import wmbs_m10 as m10
+
+    cases = [case for case in m10.load_cases(benchmark) if case.partition == "scored"]
+    records = m10.run_baseline("full-context", cases)
+    return [
+        {
+            "case_id": case.case_id,
+            "scoring_family": "whole-memory-development",
+            **record.to_dict(),
+        }
+        for case, record in zip(cases, records, strict=True)
+    ], {}
+
+
+def run_m03_valid_time_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M03 valid-time cell through the public CLI only."""
+    required = {
+        "admission_state": "PROPOSED",
+        "comparability": "proposed-non-comparable",
+        "fixture_id": "wmbs-m03-valid-time-development",
+        "headline_eligible": False,
+        "independent_reproduction": False,
+        "module_id": "M03",
+        "publishable": False,
+        "track": "DEVELOPMENT",
+        "upstream_comparable": False,
+    }
+    if any(benchmark.get(key) != value for key, value in required.items()):
+        raise ValueError("invalid M03 valid-time development fixture labels")
+    timelines = benchmark.get("timelines")
+    seeds = benchmark.get("seeds")
+    if (
+        not isinstance(timelines, list)
+        or tuple(item.get("timeline_id") for item in timelines) != _M03_TIMELINE_IDS
+        or not isinstance(seeds, list)
+        or tuple(seeds) != _M03_SEEDS
+    ):
+        raise ValueError("invalid M03 valid-time canonical matrix")
+
+    def run_matrix(matrix_cli: MnemoCLI) -> dict[str, dict[str, Any]]:
+        observations: dict[str, dict[str, Any]] = {}
+        for timeline in timelines:
+            timeline_id = timeline["timeline_id"]
+            for seed in seeds:
+                case_id = f"{timeline_id}:{seed}"
+                subject = f"M03 valid-time development:{timeline_id}:{seed}"
+                last_id: str | None = None
+                for event in timeline["events"]:
+                    obj = event["object_template"].format(seed=seed)
+                    if event["operation"] == "assert":
+                        result = matrix_cli.assert_fact(
+                            "wmbs-m03-development",
+                            subject,
+                            "value",
+                            obj,
+                            user="reference-harness",
+                            trust_tier=0,
+                            valid_from=event["valid_from"],
+                        )
+                    else:
+                        if last_id is None:
+                            raise ValueError("M03 supersede event has no prior assertion")
+                        result = matrix_cli.supersede(
+                            "wmbs-m03-development",
+                            "reference-harness",
+                            last_id,
+                            {"object_value": obj, "trust_tier": 0},
+                            valid_from=event["valid_from"],
+                        )
+                    last_id = result.json["id"]
+
+                observations[case_id] = {
+                    "current_objects": [
+                        item["object"]
+                        for item in matrix_cli.graph_as_of(
+                            "wmbs-m03-development",
+                            subject,
+                            "value",
+                            "2999-01-01T00:00:00Z",
+                        )["assertions"]
+                    ],
+                    "history": [
+                        {
+                            "as_of": query["as_of"],
+                            "objects": [
+                                item["object"]
+                                for item in matrix_cli.graph_as_of(
+                                    "wmbs-m03-development",
+                                    subject,
+                                    "value",
+                                    query["as_of"],
+                                )["assertions"]
+                            ],
+                        }
+                        for query in timeline["history"]
+                    ],
+                }
+        return observations
+
+    original = run_matrix(cli)
+    with TemporaryDirectory(prefix="mnemosyne-m03-replay-") as directory:
+        replay = run_matrix(replace(cli, store=str(Path(directory) / "store.json")))
+
+    traces: list[dict[str, Any]] = []
+    for timeline in timelines:
+        timeline_id = timeline["timeline_id"]
+        for seed in seeds:
+            case_id = f"{timeline_id}:{seed}"
+            observation = original[case_id]
+            replay_observation = replay[case_id]
+            traces.append(
+                {
+                    "case_id": case_id,
+                    "current_objects": observation["current_objects"],
+                    "history": observation["history"],
+                    "replay_case_id": f"{case_id}:replay",
+                    "replay_current_objects": replay_observation["current_objects"],
+                    "replay_history": replay_observation["history"],
+                    "scoring_family": "whole-memory-development",
+                    "seed": seed,
+                    "timeline_id": timeline_id,
+                }
+            )
+    return traces, {}
+
+
 _READINESS_STATES = {
     "PILOT-READY-DEV",
     "RUN-READY-OFFICIAL-LOCAL",

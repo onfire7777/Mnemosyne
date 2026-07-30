@@ -8,6 +8,7 @@ import random
 import string
 import unicodedata
 from collections import Counter
+from dataclasses import asdict
 from typing import Any
 
 from eval.harness.metrics import wilson_interval
@@ -16,6 +17,14 @@ from eval.public.adapters.working_memory_action_probe import score as score_work
 
 BOOTSTRAP_ITERATIONS = 2_000
 BOOTSTRAP_SEED = 1_234
+_M03_TIMELINE_IDS = (
+    "ordered-events",
+    "late-event",
+    "retroactive-correction",
+    "exact-boundary",
+    "tied-valid-time",
+)
+_M03_SEEDS = (11, 23, 37, 53, 71)
 
 
 class ScoringError(ValueError):
@@ -23,6 +32,12 @@ class ScoringError(ValueError):
 
 
 def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[str, Any]]) -> dict[str, Any]:
+    if profile == "wmbs-m01-v1":
+        return _score_wmbs_m01(labels, traces)
+    if profile == "wmbs-m03-valid-time-v1":
+        return _score_wmbs_m03_valid_time(labels, traces)
+    if profile == "wmbs-m10-v1":
+        return _score_wmbs_m10(labels, traces)
     if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
         return _score_pm_action(profile, labels, traces)
     if profile == "working-memory-action-v1":
@@ -74,6 +89,250 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
             },
         }
     raise ScoringError(f"unknown scoring profile: {profile}")
+
+
+def _score_wmbs_m01(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m01 as m01
+
+    if (
+        len(labels) != 1
+        or len(traces) != 1
+        or labels[0].get("case_id") != m01.MODULE_ID
+        or traces[0].get("case_id") != m01.MODULE_ID
+    ):
+        raise ScoringError("M01 requires one trace bound to the M01 fixture")
+    fixture = labels[0].get("fixture")
+    if not isinstance(fixture, dict):
+        raise ScoringError("M01 scoring fixture is missing")
+    trace = traces[0]
+    expected_fields = {
+        "case_id",
+        "clean_run_payloads",
+        "exported_rows",
+        "receipts",
+        "restart_replay_payload",
+        "scoring_family",
+        "stored_projection",
+    }
+    unknown = set(trace) - expected_fields
+    if unknown:
+        raise ScoringError(f"unknown M01 trace fields: {sorted(unknown)}")
+    missing = expected_fields - set(trace)
+    if missing:
+        raise ScoringError(f"missing M01 trace fields: {sorted(missing)}")
+    measured = {
+        "capture": m01.score_capture(
+            fixture, trace.get("receipts"), trace.get("exported_rows")
+        ),
+        "canonical_replay_equality": m01.score_canonical_replay_equality(
+            fixture,
+            trace.get("clean_run_payloads"),
+            trace.get("restart_replay_payload"),
+        ),
+        "provenance_retention": m01.score_provenance_retention(
+            fixture, trace.get("stored_projection")
+        ),
+    }
+    return json.loads(
+        json.dumps(
+            {
+                "family": "whole-memory-development",
+                "finite_corpus_only": True,
+                "interval": {"method": "descriptive"},
+                "metrics": measured,
+                "passed": all(row["passed"] for row in measured.values()),
+                "profile": "wmbs-m01-v1",
+                "profile_version": 1,
+                "total": 1,
+                "trace_count": 1,
+            },
+            allow_nan=False,
+        )
+    )
+
+
+def _score_wmbs_m03_valid_time(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    if len(labels) != 1 or labels[0].get("case_id") != "M03":
+        raise ScoringError("M03 valid-time development scoring requires its fixture")
+    fixture = labels[0].get("fixture")
+    if not isinstance(fixture, dict):
+        raise ScoringError("M03 valid-time development fixture is missing")
+    required = {
+        "admission_state": "PROPOSED",
+        "comparability": "proposed-non-comparable",
+        "fixture_id": "wmbs-m03-valid-time-development",
+        "headline_eligible": False,
+        "independent_reproduction": False,
+        "module_id": "M03",
+        "publishable": False,
+        "track": "DEVELOPMENT",
+        "upstream_comparable": False,
+    }
+    if any(fixture.get(key) != value for key, value in required.items()):
+        raise ScoringError("M03 valid-time development labels are invalid")
+
+    timeline_rows = fixture.get("timelines")
+    seeds = fixture.get("seeds")
+    if (
+        not isinstance(timeline_rows, list)
+        or tuple(item.get("timeline_id") for item in timeline_rows)
+        != _M03_TIMELINE_IDS
+        or not isinstance(seeds, list)
+        or tuple(seeds) != _M03_SEEDS
+    ):
+        raise ScoringError("M03 valid-time fixture does not define the canonical matrix")
+    timelines = {timeline["timeline_id"]: timeline for timeline in timeline_rows}
+    expected_ids = {
+        f"{timeline_id}:{seed}" for timeline_id in timelines for seed in seeds
+    }
+    observed = {
+        trace.get("case_id"): trace
+        for trace in traces
+        if isinstance(trace.get("case_id"), str)
+    }
+    if len(observed) != len(traces) or set(observed) != expected_ids:
+        raise ScoringError("M03 valid-time traces do not cover the canonical matrix")
+
+    history_hits = history_total = 0
+    current_exact = replay_exact = True
+    replay_agreement_by_seed = {seed: True for seed in seeds}
+    stale_current_leakage = 0
+    for timeline_id, timeline in timelines.items():
+        for seed in seeds:
+            trace = observed[f"{timeline_id}:{seed}"]
+            if (
+                trace.get("timeline_id") != timeline_id
+                or trace.get("seed") != seed
+                or trace.get("scoring_family") != "whole-memory-development"
+            ):
+                raise ScoringError("M03 valid-time trace custody is invalid")
+            expected_current = [
+                value.format(seed=seed)
+                for value in timeline["expected_current_templates"]
+            ]
+            current = trace.get("current_objects")
+            current_exact &= current == expected_current
+            replay_agrees = (
+                trace.get("replay_case_id") == f"{timeline_id}:{seed}:replay"
+                and trace.get("replay_current_objects") == current
+                and trace.get("replay_history") == trace.get("history")
+            )
+            replay_exact &= replay_agrees
+            replay_agreement_by_seed[seed] &= replay_agrees
+            historical_only = {
+                value.format(seed=seed)
+                for query in timeline["history"]
+                for value in query["expected_object_templates"]
+            } - set(expected_current)
+            stale_current_leakage += len(set(current or []) & historical_only)
+
+            history = trace.get("history")
+            if not isinstance(history, list) or len(history) != len(timeline["history"]):
+                raise ScoringError("M03 valid-time history trace is incomplete")
+            for expected, actual in zip(timeline["history"], history, strict=True):
+                expected_objects = [
+                    value.format(seed=seed)
+                    for value in expected["expected_object_templates"]
+                ]
+                history_total += 1
+                history_hits += int(
+                    actual == {"as_of": expected["as_of"], "objects": expected_objects}
+                )
+
+    asof_accuracy = history_hits / history_total if history_total else 0.0
+    metrics = {
+        "M-ASOF-ACC": asof_accuracy,
+        "current_exact": float(current_exact),
+        "deterministic_tied_time_replay": float(replay_exact),
+        "five_seed_canonical_replay": (
+            sum(replay_agreement_by_seed.values()) / len(replay_agreement_by_seed)
+        ),
+        "stale_current_leakage": stale_current_leakage,
+    }
+    return {
+        "admission_state": fixture["admission_state"],
+        "comparability": fixture["comparability"],
+        "family": "whole-memory-development",
+        "full_bitemporal_m03": False,
+        "headline_eligible": fixture["headline_eligible"],
+        "independent_reproduction": fixture["independent_reproduction"],
+        "interval": {"method": "descriptive"},
+        "metrics": metrics,
+        "passed": (
+            asof_accuracy == 1.0
+            and current_exact
+            and replay_exact
+            and stale_current_leakage == 0
+        ),
+        "profile": "wmbs-m03-valid-time-v1",
+        "profile_version": 1,
+        "publishable": fixture["publishable"],
+        "total": history_total,
+        "trace_count": len(traces),
+        "track": fixture["track"],
+        "upstream_comparable": fixture["upstream_comparable"],
+    }
+
+
+def _score_wmbs_m10(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m10 as m10
+
+    def index(rows: list[dict[str, Any]], kind: str) -> dict[str, dict[str, Any]]:
+        indexed: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            case_id = row.get("case_id")
+            if not isinstance(case_id, str) or not case_id or case_id in indexed:
+                raise ScoringError(f"duplicate or missing M10 {kind} case ID")
+            indexed[case_id] = row
+        return indexed
+
+    expected, observed = index(labels, "label"), index(traces, "trace")
+    if not expected or set(expected) != set(observed):
+        raise ScoringError("M10 labels and traces do not match")
+    cases = [m10.Case.from_dict(expected[key]["case"]) for key in sorted(expected)]
+    records = [
+        m10.AnswerEnvelope.from_dict(
+            {
+                field: value
+                for field, value in observed[key].items()
+                if field not in {"case_id", "scoring_family"}
+            }
+        )
+        for key in sorted(expected)
+    ]
+    artifacts = [expected[key].get("calibration_artifact") for key in sorted(expected)]
+    if not artifacts or any(artifact != artifacts[0] for artifact in artifacts[1:]):
+        raise ScoringError("M10 labels do not share one calibration artifact")
+    artifact = artifacts[0]
+    if not isinstance(artifact, dict):
+        raise ScoringError("M10 calibration artifact is missing")
+    m10.verify_calibration_artifact(artifact)
+    fixtures = [expected[key].get("fixture") for key in sorted(expected)]
+    if not fixtures or any(fixture != fixtures[0] for fixture in fixtures[1:]):
+        raise ScoringError("M10 labels do not share one fixture")
+    fixture = fixtures[0]
+    if not isinstance(fixture, dict):
+        raise ScoringError("M10 fixture is missing")
+    report = asdict(m10.score_records(cases, records))
+    floor = m10.useful_coverage_floor_from_fixture(fixture)
+    return {
+        "family": "whole-memory-development",
+        "finite_corpus_disclosure": m10.FINITE_CORPUS_DISCLOSURE,
+        "interval": {"method": "descriptive"},
+        "metrics": report,
+        "meets_useful_coverage_floor": report["useful_coverage"] >= floor,
+        "profile": "wmbs-m10-v1",
+        "profile_version": 1,
+        "total": len(cases),
+        "trace_count": len(records),
+        "useful_coverage_floor": floor,
+    }
 
 
 def _score_pm_action(

@@ -15,7 +15,9 @@ from urllib.parse import urlsplit
 import pytest
 from jsonschema import Draft202012Validator
 
+from eval.harness.cli_driver import MnemoCLI
 from eval.public import bundle as public_bundle
+from eval.public.scoring import ScoringError, score_profile
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -3112,3 +3114,252 @@ def test_stateful_rejections_are_closed(case: str, expected_code: str) -> None:
         validator.validate_request(request)
 
     assert _error_code(exc) == expected_code
+
+
+def test_m03_valid_time_development_fixture_contract() -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT
+            / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert fixture["fixture_id"] == "wmbs-m03-valid-time-development"
+    assert fixture["module_id"] == "M03"
+    assert fixture["track"] == "DEVELOPMENT"
+    assert fixture["publishable"] is False
+    assert fixture["comparability"] == "proposed-non-comparable"
+    assert fixture["admission_state"] == "PROPOSED"
+    assert fixture["headline_eligible"] is False
+    assert fixture["independent_reproduction"] is False
+    assert fixture["upstream_comparable"] is False
+    assert fixture["transaction_time"] == {
+        "supported": False,
+        "reason": "transaction-time is system-owned and not exposed by this development cell",
+    }
+    assert len(fixture["timelines"]) == 5
+    assert len(fixture["seeds"]) == 5
+    assert {item["timeline_id"] for item in fixture["timelines"]} == {
+        "ordered-events",
+        "late-event",
+        "retroactive-correction",
+        "exact-boundary",
+        "tied-valid-time",
+    }
+    assert all(
+        event["valid_from"].endswith("Z")
+        for timeline in fixture["timelines"]
+        for event in timeline["events"]
+    )
+    exact_boundary = next(
+        timeline
+        for timeline in fixture["timelines"]
+        if timeline["timeline_id"] == "exact-boundary"
+    )
+    assert exact_boundary["history"][0] == {
+        "as_of": "2026-05-31T23:59:59.999999Z",
+        "expected_object_templates": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("seeds", [11, 23, 37, 53]),
+        ("seeds", [11, 23, 37, 53, 72]),
+        ("seeds", [11, 23, 37, 53, 53]),
+        ("timelines", "reduced"),
+        ("timelines", "altered"),
+        ("timelines", "duplicate"),
+    ],
+)
+def test_m03_valid_time_adapter_rejects_noncanonical_matrix(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    if field == "timelines":
+        if value == "reduced":
+            fixture[field] = fixture[field][:-1]
+        elif value == "altered":
+            fixture[field][0]["timeline_id"] = "altered-events"
+        else:
+            fixture[field][-1] = deepcopy(fixture[field][0])
+    else:
+        fixture[field] = value
+
+    with pytest.raises(ValueError, match="canonical matrix"):
+        abi.run_m03_valid_time_development(
+            fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("admission_state", None),
+        ("admission_state", "CONTRACT-READY"),
+        ("headline_eligible", None),
+        ("headline_eligible", True),
+        ("independent_reproduction", None),
+        ("independent_reproduction", True),
+        ("upstream_comparable", None),
+        ("upstream_comparable", True),
+    ],
+)
+def test_m03_valid_time_adapter_rejects_missing_or_permissive_custody(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    if value is None:
+        del fixture[field]
+    else:
+        fixture[field] = value
+
+    with pytest.raises(ValueError, match="fixture labels"):
+        abi.run_m03_valid_time_development(
+            fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+        )
+
+
+def test_m03_valid_time_development_adapter_and_scorer(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, adapter_metrics = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+    measured = score_profile(
+        "wmbs-m03-valid-time-v1",
+        [{"case_id": "M03", "fixture": fixture}],
+        traces,
+    )
+
+    assert adapter_metrics == {}
+    assert measured["metrics"] == {
+        "M-ASOF-ACC": 1.0,
+        "current_exact": 1.0,
+        "deterministic_tied_time_replay": 1.0,
+        "five_seed_canonical_replay": 1.0,
+        "stale_current_leakage": 0,
+    }
+    assert measured["passed"] is True
+    assert measured["publishable"] is False
+    assert measured["comparability"] == "proposed-non-comparable"
+    assert measured["admission_state"] == "PROPOSED"
+    assert measured["headline_eligible"] is False
+    assert measured["independent_reproduction"] is False
+    assert measured["upstream_comparable"] is False
+    assert measured["full_bitemporal_m03"] is False
+    assert all(trace["replay_case_id"].endswith(":replay") for trace in traces)
+
+
+def test_m03_valid_time_scorer_rejects_incomplete_matrix(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, _ = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+
+    with pytest.raises(ScoringError, match="canonical matrix"):
+        score_profile(
+            "wmbs-m03-valid-time-v1",
+            [{"case_id": "M03", "fixture": fixture}],
+            traces[:-1],
+        )
+
+
+def test_m03_valid_time_scorer_rejects_self_consistent_reduced_matrix(
+    tmp_path: Path,
+) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, _ = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+    fixture["timelines"] = fixture["timelines"][:-1]
+    fixture["seeds"] = fixture["seeds"][:-1]
+    allowed_ids = {
+        f"{timeline['timeline_id']}:{seed}"
+        for timeline in fixture["timelines"]
+        for seed in fixture["seeds"]
+    }
+    traces = [trace for trace in traces if trace["case_id"] in allowed_ids]
+
+    with pytest.raises(ScoringError, match="canonical matrix"):
+        score_profile(
+            "wmbs-m03-valid-time-v1",
+            [{"case_id": "M03", "fixture": fixture}],
+            traces,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("admission_state", None),
+        ("admission_state", "CONTRACT-READY"),
+        ("headline_eligible", None),
+        ("headline_eligible", True),
+        ("independent_reproduction", None),
+        ("independent_reproduction", True),
+        ("upstream_comparable", None),
+        ("upstream_comparable", True),
+    ],
+)
+def test_m03_valid_time_scorer_rejects_missing_or_permissive_custody(
+    field: str, value: object
+) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    if value is None:
+        del fixture[field]
+    else:
+        fixture[field] = value
+
+    with pytest.raises(ScoringError, match="labels are invalid"):
+        score_profile(
+            "wmbs-m03-valid-time-v1",
+            [{"case_id": "M03", "fixture": fixture}],
+            [],
+        )
+
+
+def test_m03_valid_time_scorer_fails_replay_mismatch(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, _ = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+    traces[0]["replay_current_objects"] = ["different"]
+
+    measured = score_profile(
+        "wmbs-m03-valid-time-v1",
+        [{"case_id": "M03", "fixture": fixture}],
+        traces,
+    )
+
+    assert measured["metrics"]["deterministic_tied_time_replay"] == 0.0
+    assert measured["metrics"]["five_seed_canonical_replay"] == 0.8
+    assert measured["passed"] is False

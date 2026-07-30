@@ -328,6 +328,45 @@ class MnemoCLI:
             args += ["--branch", branch]
         return self.run("propose", *args).json
 
+    def assert_fact(
+        self,
+        tenant: str,
+        subject: str,
+        predicate: str,
+        obj: str,
+        *,
+        user: str | None = None,
+        evidence_cids: Sequence[str] = (),
+        branch: str | None = None,
+        confidence: float | None = None,
+        trust_tier: int | None = None,
+        role: str | None = None,
+        source_trust_tier: int | None = None,
+        valid_from: str | None = None,
+        check: bool = True,
+    ) -> CLIResult:
+        args = [
+            "--tenant", tenant, "--subject", subject,
+            "--predicate", predicate, "--object", obj,
+        ]
+        if user:
+            args += ["--user", user]
+        for cid in evidence_cids:
+            args += ["--evidence-cid", cid]
+        if branch:
+            args += ["--branch", branch]
+        if confidence is not None:
+            args += ["--confidence", str(confidence)]
+        if trust_tier is not None:
+            args += ["--trust-tier", str(trust_tier)]
+        if role:
+            args += ["--role", role]
+        if source_trust_tier is not None:
+            args += ["--source-trust-tier", str(source_trust_tier)]
+        if valid_from is not None:
+            args += ["--valid-from", valid_from]
+        return self.run("assert", *args, check=check)
+
     def confirm(
         self,
         assertion_id: str,
@@ -363,6 +402,7 @@ class MnemoCLI:
         confidence: float | None = None,
         role: str | None = None,
         source_trust_tier: int | None = None,
+        valid_from: str | None = None,
         check: bool = True,
     ) -> CLIResult:
         args = [
@@ -377,6 +417,8 @@ class MnemoCLI:
             args += ["--role", role]
         if source_trust_tier is not None:
             args += ["--source-trust-tier", str(source_trust_tier)]
+        if valid_from is not None:
+            args += ["--valid-from", valid_from]
         return self.run("supersede", *args, check=check)
 
     def branch(
