@@ -28,3 +28,9 @@ Execution worktree: `/Users/admin/Mnemosyne.codex-goal-state-wiki-reconcile`
 - [x] Search Gbrain for an existing milestone covering PRs #86–#87 and Wiki commit `46c34287`; update that record if present or create exactly one source-grounded milestone if absent—never create a duplicate.
 - [x] Record only durable receipts: PR #86 merge and development-only boundary, PR #87 canonical-truth merge and exact post-merge CI, Wiki equality, remaining operator/evidence gates, and the fact that the current map admits no new source package.
 - [x] Reconfirm both execution and canonical worktrees remain clean and unchanged; return control to GoalEx without starting quarantined sandbox, result-v2, Phase 14–15, measurement, or publication work.
+
+## Completion receipts
+- Task execution ran in the declared clean checkout `/Users/admin/Mnemosyne.codex-goal-state-wiki-reconcile`; this authoritative plan file and its completion-only commits were tracked by the GoalEx controller in `/Users/admin/.codex/worktrees/9697/Mnemosyne`.
+- PR #87 merged as `2ba4ed80f48717e92caaa66aeef48d2d331cb0bc` with zero unresolved current review threads. Successful post-merge `push` CI run `30566984814` executed at that exact SHA; run `30565062156` was the successful pull-request-head CI at `fcecee31672c6d00978b41ec779d68c7ae81be84`.
+- Wiki `master == origin/master == 46c34287fe064842e72c3f52a9afad0c822b1846`; canonical Mnemosyne `main == origin/main == 2ba4ed80f48717e92caaa66aeef48d2d331cb0bc`.
+- The canonical CBM project refreshed once and returned ready with 22,658 nodes and 102,396 edges. Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30` remained readable after its unintended filesystem projection was removed.
