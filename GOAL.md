@@ -149,9 +149,12 @@ For every GoalEx round:
    approved design/planning, isolated worktrees, TDD, debugging, execution,
    review, verification, or branch completion.
 7. Review trust boundaries, secrets, supply chain, failure modes, evidence
-   language, and result compatibility. Push normally; require a PR, exact-head
-   tests, review/thread/mergeability clearance, and post-merge `main` proof.
-   Never force-push, bypass hooks, dismiss findings, or write directly to main.
+   language, and result compatibility. Use focused local tests during repair
+   and exactly one authoritative repository-wide suite per stable candidate:
+   the required exact-head CI run. Do not duplicate that broad suite locally.
+   Push normally; require a PR, review/thread/mergeability clearance, and
+   post-merge `main` proof. Never force-push, bypass hooks, dismiss findings,
+   or write directly to main.
 8. After merge, safely fast-forward canonical local `main`, prove it equals
    clean `origin/main`, refresh CBM once, and sync one deduplicated durable
    Gbrain milestone rather than transient session facts.
