@@ -27,7 +27,9 @@ Execution worktree: `/Users/admin/Mnemosyne.codex-phase13-public-regression-ci`
 - [x] If PR #86 is already merged, record its merge commit and proceed directly to post-merge verification. Otherwise merge normally without administrator bypass, force, or check waiver.
 
 ### Task 2: Verify exact post-merge main
-- [ ] Identify the CI run whose `headSha` exactly equals PR #86’s merge commit and require every required job to finish successfully.
-- [ ] Fast-forward `/Users/admin/Mnemosyne` only after proving it is clean; verify local `main`, `origin/main`, and the PR merge commit are identical.
-- [ ] Confirm PR #86 is `MERGED` and the two scheduled-regression files exist on that exact `main`.
-- [ ] Record only the merge SHA, exact-main CI run, review-thread count, and preserved development-only/non-publishable boundary. Do not refresh CBM/Gbrain prematurely, edit canonical planning truth, or admit the quarantined sandbox lane.
+- [x] Identify the CI run whose `headSha` exactly equals PR #86’s merge commit and require every required job to finish successfully.
+- [x] Fast-forward `/Users/admin/Mnemosyne` only after proving it is clean; verify local `main`, `origin/main`, and the PR merge commit are identical.
+- [x] Confirm PR #86 is `MERGED` and the two scheduled-regression files exist on that exact `main`.
+- [x] Record only the merge SHA, exact-main CI run, review-thread count, and preserved development-only/non-publishable boundary. Do not refresh CBM/Gbrain prematurely, edit canonical planning truth, or admit the quarantined sandbox lane.
+
+Receipt: merge `661343ce05186e9a7f0f0740d1edef7c23532857`; exact-main CI run `30561266140` succeeded; current unresolved non-outdated review threads `0`; scheduled regression remains development-only and non-publishable.
