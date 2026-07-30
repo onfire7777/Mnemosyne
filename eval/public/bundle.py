@@ -28,10 +28,113 @@ SECRET = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9]{20,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|"
     r"-----(?:BEGIN|END) [A-Z ]*PRIVATE KEY-----)"
 )
+CANONICAL_REPLAY_VOLATILE_FIELDS = frozenset(
+    {
+        "host_path",
+        "path",
+        "receipt_id",
+        "rss_samples_bytes",
+        "runtime_timestamp_utc",
+        "signature",
+        "wall_time_ms",
+    }
+)
+_CANONICAL_REPLAY_SEEDS = {
+    "wmbs-m01-development": (20260728,),
+    "wmbs-m03-valid-time-development": (11, 23, 37, 53, 71),
+    "wmbs-m10-development": (0, 1, 2, 3, 4),
+}
+_CANONICAL_REPLAY_MANIFESTS = {
+    "bundle_manifest_sha256",
+    "fixture_manifest_sha256",
+    "generator_manifest_sha256",
+}
+_CANONICAL_REPLAY_REQUIRED = {
+    "abi_schema",
+    "build",
+    "config",
+    "fixture",
+    "judge",
+    "manifests",
+    "metrics",
+    "seed_records",
+    "suite",
+    "sut_outputs",
+    "traces",
+    "volatile",
+}
 
 
 class BundleError(ValueError):
     """Bundle failed closed under the public custody contract."""
+
+
+def canonical_replay_projection(payload: object) -> object:
+    """Return the deterministic M15 equality projection after custody checks."""
+    if not isinstance(payload, dict):
+        raise BundleError("canonical replay payload must be an object")
+    missing = _CANONICAL_REPLAY_REQUIRED - payload.keys()
+    if missing:
+        fields = ", ".join(field.replace("_", " ") for field in sorted(missing))
+        raise BundleError(f"canonical replay payload is missing: {fields}")
+    suite = payload.get("suite")
+    expected_seeds = _CANONICAL_REPLAY_SEEDS.get(suite)
+    if expected_seeds is None:
+        raise BundleError("unsupported stochastic equality suite")
+    seeds = payload.get("seed_records")
+    if (
+        not isinstance(seeds, list)
+        or any(not isinstance(seed, int) or isinstance(seed, bool) for seed in seeds)
+        or len(seeds) != len(expected_seeds)
+        or set(seeds) != set(expected_seeds)
+    ):
+        raise BundleError("seed records custody is incomplete or unsupported")
+    manifests = payload.get("manifests")
+    if (
+        not isinstance(manifests, dict)
+        or set(manifests) != _CANONICAL_REPLAY_MANIFESTS
+        or any(
+            not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in manifests.values()
+        )
+    ):
+        raise BundleError("manifests custody is incomplete")
+    config = payload.get("config")
+    if not isinstance(config, dict) or config.get("locale") != "C":
+        raise BundleError("locale must be frozen to C")
+    if config.get("timezone") != "UTC":
+        raise BundleError("timezone must be frozen to UTC")
+
+    def project(value: object) -> object:
+        if isinstance(value, float) and not math.isfinite(value):
+            raise BundleError("non-finite numbers are forbidden")
+        if isinstance(value, dict):
+            if any(not isinstance(key, str) for key in value):
+                raise BundleError("canonical replay map keys must be strings")
+            return {
+                key: project(item)
+                for key, item in value.items()
+                if key not in CANONICAL_REPLAY_VOLATILE_FIELDS
+            }
+        if isinstance(value, list):
+            return [project(item) for item in value]
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        raise BundleError(f"canonical replay contains ambiguous value: {type(value).__name__}")
+
+    try:
+        projection = project(payload)
+        _canonical(projection)
+    except BundleError:
+        raise
+    except (TypeError, ValueError, RecursionError) as exc:
+        raise BundleError("canonical replay projection is not canonical JSON") from exc
+    return projection
+
+
+def canonical_replay_digest(payload: object) -> str:
+    """Digest the validated M15 projection with the existing canonical JSON path."""
+    return hashlib.sha256(_canonical(canonical_replay_projection(payload))).hexdigest()
 
 
 def write_bundle(
