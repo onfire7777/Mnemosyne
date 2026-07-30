@@ -81,6 +81,16 @@ def _job_steps(lines: list[str]) -> list[list[str]]:
     return steps
 
 
+def _job_mapping(lines: list[str]) -> list[str]:
+    assert lines.count("  public-regression:") == 1
+    start = lines.index("  public-regression:")
+    return [
+        line.strip()
+        for line in lines[start + 1 :]
+        if line.startswith("    ") and not line.startswith("      ")
+    ]
+
+
 def test_workflow_is_a_bounded_development_only_regression() -> None:
     """Catch privilege, trigger, provider, and benchmark-scope expansion."""
     lines = _lines()
@@ -128,6 +138,16 @@ def test_workflow_is_a_bounded_development_only_regression() -> None:
     assert matches == []
     assert "permissions: write" not in workflow
     assert "contents: write" not in workflow
+
+
+def test_workflow_declares_only_the_frozen_job_mapping() -> None:
+    """Catch error suppression, containers, environments, or job-level expansion."""
+    assert _job_mapping(_lines()) == [
+        "runs-on: ubuntu-latest",
+        "timeout-minutes: 20",
+        "if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'",
+        "steps:",
+    ]
 
 
 def test_workflow_declares_only_the_frozen_steps() -> None:
