@@ -21,9 +21,9 @@ The integration must remain test-only. Preserve `admission_state=PROPOSED`, `evi
 - `git diff --check && test -z "$(git status --porcelain)"`
 
 ### Task 1: Establish the exact integration lease
-- [ ] Refresh `origin`, verify clean root/branch state and exact canonical-main hash, and stop if main advanced, either satellite changed, or either satellite is not based on canonical main.
-- [ ] Inspect `main...codex/wmb-m12-confirmation` and `main...codex/wmb-m13-confirmation`; confirm the aggregate diff modifies exactly the two authorized test files with no generated files, secrets, dependency churn, or production behavior.
-- [ ] Create one isolated Worktrunk integration branch from exact canonical main with an explicit two-file lease; do not write directly to `main` or modify this GoalEx controller branch.
+- [x] Refresh `origin`, verify clean root/branch state and exact canonical-main hash, and stop if main advanced, either satellite changed, or either satellite is not based on canonical main.
+- [x] Inspect `main...codex/wmb-m12-confirmation` and `main...codex/wmb-m13-confirmation`; confirm the aggregate diff modifies exactly the two authorized test files with no generated files, secrets, dependency churn, or production behavior.
+- [x] Create one isolated Worktrunk integration branch from exact canonical main with an explicit two-file lease; do not write directly to `main` or modify this GoalEx controller branch.
 
 ### Task 2: Integrate the reviewed satellite heads
 - [ ] Apply M12 commits `c86b29ab` then `18871c2d` and M13 commit `d6befbc8` without rewriting their test semantics.
