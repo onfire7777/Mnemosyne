@@ -141,11 +141,13 @@ quarantined.
 PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
 `30484986865` green. PR #81 subsequently merged the reviewed M01/M10
 development pilots at `main@392b1fc1`; exact-merge CI run `30506775012`, 507
-focused tests, and Ruff passed. Bounded M03 valid-time integration is the next
-dependency-ready increment. The result-v2 schema and RED compatibility/ledger
-fixtures remain blocked by the protected signed-publication lease. The sandbox
-branch stays quarantined until real OCI, filesystem, network, and
-write-boundary enforcement exists.
+focused tests, and Ruff passed. PR #83 then merged the bounded M03 valid-time
+development slice at `main@7f60d8ba`; exact-head CI run `30532543366` was
+green. M15 canonical replay and the composed M01→M03→M10 development slice are
+the next dependency-ready increment. The result-v2 schema and RED
+compatibility/ledger fixtures remain blocked by the protected
+signed-publication lease. The sandbox branch stays quarantined until real OCI,
+filesystem, network, and write-boundary enforcement exists.
 
 **Files:**
 
@@ -417,6 +419,16 @@ validation, M01 remains `PROPOSED`.
 
 ### Task 5: Implement only the honest M03 valid-time development slice
 
+**Delivery checkpoint:** PR #83 merged reviewed source head
+`3189cc24c570f12be06e3d04252a06f48c71f971` as
+`main@7f60d8ba8274a8ac8036a80737467654f862008f`. Exact-head CI run
+`30532543366`, exact-merge CI run `30534061552`, CodeRabbit, Greptile, focused
+M03 tests, Ruff, Gitleaks, and `git diff --check` passed. The delivered cell
+remains `PROPOSED`,
+non-publishable, non-headline-eligible, non-independent, and
+non-upstream-comparable; it does not implement transaction-time queries or full
+bitemporal M03.
+
 **Files:**
 
 - Create: `eval/public/fixtures/wmbs-m03-valid-time-development.json`
@@ -438,22 +450,22 @@ validation, M01 remains `PROPOSED`.
 - Use existing `graph-as-of`/engine `as_of` only for valid-time questions.
 - Do not expose or inspect internal validity tables.
 
-- [ ] Write RED tests for aware/naive timestamps, ordered/late events,
+- [x] Write RED tests for aware/naive timestamps, ordered/late events,
       retroactive corrections, exact boundaries, tied valid times, current
       answers, and historical answers.
-- [ ] Add the minimum public valid-time argument and thread it through the
+- [x] Add the minimum public valid-time argument and thread it through the
       existing shared write path.
-- [ ] Run the focused CLI/runtime contract:
+- [x] Run the focused CLI/runtime contract:
       `PYTHONPATH=src uv run --extra mcp pytest -q
       tests/test_cli_runtime_tools.py -k 'graph_as_of or supersede'`.
-- [ ] Build five bounded timelines across at least five seeds, with exact
+- [x] Build five bounded timelines across at least five seeds, with exact
       virtual-clock, event, and query order.
-- [ ] Score `M-ASOF-ACC=1.0`, zero stale-current leakage, and exact tie-policy
+- [x] Score `M-ASOF-ACC=1.0`, zero stale-current leakage, and exact tie-policy
       replay for the valid-time slice.
-- [ ] Unit-check the same observable queries through the CLI-only adapter; no
+- [x] Unit-check the same observable queries through the CLI-only adapter; no
       direct engine import in the scorer and no measured suite execution before
       Task 11.
-- [ ] Label the suite `wmbs-m03-valid-time-development`, not “full bitemporal.”
+- [x] Label the suite `wmbs-m03-valid-time-development`, not “full bitemporal.”
 
 **Acceptance evidence:** Golden valid-time vectors, exact current/history
 scores, five-seed canonical replay, and an explicit unsupported disclosure for
