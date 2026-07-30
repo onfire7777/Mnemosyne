@@ -43,6 +43,18 @@ def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
     return parsed
 
 
+def _parse_valid_from(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, ValueError) as exc:
+        raise ValueError("valid_from must be an ISO 8601 timestamp with timezone") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("valid_from must be an ISO 8601 timestamp with timezone")
+    return parsed.astimezone(UTC)
+
+
 TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "working_seed",
@@ -671,6 +683,7 @@ class MemoryTools:
         trust_tier: int = int(TrustTier.DIRECT_USER),
         role: WriteRole = "agent",
         source_trust_tier: int | None = None,
+        valid_from: str | None = None,
     ) -> dict[str, Any]:
         decision = self._authorize(
             "assert_fact",
@@ -678,21 +691,22 @@ class MemoryTools:
             source_trust_tier=source_trust_tier if source_trust_tier is not None else trust_tier,
             target_sink="belief",
         )
-        assertion_id = self.engine.upsert_assertion(
-            Assertion(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                subject=subject,
-                predicate=predicate,
-                object=object_value,
-                source_evidence_cids=source_evidence_cids,
-                confidence=confidence,
-                status="active",
-                trust_tier=trust_tier,
-                access_policy={"tenant": tenant_id},
-            ),
-            branch=branch,
+        normalized_valid_from = _parse_valid_from(valid_from)
+        assertion = Assertion(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            subject=subject,
+            predicate=predicate,
+            object=object_value,
+            source_evidence_cids=source_evidence_cids,
+            confidence=confidence,
+            status="active",
+            trust_tier=trust_tier,
+            access_policy={"tenant": tenant_id},
         )
+        if normalized_valid_from is not None:
+            assertion.valid_from = normalized_valid_from
+        assertion_id = self.engine.upsert_assertion(assertion, branch=branch)
         return {"id": assertion_id, "branch": branch, "security": decision}
 
     def source_sync(
@@ -1292,6 +1306,7 @@ class MemoryTools:
         confidence: float = 0.95,
         role: WriteRole = "agent",
         source_trust_tier: int = int(TrustTier.USER_AUTHORED),
+        valid_from: str | None = None,
     ) -> dict[str, Any]:
         decision = self._authorize(
             "supersede",
@@ -1299,6 +1314,10 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="belief_correction",
         )
+        for field in ("valid_to", "transaction_time"):
+            if field in new:
+                raise ValueError(f"supersede new.{field} is system-owned")
+        normalized_valid_from = _parse_valid_from(valid_from)
         existing = self.get(tenant_id, id, branch=branch)
         if existing["kind"] != "assertion":
             raise ValueError("supersede currently supports assertion records")
@@ -1306,21 +1325,21 @@ class MemoryTools:
         new_object = new.get("object_value", new.get("object"))
         if new_object is None:
             raise ValueError("supersede requires new.object_value or new.object")
-        assertion_id = self.engine.upsert_assertion(
-            Assertion(
-                tenant_id=tenant_id,
-                subject=str(new.get("subject", record["subject"])),
-                predicate=str(new.get("predicate", record["predicate"])),
-                object=str(new_object),
-                confidence=float(new.get("confidence", confidence)),
-                scope=dict(new.get("scope", record.get("scope") or {})),
-                source_evidence_cids=list(new.get("source_evidence_cids", record.get("source_evidence_cids") or [])),
-                trust_tier=int(new.get("trust_tier", record.get("trust_tier", int(TrustTier.USER_AUTHORED)))),
-                sensitivity=int(new.get("sensitivity", record.get("sensitivity", 1))),
-                access_policy=dict(new.get("access_policy", record.get("access_policy") or {"tenant": tenant_id})),
-            ),
-            branch=branch,
+        assertion = Assertion(
+            tenant_id=tenant_id,
+            subject=str(new.get("subject", record["subject"])),
+            predicate=str(new.get("predicate", record["predicate"])),
+            object=str(new_object),
+            confidence=float(new.get("confidence", confidence)),
+            scope=dict(new.get("scope", record.get("scope") or {})),
+            source_evidence_cids=list(new.get("source_evidence_cids", record.get("source_evidence_cids") or [])),
+            trust_tier=int(new.get("trust_tier", record.get("trust_tier", int(TrustTier.USER_AUTHORED)))),
+            sensitivity=int(new.get("sensitivity", record.get("sensitivity", 1))),
+            access_policy=dict(new.get("access_policy", record.get("access_policy") or {"tenant": tenant_id})),
         )
+        if normalized_valid_from is not None:
+            assertion.valid_from = normalized_valid_from
+        assertion_id = self.engine.upsert_assertion(assertion, branch=branch)
         return {
             "id": assertion_id,
             "supersedes": id,
@@ -1817,6 +1836,9 @@ class MemoryTools:
         if moment is None:
             raise ValueError("graph_as_of requires an ISO timestamp")
         assertions = self.engine.as_of(subject, predicate, moment, tenant_id=tenant_id, branch=branch)
+        if assertions:
+            latest_valid_from = max(item.valid_from for item in assertions)
+            assertions = [item for item in assertions if item.valid_from == latest_valid_from]
         return {"subject": subject, "predicate": predicate, "time": time, "assertions": [item.to_dict() for item in assertions]}
 
     def trajectory_log(
