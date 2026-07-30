@@ -24,7 +24,7 @@ Execution worktree: `/Users/admin/Mnemosyne.codex-goal-state-wiki-reconcile`
 - [x] Re-read the dependency/write-lease map from `main@2ba4ed80` and confirm T2 is the only admitted next node and that no source implementation writer is dependency-ready.
 
 ### Task 2: Perform the single deduplicated T2 refresh
-- [ ] Using codebase-memory-mcp, inspect the existing Mnemosyne index, refresh the actual canonical checkout `/Users/admin/Mnemosyne` exactly once if stale, and verify the index reaches ready/current state for `main@2ba4ed80`.
-- [ ] Search Gbrain for an existing milestone covering PRs #86–#87 and Wiki commit `46c34287`; update that record if present or create exactly one source-grounded milestone if absent—never create a duplicate.
-- [ ] Record only durable receipts: PR #86 merge and development-only boundary, PR #87 canonical-truth merge and exact post-merge CI, Wiki equality, remaining operator/evidence gates, and the fact that the current map admits no new source package.
-- [ ] Reconfirm both execution and canonical worktrees remain clean and unchanged; return control to GoalEx without starting quarantined sandbox, result-v2, Phase 14–15, measurement, or publication work.
+- [x] Using codebase-memory-mcp, inspect the existing Mnemosyne index, refresh the actual canonical checkout `/Users/admin/Mnemosyne` exactly once if stale, and verify the index reaches ready/current state for `main@2ba4ed80`.
+- [x] Search Gbrain for an existing milestone covering PRs #86–#87 and Wiki commit `46c34287`; update that record if present or create exactly one source-grounded milestone if absent—never create a duplicate.
+- [x] Record only durable receipts: PR #86 merge and development-only boundary, PR #87 canonical-truth merge and exact post-merge CI, Wiki equality, remaining operator/evidence gates, and the fact that the current map admits no new source package.
+- [x] Reconfirm both execution and canonical worktrees remain clean and unchanged; return control to GoalEx without starting quarantined sandbox, result-v2, Phase 14–15, measurement, or publication work.
