@@ -175,6 +175,13 @@ def test_canonical_replay_requires_complete_seed_and_manifest_custody(
         public_bundle.canonical_replay_projection(payload)
 
 
+def test_canonical_replay_rejects_fixture_manifest_digest_mismatch() -> None:
+    payload = _canonical_replay_payload("wmbs-m01-development")
+
+    with pytest.raises(BundleError, match="fixture manifest"):
+        public_bundle.canonical_replay_projection(payload)
+
+
 def test_canonical_replay_map_order_is_stable_but_list_order_is_bound() -> None:
     payload = _canonical_replay_payload("wmbs-m03-valid-time-development")
     reversed_map = dict(reversed(list(payload.items())))
