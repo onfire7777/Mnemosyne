@@ -16,11 +16,11 @@ Execute this increment from a fresh Worktrunk branch based on current `origin/ma
 - `git status --porcelain`
 
 ### Task 1: Re-admit the sandbox handoff on current main
-- [ ] Fetch `origin`; verify canonical main is clean and current; refresh open PR, process, worktree, dirty-path, and lease inventories; stop if another writer intersects the three leased paths.
-- [ ] Refresh CBM for the fresh checkout and inspect sandbox/public-harness impact. If CBM remains unavailable, record that blocker and limit inspection to the three leased files and their imported contracts.
-- [ ] Create a fresh Worktrunk branch from `origin/main`; do not modify or merge from the stale sandbox worktree.
-- [ ] Cherry-pick, in order, `03adc078`, `85ec141c`, `4a3cb065`, `4e445442`, and `6e523360`; resolve conflicts only within the exact lease.
-- [ ] Run the focused sandbox tests before further edits and record any current-main contract drift.
+- [x] Fetch `origin`; verify canonical main is clean and current; refresh open PR, process, worktree, dirty-path, and lease inventories; stop if another writer intersects the three leased paths.
+- [x] Refresh CBM for the fresh checkout and inspect sandbox/public-harness impact. If CBM remains unavailable, record that blocker and limit inspection to the three leased files and their imported contracts.
+- [x] Create a fresh Worktrunk branch from `origin/main`; do not modify or merge from the stale sandbox worktree.
+- [x] Cherry-pick, in order, `03adc078`, `85ec141c`, `4a3cb065`, `4e445442`, and `6e523360`; resolve conflicts only within the exact lease.
+- [x] Run the focused sandbox tests before further edits and record any current-main contract drift. No current-main contract drift was observed.
 
 ### Task 2: Add the minimum real OCI isolation path
 - [ ] Add failing tests for validated `shell=False` container argv containing an immutable image digest, non-root user, read-only root filesystem, bounded tmpfs scratch, `--network none`, dropped capabilities, `no-new-privileges`, PID/CPU/memory limits, read-only fixture mount, and result-only writable persistent mount.
