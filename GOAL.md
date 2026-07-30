@@ -239,10 +239,11 @@ test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
 test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
-test "$(git rev-parse main)" = "7f60d8ba8274a8ac8036a80737467654f862008f"
+test "$(git rev-parse main)" = "e0dd41594cec890f598718160f919c13eee1e552"
 git merge-base --is-ancestor 98b83e4be373cf0acd5411769b80b98dfd1a8caa main
 git merge-base --is-ancestor a3ca8108c22de350810dc3f574931a0d85810ed5 main
 git merge-base --is-ancestor 3189cc24c570f12be06e3d04252a06f48c71f971 main
+git merge-base --is-ancestor a4e5fd2b5d46583998821a8c146d98c512c88b73 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
