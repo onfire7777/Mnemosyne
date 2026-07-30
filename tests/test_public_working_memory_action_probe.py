@@ -4,6 +4,7 @@ import copy
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -117,6 +118,15 @@ def fixture() -> dict[str, Any]:
         "upstream_comparable": False,
         "cases": cases,
     }
+
+
+def test_public_readme_records_development_evidence_gaps() -> None:
+    readme = (
+        Path(__file__).parents[1] / "eval" / "public" / "README.md"
+    ).read_text()
+    assert "one seed (`94125`) and six cases" in readme
+    assert "no capacity parameter" in readme
+    assert "no promotion-versus-no-promotion control" in readme
 
 
 def test_probe_covers_categories_public_seam_and_score_recomputation() -> None:

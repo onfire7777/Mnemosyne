@@ -89,9 +89,31 @@ This is source delivery only. M01 remains `PILOT-READY-DEV` for Local and M10
 remains `PILOT-READY-DEV` for the deterministic reader. Every development
 result remains `publishable:false` and `pbpp_headline_eligible:false`; no
 official, enhanced-successor, measured, PBPP, certification, publication, or
-headline claim advanced. Task 5, the bounded M03 valid-time integration, is
-the next dependency-ready slice. Full transaction-time M03 remains deferred,
-and result-v2 remains blocked by the protected signed-publication lease.
+headline claim advanced. Task 5, the bounded M03 valid-time integration, was
+subsequently proven blocked because its authorized write path was outside the
+mapped lease. The integration owner has now admitted only
+`src/mnemosyne/mcp_tools.py` into that lease so the existing authorized facade
+can accept optional timezone-aware `valid_from`. PR #82 delivered Tasks 7 and 8
+as recorded below. Full transaction-time M03 remains deferred, M15 requires
+the admitted M03 cell, and result-v2 remains blocked by the protected
+signed-publication lease.
+
+## M12/M13 delivery checkpoint
+
+On 2026-07-30, PR #82 merged final candidate
+`a3ca8108c22de350810dc3f574931a0d85810ed5` to
+`main@7e9cd01feb2a31cbba96252943697245a4edd024`. Exact-head CI run
+`30521721192`, exact-merge CI run `30522846090`, the 46-test focused M12/M13
+suite, focused Ruff, and `git diff --check` passed.
+
+This remains bounded development evidence only. M12 and M13 retain
+`admission_state=PROPOSED`, `evidence_level=INTERNALLY_MEASURED`, and false
+publication, headline, independent-reproduction, and upstream-comparability
+flags. No official run, measured cell, recurrence or promotion experiment,
+certification, ranking, or publication gate advanced. The bounded M03 slice is
+now admitted with its explicit authorized-facade lease amendment; M15 requires
+that cell, result-v2 remains protected, and sandbox enforcement remains
+quarantined.
 
 ## Pilot tranche order
 
@@ -398,6 +420,7 @@ validation, M01 remains `PROPOSED`.
 **Files:**
 
 - Create: `eval/public/fixtures/wmbs-m03-valid-time-development.json`
+- Modify: `src/mnemosyne/mcp_tools.py`
 - Modify: `src/mnemosyne/cli.py`
 - Modify: `eval/harness/cli_driver.py`
 - Modify: `eval/public/adapters/whole_memory_reference.py`
@@ -409,6 +432,9 @@ validation, M01 remains `PROPOSED`.
 
 - Add public, timezone-aware `valid_from` input to assertion/supersession
   operations and the matching `MnemoCLI` wrapper.
+- Preserve `_authorize` as the first write decision; reject invalid or naive
+  timestamps and normalize aware timestamps to UTC.
+- Keep `valid_to` and `transaction_time` system-owned.
 - Use existing `graph-as-of`/engine `as_of` only for valid-time questions.
 - Do not expose or inspect internal validity tables.
 

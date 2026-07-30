@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "M03 remains PROPOSED and blocked because the mapped lease excludes the authorized MemoryTools valid_from write path; reviewed M12/M13 test-only confirmation integration is next. Result-v2 remains protected, and sandbox/measurement/launch gates remain open."
-last_updated: "2026-07-30T06:35:27Z"
-last_activity: 2026-07-29
+stopped_at: "PR #82 delivered the bounded M12/M13 evidence confirmations. The integration owner admitted src/mnemosyne/mcp_tools.py into the bounded M03 lease so its authorized write facade can accept timezone-aware valid_from; M15, result-v2, sandbox, measurement, and launch gates remain blocked as documented."
+last_updated: "2026-07-30T08:01:00Z"
+last_activity: 2026-07-30
 progress:
   total_phases: 7
   completed_phases: 2
@@ -65,9 +65,10 @@ PR #81 merged exact source head
 `30506775012` and the 507-test focused M01/M10/public-eval/reference suite
 passed; Ruff passed. M01 and the deterministic M10 reader retain
 `PILOT-READY-DEV`, while every result remains `publishable:false` and
-`pbpp_headline_eligible:false`. Bounded M03 is blocked because the committed
-lease excludes `src/mnemosyne/mcp_tools.py`, whose authorized assertion and
-supersession methods cannot currently persist caller-supplied `valid_from`.
+`pbpp_headline_eligible:false`. The integration owner has admitted only
+`src/mnemosyne/mcp_tools.py` into the bounded M03 lease so its authorized
+assertion and supersession methods can accept caller-supplied timezone-aware
+`valid_from`; M03 is next, while full transaction-time M03 remains deferred.
 PR #82 then merged final candidate
 `a3ca8108c22de350810dc3f574931a0d85810ed5` as
 `main@7e9cd01feb2a31cbba96252943697245a4edd024`. Exact-head CI run
@@ -111,7 +112,7 @@ work, benchmark, launch, certification, ranking, or publication gate advanced.
 
 ### Decisions
 
-- [Whole-memory benchmark]: PR #81 merged exact source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; exact-merge CI run `30506775012` and 507 focused tests passed. M01 and the deterministic M10 reader remain `PILOT-READY-DEV`, all results remain `publishable:false`/`pbpp_headline_eligible:false`, and M03 valid-time integration is next without broadening into transaction-time semantics.
+- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 then merged the bounded M12/M13 evidence confirmations to `main@7e9cd01feb2a31cbba96252943697245a4edd024`. M01/M10 remain `PILOT-READY-DEV`, M12/M13 remain `PROPOSED`, and all results remain non-publishable. The integration owner admitted only `src/mnemosyne/mcp_tools.py` into the existing M03 lease; M15, result-v2, and sandbox retain their stated blockers.
 - [Phase 12]: W1 local development is complete through the baseline, Fix A, and Fix B receipts, but it does not close CAP-003, BENCH-005, or Plan 12-04 without production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt.
 - [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@0784340` (Phase 1 hardening had landed earlier via PR #37 `7a1db210`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
 - [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@7a1db210`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
