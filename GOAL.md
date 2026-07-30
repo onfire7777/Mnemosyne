@@ -60,7 +60,9 @@ sandbox commits are reviewed development-source receipts only and remain
 quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
-lease map; neither result-v2 nor sandbox delivery is implicitly admitted.
+lease map at
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; neither
+result-v2 nor sandbox delivery is implicitly admitted.
 
 ## Scope
 
