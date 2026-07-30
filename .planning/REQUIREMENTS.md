@@ -9,8 +9,8 @@
 | [x] BENCH-003 | Public bundles keep deterministic retrieval and disclosed-reader QA in separate columns with Wilson/bootstrap intervals. | PBPP/M1/M2 | Complete |
 | [x] BENCH-004 | LongMemEval retrieval-recall produces Recall@5, nDCG, confidence intervals, and per-question session/turn traces with no LLM scorer. | Plan B M1.2 | Complete |
 | [ ] BENCH-005 | HippoRAG multi-hop datasets produce deterministic Recall@2/@5 and EM/F1 with graph/PPR channel traces and published-baseline context. | Plan B M1.3 | Partial — local dev graph participation is positive and deterministic; production-Postgres parity and reader EM/F1 remain open |
-| [ ] BENCH-006 | MemoryAgentBench has a conforming Mnemosyne adapter and upstream submission path; BEAM runs with a fully disclosed reader/config. | Plan B M1.4/M1.5 | Planned |
-| [ ] BENCH-007 | Deterministic public suites run on a scheduled regression-only CI cadence without tuning on held-out/test data. | Plan B M1.6 | Planned |
+| [ ] BENCH-006 | MemoryAgentBench has a conforming Mnemosyne adapter and upstream submission path; BEAM runs with a fully disclosed reader/config. | Plan B M1.4/M1.5 | Partial — source contracts are merged; official/upstream execution, rights, provider/model/judge disclosure, and operator evidence remain gated |
+| [ ] BENCH-007 | Deterministic public suites run on a scheduled regression-only CI cadence without tuning on held-out/test data. | Plan B M1.6 | Partial — fixed source and input-free manual operability are proven at `main@661343ce`; the first retained scheduled-cadence receipt remains open |
 | [ ] REPRO-001 | A neutral reproducibility bundle standard covers manifests, raw traces, configs, environment/build fingerprints, metrics, intervals, and integrity hashes. | Plan B M2 | Planned |
 | [ ] REPRO-002 | At least one headline-eligible result is reproducible by construction from the published bundle — one documented command from a clean checkout — before any external claim. Independent third-party reproduction is recorded as strengthening evidence when offered and does not gate the claim. | Plan B M3/PBPP | Planned |
 
