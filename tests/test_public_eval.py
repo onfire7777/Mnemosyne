@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from eval.public import wmbs_m10 as m10
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI, ActionCLIError
-from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
+from eval.public.bundle import BundleError, _scoring_labels, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
 from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
@@ -47,7 +48,6 @@ def test_whole_memory_development_suite_round_trips_bundle(
         "suite": suite_name,
         "valid": True,
     }
-
     metadata = json.loads((source / "benchmark.json").read_text())["metadata"]
     assert metadata["admission_state"] == "PROPOSED"
     assert metadata["track_kind"] == "ENHANCED-SUCCESSOR"
@@ -68,6 +68,23 @@ def test_whole_memory_development_suite_round_trips_bundle(
     _refresh_digest(attacked, "build.json")
     with pytest.raises(BundleError, match="system seam"):
         verify_bundle(attacked)
+
+
+def test_m10_scoring_derives_floor_from_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    records = m10.run_baseline("full-context", cases, response_mode="normal")
+    traces = [
+        {
+            **record.to_dict(),
+            "case_id": case.case_id,
+            "scoring_family": "whole-memory-development",
+        }
+        for case, record in zip(cases, records, strict=True)
+    ]
+    monkeypatch.setattr(m10, "useful_coverage_floor_from_fixture", lambda _: 0.1234)
+    measured = score_profile("wmbs-m10-v1", _scoring_labels(fixture), traces)
+    assert measured["useful_coverage_floor"] == 0.1234
 
 
 def test_m01_bundle_rejects_unknown_trace_claim_fields(tmp_path: Path) -> None:

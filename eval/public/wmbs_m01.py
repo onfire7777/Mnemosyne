@@ -600,6 +600,8 @@ def _index_receipts(
     known = known_row_ids if isinstance(known_row_ids, set) else set(known_row_ids)
     indexed: dict[str, Mapping[str, Any]] = {}
     for receipt in receipts:
+        if not isinstance(receipt, Mapping):
+            raise WmbsM01Error("capture receipt must be a mapping")
         row_id = receipt.get("fixture_row_id")
         if not isinstance(row_id, str) or not row_id:
             raise WmbsM01Error("capture receipt is missing fixture_row_id")
@@ -784,6 +786,8 @@ def score_reopen_export_projection(
     duplicate_exports: list[str] = []
     for row in exported_rows:
         event_id = row.get("event_id")
+        if not isinstance(event_id, str):
+            raise WmbsM01Error("exported row is missing a string event_id")
         if event_id in exported_by_id:
             duplicate_exports.append(event_id)
             continue
@@ -861,7 +865,7 @@ def canonical_replay_projection(
         raise WmbsM01Error("canonical replay payload must be a sequence")
 
     projected: list[dict[str, Any]] = []
-    actual_row_ids: list[Any] = []
+    actual_row_ids: list[str] = []
     for index, receipt in enumerate(receipts):
         if not isinstance(receipt, Mapping):
             raise WmbsM01Error(f"canonical replay payload[{index}] must be a mapping")
@@ -873,7 +877,12 @@ def canonical_replay_projection(
                 f"canonical replay payload[{index}] has a non-closed field set: "
                 f"missing={sorted(missing)} unknown={sorted(unknown)}"
             )
-        actual_row_ids.append(receipt.get("fixture_row_id"))
+        row_id = receipt.get("fixture_row_id")
+        if not isinstance(row_id, str):
+            raise WmbsM01Error(
+                f"canonical replay payload[{index}].fixture_row_id must be a string"
+            )
+        actual_row_ids.append(row_id)
         projected.append(
             {field: receipt.get(field) for field in _CANONICAL_REPLAY_SEMANTIC_FIELDS}
         )
@@ -881,7 +890,7 @@ def canonical_replay_projection(
     if tuple(actual_row_ids) != expected_row_ids:
         expected_set = set(expected_row_ids)
         actual_set = set(actual_row_ids)
-        seen: set[Any] = set()
+        seen: set[str] = set()
         duplicated = sorted(
             {row_id for row_id in actual_row_ids if row_id in seen or seen.add(row_id)}
         )

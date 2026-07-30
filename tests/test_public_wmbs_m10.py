@@ -358,6 +358,29 @@ def test_reader_evidence_handles_reference_contributing_hits() -> None:
     assert "h-only" in envelope.evidence_handles
 
 
+def test_reader_retains_all_contributing_hit_evidence_handles() -> None:
+    case = _manual_case(
+        facts=(_fact(evidence_handle="h-original"),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    retrieval = m10.RetrievalEnvelope(
+        hits=(
+            m10.RetrievalHit(
+                rank=1,
+                stable_item_id=case.facts[0].stable_item_id,
+                score=1.0,
+                content_or_handle=case.facts[0].content(),
+                evidence_handles=["h-first", "h-second"],
+                observed_at=case.facts[0].observed_at,
+                provenance_status="verified",
+            ),
+        )
+    )
+    envelope = m10.read_answer(case.question, retrieval, "normal")
+    assert envelope.evidence_handles == ["h-first", "h-second"]
+
+
 # ---------------------------------------------------------------------------
 # Malformed-question handling (Finding 3: fail-closed, not fail-open)
 # ---------------------------------------------------------------------------

@@ -178,8 +178,14 @@ def _score_wmbs_m10(
     if not isinstance(artifact, dict):
         raise ScoringError("M10 calibration artifact is missing")
     m10.verify_calibration_artifact(artifact)
+    fixtures = [expected[key].get("fixture") for key in sorted(expected)]
+    if not fixtures or any(fixture != fixtures[0] for fixture in fixtures[1:]):
+        raise ScoringError("M10 labels do not share one fixture")
+    fixture = fixtures[0]
+    if not isinstance(fixture, dict):
+        raise ScoringError("M10 fixture is missing")
     report = asdict(m10.score_records(cases, records))
-    floor = artifact["useful_coverage_floor"]
+    floor = m10.useful_coverage_floor_from_fixture(fixture)
     return {
         "family": "whole-memory-development",
         "finite_corpus_disclosure": m10.FINITE_CORPUS_DISCLOSURE,
