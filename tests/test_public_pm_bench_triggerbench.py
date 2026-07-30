@@ -3,9 +3,12 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from eval.harness.cli_driver import MnemoCLI
+from eval.public.action_cli import ActionCLI
 from eval.public.adapters.pm_bench_triggerbench import (
     ActionProbeError,
     TRIGGER_DIMENSIONS,
@@ -15,6 +18,9 @@ from eval.public.adapters.pm_bench_triggerbench import (
     recompute_metrics,
     run,
 )
+from eval.public.runner import load_registry
+
+_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "eval" / "public" / "fixtures"
 
 
 def _task(index: int, trigger_type: str, update: str = "none") -> dict[str, object]:
@@ -558,3 +564,146 @@ def _keys(value: object) -> set[str]:
     if isinstance(value, (list, tuple)):
         return {key for child in value for key in _keys(child)}
     return set()
+
+
+def _load_committed_fixture(name: str) -> dict[str, object]:
+    return json.loads((_FIXTURES_DIR / name).read_text())
+
+
+def test_committed_pm_bench_and_triggerbench_fixtures_freeze_shape_seed_and_custody() -> None:
+    """Freeze the honest development-evidence shape of the two committed fixtures.
+
+    PM-Bench is exactly 1 case / 7 steps and TriggerBench is exactly 20 cases /
+    20 steps, both seed 7, and neither registry entry carries a baseline
+    artifact/control — this is development-only evidence, not a measured claim.
+    """
+    registry = load_registry()
+    for suite_name, fixture_name, expected_cases, expected_steps in (
+        ("pm-bench-development", "pm-bench-development.json", 1, 7),
+        ("triggerbench-development", "triggerbench-development.json", 20, 20),
+    ):
+        suite = registry[suite_name]
+        assert "baseline" not in suite
+        raw = _load_committed_fixture(fixture_name)
+        normalized = normalize(raw)
+        assert len(normalized["cases"]) == expected_cases
+        assert sum(len(case["steps"]) for case in normalized["cases"]) == expected_steps
+        assert normalized["seed"] == 7
+        assert normalized["publishable"] is False
+        assert normalized["headline_eligible"] is False
+        assert normalized["independent_reproduction"] is False
+        assert normalized["upstream_comparable"] is False
+
+
+def test_committed_fixtures_run_and_freeze_lateness_and_cost_gaps() -> None:
+    """Run the committed fixtures through the public adapter seam and freeze the
+    honest scoring gaps: a lateness counter exists but is never exercised
+    positively by these development fixtures, cost coverage is entirely
+    absent, and ``regularity: recurring`` is retained for classification.
+    """
+    pm = _load_committed_fixture("pm-bench-development.json")
+    pm_benchmark, pm_traces, pm_metrics = run(pm, _cli(pm))
+    assert "late" in pm_metrics["safety_counts"]
+    assert pm_metrics["safety_counts"]["late"] == 0
+    assert "cost" not in pm_metrics
+    assert not any("cost" in trace for trace in pm_traces)
+    regularity_rows = {
+        row["value"]: row
+        for row in pm_metrics["category_rows"]
+        if row["dimension"] == "regularity"
+    }
+    assert set(regularity_rows) == {"one_shot", "recurring"}
+    assert regularity_rows["recurring"]["steps"] == 1
+    for flag in (
+        "publishable",
+        "headline_eligible",
+        "independent_reproduction",
+        "upstream_comparable",
+    ):
+        assert pm_benchmark[flag] is False
+
+    tb = _load_committed_fixture("triggerbench-development.json")
+    tb_benchmark, tb_traces, tb_metrics = run(tb, _cli(tb))
+    assert "late" in tb_metrics["safety_counts"]
+    assert tb_metrics["safety_counts"]["late"] == 0
+    assert "cost" not in tb_metrics
+    assert not any("cost" in trace for trace in tb_traces)
+    for flag in (
+        "publishable",
+        "headline_eligible",
+        "independent_reproduction",
+        "upstream_comparable",
+    ):
+        assert tb_benchmark[flag] is False
+
+
+def test_action_cli_represents_pm_bench_lifecycle_and_ticks_without_forwarding_regularity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Drive the committed PM-Bench fixture through ``ActionCLI`` (the real
+    schedule/update/cancel/evaluate translation layer) and freeze that:
+
+    - task creation, update (override/reschedule), and cancellation all cross
+      into signed ``intention-schedule``/``intention-update``/``intention-cancel``
+      subprocess commands (schedule/update/cancel represented);
+    - the per-step ``intention-evaluate --evaluated-at`` clock advances through
+      seven distinct virtual timestamps (virtual-time/tick behavior represented);
+    - ``regularity``/"recurring" never appears in the recorded
+      ``intention-schedule`` arguments, even though task-1 carries
+      ``regularity: recurring`` — ActionCLI does not forward it.
+    """
+    pm = _load_committed_fixture("pm-bench-development.json")
+    commands: list[tuple[str, tuple[str, ...]]] = []
+    counters = {"cid": 0, "iid": 0}
+    due_queue = {
+        case["tenant_id"]: [list(step["expected_due_action_ids"]) for step in case["steps"]]
+        for case in pm["cases"]
+    }
+
+    def fake_run(self: MnemoCLI, command: str, *args: str, **kwargs: object) -> SimpleNamespace:
+        commands.append((command, args))
+        if command == "capture":
+            counters["cid"] += 1
+            return SimpleNamespace(json={"cid": f"cid-{counters['cid']}"})
+        if command == "intention-schedule":
+            counters["iid"] += 1
+            return SimpleNamespace(json={"intention_id": f"int-{counters['iid']}"})
+        if command in {"intention-cancel", "intention-update"}:
+            return SimpleNamespace(json={})
+        if command == "intention-evaluate":
+            tenant = args[args.index("--tenant") + 1]
+            due = due_queue[tenant].pop(0)
+            return SimpleNamespace(json={"intentions": [{"action": {"ref": a}} for a in due]})
+        raise AssertionError(f"unexpected mnemo command: {command}")
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    cli = ActionCLI(MnemoCLI(store=str(tmp_path / "unused-parent.store.json")))
+    _, _, metrics = run(pm, cli)
+
+    fired = {command for command, _ in commands}
+    assert {
+        "intention-schedule",
+        "intention-update",
+        "intention-cancel",
+        "intention-evaluate",
+    } <= fired
+    schedule_calls = [args for command, args in commands if command == "intention-schedule"]
+    assert len(schedule_calls) == 5
+    assert not any("--regularity" in args or "recurring" in args for args in schedule_calls)
+    evaluated_times = [
+        args[args.index("--evaluated-at") + 1]
+        for command, args in commands
+        if command == "intention-evaluate"
+    ]
+    assert len(evaluated_times) == 7
+    assert len(set(evaluated_times)) == 7
+    assert metrics["safety_counts"] == {
+        "miss": 0,
+        "early": 0,
+        "late": 0,
+        "lure": 0,
+        "duplicate": 0,
+        "cancelled_action": 0,
+        "stale_preupdate_action": 0,
+        "dependency_violation": 0,
+    }
