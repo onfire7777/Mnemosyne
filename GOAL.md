@@ -56,6 +56,24 @@ filesystem, network, and write-boundary enforcement.
 Remaining receipts, measured cells, and module execution retain their existing
 gates.
 
+The committed dependency/write-lease map is the admission authority for this
+wave. M03 is limited to:
+
+- `eval/public/fixtures/wmbs-m03-valid-time-development.json`
+- `src/mnemosyne/cli.py`
+- `eval/harness/cli_driver.py`
+- `eval/public/adapters/whole_memory_reference.py`
+- `eval/public/scoring.py`
+- `tests/test_public_whole_memory_reference.py`
+- `tests/test_cli_runtime_tools.py`
+
+Do not add `mcp_tools.py`, registry/runner changes, a second M03 module, or new
+shared documentation to this lease. If the existing public interfaces cannot
+support the bounded cell through these paths, fail closed and return the exact
+dependency rather than widening the plan. The active M12 and M13 satellites own
+only `tests/test_public_pm_bench_triggerbench.py` and
+`tests/test_public_working_memory_action_probe.py`, respectively.
+
 ## Scope
 
 Once the activation gate passes:

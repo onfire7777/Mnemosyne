@@ -1,5 +1,11 @@
 # Plan: Implement the M03 Valid-Time Development Cell
 
+> **Coordinator rejection (2026-07-30):** This generated plan was interrupted
+> before any implementation edit because it widened the committed M03 lease.
+> It is a historical failed admission receipt, not executable authority.
+> `GOAL.md` and the committed dependency/write-lease map now carry the exact
+> seven-path M03 lease; a later round must plan only that surface.
+
 ## Overview
 Canonical `main` and `origin/main` are both `392b1fc173f454893e1b133ff3a727462586a8b0`, containing PR #81 and exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`. The dedicated GoalEx branch is clean but contains post-merge planning/verification commits through `387a130a`; preserve those commits and perform implementation in a new Worktrunk-isolated branch from `origin/main`.
 
