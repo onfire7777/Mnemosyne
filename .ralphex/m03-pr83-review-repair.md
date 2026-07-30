@@ -46,10 +46,10 @@ Batch only the confirmed CodeRabbit findings on clean PR 83 head `a8723b12`.
 
 ### Task 2: Verify the repaired PR candidate
 
-- [ ] Review the complete diff for the exact eight-path lease and all retained
+- [x] Review the complete diff for the exact eight-path lease and all retained
       security, temporal, replay, matrix, custody, and evidence boundaries.
-- [ ] Run the complete whole-memory reference test file once, the focused
+- [x] Run the complete whole-memory reference test file once, the focused
       CLI/runtime review selection, focused Ruff, and `git diff --check`.
-- [ ] Commit only any required in-lease verification adjustment and report the
+- [x] Commit only any required in-lease verification adjustment and report the
       exact clean SHA. Leave review replies, push, exact-head CI, merge, docs,
       CBM, and Gbrain to the integration owner.
