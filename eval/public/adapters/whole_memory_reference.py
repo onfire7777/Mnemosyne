@@ -11,9 +11,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from leaderboard.validate import validate_record as validate_result_v1
+
+if TYPE_CHECKING:
+    from eval.harness.cli_driver import MnemoCLI
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 VOLATILE_FIELDS = {
@@ -125,7 +128,7 @@ def run_m10_development(
 
 
 def run_m03_valid_time_development(
-    benchmark: dict[str, Any], cli: object
+    benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Exercise the proposed M03 valid-time cell through the public CLI only."""
     required = {
@@ -151,7 +154,7 @@ def run_m03_valid_time_development(
     ):
         raise ValueError("invalid M03 valid-time canonical matrix")
 
-    def run_matrix(matrix_cli: object) -> dict[str, dict[str, Any]]:
+    def run_matrix(matrix_cli: MnemoCLI) -> dict[str, dict[str, Any]]:
         observations: dict[str, dict[str, Any]] = {}
         for timeline in timelines:
             timeline_id = timeline["timeline_id"]

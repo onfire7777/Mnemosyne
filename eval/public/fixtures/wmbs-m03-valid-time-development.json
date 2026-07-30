@@ -54,6 +54,7 @@
       ],
       "expected_current_templates": ["boundary-at-{seed}"],
       "history": [
+        {"as_of": "2026-05-31T23:59:59.999999Z", "expected_object_templates": []},
         {"as_of": "2026-06-09T23:59:59.999999Z", "expected_object_templates": ["boundary-before-{seed}"]},
         {"as_of": "2026-06-10T00:00:00Z", "expected_object_templates": ["boundary-at-{seed}"]}
       ],

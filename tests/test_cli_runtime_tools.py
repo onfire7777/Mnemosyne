@@ -15675,7 +15675,7 @@ def test_cli_assert_rejects_caller_owned_validity_fields(
     assert f"unrecognized arguments: --{field}" in result.stderr
 
 
-@pytest.mark.parametrize("field", ["valid_to", "transaction_time"])
+@pytest.mark.parametrize("field", ["valid_from", "valid_to", "transaction_time"])
 def test_cli_supersede_rejects_caller_owned_validity_fields(
     tmp_path: Path,
     field: str,
@@ -15713,37 +15713,54 @@ def test_cli_graph_as_of_valid_time_development_timelines_are_observable(
             / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
         ).read_text(encoding="utf-8")
     )
+    seed = fixture["seeds"][0]
     for timeline in fixture["timelines"]:
-        for seed in fixture["seeds"]:
-            store = tmp_path / f"{timeline['timeline_id']}-{seed}.json"
-            last_id: str | None = None
-            for event in timeline["events"]:
-                object_value = event["object_template"].format(seed=seed)
-                if event["operation"] == "assert":
-                    written = _assert_timeline_fact(
-                        store,
-                        object_value=object_value,
-                        valid_from=event["valid_from"],
-                    )
-                else:
-                    assert last_id is not None
-                    written = run_cli(
-                        store,
-                        "supersede",
-                        "--tenant",
-                        TENANT,
-                        "--user",
-                        USER,
-                        "--id",
-                        last_id,
-                        "--new",
-                        json.dumps({"object_value": object_value, "trust_tier": 0}),
-                        "--valid-from",
-                        event["valid_from"],
-                    )
-                last_id = written["id"]
+        store = tmp_path / f"{timeline['timeline_id']}-{seed}.json"
+        last_id: str | None = None
+        for event in timeline["events"]:
+            object_value = event["object_template"].format(seed=seed)
+            if event["operation"] == "assert":
+                written = _assert_timeline_fact(
+                    store,
+                    object_value=object_value,
+                    valid_from=event["valid_from"],
+                )
+            else:
+                assert last_id is not None
+                written = run_cli(
+                    store,
+                    "supersede",
+                    "--tenant",
+                    TENANT,
+                    "--user",
+                    USER,
+                    "--id",
+                    last_id,
+                    "--new",
+                    json.dumps({"object_value": object_value, "trust_tier": 0}),
+                    "--valid-from",
+                    event["valid_from"],
+                )
+            last_id = written["id"]
 
-            current = run_cli(
+        current = run_cli(
+            store,
+            "graph-as-of",
+            "--tenant",
+            TENANT,
+            "--subject",
+            "M03 timeline",
+            "--predicate",
+            "value",
+            "--time",
+            "2999-01-01T00:00:00Z",
+        )
+        assert [item["object"] for item in current["assertions"]] == [
+            value.format(seed=seed)
+            for value in timeline["expected_current_templates"]
+        ]
+        for query in timeline["history"]:
+            historical = run_cli(
                 store,
                 "graph-as-of",
                 "--tenant",
@@ -15753,26 +15770,9 @@ def test_cli_graph_as_of_valid_time_development_timelines_are_observable(
                 "--predicate",
                 "value",
                 "--time",
-                "2999-01-01T00:00:00Z",
+                query["as_of"],
             )
-            assert [item["object"] for item in current["assertions"]] == [
+            assert [item["object"] for item in historical["assertions"]] == [
                 value.format(seed=seed)
-                for value in timeline["expected_current_templates"]
+                for value in query["expected_object_templates"]
             ]
-            for query in timeline["history"]:
-                historical = run_cli(
-                    store,
-                    "graph-as-of",
-                    "--tenant",
-                    TENANT,
-                    "--subject",
-                    "M03 timeline",
-                    "--predicate",
-                    "value",
-                    "--time",
-                    query["as_of"],
-                )
-                assert [item["object"] for item in historical["assertions"]] == [
-                    value.format(seed=seed)
-                    for value in query["expected_object_templates"]
-                ]

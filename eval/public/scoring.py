@@ -199,6 +199,7 @@ def _score_wmbs_m03_valid_time(
 
     history_hits = history_total = 0
     current_exact = replay_exact = True
+    replay_agreement_by_seed = {seed: True for seed in seeds}
     stale_current_leakage = 0
     for timeline_id, timeline in timelines.items():
         for seed in seeds:
@@ -215,11 +216,13 @@ def _score_wmbs_m03_valid_time(
             ]
             current = trace.get("current_objects")
             current_exact &= current == expected_current
-            replay_exact &= (
+            replay_agrees = (
                 trace.get("replay_case_id") == f"{timeline_id}:{seed}:replay"
                 and trace.get("replay_current_objects") == current
                 and trace.get("replay_history") == trace.get("history")
             )
+            replay_exact &= replay_agrees
+            replay_agreement_by_seed[seed] &= replay_agrees
             historical_only = {
                 value.format(seed=seed)
                 for query in timeline["history"]
@@ -245,8 +248,8 @@ def _score_wmbs_m03_valid_time(
         "M-ASOF-ACC": asof_accuracy,
         "current_exact": float(current_exact),
         "deterministic_tied_time_replay": float(replay_exact),
-        "five_seed_canonical_replay": float(
-            set(trace["seed"] for trace in traces) == set(seeds)
+        "five_seed_canonical_replay": (
+            sum(replay_agreement_by_seed.values()) / len(replay_agreement_by_seed)
         ),
         "stale_current_leakage": stale_current_leakage,
     }

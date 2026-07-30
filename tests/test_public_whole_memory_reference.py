@@ -3151,6 +3151,15 @@ def test_m03_valid_time_development_fixture_contract() -> None:
         for timeline in fixture["timelines"]
         for event in timeline["events"]
     )
+    exact_boundary = next(
+        timeline
+        for timeline in fixture["timelines"]
+        if timeline["timeline_id"] == "exact-boundary"
+    )
+    assert exact_boundary["history"][0] == {
+        "as_of": "2026-05-31T23:59:59.999999Z",
+        "expected_object_templates": [],
+    }
 
 
 @pytest.mark.parametrize(
@@ -3352,4 +3361,5 @@ def test_m03_valid_time_scorer_fails_replay_mismatch(tmp_path: Path) -> None:
     )
 
     assert measured["metrics"]["deterministic_tied_time_replay"] == 0.0
+    assert measured["metrics"]["five_seed_canonical_replay"] == 0.8
     assert measured["passed"] is False
