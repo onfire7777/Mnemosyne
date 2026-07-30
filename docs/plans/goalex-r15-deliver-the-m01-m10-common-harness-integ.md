@@ -29,10 +29,22 @@ Previous rounds completed the closed ABI and remediation through PRs #79 and #80
 - [x] Review trust boundaries and failure paths: reject malformed or incomplete fixtures, digest mismatches, split overlap, missing manifest-owned artifacts, non-finite scores, and attempted claim escalation.
 
 ### Task 3: Prove the exact integration head
-- [ ] Run the focused M01, M10, public-runner, and closed-ABI tests plus Ruff and `git diff --check`; diagnose and fix failures at their shared root cause.
-- [ ] Run the applicable full pytest suite without launching official benchmarks, providers, containers, models, or measured pilot cells.
+- [x] Run the focused M01, M10, public-runner, and closed-ABI tests plus Ruff and `git diff --check`; diagnose and fix failures at their shared root cause.
+- [x] Attempt the applicable full pytest suite without launching official benchmarks, providers, containers, models, or measured pilot cells; after two unchanged-head attempts reproduced timeout-only failures in the out-of-lease certificate-rotator tests, prove the exact nodes on both the integration worktree and canonical main, record the local runtime gate, and do not launch another local full suite.
 - [ ] Inspect the final diff for accidental generated output, secrets, risky files, dependency/lockfile churn, duplicated lifecycle code, and changes outside the lease.
 - [ ] Record exact commands, passing counts, head SHA, development labels, and explicit deferrals; do not convert unit-contract evidence into admitted or measured benchmark evidence.
+
+Task 3 gate receipt: the 502-test focused selection, Ruff, ancestry, clean-tree,
+and diff checks passed on integration head `c9e7884e`. Two local full-suite
+attempts reached the out-of-lease production certificate-rotator block before
+reporting only fixed-15-second timeout failures. Three exact nodes passed
+immediately in isolation; the remaining publish-interrupt node passed unchanged
+on both canonical `main@28805ccf` and the integration worktree. A second clean
+full-suite attempt reproduced one timeout in the same region. This is a local
+runtime-capacity gate, not evidence of an M01/M10 regression. Do not spend a
+third broad local run on the unchanged candidate. Task 4 must use exact-head
+GitHub CI as the authoritative uncontended full-suite gate and must not merge
+unless that CI is green.
 
 ### Task 4: Deliver through normal review gates
 - [ ] Commit only necessary remediation, push normally, and open or update the integration PR targeting `main`; never force-push, bypass hooks, or write directly to main.
