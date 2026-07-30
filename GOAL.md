@@ -26,8 +26,12 @@ remain owned by:
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
-`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`, and the first closed-ABI slice was
-merged by PR #79 at `a95fe4d291093253f8ce49adff32ba875a35e884`:
+`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`. The closed ABI and bounded
+remediation merged through PRs #79-#80; reviewed development pilots M01/M10,
+M12/M13, M03, and M15 merged through PRs #81-#84. PR #85 froze the Phase
+13-15 execution contracts, and PR #86 merged the development-only scheduled
+regression workflow as
+`main@661343ce05186e9a7f0f0740d1edef7c23532857`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -39,14 +43,26 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**ABI slice delivered — post-merge remediation before result-v2.**
+**Phase 13 development-source lane delivered; reconcile truth before fresh admission.**
 
-WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
-reference validation landed at source head
-`8d64f554c565edeb0c43868ff6d436e6e09df33a`. The current bounded work is
-post-merge review remediation. The next dependency-ready slice is result-v2;
-the remaining pilot fixtures, scorers, sandbox receipts, and module execution
-are not complete and retain their existing gates.
+WMBS-A/WMB-P1 authority, traceability, the closed common ABI, fail-closed
+reference validation, and the bounded M01/M03/M10/M12/M13/M15 development
+pilots are merged through PR #84. PR #85 froze one Phase 13 plan, one Phase 14
+plan, and four ordered Phase 15 plans without claiming their gated evidence.
+PR #86 merged the two-file scheduled-regression source at exact head
+`baf5c1852593885e37eed75da69b02d93e1bff11`; manual development operability
+run `30561430522` and exact post-merge main CI run `30561266140` passed on the
+exact merge commit. The first actual scheduled-cadence receipt and every
+official/upstream benchmark run remain open.
+
+Result-v2 remains blocked by the protected signed-publication lease. Local OCI
+sandbox commits are reviewed development-source receipts only and remain
+quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
+enforcement receipt, SBOM, provenance, or admission evidence exists. The next
+package must be recomputed from current main and the committed dependency/write
+lease map at
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; neither
+result-v2 nor sandbox delivery is implicitly admitted.
 
 ## Scope
 
@@ -55,8 +71,10 @@ Once the activation gate passes:
 1. Reconcile the landed whole-memory standard against the current GSD state,
    roadmap, requirements, blueprint, PBPP, public harness, result-v1, ledger,
    custody, and publication contracts.
-2. Execute the owner-approved pilot plan in dependency order with one active
-   exact implementation lease at a time.
+2. Execute the owner-approved pilot plan in dependency order under one
+   lifecycle/integration owner. Admit parallel Worktrunk implementation lanes
+   only when the dependency map proves their exact write leases are disjoint;
+   shared schemas, registries, runners, planning, and docs stay serialized.
 3. Prefer the smallest feasible pilot: closed ABI and validators, development
    sandbox/metering receipt, existing public-runner registration, and only the
    explicitly authorized M01/M03-valid-time/M10/M12/M13/M15/M20 development
@@ -106,9 +124,10 @@ For every GoalEx round:
 2. Reject any task that is dependency-blocked, operator-gated, leased, stale,
    broader than an approved plan, or merely housekeeping when substantive
    dependency-ready product or benchmark engineering exists.
-3. Select exactly one highest-value task on an isolated Worktrunk branch with
-   an explicit file lease. Preserve unowned dirty work and prevent redundant
-   writers.
+3. Select the highest-value dependency-ready package set within the map's
+   sustained concurrency ceiling. Every lane uses an isolated Worktrunk and an
+   exact disjoint file lease; serialize on any path or ancestry overlap, and
+   preserve unowned dirty work.
 4. Apply Ponytail fully: reuse current contracts/code, then stdlib/platform,
    then installed dependencies; make the smallest tested root-cause change
    without speculative abstractions or dependencies.
@@ -119,12 +138,15 @@ For every GoalEx round:
    approved design/planning, isolated worktrees, TDD, debugging, execution,
    review, verification, or branch completion.
 7. Review trust boundaries, secrets, supply chain, failure modes, evidence
-   language, and result compatibility. Push normally; require a PR, exact-head
-   tests, review/thread/mergeability clearance, and post-merge `main` proof.
-   Never force-push, bypass hooks, dismiss findings, or write directly to main.
+   language, and result compatibility. Use focused tests during repair and one
+   authoritative full suite on each stable exact PR head; do not duplicate
+   broad suites across lanes. Push normally; require a PR, review/thread/
+   mergeability clearance, and post-merge `main` proof. Never force-push,
+   bypass hooks, dismiss findings, or write directly to main.
 8. After merge, safely fast-forward canonical local `main`, prove it equals
-   clean `origin/main`, refresh CBM once, and sync one deduplicated durable
-   Gbrain milestone rather than transient session facts.
+   clean `origin/main`, reconcile affected canonical truth, then refresh CBM
+   once and sync one deduplicated durable Gbrain milestone. Do not refresh both
+   before and after the same reconciliation.
 9. Update only affected GSD state, plans, canonical docs, architecture/ADRs,
    benchmark contracts, and the real owner-discovered wiki. Never create a
    second wiki, roadmap, memory owner, or duplicate canonical content.
@@ -148,11 +170,15 @@ For every GoalEx round:
 
 ## Success Evidence
 
-Achieved for the closed-ABI slice:
+Achieved for the current development-source milestone:
 
 - owner-landed hardened specification and implementation plan;
-- merged compound schema, reference validator, and focused contract fixtures;
-- normal PR #79 review, exact-head CI, merge, and post-merge main proof.
+- merged compound schema, reference validator, focused contract fixtures, and
+  bounded M01/M03/M10/M12/M13/M15 development pilots through PR #84;
+- frozen Phase 13-15 execution contracts through PR #85;
+- normal PR #86 exact-head CI/review/merge gates plus passing input-free manual
+  development operability run `30561430522` and passing exact post-merge main
+  CI run `30561266140`.
 
 The remaining whole-memory pilot milestone still requires:
 
@@ -179,7 +205,9 @@ test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
 test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
+git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
+git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
