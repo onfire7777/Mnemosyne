@@ -31,8 +31,8 @@ Previous rounds completed the closed ABI and remediation through PRs #79 and #80
 ### Task 3: Prove the exact integration head
 - [x] Run the focused M01, M10, public-runner, and closed-ABI tests plus Ruff and `git diff --check`; diagnose and fix failures at their shared root cause.
 - [x] Attempt the applicable full pytest suite without launching official benchmarks, providers, containers, models, or measured pilot cells; after two unchanged-head attempts reproduced timeout-only failures in the out-of-lease certificate-rotator tests, prove the exact nodes on both the integration worktree and canonical main, record the local runtime gate, and do not launch another local full suite.
-- [ ] Inspect the final diff for accidental generated output, secrets, risky files, dependency/lockfile churn, duplicated lifecycle code, and changes outside the lease.
-- [ ] Record exact commands, passing counts, head SHA, development labels, and explicit deferrals; do not convert unit-contract evidence into admitted or measured benchmark evidence.
+- [x] Inspect the final diff for accidental generated output, secrets, risky files, dependency/lockfile churn, duplicated lifecycle code, and changes outside the lease.
+- [x] Record exact commands, passing counts, head SHA, development labels, and explicit deferrals; do not convert unit-contract evidence into admitted or measured benchmark evidence.
 
 Task 3 gate receipt: the 502-test focused selection, Ruff, ancestry, clean-tree,
 and diff checks passed on integration head `c9e7884e`. Two local full-suite
@@ -47,7 +47,16 @@ GitHub CI as the authoritative uncontended full-suite gate and must not merge
 unless that CI is green.
 
 ### Task 4: Deliver through normal review gates
-- [ ] Commit only necessary remediation, push normally, and open or update the integration PR targeting `main`; never force-push, bypass hooks, or write directly to main.
-- [ ] Require exact-head CI, mergeability, security/review clearance, and zero unresolved exact-head review threads. Fix confirmed findings and rerun affected checks.
-- [ ] Merge only after all required exact-head gates are green; otherwise leave the PR open with the precise failing gate and next safe action.
-- [ ] After merge, prove clean canonical `main == origin/main`, verify exact-merge CI, refresh CBM once, update only affected canonical GSD/GoalEx status, and leave M03 valid-time integration as the next dependency-ready slice. Do not start it in this round.
+- [x] Commit only necessary remediation, push normally, and open or update the integration PR targeting `main`; never force-push, bypass hooks, or write directly to main.
+- [x] Require exact-head CI, mergeability, security/review clearance, and zero unresolved exact-head review threads. Fix confirmed findings and rerun affected checks.
+- [x] Merge only after all required exact-head gates are green; otherwise leave the PR open with the precise failing gate and next safe action.
+- [x] After merge, prove clean canonical `main == origin/main`, verify exact-merge CI, refresh CBM once, update only affected canonical GSD/GoalEx status, and record the next dependency-ready slice without starting it in this round.
+
+Task 4 delivery receipt: six confirmed in-lease findings were fixed at exact
+source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`. PR #81 merged that head to
+`main@392b1fc173f454893e1b133ff3a727462586a8b0`; exact-merge CI run
+`30506775012`, 507 focused tests, Ruff, diff/secret checks, canonical
+fast-forward, and the CBM refresh passed. M01 and M10 retain development-only,
+non-publishable labels. Bounded M03 valid-time integration is the next
+dependency-ready slice; result-v2 remains blocked by the protected
+signed-publication lease.

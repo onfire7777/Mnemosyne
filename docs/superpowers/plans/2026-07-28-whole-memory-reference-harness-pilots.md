@@ -90,7 +90,8 @@ remains `PILOT-READY-DEV` for the deterministic reader. Every development
 result remains `publishable:false` and `pbpp_headline_eligible:false`; no
 official, enhanced-successor, measured, PBPP, certification, publication, or
 headline claim advanced. Task 5, the bounded M03 valid-time integration, is
-the next dependency-ready slice. Full transaction-time M03 remains deferred.
+the next dependency-ready slice. Full transaction-time M03 remains deferred,
+and result-v2 remains blocked by the protected signed-publication lease.
 
 ## Pilot tranche order
 
@@ -116,11 +117,13 @@ the next dependency-ready slice. Full transaction-time M03 remains deferred.
 `8d64f554c565edeb0c43868ff6d436e6e09df33a`, merged by PR #79 at
 `a95fe4d291093253f8ce49adff32ba875a35e884`. Its bounded remediation merged by
 PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
-`30484986865` green. Result-v2 compatibility fixtures and local ledger support
-remain unimplemented and blocked by the protected signed-publication lease. The
-next dependency-ready increment is fresh-main common-harness integration of the
-reviewed M01 and M10 development cores. The sandbox branch stays quarantined
-until real OCI, filesystem, network, and write-boundary enforcement exists.
+`30484986865` green. PR #81 subsequently merged the reviewed M01/M10
+development pilots at `main@392b1fc1`; exact-merge CI run `30506775012`, 507
+focused tests, and Ruff passed. Bounded M03 valid-time integration is the next
+dependency-ready increment. The result-v2 schema and RED compatibility/ledger
+fixtures remain blocked by the protected signed-publication lease. The sandbox
+branch stays quarantined until real OCI, filesystem, network, and
+write-boundary enforcement exists.
 
 **Files:**
 
@@ -160,9 +163,11 @@ until real OCI, filesystem, network, and write-boundary enforcement exists.
 - Error codes: `INVALID_REQUEST`, `UNSUPPORTED_OPERATION`, `UNAUTHORIZED`,
   `CONFLICT`, `ORDER_VIOLATION`, `DEADLINE_EXCEEDED`, `RESOURCE_LIMIT`,
   `DEPENDENCY_UNAVAILABLE`, and `INTERNAL_ERROR`.
-- Freeze before any module cell: the M15 canonical/volatile-field projection
-  and the result-v2 fields, four digest meanings, version dispatch, and
-  append-only cross-version supersession semantics described in Task 10.
+- Freeze the M15 canonical/volatile-field projection before composed replay.
+  Freeze the result-v2 fields, four digest meanings, version dispatch, and
+  append-only cross-version supersession semantics described in Task 10 before
+  any M20, result-v2, admitted, measured, or publication work. The protected
+  result-v2 lease does not block development-only M03/M12/M13 cells.
 
 - [x] Write failing tests for every required field, unknown-field rejection,
       timezone-aware UTC normalization, bounded strings/arrays, finite numbers,
@@ -172,9 +177,11 @@ until real OCI, filesystem, network, and write-boundary enforcement exists.
       SPDX/license and data-rights declarations, PII/consent/takedown fields,
       baseline pins, inferential fields, sandbox/meter provenance, and
       digest-bound cross-references.
-- [ ] Write the result-v2 schema and RED compatibility/ledger fixtures before
-      any module implementation. These fixtures freeze the contract; Task 10
-      later completes validator/ledger/render code without changing them.
+- [ ] After the protected signed-publication lease is released, write the
+      result-v2 schema and RED compatibility/ledger fixtures before M20 or any
+      admitted/measured result-v2 work. These fixtures freeze the contract;
+      Task 10 later completes validator/ledger/render code without changing
+      them.
 - [ ] Add RED fixtures proving atomic attempts cannot contain aggregate
       metrics, official records fail without a complete fidelity manifest,
       successor records fail without a parent/difference manifest, and no
@@ -270,6 +277,12 @@ rank.
 
 ### Task 3: Register the common harness without creating a second runner
 
+**Partial delivery:** PR #81 registered the M01 and M10 development suites
+through the existing runner, scorer, bundle, and registry paths with independent
+manifest-owned fixture/scorer digests and fail-closed non-publishable labels.
+M03, M20, CLI isolation routing, sandbox/resource receipts, and admitted bundle
+execution remain unchecked below.
+
 **Files:**
 
 - Modify: `eval/public/runner.py`
@@ -326,6 +339,12 @@ manifest requires a new bundle schema version. Do not silently extend a closed
 shape.
 
 ### Task 4: Implement the M01 Local capture pilot
+
+**Partial delivery:** PR #81 delivered the pure M01 development fixture,
+capture gate, exact-duplicate handling, canonical replay, scorer, and focused
+tests at `PILOT-READY-DEV` for Local. CLI metadata widening, admitted resource
+receipts, measured execution, SQLite/P32, and process-kill durability remain
+deferred and unchecked below.
 
 **Files:**
 
@@ -421,6 +440,12 @@ Do not broaden this pilot to implement that product feature without a separate
 approved goal.
 
 ### Task 6: Implement the M10 deterministic abstention pilot
+
+**Partial delivery:** PR #81 delivered the deterministic reader, disjoint
+calibration/scored custody, useful-coverage gate, optional-confidence handling,
+baseline disclosures, fixture/scorer digest binding, and focused tests at
+`PILOT-READY-DEV`. Model-backed/judged QA, admitted resource receipts, measured
+execution, and population-inference claims remain deferred.
 
 **Files:**
 
@@ -568,8 +593,8 @@ earn M15.
 
 **Files:**
 
-- Modify only to resolve reviewed contract defects:
-  `leaderboard/schema/result-v2.schema.json` (created and frozen in Task 1)
+- Create after the protected signed-publication lease is released:
+  `leaderboard/schema/result-v2.schema.json`
 - Modify: `leaderboard/validate.py`
 - Modify: `leaderboard/ledger.py`
 - Modify: `leaderboard/render.py`
