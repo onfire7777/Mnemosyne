@@ -96,7 +96,7 @@ def run_m01_development(
 
     fixture = dict(m01.validate_fixture(benchmark))
     receipts = m01.perfect_receipts(fixture)
-    return [
+    traces = [
         {
             "case_id": m01.MODULE_ID,
             "clean_run_payloads": [receipts for _ in range(m01.MIN_CLEAN_REPLAY_RUNS)],
@@ -106,7 +106,10 @@ def run_m01_development(
             "scoring_family": "whole-memory-development",
             "stored_projection": m01.perfect_stored_projection(fixture),
         }
-    ], {}
+    ]
+    return traces, _canonical_replay_evidence(
+        "wmbs-m01-development", fixture, traces, [fixture["seed"]]
+    )
 
 
 def run_m10_development(
@@ -117,14 +120,19 @@ def run_m10_development(
 
     cases = [case for case in m10.load_cases(benchmark) if case.partition == "scored"]
     records = m10.run_baseline("full-context", cases)
-    return [
+    traces = [
         {
             "case_id": case.case_id,
             "scoring_family": "whole-memory-development",
             **record.to_dict(),
         }
         for case, record in zip(cases, records, strict=True)
-    ], {}
+    ]
+    seeds = benchmark.get("seeds", {})
+    seed_records = [*seeds.get("calibration", []), *seeds.get("scored", [])]
+    return traces, _canonical_replay_evidence(
+        "wmbs-m10-development", benchmark, traces, seed_records
+    )
 
 
 def run_m03_valid_time_development(
@@ -238,7 +246,173 @@ def run_m03_valid_time_development(
                     "timeline_id": timeline_id,
                 }
             )
-    return traces, {}
+    return traces, _canonical_replay_evidence(
+        "wmbs-m03-valid-time-development", benchmark, traces, seeds
+    )
+
+
+def run_m15_composed_development(
+    m01_fixture: dict[str, Any],
+    m03_fixture: dict[str, Any],
+    m10_fixture: dict[str, Any],
+    cli: MnemoCLI,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Compose the admitted deterministic pilots and replay them exactly."""
+    from eval.public import wmbs_m10 as m10
+    from eval.public.bundle import canonical_replay_fixture_custody
+
+    def run_once(run_cli: MnemoCLI) -> tuple[dict[str, Any], dict[str, Any]]:
+        m01_traces, m01_evidence = run_m01_development(m01_fixture, run_cli)
+        m03_traces, m03_evidence = run_m03_valid_time_development(
+            m03_fixture, run_cli
+        )
+        m10_traces, m10_evidence = run_m10_development(m10_fixture, run_cli)
+        return (
+            {"m01": m01_traces, "m03": m03_traces, "m10": m10_traces},
+            {
+                "m01": m01_evidence,
+                "m03": m03_evidence,
+                "m10": m10_evidence,
+            },
+        )
+
+    original, original_evidence = run_once(cli)
+    with TemporaryDirectory(prefix="mnemosyne-m15-composed-replay-") as directory:
+        replay, replay_evidence = run_once(
+            replace(cli, store=str(Path(directory) / "store.json"))
+        )
+
+    m01_receipts = original["m01"][0]["receipts"]
+    m10_cases = {
+        case.case_id: case
+        for case in m10.load_cases(m10_fixture)
+        if case.partition == "scored"
+    }
+    expected_m03 = {
+        f"{timeline['timeline_id']}:{seed}": {
+            "current_objects": [
+                value.format(seed=seed)
+                for value in timeline["expected_current_templates"]
+            ],
+            "history": [
+                {
+                    "as_of": query["as_of"],
+                    "objects": [
+                        value.format(seed=seed)
+                        for value in query["expected_object_templates"]
+                    ],
+                }
+                for query in timeline["history"]
+            ],
+        }
+        for timeline in m03_fixture["timelines"]
+        for seed in m03_fixture["seeds"]
+    }
+    m03_observations = {trace["case_id"]: trace for trace in original["m03"]}
+    gates = {
+        "deduplication_exact": (
+            any(receipt["outcome"] == "deduplicated" for receipt in m01_receipts)
+            and original["m01"][0]["stored_projection"]
+            == replay["m01"][0]["stored_projection"]
+        ),
+        "current_state_exact": all(
+            m03_observations[case_id]["current_objects"]
+            == expected["current_objects"]
+            for case_id, expected in expected_m03.items()
+        ),
+        "historical_state_exact": all(
+            m03_observations[case_id]["history"] == expected["history"]
+            for case_id, expected in expected_m03.items()
+        ),
+        "deterministic_answer_exact": all(
+            trace["answer_text"] == m10_cases[trace["case_id"]].gold_answer
+            and trace["abstained"] is False
+            for trace in original["m10"]
+            if m10_cases[trace["case_id"]].category == "answerable"
+        ),
+        "abstention_exact": all(
+            trace["answer_text"] is None and trace["abstained"] is True
+            for trace in original["m10"]
+            if m10_cases[trace["case_id"]].category == "unanswerable"
+        ),
+        "custody_complete": all(
+            canonical_replay_fixture_custody(evidence["canonical_replay_projection"])
+            for evidence in original_evidence.values()
+        ),
+        "canonical_equality": original_evidence == replay_evidence
+        and original == replay,
+    }
+    failed = [name for name, passed in gates.items() if not passed]
+    if failed:
+        raise ValueError(f"M15 composed exact gates failed: {', '.join(failed)}")
+
+    fixture_custody = {
+        "m01": canonical_sha256(m01_fixture),
+        "m03": canonical_sha256(m03_fixture),
+        "m10": canonical_sha256(m10_fixture),
+    }
+    traces = [{"original": original, "replay": replay}]
+    composed_projection = {
+        "fixture_custody": fixture_custody,
+        "rails": {
+            name: rail["canonical_replay_projection"]
+            for name, rail in original_evidence.items()
+        },
+        "sut_outputs": traces,
+    }
+    evidence = {
+        "canonical_replay_digest": canonical_sha256(composed_projection),
+        "canonical_replay_projection": composed_projection,
+        "exact_gates": gates,
+        "publishable": False,
+        "pbpp_headline_eligible": False,
+        "independent_external_reproduction": False,
+        "upstream_comparable": False,
+        "full_bitemporal_m03": False,
+        "transaction_time": m03_fixture["transaction_time"],
+    }
+    return traces, evidence
+
+
+def _canonical_replay_evidence(
+    suite: str,
+    benchmark: dict[str, Any],
+    traces: list[dict[str, Any]],
+    seeds: list[int],
+) -> dict[str, Any]:
+    """Bind deterministic adapter output to the shared M15 projection."""
+    from eval.public.bundle import canonical_replay_digest, canonical_replay_projection
+
+    fixture_digest = canonical_sha256(benchmark)
+    generator = {
+        key: benchmark.get(key)
+        for key in ("generator_id", "generator_version", "schema_id")
+    }
+    payload = {
+        "abi_schema": f"{PROTOCOL_VERSION}@sha256:{hashlib.sha256(_SCHEMA_PATH.read_bytes()).hexdigest()}",
+        "build": {"system_seam": "harness-owned-reference-core"},
+        "config": {"locale": "C", "timezone": "UTC"},
+        "fixture": f"{suite}@sha256:{fixture_digest}",
+        "judge": {"judge": None, "reader": None},
+        "manifests": {
+            "bundle_manifest_sha256": canonical_sha256(
+                {"fixture_sha256": fixture_digest, "suite": suite, "traces": traces}
+            ),
+            "fixture_manifest_sha256": fixture_digest,
+            "generator_manifest_sha256": canonical_sha256(generator),
+        },
+        "metrics": {},
+        "seed_records": list(seeds),
+        "suite": suite,
+        "sut_outputs": traces,
+        "traces": traces,
+        "volatile": {},
+    }
+    projection = canonical_replay_projection(payload)
+    return {
+        "canonical_replay_digest": canonical_replay_digest(payload),
+        "canonical_replay_projection": projection,
+    }
 
 
 _READINESS_STATES = {
