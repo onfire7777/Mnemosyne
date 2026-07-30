@@ -566,6 +566,11 @@ def _keys(value: object) -> set[str]:
     return set()
 
 
+def _cost_like_keys(value: object) -> set[str]:
+    """Every key at any nesting depth that could carry cost evidence."""
+    return {key for key in _keys(value) if "cost" in key.lower()}
+
+
 def _load_committed_fixture(name: str) -> dict[str, object]:
     return json.loads((_FIXTURES_DIR / name).read_text())
 
@@ -597,16 +602,33 @@ def test_committed_pm_bench_and_triggerbench_fixtures_freeze_shape_seed_and_cust
 
 def test_committed_fixtures_run_and_freeze_lateness_and_cost_gaps() -> None:
     """Run the committed fixtures through the public adapter seam and freeze the
-    honest scoring gaps: a lateness counter exists but is never exercised
-    positively by these development fixtures, cost coverage is entirely
-    absent, and ``regularity: recurring`` is retained for classification.
+    honest scoring gaps: this single, perfectly-served run reports zero
+    ``late`` safety-counter hits (not "never possible" — a controlled
+    mutation below against the exact committed PM-Bench fixture shows
+    ``late`` is directly reachable, so the zero reflects an easy fixture
+    rather than an inert counter), no key anywhere in the metrics or trace
+    payloads carries cost evidence, and ``regularity: recurring`` is
+    retained for classification.
     """
     pm = _load_committed_fixture("pm-bench-development.json")
     pm_benchmark, pm_traces, pm_metrics = run(pm, _cli(pm))
     assert "late" in pm_metrics["safety_counts"]
     assert pm_metrics["safety_counts"]["late"] == 0
-    assert "cost" not in pm_metrics
-    assert not any("cost" in trace for trace in pm_traces)
+    assert not _cost_like_keys(pm_metrics)
+    assert not _cost_like_keys(pm_traces)
+
+    late_probe = copy.deepcopy(pm)
+    late_case = late_probe["cases"][0]
+    late_step = late_case["steps"][1]
+    late_step["available_actions"].append(
+        {"action_id": "action-0", "opaque_token": "opaque-action-0"}
+    )
+    late_cli = _cli(late_probe)
+    late_key = (late_case["tenant_id"], late_case["session_id"])
+    late_cli.responses[late_key][1] = ["action-0"]
+    with pytest.raises(ActionProbeError, match="late"):
+        run(late_probe, late_cli)
+
     regularity_rows = {
         row["value"]: row
         for row in pm_metrics["category_rows"]
@@ -626,8 +648,8 @@ def test_committed_fixtures_run_and_freeze_lateness_and_cost_gaps() -> None:
     tb_benchmark, tb_traces, tb_metrics = run(tb, _cli(tb))
     assert "late" in tb_metrics["safety_counts"]
     assert tb_metrics["safety_counts"]["late"] == 0
-    assert "cost" not in tb_metrics
-    assert not any("cost" in trace for trace in tb_traces)
+    assert not _cost_like_keys(tb_metrics)
+    assert not _cost_like_keys(tb_traces)
     for flag in (
         "publishable",
         "headline_eligible",
@@ -689,7 +711,11 @@ def test_action_cli_represents_pm_bench_lifecycle_and_ticks_without_forwarding_r
     } <= fired
     schedule_calls = [args for command, args in commands if command == "intention-schedule"]
     assert len(schedule_calls) == 5
-    assert not any("--regularity" in args or "recurring" in args for args in schedule_calls)
+    assert not any(
+        "regularity" in arg or "recurring" in arg
+        for args in schedule_calls
+        for arg in args
+    )
     evaluated_times = [
         args[args.index("--evaluated-at") + 1]
         for command, args in commands
