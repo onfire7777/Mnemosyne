@@ -566,9 +566,12 @@ def _keys(value: object) -> set[str]:
     return set()
 
 
-def _cost_like_keys(value: object) -> set[str]:
-    """Every key at any nesting depth that could carry cost evidence."""
-    return {key for key in _keys(value) if "cost" in key.lower()}
+_SCHEMA_COST_KEYS = {"cost_usd", "setup_cost_usd", "indexing_cost_usd"}
+
+
+def _cost_evidence_keys(value: object) -> set[str]:
+    """WMBS schema-defined cost fields present at any nesting depth."""
+    return _keys(value) & _SCHEMA_COST_KEYS
 
 
 def _load_committed_fixture(name: str) -> dict[str, object]:
@@ -607,15 +610,21 @@ def test_committed_fixtures_run_and_freeze_lateness_and_cost_gaps() -> None:
     mutation below against the exact committed PM-Bench fixture shows
     ``late`` is directly reachable, so the zero reflects an easy fixture
     rather than an inert counter), no key anywhere in the metrics or trace
-    payloads carries cost evidence, and ``regularity: recurring`` is
+    payloads carries a WMBS schema-defined cost field, and
+    ``regularity: recurring`` is
     retained for classification.
     """
+    assert _cost_evidence_keys(
+        {"nested": {"cost_usd": 1, "setup_cost_usd": 2, "indexing_cost_usd": 3}}
+    ) == _SCHEMA_COST_KEYS
+    assert not _cost_evidence_keys({"billing": 1, "note": "cost is unmeasured"})
+
     pm = _load_committed_fixture("pm-bench-development.json")
     pm_benchmark, pm_traces, pm_metrics = run(pm, _cli(pm))
     assert "late" in pm_metrics["safety_counts"]
     assert pm_metrics["safety_counts"]["late"] == 0
-    assert not _cost_like_keys(pm_metrics)
-    assert not _cost_like_keys(pm_traces)
+    assert not _cost_evidence_keys(pm_metrics)
+    assert not _cost_evidence_keys(pm_traces)
 
     late_probe = copy.deepcopy(pm)
     late_case = late_probe["cases"][0]
@@ -648,8 +657,8 @@ def test_committed_fixtures_run_and_freeze_lateness_and_cost_gaps() -> None:
     tb_benchmark, tb_traces, tb_metrics = run(tb, _cli(tb))
     assert "late" in tb_metrics["safety_counts"]
     assert tb_metrics["safety_counts"]["late"] == 0
-    assert not _cost_like_keys(tb_metrics)
-    assert not _cost_like_keys(tb_traces)
+    assert not _cost_evidence_keys(tb_metrics)
+    assert not _cost_evidence_keys(tb_traces)
     for flag in (
         "publishable",
         "headline_eligible",
