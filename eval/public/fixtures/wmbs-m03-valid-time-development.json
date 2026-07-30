@@ -1,6 +1,9 @@
 {
+  "admission_state": "PROPOSED",
   "comparability": "proposed-non-comparable",
   "fixture_id": "wmbs-m03-valid-time-development",
+  "headline_eligible": false,
+  "independent_reproduction": false,
   "module_id": "M03",
   "publishable": false,
   "schema_id": "wmbs-m03-valid-time-development/fixture/0.1",
@@ -73,5 +76,6 @@
   "transaction_time": {
     "reason": "transaction-time is system-owned and not exposed by this development cell",
     "supported": false
-  }
+  },
+  "upstream_comparable": false
 }

@@ -36,6 +36,14 @@ _MAX_RETAINED_BYTES = 64 * 1024 * 1024
 _MAX_JSON_DEPTH = 64
 _MAX_RESULT_V1_METRICS = 1000
 _STRING_CHUNK_SIZE = 64 * 1024
+_M03_TIMELINE_IDS = (
+    "ordered-events",
+    "late-event",
+    "retroactive-correction",
+    "exact-boundary",
+    "tied-valid-time",
+)
+_M03_SEEDS = (11, 23, 37, 53, 71)
 _EVIDENCE_DEFINITIONS = {
     "AdapterContract",
     "DataSourceContract",
@@ -121,20 +129,33 @@ def run_m03_valid_time_development(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Exercise the proposed M03 valid-time cell through the public CLI only."""
     required = {
+        "admission_state": "PROPOSED",
         "comparability": "proposed-non-comparable",
         "fixture_id": "wmbs-m03-valid-time-development",
+        "headline_eligible": False,
+        "independent_reproduction": False,
         "module_id": "M03",
         "publishable": False,
         "track": "DEVELOPMENT",
+        "upstream_comparable": False,
     }
     if any(benchmark.get(key) != value for key, value in required.items()):
         raise ValueError("invalid M03 valid-time development fixture labels")
+    timelines = benchmark.get("timelines")
+    seeds = benchmark.get("seeds")
+    if (
+        not isinstance(timelines, list)
+        or tuple(item.get("timeline_id") for item in timelines) != _M03_TIMELINE_IDS
+        or not isinstance(seeds, list)
+        or tuple(seeds) != _M03_SEEDS
+    ):
+        raise ValueError("invalid M03 valid-time canonical matrix")
 
     def run_matrix(matrix_cli: object) -> dict[str, dict[str, Any]]:
         observations: dict[str, dict[str, Any]] = {}
-        for timeline in benchmark.get("timelines", []):
+        for timeline in timelines:
             timeline_id = timeline["timeline_id"]
-            for seed in benchmark.get("seeds", []):
+            for seed in seeds:
                 case_id = f"{timeline_id}:{seed}"
                 subject = f"M03 valid-time development:{timeline_id}:{seed}"
                 last_id: str | None = None
@@ -195,9 +216,9 @@ def run_m03_valid_time_development(
         replay = run_matrix(replace(cli, store=str(Path(directory) / "store.json")))
 
     traces: list[dict[str, Any]] = []
-    for timeline in benchmark.get("timelines", []):
+    for timeline in timelines:
         timeline_id = timeline["timeline_id"]
-        for seed in benchmark.get("seeds", []):
+        for seed in seeds:
             case_id = f"{timeline_id}:{seed}"
             observation = original[case_id]
             replay_observation = replay[case_id]

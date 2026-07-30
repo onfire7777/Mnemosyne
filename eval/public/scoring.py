@@ -17,6 +17,14 @@ from eval.public.adapters.working_memory_action_probe import score as score_work
 
 BOOTSTRAP_ITERATIONS = 2_000
 BOOTSTRAP_SEED = 1_234
+_M03_TIMELINE_IDS = (
+    "ordered-events",
+    "late-event",
+    "retroactive-correction",
+    "exact-boundary",
+    "tied-valid-time",
+)
+_M03_SEEDS = (11, 23, 37, 53, 71)
 
 
 class ScoringError(ValueError):
@@ -154,19 +162,30 @@ def _score_wmbs_m03_valid_time(
     if not isinstance(fixture, dict):
         raise ScoringError("M03 valid-time development fixture is missing")
     required = {
+        "admission_state": "PROPOSED",
         "comparability": "proposed-non-comparable",
         "fixture_id": "wmbs-m03-valid-time-development",
+        "headline_eligible": False,
+        "independent_reproduction": False,
         "module_id": "M03",
         "publishable": False,
         "track": "DEVELOPMENT",
+        "upstream_comparable": False,
     }
     if any(fixture.get(key) != value for key, value in required.items()):
         raise ScoringError("M03 valid-time development labels are invalid")
 
-    timelines = {
-        timeline["timeline_id"]: timeline for timeline in fixture.get("timelines", [])
-    }
+    timeline_rows = fixture.get("timelines")
     seeds = fixture.get("seeds")
+    if (
+        not isinstance(timeline_rows, list)
+        or tuple(item.get("timeline_id") for item in timeline_rows)
+        != _M03_TIMELINE_IDS
+        or not isinstance(seeds, list)
+        or tuple(seeds) != _M03_SEEDS
+    ):
+        raise ScoringError("M03 valid-time fixture does not define the canonical matrix")
+    timelines = {timeline["timeline_id"]: timeline for timeline in timeline_rows}
     expected_ids = {
         f"{timeline_id}:{seed}" for timeline_id in timelines for seed in seeds
     }
@@ -232,9 +251,12 @@ def _score_wmbs_m03_valid_time(
         "stale_current_leakage": stale_current_leakage,
     }
     return {
+        "admission_state": fixture["admission_state"],
         "comparability": fixture["comparability"],
         "family": "whole-memory-development",
         "full_bitemporal_m03": False,
+        "headline_eligible": fixture["headline_eligible"],
+        "independent_reproduction": fixture["independent_reproduction"],
         "interval": {"method": "descriptive"},
         "metrics": metrics,
         "passed": (
@@ -249,6 +271,7 @@ def _score_wmbs_m03_valid_time(
         "total": history_total,
         "trace_count": len(traces),
         "track": fixture["track"],
+        "upstream_comparable": fixture["upstream_comparable"],
     }
 
 
