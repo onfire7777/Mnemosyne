@@ -69,6 +69,27 @@ class BundleError(ValueError):
     """Bundle failed closed under the public custody contract."""
 
 
+def canonical_replay_fixture_custody(payload: object) -> bool:
+    """Validate that the closed fixture reference is bound to its manifest."""
+    if not isinstance(payload, dict):
+        raise BundleError("canonical replay payload must be an object")
+    suite = payload.get("suite")
+    fixture = payload.get("fixture")
+    manifests = payload.get("manifests")
+    if not isinstance(fixture, str):
+        raise BundleError("fixture reference custody is incomplete")
+    fixture_suite, separator, fixture_digest = fixture.rpartition("@sha256:")
+    if (
+        separator != "@sha256:"
+        or fixture_suite != suite
+        or re.fullmatch(r"[0-9a-f]{64}", fixture_digest) is None
+        or not isinstance(manifests, dict)
+        or fixture_digest != manifests.get("fixture_manifest_sha256")
+    ):
+        raise BundleError("fixture manifest custody does not match fixture reference")
+    return True
+
+
 def canonical_replay_projection(payload: object) -> object:
     """Return the deterministic M15 equality projection after custody checks."""
     if not isinstance(payload, dict):
@@ -99,6 +120,7 @@ def canonical_replay_projection(payload: object) -> object:
         )
     ):
         raise BundleError("manifests custody is incomplete")
+    canonical_replay_fixture_custody(payload)
     config = payload.get("config")
     if not isinstance(config, dict) or config.get("locale") != "C":
         raise BundleError("locale must be frozen to C")
