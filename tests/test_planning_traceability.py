@@ -125,11 +125,16 @@ def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
         PHASE_15_S4_PLAN.read_text(encoding="utf-8"), "requirements"
     ) == {"CAP-006", "CAP-011", "RAIL-001", "RAIL-002", "RAIL-003", "RAIL-004"}
     roadmap = V2_ROADMAP.read_text(encoding="utf-8")
+    phase_15_roadmap = roadmap.split("### Phase 15:", 1)[1].split(
+        "\n### Phase 16:", 1
+    )[0]
     assert (
         "**Requirements:** CAP-004..011, CAP-012, CAP-013, RAIL-001..004"
-        in roadmap
+        in phase_15_roadmap
     )
-    assert "remaining Phase 15 items (CAP-004..011) stay planned" in roadmap
+    assert (
+        "remaining Phase 15 items (CAP-004..011) stay planned" in phase_15_roadmap
+    )
 
 
 def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
