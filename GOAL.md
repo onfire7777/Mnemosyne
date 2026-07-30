@@ -34,7 +34,9 @@ development pilots merged by PR #81 at
 development-evidence confirmations merged by PR #82 at
 `7e9cd01feb2a31cbba96252943697245a4edd024`. The bounded M03 valid-time
 development slice then merged by PR #83 at
-`7f60d8ba8274a8ac8036a80737467654f862008f`:
+`7f60d8ba8274a8ac8036a80737467654f862008f`, and the M15 canonical replay
+pilot merged by PR #84 at
+`e0dd41594cec890f598718160f919c13eee1e552`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -46,7 +48,7 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**Bounded M03 valid-time slice delivered — M15 composed replay slice next.**
+**M15 composed replay slice delivered — next package under fresh admission.**
 
 WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
 reference validation landed through PR #80. PR #81 then merged exact M01/M10
@@ -73,14 +75,19 @@ transaction-time/bitemporal M03 remains deferred, and the result remains
 non-upstream-comparable.
 
 The committed dependency/write-lease map remains the admission authority. The
-highest-value dependency-ready package is now M15 canonical replay and the
-composed M01→M03→M10 development slice. It has this exact shared-file lease,
-owned only by the integration owner:
+M15 canonical replay and composed M01→M03→M10 development cassette merged by
+PR #84 as `main@e0dd41594cec890f598718160f919c13eee1e552`. The implementation
+enforces canonical output and fixture binding across seven joint rails:
+deduplication, current state, historical state, deterministic answer,
+abstention, custody completeness, and canonical equality. It remains
+development-only, non-publishable, non-headline-eligible, non-independent, and
+non-upstream-comparable. Exact executable-build provenance and Task 11
+measured/operator evidence remain deferred.
 
-- `eval/public/bundle.py`
-- `eval/public/adapters/whole_memory_reference.py`
-- `tests/test_public_whole_memory_reference.py`
-- `tests/test_public_eval.py`
+No successor source package is admitted merely because M15 merged. GoalEx must
+re-read current main, live writers/PRs, and the dependency/write-lease map,
+then choose the highest-value dependency-ready exact-disjoint package. Shared
+runner/schema/registry/planning surfaces remain integration-owner-only.
 
 Result-v2 remains blocked by the protected signed-publication lease, and the
 sandbox lane remains quarantined until it provides real OCI, filesystem,

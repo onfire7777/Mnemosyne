@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "PR #83 delivered the bounded M03 valid-time development slice. M15 canonical replay and the composed M01-M03-M10 development slice are next; result-v2, sandbox, measurement, and launch gates remain blocked as documented."
-last_updated: "2026-07-30T10:39:14Z"
+stopped_at: "PR #84 delivered M15 canonical replay and the composed M01-M03-M10 development cassette to main. The next package requires fresh dependency/write-lease admission; result-v2, sandbox, measurement, and launch gates remain blocked as documented."
+last_updated: "2026-07-30T12:37:59Z"
 last_activity: 2026-07-30
 progress:
   total_phases: 7
@@ -39,10 +39,11 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-30 — PR #83 merged the bounded M03 valid-time
-development slice as `main@7f60d8ba`; exact-head CI run `30532543366` and
-exact-merge CI run `30534061552` passed. M03 remains `PROPOSED` and bounded to
-valid-time behavior; no measured, publishable, PBPP, or headline claim changed.
+Last activity: 2026-07-30 — PR #84 merged the M15 canonical replay pilot and
+composed M01→M03→M10 development cassette as `main@e0dd4159`. Exact-head CI,
+independent review, and mergeability gates passed; post-merge CI run
+`30543119233` is the exact-main receipt. M15 remains development-only and no
+measured, publishable, PBPP, official-upstream, or headline claim changed.
 
 ## Parallel Phase 16 Source Status
 
@@ -87,8 +88,16 @@ focused M03 tests, Ruff, and `git diff --check` passed. The cell remains
 `admission_state=PROPOSED`, `publishable:false`, `headline_eligible:false`,
 `independent_reproduction:false`, and `upstream_comparable:false`. It supports
 only the bounded valid-time slice; transaction-time queries and full
-bitemporality remain deferred. M15 canonical replay and the composed
-M01→M03→M10 development slice are now the next dependency-ready package.
+bitemporality remain deferred. PR #84 then merged M15 canonical replay and the
+composed M01→M03→M10 development cassette as
+`main@e0dd41594cec890f598718160f919c13eee1e552`. The cassette binds its fixture
+suite and manifest digest and jointly enforces deduplication, current state,
+historical state, deterministic answer, abstention, custody completeness, and
+canonical equality. It remains development-only, non-publishable,
+non-headline-eligible, non-independent, and non-upstream-comparable. Exact
+executable-build provenance and Task 11 measured/operator evidence remain
+deferred. The next source package requires a fresh dependency/write-lease
+admission; result-v2 and sandbox retain their stated blockers.
 
 ## Performance Metrics
 
@@ -120,7 +129,7 @@ M01→M03→M10 development slice are now the next dependency-ready package.
 
 ### Decisions
 
-- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 merged bounded M12/M13 evidence to `main@7e9cd01feb2a31cbba96252943697245a4edd024`; PR #83 merged bounded M03 valid-time source head `3189cc24c570f12be06e3d04252a06f48c71f971` to `main@7f60d8ba8274a8ac8036a80737467654f862008f`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, and all results remain non-publishable. M15 composed replay is next; result-v2 and sandbox retain their stated blockers.
+- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 merged bounded M12/M13 evidence to `main@7e9cd01feb2a31cbba96252943697245a4edd024`; PR #83 merged bounded M03 valid-time source head `3189cc24c570f12be06e3d04252a06f48c71f971` to `main@7f60d8ba8274a8ac8036a80737467654f862008f`; PR #84 merged M15 canonical replay and the composed M01→M03→M10 cassette to `main@e0dd41594cec890f598718160f919c13eee1e552`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, M15 remains development-only, and all results remain non-publishable. The next package requires fresh dependency/write-lease admission; result-v2 and sandbox retain their stated blockers.
 - [Phase 12]: W1 local development is complete through the baseline, Fix A, and Fix B receipts, but it does not close CAP-003, BENCH-005, or Plan 12-04 without production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt.
 - [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@0784340` (Phase 1 hardening had landed earlier via PR #37 `7a1db210`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
 - [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@7a1db210`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
