@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "M01/M10 development pilots merged through PR #81 at main@392b1fc1; M03 valid-time integration is the next dependency-ready slice. Result-v2, sandbox enforcement, Phase 12 measurement, and Phase 16 launch/publication gates remain open."
-last_updated: "2026-07-30T02:07:58Z"
+stopped_at: "M01/M10 development pilots merged through PR #81 at main@392b1fc1; M03 valid-time integration is the next dependency-ready slice. Result-v2 remains blocked by the protected signed-publication lease; sandbox enforcement, Phase 12 measurement, and Phase 16 launch/publication gates remain open."
+last_updated: "2026-07-30T06:19:37Z"
 last_activity: 2026-07-29
 progress:
   total_phases: 7
@@ -67,8 +67,9 @@ passed; Ruff passed. M01 and the deterministic M10 reader retain
 `PILOT-READY-DEV`, while every result remains `publishable:false` and
 `pbpp_headline_eligible:false`. The next dependency-ready slice is bounded M03
 valid-time integration; full transaction-time M03 remains deferred. Result-v2
-and sandbox enforcement remain separate blocked work. No benchmark, launch, or
-publication gate advanced.
+remains blocked by the protected signed-publication lease, and sandbox
+enforcement remains quarantined. No benchmark, launch, or publication gate
+advanced.
 
 ## Performance Metrics
 
@@ -260,16 +261,8 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 Current continuation: see **Latest checkpoint** below.
 
-Latest checkpoint (2026-07-29): PR #81 merged the reviewed M01/M10 development
-pilots from exact source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`
-to `main@392b1fc173f454893e1b133ff3a727462586a8b0`. Exact-merge CI run
-`30506775012` completed successfully, and the focused M01/M10/public-eval/
-reference suite passed 507 tests with Ruff green. CBM was refreshed once after
-canonical main reached the merge head; CBM 0.8.1 reports the project ready but
-does not expose a stored Git revision. M01 and the deterministic M10 reader
-retain `PILOT-READY-DEV`; every result remains `publishable:false` and
-`pbpp_headline_eligible:false`. M03 valid-time integration is the next
-dependency-ready slice; full transaction-time M03 remains deferred.
+Latest checkpoint (2026-07-29): see **Whole-Memory Pilot Status** above for the
+PR #81 delivery receipt and exact continuation gate.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
