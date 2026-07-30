@@ -101,7 +101,7 @@ surprise-gated writes, security/calibration evidence, performance/scale
 closure, the cartridge A/B, and the activation-memory go/no-go research note.
 It also closes the physical 8 GiB compact grounded-QA path without weakening
 the shared quality or custody gates.
-**Requirements:** CAP-004..010, CAP-012, CAP-013, RAIL-001..004
+**Requirements:** CAP-004..011, CAP-012, CAP-013, RAIL-001..004
 **Depends on:** Phases 10-14
 **Plans:** Not planned
 
