@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "M01/M10 development pilots merged through PR #81 at main@392b1fc1; M03 valid-time integration is the next dependency-ready slice. Result-v2 remains blocked by the protected signed-publication lease; sandbox enforcement, Phase 12 measurement, and Phase 16 launch/publication gates remain open."
-last_updated: "2026-07-30T06:19:37Z"
+stopped_at: "M03 remains PROPOSED and blocked because the mapped lease excludes the authorized MemoryTools valid_from write path; reviewed M12/M13 test-only confirmation integration is next. Result-v2 remains protected, and sandbox/measurement/launch gates remain open."
+last_updated: "2026-07-30T06:35:27Z"
 last_activity: 2026-07-29
 progress:
   total_phases: 7
@@ -41,8 +41,10 @@ Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
 Last activity: 2026-07-29 — PR #81 merged the M01/M10 development pilots to
 `main@392b1fc1`; exact-merge CI run `30506775012` and 507 focused tests passed.
-M03 valid-time integration is next; no measured, publishable, PBPP, or headline
-claim changed.
+Round 18 proved the mapped M03 lease excludes the authorized
+`MemoryTools` valid-time write path, so M03 remains `PROPOSED` and blocked.
+Reviewed M12/M13 test-only confirmation integration is next; no measured,
+publishable, PBPP, or headline claim changed.
 
 ## Parallel Phase 16 Source Status
 
@@ -65,11 +67,12 @@ PR #81 merged exact source head
 `30506775012` and the 507-test focused M01/M10/public-eval/reference suite
 passed; Ruff passed. M01 and the deterministic M10 reader retain
 `PILOT-READY-DEV`, while every result remains `publishable:false` and
-`pbpp_headline_eligible:false`. The next dependency-ready slice is bounded M03
-valid-time integration; full transaction-time M03 remains deferred. Result-v2
-remains blocked by the protected signed-publication lease, and sandbox
-enforcement remains quarantined. No benchmark, launch, or publication gate
-advanced.
+`pbpp_headline_eligible:false`. Bounded M03 is blocked because the committed
+lease excludes `src/mnemosyne/mcp_tools.py`, whose authorized assertion and
+supersession methods cannot currently persist caller-supplied `valid_from`.
+Reviewed M12/M13 test-only confirmation integration is next. Result-v2 remains
+blocked by the protected signed-publication lease, and sandbox enforcement
+remains quarantined. No benchmark, launch, or publication gate advanced.
 
 ## Performance Metrics
 

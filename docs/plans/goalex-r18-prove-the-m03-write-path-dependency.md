@@ -7,6 +7,12 @@ The authoritative M03 lease contains exactly seven paths: `eval/public/fixtures/
 
 Current evidence shows the public CLI delegates assertion and supersession writes to `MemoryTools.assert_fact` and `MemoryTools.supersede` in excluded `src/mnemosyne/mcp_tools.py`. Neither method accepts or assigns `Assertion.valid_from`. Direct engine access from the CLI or adapter would bypass the shared authorization/write contract and is forbidden. This round must independently reproduce that dependency and return it without implementation, failing tests, or lease widening. No independent review findings require adjudication.
 
+**Outcome (2026-07-30):** The exact checkout, graph trace, symbol trace, and
+cleanliness checks confirmed this dependency without repository changes. The
+bounded RalphEx child was stopped after it began retrying only because its
+generic completion contract expected an edit. M03 remains `PROPOSED`; the
+lease was not widened.
+
 ## Validation Commands
 - `test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne" && test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot" && test -z "$(git status --porcelain)"`
 - `test "$(git rev-parse main)" = "392b1fc173f454893e1b133ff3a727462586a8b0" && test "$(git rev-parse origin/main)" = "$(git rev-parse main)"`
@@ -17,13 +23,13 @@ Current evidence shows the public CLI delegates assertion and supersession write
 - `git diff --check && test -z "$(git status --porcelain)"`
 
 ### Task 1: Reproduce the lease-blocking dependency
-- [ ] Verify the root, branch, clean state, canonical `main`, and the seven-path lease using the validation commands; do not fetch, branch, edit, or commit.
-- [ ] Trace `cmd_assert` and `cmd_supersede` through `MemoryTools.assert_fact` and `MemoryTools.supersede`, confirming that neither shared write method accepts `valid_from` nor assigns it to the constructed `Assertion`.
-- [ ] Confirm that adding only CLI flags or `MnemoCLI` wrapper parameters would be inert, while direct `tools.engine` access would bypass the existing authorization and shared write path.
-- [ ] Confirm that the fixture, adapter, and scorer cannot produce honest ordered/late/retroactive valid-time traces until the write surface can persist caller-supplied `valid_from`.
+- [x] Verify the root, branch, clean state, canonical `main`, and the seven-path lease using the validation commands; do not fetch, branch, edit, or commit.
+- [x] Trace `cmd_assert` and `cmd_supersede` through `MemoryTools.assert_fact` and `MemoryTools.supersede`, confirming that neither shared write method accepts `valid_from` nor assigns it to the constructed `Assertion`.
+- [x] Confirm that adding only CLI flags or `MnemoCLI` wrapper parameters would be inert, while direct `tools.engine` access would bypass the existing authorization and shared write path.
+- [x] Confirm that the fixture, adapter, and scorer cannot produce honest ordered/late/retroactive valid-time traces until the write surface can persist caller-supplied `valid_from`.
 
 ### Task 2: Fail closed with the exact admission request
-- [ ] Make no repository changes and leave the worktree clean.
-- [ ] Return the exact blocker: M03 requires owner authorization to add `src/mnemosyne/mcp_tools.py` to the lease so `MemoryTools.assert_fact` and `MemoryTools.supersede` can accept, validate, and assign timezone-aware `valid_from`.
-- [ ] Explicitly reject direct engine access, internal validity-table mutation, registry/runner changes, a second M03 module, transaction-time semantics, and shared-documentation edits.
-- [ ] State that M03 remains unimplemented and `PROPOSED`; do not claim pilot readiness, measured evidence, publication eligibility, or completion.
+- [x] Make no repository changes and leave the worktree clean.
+- [x] Return the exact blocker: M03 requires owner authorization to add `src/mnemosyne/mcp_tools.py` to the lease so `MemoryTools.assert_fact` and `MemoryTools.supersede` can accept, validate, and assign timezone-aware `valid_from`.
+- [x] Explicitly reject direct engine access, internal validity-table mutation, registry/runner changes, a second M03 module, transaction-time semantics, and shared-documentation edits.
+- [x] State that M03 remains unimplemented and `PROPOSED`; do not claim pilot readiness, measured evidence, publication eligibility, or completion.
