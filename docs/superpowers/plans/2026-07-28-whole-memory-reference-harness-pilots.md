@@ -502,16 +502,16 @@ any applicable baseline is absent, M10 stays `PROPOSED`.
 - Modify: `tests/test_public_pm_bench_triggerbench.py`
 - Modify: `eval/public/README.md`
 
-- [ ] Re-run the existing PM-Bench and TriggerBench development tests unchanged
+- [x] Re-run the existing PM-Bench and TriggerBench development tests unchanged
       before editing.
-- [ ] Verify schedule/update/cancel/tick request fields, virtual time, and
+- [x] Verify schedule/update/cancel/tick request fields, virtual time, and
       idempotent test-sink behavior that the current code actually exposes.
-- [ ] Unit-check the existing adapter/fixture contracts. Defer isolated
+- [x] Unit-check the existing adapter/fixture contracts. Defer isolated
       measured runs and reproduction of `pm-bench-development` and
       `triggerbench-development` to Task 11.
-- [ ] Record the exact fixture counts, steps, unsupported recurrence field,
+- [x] Record the exact fixture counts, steps, unsupported recurrence field,
       baseline absence, and missing lateness/cost coverage.
-- [ ] Do not add a synthetic recurrence implementation merely to pass the
+- [x] Do not add a synthetic recurrence implementation merely to pass the
       benchmark.
 
 **Acceptance evidence:** Existing unit contracts remain green and a gap
@@ -533,15 +533,15 @@ Official PM-Bench/TriggerBench names also require upstream pins and rights.
 - Modify: `tests/test_public_working_memory_action_probe.py`
 - Modify: `eval/public/README.md`
 
-- [ ] Re-run the existing working-memory action tests unchanged before editing.
-- [ ] Verify session/tenant isolation, expiry, bounded capacity, and the
+- [x] Re-run the existing working-memory action tests unchanged before editing.
+- [x] Verify session/tenant isolation, expiry, bounded capacity, and the
       existing prohibition on automatic promotion.
-- [ ] Unit-check the existing adapter/fixture contract. Defer the isolated
+- [x] Unit-check the existing adapter/fixture contract. Defer the isolated
       measured run and reproduction of `working-memory-action-development` to
       Task 11.
-- [ ] Record the current seed count, capacity setting, case count, and absence
+- [x] Record the current seed count, capacity setting, case count, and absence
       of a promotion-versus-no-promotion control.
-- [ ] Do not infer promotion utility from “automatic promotion blocked.”
+- [x] Do not infer promotion utility from “automatic promotion blocked.”
 
 **Acceptance evidence:** Green unit contract plus explicit gap disclosure.
 After Task 11 produces an admitted reproducible bundle, record zero observed

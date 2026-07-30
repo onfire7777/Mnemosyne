@@ -27,7 +27,7 @@ Preserve `admission_state=PROPOSED`, `evidence_level=INTERNALLY_MEASURED`, `publ
 - [x] Inspect all current-head reviews, unresolved threads, security findings, required checks, and mergeability conditions. If GitHub remains unreachable, canonical `main` advanced incompatibly, or remediation needs files outside the lease, stop with the exact blocker.
 
 ### Task 2: Merge and prove the revised candidate
-- [ ] Require every exact-head check and review gate to finish green for `a3ca8108`; if a confirmed two-file fix changes the SHA, restart exact-head verification against the new SHA.
-- [ ] Merge normally without force-push, hook bypass, direct-to-main writes, or loss of reviewed ancestry.
-- [ ] Require exact post-merge `main` CI to pass, safely fast-forward clean canonical `/Users/admin/Mnemosyne`, and prove `main == origin/main` and contains `a3ca8108`.
-- [ ] Refresh CBM once after merge and record one deduplicated Gbrain milestone plus affected canonical GSD/pilot status using the PR, final candidate SHA, merge SHA, exact-head and exact-merge CI runs, focused-test receipt, and unchanged non-publishable boundaries.
+- [x] Require every exact-head check and review gate to finish green for `a3ca8108`; if a confirmed two-file fix changes the SHA, restart exact-head verification against the new SHA.
+- [x] Merge normally without force-push, hook bypass, direct-to-main writes, or loss of reviewed ancestry.
+- [x] Require exact post-merge `main` CI to pass, safely fast-forward clean canonical `/Users/admin/Mnemosyne`, and prove `main == origin/main` and contains `a3ca8108`.
+- [x] Refresh CBM once after merge and record one deduplicated Gbrain milestone plus affected canonical GSD/pilot status using the PR, final candidate SHA, merge SHA, exact-head and exact-merge CI runs, focused-test receipt, and unchanged non-publishable boundaries.

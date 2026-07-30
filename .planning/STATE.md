@@ -39,12 +39,10 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-29 — PR #81 merged the M01/M10 development pilots to
-`main@392b1fc1`; exact-merge CI run `30506775012` and 507 focused tests passed.
-Round 18 proved the mapped M03 lease excludes the authorized
-`MemoryTools` valid-time write path, so M03 remains `PROPOSED` and blocked.
-Reviewed M12/M13 test-only confirmation integration is next; no measured,
-publishable, PBPP, or headline claim changed.
+Last activity: 2026-07-30 — PR #82 merged the bounded M12/M13 development
+evidence confirmations as `main@7e9cd01f`; exact-head CI run `30521721192`,
+exact-merge CI run `30522846090`, and 46 focused tests passed. M12/M13 remain
+`PROPOSED`; no measured, publishable, PBPP, or headline claim changed.
 
 ## Parallel Phase 16 Source Status
 
@@ -70,9 +68,18 @@ passed; Ruff passed. M01 and the deterministic M10 reader retain
 `pbpp_headline_eligible:false`. Bounded M03 is blocked because the committed
 lease excludes `src/mnemosyne/mcp_tools.py`, whose authorized assertion and
 supersession methods cannot currently persist caller-supplied `valid_from`.
-Reviewed M12/M13 test-only confirmation integration is next. Result-v2 remains
-blocked by the protected signed-publication lease, and sandbox enforcement
-remains quarantined. No benchmark, launch, or publication gate advanced.
+PR #82 then merged final candidate
+`a3ca8108c22de350810dc3f574931a0d85810ed5` as
+`main@7e9cd01feb2a31cbba96252943697245a4edd024`. Exact-head CI run
+`30521721192`, exact-merge CI run `30522846090`, and the 46-test focused
+M12/M13 public-action suite passed; focused Ruff and `git diff --check` passed.
+M12 and M13 remain `admission_state=PROPOSED` and
+`evidence_level=INTERNALLY_MEASURED`; `publishable:false`,
+`headline_eligible:false`, `independent_reproduction:false`, and
+`upstream_comparable:false` remain unchanged. Result-v2 remains blocked by the
+protected signed-publication lease, and sandbox enforcement remains
+quarantined. No official run, measured pilot cell, recurrence or promotion
+work, benchmark, launch, certification, ranking, or publication gate advanced.
 
 ## Performance Metrics
 
@@ -264,8 +271,8 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 Current continuation: see **Latest checkpoint** below.
 
-Latest checkpoint (2026-07-29): see **Whole-Memory Pilot Status** above for the
-PR #81 delivery receipt and exact continuation gate.
+Latest checkpoint (2026-07-30): see **Whole-Memory Pilot Status** above for the
+PR #81 and PR #82 delivery receipts and unchanged evidence boundaries.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
