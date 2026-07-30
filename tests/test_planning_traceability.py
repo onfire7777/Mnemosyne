@@ -17,6 +17,12 @@ PHASE_15_S4_PLAN = (
 )
 ARCHITECTURE_OVERVIEW = ROOT / "docs" / "ARCHITECTURE-OVERVIEW.md"
 ENGINE_CONTRACT = ROOT / "docs" / "ENGINE-CONTRACT.md"
+DEPENDENCY_LEASE_MAP = (
+    ROOT
+    / "docs"
+    / "coordination"
+    / "2026-07-28-remaining-dependency-write-lease-map.md"
+)
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
@@ -89,6 +95,18 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     ids = set(ID_PATTERN.findall(text))
     assert {f"REQ-{index:03d}" for index in range(1, 19)} <= ids
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
+
+
+def test_phase_13_truth_lease_names_existing_authoritative_files() -> None:
+    text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    for relative_path in (
+        ".planning/phases/13-external-benchmark-adapters-and-scheduled-ci/"
+        "13-01-PLAN.md",
+        ".planning/phases/13-external-benchmark-adapters-and-scheduled-ci/"
+        "13-01-SUMMARY.md",
+    ):
+        assert f"`{relative_path}`" in text
+        assert (ROOT / relative_path).is_file()
 
 
 def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
