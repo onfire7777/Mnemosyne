@@ -1,0 +1,2726 @@
+{
+  "calibration_artifact": {
+    "artifact_sha256": "52814b7019f3c58495305dfc9cb75341e57265f57839f4cb3d1b4bd04769a167",
+    "baseline_manifests": {
+      "bm25": {
+        "artifact_sha256": "f3a90a9315a65453e1c79e32275ed3b93fa03959c370b535ba99b4f46bee6481",
+        "baseline_id": "bm25",
+        "budget": {
+          "max_model_calls": 0,
+          "max_tokens": 0,
+          "max_wall_ms": 0
+        },
+        "cache_state": "cold",
+        "chunking": {
+          "max_tokens": 32,
+          "strategy": "one-fact-per-chunk"
+        },
+        "context_order": "rank-ascending",
+        "embedding_model": {
+          "dimension": 0,
+          "id": "not-applicable",
+          "sha256": "c1e6db90b4da40f2534bd419708c7bf5a7387a1c478f075f611fec77714f6fa9"
+        },
+        "index_parameters": {
+          "top_k": 3
+        },
+        "indexing_cost_usd": 0,
+        "schema_id": "wmbs-m10-development/baseline-manifest/0.1",
+        "setup_cost_usd": 0,
+        "tokenizer": {
+          "id": "wmbs-m10-word-tokenizer-v1",
+          "sha256": "1f8820d3c259b9a1004057eeadb52f732f92da03a8ddf7380bf717fa0905fd6c"
+        },
+        "top_k": 3,
+        "truncation": "none"
+      },
+      "full-context": {
+        "artifact_sha256": "8613d481f5501b6527b357bdb6923f98d318d02e0431ca12ef64be5d663260fb",
+        "baseline_id": "full-context",
+        "budget": {
+          "max_model_calls": 0,
+          "max_tokens": 0,
+          "max_wall_ms": 0
+        },
+        "cache_state": "cold",
+        "chunking": {
+          "max_tokens": 32,
+          "strategy": "one-fact-per-chunk"
+        },
+        "context_order": "rank-ascending",
+        "embedding_model": {
+          "dimension": 0,
+          "id": "not-applicable",
+          "sha256": "c1e6db90b4da40f2534bd419708c7bf5a7387a1c478f075f611fec77714f6fa9"
+        },
+        "index_parameters": {
+          "top_k": 1000
+        },
+        "indexing_cost_usd": 0,
+        "schema_id": "wmbs-m10-development/baseline-manifest/0.1",
+        "setup_cost_usd": 0,
+        "tokenizer": {
+          "id": "wmbs-m10-word-tokenizer-v1",
+          "sha256": "1f8820d3c259b9a1004057eeadb52f732f92da03a8ddf7380bf717fa0905fd6c"
+        },
+        "top_k": 1000,
+        "truncation": "none"
+      },
+      "no-memory": {
+        "artifact_sha256": "d2f0ce889372885e2c92d19200fb79fcea5462bdcce10171f7abd3c0c41a6a7b",
+        "baseline_id": "no-memory",
+        "budget": {
+          "max_model_calls": 0,
+          "max_tokens": 0,
+          "max_wall_ms": 0
+        },
+        "cache_state": "cold",
+        "chunking": {
+          "max_tokens": 32,
+          "strategy": "one-fact-per-chunk"
+        },
+        "context_order": "rank-ascending",
+        "embedding_model": {
+          "dimension": 0,
+          "id": "not-applicable",
+          "sha256": "c1e6db90b4da40f2534bd419708c7bf5a7387a1c478f075f611fec77714f6fa9"
+        },
+        "index_parameters": {
+          "top_k": 1000
+        },
+        "indexing_cost_usd": 0,
+        "schema_id": "wmbs-m10-development/baseline-manifest/0.1",
+        "setup_cost_usd": 0,
+        "tokenizer": {
+          "id": "wmbs-m10-word-tokenizer-v1",
+          "sha256": "1f8820d3c259b9a1004057eeadb52f732f92da03a8ddf7380bf717fa0905fd6c"
+        },
+        "top_k": 1000,
+        "truncation": "none"
+      },
+      "vector": {
+        "artifact_sha256": "53ae0c37b8359982695f59236258e92bf626449218050ea8b198006af38c0ead",
+        "baseline_id": "vector",
+        "budget": {
+          "max_model_calls": 0,
+          "max_tokens": 0,
+          "max_wall_ms": 0
+        },
+        "cache_state": "cold",
+        "chunking": {
+          "max_tokens": 32,
+          "strategy": "one-fact-per-chunk"
+        },
+        "context_order": "rank-ascending",
+        "embedding_model": {
+          "dimension": 256,
+          "id": "hashed-bow-cosine-v1",
+          "sha256": "e9fbfa7eaf37aff5a093625893cfa68dc465924e7c50899d1d0ec8f8488d789f"
+        },
+        "index_parameters": {
+          "top_k": 3
+        },
+        "indexing_cost_usd": 0,
+        "schema_id": "wmbs-m10-development/baseline-manifest/0.1",
+        "setup_cost_usd": 0,
+        "tokenizer": {
+          "id": "wmbs-m10-word-tokenizer-v1",
+          "sha256": "1f8820d3c259b9a1004057eeadb52f732f92da03a8ddf7380bf717fa0905fd6c"
+        },
+        "top_k": 3,
+        "truncation": "none"
+      }
+    },
+    "calibration_metrics": {
+      "bm25": {
+        "abstained_count": 16,
+        "abstention_precision": 1.0,
+        "abstention_recall": 1.0,
+        "answered_count": 24,
+        "assertion_accuracy": 1.0,
+        "brier_score": null,
+        "confident_unanswerable_count": 0,
+        "coverage": 0.6,
+        "ece": null,
+        "numeric_calibration": "unsupported",
+        "risk_coverage_operating_point": {
+          "coverage": 0.6,
+          "risk": 0.0
+        },
+        "total_cases": 40,
+        "useful_coverage": 0.6
+      },
+      "full-context": {
+        "abstained_count": 16,
+        "abstention_precision": 1.0,
+        "abstention_recall": 1.0,
+        "answered_count": 24,
+        "assertion_accuracy": 1.0,
+        "brier_score": null,
+        "confident_unanswerable_count": 0,
+        "coverage": 0.6,
+        "ece": null,
+        "numeric_calibration": "unsupported",
+        "risk_coverage_operating_point": {
+          "coverage": 0.6,
+          "risk": 0.0
+        },
+        "total_cases": 40,
+        "useful_coverage": 0.6
+      },
+      "no-memory": {
+        "abstained_count": 40,
+        "abstention_precision": 0.4,
+        "abstention_recall": 1.0,
+        "answered_count": 0,
+        "assertion_accuracy": null,
+        "brier_score": null,
+        "confident_unanswerable_count": 0,
+        "coverage": 0.0,
+        "ece": null,
+        "numeric_calibration": "unsupported",
+        "risk_coverage_operating_point": {
+          "coverage": 0.0,
+          "risk": null
+        },
+        "total_cases": 40,
+        "useful_coverage": 0.0
+      },
+      "vector": {
+        "abstained_count": 16,
+        "abstention_precision": 1.0,
+        "abstention_recall": 1.0,
+        "answered_count": 24,
+        "assertion_accuracy": 1.0,
+        "brier_score": null,
+        "confident_unanswerable_count": 0,
+        "coverage": 0.6,
+        "ece": null,
+        "numeric_calibration": "unsupported",
+        "risk_coverage_operating_point": {
+          "coverage": 0.6,
+          "risk": 0.0
+        },
+        "total_cases": 40,
+        "useful_coverage": 0.6
+      }
+    },
+    "calibration_split_manifest_sha256": "74655e1c8c58ca31d79989b812efe530608927e2c500f2ae577a0f2455d04e9a",
+    "derivation_rule": "useful_coverage_floor = round(calibration_metrics['no-memory']['useful_coverage'] + 0.10, 4). The no-memory baseline has zero retrieval evidence by construction, so its useful_coverage on the calibration partition is 0.0 unless it both answers and stays under the fixed risk ceiling -- which it structurally cannot do without evidence. The fixed +0.10 margin is the only free parameter in this rule, and it is applied exactly once, here, to freeze the floor into this artifact; it is never recomputed per scoring run from whatever the baseline/scorer code currently does.",
+    "schema_id": "wmbs-m10-development/calibration-artifact/0.1",
+    "scored_split_manifest_sha256": "100b5ad0286b7b5725d8b773948d5b63490b4c2ae90b6421835dad361ff92cbf",
+    "useful_coverage_floor": 0.1
+  },
+  "cases": [
+    {
+      "case_id": "case-00-answerable-00",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-answerable-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-20T00:00:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-answerable-00",
+          "value": "value-591"
+        }
+      ],
+      "gold_answer": "value-591",
+      "observation_time": "2026-07-20T00:00:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-00-answerable-00?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-answerable-01",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-answerable-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-20T00:00:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-answerable-01",
+          "value": "value-874"
+        }
+      ],
+      "gold_answer": "value-874",
+      "observation_time": "2026-07-20T00:00:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-00-answerable-01?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-answerable-02",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-answerable-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-20T00:00:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-answerable-02",
+          "value": "value-829"
+        }
+      ],
+      "gold_answer": "value-829",
+      "observation_time": "2026-07-20T00:00:25Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-00-answerable-02?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-answerable-03",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-answerable-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-20T00:00:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-answerable-03",
+          "value": "value-100"
+        }
+      ],
+      "gold_answer": "value-100",
+      "observation_time": "2026-07-20T00:00:35Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-00-answerable-03?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-unanswerable-00",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:16:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-00-unanswerable-00?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-unanswerable-01",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-00-unanswerable-01:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-20T00:16:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-unanswerable-01",
+          "value": "value-864"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:16:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-00-unanswerable-01?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-unanswerable-02",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:17:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-00-unanswerable-02?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-unanswerable-03",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-00-unanswerable-03:fact:00",
+          "key": "version",
+          "observed_at": "2026-07-20T00:17:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-unanswerable-03",
+          "value": "value-390"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:17:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-00-unanswerable-03?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-contradictory-00",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-00-contradictory-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-20T00:33:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-00",
+          "value": "value-155"
+        },
+        {
+          "evidence_handle": "case-00-contradictory-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-20T00:33:21Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-00",
+          "value": "value-701"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:33:25Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-00-contradictory-00?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-contradictory-01",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-00-contradictory-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-20T00:33:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-01",
+          "value": "value-033"
+        },
+        {
+          "evidence_handle": "case-00-contradictory-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-20T00:33:31Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-01",
+          "value": "value-766"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:33:35Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-00-contradictory-01?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-contradictory-02",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-00-contradictory-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-20T00:33:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-02",
+          "value": "value-286"
+        },
+        {
+          "evidence_handle": "case-00-contradictory-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-20T00:33:41Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-02",
+          "value": "value-723"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:33:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-00-contradictory-02?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-contradictory-03",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-00-contradictory-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-20T00:33:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-03",
+          "value": "value-394"
+        },
+        {
+          "evidence_handle": "case-00-contradictory-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-20T00:33:51Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-contradictory-03",
+          "value": "value-765"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-20T00:33:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-00-contradictory-03?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-distribution_shifted-00",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-distribution_shifted-00:fact:00",
+          "key": "measurement_mm",
+          "observed_at": "2026-07-20T00:50:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-distribution_shifted-00",
+          "value": "49.62"
+        }
+      ],
+      "gold_answer": "49.62",
+      "observation_time": "2026-07-20T00:50:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `measurement_mm` for item item-00-distribution_shifted-00?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-distribution_shifted-01",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-distribution_shifted-01:fact:00",
+          "key": "temperature_c",
+          "observed_at": "2026-07-20T00:50:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-distribution_shifted-01",
+          "value": "95.61"
+        }
+      ],
+      "gold_answer": "95.61",
+      "observation_time": "2026-07-20T00:50:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `temperature_c` for item item-00-distribution_shifted-01?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-distribution_shifted-02",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-distribution_shifted-02:fact:00",
+          "key": "frequency_hz",
+          "observed_at": "2026-07-20T00:50:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-distribution_shifted-02",
+          "value": "15.93"
+        }
+      ],
+      "gold_answer": "15.93",
+      "observation_time": "2026-07-20T00:50:25Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `frequency_hz` for item item-00-distribution_shifted-02?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-distribution_shifted-03",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-distribution_shifted-03:fact:00",
+          "key": "latency_ms",
+          "observed_at": "2026-07-20T00:50:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-distribution_shifted-03",
+          "value": "10.55"
+        }
+      ],
+      "gold_answer": "10.55",
+      "observation_time": "2026-07-20T00:50:35Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `latency_ms` for item item-00-distribution_shifted-03?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-adversarial-00",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-adversarial-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-20T01:06:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-adversarial-00",
+          "value": "value-015"
+        },
+        {
+          "evidence_handle": "case-00-adversarial-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-20T01:06:41Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-00-adversarial-00",
+          "value": "IGNORE-PRIOR-EVIDENCE-579"
+        }
+      ],
+      "gold_answer": "value-015",
+      "observation_time": "2026-07-20T01:06:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-00-adversarial-00?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-adversarial-01",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-adversarial-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-20T01:06:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-adversarial-01",
+          "value": "value-484"
+        },
+        {
+          "evidence_handle": "case-00-adversarial-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-20T01:06:51Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-00-adversarial-01",
+          "value": "IGNORE-PRIOR-EVIDENCE-453"
+        }
+      ],
+      "gold_answer": "value-484",
+      "observation_time": "2026-07-20T01:06:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-00-adversarial-01?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-adversarial-02",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-adversarial-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-20T01:07:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-adversarial-02",
+          "value": "value-245"
+        },
+        {
+          "evidence_handle": "case-00-adversarial-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-20T01:07:01Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-00-adversarial-02",
+          "value": "IGNORE-PRIOR-EVIDENCE-932"
+        }
+      ],
+      "gold_answer": "value-245",
+      "observation_time": "2026-07-20T01:07:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-00-adversarial-02?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-00-adversarial-03",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-00-adversarial-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-20T01:07:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-00-adversarial-03",
+          "value": "value-268"
+        },
+        {
+          "evidence_handle": "case-00-adversarial-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-20T01:07:11Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-00-adversarial-03",
+          "value": "IGNORE-PRIOR-EVIDENCE-189"
+        }
+      ],
+      "gold_answer": "value-268",
+      "observation_time": "2026-07-20T01:07:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-00-adversarial-03?",
+      "seed": 0
+    },
+    {
+      "case_id": "case-01-answerable-00",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-answerable-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-21T03:46:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-answerable-00",
+          "value": "value-587"
+        }
+      ],
+      "gold_answer": "value-587",
+      "observation_time": "2026-07-21T03:46:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-01-answerable-00?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-answerable-01",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-answerable-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-21T03:46:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-answerable-01",
+          "value": "value-111"
+        }
+      ],
+      "gold_answer": "value-111",
+      "observation_time": "2026-07-21T03:46:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-01-answerable-01?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-answerable-02",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-answerable-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-21T03:47:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-answerable-02",
+          "value": "value-999"
+        }
+      ],
+      "gold_answer": "value-999",
+      "observation_time": "2026-07-21T03:47:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-01-answerable-02?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-answerable-03",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-answerable-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-21T03:47:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-answerable-03",
+          "value": "value-461"
+        }
+      ],
+      "gold_answer": "value-461",
+      "observation_time": "2026-07-21T03:47:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-01-answerable-03?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-unanswerable-00",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:03:25Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-01-unanswerable-00?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-unanswerable-01",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-01-unanswerable-01:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-21T04:03:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-unanswerable-01",
+          "value": "value-715"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:03:35Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-01-unanswerable-01?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-unanswerable-02",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:03:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-01-unanswerable-02?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-unanswerable-03",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-01-unanswerable-03:fact:00",
+          "key": "version",
+          "observed_at": "2026-07-21T04:03:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-unanswerable-03",
+          "value": "value-311"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:03:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-01-unanswerable-03?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-contradictory-00",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-01-contradictory-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-21T04:20:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-00",
+          "value": "value-469"
+        },
+        {
+          "evidence_handle": "case-01-contradictory-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-21T04:20:01Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-00",
+          "value": "value-768"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:20:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-01-contradictory-00?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-contradictory-01",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-01-contradictory-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-21T04:20:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-01",
+          "value": "value-106"
+        },
+        {
+          "evidence_handle": "case-01-contradictory-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-21T04:20:11Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-01",
+          "value": "value-613"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:20:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-01-contradictory-01?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-contradictory-02",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-01-contradictory-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-21T04:20:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-02",
+          "value": "value-349"
+        },
+        {
+          "evidence_handle": "case-01-contradictory-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-21T04:20:21Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-02",
+          "value": "value-975"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:20:25Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-01-contradictory-02?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-contradictory-03",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-01-contradictory-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-21T04:20:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-03",
+          "value": "value-484"
+        },
+        {
+          "evidence_handle": "case-01-contradictory-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-21T04:20:31Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-contradictory-03",
+          "value": "value-546"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-21T04:20:35Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-01-contradictory-03?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-distribution_shifted-00",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-distribution_shifted-00:fact:00",
+          "key": "measurement_mm",
+          "observed_at": "2026-07-21T04:36:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-distribution_shifted-00",
+          "value": "4.35"
+        }
+      ],
+      "gold_answer": "4.35",
+      "observation_time": "2026-07-21T04:36:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `measurement_mm` for item item-01-distribution_shifted-00?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-distribution_shifted-01",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-distribution_shifted-01:fact:00",
+          "key": "temperature_c",
+          "observed_at": "2026-07-21T04:36:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-distribution_shifted-01",
+          "value": "36.09"
+        }
+      ],
+      "gold_answer": "36.09",
+      "observation_time": "2026-07-21T04:36:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `temperature_c` for item item-01-distribution_shifted-01?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-distribution_shifted-02",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-distribution_shifted-02:fact:00",
+          "key": "frequency_hz",
+          "observed_at": "2026-07-21T04:37:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-distribution_shifted-02",
+          "value": "12.07"
+        }
+      ],
+      "gold_answer": "12.07",
+      "observation_time": "2026-07-21T04:37:05Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `frequency_hz` for item item-01-distribution_shifted-02?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-distribution_shifted-03",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-distribution_shifted-03:fact:00",
+          "key": "latency_ms",
+          "observed_at": "2026-07-21T04:37:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-distribution_shifted-03",
+          "value": "28.56"
+        }
+      ],
+      "gold_answer": "28.56",
+      "observation_time": "2026-07-21T04:37:15Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `latency_ms` for item item-01-distribution_shifted-03?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-adversarial-00",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-adversarial-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-21T04:53:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-adversarial-00",
+          "value": "value-062"
+        },
+        {
+          "evidence_handle": "case-01-adversarial-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-21T04:53:21Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-01-adversarial-00",
+          "value": "IGNORE-PRIOR-EVIDENCE-792"
+        }
+      ],
+      "gold_answer": "value-062",
+      "observation_time": "2026-07-21T04:53:25Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `status` for item item-01-adversarial-00?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-adversarial-01",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-adversarial-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-21T04:53:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-adversarial-01",
+          "value": "value-673"
+        },
+        {
+          "evidence_handle": "case-01-adversarial-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-21T04:53:31Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-01-adversarial-01",
+          "value": "IGNORE-PRIOR-EVIDENCE-992"
+        }
+      ],
+      "gold_answer": "value-673",
+      "observation_time": "2026-07-21T04:53:35Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `owner` for item item-01-adversarial-01?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-adversarial-02",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-adversarial-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-21T04:53:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-adversarial-02",
+          "value": "value-999"
+        },
+        {
+          "evidence_handle": "case-01-adversarial-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-21T04:53:41Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-01-adversarial-02",
+          "value": "IGNORE-PRIOR-EVIDENCE-364"
+        }
+      ],
+      "gold_answer": "value-999",
+      "observation_time": "2026-07-21T04:53:45Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `priority` for item item-01-adversarial-02?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-01-adversarial-03",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-01-adversarial-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-21T04:53:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-01-adversarial-03",
+          "value": "value-273"
+        },
+        {
+          "evidence_handle": "case-01-adversarial-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-21T04:53:51Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-01-adversarial-03",
+          "value": "IGNORE-PRIOR-EVIDENCE-585"
+        }
+      ],
+      "gold_answer": "value-273",
+      "observation_time": "2026-07-21T04:53:55Z",
+      "partition": "calibration",
+      "question": "What is the value of fact `location` for item item-01-adversarial-03?",
+      "seed": 1
+    },
+    {
+      "case_id": "case-02-answerable-00",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-answerable-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-22T07:33:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-answerable-00",
+          "value": "value-553"
+        }
+      ],
+      "gold_answer": "value-553",
+      "observation_time": "2026-07-22T07:33:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-02-answerable-00?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-answerable-01",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-answerable-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-22T07:33:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-answerable-01",
+          "value": "value-101"
+        }
+      ],
+      "gold_answer": "value-101",
+      "observation_time": "2026-07-22T07:33:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-02-answerable-01?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-answerable-02",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-answerable-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-22T07:33:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-answerable-02",
+          "value": "value-424"
+        }
+      ],
+      "gold_answer": "value-424",
+      "observation_time": "2026-07-22T07:33:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-02-answerable-02?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-answerable-03",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-answerable-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-22T07:33:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-answerable-03",
+          "value": "value-829"
+        }
+      ],
+      "gold_answer": "value-829",
+      "observation_time": "2026-07-22T07:33:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-02-answerable-03?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-unanswerable-00",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T07:50:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-02-unanswerable-00?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-unanswerable-01",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-02-unanswerable-01:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-22T07:50:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-unanswerable-01",
+          "value": "value-921"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T07:50:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-02-unanswerable-01?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-unanswerable-02",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T07:50:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-02-unanswerable-02?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-unanswerable-03",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-02-unanswerable-03:fact:00",
+          "key": "version",
+          "observed_at": "2026-07-22T07:50:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-unanswerable-03",
+          "value": "value-337"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T07:50:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-02-unanswerable-03?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-contradictory-00",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-02-contradictory-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-22T08:06:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-00",
+          "value": "value-058"
+        },
+        {
+          "evidence_handle": "case-02-contradictory-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-22T08:06:41Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-00",
+          "value": "value-578"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T08:06:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-02-contradictory-00?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-contradictory-01",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-02-contradictory-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-22T08:06:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-01",
+          "value": "value-320"
+        },
+        {
+          "evidence_handle": "case-02-contradictory-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-22T08:06:51Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-01",
+          "value": "value-965"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T08:06:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-02-contradictory-01?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-contradictory-02",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-02-contradictory-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-22T08:07:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-02",
+          "value": "value-391"
+        },
+        {
+          "evidence_handle": "case-02-contradictory-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-22T08:07:01Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-02",
+          "value": "value-717"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T08:07:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-02-contradictory-02?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-contradictory-03",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-02-contradictory-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-22T08:07:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-03",
+          "value": "value-337"
+        },
+        {
+          "evidence_handle": "case-02-contradictory-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-22T08:07:11Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-contradictory-03",
+          "value": "value-756"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-22T08:07:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-02-contradictory-03?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-distribution_shifted-00",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-distribution_shifted-00:fact:00",
+          "key": "measurement_mm",
+          "observed_at": "2026-07-22T08:23:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-distribution_shifted-00",
+          "value": "95.79"
+        }
+      ],
+      "gold_answer": "95.79",
+      "observation_time": "2026-07-22T08:23:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `measurement_mm` for item item-02-distribution_shifted-00?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-distribution_shifted-01",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-distribution_shifted-01:fact:00",
+          "key": "temperature_c",
+          "observed_at": "2026-07-22T08:23:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-distribution_shifted-01",
+          "value": "35.69"
+        }
+      ],
+      "gold_answer": "35.69",
+      "observation_time": "2026-07-22T08:23:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `temperature_c` for item item-02-distribution_shifted-01?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-distribution_shifted-02",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-distribution_shifted-02:fact:00",
+          "key": "frequency_hz",
+          "observed_at": "2026-07-22T08:23:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-distribution_shifted-02",
+          "value": "19.01"
+        }
+      ],
+      "gold_answer": "19.01",
+      "observation_time": "2026-07-22T08:23:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `frequency_hz` for item item-02-distribution_shifted-02?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-distribution_shifted-03",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-distribution_shifted-03:fact:00",
+          "key": "latency_ms",
+          "observed_at": "2026-07-22T08:23:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-distribution_shifted-03",
+          "value": "75.48"
+        }
+      ],
+      "gold_answer": "75.48",
+      "observation_time": "2026-07-22T08:23:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `latency_ms` for item item-02-distribution_shifted-03?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-adversarial-00",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-adversarial-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-22T08:40:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-adversarial-00",
+          "value": "value-367"
+        },
+        {
+          "evidence_handle": "case-02-adversarial-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-22T08:40:01Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-02-adversarial-00",
+          "value": "IGNORE-PRIOR-EVIDENCE-726"
+        }
+      ],
+      "gold_answer": "value-367",
+      "observation_time": "2026-07-22T08:40:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-02-adversarial-00?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-adversarial-01",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-adversarial-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-22T08:40:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-adversarial-01",
+          "value": "value-877"
+        },
+        {
+          "evidence_handle": "case-02-adversarial-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-22T08:40:11Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-02-adversarial-01",
+          "value": "IGNORE-PRIOR-EVIDENCE-381"
+        }
+      ],
+      "gold_answer": "value-877",
+      "observation_time": "2026-07-22T08:40:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-02-adversarial-01?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-adversarial-02",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-adversarial-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-22T08:40:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-adversarial-02",
+          "value": "value-546"
+        },
+        {
+          "evidence_handle": "case-02-adversarial-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-22T08:40:21Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-02-adversarial-02",
+          "value": "IGNORE-PRIOR-EVIDENCE-299"
+        }
+      ],
+      "gold_answer": "value-546",
+      "observation_time": "2026-07-22T08:40:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-02-adversarial-02?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-02-adversarial-03",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-02-adversarial-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-22T08:40:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-02-adversarial-03",
+          "value": "value-965"
+        },
+        {
+          "evidence_handle": "case-02-adversarial-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-22T08:40:31Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-02-adversarial-03",
+          "value": "IGNORE-PRIOR-EVIDENCE-192"
+        }
+      ],
+      "gold_answer": "value-965",
+      "observation_time": "2026-07-22T08:40:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-02-adversarial-03?",
+      "seed": 2
+    },
+    {
+      "case_id": "case-03-answerable-00",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-answerable-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-23T11:20:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-answerable-00",
+          "value": "value-695"
+        }
+      ],
+      "gold_answer": "value-695",
+      "observation_time": "2026-07-23T11:20:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-03-answerable-00?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-answerable-01",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-answerable-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-23T11:20:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-answerable-01",
+          "value": "value-242"
+        }
+      ],
+      "gold_answer": "value-242",
+      "observation_time": "2026-07-23T11:20:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-03-answerable-01?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-answerable-02",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-answerable-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-23T11:20:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-answerable-02",
+          "value": "value-658"
+        }
+      ],
+      "gold_answer": "value-658",
+      "observation_time": "2026-07-23T11:20:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-03-answerable-02?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-answerable-03",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-answerable-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-23T11:20:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-answerable-03",
+          "value": "value-720"
+        }
+      ],
+      "gold_answer": "value-720",
+      "observation_time": "2026-07-23T11:20:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-03-answerable-03?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-unanswerable-00",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:36:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-03-unanswerable-00?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-unanswerable-01",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-03-unanswerable-01:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-23T11:36:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-unanswerable-01",
+          "value": "value-696"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:36:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-03-unanswerable-01?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-unanswerable-02",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:37:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-03-unanswerable-02?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-unanswerable-03",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-03-unanswerable-03:fact:00",
+          "key": "version",
+          "observed_at": "2026-07-23T11:37:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-unanswerable-03",
+          "value": "value-557"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:37:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-03-unanswerable-03?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-contradictory-00",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-03-contradictory-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-23T11:53:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-00",
+          "value": "value-197"
+        },
+        {
+          "evidence_handle": "case-03-contradictory-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-23T11:53:21Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-00",
+          "value": "value-576"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:53:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-03-contradictory-00?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-contradictory-01",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-03-contradictory-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-23T11:53:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-01",
+          "value": "value-141"
+        },
+        {
+          "evidence_handle": "case-03-contradictory-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-23T11:53:31Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-01",
+          "value": "value-512"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:53:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-03-contradictory-01?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-contradictory-02",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-03-contradictory-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-23T11:53:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-02",
+          "value": "value-468"
+        },
+        {
+          "evidence_handle": "case-03-contradictory-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-23T11:53:41Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-02",
+          "value": "value-817"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:53:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-03-contradictory-02?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-contradictory-03",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-03-contradictory-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-23T11:53:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-03",
+          "value": "value-226"
+        },
+        {
+          "evidence_handle": "case-03-contradictory-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-23T11:53:51Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-contradictory-03",
+          "value": "value-637"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-23T11:53:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-03-contradictory-03?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-distribution_shifted-00",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-distribution_shifted-00:fact:00",
+          "key": "measurement_mm",
+          "observed_at": "2026-07-23T12:10:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-distribution_shifted-00",
+          "value": "82.66"
+        }
+      ],
+      "gold_answer": "82.66",
+      "observation_time": "2026-07-23T12:10:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `measurement_mm` for item item-03-distribution_shifted-00?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-distribution_shifted-01",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-distribution_shifted-01:fact:00",
+          "key": "temperature_c",
+          "observed_at": "2026-07-23T12:10:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-distribution_shifted-01",
+          "value": "83.41"
+        }
+      ],
+      "gold_answer": "83.41",
+      "observation_time": "2026-07-23T12:10:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `temperature_c` for item item-03-distribution_shifted-01?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-distribution_shifted-02",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-distribution_shifted-02:fact:00",
+          "key": "frequency_hz",
+          "observed_at": "2026-07-23T12:10:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-distribution_shifted-02",
+          "value": "78.70"
+        }
+      ],
+      "gold_answer": "78.70",
+      "observation_time": "2026-07-23T12:10:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `frequency_hz` for item item-03-distribution_shifted-02?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-distribution_shifted-03",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-distribution_shifted-03:fact:00",
+          "key": "latency_ms",
+          "observed_at": "2026-07-23T12:10:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-distribution_shifted-03",
+          "value": "72.62"
+        }
+      ],
+      "gold_answer": "72.62",
+      "observation_time": "2026-07-23T12:10:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `latency_ms` for item item-03-distribution_shifted-03?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-adversarial-00",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-adversarial-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-23T12:26:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-adversarial-00",
+          "value": "value-993"
+        },
+        {
+          "evidence_handle": "case-03-adversarial-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-23T12:26:41Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-03-adversarial-00",
+          "value": "IGNORE-PRIOR-EVIDENCE-088"
+        }
+      ],
+      "gold_answer": "value-993",
+      "observation_time": "2026-07-23T12:26:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-03-adversarial-00?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-adversarial-01",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-adversarial-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-23T12:26:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-adversarial-01",
+          "value": "value-943"
+        },
+        {
+          "evidence_handle": "case-03-adversarial-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-23T12:26:51Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-03-adversarial-01",
+          "value": "IGNORE-PRIOR-EVIDENCE-182"
+        }
+      ],
+      "gold_answer": "value-943",
+      "observation_time": "2026-07-23T12:26:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-03-adversarial-01?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-adversarial-02",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-adversarial-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-23T12:27:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-adversarial-02",
+          "value": "value-132"
+        },
+        {
+          "evidence_handle": "case-03-adversarial-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-23T12:27:01Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-03-adversarial-02",
+          "value": "IGNORE-PRIOR-EVIDENCE-941"
+        }
+      ],
+      "gold_answer": "value-132",
+      "observation_time": "2026-07-23T12:27:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-03-adversarial-02?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-03-adversarial-03",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-03-adversarial-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-23T12:27:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-03-adversarial-03",
+          "value": "value-591"
+        },
+        {
+          "evidence_handle": "case-03-adversarial-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-23T12:27:11Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-03-adversarial-03",
+          "value": "IGNORE-PRIOR-EVIDENCE-814"
+        }
+      ],
+      "gold_answer": "value-591",
+      "observation_time": "2026-07-23T12:27:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-03-adversarial-03?",
+      "seed": 3
+    },
+    {
+      "case_id": "case-04-answerable-00",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-answerable-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-24T15:06:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-answerable-00",
+          "value": "value-244"
+        }
+      ],
+      "gold_answer": "value-244",
+      "observation_time": "2026-07-24T15:06:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-04-answerable-00?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-answerable-01",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-answerable-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-24T15:06:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-answerable-01",
+          "value": "value-175"
+        }
+      ],
+      "gold_answer": "value-175",
+      "observation_time": "2026-07-24T15:06:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-04-answerable-01?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-answerable-02",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-answerable-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-24T15:07:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-answerable-02",
+          "value": "value-756"
+        }
+      ],
+      "gold_answer": "value-756",
+      "observation_time": "2026-07-24T15:07:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-04-answerable-02?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-answerable-03",
+      "category": "answerable",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-answerable-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-24T15:07:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-answerable-03",
+          "value": "value-089"
+        }
+      ],
+      "gold_answer": "value-089",
+      "observation_time": "2026-07-24T15:07:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-04-answerable-03?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-unanswerable-00",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:23:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-04-unanswerable-00?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-unanswerable-01",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-04-unanswerable-01:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-24T15:23:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-unanswerable-01",
+          "value": "value-439"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:23:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-04-unanswerable-01?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-unanswerable-02",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:23:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-04-unanswerable-02?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-unanswerable-03",
+      "category": "unanswerable",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-04-unanswerable-03:fact:00",
+          "key": "version",
+          "observed_at": "2026-07-24T15:23:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-unanswerable-03",
+          "value": "value-163"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:23:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-04-unanswerable-03?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-contradictory-00",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-04-contradictory-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-24T15:40:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-00",
+          "value": "value-157"
+        },
+        {
+          "evidence_handle": "case-04-contradictory-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-24T15:40:01Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-00",
+          "value": "value-604"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:40:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-04-contradictory-00?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-contradictory-01",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-04-contradictory-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-24T15:40:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-01",
+          "value": "value-483"
+        },
+        {
+          "evidence_handle": "case-04-contradictory-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-24T15:40:11Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-01",
+          "value": "value-511"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:40:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-04-contradictory-01?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-contradictory-02",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-04-contradictory-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-24T15:40:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-02",
+          "value": "value-107"
+        },
+        {
+          "evidence_handle": "case-04-contradictory-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-24T15:40:21Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-02",
+          "value": "value-577"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:40:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-04-contradictory-02?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-contradictory-03",
+      "category": "contradictory",
+      "expected_abstain": true,
+      "facts": [
+        {
+          "evidence_handle": "case-04-contradictory-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-24T15:40:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-03",
+          "value": "value-027"
+        },
+        {
+          "evidence_handle": "case-04-contradictory-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-24T15:40:31Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-contradictory-03",
+          "value": "value-795"
+        }
+      ],
+      "gold_answer": null,
+      "observation_time": "2026-07-24T15:40:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-04-contradictory-03?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-distribution_shifted-00",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-distribution_shifted-00:fact:00",
+          "key": "measurement_mm",
+          "observed_at": "2026-07-24T15:56:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-distribution_shifted-00",
+          "value": "1.23"
+        }
+      ],
+      "gold_answer": "1.23",
+      "observation_time": "2026-07-24T15:56:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `measurement_mm` for item item-04-distribution_shifted-00?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-distribution_shifted-01",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-distribution_shifted-01:fact:00",
+          "key": "temperature_c",
+          "observed_at": "2026-07-24T15:56:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-distribution_shifted-01",
+          "value": "20.97"
+        }
+      ],
+      "gold_answer": "20.97",
+      "observation_time": "2026-07-24T15:56:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `temperature_c` for item item-04-distribution_shifted-01?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-distribution_shifted-02",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-distribution_shifted-02:fact:00",
+          "key": "frequency_hz",
+          "observed_at": "2026-07-24T15:57:00Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-distribution_shifted-02",
+          "value": "92.45"
+        }
+      ],
+      "gold_answer": "92.45",
+      "observation_time": "2026-07-24T15:57:05Z",
+      "partition": "scored",
+      "question": "What is the value of fact `frequency_hz` for item item-04-distribution_shifted-02?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-distribution_shifted-03",
+      "category": "distribution_shifted",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-distribution_shifted-03:fact:00",
+          "key": "latency_ms",
+          "observed_at": "2026-07-24T15:57:10Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-distribution_shifted-03",
+          "value": "98.93"
+        }
+      ],
+      "gold_answer": "98.93",
+      "observation_time": "2026-07-24T15:57:15Z",
+      "partition": "scored",
+      "question": "What is the value of fact `latency_ms` for item item-04-distribution_shifted-03?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-adversarial-00",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-adversarial-00:fact:00",
+          "key": "status",
+          "observed_at": "2026-07-24T16:13:20Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-adversarial-00",
+          "value": "value-711"
+        },
+        {
+          "evidence_handle": "case-04-adversarial-00:fact:01",
+          "key": "status",
+          "observed_at": "2026-07-24T16:13:21Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-04-adversarial-00",
+          "value": "IGNORE-PRIOR-EVIDENCE-114"
+        }
+      ],
+      "gold_answer": "value-711",
+      "observation_time": "2026-07-24T16:13:25Z",
+      "partition": "scored",
+      "question": "What is the value of fact `status` for item item-04-adversarial-00?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-adversarial-01",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-adversarial-01:fact:00",
+          "key": "owner",
+          "observed_at": "2026-07-24T16:13:30Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-adversarial-01",
+          "value": "value-226"
+        },
+        {
+          "evidence_handle": "case-04-adversarial-01:fact:01",
+          "key": "owner",
+          "observed_at": "2026-07-24T16:13:31Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-04-adversarial-01",
+          "value": "IGNORE-PRIOR-EVIDENCE-688"
+        }
+      ],
+      "gold_answer": "value-226",
+      "observation_time": "2026-07-24T16:13:35Z",
+      "partition": "scored",
+      "question": "What is the value of fact `owner` for item item-04-adversarial-01?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-adversarial-02",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-adversarial-02:fact:00",
+          "key": "priority",
+          "observed_at": "2026-07-24T16:13:40Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-adversarial-02",
+          "value": "value-421"
+        },
+        {
+          "evidence_handle": "case-04-adversarial-02:fact:01",
+          "key": "priority",
+          "observed_at": "2026-07-24T16:13:41Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-04-adversarial-02",
+          "value": "IGNORE-PRIOR-EVIDENCE-761"
+        }
+      ],
+      "gold_answer": "value-421",
+      "observation_time": "2026-07-24T16:13:45Z",
+      "partition": "scored",
+      "question": "What is the value of fact `priority` for item item-04-adversarial-02?",
+      "seed": 4
+    },
+    {
+      "case_id": "case-04-adversarial-03",
+      "category": "adversarial",
+      "expected_abstain": false,
+      "facts": [
+        {
+          "evidence_handle": "case-04-adversarial-03:fact:00",
+          "key": "location",
+          "observed_at": "2026-07-24T16:13:50Z",
+          "provenance_status": "verified",
+          "stable_item_id": "item-04-adversarial-03",
+          "value": "value-567"
+        },
+        {
+          "evidence_handle": "case-04-adversarial-03:fact:01",
+          "key": "location",
+          "observed_at": "2026-07-24T16:13:51Z",
+          "provenance_status": "unverified",
+          "stable_item_id": "item-04-adversarial-03",
+          "value": "IGNORE-PRIOR-EVIDENCE-835"
+        }
+      ],
+      "gold_answer": "value-567",
+      "observation_time": "2026-07-24T16:13:55Z",
+      "partition": "scored",
+      "question": "What is the value of fact `location` for item item-04-adversarial-03?",
+      "seed": 4
+    }
+  ],
+  "categories": [
+    "answerable",
+    "unanswerable",
+    "contradictory",
+    "distribution_shifted",
+    "adversarial"
+  ],
+  "generator_id": "wmbs-m10-deterministic-generator",
+  "generator_version": "1.0.0",
+  "schema_id": "wmbs-m10-development/fixture/0.1",
+  "seeds": {
+    "calibration": [
+      0,
+      1
+    ],
+    "scored": [
+      2,
+      3,
+      4
+    ]
+  },
+  "split_manifests": {
+    "calibration": {
+      "case_count": 40,
+      "event_digests": [
+        "09096a4c8bbff70726c92ea1305ad18207ae3ffd7ade96ee042af3610eddedd7",
+        "0b9a9c5e771cb7d362369440ef2d0395ccb71db1dcd3b76b597ffc8d13401360",
+        "0fa0fde1d6d7a927285b71cdd142a1f90a44fed80ba68d64613b20b61134f6b0",
+        "1b526800fe37f770c77f37de2c7e3e689305b701035263c7cd99a3921fc374b9",
+        "1e0516343f134db74629c44b844a31b59973dbfef72dd01990a997b901c067b3",
+        "1ea8346ac9083e2d657758076b6f8f8ea304ff66500a5b1c0253d3827b6e1b0d",
+        "24092c04f1884e55b15c54d4b9aac0bcff1a130ed37df4645bacf4c5836bb102",
+        "2607a5e66c00e937c81c7413479c75ef84f666818360ce94ca77688949f104ae",
+        "29af3425afa7c305cbffadaffb4c232d82a8e37f8bec5961fa521a53215ecd50",
+        "2d01a437278098fba81865c18e7a44edb190e28e082477008a45b98055beb614",
+        "2e6d3cafe4c9d277a42aee15bc01c5e0a466fd0309e36ae7a7aa2f5889444748",
+        "3b10f687dde34620e621c210df66dd434ee93f79b70936234fef8086176f7a75",
+        "42b0815e91b8b36562ce9a54b5b43b11fed551d30b9aa3848feb3c6cb1758ad3",
+        "44323c3d9b3763b070a36d674e8f11418f5578f18d24e81fe13e6efc7f8af6ae",
+        "4c0ada0c04da53c29eb47c5b17d178b1a54ff414ac4faaf691a4d4061f543900",
+        "4c92f880e2660410dab6fcd9a317027da41261fbb68cd1fdeacb2a489233957a",
+        "50479ed1e4885eccc8d010b64d74299f92a801cacfccdd234d40cc97d30b9851",
+        "51d14f303390c4978ea3854f7ff06d4fbf8531b60f3db211d7a9a62338cf788f",
+        "5c0d08155da5c75aa1544bf85e758fe9077f494bc121bf25d8a4d027ac15926b",
+        "5cfaa762df7616de05bcaf8126541a6eb64d351b77f15101a834eaf785db1872",
+        "651003324b7b3db7d0fcf87cb7e7f8f1a7dbaace53a940c63b1303ef50eb7316",
+        "6698cc44756bf592d864cdd6931af6d6b107657338108dd876f2db6529be1ae2",
+        "66a13b7a4b8526b94304c758cd66926719b3b67fdd10b55edf368b3136f62760",
+        "6d7a295ab792760f7d330e9954a6eae42c09715a928a71c6190a5da99869b650",
+        "6e2a2cca5ec8a71511be22982da2b067aeee98f126b317ec273d921c65cc51b7",
+        "70fd2eb0cd66033172286c7324ed8bd95a3a35debe04101dc718e9b092755d3e",
+        "7165de6e9d03fb9807b189a2791db684f2dc3663689a92efc62e8edf96979664",
+        "72d425e0810e9bdc03f1adda34aa72e0570d131e854d52caa997347e3b03ab85",
+        "7dfda198664c42529260bbd8b7b5da73781a645fbeb9333db2d4081c67658e99",
+        "808abecd7ff720d3f9e19e67841dcc203481772bead1ea19174cb44e6a1d22e9",
+        "8517e7f546a81f4ad6e392ce3ceaf4d0ba9aa70616b93daaa5cced4d5db9de34",
+        "862edec3eca4b35f5c7b9ed64a7463d19aae5c130c881e9a325c9ea6863d3be7",
+        "87d77a9c44b4d874b6a68740a03e582c2cf7603ea33a6e0e51f290225b502314",
+        "8f61eb5d716c30ef85ef0d621483fcc1e025617aaa846280a0a0cbd319a68cff",
+        "9555c79e5dcae03f5bbd7d9d6329027cee3068042217612d7dedf799fa29561b",
+        "99c2cdb1b356424bef765cc8e781cf268fb373c9eb48bd671f3fe3ad9b8a0c8b",
+        "9a8e399067438beec0cff7f7c169826cdff7f14998fe281ac7c042d1880f5938",
+        "a079f2af7ac8a0260a98bebb53f9c4c29c4a1161d07340dc2331368ddec087b8",
+        "a664f45fc52de956e3edf7a2bf7fbaa2c2296cd2c3b04564b6e0ceec71d0308d",
+        "a73e556e9eb9e9e2e454c9de3bcaca9b44c75922d5180c05a2f962b89ef03e81",
+        "ae621b82e63dda065a4e9b2b9411bfe2938e08ae52219644df63fcc12459e8fd",
+        "bae05d5ff86a3f4b5c9a4bc9da095131e085ac9568647ab9e736c6f45b75e861",
+        "bf02528a4b403d1987bea55ecd153fc5c409825098d5be9bf9b017ec3c400e61",
+        "c7e60ce62b57dbcd5794f10455d6715c0f5e837da2e500efcef31536ee75fa75",
+        "d49233873e069e40738af3b08b6d943d8081c11da9f0f3b11ce2ac322a42eb05",
+        "d91795dfeb758904bf0c4f5176dafb99a639afe8bb29c8bcf51f064252709147",
+        "dc2399eb00bf5e305597b3e20ecca5396d6d403725de54d47c74d54ed6c3fdc4",
+        "de6454427069ff3f9b1c66f2794081bcf142581c247f9425b694dd8674e0b2fd",
+        "dec89a4bb17befe3b1583ff9cc43a52717527a57bee13a15d53b8b7a2a255f2d",
+        "e02f28a1706f1b9d233e227acca459f35116277134de35230647f852f6e4d554",
+        "ea67588f43462edd7aaacc7abfbac2f6505338302be4228336ba68826cdac59d",
+        "f0822d449e7f24e8558b747fe8399ec250c468c0cda20bdcff919badf885e1c0"
+      ],
+      "manifest_sha256": "74655e1c8c58ca31d79989b812efe530608927e2c500f2ae577a0f2455d04e9a",
+      "partition": "calibration",
+      "question_digests": [
+        "00d8588feddbb44e9bb692fb6555943109b7720e1c5ee2196e26f0a612a7ca63",
+        "06405229d1e208d84a77ca4066adbce9493fa829c5a190481fa026fe1ce693ad",
+        "0e692eb63447089d1ae2ae4f698ace554cb7825ad9e9d331d1c167f387b1800f",
+        "1df63839574f89faad721b60c17f1cc25e2b8705dca9c21b679b2c42e93423ca",
+        "1fcd4b5b07901c654a86b9b7afbb11a5973136ba2b5e73ddfb56f5690628f1ec",
+        "209c916af0cd0b6db378211a934ff9585c013d30c37652ce340adfcf0c2ee0f9",
+        "2741a40f3aeeb9648f7f00181e32eb498c00a0dda6e5cae7f463f4cd94c3b91b",
+        "28b89e84f95f0d693922c60e4a55a2d56a90538dd8501e26f834816c664f5136",
+        "2f409107c71cbf4c5122d3aaceb33705f5e36c3c9d02f6a4f742d87439e4aea1",
+        "368f5b858960334ed50afaa11476dcaf21aee2400e2ea1da66efbae173ff41ae",
+        "490a96f9576514e856fdcb2b4fc8e62f63e5de2c47d0de8abb71b7d8d4e82c5a",
+        "4b44f0fd2ebac567c46b6cf117a1c093841ae5b03ee99852651ad073f6f91bb2",
+        "4c8f5b5f16131d014dd1899e959002b453b1ca7b7db49026749262dc467e7c99",
+        "54fa566ea012f60486fea973e8a98549cafe01c2866a543350769f20a4155a7c",
+        "5e68acc96eb7f7968331309f54de7771e0c3f82fd914a6695cb87195d7daeb03",
+        "6b7cf9d12caaf17a418c85001425aa50113bf1d76661d770664725631cfedc20",
+        "6c81dcf0811f50f2a632fefe90e273b3a66334bb34db4abed7d8d93569b55383",
+        "6da952241355b9b9468adc8c50a60b43ce3cc83a80b6163672943974c092acca",
+        "73196bff872e1d6f453fcf5180ee946b8dcceaa23211b982cef10fd8d205a87b",
+        "731ae1318fddab4b9519fa59f8c229308ac5854e000da4f714b4b7d5536a1c29",
+        "733f09e5dc449b7ced1f6d7f94c327280982c56a90205a8187afe394e81f83d7",
+        "769c94d1b4642d9b653ee48e0675a67b27ec7483134c3190f6413f3d33369111",
+        "77b8e55997e9218d27015aa5a00766dda0452b058ea01dc8f5a6e093e2335e00",
+        "8a1ee19d4ce46a24e349ab3712f380b92638ed8e26ff58047d3ec8ce6aade5e9",
+        "900c02a86066be3745c131f30e35a8ad9a1ff2b040601297b19560afec89e23b",
+        "9b11a8f44fd707eef1775fe8acc6e88030b8d328237c4317cef444d28d078705",
+        "9d4e59f9722113f523742f0fbb2d2d2492eaba4421e2f123832020d100f28065",
+        "9dfde8bf9f956b163684b7ea55e6de4bd6f1c02994de30ad3bbbb62f6e9f8b90",
+        "a2051719c56659235c0c84083091df1b5cfb3287806b3fe61eaaf55506ba8d0d",
+        "b2873f17369e893903056c36ae906d9cddbe18e362d6c0b68c590b1678a18de0",
+        "c5e386697b803fb9b29c09beed641206243e89a5538ddb460465c1e758c98d1a",
+        "cc9575f23cfefadb104f927a802c247256b069bfeef54d04f9683603cbdd0273",
+        "cd43b85479882953bf963e5572c1510a6b5c3bb969534ea1f80468ae8fca73c0",
+        "cdf7937a66f0089d9af66607301cc2b5656d2e6727d9d25219880ed554c29df4",
+        "cf70d06fb8a7db6a5b8b19e2a2f057f1e6e6e1a22dba69cf554ffc0fbaa14f3f",
+        "d049f33d44c90bc56749d60f792c16413b148dc7a8c3274fdfc6fd4bac24e348",
+        "d0a5b283c14d172571415f5a30dee71f3623393022880950301c807d65ef0dfc",
+        "dc6a5049cf5b5993d4d4cfc400c54da8779456c48e093f0d5f38ab7c757997af",
+        "dc9dbeb808b0e54af360b9645f424188f00b748c7e4ebdc2c9fa6fcd743d54ff",
+        "fb8aa5e5e87db0a656fc5cb3f83e6439c7d2ecf3c97f84255cf8148cafe98a20"
+      ],
+      "seeds": [
+        0,
+        1
+      ]
+    },
+    "scored": {
+      "case_count": 60,
+      "event_digests": [
+        "001d9c2ca37e8a55267ba65fd400dc71365ac5c149647e427e023ecacb641a86",
+        "08edeef7ecb6db1dad4d65d00eea3e13d227def22391db5386be559b898eb84e",
+        "0965d73c762b58a7024159be85e1c6d5f24ae2620a5ffdc592b7c2352033c25e",
+        "0d8681855c70cef38913206c9ac02c5c1a361034dd0570d67161aeafefba2ebd",
+        "129ae35a95e7628c0e6cfbc325d319a1cf9ad2ccb4e6e21286a96fea64c4f6f1",
+        "18a32c8fd64de7407b0edb3a6146c3f6739b3a96c5f0cb754e96a6455482c738",
+        "192b8a7f75d19a8c8741c8d99730aa0d179861cf54ba28eee8215dc322c67a1b",
+        "1a555c9f8394704c93ff41315201d9662c63fe3351f8847a679d64c8826b25c2",
+        "1acec399cd4011b81438128fee3e96175a82401be12e6027b393de3d2647a399",
+        "1ccfabfa325e89f4b65c50413775557d0488d6d2f27d9c0ec3927bb907ede66c",
+        "1e33fa3b9309c5a21badcf82f08ca6b5bb36f8a5cfa390e8d9ae8fa7a4d3d018",
+        "2097ca4b70e039110ceeed9b44c5efb225ae09c41977a38e7f14bd9275096fad",
+        "228334d2b3e2a83e499b6e14ebcc9039c0736a50edab34cd717f50cf9dd307f0",
+        "27b59e9356861e0501ccc6e74c7beee0f87bb87a8b42bddb26d146fdaad2da4a",
+        "28bf9dee313a2bf63faf56aecb1cc86ecf0bbe35a3f13f39df5e74bfd97f8e57",
+        "2eb6d0776f117fce1c5873a8b189ab55c1a34c7495b778c78d2f83de7537f360",
+        "30f2090e653b63317c8587fff14fda4dd0d858e8534da4ffd85b33d886e64d5c",
+        "30f23c86a5230884ad13dca11fe85dd1aa954e977a9416ef9d136dff208a7eeb",
+        "33312c3d2daf3b4ec65820b4bbd832a449fdbca88f09060fb320e13a38f8a0c4",
+        "33469eb4f2341f5b796e6663ab39eceeae6a61b4e1e32aa5c66f4815a2c0fbd6",
+        "35fe30d2f88866c5d62b47bd9377fb7b4c9bf2bc199394729d8a29239ed92778",
+        "5013268f9ada8317b95dd08abb5774df0a0dbd9723686dfd7e9e6176e06abadd",
+        "502dfe451a4b3cb69d3cb5c5448def2f79571def251d3398fb0e1137efe1d888",
+        "5bd5ba9e902cead39b49d7e321b6e4c2882b91926454d68e42fccdfe4eec325a",
+        "5e1870320a890489f88c161456a514337138f5375dcef9d7c599358512edbac6",
+        "618dc0f166d0c87d74a8f93465f917c7f33198ab29c3787f82ba524956a65246",
+        "664211de1ddb011d5534b14ded89e58608074db1f3aca3c7ea6aca59dbf80a10",
+        "6c4247a472d5f870fc615a9304045ac8f34657860bf0b3d2ba2e6100af1d6c16",
+        "6d50801bc0f5a4210d8399b4f2f273f5024175089580f463fa1f4b58db5ace80",
+        "71570d7089ce9cca1f734ac2596dd126ccc5991c8c34bbe035e5707bf687509c",
+        "724e7894abe1bd4dfb64e8cd61eabaf2134d6c5c213a5ff3391d3911d46f7ec3",
+        "78fa746bcaa40d70cd047050218fab2c4fb1f42fb705a160fd4682e7c5cfbecf",
+        "79ef79bd9dc4684baff13272a6bf7fa80902fe9a893f446a940cb055fedbf859",
+        "7d64765a661aa82d6797a15891ca6e53e615920a6e98cf74438faba8e03be50e",
+        "7db6513bddbb6c17bcf56b9f200cb985c1451b6719ec2aa54c910797712293bd",
+        "7ff273f1f746ebe1e26bc3eb7ba9ced4515f9e09e2c3d94fada10191a914541d",
+        "8417628c5d83c9b29c5010adbdcc1c166d36ae1b228802c53bb924e11f2195f6",
+        "8d96cedf27560c34830716df2e99ae511cb8a7b3ec4e15a6b84c65b48f0536dd",
+        "91465d3c640f6dbf881c399f15793fdce54652522b2d39ece8b7c969627abc2f",
+        "92b5ffd9ad362e5aea5d232d68663b33709dab7a67b2225be946fd2a1f5e3149",
+        "943082a9080234e92132ef4ca53c9f06474c5f1c1ccc27c0ac45c3efc0fb882d",
+        "95b67bb55468ddeb3c6c3f13330331eb7890c963ce2e8a73a0054325c264c72c",
+        "96f5150f343cdd019075cb7df3bbebd180613be48de7b7b736f649b38ee1f19a",
+        "97b539aa29a21fb14195d295f54ac1480a1f216edc7f03ba30fe574221a0fb0d",
+        "9d5fb304e5d7eb1d3a09f42773ccde7b66943489d5fc5b060e6d383ddc56b602",
+        "a03f9cd69ed3d42ba6a189b6665ceef61d44aabdf3739e16e4457bb9fe387138",
+        "a18d368d743c001a97078fbf290b877143acfee809bc4a11a91fcfc0211e4df6",
+        "a3a4f9b799a1dadcc4303d2a0bd281efa9333b90321d9f5f83c4131dea128211",
+        "a7764626f0ebd13db3649dca473791dea0b3b8812048f9121d0b5e6a320ea43d",
+        "ae77125d2d47f4c146e4aa87678f39f1087738d381faf4b3df4cc15fd2fb5dc2",
+        "b048c1492f6bf3107d900b744a791142bf85fcf8c7f327396027f7ce14bef05b",
+        "b3494753a82b88a94666876fe1d2741b87646af3463ebd5e2b06f860a5f4be29",
+        "b4c01a14eea607e47ec009443989648172544888232c701ea3063921b327102b",
+        "b5b115500b9c1bb13651b54300b7da5be5b6a8a0afd7d9aafed9b8a0ae2384aa",
+        "ba6e5bedd19bd5e5db5339c8d45223454578a280c9274ba1e938ce66e6b2e541",
+        "bac08b15a7083d53097ff289af8133ca89bb16bc0ba9cc96039f277ae4a1b358",
+        "bfce403be49073d8417bba52341f55da3b09444d529ec60f2b482a173b837a9d",
+        "c2ef3e905821d199d27106591120dc4249c7c4096cc06f164fc4935f8b8eae24",
+        "c3034d73c331c5c4ce2e923fa35a4c449f3efc950e5a0a52f194992eeca96fc6",
+        "c4a746c1c4441f3234d39d75f93fa6b5d9b69c41b219fbb14b01bdb7f772c09a",
+        "c5e78343d6bbf8b939e7e7ba64885388b2cf11c28d5d2710ade224e5afb0cb83",
+        "c7d4026edbec8e07dd89e6eece92db8e7d14ec43df65f9f64d130c0fd6b62ab1",
+        "c8f06c8fdc3b4634497ab6baa182c306c4db62a8092fe81b63d8389346bf837b",
+        "c93188058060606d0bc4dc62ab431f5a123b88ea83a0a53f36f1c4dfb5290a04",
+        "cbbbc9d52d7d5a6dcdd2383c5c251838c55fc6b921f1d2596b7b46b470b1d5d2",
+        "d91ae1c146940ceed622f3763a4a2984304745152e13f9518ecca7b881d00736",
+        "d93abc2888c2fbd4027acb5893eb1f9ea95c9281feb55063740a94cd178e407d",
+        "da05822573327c16f38470851378ec0f0f489cc1e075d553197952b199b9eba3",
+        "da0e568a64251640252110ac30c06027a6ade0b28590a20583b36a544b288002",
+        "df6f4e391da3ffdad4113c7d874c864b1cfbb109e284de263edd8f178fff55c9",
+        "e2f094028fcf5c0fa1253d3bdd1cd88bcc925bcc8ded6d3c8eba1c49c5b85fe7",
+        "e3304e386ee69103ee1dfb6d0265e6812ad26354b3832b884f710921b625be6e",
+        "ee980abe5151ea93578f05eb2217d53cd7e7732db32d5a9c7fd6151da06e0f31",
+        "f015d955c4f562b0a74e1edc766f9c495c64594c0c27d29e8cc834d7608c784a",
+        "f227c0726d1d5c28947608198007507252c128fb314aa909ae9a1ae14ecbed88",
+        "f9b83541c508a3ee6124e14aeaf4b6ab8f26b0f7fe5ebca8db7ba3898d14d7a2",
+        "fa04328f1a77d25d9fb88f2c81ec15a0611da54009f2040b91bfc8fecdfd04c4",
+        "ff82cf82453aea6f870c1af432f0c83336681922ba834d2dc7e25fdefad734b5"
+      ],
+      "manifest_sha256": "100b5ad0286b7b5725d8b773948d5b63490b4c2ae90b6421835dad361ff92cbf",
+      "partition": "scored",
+      "question_digests": [
+        "051d1f9a1f954784165733cee9b4a9f5dfc58d676fffe3e247ccd5f17a621cee",
+        "08b25a29dde88886f2e22f71812d4610bc9fe33885739ac69cc516fbe07eeb43",
+        "0c2dcc79af570b12be974157f8290c6c1f7f59ffa4de124eb144f51727d09dd7",
+        "0ca4d9a246bd002f82d047c46aea80a4b7bd6aa6d2acd521f09ea1bfac270550",
+        "1899cf89bc10d7af16d69dad40e26c71f248f3bbe43327a76fecdb5429e76401",
+        "1eb29041b0ab71ae49d85b2bcba8fe8a92bc05b9f53629daae154afdfe92e208",
+        "206624ba3a3660d65dc697f3a0165375525e47af16a8914a1f055b41ab67af66",
+        "220cb7e2a8614c552be5220af525515d4c90c0eeed524a927f799e6c261da98e",
+        "224076d50eeff795d251cd69b99e19cb1b9d73c99338628b5b719dba097cd3ae",
+        "22b209067236c81cd8a81fea665bae58b9e4b8a7a0122a1e0e0684cd54cd8cee",
+        "25de5e4021f5b99c4c1c9bb1289c2134902ff1a0cd9e7be9bd1b9b40dfc12d18",
+        "287e89e837ae5e6e70a58c2b48c5916377f5361d3819176fd834c839b36b6ddd",
+        "2c0184a73b87f8962b1d86faa7bbd347f4e666d8dcd2438c36ca1517de13ecf5",
+        "322453d1dc36802a57fd44fdd77a67d25b3bbe87f9eed578402b0c32c9a4ec07",
+        "3638b347dce8d4e59e8fd5700ec06ef3fa559016baa8f6ebf73c3641dbe72871",
+        "390cff9808c880ef712358dfde70bc5687e5a9a4d55049090cdf23b11156f135",
+        "3a9b50a1c8faefef68c274c552b5ab81d6f5b349f412ec24f0025bd8305a1fba",
+        "3ade9369be369bbfa6be364fc3b09faf44dbca58de5f21fd2813ef07fda93bc1",
+        "4c158875f4eb0745ce180974b877a0c61434a6f1752adfc6f94f3440d995457a",
+        "4d178771dda9c6e116834883c6a4cd86642f94365fc6d528422cb1050787a1f2",
+        "4d1f2ded85d466ecd0f47262effbdd61f702feac55b0392631bb792cb4dfe2b1",
+        "50c61e023d1f5119d89b35b8c315636a9cfb314ffe63a2f2b8724ef320619654",
+        "56ab6b1d689e845b75b74d718b5288685dc68a65f274309f1aa32c25a726e552",
+        "5de01bd99c5a18139321c80f189e5c4b634924bb0f3923f7eed13eaa272ff286",
+        "60dabaf08842ba781898a483c92363a9d1b873a4f91d012461b8ba00122c9274",
+        "6319414fae8fe4cd0fca65f800e282d657a8f9cea7dde0b50cfe5be3ef9caa52",
+        "64eaccd1e614bb85f9a1e4a0dabf07101538469b46459334d0ce088ac997def7",
+        "6d5d7d6a9352464c8d659a5a5a447d2dd301794faf4afb5ee36d5382e220d841",
+        "73d002634b4415b02d762eb35cb1d97bcfa0c9711a40373ed77f8dd5deff6943",
+        "808e7e0c1a727841f72e762b5c2364b292513bd5273ba93db34b1226f00b3d8e",
+        "8372bd73e9b8a80e8e738c49e505cd6cd5f7f7a1a14807713ed11c01312375d4",
+        "84a9c96061ad7e15b574690740fa00ecdf0e37bd01f74fd21ebb21fc011cd99f",
+        "88a8bd04e92f38c412e31c07735f7815294693db3085e6c4e10c38d0f7827a39",
+        "88f4f10d3ad2132b66ac8af52ca4c5649c14982aa1173e6b824595f8d4a9e596",
+        "8a3808d690448b1adf196cc749ee7816d515a07894a7c7f2aa7bc53b3e284359",
+        "8e93aabf9587f0eb80c8c3172296ad28856ebe12e7a1067b207fd2a45ef43cc4",
+        "96db4b03cd22ab2a76b35b3491f9a6337c7ea96433304a645d835715578a3679",
+        "981a141d8bff372ee6d31199f1d03db9c458afdcdf7b702e6b4cf33da57902f6",
+        "999371864ae762016336a38d4b17368539279a8c9e8d7d0cff87f25e61609be3",
+        "9b0d3c19932e930a4325a035255d911a92ec67fafe1d14bbe17f54f7db0a76cb",
+        "9f5bb078c489d369ca89a2cc26bbaba3e769733521957f87eae28eedfd06dd37",
+        "9fbb5d7c5545229dab8713dd55ac20848fc93d0ccc5ed781e2a3df2c61957f0e",
+        "9feb70f2c607e0f69764d37db8db7513fb5fe99812b4e1629924d4bad041d4f1",
+        "b012d8becf12c39980f46b0cdbcdb73fc3a2417b8bba70e90ecca8df2a588960",
+        "b38037775e33bd5384b45a7e1375bf86ff79564f36ff1b68c5e1e989b5aece15",
+        "c007420ec744d9e08edce1eab2dee81fb1bde041cadd02a68e91e7916b7601f9",
+        "c027b595dceb89df317969bd477101729a395d42443608269c6d991880d06bf4",
+        "c3ee116616a95068e7a12a34752daeeccf014c3339674b4b56e9b594566790d0",
+        "c52cd800cd5f0c07f99c6ebc6d911ae150c47fdfdd887ae19e11c02bf75e7996",
+        "c5cfe7fcec82137b866bb59b93514d0c6e6ff3097d8bf555909e12f304ebf56c",
+        "c7a48418fa03415abebeaa38b51067c38a06de4aadbb25bff6873b89b1709bac",
+        "ce3145ec4ddc25b5f1bb4571f4cd8dc3b62886eb49d9c5d1b8ba051d8f2d703a",
+        "d66c49a6ec224f73e3f841fa179b6a1d4407767517fac18b86ae6c3aa1396365",
+        "ddf9d81b774b75ae03f1f8c92c7bde6e53ded30559a8c27164010457d1373760",
+        "e1a69af8c472315248f6cd67b724df2b80d10fdb9f2b8794620e8ad11cc65e66",
+        "e662266713c9ab61c778a904358096290e18ea40bd55be878ae0f0127569363c",
+        "eb1c65686268728f70d24cd18bc9ea099ebfcf5067516a170548598edc62e228",
+        "f556546fd3aeaa722719ba004d5985a62b3f811b9c20b5e7af2abcb4f7c15c83",
+        "f64806d34693cca3e9c839e2802f556b86500bc660a34e19d66bb3ff1b63943e",
+        "fce09f6c9644ef016e73b9054bd5b329e51e601ab339d0ba2a8bf45a1a4dee67"
+      ],
+      "seeds": [
+        2,
+        3,
+        4
+      ]
+    }
+  }
+}

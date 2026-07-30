@@ -7,13 +7,14 @@ from pathlib import Path
 
 import pytest
 
+from eval.public import wmbs_m10 as m10
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI, ActionCLIError
-from eval.public.bundle import BundleError, reproduce_bundle, verify_bundle
+from eval.public.bundle import BundleError, _scoring_labels, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
 from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
-from eval.public.scoring import score_profile
+from eval.public.scoring import ScoringError, score_profile
 
 
 def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
@@ -28,6 +29,84 @@ def test_smoke_registry_is_pinned_and_permanently_non_publishable() -> None:
     assert suite["publishable"] is False
     assert suite["pbpp_headline_eligible"] is False
     assert suite["independent_external_reproduction"] is False
+
+
+@pytest.mark.parametrize(
+    "suite_name",
+    ("wmbs-m01-development", "wmbs-m10-development"),
+)
+def test_whole_memory_development_suite_round_trips_bundle(
+    tmp_path: Path, suite_name: str
+) -> None:
+    source = tmp_path / f"{suite_name}-source"
+    reproduced = tmp_path / f"{suite_name}-reproduced"
+
+    result = run_public_suite(suite_name, source)
+    assert result["system_seam"] == "harness-owned-reference-core"
+    assert verify_bundle(source) == {
+        "family": "whole-memory-development",
+        "suite": suite_name,
+        "valid": True,
+    }
+    metadata = json.loads((source / "benchmark.json").read_text())["metadata"]
+    assert metadata["admission_state"] == "PROPOSED"
+    assert metadata["track_kind"] == "ENHANCED-SUCCESSOR"
+    assert metadata["publishable"] is False
+    assert metadata["pbpp_headline_eligible"] is False
+    assert metadata["independent_external_reproduction"] is False
+    assert metadata["upstream_comparable"] is False
+
+    reproduced_result = reproduce_bundle(source, reproduced)
+    assert reproduced_result["system_seam"] == "harness-owned-reference-core"
+    assert verify_bundle(reproduced)["valid"] is True
+
+    attacked = tmp_path / f"{suite_name}-wrong-seam"
+    shutil.copytree(source, attacked)
+    build = json.loads((attacked / "build.json").read_text())
+    build["system_seam"] = "public-cli-subprocess"
+    _rewrite_json(attacked / "build.json", build)
+    _refresh_digest(attacked, "build.json")
+    with pytest.raises(BundleError, match="system seam"):
+        verify_bundle(attacked)
+
+
+def test_m10_scoring_derives_floor_from_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    records = m10.run_baseline("full-context", cases, response_mode="normal")
+    traces = [
+        {
+            **record.to_dict(),
+            "case_id": case.case_id,
+            "scoring_family": "whole-memory-development",
+        }
+        for case, record in zip(cases, records, strict=True)
+    ]
+    monkeypatch.setattr(m10, "useful_coverage_floor_from_fixture", lambda _: 0.1234)
+    measured = score_profile("wmbs-m10-v1", _scoring_labels(fixture), traces)
+    assert measured["useful_coverage_floor"] == 0.1234
+
+
+def test_m01_bundle_rejects_unknown_trace_claim_fields(tmp_path: Path) -> None:
+    out = tmp_path / "m01-unknown-trace-field"
+    run_public_suite("wmbs-m01-development", out)
+
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
+    traces[0]["official_score"] = 1.0
+    (out / "traces.jsonl").write_text(
+        "".join(
+            json.dumps(trace, sort_keys=True, separators=(",", ":")) + "\n"
+            for trace in traces
+        )
+    )
+    _refresh_digest(out, "traces.jsonl")
+
+    with pytest.raises(BundleError, match="generalized scoring") as exc_info:
+        verify_bundle(out)
+    assert isinstance(exc_info.value.__cause__, ScoringError)
+    assert "unknown M01 trace fields" in str(exc_info.value.__cause__)
 
 
 def test_deterministic_action_registry_is_bound_to_frozen_fixture_custody() -> None:
