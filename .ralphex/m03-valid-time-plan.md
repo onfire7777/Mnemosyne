@@ -53,6 +53,6 @@ repository suite. The development cell remains proposed and non-publishable.
 - [x] Preserve all non-publication and non-comparability labels and never call this full bitemporal M03.
 
 ### Task 4: Verify and commit the candidate
-- [ ] Run only the focused CLI/runtime tests, whole-memory reference tests, focused Ruff, and `git diff --check`.
-- [ ] Review the complete diff for exact lease, authorization ordering, timestamp validation, deterministic tie behavior, stale leakage, secrets, risky files, dependency churn, and evidence language.
-- [ ] Commit the clean candidate and report exact SHA and focused evidence. Leave push, PR, exact-head CI, merge, post-merge proof, CBM, and Gbrain to the GoalEx delivery round.
+- [x] Run only the focused CLI/runtime tests, whole-memory reference tests, focused Ruff, and `git diff --check`.
+- [x] Review the complete diff for exact lease, authorization ordering, timestamp validation, deterministic tie behavior, stale leakage, secrets, risky files, dependency churn, and evidence language.
+- [x] Commit the clean candidate and report exact SHA and focused evidence. Leave push, PR, exact-head CI, merge, post-merge proof, CBM, and Gbrain to the GoalEx delivery round.
