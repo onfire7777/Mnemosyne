@@ -42,22 +42,26 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**M01/M10 development pilots delivered — M03 valid-time integration next.**
+**M03 write-path dependency blocked — M12/M13 integration next.**
 
 WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
 reference validation landed through PR #80. PR #81 then merged exact M01/M10
 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`; exact-merge CI run
 `30506775012`, 507 focused tests, and Ruff passed on
-`main@392b1fc173f454893e1b133ff3a727462586a8b0`. The bounded M03 valid-time
-slice is the next dependency-ready module cell, followed by the M01→M03→M10
-replay path. Result-v2 remains blocked by the protected signed-publication
-lease. The sandbox lane remains quarantined until it provides real OCI,
-filesystem, network, and write-boundary enforcement.
+`main@392b1fc173f454893e1b133ff3a727462586a8b0`. Round 18 proved that the
+mapped seven-path M03 lease cannot persist caller-supplied `valid_from`: both
+authorized assertion/supersession write methods live in excluded
+`src/mnemosyne/mcp_tools.py`, and bypassing them would skip authorization.
+M03 therefore remains `PROPOSED` and blocked until the map/owner explicitly
+admits that dependency. The next dependency-ready package is the reviewed
+M12/M13 test-only confirmation integration. Result-v2 remains blocked by the
+protected signed-publication lease. The sandbox lane remains quarantined until
+it provides real OCI, filesystem, network, and write-boundary enforcement.
 Remaining receipts, measured cells, and module execution retain their existing
 gates.
 
 The committed dependency/write-lease map is the admission authority for this
-wave. M03 is limited to:
+wave. The blocked M03 lease remains limited to:
 
 - `eval/public/fixtures/wmbs-m03-valid-time-development.json`
 - `src/mnemosyne/cli.py`
