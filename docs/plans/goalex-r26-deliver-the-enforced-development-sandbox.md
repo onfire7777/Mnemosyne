@@ -23,6 +23,7 @@ Execute this increment from a fresh Worktrunk branch based on current `origin/ma
 - [x] Run the focused sandbox tests before further edits and record any current-main contract drift. No current-main contract drift was observed.
 
 ### Task 2: Add the minimum real OCI isolation path
+- [ ] Before any read, test, or edit, assert the execution root is `/Users/admin/Mnemosyne.codex-goalex-r26-sandbox` on branch `codex/goalex-r26-sandbox`; run every Task 2 command in that Worktrunk checkout. The coordinator checkout is control-plane only and must not receive sandbox source or test changes.
 - [ ] Add failing tests for validated `shell=False` container argv containing an immutable image digest, non-root user, read-only root filesystem, bounded tmpfs scratch, `--network none`, dropped capabilities, `no-new-privileges`, PID/CPU/memory limits, read-only fixture mount, and result-only writable persistent mount.
 - [ ] Add denial tests for missing runtime, mutable image reference, fixture/output path escape, omitted isolation flags, network access, and writes to the root filesystem or fixture mount. Do not use `/tmp` as a forbidden-write probe because bounded tmpfs scratch is intentionally writable.
 - [ ] Reuse the handoff’s `run_isolated`, receipt, cleanup, quota, environment, and external-meter logic. Invoke the installed container CLI with an argument array and no shell; add no dependency, fallback executor, runner, schema, or registry.
