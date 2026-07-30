@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Whole-memory closed ABI and remediation are merged through PR #80 at main@28805ccf; fresh-main M01/M10 common-harness integration is the next dependency-ready increment. Result-v2, sandbox enforcement, Phase 12 measurement, and Phase 16 launch/publication gates remain open."
-last_updated: "2026-07-29T20:53:36Z"
+stopped_at: "M01/M10 development pilots merged through PR #81 at main@392b1fc1; M03 valid-time integration is the next dependency-ready slice. Result-v2, sandbox enforcement, Phase 12 measurement, and Phase 16 launch/publication gates remain open."
+last_updated: "2026-07-30T02:07:58Z"
 last_activity: 2026-07-29
 progress:
   total_phases: 7
@@ -39,9 +39,10 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-26 — Phase 16 source packages merged through PR #72 at
-`main@b9c475ad`; the earlier Phase 12 lease sweep remains delivered and its
-operator-only measurement boundary is unchanged.
+Last activity: 2026-07-29 — PR #81 merged the M01/M10 development pilots to
+`main@392b1fc1`; exact-merge CI run `30506775012` and 507 focused tests passed.
+M03 valid-time integration is next; no measured, publishable, PBPP, or headline
+claim changed.
 
 ## Parallel Phase 16 Source Status
 
@@ -57,16 +58,17 @@ and the six `docs/plans/2026-07-25-phase16-*` /
 
 ## Whole-Memory Pilot Status
 
-PR #79 merged the closed ABI at
-`main@a95fe4d291093253f8ce49adff32ba875a35e884`; bounded remediation head
-`0d42f9436397a04e12ceaa3bdbd60d925e2640e9` merged by PR #80 at
-`main@28805ccf54f99f098a5abc23fe6f1155400d0f22`, and exact-merge CI run
-`30484986865` completed green. The next safe action is fresh-main
-common-harness integration of the reviewed M01 and M10 development cores,
-followed by the narrow M03 valid-time slice and the M01→M03→M10 replay path.
-Result-v2 remains blocked by the protected signed-publication lease, and the
-sandbox branch remains quarantined until real enforcement exists. No benchmark,
-launch, or publication gate advanced.
+PR #81 merged exact source head
+`98b83e4be373cf0acd5411769b80b98dfd1a8caa` (reviewed candidate lineage
+`c9e7884e4263cdeedeaf2fe5b30f9796226082b3`) to
+`main@392b1fc173f454893e1b133ff3a727462586a8b0`. Exact-merge CI run
+`30506775012` and the 507-test focused M01/M10/public-eval/reference suite
+passed; Ruff passed. M01 and the deterministic M10 reader retain
+`PILOT-READY-DEV`, while every result remains `publishable:false` and
+`pbpp_headline_eligible:false`. The next dependency-ready slice is bounded M03
+valid-time integration; full transaction-time M03 remains deferred. Result-v2
+and sandbox enforcement remain separate blocked work. No benchmark, launch, or
+publication gate advanced.
 
 ## Performance Metrics
 
@@ -98,6 +100,7 @@ launch, or publication gate advanced.
 
 ### Decisions
 
+- [Whole-memory benchmark]: PR #81 merged exact source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; exact-merge CI run `30506775012` and 507 focused tests passed. M01 and the deterministic M10 reader remain `PILOT-READY-DEV`, all results remain `publishable:false`/`pbpp_headline_eligible:false`, and M03 valid-time integration is next without broadening into transaction-time semantics.
 - [Phase 12]: W1 local development is complete through the baseline, Fix A, and Fix B receipts, but it does not close CAP-003, BENCH-005, or Plan 12-04 without production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt.
 - [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@0784340` (Phase 1 hardening had landed earlier via PR #37 `7a1db210`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
 - [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@7a1db210`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
@@ -256,6 +259,17 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 ## Session Continuity
 
 Current continuation: see **Latest checkpoint** below.
+
+Latest checkpoint (2026-07-29): PR #81 merged the reviewed M01/M10 development
+pilots from exact source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`
+to `main@392b1fc173f454893e1b133ff3a727462586a8b0`. Exact-merge CI run
+`30506775012` completed successfully, and the focused M01/M10/public-eval/
+reference suite passed 507 tests with Ruff green. CBM was refreshed once after
+canonical main reached the merge head; CBM 0.8.1 reports the project ready but
+does not expose a stored Git revision. M01 and the deterministic M10 reader
+retain `PILOT-READY-DEV`; every result remains `publishable:false` and
+`pbpp_headline_eligible:false`. M03 valid-time integration is the next
+dependency-ready slice; full transaction-time M03 remains deferred.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
