@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 source work is delivered but CAP-003/BENCH-005 and 12-04-03 remain operator-measurement gated; Phase 16 source preparation is merged through PR #72 at main@b9c475ad, with every real launch and publication gate still open."
-last_updated: "2026-07-26T18:20:00Z"
-last_activity: 2026-07-26
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86 at main@661343ce; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+last_updated: "2026-07-30T16:49:30Z"
+last_activity: 2026-07-30
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 9
-  completed_plans: 8
+  total_plans: 15
+  completed_plans: 9
   percent: 29
 ---
 
@@ -32,16 +32,19 @@ Tier-B is CLOSED. A genuine operator-run production capture over the live self-h
 See: .planning/PROJECT.md (updated 2026-06-19)
 
 **Core value:** Build a memory compiler with lossless evidence, typed projections, safe retrieval, branchable updates, and gated self-improvement.
-**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the six Phase 16 L1-L4 source packages are merged through PR #72 (`main@b9c475ad`); they prepare the ledger, validation, rendering, publication, taxonomy, and readiness surfaces but do not satisfy or publish any launch gate.
+**Current focus:** Plan 12-04 closure remains the measured critical path — the #46–#61 lease sweep is delivered to main and Blueprint §7 code residuals are closed; what remains is **operator measurement**, not implementation: CAP-003/BENCH-005 stay Partial pending measured EM/F1 ≥ 0.85, and 12-04-03 stays held. In parallel, the Phase 13 adapter contracts and bounded scheduled-development-regression source are merged through PR #86 (`main@661343ce`), Phase 14-15 execution contracts are frozen, and the six Phase 16 L1-L4 source packages remain complete. None of those source milestones satisfies an official benchmark, headline, launch, or publication gate.
 
 ## Current Position
 
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-26 — Phase 16 source packages merged through PR #72 at
-`main@b9c475ad`; the earlier Phase 12 lease sweep remains delivered and its
-operator-only measurement boundary is unchanged.
+Last activity: 2026-07-30 — PR #86 merged the two-file bounded scheduled
+development-regression workflow at `main@661343ce`; input-free manual run
+`30561430522` passed the fixed four-test contract job. The first actual
+scheduled-cadence receipt, official MemoryAgentBench/BEAM execution, and all
+benchmark/publication claims remain open. The earlier Phase 12 lease sweep
+remains delivered and its operator-only measurement boundary is unchanged.
 
 ## Parallel Phase 16 Source Status
 
@@ -54,6 +57,25 @@ operator-entry evidence, or human-approved publication is claimed. The
 controlling details are in `.planning/ROADMAP.md`, `.planning/REQUIREMENTS.md`,
 and the six `docs/plans/2026-07-25-phase16-*` /
 `docs/plans/2026-07-26-phase16-*` records.
+
+## Phase 13-15 Planning and Source Status
+
+Phase 13 source contracts are merged. Plan 13-01 delivered the bounded
+weekly/manual development-regression workflow through PR #86 with no dispatch
+inputs, secrets, artifacts, providers, official assets, or claim outputs.
+Exact post-merge main CI run `30561266140` passed on `main@661343ce`.
+BENCH-006 remains Partial behind official/upstream rights, disclosure,
+operator, and execution evidence. BENCH-007 remains Partial until the first
+actual scheduled-cadence receipt is retained; the passing manual run proves
+only development operability.
+
+Phase 14 has one frozen plan. REPRO-001 implementation is blocked on additive
+result-v2 dispatch and release of the protected signed-publication lease;
+REPRO-002 additionally requires a headline-eligible pinned official result.
+Phase 15 has four ordered frozen plans. S2 depends on Phase 14; S3-S5 then
+serialize behind S2, with hardware, scale, protected, licensed, and operator
+evidence remaining external gates. No frozen plan or development fixture is
+reported as implemented evidence.
 
 ## Performance Metrics
 
