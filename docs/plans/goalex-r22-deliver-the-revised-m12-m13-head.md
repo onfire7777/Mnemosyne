@@ -21,10 +21,10 @@ Preserve `admission_state=PROPOSED`, `evidence_level=INTERNALLY_MEASURED`, `publ
 - `git fetch --prune origin && test "$(git rev-parse main)" = "$(git rev-parse origin/main)" && git merge-base --is-ancestor a3ca8108c22de350810dc3f574931a0d85810ed5 main`
 
 ### Task 1: Re-establish the revised exact-head gate
-- [ ] Restore GitHub connectivity and open or reuse exactly one PR from `codex/wmb-action-evidence-confirmations` to `main`; verify `headRefOid` is exactly `a3ca8108c22de350810dc3f574931a0d85810ed5`, not round 21’s superseded `d68f55cd`.
-- [ ] Verify the PR cumulative diff contains only the two leased test files and the latest commit truthfully describes the mocked `MnemoCLI.run` seam without claiming subprocess coverage.
-- [ ] Run only the two focused test files, focused Ruff, and `git diff --check`; do not duplicate the repository-wide suite locally.
-- [ ] Inspect all current-head reviews, unresolved threads, security findings, required checks, and mergeability conditions. If GitHub remains unreachable, canonical `main` advanced incompatibly, or remediation needs files outside the lease, stop with the exact blocker.
+- [x] Restore GitHub connectivity and open or reuse exactly one PR from `codex/wmb-action-evidence-confirmations` to `main`; verify `headRefOid` is exactly `a3ca8108c22de350810dc3f574931a0d85810ed5`, not round 21’s superseded `d68f55cd`.
+- [x] Verify the PR cumulative diff contains only the two leased test files and the latest commit truthfully describes the mocked `MnemoCLI.run` seam without claiming subprocess coverage.
+- [x] Run only the two focused test files, focused Ruff, and `git diff --check`; do not duplicate the repository-wide suite locally.
+- [x] Inspect all current-head reviews, unresolved threads, security findings, required checks, and mergeability conditions. If GitHub remains unreachable, canonical `main` advanced incompatibly, or remediation needs files outside the lease, stop with the exact blocker.
 
 ### Task 2: Merge and prove the revised candidate
 - [ ] Require every exact-head check and review gate to finish green for `a3ca8108`; if a confirmed two-file fix changes the SHA, restart exact-head verification against the new SHA.
