@@ -1,0 +1,1820 @@
+"""TDD tests for the standalone M10 calibration/abstention pilot core.
+
+This suite exercises `eval/public/wmbs_m10.py` only. It is new-file,
+unwired evidence: no adapter, scoring, runner, or registry module is
+imported or modified. See the module docstring for the exact integration
+dependencies this pilot intentionally leaves open.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from eval.public import wmbs_m10 as m10
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_PATH = REPO_ROOT / "eval/public/fixtures/wmbs-m10-development.json"
+
+
+# ---------------------------------------------------------------------------
+# Fixture generation and split determinism
+# ---------------------------------------------------------------------------
+
+
+def test_generate_fixture_is_deterministic_across_calls() -> None:
+    first = m10.generate_fixture()
+    second = m10.generate_fixture()
+    assert first == second
+
+
+def test_fixture_covers_all_five_categories() -> None:
+    fixture = m10.generate_fixture()
+    categories = {case["category"] for case in fixture["cases"]}
+    assert categories == set(m10.CATEGORIES)
+
+
+def test_fixture_uses_at_least_five_seeds() -> None:
+    fixture = m10.generate_fixture()
+    seeds = fixture["seeds"]["calibration"] + fixture["seeds"]["scored"]
+    assert len(seeds) >= 5
+    assert len(set(seeds)) == len(seeds)
+
+
+def test_split_manifests_are_disjoint_by_question_digest() -> None:
+    fixture = m10.generate_fixture()
+    calibration = fixture["split_manifests"]["calibration"]
+    scored = fixture["split_manifests"]["scored"]
+    assert calibration["question_digests"]
+    assert scored["question_digests"]
+    assert set(calibration["question_digests"]).isdisjoint(scored["question_digests"])
+
+
+def test_split_manifests_are_disjoint_by_event_digest() -> None:
+    fixture = m10.generate_fixture()
+    calibration = fixture["split_manifests"]["calibration"]
+    scored = fixture["split_manifests"]["scored"]
+    assert calibration["event_digests"]
+    assert scored["event_digests"]
+    assert set(calibration["event_digests"]).isdisjoint(scored["event_digests"])
+
+
+def test_split_manifest_digest_is_stable() -> None:
+    first = m10.generate_fixture()
+    second = m10.generate_fixture()
+    cal1 = first["split_manifests"]["calibration"]["manifest_sha256"]
+    cal2 = second["split_manifests"]["calibration"]["manifest_sha256"]
+    scored1 = first["split_manifests"]["scored"]["manifest_sha256"]
+    scored2 = second["split_manifests"]["scored"]["manifest_sha256"]
+    assert cal1 == cal2
+    assert scored1 == scored2
+    assert cal1 != scored1
+
+
+def test_fixture_file_on_disk_matches_generator_output() -> None:
+    assert FIXTURE_PATH.is_file(), "fixture must be committed to disk"
+    on_disk = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    assert on_disk == m10.generate_fixture()
+
+
+def test_cases_have_no_shared_case_ids_across_partitions() -> None:
+    fixture = m10.generate_fixture()
+    calibration_ids = {
+        case["case_id"]
+        for case in fixture["cases"]
+        if case["partition"] == "calibration"
+    }
+    scored_ids = {
+        case["case_id"] for case in fixture["cases"] if case["partition"] == "scored"
+    }
+    assert calibration_ids
+    assert scored_ids
+    assert calibration_ids.isdisjoint(scored_ids)
+
+
+def test_load_cases_round_trips_fixture_dicts() -> None:
+    fixture = m10.generate_fixture()
+    cases = m10.load_cases(fixture)
+    assert len(cases) == len(fixture["cases"])
+    assert all(isinstance(case, m10.Case) for case in cases)
+
+
+# ---------------------------------------------------------------------------
+# Question digest identity (Finding 4: separate from event/fact digests)
+# ---------------------------------------------------------------------------
+
+
+def test_question_digest_is_independent_of_fact_content() -> None:
+    case_a = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    case_b = _manual_case(
+        facts=(
+            _fact(
+                key="owner",
+                value="closed",
+                evidence_handle="different-evidence-handle",
+            ),
+        ),
+        gold_answer="closed",
+        expected_abstain=False,
+    )
+    assert m10._question_digest(case_a) == m10._question_digest(case_b)
+
+
+def test_question_digest_differs_from_event_digest_for_same_case() -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    question_digest = m10._question_digest(case)
+    event_digests = {m10._event_digest(fact) for fact in case.facts}
+    assert question_digest not in event_digests
+
+
+def test_question_digest_changes_when_question_text_changes() -> None:
+    case_a = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    case_b = _manual_case(
+        question="What is the value of fact `owner` for item item-manual-00?",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    assert m10._question_digest(case_a) != m10._question_digest(case_b)
+
+
+# ---------------------------------------------------------------------------
+# Retrieval baselines
+# ---------------------------------------------------------------------------
+
+
+def _manual_case(
+    *,
+    case_id: str = "case-manual-00",
+    category: str = "answerable",
+    question: str = "What is the value of fact `status` for item item-manual-00?",
+    facts: tuple[m10.FactInstance, ...],
+    gold_answer: str | None,
+    expected_abstain: bool,
+) -> m10.Case:
+    return m10.Case(
+        case_id=case_id,
+        category=category,
+        seed=0,
+        question=question,
+        observation_time="2026-07-20T00:00:05Z",
+        facts=facts,
+        gold_answer=gold_answer,
+        expected_abstain=expected_abstain,
+    )
+
+
+def _fact(
+    *,
+    item_id: str = "item-manual-00",
+    key: str = "status",
+    value: str = "open",
+    provenance_status: str = "verified",
+    evidence_handle: str = "case-manual-00:fact:00",
+) -> m10.FactInstance:
+    return m10.FactInstance(
+        stable_item_id=item_id,
+        key=key,
+        value=value,
+        observed_at="2026-07-20T00:00:00Z",
+        provenance_status=provenance_status,
+        evidence_handle=evidence_handle,
+    )
+
+
+def test_no_memory_baseline_returns_no_hits() -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    envelope = m10.retrieve_no_memory(case)
+    assert envelope.hits == ()
+
+
+def test_full_context_baseline_includes_every_fact() -> None:
+    facts = (
+        _fact(evidence_handle="h0"),
+        _fact(key="owner", value="alice", evidence_handle="h1"),
+    )
+    case = _manual_case(facts=facts, gold_answer="open", expected_abstain=False)
+    envelope = m10.retrieve_full_context(case)
+    assert len(envelope.hits) == 2
+    assert {hit.evidence_handles[0] for hit in envelope.hits} == {"h0", "h1"}
+
+
+def test_bm25_baseline_ranks_relevant_fact_above_distractor() -> None:
+    facts = (
+        _fact(key="owner", value="bob", evidence_handle="h-distractor"),
+        _fact(key="status", value="open", evidence_handle="h-relevant"),
+    )
+    question = "What is the value of fact `status` for item item-manual-00?"
+    case = _manual_case(
+        facts=facts, question=question, gold_answer="open", expected_abstain=False
+    )
+    envelope = m10.retrieve_bm25(case, top_k=2)
+    assert envelope.hits[0].evidence_handles == ["h-relevant"]
+
+
+def test_vector_baseline_ranks_relevant_fact_above_distractor() -> None:
+    facts = (
+        _fact(key="owner", value="bob", evidence_handle="h-distractor"),
+        _fact(key="status", value="open", evidence_handle="h-relevant"),
+    )
+    question = "What is the value of fact `status` for item item-manual-00?"
+    case = _manual_case(
+        facts=facts, question=question, gold_answer="open", expected_abstain=False
+    )
+    envelope = m10.retrieve_vector(case, top_k=2)
+    assert envelope.hits[0].evidence_handles == ["h-relevant"]
+
+
+def test_vector_baseline_manifest_declares_hashed_bow_algorithm() -> None:
+    manifest = m10.baseline_manifest("vector")
+    assert manifest["embedding_model"]["id"] == "hashed-bow-cosine-v1"
+    assert manifest["embedding_model"]["dimension"] > 0
+    assert "sha256" in manifest["embedding_model"]
+
+
+def test_baseline_manifests_exist_for_all_four_ids() -> None:
+    for baseline_id in m10.BASELINE_IDS:
+        manifest = m10.baseline_manifest(baseline_id)
+        assert manifest["schema_id"] == "wmbs-m10-development/baseline-manifest/0.1"
+        assert manifest["baseline_id"] == baseline_id
+        assert manifest["top_k"] >= 1
+        assert manifest["setup_cost_usd"] == 0
+        assert manifest["indexing_cost_usd"] == 0
+
+
+def test_run_baseline_is_reproducible_across_two_calls() -> None:
+    fixture = m10.generate_fixture()
+    cases = [
+        case for case in m10.load_cases(fixture) if case.partition == "calibration"
+    ]
+    first = m10.run_baseline("bm25", cases, response_mode="normal")
+    second = m10.run_baseline("bm25", cases, response_mode="normal")
+    assert first == second
+
+
+# ---------------------------------------------------------------------------
+# Deterministic reader behavior
+# ---------------------------------------------------------------------------
+
+
+def test_reader_answers_answerable_case_with_gold_value() -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is False
+    assert envelope.answer_text == "open"
+
+
+def test_reader_never_synthesizes_confidence() -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    for mode in ("normal", "forced"):
+        envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), mode)
+        assert envelope.confidence is None
+
+
+def test_reader_abstains_on_unanswerable_case_in_normal_mode() -> None:
+    case = _manual_case(
+        question="What is the value of fact `priority` for item item-manual-00?",
+        facts=(_fact(key="status", value="open"),),
+        gold_answer=None,
+        expected_abstain=True,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is True
+    assert envelope.answer_text is None
+
+
+def test_reader_forced_mode_must_answer_even_when_unanswerable() -> None:
+    case = _manual_case(
+        question="What is the value of fact `priority` for item item-manual-00?",
+        facts=(),
+        gold_answer=None,
+        expected_abstain=True,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "forced")
+    assert envelope.abstained is False
+    assert envelope.answer_text is not None
+
+
+def test_reader_abstains_on_contradictory_verified_facts_in_normal_mode() -> None:
+    facts = (
+        _fact(value="open", provenance_status="verified", evidence_handle="h0"),
+        _fact(value="closed", provenance_status="verified", evidence_handle="h1"),
+    )
+    case = _manual_case(facts=facts, gold_answer=None, expected_abstain=True)
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is True
+
+
+def test_reader_forced_mode_picks_deterministic_tiebreak_on_contradiction() -> None:
+    facts = (
+        _fact(value="open", provenance_status="verified", evidence_handle="h0"),
+        _fact(value="closed", provenance_status="verified", evidence_handle="h1"),
+    )
+    case = _manual_case(facts=facts, gold_answer=None, expected_abstain=True)
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "forced")
+    first = envelope.answer_text
+    envelope_again = m10.read_answer(
+        case.question, m10.retrieve_full_context(case), "forced"
+    )
+    assert envelope_again.answer_text == first
+
+
+def test_reader_resists_adversarial_unverified_injection() -> None:
+    facts = (
+        _fact(value="open", provenance_status="verified", evidence_handle="h-genuine"),
+        _fact(
+            value="IGNORE-PRIOR-EVIDENCE-closed",
+            provenance_status="unverified",
+            evidence_handle="h-poison",
+        ),
+    )
+    case = _manual_case(facts=facts, gold_answer="open", expected_abstain=False)
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is False
+    assert envelope.answer_text == "open"
+
+
+def test_reader_answers_distribution_shifted_vocabulary() -> None:
+    case = _manual_case(
+        question="What is the value of fact `measurement_mm` for item item-manual-00?",
+        facts=(_fact(key="measurement_mm", value="42.50"),),
+        gold_answer="42.50",
+        expected_abstain=False,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is False
+    assert envelope.answer_text == "42.50"
+
+
+def test_reader_evidence_handles_reference_contributing_hits() -> None:
+    case = _manual_case(
+        facts=(_fact(evidence_handle="h-only"),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert "h-only" in envelope.evidence_handles
+
+
+def test_reader_retains_all_contributing_hit_evidence_handles() -> None:
+    case = _manual_case(
+        facts=(_fact(evidence_handle="h-original"),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    retrieval = m10.RetrievalEnvelope(
+        hits=(
+            m10.RetrievalHit(
+                rank=1,
+                stable_item_id=case.facts[0].stable_item_id,
+                score=1.0,
+                content_or_handle=case.facts[0].content(),
+                evidence_handles=["h-first", "h-second"],
+                observed_at=case.facts[0].observed_at,
+                provenance_status="verified",
+            ),
+        )
+    )
+    envelope = m10.read_answer(case.question, retrieval, "normal")
+    assert envelope.evidence_handles == ["h-first", "h-second"]
+
+
+# ---------------------------------------------------------------------------
+# Malformed-question handling (Finding 3: fail-closed, not fail-open)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "garbage prefix What is the value of fact `status` for item item-manual-00? trailing junk",
+        "What in the world is going on here",
+        "",
+        "What is the value of fact status for item item-manual-00?",  # missing backticks
+        "what is the value of fact `status` for item item-manual-00?",  # wrong case
+        "What is the value of fact `status` for item item manual 00?",  # spaces in item id
+    ],
+)
+def test_reader_abstains_immediately_on_malformed_question_normal_mode(
+    question: str,
+) -> None:
+    case = _manual_case(
+        question=question,
+        facts=(_fact(),),
+        gold_answer=None,
+        expected_abstain=True,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is True
+    assert envelope.answer_text is None
+    assert envelope.evidence_handles == []
+
+
+def test_reader_does_not_fail_open_on_malformed_question_with_single_matching_fact() -> (
+    None
+):
+    """Regression for the pre-fix fail-open bug.
+
+    Before the fix, a malformed question produced `target_key=None` and
+    `target_item=None`, and the reader's item/key filters were skipped
+    whenever the target was `None` -- so any single verified fact in the
+    envelope was (wrongly) treated as an unambiguous, confident answer to
+    a question the reader could not actually parse.
+    """
+    case = _manual_case(
+        question="What in the world is going on here",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=True,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is True
+    assert envelope.answer_text is None
+
+
+def test_reader_forced_mode_uses_explicit_fallback_on_malformed_question() -> None:
+    case = _manual_case(
+        question="not a real question at all",
+        facts=(_fact(),),
+        gold_answer=None,
+        expected_abstain=True,
+    )
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "forced")
+    assert envelope.abstained is False
+    assert envelope.answer_text == "unknown"
+    assert envelope.evidence_handles == []
+
+
+def test_reader_forced_mode_fallback_on_malformed_question_is_deterministic() -> None:
+    case = _manual_case(
+        question="not a real question at all",
+        facts=(_fact(),),
+        gold_answer=None,
+        expected_abstain=True,
+    )
+    first = m10.read_answer(case.question, m10.retrieve_full_context(case), "forced")
+    second = m10.read_answer(case.question, m10.retrieve_full_context(case), "forced")
+    assert first == second
+
+
+def test_reader_still_answers_well_formed_question_after_grammar_fix() -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    envelope = m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+    assert envelope.abstained is False
+    assert envelope.answer_text == "open"
+
+
+# ---------------------------------------------------------------------------
+# Reference-reader correctness across the generated fixture
+# ---------------------------------------------------------------------------
+
+
+def test_reference_reader_is_perfectly_accurate_on_assertable_categories() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    assertable = {"answerable", "distribution_shifted", "adversarial"}
+    for case in cases:
+        if case.category not in assertable:
+            continue
+        envelope = m10.read_answer(
+            case.question, m10.retrieve_full_context(case), "normal"
+        )
+        assert envelope.abstained is False
+        assert envelope.answer_text == case.gold_answer
+
+
+def test_reference_reader_has_zero_confident_unanswerable_assertions_normal_mode() -> (
+    None
+):
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    records = [
+        m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+        for case in cases
+    ]
+    report = m10.score_records(cases, records)
+    assert report.confident_unanswerable_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Scorer
+# ---------------------------------------------------------------------------
+
+
+def test_scorer_reports_perfect_assertion_accuracy_for_reference_reader() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    records = [
+        m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+        for case in cases
+    ]
+    report = m10.score_records(cases, records)
+    assert report.assertion_accuracy == 1.0
+
+
+def test_scorer_reports_perfect_abstention_recall_for_reference_reader() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    records = [
+        m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+        for case in cases
+    ]
+    report = m10.score_records(cases, records)
+    assert report.abstention_recall == 1.0
+
+
+def test_scorer_numeric_calibration_is_unsupported_without_confidence() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"][:4]
+    records = [
+        m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+        for case in cases
+    ]
+    report = m10.score_records(cases, records)
+    assert report.numeric_calibration == "unsupported"
+    assert report.brier_score is None
+    assert report.ece is None
+
+
+def test_scorer_computes_brier_and_ece_when_confidence_is_present() -> None:
+    case_correct = _manual_case(
+        case_id="case-conf-00",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    case_wrong = _manual_case(
+        case_id="case-conf-01",
+        question="What is the value of fact `status` for item item-manual-00?",
+        facts=(_fact(value="closed"),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    cases = [case_correct, case_wrong]
+    record_correct = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=0.9,
+        evidence_handles=["h0"],
+        action_handles=[],
+        adapter_metadata={"mode": "normal"},
+    )
+    record_wrong = m10.AnswerEnvelope(
+        answer_text="closed",
+        abstained=False,
+        confidence=0.9,
+        evidence_handles=["h0"],
+        action_handles=[],
+        adapter_metadata={"mode": "normal"},
+    )
+    report = m10.score_records(cases, [record_correct, record_wrong])
+    assert report.numeric_calibration == "supported"
+    assert report.brier_score is not None
+    assert report.ece is not None
+    expected_brier = ((1 - 0.9) ** 2 + (0 - 0.9) ** 2) / 2
+    assert report.brier_score == pytest.approx(expected_brier)
+
+
+# ---------------------------------------------------------------------------
+# Confidence value validation (Finding 5)
+# ---------------------------------------------------------------------------
+
+
+def test_score_records_rejects_bool_confidence() -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=True, evidence_handles=[]
+    )
+    with pytest.raises(m10.ConfidenceValidationError):
+        m10.score_records([case], [record])
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_score_records_rejects_non_finite_confidence(bad: float) -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=bad, evidence_handles=[]
+    )
+    with pytest.raises(m10.ConfidenceValidationError):
+        m10.score_records([case], [record])
+
+
+@pytest.mark.parametrize("bad", [-0.0001, 1.0001, -1.0, 2.0])
+def test_score_records_rejects_out_of_range_confidence(bad: float) -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=bad, evidence_handles=[]
+    )
+    with pytest.raises(m10.ConfidenceValidationError):
+        m10.score_records([case], [record])
+
+
+@pytest.mark.parametrize("good", [0.0, 1.0, 0.5])
+def test_score_records_accepts_boundary_confidence_values(good: float) -> None:
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=good, evidence_handles=[]
+    )
+    report = m10.score_records([case], [record])
+    assert report.numeric_calibration == "supported"
+
+
+def test_score_records_confidence_validation_runs_before_metric_computation() -> None:
+    """One invalid record must fail closed even if others look fine."""
+    case_good = _manual_case(
+        case_id="case-conf-good",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    case_bad = _manual_case(
+        case_id="case-conf-bad",
+        question="What is the value of fact `owner` for item item-manual-00?",
+        facts=(_fact(key="owner", value="alice"),),
+        gold_answer="alice",
+        expected_abstain=False,
+    )
+    record_good = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=0.9, evidence_handles=[]
+    )
+    record_bad = m10.AnswerEnvelope(
+        answer_text="alice", abstained=False, confidence=1.5, evidence_handles=[]
+    )
+    with pytest.raises(m10.ConfidenceValidationError):
+        m10.score_records([case_good, case_bad], [record_good, record_bad])
+
+
+# ---------------------------------------------------------------------------
+# AnswerEnvelope shape validation (local-record trust boundary)
+# ---------------------------------------------------------------------------
+
+
+def test_answer_envelope_from_dict_accepts_well_formed_record() -> None:
+    record = m10.AnswerEnvelope.from_dict(
+        {
+            "answer_text": "open",
+            "abstained": False,
+            "confidence": None,
+            "evidence_handles": ["h0"],
+        }
+    )
+    assert record.answer_text == "open"
+    assert record.abstained is False
+    assert record.action_handles == []
+    assert record.adapter_metadata == {}
+
+
+def test_answer_envelope_from_dict_rejects_string_abstained_value() -> None:
+    """Adversarial regression: coercive string abstained value."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": None,
+                "abstained": "false",
+                "confidence": None,
+                "evidence_handles": [],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_abstained_true_with_answer_text() -> None:
+    """Adversarial regression: contradictory answer envelope."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": True,
+                "confidence": None,
+                "evidence_handles": [],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_abstained_false_with_null_answer_text() -> (
+    None
+):
+    """Adversarial regression: contradictory answer envelope."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": None,
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": [],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_missing_required_field() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {"answer_text": "open", "abstained": False, "confidence": None}
+        )
+
+
+def test_answer_envelope_from_dict_rejects_non_bool_evidence_handles() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": "h0",
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# AnswerEnvelope closed-ABI adversarial regressions
+# ---------------------------------------------------------------------------
+
+
+def test_answer_envelope_from_dict_rejects_unknown_field() -> None:
+    """Adversarial regression: an unrecognized top-level key must fail
+    closed rather than being silently ignored by a non-closed loader."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "unexpected_field": "surprise",
+            }
+        )
+
+
+def test_answer_envelope_from_dict_raises_wmbs_m10_error_base_type() -> None:
+    """`AnswerEnvelopeValidationError` must be catchable as `WmbsM10Error`."""
+    with pytest.raises(m10.WmbsM10Error):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "unexpected_field": "surprise",
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_empty_answer_text() -> None:
+    """Adversarial regression: empty-string answer_text is not a genuine
+    assertion and must not silently pass as a well-formed answered
+    record."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+            }
+        )
+
+
+def test_score_records_rejects_empty_answer_text() -> None:
+    """The same nonempty-answer-text rule applies at the score_records
+    trust boundary, not only at AnswerEnvelope.from_dict."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="", abstained=False, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_answer_envelope_from_dict_rejects_duplicate_evidence_handles() -> None:
+    """Adversarial regression: duplicate evidence handles must fail closed."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0", "h0"],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_empty_evidence_handle_string() -> None:
+    """Adversarial regression: an empty-string handle is not a valid
+    identifier and must fail closed."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0", ""],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_duplicate_action_handles() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "action_handles": ["a0", "a0"],
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_unknown_metadata_key() -> None:
+    """Adversarial regression: adapter_metadata is closed to the local
+    contract's own vocabulary, not an arbitrary str-to-str bag."""
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "adapter_metadata": {"unexpected": "value"},
+            }
+        )
+
+
+def test_answer_envelope_from_dict_rejects_invalid_mode_metadata_value() -> None:
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.AnswerEnvelope.from_dict(
+            {
+                "answer_text": "open",
+                "abstained": False,
+                "confidence": None,
+                "evidence_handles": ["h0"],
+                "adapter_metadata": {"mode": "bogus-mode"},
+            }
+        )
+
+
+def test_answer_envelope_from_dict_accepts_known_metadata_keys() -> None:
+    record = m10.AnswerEnvelope.from_dict(
+        {
+            "answer_text": None,
+            "abstained": True,
+            "confidence": None,
+            "evidence_handles": [],
+            "adapter_metadata": {
+                "mode": "normal",
+                "abstain_reason": "malformed_question",
+            },
+        }
+    )
+    assert record.adapter_metadata == {
+        "mode": "normal",
+        "abstain_reason": "malformed_question",
+    }
+
+
+def test_score_records_rejects_string_abstained_value_before_scoring() -> None:
+    """Adversarial regression: a directly-constructed envelope bypasses
+    ``from_dict`` entirely, so ``score_records`` must independently
+    enforce the closed contract rather than relying on ``bool()``
+    coercion (which would treat the truthy string "true" the same as
+    ``True`` and "" the same as ``False``).
+    """
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text=None, abstained="true", confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_abstained_true_with_non_null_answer_text() -> None:
+    """Adversarial regression: contradictory envelope constructed directly."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open", abstained=True, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_abstained_false_with_null_answer_text() -> None:
+    """Adversarial regression: contradictory envelope constructed directly."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text=None, abstained=False, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_duplicate_evidence_handles() -> (
+    None
+):
+    """A directly-constructed ``AnswerEnvelope`` with duplicate evidence
+    handles bypasses ``AnswerEnvelope.from_dict`` entirely -- dataclasses
+    do not validate field contents at construction time -- so
+    ``score_records`` must independently enforce the same closed
+    handle-list rule via the shared ``_validate_answer_envelope_contract``
+    validator, not a weaker or absent check."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0", "h0"],
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_empty_evidence_handle() -> (
+    None
+):
+    """Adversarial regression: an empty-string evidence handle in a
+    directly-constructed envelope must fail closed at score_records."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0", ""],
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_duplicate_action_handles() -> (
+    None
+):
+    """Adversarial regression: duplicate action handles on a
+    directly-constructed envelope must fail closed at score_records."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0"],
+        action_handles=["a0", "a0"],
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_unknown_metadata_key() -> (
+    None
+):
+    """Adversarial regression: a directly-constructed envelope can smuggle
+    an unrecognized adapter_metadata key past dataclass construction;
+    score_records must still reject it via the same closed vocabulary
+    from_dict enforces."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0"],
+        adapter_metadata={"unexpected": "value"},
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_rejects_direct_construction_with_invalid_mode_metadata() -> (
+    None
+):
+    """Adversarial regression: a directly-constructed envelope with an
+    out-of-vocabulary adapter_metadata['mode'] value must fail closed at
+    score_records, exactly as from_dict already does."""
+    case = _manual_case(facts=(_fact(),), gold_answer="open", expected_abstain=False)
+    record = m10.AnswerEnvelope(
+        answer_text="open",
+        abstained=False,
+        confidence=None,
+        evidence_handles=["h0"],
+        adapter_metadata={"mode": "bogus-mode"},
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case], [record])
+
+
+def test_score_records_and_from_dict_share_the_same_validator_function() -> None:
+    """Both trust boundaries must call the exact same validator function,
+    so a caller cannot rely on a weaker duplicated check ever creeping
+    into ``score_records`` in isolation from ``AnswerEnvelope.from_dict``."""
+    import inspect
+
+    from_dict_source = inspect.getsource(m10.AnswerEnvelope.from_dict)
+    score_records_source = inspect.getsource(m10.score_records)
+    assert "_validate_answer_envelope_contract" in from_dict_source
+    assert "_validate_answer_envelope_contract" in score_records_source
+
+
+def test_score_records_shape_validation_runs_before_metric_computation() -> None:
+    """One malformed record must fail closed even if others look fine."""
+    case_good = _manual_case(
+        case_id="case-shape-good",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    case_bad = _manual_case(
+        case_id="case-shape-bad",
+        question="What is the value of fact `owner` for item item-manual-00?",
+        facts=(_fact(key="owner", value="alice"),),
+        gold_answer="alice",
+        expected_abstain=False,
+    )
+    record_good = m10.AnswerEnvelope(
+        answer_text="open", abstained=False, confidence=None, evidence_handles=[]
+    )
+    record_bad = m10.AnswerEnvelope(
+        answer_text="alice", abstained=True, confidence=None, evidence_handles=[]
+    )
+    with pytest.raises(m10.AnswerEnvelopeValidationError):
+        m10.score_records([case_good, case_bad], [record_good, record_bad])
+
+
+# ---------------------------------------------------------------------------
+# Complete confidence coverage requirement (Finding 2)
+# ---------------------------------------------------------------------------
+
+
+def test_scorer_treats_partial_confidence_coverage_as_unsupported() -> None:
+    """A system may not supply confidence only on its easy/correct answers.
+
+    If any answered record lacks a confidence value, the whole
+    calibration must be marked unsupported and non-gating, even though at
+    least one confidence value is present.
+    """
+    case_confident_correct = _manual_case(
+        case_id="case-partial-00",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    case_no_confidence_wrong = _manual_case(
+        case_id="case-partial-01",
+        question="What is the value of fact `status` for item item-manual-00?",
+        facts=(_fact(value="closed"),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    cases = [case_confident_correct, case_no_confidence_wrong]
+    records = [
+        m10.AnswerEnvelope(
+            answer_text="open", abstained=False, confidence=0.99, evidence_handles=[]
+        ),
+        m10.AnswerEnvelope(
+            answer_text="closed", abstained=False, confidence=None, evidence_handles=[]
+        ),
+    ]
+    report = m10.score_records(cases, records)
+    assert report.numeric_calibration == "unsupported"
+    assert report.brier_score is None
+    assert report.ece is None
+
+
+def test_scorer_ignores_confidence_on_abstained_records_for_coverage_check() -> None:
+    """Confidence on an abstention neither helps nor hurts coverage.
+
+    Only the answered population must have complete confidence coverage;
+    an abstained record's confidence (present or absent) is irrelevant.
+    """
+    case_answered = _manual_case(
+        case_id="case-abstain-conf-00",
+        facts=(_fact(),),
+        gold_answer="open",
+        expected_abstain=False,
+    )
+    case_abstained = _manual_case(
+        case_id="case-abstain-conf-01",
+        question="What is the value of fact `priority` for item item-manual-00?",
+        facts=(),
+        gold_answer=None,
+        expected_abstain=True,
+    )
+    cases = [case_answered, case_abstained]
+    records = [
+        m10.AnswerEnvelope(
+            answer_text="open", abstained=False, confidence=0.9, evidence_handles=[]
+        ),
+        m10.AnswerEnvelope(
+            answer_text=None, abstained=True, confidence=0.5, evidence_handles=[]
+        ),
+    ]
+    report = m10.score_records(cases, records)
+    assert report.numeric_calibration == "supported"
+    assert report.brier_score == pytest.approx((1 - 0.9) ** 2)
+
+
+def test_useful_coverage_gate_rejects_always_abstain_policy() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    floor = m10.useful_coverage_floor_from_fixture(fixture)
+    always_abstain_records = [
+        m10.AnswerEnvelope(
+            answer_text=None,
+            abstained=True,
+            confidence=None,
+            evidence_handles=[],
+            action_handles=[],
+            adapter_metadata={"mode": "normal"},
+        )
+        for _ in cases
+    ]
+    report = m10.score_records(cases, always_abstain_records)
+    assert report.useful_coverage < floor
+
+
+def test_useful_coverage_floor_is_frozen_and_strictly_positive() -> None:
+    fixture = m10.generate_fixture()
+    calibration_cases = [
+        case for case in m10.load_cases(fixture) if case.partition == "calibration"
+    ]
+    first = m10.calibrate_useful_coverage_floor(calibration_cases)
+    second = m10.calibrate_useful_coverage_floor(calibration_cases)
+    assert first == second
+    assert first > 0.0
+
+
+def test_useful_coverage_floor_does_not_inspect_scored_cases() -> None:
+    import inspect
+
+    source = inspect.getsource(m10.calibrate_useful_coverage_floor)
+    assert "scored" not in source
+
+
+def test_reference_reader_clears_useful_coverage_floor_on_scored_cases() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    floor = m10.useful_coverage_floor_from_fixture(fixture)
+    records = [
+        m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+        for case in cases
+    ]
+    report = m10.score_records(cases, records)
+    assert report.useful_coverage >= floor
+
+
+# ---------------------------------------------------------------------------
+# Digest-bound calibration artifact (Finding 1)
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_artifact_is_embedded_in_generated_fixture() -> None:
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    assert artifact["schema_id"] == m10.CALIBRATION_ARTIFACT_SCHEMA_ID
+
+
+def test_calibration_artifact_contains_all_four_baseline_manifests() -> None:
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    assert set(artifact["baseline_manifests"]) == set(m10.BASELINE_IDS)
+    for baseline_id in m10.BASELINE_IDS:
+        manifest = artifact["baseline_manifests"][baseline_id]
+        assert manifest["baseline_id"] == baseline_id
+
+
+def test_calibration_artifact_contains_calibration_metrics_for_all_baselines() -> None:
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    assert set(artifact["calibration_metrics"]) == set(m10.BASELINE_IDS)
+    for baseline_id in m10.BASELINE_IDS:
+        metrics = artifact["calibration_metrics"][baseline_id]
+        assert "useful_coverage" in metrics
+        assert "coverage" in metrics
+
+
+def test_calibration_artifact_binds_derivation_rule_and_floor() -> None:
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    assert artifact["derivation_rule"] == m10.USEFUL_COVERAGE_DERIVATION_RULE
+    assert artifact["useful_coverage_floor"] > 0.0
+
+
+def test_calibration_artifact_floor_matches_raw_derivation() -> None:
+    """The frozen artifact's floor must agree with the raw derivation step."""
+    fixture = m10.generate_fixture()
+    calibration_cases = [
+        case for case in m10.load_cases(fixture) if case.partition == "calibration"
+    ]
+    artifact = fixture["calibration_artifact"]
+    assert artifact["useful_coverage_floor"] == m10.calibrate_useful_coverage_floor(
+        calibration_cases
+    )
+
+
+def test_calibration_artifact_is_deterministic_and_digest_stable() -> None:
+    first = m10.generate_fixture()["calibration_artifact"]
+    second = m10.generate_fixture()["calibration_artifact"]
+    assert first == second
+    assert first["artifact_sha256"] == second["artifact_sha256"]
+
+
+def test_verify_calibration_artifact_accepts_untampered_artifact() -> None:
+    fixture = m10.generate_fixture()
+    m10.verify_calibration_artifact(fixture["calibration_artifact"])  # no raise
+
+
+def test_verify_calibration_artifact_rejects_tampered_floor() -> None:
+    fixture = m10.generate_fixture()
+    tampered = dict(fixture["calibration_artifact"])
+    tampered["useful_coverage_floor"] = 0.0
+    with pytest.raises(ValueError):
+        m10.verify_calibration_artifact(tampered)
+
+
+def test_verify_calibration_artifact_rejects_tampered_baseline_manifest() -> None:
+    fixture = m10.generate_fixture()
+    tampered = dict(fixture["calibration_artifact"])
+    tampered_manifests = dict(tampered["baseline_manifests"])
+    tampered_manifests["bm25"] = {**tampered_manifests["bm25"], "top_k": 999}
+    tampered["baseline_manifests"] = tampered_manifests
+    with pytest.raises(ValueError):
+        m10.verify_calibration_artifact(tampered)
+
+
+def test_verify_calibration_artifact_rejects_missing_digest() -> None:
+    fixture = m10.generate_fixture()
+    artifact_without_digest = {
+        key: value
+        for key, value in fixture["calibration_artifact"].items()
+        if key != "artifact_sha256"
+    }
+    with pytest.raises(ValueError):
+        m10.verify_calibration_artifact(artifact_without_digest)
+
+
+def test_useful_coverage_floor_from_fixture_verifies_before_returning() -> None:
+    fixture = m10.generate_fixture()
+    assert m10.useful_coverage_floor_from_fixture(
+        fixture
+    ) == m10.calibrate_useful_coverage_floor(
+        [case for case in m10.load_cases(fixture) if case.partition == "calibration"]
+    )
+
+
+def test_useful_coverage_floor_from_fixture_rejects_tampered_artifact() -> None:
+    fixture = m10.generate_fixture()
+    tampered_fixture = dict(fixture)
+    tampered_artifact = dict(fixture["calibration_artifact"])
+    tampered_artifact["useful_coverage_floor"] = 999.0
+    tampered_fixture["calibration_artifact"] = tampered_artifact
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(tampered_fixture)
+
+
+def test_useful_coverage_floor_from_fixture_rejects_rehashed_floor_splice() -> None:
+    """Adversarial regression: self-consistent tamper must still fail closed.
+
+    An attacker edits ``useful_coverage_floor`` and correctly recomputes
+    ``artifact_sha256`` over the edited body. ``verify_calibration_artifact``
+    alone is fooled (the digest matches the tampered body it was computed
+    from), but ``useful_coverage_floor_from_fixture`` must still reject it
+    once the artifact is checked against independently recomputed
+    calibration data derived from the fixture's own cases.
+    """
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    tampered_body = {
+        key: value for key, value in artifact.items() if key != "artifact_sha256"
+    }
+    tampered_body["useful_coverage_floor"] = 999.0
+    rehashed = {
+        **tampered_body,
+        "artifact_sha256": m10.canonical_sha256(tampered_body),
+    }
+
+    m10.verify_calibration_artifact(rehashed)  # self-digest check alone passes
+
+    tampered_fixture = {**fixture, "calibration_artifact": rehashed}
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(tampered_fixture)
+
+
+def test_useful_coverage_floor_from_fixture_rejects_stale_artifact_splice() -> None:
+    """Adversarial regression: a valid-but-stale artifact must fail closed.
+
+    A genuinely valid, self-consistent ``calibration_artifact`` (produced
+    by a real prior call to ``generate_fixture``) is spliced into a
+    fixture whose calibration-partition case content has since changed.
+    ``verify_calibration_artifact`` cannot detect this -- the artifact was
+    never edited, only the fixture it now sits inside was -- so
+    ``useful_coverage_floor_from_fixture`` must independently recompute
+    from the fixture's actual calibration cases to catch it.
+    """
+    original_fixture = m10.generate_fixture()
+    stale_artifact = original_fixture["calibration_artifact"]
+    m10.verify_calibration_artifact(stale_artifact)  # still self-consistent
+
+    cases = [dict(case) for case in original_fixture["cases"]]
+    mutated_any = False
+    for index, case in enumerate(cases):
+        if case["partition"] == "calibration" and case["category"] == "answerable":
+            cases[index] = {
+                **case,
+                "facts": [
+                    {**fact, "value": "value-999"} for fact in case["facts"]
+                ],
+            }
+            mutated_any = True
+            break
+    assert mutated_any, "expected an answerable calibration case to mutate"
+
+    spliced_fixture = {
+        **original_fixture,
+        "cases": cases,
+        "calibration_artifact": stale_artifact,
+    }
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(spliced_fixture)
+
+
+def test_fixture_file_on_disk_calibration_artifact_matches_generator() -> None:
+    on_disk = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    assert (
+        on_disk["calibration_artifact"]
+        == m10.generate_fixture()["calibration_artifact"]
+    )
+
+
+# ---------------------------------------------------------------------------
+# Calibration split manifest recomputation-binding adversarial regressions
+# ---------------------------------------------------------------------------
+
+
+def test_build_calibration_artifact_rejects_rehashed_forged_split_digest() -> None:
+    """Adversarial regression: a forged calibration split manifest that is
+    correctly self-rehashed (so it is internally consistent on its own)
+    must still be rejected, because it does not match a manifest
+    independently recomputed from this fixture's own calibration cases.
+    """
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["calibration"]
+    forged_body = {**stored, "case_count": stored["case_count"] + 1}
+    del forged_body["manifest_sha256"]
+    forged_manifest = {
+        **forged_body,
+        "manifest_sha256": m10.canonical_sha256(forged_body),
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "calibration": forged_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_changed_manifest_body() -> None:
+    """Adversarial regression: editing the stored manifest body without
+    rehashing must also fail closed (caught by the whole-manifest
+    comparison against the recomputed manifest, not by a separate
+    self-digest check)."""
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["calibration"]
+    tampered = {
+        **stored,
+        "question_digests": [*stored["question_digests"], "0" * 64],
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {**fixture["split_manifests"], "calibration": tampered},
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_overlapping_partitions() -> None:
+    """Adversarial regression: a calibration case duplicating a scored
+    case's question/event content must be rejected by the disjointness
+    check, even when the forged calibration split manifest is made fully
+    self-consistent with the forged (overlapping) calibration cases so
+    the whole-manifest comparison alone would pass.
+    """
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    scored_case = next(case for case in cases if case["partition"] == "scored")
+    duplicated = {
+        **scored_case,
+        "case_id": "case-forged-overlap",
+        "partition": "calibration",
+    }
+    forged_cases = cases + [duplicated]
+
+    calibration_cases = [
+        m10.Case.from_dict(case)
+        for case in forged_cases
+        if case["partition"] == "calibration"
+    ]
+    forged_manifest = m10._split_manifest(
+        calibration_cases, m10._CALIBRATION_SEEDS, "calibration"
+    )
+
+    forged_fixture = {
+        **fixture,
+        "cases": forged_cases,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "calibration": forged_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_self_consistent_empty_calibration_partition() -> (
+    None
+):
+    """Adversarial regression: an incomplete (empty) calibration partition
+    must be rejected even when the stored split manifest is forged to be
+    self-consistent with that empty partition."""
+    fixture = m10.generate_fixture()
+    cases = [case for case in fixture["cases"] if case["partition"] != "calibration"]
+    empty_manifest = m10._split_manifest([], m10._CALIBRATION_SEEDS, "calibration")
+    forged_fixture = {
+        **fixture,
+        "cases": cases,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "calibration": empty_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_rehashed_forged_scored_split_digest() -> (
+    None
+):
+    """Adversarial regression: a forged scored split manifest that is
+    correctly self-rehashed (so it is internally consistent on its own)
+    must still be rejected, because it does not match a manifest
+    independently recomputed from this fixture's own scored cases. Prior
+    behavior only ever consumed the stored scored manifest for
+    overlap-set computation and never verified it against the fixture's
+    own scored cases; this closes that gap symmetrically with the
+    calibration-side check.
+    """
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["scored"]
+    forged_body = {**stored, "case_count": stored["case_count"] + 1}
+    del forged_body["manifest_sha256"]
+    forged_manifest = {
+        **forged_body,
+        "manifest_sha256": m10.canonical_sha256(forged_body),
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "scored": forged_manifest,
+        },
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_build_calibration_artifact_rejects_edited_unrehashed_scored_manifest_body() -> (
+    None
+):
+    """Editing the stored scored manifest body without rehashing must
+    also fail closed (caught by the whole-manifest comparison against the
+    recomputed scored manifest, not by a separate self-digest check)."""
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["scored"]
+    tampered = {
+        **stored,
+        "question_digests": [*stored["question_digests"], "0" * 64],
+    }
+    forged_fixture = {
+        **fixture,
+        "split_manifests": {**fixture["split_manifests"], "scored": tampered},
+    }
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(forged_fixture)
+
+
+def test_calibration_artifact_binds_scored_split_manifest_digest() -> None:
+    """The scored partition's own independently recomputed manifest
+    digest is bound into the calibration artifact -- as a canonical joint
+    split-custody projection alongside the calibration digest -- rather
+    than left as a field the artifact never itself verifies or binds."""
+    fixture = m10.generate_fixture()
+    artifact = fixture["calibration_artifact"]
+    assert (
+        artifact["scored_split_manifest_sha256"]
+        == fixture["split_manifests"]["scored"]["manifest_sha256"]
+    )
+
+
+def test_useful_coverage_floor_from_fixture_rejects_tampered_scored_manifest() -> None:
+    """A tampered-but-rehashed scored split manifest must also be caught
+    by the sanctioned gating entry point, not only by
+    ``build_calibration_artifact`` directly."""
+    fixture = m10.generate_fixture()
+    stored = fixture["split_manifests"]["scored"]
+    forged_body = {**stored, "case_count": stored["case_count"] + 1}
+    del forged_body["manifest_sha256"]
+    forged_manifest = {
+        **forged_body,
+        "manifest_sha256": m10.canonical_sha256(forged_body),
+    }
+    tampered_fixture = {
+        **fixture,
+        "split_manifests": {
+            **fixture["split_manifests"],
+            "scored": forged_manifest,
+        },
+    }
+    with pytest.raises(ValueError):
+        m10.useful_coverage_floor_from_fixture(tampered_fixture)
+
+
+# ---------------------------------------------------------------------------
+# Case seed assignment binding adversarial regressions
+# ---------------------------------------------------------------------------
+
+
+def _first_case_index(
+    cases: list[dict[str, object]], *, partition: str, seed: int, category: str
+) -> int:
+    for index, case in enumerate(cases):
+        if (
+            case["partition"] == partition
+            and case["seed"] == seed
+            and case["category"] == category
+        ):
+            return index
+    raise AssertionError(f"no case found for {partition}/{seed}/{category}")
+
+
+def test_build_calibration_artifact_rejects_mutated_case_seed_within_partition() -> (
+    None
+):
+    """A calibration case's seed is mutated from 0 to 1, another seed
+    already in the frozen calibration seed set. The observed seed-set
+    check alone would not catch this (both values remain in-set); only
+    the per-(seed, category) coverage count does, since seed 0's slot for
+    this category now has one too few cases and seed 1's has one too
+    many."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    cases[index] = {**cases[index], "seed": 1}
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_case_seed_moved_across_partition_boundary() -> (
+    None
+):
+    """A calibration-partition case's seed is changed to a scored-only
+    seed value while the case itself stays inside the calibration
+    partition: the observed calibration seed set no longer exactly
+    equals the frozen calibration seed set."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    cases[index] = {**cases[index], "seed": 2}
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_missing_seed_in_calibration_partition() -> (
+    None
+):
+    """Every case for calibration seed 1 is dropped: the observed
+    calibration seed set is missing a frozen seed value entirely."""
+    fixture = m10.generate_fixture()
+    cases = [
+        case
+        for case in fixture["cases"]
+        if not (case["partition"] == "calibration" and case["seed"] == 1)
+    ]
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_extra_unknown_seed_in_calibration_partition() -> (
+    None
+):
+    """An extra case carrying a seed value outside both frozen seed sets
+    is injected into the calibration partition."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    template_index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    extra_case = {
+        **cases[template_index],
+        "case_id": "case-forged-extra-seed",
+        "seed": 99,
+    }
+    mutated_fixture = {**fixture, "cases": cases + [extra_case]}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_duplicated_case_in_seed_category_slot() -> (
+    None
+):
+    """An extra case duplicates an already-full (seed, category) slot
+    without introducing any new or missing seed value, so only the
+    per-slot coverage count check catches it, not the seed-set check."""
+    fixture = m10.generate_fixture()
+    cases = [dict(case) for case in fixture["cases"]]
+    template_index = _first_case_index(
+        cases, partition="calibration", seed=0, category="answerable"
+    )
+    duplicate_case = {**cases[template_index], "case_id": "case-forged-duplicate"}
+    mutated_fixture = {**fixture, "cases": cases + [duplicate_case]}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_build_calibration_artifact_rejects_missing_seed_in_scored_partition_too() -> (
+    None
+):
+    """The case-seed-assignment binding applies symmetrically to the
+    scored partition, not only to calibration."""
+    fixture = m10.generate_fixture()
+    cases = [
+        case
+        for case in fixture["cases"]
+        if not (case["partition"] == "scored" and case["seed"] == 4)
+    ]
+    mutated_fixture = {**fixture, "cases": cases}
+    with pytest.raises(m10.CalibrationSplitManifestError):
+        m10.build_calibration_artifact(mutated_fixture)
+
+
+def test_calibration_split_manifest_error_is_a_wmbs_m10_error() -> None:
+    assert issubclass(m10.CalibrationSplitManifestError, m10.WmbsM10Error)
+
+
+def test_risk_coverage_operating_point_reports_coverage_and_risk() -> None:
+    fixture = m10.generate_fixture()
+    cases = [case for case in m10.load_cases(fixture) if case.partition == "scored"]
+    records = [
+        m10.read_answer(case.question, m10.retrieve_full_context(case), "normal")
+        for case in cases
+    ]
+    report = m10.score_records(cases, records)
+    assert 0.0 <= report.risk_coverage_operating_point["coverage"] <= 1.0
+    assert report.risk_coverage_operating_point["risk"] is not None
+
+
+def test_finite_corpus_disclosure_avoids_population_inference_language() -> None:
+    disclosure = m10.FINITE_CORPUS_DISCLOSURE
+    assert "descriptive" in disclosure
+    assert "population" not in disclosure.lower() or "does not" in disclosure.lower()
+
+
+def test_module_declares_integration_dependencies_explicitly() -> None:
+    assert m10.INTEGRATION_DEPENDENCIES
+    for dependency in m10.INTEGRATION_DEPENDENCIES:
+        assert isinstance(dependency, str) and dependency
+
+
+def test_integration_dependencies_document_shared_event_generator_gate() -> None:
+    """Finding 6: the shared M02-M04 event generator integration must be
+    documented as an unresolved external gate, without this lease
+    attempting to widen scope and actually wire it in.
+    """
+    combined = " ".join(m10.INTEGRATION_DEPENDENCIES)
+    assert "M02-M04" in combined
+    assert "event generator" in combined
+    assert "unresolved" in combined.lower()
+
+
+# ---------------------------------------------------------------------------
+# Raw fixture boundary custody
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_seed", ["0", 0.0, False])
+def test_load_cases_rejects_coercive_seed_types(bad_seed: object) -> None:
+    fixture = m10.generate_fixture()
+    fixture["cases"][0]["seed"] = bad_seed
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("case_id", 1),
+        ("category", 1),
+        ("question", 1),
+        ("observation_time", 1),
+        ("gold_answer", 1),
+        ("expected_abstain", "false"),
+        ("partition", 1),
+    ],
+)
+def test_load_cases_rejects_wrong_case_field_types(
+    field: str, bad_value: object
+) -> None:
+    fixture = m10.generate_fixture()
+    fixture["cases"][0][field] = bad_value
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_load_cases_rejects_unknown_or_missing_case_fields() -> None:
+    fixture = m10.generate_fixture()
+    fixture["cases"][0]["unexpected"] = "surprise"
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+    fixture = m10.generate_fixture()
+    del fixture["cases"][0]["question"]
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_load_cases_rejects_unknown_or_malformed_fact_fields() -> None:
+    fixture = m10.generate_fixture()
+    fact = next(case["facts"][0] for case in fixture["cases"] if case["facts"])
+    fact["unexpected"] = "surprise"
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+    fixture = m10.generate_fixture()
+    fact = next(case["facts"][0] for case in fixture["cases"] if case["facts"])
+    fact["provenance_status"] = "trusted-ish"
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_floor_verifier_rejects_forged_top_level_seed_declaration() -> None:
+    fixture = m10.generate_fixture()
+    fixture["seeds"] = {"calibration": [999], "scored": [888]}
+    with pytest.raises(m10.FixtureValidationError):
+        m10.useful_coverage_floor_from_fixture(fixture)
+
+
+def test_build_artifact_rejects_extra_unknown_category_even_if_manifests_match() -> None:
+    fixture = m10.generate_fixture()
+    extra = {
+        **fixture["cases"][0],
+        "case_id": "case-forged-unknown-category",
+        "category": "unknown",
+    }
+    fixture["cases"].append(extra)
+    with pytest.raises(m10.FixtureValidationError):
+        m10.build_calibration_artifact(fixture)
+
+
+@pytest.mark.parametrize("case_count", [99, 101])
+def test_load_cases_rejects_noncanonical_corpus_size(case_count: int) -> None:
+    fixture = m10.generate_fixture()
+    if case_count < len(fixture["cases"]):
+        fixture["cases"] = fixture["cases"][:case_count]
+    else:
+        fixture["cases"].append(
+            {**fixture["cases"][0], "case_id": "case-forged-extra"}
+        )
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_load_cases_requires_calibration_artifact() -> None:
+    fixture = m10.generate_fixture()
+    del fixture["calibration_artifact"]
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_floor_verifier_missing_artifact_fails_with_fixture_error() -> None:
+    fixture = m10.generate_fixture()
+    del fixture["calibration_artifact"]
+    with pytest.raises(m10.FixtureValidationError):
+        m10.useful_coverage_floor_from_fixture(fixture)
+
+
+@pytest.mark.parametrize("bad_artifact", [None, [], "artifact", 1])
+def test_load_cases_rejects_non_object_calibration_artifact(
+    bad_artifact: object,
+) -> None:
+    fixture = m10.generate_fixture()
+    fixture["calibration_artifact"] = bad_artifact
+    with pytest.raises(m10.FixtureValidationError):
+        m10.load_cases(fixture)
+
+
+def test_generate_fixture_uses_private_pre_artifact_path() -> None:
+    fixture = m10.generate_fixture()
+    assert isinstance(fixture["calibration_artifact"], dict)

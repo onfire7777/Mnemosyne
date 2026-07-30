@@ -54,7 +54,7 @@ def write_bundle(
         _write_json(temp / "benchmark.json", {"data": benchmark, "metadata": metadata})
         build = {
             "environment_contract": "uv run --locked",
-            "system_seam": "public-cli-subprocess",
+            "system_seam": metadata.get("system_seam", "public-cli-subprocess"),
             "version": 1,
         }
         if metadata["family"] == "qa":
@@ -112,7 +112,7 @@ def write_bundle(
             b"".join(_canonical(trace) for trace in traces)
         )
         (temp / "README.md").write_text(
-            "# PBPP development bundle\n\nThis smoke artifact is non-publishable, not headline eligible, and is not an independent external reproduction. Run `./reproduce.sh DEST`.\n",
+            "# PBPP development bundle\n\nThis development artifact is non-publishable, not headline eligible, and is not an independent external reproduction. Run `./reproduce.sh DEST`.\n",
             encoding="utf-8",
         )
         (temp / "reproduce.sh").write_text(
@@ -185,10 +185,16 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "pm-bench-action-v1": ("deterministic-action", "wilson"),
         "triggerbench-action-v1": ("deterministic-action", "wilson"),
         "working-memory-action-v1": ("deterministic-action", "bootstrap"),
+        "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
+        "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
     }.get(profile)
     if any(trace.get("scoring_family") != family for trace in traces):
         raise BundleError("metric families may not be blended")
-    if family in {"deterministic-retrieval", "deterministic-action"} and (
+    if family in {
+        "deterministic-retrieval",
+        "deterministic-action",
+        "whole-memory-development",
+    } and (
         judge.get("reader") is not None or judge.get("judge") is not None
     ):
         raise BundleError("deterministic families must not declare a reader or judge")
@@ -208,6 +214,10 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if hashlib.sha256(dataset_bytes).hexdigest() != metadata.get("dataset_sha256"):
         raise BundleError("benchmark custody digest mismatch")
     _verify_registry_anchor(metadata)
+    if build.get("system_seam") != metadata.get(
+        "system_seam", "public-cli-subprocess"
+    ):
+        raise BundleError("build system seam does not match registry metadata")
     expected_config = {
         "family": metadata.get("family"),
         "interval_method": metadata.get("interval_method"),
@@ -562,6 +572,18 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
     if not isinstance(benchmark, dict):
         raise BundleError("scoring profile benchmark is missing")
     if isinstance(benchmark.get("cases"), list):
+        if benchmark.get("schema_id") == "wmbs-m10-development/fixture/0.1":
+            artifact = benchmark.get("calibration_artifact")
+            return [
+                {
+                    "calibration_artifact": artifact,
+                    "case": case,
+                    "case_id": case.get("case_id"),
+                    "fixture": benchmark,
+                }
+                for case in benchmark["cases"]
+                if case.get("partition") == "scored"
+            ]
         if benchmark.get("benchmark") in {"pm-bench", "triggerbench"}:
             return [
                 {
@@ -586,7 +608,9 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
                 }
                 for case in benchmark["cases"]
             ]
-        raise BundleError("unknown deterministic-action benchmark schema")
+        raise BundleError("unknown case-based benchmark schema")
+    if benchmark.get("schema_id") == "wmbs-m01-fixture-v1":
+        return [{"case_id": "M01", "fixture": benchmark}]
     if not isinstance(benchmark.get("questions"), list):
         raise BundleError("scoring profile benchmark questions are missing")
     labels = []
@@ -624,7 +648,7 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
 
 
 def _trace_id(trace: dict[str, Any], *, family: Any) -> tuple[Any, ...]:
-    if family == "deterministic-action":
+    if family in {"deterministic-action", "whole-memory-development"}:
         case_id, step_id = trace.get("case_id"), trace.get("step_id")
         if not isinstance(case_id, str) or not case_id or (
             step_id is not None and (not isinstance(step_id, str) or not step_id)
@@ -948,6 +972,9 @@ def _verify_registry_anchor(metadata: dict[str, Any]) -> None:
         "fixture",
         "headline_eligible",
         "upstream_comparable",
+        "admission_state",
+        "track_kind",
+        "system_seam",
     )
     if any(metadata.get(key) != canonical.get(key) for key in anchored):
         raise BundleError("bundle metadata does not match canonical registry anchor")

@@ -73,6 +73,47 @@ _CONTRACT_REFERENCE_FIELDS = tuple(
     for field in _FEASIBILITY_REFERENCE_FIELDS
     if field not in {"resource_receipt_ref", "smoke_receipt_ref"}
 )
+
+
+def run_m01_development(
+    benchmark: dict[str, Any], _cli: object
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Produce the deterministic M01 reference trace for bundle custody."""
+    from eval.public import wmbs_m01 as m01
+
+    fixture = dict(m01.validate_fixture(benchmark))
+    receipts = m01.perfect_receipts(fixture)
+    return [
+        {
+            "case_id": m01.MODULE_ID,
+            "clean_run_payloads": [receipts for _ in range(m01.MIN_CLEAN_REPLAY_RUNS)],
+            "exported_rows": m01.perfect_export_rows(fixture),
+            "receipts": receipts,
+            "restart_replay_payload": receipts,
+            "scoring_family": "whole-memory-development",
+            "stored_projection": m01.perfect_stored_projection(fixture),
+        }
+    ], {}
+
+
+def run_m10_development(
+    benchmark: dict[str, Any], _cli: object
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Produce deterministic M10 full-context reference traces."""
+    from eval.public import wmbs_m10 as m10
+
+    cases = [case for case in m10.load_cases(benchmark) if case.partition == "scored"]
+    records = m10.run_baseline("full-context", cases)
+    return [
+        {
+            "case_id": case.case_id,
+            "scoring_family": "whole-memory-development",
+            **record.to_dict(),
+        }
+        for case, record in zip(cases, records, strict=True)
+    ], {}
+
+
 _READINESS_STATES = {
     "PILOT-READY-DEV",
     "RUN-READY-OFFICIAL-LOCAL",
