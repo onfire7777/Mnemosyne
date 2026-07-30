@@ -1,6 +1,6 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-07-30  
+Updated: 2026-07-30
 Baseline: `main@661343ce05186e9a7f0f0740d1edef7c23532857`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
@@ -59,7 +59,7 @@ exact lease, shared owner/integration edge, and external gate.
 | P15-S3 | BLOCKED on P15-S2 | CAP-004/005 security and calibration development evidence | Separate attack-family hard failures and calibration/abstention diagnostics | Stage A new-file lease, then serialized Stage B integration lease in `15-02-PLAN.md` | Dataset/model/judge rights and protected-suite controls remain external |
 | P15-S4 | BLOCKED on P15-S3 | CAP-006/011 performance, scale, provider, and 8 GiB closure | Warm/concurrent, provider, 100k, compact-host receipts kept separate | Task-specific exact leases in `15-03-PLAN.md`; one measurement owner | Real 100k/production backfill and physical Windows/Linux 8 GiB evidence are operator/resource gated |
 | P15-S5 | BLOCKED on P15-S4 | CAP-009/010 research closure | Cartridge A/B, reduced activation-memory diagnostics, explicit go/no-go | Task-specific exact leases in `15-04-PLAN.md`; no product write path | Model/tool/license/hardware/custody admission; research never grants authority |
-| P16-L | HUMAN/EVIDENCE BLOCKED | Neutral leaderboard launch; consumes N12, P14-R, PBPP, custody, neutral review, accepted official evidence | Public activation only after all launch gates | No admitted source lease | Human approval, evidence sufficiency, custody, rollback and publication gates |
+| P16-L | HUMAN/EVIDENCE BLOCKED | Open leaderboard launch; consumes N12, P14-R, PBPP, custody, and accepted official evidence | Public activation only after all launch gates; optional Register B/neutral review enables only the `neutral` label | No admitted source lease | Human approval, evidence sufficiency, custody, rollback and publication gates |
 | U-MODULES | SPEC UNSTABLE | M02, M04-M09, M11, M14, M16-M19 | No artifact authorized | No lease | Each needs an approved exact plan, protocol, scorer, license/custody, and dependency placement before code |
 
 ## Topological waves
