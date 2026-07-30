@@ -76,6 +76,22 @@ No row may advance merely because its tests pass. The exact §4 feasibility
 record, measured resource receipt, sandbox receipt, BOM, and replay evidence
 must exist for the claimed state.
 
+## M01/M10 delivery checkpoint
+
+On 2026-07-29, PR #81 merged exact source head
+`98b83e4be373cf0acd5411769b80b98dfd1a8caa` (reviewed candidate lineage
+`c9e7884e4263cdeedeaf2fe5b30f9796226082b3`) to
+`main@392b1fc173f454893e1b133ff3a727462586a8b0`. Exact-merge CI run
+`30506775012` passed all required jobs. The focused M01/M10/public-eval/
+reference suite passed 507 tests and Ruff passed.
+
+This is source delivery only. M01 remains `PILOT-READY-DEV` for Local and M10
+remains `PILOT-READY-DEV` for the deterministic reader. Every development
+result remains `publishable:false` and `pbpp_headline_eligible:false`; no
+official, enhanced-successor, measured, PBPP, certification, publication, or
+headline claim advanced. Task 5, the bounded M03 valid-time integration, is
+the next dependency-ready slice. Full transaction-time M03 remains deferred.
+
 ## Pilot tranche order
 
 1. **WMB-P1 — Contract freeze:** common ABI, fixtures, scorers, baselines,
