@@ -1,0 +1,82 @@
+{
+  "admission_state": "PROPOSED",
+  "comparability": "proposed-non-comparable",
+  "fixture_id": "wmbs-m03-valid-time-development",
+  "headline_eligible": false,
+  "independent_reproduction": false,
+  "module_id": "M03",
+  "publishable": false,
+  "schema_id": "wmbs-m03-valid-time-development/fixture/0.1",
+  "seeds": [11, 23, 37, 53, 71],
+  "timelines": [
+    {
+      "events": [
+        {"object_template": "ordered-old-{seed}", "operation": "assert", "valid_from": "2026-06-01T00:00:00Z"},
+        {"object_template": "ordered-current-{seed}", "operation": "assert", "valid_from": "2026-06-10T00:00:00Z"}
+      ],
+      "expected_current_templates": ["ordered-current-{seed}"],
+      "history": [
+        {"as_of": "2026-06-09T23:59:59.999999Z", "expected_object_templates": ["ordered-old-{seed}"]},
+        {"as_of": "2026-06-10T00:00:00Z", "expected_object_templates": ["ordered-current-{seed}"]}
+      ],
+      "timeline_id": "ordered-events"
+    },
+    {
+      "events": [
+        {"object_template": "late-current-{seed}", "operation": "assert", "valid_from": "2026-06-10T00:00:00Z"},
+        {"object_template": "late-historical-{seed}", "operation": "assert", "valid_from": "2026-06-01T00:00:00Z"}
+      ],
+      "expected_current_templates": ["late-current-{seed}"],
+      "history": [
+        {"as_of": "2026-06-05T00:00:00Z", "expected_object_templates": ["late-historical-{seed}"]},
+        {"as_of": "2026-06-10T00:00:00Z", "expected_object_templates": ["late-current-{seed}"]}
+      ],
+      "timeline_id": "late-event"
+    },
+    {
+      "events": [
+        {"object_template": "retro-original-{seed}", "operation": "assert", "valid_from": "2026-06-01T00:00:00Z"},
+        {"object_template": "retro-current-{seed}", "operation": "supersede", "valid_from": "2026-06-10T00:00:00Z"},
+        {"object_template": "retro-corrected-{seed}", "operation": "supersede", "valid_from": "2026-06-05T00:00:00Z"}
+      ],
+      "expected_current_templates": ["retro-current-{seed}"],
+      "history": [
+        {"as_of": "2026-06-04T23:59:59.999999Z", "expected_object_templates": ["retro-original-{seed}"]},
+        {"as_of": "2026-06-05T00:00:00Z", "expected_object_templates": ["retro-corrected-{seed}"]},
+        {"as_of": "2026-06-10T00:00:00Z", "expected_object_templates": ["retro-current-{seed}"]}
+      ],
+      "timeline_id": "retroactive-correction"
+    },
+    {
+      "events": [
+        {"object_template": "boundary-before-{seed}", "operation": "assert", "valid_from": "2026-06-01T00:00:00Z"},
+        {"object_template": "boundary-at-{seed}", "operation": "assert", "valid_from": "2026-06-10T00:00:00Z"}
+      ],
+      "expected_current_templates": ["boundary-at-{seed}"],
+      "history": [
+        {"as_of": "2026-05-31T23:59:59.999999Z", "expected_object_templates": []},
+        {"as_of": "2026-06-09T23:59:59.999999Z", "expected_object_templates": ["boundary-before-{seed}"]},
+        {"as_of": "2026-06-10T00:00:00Z", "expected_object_templates": ["boundary-at-{seed}"]}
+      ],
+      "timeline_id": "exact-boundary"
+    },
+    {
+      "events": [
+        {"object_template": "tie-alpha-{seed}", "operation": "assert", "valid_from": "2026-06-10T00:00:00Z"},
+        {"object_template": "tie-beta-{seed}", "operation": "assert", "valid_from": "2026-06-10T00:00:00Z"}
+      ],
+      "expected_current_templates": ["tie-alpha-{seed}", "tie-beta-{seed}"],
+      "history": [
+        {"as_of": "2026-06-09T23:59:59.999999Z", "expected_object_templates": []},
+        {"as_of": "2026-06-10T00:00:00Z", "expected_object_templates": ["tie-alpha-{seed}", "tie-beta-{seed}"]}
+      ],
+      "timeline_id": "tied-valid-time"
+    }
+  ],
+  "track": "DEVELOPMENT",
+  "transaction_time": {
+    "reason": "transaction-time is system-owned and not exposed by this development cell",
+    "supported": false
+  },
+  "upstream_comparable": false
+}

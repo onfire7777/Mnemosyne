@@ -129,6 +129,16 @@ def test_public_readme_records_development_evidence_gaps() -> None:
     assert "no promotion-versus-no-promotion control" in readme
 
 
+_COMMITTED_FIXTURE_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "eval" / "public" / "fixtures" / "working-memory-action-development.json"
+)
+
+
+def committed_fixture() -> dict[str, Any]:
+    return json.loads(_COMMITTED_FIXTURE_PATH.read_text())
+
+
 def test_probe_covers_categories_public_seam_and_score_recomputation() -> None:
     value = fixture()
     normalized, traces, metrics = run(value, FakeCLI())  # type: ignore[arg-type]
@@ -358,3 +368,55 @@ def test_capture_failure_and_invalid_query_fail_closed() -> None:
 
     with pytest.raises(ValueError, match="invalid items"):
         run(fixture(), BadQuery())  # type: ignore[arg-type]
+
+
+def test_committed_fixture_freezes_honest_development_evidence_through_public_adapter(
+    tmp_path: Any,
+) -> None:
+    """Load the committed on-disk fixture (not the in-code helper) and run it
+    through the real public ``MnemoCLI`` seam, then freeze the honest M13
+    development-evidence shape: one seed, six cases (one per category), fresh
+    tenant/session scopes, zero automatic promotion, and zero foreign-scope
+    visibility. This is development-split evidence only; M13 stays PROPOSED
+    and makes no capacity or promotion-utility claim.
+    """
+    value = committed_fixture()
+    assert value["seed"] == 94125
+    assert value["split_role"] == "development"
+    assert value["publishable"] is False
+    assert value["headline_eligible"] is False
+    assert value["upstream_comparable"] is False
+    assert value["independent_reproduction"] is False
+    normalized, traces, metrics = run(
+        value, MnemoCLI(store=str(tmp_path / "unused-parent.store.json"))
+    )
+    assert len(normalized["cases"]) == 6
+    assert [case["category"] for case in normalized["cases"]] == list(ITEM_CATEGORIES)
+    scopes = [(case["tenant_id"], case["session_id"]) for case in normalized["cases"]]
+    assert len(set(scopes)) == 6
+
+    assert all(trace["status"] == "action" for trace in traces)
+    assert metrics["decision_accuracy"] == 1.0
+    assert metrics["hard_gate_violations"] == {
+        "fixture_gold_exposed_to_policy": 0,
+        "foreign_scope_visible": 0,
+        "payload_executed": 0,
+        "automatic_durable_promotion": 0,
+    }
+    assert all("working-promote" not in trace["command_log"] for trace in traces)
+    assert not (tmp_path / "unused-parent.store.json").exists()
+
+
+def test_committed_fixture_ttl_boundary_is_exclusive() -> None:
+    """The committed fixture's ``now`` sits one second before each item's
+    ``expires_at``; moving ``now`` to the exact expiry boundary must abstain,
+    confirming the TTL boundary the fixture freezes is exclusive.
+    """
+    value = committed_fixture()
+    case = value["cases"][0]
+    case["now"] = case["events"][0]["expires_at"]
+    case["expected_action_id"] = None
+    case["expected_abstain"] = True
+    _, traces, _ = run(value, FakeCLI())  # type: ignore[arg-type]
+    assert traces[0]["status"] == "abstain"
+    assert traces[0]["visible_item_ids"] == []
