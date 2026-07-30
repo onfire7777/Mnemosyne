@@ -7,8 +7,10 @@ import math
 import re
 from collections.abc import Callable, Mapping
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, NoReturn
 
 from leaderboard.validate import validate_record as validate_result_v1
@@ -128,73 +130,85 @@ def run_m03_valid_time_development(
     if any(benchmark.get(key) != value for key, value in required.items()):
         raise ValueError("invalid M03 valid-time development fixture labels")
 
+    def run_matrix(matrix_cli: object) -> dict[str, dict[str, Any]]:
+        observations: dict[str, dict[str, Any]] = {}
+        for timeline in benchmark.get("timelines", []):
+            timeline_id = timeline["timeline_id"]
+            for seed in benchmark.get("seeds", []):
+                case_id = f"{timeline_id}:{seed}"
+                subject = f"M03 valid-time development:{timeline_id}:{seed}"
+                last_id: str | None = None
+                for event in timeline["events"]:
+                    obj = event["object_template"].format(seed=seed)
+                    if event["operation"] == "assert":
+                        result = matrix_cli.assert_fact(
+                            "wmbs-m03-development",
+                            subject,
+                            "value",
+                            obj,
+                            user="reference-harness",
+                            trust_tier=0,
+                            valid_from=event["valid_from"],
+                        )
+                    else:
+                        if last_id is None:
+                            raise ValueError("M03 supersede event has no prior assertion")
+                        result = matrix_cli.supersede(
+                            "wmbs-m03-development",
+                            "reference-harness",
+                            last_id,
+                            {"object_value": obj, "trust_tier": 0},
+                            valid_from=event["valid_from"],
+                        )
+                    last_id = result.json["id"]
+
+                observations[case_id] = {
+                    "current_objects": [
+                        item["object"]
+                        for item in matrix_cli.graph_as_of(
+                            "wmbs-m03-development",
+                            subject,
+                            "value",
+                            "2999-01-01T00:00:00Z",
+                        )["assertions"]
+                    ],
+                    "history": [
+                        {
+                            "as_of": query["as_of"],
+                            "objects": [
+                                item["object"]
+                                for item in matrix_cli.graph_as_of(
+                                    "wmbs-m03-development",
+                                    subject,
+                                    "value",
+                                    query["as_of"],
+                                )["assertions"]
+                            ],
+                        }
+                        for query in timeline["history"]
+                    ],
+                }
+        return observations
+
+    original = run_matrix(cli)
+    with TemporaryDirectory(prefix="mnemosyne-m03-replay-") as directory:
+        replay = run_matrix(replace(cli, store=str(Path(directory) / "store.json")))
+
     traces: list[dict[str, Any]] = []
     for timeline in benchmark.get("timelines", []):
         timeline_id = timeline["timeline_id"]
         for seed in benchmark.get("seeds", []):
-            subject = f"M03 valid-time development:{timeline_id}:{seed}"
-            last_id: str | None = None
-            for event in timeline["events"]:
-                obj = event["object_template"].format(seed=seed)
-                if event["operation"] == "assert":
-                    result = cli.assert_fact(
-                        "wmbs-m03-development",
-                        subject,
-                        "value",
-                        obj,
-                        user="reference-harness",
-                        trust_tier=0,
-                        valid_from=event["valid_from"],
-                    )
-                else:
-                    if last_id is None:
-                        raise ValueError("M03 supersede event has no prior assertion")
-                    result = cli.supersede(
-                        "wmbs-m03-development",
-                        "reference-harness",
-                        last_id,
-                        {"object_value": obj, "trust_tier": 0},
-                        valid_from=event["valid_from"],
-                    )
-                last_id = result.json["id"]
-
-            current = cli.graph_as_of(
-                "wmbs-m03-development",
-                subject,
-                "value",
-                "2999-01-01T00:00:00Z",
-            )
-            history = [
-                {
-                    "as_of": query["as_of"],
-                    "objects": [
-                        item["object"]
-                        for item in cli.graph_as_of(
-                            "wmbs-m03-development",
-                            subject,
-                            "value",
-                            query["as_of"],
-                        )["assertions"]
-                    ],
-                }
-                for query in timeline["history"]
-            ]
-            replay = cli.graph_as_of(
-                "wmbs-m03-development",
-                subject,
-                "value",
-                "2999-01-01T00:00:00Z",
-            )
+            case_id = f"{timeline_id}:{seed}"
+            observation = original[case_id]
+            replay_observation = replay[case_id]
             traces.append(
                 {
-                    "case_id": f"{timeline_id}:{seed}",
-                    "current_objects": [
-                        item["object"] for item in current["assertions"]
-                    ],
-                    "current_replay_objects": [
-                        item["object"] for item in replay["assertions"]
-                    ],
-                    "history": history,
+                    "case_id": case_id,
+                    "current_objects": observation["current_objects"],
+                    "history": observation["history"],
+                    "replay_case_id": f"{case_id}:replay",
+                    "replay_current_objects": replay_observation["current_objects"],
+                    "replay_history": replay_observation["history"],
                     "scoring_family": "whole-memory-development",
                     "seed": seed,
                     "timeline_id": timeline_id,
