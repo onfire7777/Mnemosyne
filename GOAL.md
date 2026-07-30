@@ -41,7 +41,9 @@ development-evidence confirmations merged by PR #82 at
 development slice then merged by PR #83 at
 `7f60d8ba8274a8ac8036a80737467654f862008f`, and the M15 canonical replay
 pilot merged by PR #84 at
-`e0dd41594cec890f598718160f919c13eee1e552`:
+`e0dd41594cec890f598718160f919c13eee1e552`. PR #85 then merged the frozen
+Phase 13-15 planning contracts as
+`90841427da5e8299048cf86d027c451570e479a6`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -53,7 +55,7 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**M15 composed replay slice delivered — next package under fresh admission.**
+**Phase 13-15 contracts frozen; PR #86 gating development regression CI.**
 
 WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
 reference validation landed through PR #80. PR #81 then merged exact M01/M10
@@ -89,6 +91,14 @@ development-only, non-publishable, non-headline-eligible, non-independent, and
 non-upstream-comparable. Exact executable-build provenance and Task 11
 measured/operator evidence remain deferred.
 
+PR #85 merged the reviewed Phase 13-15 planning contracts as
+`main@90841427da5e8299048cf86d027c451570e479a6`; post-merge CI run
+`30557821402` passed every required job. PR #86 is the only active delivery
+lane: exact source head `baf5c1852593885e37eed75da69b02d93e1bff11`
+adds development-only scheduled public-regression CI. It must not be described
+as merged until exact-head CI, review threads, mergeability, normal merge, and
+post-merge-main CI are all freshly proven.
+
 No successor source package is admitted merely because M15 merged. GoalEx must
 re-read current main, live writers/PRs, and the dependency/write-lease map,
 then choose the highest-value dependency-ready exact-disjoint package. Shared
@@ -96,9 +106,12 @@ runner/schema/registry/planning surfaces remain integration-owner-only.
 
 Result-v2 remains blocked by the protected signed-publication lease, and the
 sandbox lane remains quarantined until it provides real OCI, filesystem,
-network, and write-boundary enforcement. Five-run/new-process reproduction,
-measured cells, hardware receipts, official runs, and publication remain behind
-their existing operator/evidence gates.
+network, and write-boundary enforcement. Local sandbox commits `7d9fa768`,
+`2177eba1`, and `e8a860b2` are reviewed development-source receipts only; they
+must not be pushed, opened as a PR, merged, or described as admitted runtime
+enforcement without the missing live OCI evidence. Five-run/new-process
+reproduction, measured cells, hardware receipts, official runs, and publication
+remain behind their existing operator/evidence gates.
 
 ## Scope
 
@@ -242,11 +255,12 @@ test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
 test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
-test "$(git rev-parse main)" = "e0dd41594cec890f598718160f919c13eee1e552"
+test "$(git rev-parse main)" = "90841427da5e8299048cf86d027c451570e479a6"
 git merge-base --is-ancestor 98b83e4be373cf0acd5411769b80b98dfd1a8caa main
 git merge-base --is-ancestor a3ca8108c22de350810dc3f574931a0d85810ed5 main
 git merge-base --is-ancestor 3189cc24c570f12be06e3d04252a06f48c71f971 main
 git merge-base --is-ancestor a4e5fd2b5d46583998821a8c146d98c512c88b73 main
+git merge-base --is-ancestor b743af67e21f15d695fa404643164fb622b2d714 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
