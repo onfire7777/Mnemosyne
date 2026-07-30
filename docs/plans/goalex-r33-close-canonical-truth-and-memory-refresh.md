@@ -18,10 +18,10 @@ Execution worktree: `/Users/admin/Mnemosyne.codex-goal-state-wiki-reconcile`
 - `test "$(git -C /Users/admin/Mnemosyne.wiki show --name-only --format='' 46c34287 | sort)" = "$(printf '%s\n' Calibration-and-Evaluation.md Development-Guide.md Home.md Roadmap-and-Status.md | sort)"`
 
 ### Task 1: Prove the T0 and T1 delivery gates
-- [ ] Refresh GitHub read-only state and prove PR #87 is `MERGED` as exact commit `2ba4ed80f48717e92caaa66aeef48d2d331cb0bc`, with zero unresolved current review threads and a successful required CI run whose `headSha` exactly matches that merge commit.
-- [ ] If GitHub remains unreachable or exact post-merge CI is absent, pending, or failing, stop with the exact command evidence; do not edit files, rerun broad tests, refresh memory, or admit another package.
-- [ ] Fetch the Wiki remote read-only, then prove `/Users/admin/Mnemosyne.wiki` is clean, `master == origin/master == 46c34287fe064842e72c3f52a9afad0c822b1846`, and its four changed pages preserve the non-publishable, non-headline, official-evidence-open, and scheduled-event-open boundaries.
-- [ ] Re-read the dependency/write-lease map from `main@2ba4ed80` and confirm T2 is the only admitted next node and that no source implementation writer is dependency-ready.
+- [x] Refresh GitHub read-only state and prove PR #87 is `MERGED` as exact commit `2ba4ed80f48717e92caaa66aeef48d2d331cb0bc`, with zero unresolved current review threads and a successful required CI run whose `headSha` exactly matches that merge commit.
+- [x] If GitHub remains unreachable or exact post-merge CI is absent, pending, or failing, stop with the exact command evidence; do not edit files, rerun broad tests, refresh memory, or admit another package.
+- [x] Fetch the Wiki remote read-only, then prove `/Users/admin/Mnemosyne.wiki` is clean, `master == origin/master == 46c34287fe064842e72c3f52a9afad0c822b1846`, and its four changed pages preserve the non-publishable, non-headline, official-evidence-open, and scheduled-event-open boundaries.
+- [x] Re-read the dependency/write-lease map from `main@2ba4ed80` and confirm T2 is the only admitted next node and that no source implementation writer is dependency-ready.
 
 ### Task 2: Perform the single deduplicated T2 refresh
 - [ ] Using codebase-memory-mcp, inspect the existing Mnemosyne index, refresh the actual canonical checkout `/Users/admin/Mnemosyne` exactly once if stale, and verify the index reaches ready/current state for `main@2ba4ed80`.
