@@ -23,7 +23,7 @@ That handoff provides process cleanup, output quotas, external host metering, an
 
 ### Task 2: Replace the documented OCI profile with enforced isolation
 - [ ] Add RED tests proving OCI argv includes an immutable image digest, non-root user, read-only root, tmpfs scratch, `--network none`, dropped capabilities, `no-new-privileges`, PID/CPU/memory limits, read-only input mount, and output-only writable mount.
-- [ ] Add denial tests proving execution fails closed when the runtime is missing, the image reference is mutable/unresolved, required isolation flags cannot be established, fixture paths escape their admitted roots, or the child writes outside the result mount.
+- [ ] Add denial tests proving execution fails closed when the runtime is missing, the image reference is mutable/unresolved, required isolation flags cannot be established, fixture paths escape their admitted roots, or the child writes outside both explicitly writable locations: the result mount and bounded ephemeral tmpfs scratch. Negative probes must target the read-only root, fixture mount, or another forbidden persistent/host path, never `/tmp`.
 - [ ] Reuse `run_isolated` and the installed container CLI through validated argv with `shell=False`; add no dependency, second lifecycle, or in-process fallback for the OCI profile.
 - [ ] Replace `UNVERIFIED-RESOLVE-BEFORE-BUILD` only with a live-resolved immutable digest. If registry access or an admitted runtime is unavailable, retain `PROPOSED`, record the exact blocker, and do not fabricate build, SBOM, provenance, or enforcement evidence.
 - [ ] Preserve existing timeout, descendant cleanup, output-quota, secret-free environment, canonical receipt, and external-meter behavior.
