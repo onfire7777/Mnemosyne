@@ -26,10 +26,10 @@ The integration must remain test-only. Preserve `admission_state=PROPOSED`, `evi
 - [x] Create one isolated Worktrunk integration branch from exact canonical main with an explicit two-file lease; do not write directly to `main` or modify this GoalEx controller branch.
 
 ### Task 2: Integrate the reviewed satellite heads
-- [ ] Apply M12 commits `c86b29ab` then `18871c2d` and M13 commit `d6befbc8` without rewriting their test semantics.
-- [ ] Confirm the resulting diff contains only `tests/test_public_pm_bench_triggerbench.py` and `tests/test_public_working_memory_action_probe.py`; abort on conflicts or any required out-of-lease change.
-- [ ] Inspect the combined assertions to ensure M12 explicitly proves only the declared schedule/update/cancel/tick, regularity, late-event, and cost-gap disclosures, while M13 explicitly records its single seed/capacity and missing promotion-control limitations.
-- [ ] Confirm neither test converts blocked gaps into implemented capability or upgrades publication, upstream-comparability, independence, admission, or evidence labels.
+- [x] Apply M12 commits `c86b29ab` then `18871c2d` and M13 commit `d6befbc8` without rewriting their test semantics.
+- [x] Confirm the resulting diff contains only `tests/test_public_pm_bench_triggerbench.py` and `tests/test_public_working_memory_action_probe.py`; abort on conflicts or any required out-of-lease change.
+- [x] Inspect the combined assertions to ensure M12 explicitly proves only the declared schedule/update/cancel/tick, regularity, late-event, and cost-gap disclosures, while M13 explicitly records its single seed/capacity and missing promotion-control limitations.
+- [x] Confirm neither test converts blocked gaps into implemented capability or upgrades publication, upstream-comparability, independence, admission, or evidence labels.
 
 ### Task 3: Verify the combined exact head
 - [ ] Run both focused test files together, then Ruff on both files and `git diff --check`.
