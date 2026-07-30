@@ -259,6 +259,7 @@ def run_m15_composed_development(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Compose the admitted deterministic pilots and replay them exactly."""
     from eval.public import wmbs_m10 as m10
+    from eval.public.bundle import canonical_replay_fixture_custody
 
     def run_once(run_cli: MnemoCLI) -> tuple[dict[str, Any], dict[str, Any]]:
         m01_traces, m01_evidence = run_m01_development(m01_fixture, run_cli)
@@ -335,10 +336,7 @@ def run_m15_composed_development(
             if m10_cases[trace["case_id"]].category == "unanswerable"
         ),
         "custody_complete": all(
-            evidence["canonical_replay_projection"]["seed_records"]
-            and all(
-                evidence["canonical_replay_projection"]["manifests"].values()
-            )
+            canonical_replay_fixture_custody(evidence["canonical_replay_projection"])
             for evidence in original_evidence.values()
         ),
         "canonical_equality": original_evidence == replay_evidence

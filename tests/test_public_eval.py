@@ -91,13 +91,13 @@ REPLAY_SUITES = {
 }
 REPLAY_DIGESTS = {
     "wmbs-m01-development": (
-        "46f58a277413949692ea9fdee70dff026bc6569b4337a051fc68fa7d65874ba6"
+        "07c2201386a08fa673ed7f8cec1b47ef1c8fd024c5e32e31fe9b1d4c1b3c1cc8"
     ),
     "wmbs-m03-valid-time-development": (
-        "99a78d18cd96ea453dad82a6b784dcfe2145e4e272cc27c0442199ab8fae7e03"
+        "3b46f9e4557301ef6f963813a4a8d286747e230172ac22226bd4c2ad1f8c3d96"
     ),
     "wmbs-m10-development": (
-        "f5a61446a420bc13fb7a6946bc1aaf4dda7d29cdfc088b09752bf15f6b37636f"
+        "3f67d18d7178d3faf91554b3df2b72ebbf70f6d292b2ebe11d9aac7fffe386cb"
     ),
 }
 
@@ -114,7 +114,7 @@ def _canonical_replay_payload(
         "judge": {"judge": None, "reader": None},
         "manifests": {
             "bundle_manifest_sha256": "c" * 64,
-            "fixture_manifest_sha256": "d" * 64,
+            "fixture_manifest_sha256": str(suite["fixture"]).rpartition("@sha256:")[2],
             "generator_manifest_sha256": "e" * 64,
         },
         "metrics": {"exact": 1.0},
@@ -177,6 +177,7 @@ def test_canonical_replay_requires_complete_seed_and_manifest_custody(
 
 def test_canonical_replay_rejects_fixture_manifest_digest_mismatch() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
+    payload["manifests"]["fixture_manifest_sha256"] = "d" * 64  # type: ignore[index]
 
     with pytest.raises(BundleError, match="fixture manifest"):
         public_bundle.canonical_replay_projection(payload)
