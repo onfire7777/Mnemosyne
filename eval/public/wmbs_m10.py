@@ -1100,8 +1100,8 @@ def read_answer(
     target_key = match.group("key")
     target_item = match.group("item")
 
-    verified_values: list[tuple[int, str, str]] = []  # (rank, value, evidence_handle)
-    any_matching_values: list[tuple[int, str, str]] = []
+    verified_values: list[tuple[int, str, tuple[str, ...]]] = []
+    any_matching_values: list[tuple[int, str, tuple[str, ...]]] = []
     for hit in retrieval_envelope.hits:
         if hit.stable_item_id != target_item:
             continue
@@ -1111,10 +1111,10 @@ def read_answer(
         key, value = parsed
         if key != target_key:
             continue
-        evidence_handle = hit.evidence_handles[0] if hit.evidence_handles else ""
-        any_matching_values.append((hit.rank, value, evidence_handle))
+        evidence_handles = tuple(hit.evidence_handles)
+        any_matching_values.append((hit.rank, value, evidence_handles))
         if hit.provenance_status == "verified":
-            verified_values.append((hit.rank, value, evidence_handle))
+            verified_values.append((hit.rank, value, evidence_handles))
 
     distinct_verified = {value for _, value, _ in verified_values}
 
@@ -1124,7 +1124,9 @@ def read_answer(
             answer_text=value,
             abstained=False,
             confidence=None,
-            evidence_handles=sorted({eh for _, _, eh in verified_values if eh}),
+            evidence_handles=sorted(
+                {eh for _, _, handles in verified_values for eh in handles if eh}
+            ),
             adapter_metadata={"mode": response_mode},
         )
 
@@ -1134,7 +1136,9 @@ def read_answer(
             answer_text=None,
             abstained=True,
             confidence=None,
-            evidence_handles=sorted({eh for _, _, eh in any_matching_values if eh}),
+            evidence_handles=sorted(
+                {eh for _, _, handles in any_matching_values for eh in handles if eh}
+            ),
             adapter_metadata={"mode": response_mode},
         )
 
@@ -1146,7 +1150,9 @@ def read_answer(
             answer_text=value,
             abstained=False,
             confidence=None,
-            evidence_handles=sorted({eh for _, _, eh in pool if eh}),
+            evidence_handles=sorted(
+                {eh for _, _, handles in pool for eh in handles if eh}
+            ),
             adapter_metadata={"mode": response_mode},
         )
     return AnswerEnvelope(
@@ -1694,7 +1700,10 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
         calibration_metrics[baseline_id] = _score_report_to_dict(report)
 
     no_memory_useful_coverage = calibration_metrics["no-memory"]["useful_coverage"]
-    assert isinstance(no_memory_useful_coverage, float)
+    if not isinstance(no_memory_useful_coverage, float):
+        raise CalibrationSplitManifestError(
+            "no-memory useful_coverage must be a float"
+        )
     floor = round(no_memory_useful_coverage + _USEFUL_COVERAGE_MARGIN, 4)
 
     body = {
@@ -1774,7 +1783,8 @@ def useful_coverage_floor_from_fixture(fixture: dict[str, object]) -> float:
 
     load_cases(fixture)
     artifact = fixture["calibration_artifact"]
-    assert isinstance(artifact, dict)
+    if not isinstance(artifact, dict):
+        raise FixtureValidationError("fixture.calibration_artifact must be an object")
     verify_calibration_artifact(artifact)
 
     rebuilt = build_calibration_artifact(fixture)
@@ -1790,5 +1800,6 @@ def useful_coverage_floor_from_fixture(fixture: dict[str, object]) -> float:
         )
 
     floor = artifact["useful_coverage_floor"]
-    assert isinstance(floor, float)
+    if not isinstance(floor, float):
+        raise ValueError("calibration artifact useful_coverage_floor must be a float")
     return floor

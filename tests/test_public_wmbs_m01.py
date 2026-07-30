@@ -317,6 +317,12 @@ def test_golden_payload_2_acknowledged_write_loss_is_detected() -> None:
     assert result["passed"] is False
 
 
+def test_acknowledged_write_loss_rejects_non_mapping_receipt() -> None:
+    fixture = wmbs_m01.load_fixture()
+    with pytest.raises(wmbs_m01.WmbsM01Error, match="must be a mapping"):
+        wmbs_m01.score_acknowledged_write_loss(fixture, [None])  # type: ignore[list-item]
+
+
 def test_golden_payload_2b_a_missing_receipt_is_also_acknowledged_write_loss() -> None:
     fixture = wmbs_m01.load_fixture()
     target = _row(fixture, "primary", index=1)
@@ -533,6 +539,14 @@ def test_reopen_export_projection_detects_duplicate_exported_rows() -> None:
     assert exported[0]["event_id"] in result["duplicate_exported_event_ids"]
 
 
+def test_reopen_export_projection_rejects_non_string_event_id() -> None:
+    fixture = wmbs_m01.load_fixture()
+    exported = wmbs_m01.perfect_export_rows(fixture)
+    exported[0]["event_id"] = None
+    with pytest.raises(wmbs_m01.WmbsM01Error, match="string event_id"):
+        wmbs_m01.score_reopen_export_projection(fixture, exported)
+
+
 # ---------------------------------------------------------------------------
 # Canonical replay projection — closed ABI, not an arbitrary-payload hash
 # ---------------------------------------------------------------------------
@@ -655,6 +669,14 @@ def test_canonical_replay_projection_rejects_a_missing_row() -> None:
     fixture = wmbs_m01.load_fixture()
     payload = wmbs_m01.perfect_receipts(fixture)[1:]
     with pytest.raises(wmbs_m01.WmbsM01Error):
+        wmbs_m01.canonical_replay_projection(fixture, payload)
+
+
+def test_canonical_replay_projection_rejects_non_string_row_id() -> None:
+    fixture = wmbs_m01.load_fixture()
+    payload = wmbs_m01.perfect_receipts(fixture)
+    payload[0]["fixture_row_id"] = None
+    with pytest.raises(wmbs_m01.WmbsM01Error, match="must be a string"):
         wmbs_m01.canonical_replay_projection(fixture, payload)
 
 

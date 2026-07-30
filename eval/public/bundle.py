@@ -579,6 +579,7 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
                     "calibration_artifact": artifact,
                     "case": case,
                     "case_id": case.get("case_id"),
+                    "fixture": benchmark,
                 }
                 for case in benchmark["cases"]
                 if case.get("partition") == "scored"
