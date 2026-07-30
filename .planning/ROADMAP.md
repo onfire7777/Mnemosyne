@@ -116,7 +116,7 @@ and test-pinned by `tests/test_planning_traceability.py`. The same merge landed
 the W2 D5 signed deletion manifest and the W3 I0R signed-session public-action
 evaluator, whose PM-Bench/TriggerBench/Working-Memory suites are development-split
 and `publishable:false` — they add no public or headline benchmark result. The
-remaining Phase 15 items (CAP-004..010) stay planned, and the W1/W4/W5 GATEs
+remaining Phase 15 items (CAP-004..011) stay planned, and the W1/W4/W5 GATEs
 remain operator-gated; none of that gated or adapter work is claimed complete.
 
 ### Phase 16: Open Leaderboard Build and Launch

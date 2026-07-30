@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
 REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
 V2_REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
+V2_ROADMAP = PLANNING / "ROADMAP.md"
 PHASE_15_S4_PLAN = (
     PLANNING
     / "phases"
@@ -123,6 +124,12 @@ def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
     assert _frontmatter_list(
         PHASE_15_S4_PLAN.read_text(encoding="utf-8"), "requirements"
     ) == {"CAP-006", "CAP-011", "RAIL-001", "RAIL-002", "RAIL-003", "RAIL-004"}
+    roadmap = V2_ROADMAP.read_text(encoding="utf-8")
+    assert (
+        "**Requirements:** CAP-004..011, CAP-012, CAP-013, RAIL-001..004"
+        in roadmap
+    )
+    assert "remaining Phase 15 items (CAP-004..011) stay planned" in roadmap
 
 
 def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
