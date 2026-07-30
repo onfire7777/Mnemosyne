@@ -3244,7 +3244,12 @@ def test_m03_valid_time_development_adapter_and_scorer(tmp_path: Path) -> None:
         traces,
     )
 
-    assert adapter_metrics == {}
+    assert adapter_metrics["canonical_replay_digest"] == (
+        public_bundle.canonical_replay_digest(
+            adapter_metrics["canonical_replay_projection"]
+        )
+    )
+    assert adapter_metrics["canonical_replay_projection"]["sut_outputs"] == traces
     assert measured["metrics"] == {
         "M-ASOF-ACC": 1.0,
         "current_exact": 1.0,
@@ -3261,6 +3266,77 @@ def test_m03_valid_time_development_adapter_and_scorer(tmp_path: Path) -> None:
     assert measured["upstream_comparable"] is False
     assert measured["full_bitemporal_m03"] is False
     assert all(trace["replay_case_id"].endswith(":replay") for trace in traces)
+
+
+@requires_abi
+@pytest.mark.parametrize(
+    ("suite", "runner", "fixture_name"),
+    [
+        (
+            "wmbs-m01-development",
+            abi.run_m01_development,
+            "wmbs-m01-development.json",
+        ),
+        (
+            "wmbs-m10-development",
+            abi.run_m10_development,
+            "wmbs-m10-development.json",
+        ),
+    ],
+)
+def test_deterministic_adapters_emit_canonical_replay_evidence(
+    suite: str,
+    runner: Callable[..., object],
+    fixture_name: str,
+) -> None:
+    fixture = json.loads(
+        (REPO_ROOT / "eval/public/fixtures" / fixture_name).read_text(encoding="utf-8")
+    )
+    traces, evidence = runner(fixture, None)
+
+    assert evidence["canonical_replay_digest"] == public_bundle.canonical_replay_digest(
+        evidence["canonical_replay_projection"]
+    )
+    assert evidence["canonical_replay_projection"]["suite"] == suite
+    assert evidence["canonical_replay_projection"]["sut_outputs"] == traces
+
+
+def test_m15_composed_cassette_passes_every_exact_rail(tmp_path: Path) -> None:
+    fixtures = [
+        json.loads(
+            (REPO_ROOT / "eval/public/fixtures" / name).read_text(encoding="utf-8")
+        )
+        for name in (
+            "wmbs-m01-development.json",
+            "wmbs-m03-valid-time-development.json",
+            "wmbs-m10-development.json",
+        )
+    ]
+
+    traces, evidence = abi.run_m15_composed_development(
+        *fixtures, MnemoCLI(store=str(tmp_path / "m15.json"))
+    )
+
+    assert evidence["exact_gates"] == {
+        "deduplication_exact": True,
+        "current_state_exact": True,
+        "historical_state_exact": True,
+        "deterministic_answer_exact": True,
+        "abstention_exact": True,
+        "custody_complete": True,
+        "canonical_equality": True,
+    }
+    assert traces[0]["original"] == traces[0]["replay"]
+    assert evidence["canonical_replay_projection"]["sut_outputs"] == traces
+    assert evidence["publishable"] is False
+    assert evidence["pbpp_headline_eligible"] is False
+    assert evidence["independent_external_reproduction"] is False
+    assert evidence["upstream_comparable"] is False
+    assert evidence["full_bitemporal_m03"] is False
+    assert evidence["transaction_time"] == {
+        "supported": False,
+        "reason": "transaction-time is system-owned and not exposed by this development cell",
+    }
 
 
 def test_m03_valid_time_scorer_rejects_incomplete_matrix(tmp_path: Path) -> None:

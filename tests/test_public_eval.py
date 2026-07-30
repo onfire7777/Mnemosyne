@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
+from eval.public import bundle as public_bundle
 from eval.public import wmbs_m10 as m10
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI, ActionCLIError
@@ -68,6 +70,166 @@ def test_whole_memory_development_suite_round_trips_bundle(
     _refresh_digest(attacked, "build.json")
     with pytest.raises(BundleError, match="system seam"):
         verify_bundle(attacked)
+
+
+REPLAY_SUITES = {
+    "wmbs-m01-development": {
+        "fixture": "wmbs-m01-development@sha256:" + "1" * 64,
+        "seeds": [20260728],
+        "sut_outputs": {"deduplicated_rows": 100},
+    },
+    "wmbs-m03-valid-time-development": {
+        "fixture": "wmbs-m03-valid-time-development@sha256:" + "2" * 64,
+        "seeds": [11, 23, 37, 53, 71],
+        "sut_outputs": {"current": ["corrected"], "history": ["original"]},
+    },
+    "wmbs-m10-development": {
+        "fixture": "wmbs-m10-development@sha256:" + "3" * 64,
+        "seeds": [0, 1, 2, 3, 4],
+        "sut_outputs": {"answer": "grounded", "abstention": ""},
+    },
+}
+REPLAY_DIGESTS = {
+    "wmbs-m01-development": (
+        "07c2201386a08fa673ed7f8cec1b47ef1c8fd024c5e32e31fe9b1d4c1b3c1cc8"
+    ),
+    "wmbs-m03-valid-time-development": (
+        "3b46f9e4557301ef6f963813a4a8d286747e230172ac22226bd4c2ad1f8c3d96"
+    ),
+    "wmbs-m10-development": (
+        "3f67d18d7178d3faf91554b3df2b72ebbf70f6d292b2ebe11d9aac7fffe386cb"
+    ),
+}
+
+
+def _canonical_replay_payload(
+    suite_name: str, *, process_index: int = 0
+) -> dict[str, object]:
+    suite = REPLAY_SUITES[suite_name]
+    return {
+        "abi_schema": "wmbs/0.1-draft@sha256:" + "a" * 64,
+        "build": {"candidate_git_sha": "b" * 40, "system_seam": "reference"},
+        "config": {"locale": "C", "timezone": "UTC"},
+        "fixture": suite["fixture"],
+        "judge": {"judge": None, "reader": None},
+        "manifests": {
+            "bundle_manifest_sha256": "c" * 64,
+            "fixture_manifest_sha256": str(suite["fixture"]).rpartition("@sha256:")[2],
+            "generator_manifest_sha256": "e" * 64,
+        },
+        "metrics": {"exact": 1.0},
+        "seed_records": suite["seeds"],
+        "suite": suite_name,
+        "sut_outputs": suite["sut_outputs"],
+        "traces": [{"case_id": "case-1", "passed": True}],
+        "volatile": {
+            "host_path": f"/tmp/process-{process_index}",
+            "receipt_id": f"receipt-{process_index}",
+            "rss_samples_bytes": [process_index + 1],
+            "runtime_timestamp_utc": f"2026-07-30T04:00:0{process_index}Z",
+            "signature": f"signature-{process_index}",
+            "wall_time_ms": process_index + 1,
+        },
+    }
+
+
+@pytest.mark.parametrize("suite_name", tuple(REPLAY_SUITES))
+def test_canonical_replay_records_five_golden_and_one_new_process_digest(
+    suite_name: str,
+) -> None:
+    records = [
+        public_bundle.canonical_replay_digest(
+            _canonical_replay_payload(suite_name, process_index=index)
+        )
+        for index in range(6)
+    ]
+
+    assert records == [REPLAY_DIGESTS[suite_name]] * 6
+
+
+def test_canonical_replay_projection_excludes_only_frozen_volatile_fields() -> None:
+    first = _canonical_replay_payload("wmbs-m01-development")
+    second = _canonical_replay_payload("wmbs-m01-development", process_index=5)
+
+    assert public_bundle.canonical_replay_projection(first) == (
+        public_bundle.canonical_replay_projection(second)
+    )
+    assert public_bundle.canonical_replay_digest(first) == (
+        public_bundle.canonical_replay_digest(second)
+    )
+
+    second["volatile"]["elapsed_ms"] = 9  # type: ignore[index]
+    assert public_bundle.canonical_replay_digest(first) != (
+        public_bundle.canonical_replay_digest(second)
+    )
+
+
+@pytest.mark.parametrize("missing", ("seed_records", "manifests"))
+def test_canonical_replay_requires_complete_seed_and_manifest_custody(
+    missing: str,
+) -> None:
+    payload = _canonical_replay_payload("wmbs-m03-valid-time-development")
+    del payload[missing]
+
+    with pytest.raises(BundleError, match=missing.replace("_", " ")):
+        public_bundle.canonical_replay_projection(payload)
+
+
+def test_canonical_replay_rejects_fixture_manifest_digest_mismatch() -> None:
+    payload = _canonical_replay_payload("wmbs-m01-development")
+    payload["manifests"]["fixture_manifest_sha256"] = "d" * 64  # type: ignore[index]
+
+    with pytest.raises(BundleError, match="fixture manifest"):
+        public_bundle.canonical_replay_projection(payload)
+
+
+def test_canonical_replay_map_order_is_stable_but_list_order_is_bound() -> None:
+    payload = _canonical_replay_payload("wmbs-m03-valid-time-development")
+    reversed_map = dict(reversed(list(payload.items())))
+    reordered_list = deepcopy(payload)
+    reordered_list["seed_records"] = list(
+        reversed(reordered_list["seed_records"])  # type: ignore[arg-type]
+    )
+
+    assert public_bundle.canonical_replay_digest(payload) == (
+        public_bundle.canonical_replay_digest(reversed_map)
+    )
+    assert public_bundle.canonical_replay_digest(payload) != (
+        public_bundle.canonical_replay_digest(reordered_list)
+    )
+
+
+@pytest.mark.parametrize("value", (float("nan"), float("inf"), float("-inf")))
+def test_canonical_replay_rejects_non_finite_numbers(value: float) -> None:
+    payload = _canonical_replay_payload("wmbs-m01-development")
+    payload["metrics"] = {"exact": value}
+
+    with pytest.raises(BundleError, match="non-finite"):
+        public_bundle.canonical_replay_projection(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("locale", "en_US.UTF-8"), ("timezone", "America/Los_Angeles")),
+)
+def test_canonical_replay_rejects_locale_or_timezone_drift(
+    field: str, value: str
+) -> None:
+    payload = _canonical_replay_payload("wmbs-m10-development")
+    payload["config"][field] = value  # type: ignore[index]
+
+    with pytest.raises(BundleError, match=field):
+        public_bundle.canonical_replay_projection(payload)
+
+
+def test_canonical_replay_digest_detects_one_byte_tampering() -> None:
+    payload = _canonical_replay_payload("wmbs-m10-development")
+    attacked = deepcopy(payload)
+    attacked["sut_outputs"]["answer"] = "groundee"  # type: ignore[index]
+
+    assert public_bundle.canonical_replay_digest(payload) != (
+        public_bundle.canonical_replay_digest(attacked)
+    )
 
 
 def test_m10_scoring_derives_floor_from_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
