@@ -8,6 +8,12 @@ ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
 REQUIREMENTS = PLANNING / "milestones" / "v1.0-REQUIREMENTS.md"
 V2_REQUIREMENTS = PLANNING / "REQUIREMENTS.md"
+PHASE_15_S4_PLAN = (
+    PLANNING
+    / "phases"
+    / "15-security-calibration-performance-and-scale-columns"
+    / "15-03-PLAN.md"
+)
 ARCHITECTURE_OVERVIEW = ROOT / "docs" / "ARCHITECTURE-OVERVIEW.md"
 ENGINE_CONTRACT = ROOT / "docs" / "ENGINE-CONTRACT.md"
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
@@ -113,7 +119,10 @@ def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
         ]
 
     phase_15 = next(line for line in text.splitlines() if line.startswith("| 15 |"))
-    assert phase_15 == "| 15 | CAP-004..010, CAP-012, CAP-013, RAIL-001..004 |"
+    assert phase_15 == "| 15 | CAP-004..011, CAP-012, CAP-013, RAIL-001..004 |"
+    assert _frontmatter_list(
+        PHASE_15_S4_PLAN.read_text(encoding="utf-8"), "requirements"
+    ) == {"CAP-006", "CAP-011", "RAIL-001", "RAIL-002", "RAIL-003", "RAIL-004"}
 
 
 def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
