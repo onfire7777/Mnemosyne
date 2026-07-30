@@ -67,6 +67,20 @@ def _single_run_command(lines: list[str]) -> list[str]:
     return command
 
 
+def _job_steps(lines: list[str]) -> list[list[str]]:
+    assert lines.count("    steps:") == 1
+    start = lines.index("    steps:")
+    steps: list[list[str]] = []
+    for line in lines[start + 1 :]:
+        if line.startswith("      - "):
+            steps.append([line.strip()])
+        elif line.strip():
+            assert steps, "content before first step"
+            assert line.startswith("        "), f"unexpected job-level content: {line}"
+            steps[-1].append(line.strip())
+    return steps
+
+
 def test_workflow_is_a_bounded_development_only_regression() -> None:
     """Catch privilege, trigger, provider, and benchmark-scope expansion."""
     lines = _lines()
@@ -114,6 +128,38 @@ def test_workflow_is_a_bounded_development_only_regression() -> None:
     assert matches == []
     assert "permissions: write" not in workflow
     assert "contents: write" not in workflow
+
+
+def test_workflow_declares_only_the_frozen_steps() -> None:
+    """Catch extra commands, error suppression, shells, or undeclared step keys."""
+    assert _job_steps(_lines()) == [
+        [
+            "- uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+        ],
+        [
+            "- uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1",
+            "with:",
+            'python-version: "3.12"',
+        ],
+        [
+            "- name: Install uv",
+            "run: python -m pip install pip==26.1.2 uv==0.11.16",
+        ],
+        [
+            "- name: Sync locked development environment",
+            "run: uv sync --locked --group dev",
+        ],
+        [
+            "- name: Run fixed public contract regression",
+            "run: |",
+            "uv run --locked python -m pytest \\",
+            "tests/test_public_longmemeval.py \\",
+            "tests/test_public_hipporag.py \\",
+            "tests/test_public_memoryagentbench.py \\",
+            "tests/test_public_beam.py \\",
+            "-q",
+        ],
+    ]
 
 
 def test_workflow_uses_immutable_locked_repo_setup() -> None:
