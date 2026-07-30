@@ -159,8 +159,11 @@ For every GoalEx round:
    broader than an approved plan, or merely housekeeping when substantive
    dependency-ready product or benchmark engineering exists.
 3. Select exactly one highest-value task on an isolated Worktrunk branch with
-   an explicit file lease. Preserve unowned dirty work and prevent redundant
-   writers.
+   an explicit file lease. Every executor plan must name its exact clean
+   Worktrunk checkout in a machine-readable `Execution worktree: \`/absolute/path\``
+   line; GoalEx launches bounded RalphEx from that registered checkout and
+   fails closed if it is missing, dirty, protected, or outside admitted roots.
+   Preserve unowned dirty work and prevent redundant writers.
 4. Apply Ponytail fully: reuse current contracts/code, then stdlib/platform,
    then installed dependencies; make the smallest tested root-cause change
    without speculative abstractions or dependencies.
