@@ -674,9 +674,10 @@ def test_action_cli_represents_pm_bench_lifecycle_and_ticks_without_forwarding_r
     """Drive the committed PM-Bench fixture through ``ActionCLI`` (the real
     schedule/update/cancel/evaluate translation layer) and freeze that:
 
-    - task creation, update (override/reschedule), and cancellation all cross
-      into signed ``intention-schedule``/``intention-update``/``intention-cancel``
-      subprocess commands (schedule/update/cancel represented);
+    - task creation, update (override/reschedule), and cancellation translate
+      into ``intention-schedule``/``intention-update``/``intention-cancel``
+      calls at the mocked ``MnemoCLI.run`` seam (subprocess transport is not
+      exercised);
     - the per-step ``intention-evaluate --evaluated-at`` clock advances through
       seven distinct virtual timestamps (virtual-time/tick behavior represented);
     - ``regularity``/"recurring" never appears in the recorded
