@@ -3112,3 +3112,36 @@ def test_stateful_rejections_are_closed(case: str, expected_code: str) -> None:
         validator.validate_request(request)
 
     assert _error_code(exc) == expected_code
+
+
+def test_m03_valid_time_development_fixture_contract() -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT
+            / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert fixture["fixture_id"] == "wmbs-m03-valid-time-development"
+    assert fixture["module_id"] == "M03"
+    assert fixture["track"] == "DEVELOPMENT"
+    assert fixture["publishable"] is False
+    assert fixture["comparability"] == "proposed-non-comparable"
+    assert fixture["transaction_time"] == {
+        "supported": False,
+        "reason": "transaction-time is system-owned and not exposed by this development cell",
+    }
+    assert len(fixture["timelines"]) == 5
+    assert len(fixture["seeds"]) == 5
+    assert {item["timeline_id"] for item in fixture["timelines"]} == {
+        "ordered-events",
+        "late-event",
+        "retroactive-correction",
+        "exact-boundary",
+        "tied-valid-time",
+    }
+    assert all(
+        event["valid_from"].endswith("Z")
+        for timeline in fixture["timelines"]
+        for event in timeline["events"]
+    )

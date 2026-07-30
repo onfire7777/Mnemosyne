@@ -39,6 +39,7 @@ from mnemosyne.cli import (
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.learning import LearningSystem, Lesson, Procedure
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_http_server, build_sdk_streamable_http_app
+from mnemosyne.mcp_tools import MemoryTools
 from mnemosyne.models import Evidence, Relation
 from mnemosyne.oidc_jwks import load_oidc_jwks
 from mnemosyne.postgres_engine import PostgresEngine
@@ -344,6 +345,34 @@ def run_raw_cli(store: Path, *args: str) -> subprocess.CompletedProcess[str]:
         text=True,
         capture_output=True,
     )
+
+
+def _assert_timeline_fact(
+    store: Path,
+    *,
+    object_value: str,
+    valid_from: str | None,
+) -> dict:
+    args = [
+        "assert",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--subject",
+        "M03 timeline",
+        "--predicate",
+        "value",
+        "--object",
+        object_value,
+        "--trust-tier",
+        "0",
+        "--source-trust-tier",
+        "0",
+    ]
+    if valid_from is not None:
+        args += ["--valid-from", valid_from]
+    return run_cli(store, *args)
 
 
 def fake_retrieval_command(tmp_path: Path, *, name: str = "retrieval-provider") -> tuple[str, Path]:
@@ -15410,3 +15439,228 @@ def test_cli_provenance_ops_check_production_bundle_rejects_sqlite_backend(tmp_p
     assert report["ok"] is False
     assert "ingestion_backend_not_postgres" in codes
     assert report["requirements"]["ingestion_backend"] == "postgres"
+
+
+def test_cli_assert_valid_from_accepts_aware_timestamp_and_normalizes_utc(
+    tmp_path: Path,
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asserted = _assert_timeline_fact(
+        store,
+        object_value="aware",
+        valid_from="2026-06-01T02:30:00+02:00",
+    )
+    record = run_cli(store, "get", "--tenant", TENANT, "--id", asserted["id"])
+    assert record["record"]["valid_from"] == "2026-06-01T00:30:00Z"
+
+
+@pytest.mark.parametrize("valid_from", ["2026-06-01T00:00:00", "not-a-timestamp"])
+def test_cli_assert_valid_from_rejects_naive_or_malformed_timestamp(
+    tmp_path: Path,
+    valid_from: str,
+) -> None:
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "M03 timeline",
+        "--predicate",
+        "value",
+        "--object",
+        "invalid",
+        "--valid-from",
+        valid_from,
+        "--trust-tier",
+        "0",
+        "--source-trust-tier",
+        "0",
+    )
+    assert result.returncode != 0
+    assert "valid_from must be an ISO 8601 timestamp with timezone" in result.stderr
+
+
+def test_assert_valid_from_validation_occurs_after_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = MemoryTools(LocalMemoryEngine(store_path=tmp_path / "mnemosyne.json"))
+
+    def deny(*args: object, **kwargs: object) -> dict[str, object]:
+        raise PermissionError("authorization-first sentinel")
+
+    monkeypatch.setattr(tools, "_authorize", deny)
+    with pytest.raises(PermissionError, match="authorization-first sentinel"):
+        tools.assert_fact(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="M03 timeline",
+            predicate="value",
+            object_value="denied",
+            source_evidence_cids=[],
+            valid_from="not-a-timestamp",
+        )
+
+
+def test_supersede_valid_from_validation_occurs_after_authorization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tools = MemoryTools(LocalMemoryEngine(store_path=tmp_path / "mnemosyne.json"))
+
+    def deny(*args: object, **kwargs: object) -> dict[str, object]:
+        raise PermissionError("authorization-first sentinel")
+
+    monkeypatch.setattr(tools, "_authorize", deny)
+    with pytest.raises(PermissionError, match="authorization-first sentinel"):
+        tools.supersede(
+            tenant_id=TENANT,
+            user_id=USER,
+            id="not-read-before-authorization",
+            new={"object_value": "denied"},
+            valid_from="not-a-timestamp",
+        )
+
+
+def test_cli_assert_omitted_valid_from_preserves_wall_clock_behavior(
+    tmp_path: Path,
+) -> None:
+    before = datetime.now(UTC)
+    asserted = _assert_timeline_fact(
+        store := tmp_path / "mnemosyne.json",
+        object_value="wall clock",
+        valid_from=None,
+    )
+    after = datetime.now(UTC)
+    record = run_cli(store, "get", "--tenant", TENANT, "--id", asserted["id"])
+    valid_from = datetime.fromisoformat(
+        record["record"]["valid_from"].replace("Z", "+00:00")
+    )
+    assert before <= valid_from <= after
+
+
+@pytest.mark.parametrize("field", ["valid-to", "transaction-time"])
+def test_cli_assert_rejects_caller_owned_validity_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    result = run_raw_cli(
+        tmp_path / "mnemosyne.json",
+        "assert",
+        "--tenant",
+        TENANT,
+        "--subject",
+        "M03 timeline",
+        "--predicate",
+        "value",
+        "--object",
+        "forbidden",
+        f"--{field}",
+        "2026-06-01T00:00:00Z",
+    )
+    assert result.returncode != 0
+    assert f"unrecognized arguments: --{field}" in result.stderr
+
+
+@pytest.mark.parametrize("field", ["valid_to", "transaction_time"])
+def test_cli_supersede_rejects_caller_owned_validity_fields(
+    tmp_path: Path,
+    field: str,
+) -> None:
+    store = tmp_path / "mnemosyne.json"
+    asserted = _assert_timeline_fact(
+        store,
+        object_value="original",
+        valid_from=None,
+    )
+    result = run_raw_cli(
+        store,
+        "supersede",
+        "--tenant",
+        TENANT,
+        "--user",
+        USER,
+        "--id",
+        asserted["id"],
+        "--new",
+        json.dumps({"object_value": "replacement", field: "2026-06-02T00:00:00Z"}),
+        "--valid-from",
+        "2026-06-02T00:00:00Z",
+    )
+    assert result.returncode != 0
+    assert f"supersede new.{field} is system-owned" in result.stderr
+
+
+def test_cli_graph_as_of_valid_time_development_timelines_are_observable(
+    tmp_path: Path,
+) -> None:
+    fixture = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    for timeline in fixture["timelines"]:
+        for seed in fixture["seeds"]:
+            store = tmp_path / f"{timeline['timeline_id']}-{seed}.json"
+            last_id: str | None = None
+            for event in timeline["events"]:
+                object_value = event["object_template"].format(seed=seed)
+                if event["operation"] == "assert":
+                    written = _assert_timeline_fact(
+                        store,
+                        object_value=object_value,
+                        valid_from=event["valid_from"],
+                    )
+                else:
+                    assert last_id is not None
+                    written = run_cli(
+                        store,
+                        "supersede",
+                        "--tenant",
+                        TENANT,
+                        "--user",
+                        USER,
+                        "--id",
+                        last_id,
+                        "--new",
+                        json.dumps({"object_value": object_value, "trust_tier": 0}),
+                        "--valid-from",
+                        event["valid_from"],
+                    )
+                last_id = written["id"]
+
+            current = run_cli(
+                store,
+                "graph-as-of",
+                "--tenant",
+                TENANT,
+                "--subject",
+                "M03 timeline",
+                "--predicate",
+                "value",
+                "--time",
+                "2999-01-01T00:00:00Z",
+            )
+            assert [item["object"] for item in current["assertions"]] == [
+                value.format(seed=seed)
+                for value in timeline["expected_current_templates"]
+            ]
+            for query in timeline["history"]:
+                historical = run_cli(
+                    store,
+                    "graph-as-of",
+                    "--tenant",
+                    TENANT,
+                    "--subject",
+                    "M03 timeline",
+                    "--predicate",
+                    "value",
+                    "--time",
+                    query["as_of"],
+                )
+                assert [item["object"] for item in historical["assertions"]] == [
+                    value.format(seed=seed)
+                    for value in query["expected_object_templates"]
+                ]
