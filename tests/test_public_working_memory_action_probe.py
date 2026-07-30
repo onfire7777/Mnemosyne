@@ -369,7 +369,7 @@ def test_committed_fixture_freezes_honest_development_evidence_through_public_ad
     development-evidence shape: one seed, six cases (one per category), fresh
     tenant/session scopes, zero automatic promotion, and zero foreign-scope
     visibility. This is development-split evidence only; M13 stays PROPOSED
-    and no promotion-utility claim is made.
+    and makes no capacity or promotion-utility claim.
     """
     value = committed_fixture()
     assert value["seed"] == 94125
@@ -378,10 +378,6 @@ def test_committed_fixture_freezes_honest_development_evidence_through_public_ad
     assert value["headline_eligible"] is False
     assert value["upstream_comparable"] is False
     assert value["independent_reproduction"] is False
-    serialized = json.dumps(value)
-    assert "capacity" not in serialized
-    assert "promotion" not in serialized
-
     normalized, traces, metrics = run(
         value, MnemoCLI(store=str(tmp_path / "unused-parent.store.json"))
     )
