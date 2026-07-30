@@ -24,6 +24,11 @@ remain owned by:
 - approved repository plans and specifications
 - live GitHub PR, review, and CI state
 
+The active scheduling policy is the committed DAG/write-lease map at
+`a7221348:docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+Its package statuses must be recomputed from current main after every merge;
+the map is not blanket permission to launch stale or overlapping lanes.
+
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
 `605ecd3ddf7faf308f664f0869e5e2eb431afa7d`; the first closed-ABI slice merged
