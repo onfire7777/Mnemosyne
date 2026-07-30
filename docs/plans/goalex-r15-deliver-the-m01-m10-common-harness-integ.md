@@ -18,9 +18,9 @@ Previous rounds completed the closed ABI and remediation through PRs #79 and #80
 - `git status --short`
 
 ### Task 1: Reconcile the isolated integration lease
-- [ ] Refresh `origin/main`, confirm the integration branch is based on exact current main, and inspect every changed/untracked file; stop if main advanced incompatibly, the worktree is dirty with unowned changes, or another writer owns any leased file.
-- [ ] Confirm the diff remains restricted to the 13 M01/M10 common-harness files. Exclude result-v2, ledger/publication, M03, sandbox, CLI metadata widening, and external-owner worktrees.
-- [ ] Compare the integration against the authoritative plan interfaces: reuse the existing public runner, scorer, bundle lifecycle, registry, and closed ABI without creating a second runner or weakening existing bundle verification.
+- [x] Refresh `origin/main`, confirm the integration branch is based on exact current main, and inspect every changed/untracked file; stop if main advanced incompatibly, the worktree is dirty with unowned changes, or another writer owns any leased file.
+- [x] Confirm the diff remains restricted to the 13 M01/M10 common-harness files. Exclude result-v2, ledger/publication, M03, sandbox, CLI metadata widening, and external-owner worktrees.
+- [x] Compare the integration against the authoritative plan interfaces: reuse the existing public runner, scorer, bundle lifecycle, registry, and closed ABI without creating a second runner or weakening existing bundle verification.
 
 ### Task 2: Review and harden the integrated contracts
 - [ ] Trace M01 fixture loading, duplicate handling, capture gating, canonical replay, and score computation end to end; fix only confirmed shared-path defects and retain development-only claims.
