@@ -2212,6 +2212,7 @@ def cmd_assert(args: argparse.Namespace) -> None:
             branch=args.branch,
             role=args.role,
             source_trust_tier=args.source_trust_tier,
+            valid_from=args.valid_from,
         )
     )
 
@@ -2340,6 +2341,7 @@ def cmd_supersede(args: argparse.Namespace) -> None:
             confidence=args.confidence,
             role=args.role,
             source_trust_tier=args.source_trust_tier,
+            valid_from=args.valid_from,
         )
     )
 
@@ -19276,6 +19278,7 @@ def build_parser() -> argparse.ArgumentParser:
     assertion.add_argument("--trust-tier", type=int, default=0)
     assertion.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
     assertion.add_argument("--source-trust-tier", type=int)
+    assertion.add_argument("--valid-from")
     assertion.set_defaults(func=cmd_assert)
 
     source_sync = sub.add_parser("source-sync")
@@ -19375,6 +19378,7 @@ def build_parser() -> argparse.ArgumentParser:
     supersede.add_argument("--confidence", type=float, default=0.95)
     supersede.add_argument("--role", default="agent", choices=["reader", "agent", "consolidator", "operator"])
     supersede.add_argument("--source-trust-tier", type=int, default=0)
+    supersede.add_argument("--valid-from")
     supersede.set_defaults(func=cmd_supersede)
 
     correct = sub.add_parser("correct")
