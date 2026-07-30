@@ -17,14 +17,13 @@ Preserve `admission_state=PROPOSED`, `evidence_level=INTERNALLY_MEASURED`, `publ
 - `uv run pytest -q tests/test_public_pm_bench_triggerbench.py tests/test_public_working_memory_action_probe.py`
 - `uv run ruff check tests/test_public_pm_bench_triggerbench.py tests/test_public_working_memory_action_probe.py`
 - `git diff --check`
-- `uv run --extra mcp pytest -q`
 - `gh pr checks <PR_NUMBER> --required`
 - `git fetch --prune origin && test "$(git rev-parse main)" = "$(git rev-parse origin/main)" && git merge-base --is-ancestor d68f55cd419e159b1ba3296428f102134d8ea49c main`
 
 ### Task 1: Prove the exact candidate
 - [ ] Reconfirm the clean candidate SHA, exact two-file lease, canonical-main base, and absence of generated files, risky files, secrets, dependency churn, executable payloads, production behavior, or unrelated changes.
-- [ ] Run the two focused tests together, Ruff, and `git diff --check`; inspect assertions for honest M12 regularity/late-event/cost-gap disclosures and M13 single-seed/single-capacity/promotion-control limitations.
-- [ ] Run the applicable repository-wide non-official suite without external benchmarks, providers, containers, protected datasets, or measured cells. If the known certificate-rotator timeout reproduces unchanged on canonical main, record exact comparative evidence and rely on uncontended exact-head CI; do not weaken or skip tests.
+- [ ] Use the fresh 46-test focused receipt, Ruff, `git diff --check`, staged Gitleaks, and independent approval on exact candidate content; inspect assertions for honest M12 regularity/late-event/schema-defined-cost-gap disclosures and M13 single-seed/no-capacity-or-promotion-utility-claim limitations.
+- [ ] Do not duplicate the repository-wide suite locally. The one authoritative broad suite for candidate `d68f55cd` is required exact-head CI; fail closed if it cannot run or does not pass.
 - [ ] Record candidate `d68f55cd419e159b1ba3296428f102134d8ea49c` and prove its cumulative diff represents the reviewed M12 and M13 satellite content without upgrading any evidence or publication label.
 
 ### Task 2: Land through exact-head gates
