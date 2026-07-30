@@ -23,10 +23,10 @@ Previous rounds completed the closed ABI and remediation through PRs #79 and #80
 - [x] Compare the integration against the authoritative plan interfaces: reuse the existing public runner, scorer, bundle lifecycle, registry, and closed ABI without creating a second runner or weakening existing bundle verification.
 
 ### Task 2: Review and harden the integrated contracts
-- [ ] Trace M01 fixture loading, duplicate handling, capture gating, canonical replay, and score computation end to end; fix only confirmed shared-path defects and retain development-only claims.
-- [ ] Trace M10 fixture custody, calibration/scored split separation, deterministic reader behavior, abstention/useful-coverage gates, optional-confidence handling, and baseline disclosures end to end; fix only confirmed defects.
-- [ ] Verify runner registration produces independent M01 and M10 manifests, rejects unknown profiles, binds fixture/scorer digests, and cannot mark either suite publishable or PBPP-headline-eligible.
-- [ ] Review trust boundaries and failure paths: reject malformed or incomplete fixtures, digest mismatches, split overlap, missing manifest-owned artifacts, non-finite scores, and attempted claim escalation.
+- [x] Trace M01 fixture loading, duplicate handling, capture gating, canonical replay, and score computation end to end; fix only confirmed shared-path defects and retain development-only claims.
+- [x] Trace M10 fixture custody, calibration/scored split separation, deterministic reader behavior, abstention/useful-coverage gates, optional-confidence handling, and baseline disclosures end to end; fix only confirmed defects.
+- [x] Verify runner registration produces independent M01 and M10 manifests, rejects unknown profiles, binds fixture/scorer digests, and cannot mark either suite publishable or PBPP-headline-eligible.
+- [x] Review trust boundaries and failure paths: reject malformed or incomplete fixtures, digest mismatches, split overlap, missing manifest-owned artifacts, non-finite scores, and attempted claim escalation.
 
 ### Task 3: Prove the exact integration head
 - [ ] Run the focused M01, M10, public-runner, and closed-ABI tests plus Ruff and `git diff --check`; diagnose and fix failures at their shared root cause.
