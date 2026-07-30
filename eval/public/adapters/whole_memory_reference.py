@@ -96,7 +96,7 @@ def run_m01_development(
 
     fixture = dict(m01.validate_fixture(benchmark))
     receipts = m01.perfect_receipts(fixture)
-    return [
+    traces = [
         {
             "case_id": m01.MODULE_ID,
             "clean_run_payloads": [receipts for _ in range(m01.MIN_CLEAN_REPLAY_RUNS)],
@@ -106,7 +106,10 @@ def run_m01_development(
             "scoring_family": "whole-memory-development",
             "stored_projection": m01.perfect_stored_projection(fixture),
         }
-    ], {}
+    ]
+    return traces, _canonical_replay_evidence(
+        "wmbs-m01-development", fixture, traces, [fixture["seed"]]
+    )
 
 
 def run_m10_development(
@@ -117,14 +120,19 @@ def run_m10_development(
 
     cases = [case for case in m10.load_cases(benchmark) if case.partition == "scored"]
     records = m10.run_baseline("full-context", cases)
-    return [
+    traces = [
         {
             "case_id": case.case_id,
             "scoring_family": "whole-memory-development",
             **record.to_dict(),
         }
         for case, record in zip(cases, records, strict=True)
-    ], {}
+    ]
+    seeds = benchmark.get("seeds", {})
+    seed_records = [*seeds.get("calibration", []), *seeds.get("scored", [])]
+    return traces, _canonical_replay_evidence(
+        "wmbs-m10-development", benchmark, traces, seed_records
+    )
 
 
 def run_m03_valid_time_development(
@@ -238,7 +246,50 @@ def run_m03_valid_time_development(
                     "timeline_id": timeline_id,
                 }
             )
-    return traces, {}
+    return traces, _canonical_replay_evidence(
+        "wmbs-m03-valid-time-development", benchmark, traces, seeds
+    )
+
+
+def _canonical_replay_evidence(
+    suite: str,
+    benchmark: dict[str, Any],
+    traces: list[dict[str, Any]],
+    seeds: list[int],
+) -> dict[str, Any]:
+    """Bind deterministic adapter output to the shared M15 projection."""
+    from eval.public.bundle import canonical_replay_digest, canonical_replay_projection
+
+    fixture_digest = canonical_sha256(benchmark)
+    generator = {
+        key: benchmark.get(key)
+        for key in ("generator_id", "generator_version", "schema_id")
+    }
+    payload = {
+        "abi_schema": f"{PROTOCOL_VERSION}@sha256:{hashlib.sha256(_SCHEMA_PATH.read_bytes()).hexdigest()}",
+        "build": {"system_seam": "harness-owned-reference-core"},
+        "config": {"locale": "C", "timezone": "UTC"},
+        "fixture": f"{suite}@sha256:{fixture_digest}",
+        "judge": {"judge": None, "reader": None},
+        "manifests": {
+            "bundle_manifest_sha256": canonical_sha256(
+                {"fixture_sha256": fixture_digest, "suite": suite, "traces": traces}
+            ),
+            "fixture_manifest_sha256": fixture_digest,
+            "generator_manifest_sha256": canonical_sha256(generator),
+        },
+        "metrics": {},
+        "seed_records": list(seeds),
+        "suite": suite,
+        "sut_outputs": traces,
+        "traces": traces,
+        "volatile": {},
+    }
+    projection = canonical_replay_projection(payload)
+    return {
+        "canonical_replay_digest": canonical_replay_digest(payload),
+        "canonical_replay_projection": projection,
+    }
 
 
 _READINESS_STATES = {
