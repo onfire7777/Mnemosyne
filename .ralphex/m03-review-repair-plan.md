@@ -55,12 +55,12 @@ uncommitted RED tests from the interrupted review; preserve and use them.
 
 ### Task 3: Verify the repaired candidate
 
-- [ ] Review the full `7e9cd01f...HEAD` diff for exact lease, authorization
+- [x] Review the full `7e9cd01f...HEAD` diff for exact lease, authorization
       ordering, UTC validation, distinct-scope semantics, genuine fresh replay,
       complete-matrix scoring, deterministic ties, evidence language, secrets,
       risky files, and dependency churn.
-- [ ] Run only the focused CLI/runtime tests, whole-memory reference tests,
+- [x] Run only the focused CLI/runtime tests, whole-memory reference tests,
       focused Ruff, and `git diff --check`.
-- [ ] Commit only any required in-lease verification adjustment and report the
+- [x] Commit only any required in-lease verification adjustment and report the
       exact candidate SHA. Leave docs, push, PR, CI, merge, CBM, and Gbrain to
       the integration owner.
