@@ -96,7 +96,8 @@ mapped lease. The integration owner has now admitted only
 can accept optional timezone-aware `valid_from`. PR #82 delivered Tasks 7 and 8
 as recorded below. Full transaction-time M03 remains deferred, M15 requires
 the admitted M03 cell, and result-v2 remains blocked by the protected
-signed-publication lease.
+signed-publication lease. PR #83 later delivered that bounded M03 cell and
+PR #84 delivered the dependent M15 development slice, as recorded below.
 
 ## M12/M13 delivery checkpoint
 
@@ -111,9 +112,27 @@ This remains bounded development evidence only. M12 and M13 retain
 publication, headline, independent-reproduction, and upstream-comparability
 flags. No official run, measured cell, recurrence or promotion experiment,
 certification, ranking, or publication gate advanced. The bounded M03 slice is
-now admitted with its explicit authorized-facade lease amendment; M15 requires
-that cell, result-v2 remains protected, and sandbox enforcement remains
-quarantined.
+now admitted with its explicit authorized-facade lease amendment; PR #84 later
+delivered the dependent M15 development slice. Result-v2 remains protected,
+and sandbox enforcement remains quarantined.
+
+## M15 delivery checkpoint
+
+On 2026-07-30, PR #84 merged final candidate
+`a4e5fd2b5d46583998821a8c146d98c512c88b73` as
+`main@e0dd41594cec890f598718160f919c13eee1e552`. Exact-head CI, independent
+review, mergeability, and the focused 339-test/Ruff/diff/lease gates passed;
+post-merge CI run `30543119233` is the exact-main receipt.
+
+The merged development cassette canonically replays M01, bounded M03, and M10
+and requires seven joint rails: deduplication, current state, historical state,
+deterministic answer, abstention, custody completeness, and canonical equality.
+Fixture references are validated against the fixture suite and
+`fixture_manifest_sha256`. This is output/fixture replay, not exact executable
+build provenance. It remains development-only, non-publishable,
+non-headline-eligible, non-independent, and non-upstream-comparable. Actual
+five-run/new-process reproduction and measured/operator evidence remain Task 11
+work behind the sandbox, hardware, resource, BOM/rights, and custody gates.
 
 ## Pilot tranche order
 
@@ -143,8 +162,8 @@ PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
 development pilots at `main@392b1fc1`; exact-merge CI run `30506775012`, 507
 focused tests, and Ruff passed. PR #83 then merged the bounded M03 valid-time
 development slice at `main@7f60d8ba`; exact-head CI run `30532543366` was
-green. M15 canonical replay and the composed M01→M03→M10 development slice are
-the next dependency-ready increment. The result-v2 schema and RED
+green. PR #84 then merged M15 canonical replay and the composed M01→M03→M10
+development slice at `main@e0dd4159`. The result-v2 schema and RED
 compatibility/ledger fixtures remain blocked by the protected
 signed-publication lease. The sandbox branch stays quarantined until real OCI,
 filesystem, network, and write-boundary enforcement exists.
@@ -592,6 +611,11 @@ control are frozen and measured.
 
 ### Task 9: Enforce M15 canonical replay across all pilot payloads
 
+**Status:** Development-only source slice completed at final candidate
+`a4e5fd2b5d46583998821a8c146d98c512c88b73`, merged by PR #84 as
+`main@e0dd41594cec890f598718160f919c13eee1e552`. Task 11 measured execution
+and exact executable-build provenance remain deferred.
+
 **Files:**
 
 - Modify: `eval/public/bundle.py`
@@ -599,23 +623,23 @@ control are frozen and measured.
 - Modify: `tests/test_public_whole_memory_reference.py`
 - Modify: `tests/test_public_eval.py`
 
-- [ ] Define the canonical projection: ABI schema, fixture/generator,
+- [x] Define the canonical projection: ABI schema, fixture/generator,
       candidate/config/build/judge data, metrics, traces, manifests, and
       deterministic SUT outputs.
-- [ ] Explicitly exclude volatile timestamps, signatures, host paths, wall/RSS
+- [x] Explicitly exclude volatile timestamps, signatures, host paths, wall/RSS
       samples, and runtime-generated receipt IDs from byte equality while
       retaining them in the bundle.
-- [ ] Write RED tests for missing seed/manifest data, unstable ordering,
+- [x] Write RED tests for missing seed/manifest data, unstable ordering,
       float/non-finite values, locale/timezone drift, and one-byte tampering.
-- [ ] Add one composed cassette, without duplicating fixture data: ingest the
+- [x] Add one composed cassette, without duplicating fixture data: ingest the
       M01 duplicates, apply an M03 valid-time correction, ask current,
       historical, answerable, and unanswerable M10 questions, then replay the
       exact sequence. Require dedup, current/history, abstention, and canonical
       replay gates to pass together.
-- [ ] Unit-check each deterministic suite projection against five golden
+- [x] Unit-check each deterministic suite projection against five golden
       payloads plus one new-process-shaped fixture. Actual five-run and
       `reproduce_bundle` execution waits for Task 11 admission.
-- [ ] Require exact canonical payload equality; stochastic metrics require all
+- [x] Require exact canonical payload equality; stochastic metrics require all
       seed outputs and frozen tolerances rather than byte equality.
 
 **Acceptance evidence:** A six-run digest table per admitted suite, exact
