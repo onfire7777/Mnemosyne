@@ -1314,7 +1314,7 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="belief_correction",
         )
-        for field in ("valid_to", "transaction_time"):
+        for field in ("valid_from", "valid_to", "transaction_time"):
             if field in new:
                 raise ValueError(f"supersede new.{field} is system-owned")
         normalized_valid_from = _parse_valid_from(valid_from)
