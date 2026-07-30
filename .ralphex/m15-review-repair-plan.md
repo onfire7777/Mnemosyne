@@ -34,8 +34,8 @@ The composed cassette must not label custody complete from truthiness alone.
 
 ### Task 3: Verify the repaired exact head
 
-- [ ] Verify the committed diff remains exactly inside the four leased product paths.
-- [ ] Commit the repair and report the exact SHA and retained deferrals.
+- [x] Verify the committed diff remains exactly inside the four leased product paths.
+- [x] Commit the repair and report the exact SHA and retained deferrals.
 
 Preserve all development-only/nonpublishable/nonheadline/nonindependent/
 nonupstream labels. Do not claim exact executable-build provenance; `build`
