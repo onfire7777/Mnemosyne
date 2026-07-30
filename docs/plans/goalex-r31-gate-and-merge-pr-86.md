@@ -27,6 +27,6 @@ Execution worktree: `/Users/admin/Mnemosyne.codex-phase13-public-regression-ci`
 ### Task 2: Prove post-merge main and record the boundary
 - [ ] Capture the merge commit and require the CI workflow triggered for that exact `main` commit to pass every required job.
 - [ ] Fast-forward `/Users/admin/Mnemosyne` only if it is clean; prove local `main == origin/main == <merge commit>` and PR #86 is `MERGED`.
-- [ ] Refresh the CBM index once against canonical `/Users/admin/Mnemosyne` and record one deduplicated source-grounded Gbrain milestone.
-- [ ] Update the GoalEx admission receipt to describe scheduled regression CI as merged while preserving development-only, non-publishable, non-headline-eligible boundaries.
-- [ ] Stop after reconciliation and return control to GoalEx for fresh dependency/write-lease admission; do not automatically launch the previously planned OCI sandbox delivery.
+- [ ] Preserve the existing fresh CBM/Gbrain maintenance receipt at `main@90841427`; defer the next single refresh until the queued canonical GOAL/STATE/docs/wiki truth reconciliation actually changes source files.
+- [ ] Record the exact merge and post-merge CI receipts in this round's progress log only. Do not edit GOAL.md, GSD planning, the wiki, or any path outside the PR #86 two-file lease.
+- [ ] Stop after post-merge proof and return control to GoalEx for the queued shared-owner truth reconciliation; do not automatically launch the quarantined OCI sandbox delivery.
