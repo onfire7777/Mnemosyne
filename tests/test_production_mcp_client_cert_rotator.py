@@ -26,7 +26,8 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 REPO = Path(__file__).resolve().parents[1]
 ROTATOR = REPO / "infra" / "scripts" / "rotate-production-mcp-client-cert.sh"
-ROTATOR_TEST_TIMEOUT_SECONDS = 120
+ROTATOR_TEST_TIMEOUT_SECONDS = 15
+ROTATOR_LOCK_TEST_TIMEOUT_SECONDS = 120
 
 
 @pytest.fixture(autouse=True)
@@ -4218,7 +4219,7 @@ def test_rotator_holds_process_lock_for_entire_invocation(tmp_path: Path) -> Non
     first_stdout = ""
     first_stderr = ""
     try:
-        deadline = time.monotonic() + ROTATOR_TEST_TIMEOUT_SECONDS
+        deadline = time.monotonic() + ROTATOR_LOCK_TEST_TIMEOUT_SECONDS
         while not entered.exists() and first.poll() is None:
             if time.monotonic() >= deadline:
                 pytest.fail("first rotator did not durably mark completion")
@@ -4248,7 +4249,7 @@ def test_rotator_holds_process_lock_for_entire_invocation(tmp_path: Path) -> Non
         assert first.poll() is None
         release.write_bytes(b"")
         first_stdout, first_stderr = first.communicate(
-            timeout=ROTATOR_TEST_TIMEOUT_SECONDS,
+            timeout=ROTATOR_LOCK_TEST_TIMEOUT_SECONDS,
         )
     finally:
         release.touch(exist_ok=True)

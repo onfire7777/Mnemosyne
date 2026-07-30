@@ -30,7 +30,9 @@ The whole-memory standard and pilot plan are executable authority on canonical
 by PR #79 at `a95fe4d291093253f8ce49adff32ba875a35e884`, its bounded remediation
 merged by PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, and the reviewed M01/M10
 development pilots merged by PR #81 at
-`392b1fc173f454893e1b133ff3a727462586a8b0`:
+`392b1fc173f454893e1b133ff3a727462586a8b0`, and the bounded M12/M13
+development-evidence confirmations merged by PR #82 at
+`7e9cd01feb2a31cbba96252943697245a4edd024`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -42,7 +44,7 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**M03 write-path dependency blocked — M12/M13 integration next.**
+**M03 valid-time write contract admitted — bounded vertical slice next.**
 
 WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
 reference validation landed through PR #80. PR #81 then merged exact M01/M10
@@ -52,18 +54,25 @@ source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`; exact-merge CI run
 mapped seven-path M03 lease cannot persist caller-supplied `valid_from`: both
 authorized assertion/supersession write methods live in excluded
 `src/mnemosyne/mcp_tools.py`, and bypassing them would skip authorization.
-M03 therefore remains `PROPOSED` and blocked until the map/owner explicitly
-admits that dependency. The next dependency-ready package is the reviewed
-M12/M13 test-only confirmation integration. Result-v2 remains blocked by the
-protected signed-publication lease. The sandbox lane remains quarantined until
-it provides real OCI, filesystem, network, and write-boundary enforcement.
+The integration owner has now admitted that one additional path so the existing
+authorized write facade can accept an optional timezone-aware `valid_from`;
+direct engine/table writes, caller-controlled `valid_to`, and caller-controlled
+`transaction_time` remain forbidden. PR #82 merged the bounded M12/M13 test-only
+confirmations as `main@7e9cd01f`; exact-head CI run `30521721192`, exact-merge
+CI run `30522846090`, and 46 focused tests passed. M12/M13 remain `PROPOSED`
+and non-publishable. The bounded M03 slice is now the highest-value admitted
+package; M15 remains blocked on it, result-v2 remains blocked by the protected
+signed-publication lease, and the sandbox lane remains quarantined until it
+provides real OCI, filesystem, network, and write-boundary enforcement.
 Remaining receipts, measured cells, and module execution retain their existing
 gates.
 
 The committed dependency/write-lease map is the admission authority for this
-wave. The blocked M03 lease remains limited to:
+wave. Its M03 lease is amended by the integration owner only to include the
+authorized write facade:
 
 - `eval/public/fixtures/wmbs-m03-valid-time-development.json`
+- `src/mnemosyne/mcp_tools.py`
 - `src/mnemosyne/cli.py`
 - `eval/harness/cli_driver.py`
 - `eval/public/adapters/whole_memory_reference.py`
@@ -71,12 +80,11 @@ wave. The blocked M03 lease remains limited to:
 - `tests/test_public_whole_memory_reference.py`
 - `tests/test_cli_runtime_tools.py`
 
-Do not add `mcp_tools.py`, registry/runner changes, a second M03 module, or new
-shared documentation to this lease. If the existing public interfaces cannot
-support the bounded cell through these paths, fail closed and return the exact
-dependency rather than widening the plan. The active M12 and M13 satellites own
-only `tests/test_public_pm_bench_triggerbench.py` and
-`tests/test_public_working_memory_action_probe.py`, respectively.
+Do not add registry/runner changes, a second M03 module, or new shared
+documentation to this lease. Keep authorization first and preserve current
+wall-clock behavior when `valid_from` is omitted. The completed M12 and M13
+satellite leases were limited to `tests/test_public_pm_bench_triggerbench.py`
+and `tests/test_public_working_memory_action_probe.py`, respectively.
 
 ## Scope
 
