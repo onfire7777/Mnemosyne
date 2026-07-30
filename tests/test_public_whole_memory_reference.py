@@ -15,7 +15,9 @@ from urllib.parse import urlsplit
 import pytest
 from jsonschema import Draft202012Validator
 
+from eval.harness.cli_driver import MnemoCLI
 from eval.public import bundle as public_bundle
+from eval.public.scoring import score_profile
 
 PROTOCOL_VERSION = "wmbs/0.1-draft"
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -3145,3 +3147,32 @@ def test_m03_valid_time_development_fixture_contract() -> None:
         for timeline in fixture["timelines"]
         for event in timeline["events"]
     )
+
+
+def test_m03_valid_time_development_adapter_and_scorer(tmp_path: Path) -> None:
+    fixture = json.loads(
+        (
+            REPO_ROOT / "eval/public/fixtures/wmbs-m03-valid-time-development.json"
+        ).read_text(encoding="utf-8")
+    )
+    traces, adapter_metrics = abi.run_m03_valid_time_development(
+        fixture, MnemoCLI(store=str(tmp_path / "m03.json"))
+    )
+    measured = score_profile(
+        "wmbs-m03-valid-time-v1",
+        [{"case_id": "M03", "fixture": fixture}],
+        traces,
+    )
+
+    assert adapter_metrics == {}
+    assert measured["metrics"] == {
+        "M-ASOF-ACC": 1.0,
+        "current_exact": 1.0,
+        "deterministic_tied_time_replay": 1.0,
+        "five_seed_canonical_replay": 1.0,
+        "stale_current_leakage": 0,
+    }
+    assert measured["passed"] is True
+    assert measured["publishable"] is False
+    assert measured["comparability"] == "proposed-non-comparable"
+    assert measured["full_bitemporal_m03"] is False

@@ -114,6 +114,95 @@ def run_m10_development(
     ], {}
 
 
+def run_m03_valid_time_development(
+    benchmark: dict[str, Any], cli: object
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M03 valid-time cell through the public CLI only."""
+    required = {
+        "comparability": "proposed-non-comparable",
+        "fixture_id": "wmbs-m03-valid-time-development",
+        "module_id": "M03",
+        "publishable": False,
+        "track": "DEVELOPMENT",
+    }
+    if any(benchmark.get(key) != value for key, value in required.items()):
+        raise ValueError("invalid M03 valid-time development fixture labels")
+
+    traces: list[dict[str, Any]] = []
+    for timeline in benchmark.get("timelines", []):
+        timeline_id = timeline["timeline_id"]
+        for seed in benchmark.get("seeds", []):
+            subject = f"M03 valid-time development:{timeline_id}:{seed}"
+            last_id: str | None = None
+            for event in timeline["events"]:
+                obj = event["object_template"].format(seed=seed)
+                if event["operation"] == "assert":
+                    result = cli.assert_fact(
+                        "wmbs-m03-development",
+                        subject,
+                        "value",
+                        obj,
+                        user="reference-harness",
+                        trust_tier=0,
+                        valid_from=event["valid_from"],
+                    )
+                else:
+                    if last_id is None:
+                        raise ValueError("M03 supersede event has no prior assertion")
+                    result = cli.supersede(
+                        "wmbs-m03-development",
+                        "reference-harness",
+                        last_id,
+                        {"object_value": obj, "trust_tier": 0},
+                        valid_from=event["valid_from"],
+                    )
+                last_id = result.json["id"]
+
+            current = cli.graph_as_of(
+                "wmbs-m03-development",
+                subject,
+                "value",
+                "2999-01-01T00:00:00Z",
+            )
+            history = [
+                {
+                    "as_of": query["as_of"],
+                    "objects": [
+                        item["object"]
+                        for item in cli.graph_as_of(
+                            "wmbs-m03-development",
+                            subject,
+                            "value",
+                            query["as_of"],
+                        )["assertions"]
+                    ],
+                }
+                for query in timeline["history"]
+            ]
+            replay = cli.graph_as_of(
+                "wmbs-m03-development",
+                subject,
+                "value",
+                "2999-01-01T00:00:00Z",
+            )
+            traces.append(
+                {
+                    "case_id": f"{timeline_id}:{seed}",
+                    "current_objects": [
+                        item["object"] for item in current["assertions"]
+                    ],
+                    "current_replay_objects": [
+                        item["object"] for item in replay["assertions"]
+                    ],
+                    "history": history,
+                    "scoring_family": "whole-memory-development",
+                    "seed": seed,
+                    "timeline_id": timeline_id,
+                }
+            )
+    return traces, {}
+
+
 _READINESS_STATES = {
     "PILOT-READY-DEV",
     "RUN-READY-OFFICIAL-LOCAL",
