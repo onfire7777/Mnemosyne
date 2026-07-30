@@ -21,10 +21,10 @@ Execution worktree: `/Users/admin/Mnemosyne.codex-phase13-public-regression-ci`
 - `test "$(git diff --name-only 90841427da5e8299048cf86d027c451570e479a6...HEAD | sort)" = "$(printf '%s\n' .github/workflows/public-regression.yml tests/test_public_regression_workflow.py | sort)"`
 
 ### Task 1: Establish a terminal exact-head verdict
-- [ ] Confirm run `30559003114` belongs to head `baf5c1852593885e37eed75da69b02d93e1bff11`; use `gh run watch 30559003114 --exit-status` only if it remains non-terminal.
-- [ ] Require all required checks to pass, zero current unresolved non-outdated review threads, exact PR head equality, and `MERGEABLE`/clean merge state.
-- [ ] If GitHub is unreachable after a fresh authentication/status check, or any gate fails, stop and report the exact command and result. Do not edit source, rerun broad CI, merge, or launch another package.
-- [ ] If PR #86 is already merged, record its merge commit and proceed directly to post-merge verification. Otherwise merge normally without administrator bypass, force, or check waiver.
+- [x] Confirm run `30559003114` belongs to head `baf5c1852593885e37eed75da69b02d93e1bff11`; use `gh run watch 30559003114 --exit-status` only if it remains non-terminal.
+- [x] Require all required checks to pass, zero current unresolved non-outdated review threads, exact PR head equality, and `MERGEABLE`/clean merge state.
+- [x] If GitHub is unreachable after a fresh authentication/status check, or any gate fails, stop and report the exact command and result. Do not edit source, rerun broad CI, merge, or launch another package.
+- [x] If PR #86 is already merged, record its merge commit and proceed directly to post-merge verification. Otherwise merge normally without administrator bypass, force, or check waiver.
 
 ### Task 2: Verify exact post-merge main
 - [ ] Identify the CI run whose `headSha` exactly equals PR #86’s merge commit and require every required job to finish successfully.
