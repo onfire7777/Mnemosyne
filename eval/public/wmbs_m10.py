@@ -1699,7 +1699,12 @@ def build_calibration_artifact(fixture: dict[str, object]) -> dict[str, object]:
         report = score_records(calibration_cases, records)
         calibration_metrics[baseline_id] = _score_report_to_dict(report)
 
-    no_memory_useful_coverage = calibration_metrics["no-memory"]["useful_coverage"]
+    no_memory_metrics = calibration_metrics["no-memory"]
+    if not isinstance(no_memory_metrics, dict):
+        raise CalibrationSplitManifestError(
+            "no-memory calibration metrics must be an object"
+        )
+    no_memory_useful_coverage = no_memory_metrics.get("useful_coverage")
     if not isinstance(no_memory_useful_coverage, float):
         raise CalibrationSplitManifestError(
             "no-memory useful_coverage must be a float"
