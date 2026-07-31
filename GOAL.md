@@ -31,19 +31,12 @@ the map is not blanket permission to launch stale or overlapping lanes.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
-`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`; the first closed-ABI slice merged
-by PR #79 at `a95fe4d291093253f8ce49adff32ba875a35e884`, its bounded remediation
-merged by PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, and the reviewed M01/M10
-development pilots merged by PR #81 at
-`392b1fc173f454893e1b133ff3a727462586a8b0`, and the bounded M12/M13
-development-evidence confirmations merged by PR #82 at
-`7e9cd01feb2a31cbba96252943697245a4edd024`. The bounded M03 valid-time
-development slice then merged by PR #83 at
-`7f60d8ba8274a8ac8036a80737467654f862008f`, and the M15 canonical replay
-pilot merged by PR #84 at
-`e0dd41594cec890f598718160f919c13eee1e552`. PR #85 then merged the frozen
-Phase 13-15 planning contracts as
-`90841427da5e8299048cf86d027c451570e479a6`:
+`605ecd3ddf7faf308f664f0869e5e2eb431afa7d`. The closed ABI and bounded
+remediation merged through PRs #79-#80; reviewed development pilots M01/M10,
+M12/M13, M03, and M15 merged through PRs #81-#84. PR #85 froze the Phase
+13-15 execution contracts, and PR #86 merged the development-only scheduled
+regression workflow as
+`main@661343ce05186e9a7f0f0740d1edef7c23532857`:
 
 - `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -55,63 +48,26 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**Phase 13-15 contracts frozen; PR #86 gating development regression CI.**
+**Phase 13 development-source lane delivered; reconcile truth before fresh admission.**
 
-WMBS-A/WMB-P1 authority, traceability, the closed common ABI, and fail-closed
-reference validation landed through PR #80. PR #81 then merged exact M01/M10
-source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa`; exact-merge CI run
-`30506775012`, 507 focused tests, and Ruff passed on
-`main@392b1fc173f454893e1b133ff3a727462586a8b0`. Round 18 proved that the
-mapped seven-path M03 lease cannot persist caller-supplied `valid_from`: both
-authorized assertion/supersession write methods live in excluded
-`src/mnemosyne/mcp_tools.py`, and bypassing them would skip authorization.
-The integration owner has now admitted that one additional path so the existing
-authorized write facade can accept an optional timezone-aware `valid_from`;
-direct engine/table writes, caller-controlled `valid_to`, and caller-controlled
-`transaction_time` remain forbidden. PR #82 merged the bounded M12/M13 test-only
-confirmations as `main@7e9cd01f`; exact-head CI run `30521721192`, exact-merge
-CI run `30522846090`, and 46 focused tests passed. M12/M13 remain `PROPOSED`
-and non-publishable. PR #83 merged reviewed source head
-`3189cc24c570f12be06e3d04252a06f48c71f971` as
-`main@7f60d8ba8274a8ac8036a80737467654f862008f`. Exact-head CI run
-`30532543366` and exact-merge CI run `30534061552` passed all required jobs,
-CodeRabbit and Greptile were green, and all review threads were resolved. This
-is a bounded valid-time development slice only: full
-transaction-time/bitemporal M03 remains deferred, and the result remains
-`PROPOSED`, non-publishable, non-headline-eligible, non-independent, and
-non-upstream-comparable.
+WMBS-A/WMB-P1 authority, traceability, the closed common ABI, fail-closed
+reference validation, and the bounded M01/M03/M10/M12/M13/M15 development
+pilots are merged through PR #84. PR #85 froze one Phase 13 plan, one Phase 14
+plan, and four ordered Phase 15 plans without claiming their gated evidence.
+PR #86 merged the two-file scheduled-regression source at exact head
+`baf5c1852593885e37eed75da69b02d93e1bff11`; manual development operability
+run `30561430522` and exact post-merge main CI run `30561266140` passed on the
+exact merge commit. The first actual scheduled-cadence receipt and every
+official/upstream benchmark run remain open.
 
-The committed dependency/write-lease map remains the admission authority. The
-M15 canonical replay and composed M01→M03→M10 development cassette merged by
-PR #84 as `main@e0dd41594cec890f598718160f919c13eee1e552`. The implementation
-enforces canonical output and fixture binding across seven joint rails:
-deduplication, current state, historical state, deterministic answer,
-abstention, custody completeness, and canonical equality. It remains
-development-only, non-publishable, non-headline-eligible, non-independent, and
-non-upstream-comparable. Exact executable-build provenance and Task 11
-measured/operator evidence remain deferred.
-
-PR #85 merged the reviewed Phase 13-15 planning contracts as
-`main@90841427da5e8299048cf86d027c451570e479a6`; post-merge CI run
-`30557821402` passed every required job. PR #86 is the only active delivery
-lane: exact source head `baf5c1852593885e37eed75da69b02d93e1bff11`
-adds development-only scheduled public-regression CI. It must not be described
-as merged until exact-head CI, review threads, mergeability, normal merge, and
-post-merge-main CI are all freshly proven.
-
-No successor source package is admitted merely because M15 merged. GoalEx must
-re-read current main, live writers/PRs, and the dependency/write-lease map,
-then choose the highest-value dependency-ready exact-disjoint package. Shared
-runner/schema/registry/planning surfaces remain integration-owner-only.
-
-Result-v2 remains blocked by the protected signed-publication lease, and the
-sandbox lane remains quarantined until it provides real OCI, filesystem,
-network, and write-boundary enforcement. Local sandbox commits `7d9fa768`,
-`2177eba1`, and `e8a860b2` are reviewed development-source receipts only; they
-must not be pushed, opened as a PR, merged, or described as admitted runtime
-enforcement without the missing live OCI evidence. Five-run/new-process
-reproduction, measured cells, hardware receipts, official runs, and publication
-remain behind their existing operator/evidence gates.
+Result-v2 remains blocked by the protected signed-publication lease. Local OCI
+sandbox commits are reviewed development-source receipts only and remain
+quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
+enforcement receipt, SBOM, provenance, or admission evidence exists. The next
+package must be recomputed from current main and the committed dependency/write
+lease map at
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; neither
+result-v2 nor sandbox delivery is implicitly admitted.
 
 ## Scope
 
@@ -120,8 +76,10 @@ Once the activation gate passes:
 1. Reconcile the landed whole-memory standard against the current GSD state,
    roadmap, requirements, blueprint, PBPP, public harness, result-v1, ledger,
    custody, and publication contracts.
-2. Execute the owner-approved pilot plan in dependency order with one active
-   exact implementation lease at a time.
+2. Execute the owner-approved pilot plan in dependency order under one
+   lifecycle/integration owner. Admit parallel Worktrunk implementation lanes
+   only when the dependency map proves their exact write leases are disjoint;
+   shared schemas, registries, runners, planning, and docs stay serialized.
 3. Prefer the smallest feasible pilot: closed ABI and validators, development
    sandbox/metering receipt, existing public-runner registration, and only the
    explicitly authorized M01/M03-valid-time/M10/M12/M13/M15/M20 development
@@ -171,12 +129,10 @@ For every GoalEx round:
 2. Reject any task that is dependency-blocked, operator-gated, leased, stale,
    broader than an approved plan, or merely housekeeping when substantive
    dependency-ready product or benchmark engineering exists.
-3. Select exactly one highest-value task on an isolated Worktrunk branch with
-   an explicit file lease. Every executor plan must name its exact clean
-   Worktrunk checkout in a machine-readable `Execution worktree: \`/absolute/path\``
-   line; GoalEx launches bounded RalphEx from that registered checkout and
-   fails closed if it is missing, dirty, protected, or outside admitted roots.
-   Preserve unowned dirty work and prevent redundant writers.
+3. Select the highest-value dependency-ready package set within the map's
+   sustained concurrency ceiling. Every lane uses an isolated Worktrunk and an
+   exact disjoint file lease; serialize on any path or ancestry overlap, and
+   preserve unowned dirty work.
 4. Apply Ponytail fully: reuse current contracts/code, then stdlib/platform,
    then installed dependencies; make the smallest tested root-cause change
    without speculative abstractions or dependencies.
@@ -187,15 +143,15 @@ For every GoalEx round:
    approved design/planning, isolated worktrees, TDD, debugging, execution,
    review, verification, or branch completion.
 7. Review trust boundaries, secrets, supply chain, failure modes, evidence
-   language, and result compatibility. Use focused local tests during repair
-   and exactly one authoritative repository-wide suite per stable candidate:
-   the required exact-head CI run. Do not duplicate that broad suite locally.
-   Push normally; require a PR, review/thread/mergeability clearance, and
-   post-merge `main` proof. Never force-push, bypass hooks, dismiss findings,
-   or write directly to main.
+   language, and result compatibility. Use focused tests during repair and one
+   authoritative full suite on each stable exact PR head; do not duplicate
+   broad suites across lanes. Push normally; require a PR, review/thread/
+   mergeability clearance, and post-merge `main` proof. Never force-push,
+   bypass hooks, dismiss findings, or write directly to main.
 8. After merge, safely fast-forward canonical local `main`, prove it equals
-   clean `origin/main`, refresh CBM once, and sync one deduplicated durable
-   Gbrain milestone rather than transient session facts.
+   clean `origin/main`, reconcile affected canonical truth, then refresh CBM
+   once and sync one deduplicated durable Gbrain milestone. Do not refresh both
+   before and after the same reconciliation.
 9. Update only affected GSD state, plans, canonical docs, architecture/ADRs,
    benchmark contracts, and the real owner-discovered wiki. Never create a
    second wiki, roadmap, memory owner, or duplicate canonical content.
@@ -219,16 +175,15 @@ For every GoalEx round:
 
 ## Success Evidence
 
-Achieved for the closed-ABI slice and bounded remediation:
+Achieved for the current development-source milestone:
 
 - owner-landed hardened specification and implementation plan;
-- merged compound schema, reference validator, and focused contract fixtures;
-- normal PR #79 review, exact-head CI, merge, and post-merge main proof.
-- normal PR #80 remediation review, exact-head clearance, merge, exact-merge CI
-  run `30484986865`, refreshed CBM, and a deduplicated Gbrain milestone.
-- normal PR #81 review and merge of exact source head `98b83e4b`; exact-merge
-  CI run `30506775012`, 507 focused tests, Ruff, refreshed CBM, and retained
-  `publishable:false` / `pbpp_headline_eligible:false` boundaries.
+- merged compound schema, reference validator, focused contract fixtures, and
+  bounded M01/M03/M10/M12/M13/M15 development pilots through PR #84;
+- frozen Phase 13-15 execution contracts through PR #85;
+- normal PR #86 exact-head CI/review/merge gates plus passing input-free manual
+  development operability run `30561430522` and passing exact post-merge main
+  CI run `30561266140`.
 
 The remaining whole-memory pilot milestone still requires:
 
@@ -255,13 +210,9 @@ test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
 test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
-git merge-base --is-ancestor 98b83e4be373cf0acd5411769b80b98dfd1a8caa main
-git merge-base --is-ancestor a3ca8108c22de350810dc3f574931a0d85810ed5 main
-git merge-base --is-ancestor 3189cc24c570f12be06e3d04252a06f48c71f971 main
-git merge-base --is-ancestor a4e5fd2b5d46583998821a8c146d98c512c88b73 main
-git merge-base --is-ancestor b743af67e21f15d695fa404643164fb622b2d714 main
 git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
-git merge-base --is-ancestor 2ba4ed80f48717e92caaa66aeef48d2d331cb0bc main
+git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
+git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
