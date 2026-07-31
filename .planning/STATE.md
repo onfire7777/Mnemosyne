@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #88 at main@4a891042; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87 and public-regression documentation plus workflow contract-test hardening through PR #88, at main@4a891042; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
 last_updated: "2026-07-31T22:27:04Z"
 last_activity: 2026-07-31
 progress:
