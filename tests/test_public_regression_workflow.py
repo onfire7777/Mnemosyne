@@ -25,7 +25,7 @@ def _top_level_blocks(lines: list[str]) -> dict[str, list[str]]:
     blocks: dict[str, list[str]] = {}
     current: str | None = None
     for line in lines:
-        match = re.fullmatch(r"([a-z][a-z0-9_-]*):(?: .*)?", line)
+        match = re.fullmatch(r"([^\s#][^:]*):(?: .*)?", line)
         if match:
             current = match.group(1)
             assert current not in blocks, f"duplicate top-level key: {current}"
@@ -124,9 +124,16 @@ def test_workflow_is_a_bounded_development_only_regression() -> None:
     assert "runs-on: ubuntu-latest" in workflow
     assert re.search(r"(?m)^    timeout-minutes: (?:[1-9]|1[0-9]|20)$", workflow)
     assert "if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'" in workflow
-    concurrency = [line.strip() for line in blocks["concurrency"]]
-    assert "group: public-regression" in concurrency
-    assert "cancel-in-progress: false" in concurrency
+    assert _mapping_keys(blocks["concurrency"], 2) == [
+        "group",
+        "cancel-in-progress",
+    ]
+    assert blocks["concurrency"] == [
+        "concurrency:",
+        "  group: public-regression",
+        "  cancel-in-progress: false",
+        "",
+    ]
 
     forbidden = re.compile(
         r"(?i)"
