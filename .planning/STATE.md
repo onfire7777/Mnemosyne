@@ -274,8 +274,10 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 Current continuation: see **Latest checkpoint** below.
 
-Latest checkpoint (2026-07-30): see **Whole-Memory Pilot Status** above for the
-PR #81 and PR #82 delivery receipts and unchanged evidence boundaries.
+Latest checkpoint (2026-07-30): see the **Decisions** entry under **Accumulated
+Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
+receipts, and **Phase 13-15 Planning and Source Status** for the Phase 13
+receipts merged through PR #86/#87/#88. Evidence boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
