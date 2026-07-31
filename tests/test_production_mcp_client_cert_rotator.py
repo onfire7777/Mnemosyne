@@ -1553,7 +1553,7 @@ def _run_rotator(
         text=True,
         capture_output=True,
         stdin=subprocess.DEVNULL,
-        timeout=ROTATOR_TEST_TIMEOUT_SECONDS,
+        timeout=60,
         check=False,
         pass_fds=_runtime_lock_pass_fds(env),
         umask=-1 if child_umask is None else child_umask,

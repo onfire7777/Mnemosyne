@@ -80,7 +80,20 @@ development QA, and the single protected attempt remain open under 12-04.
 deterministic regression runs that never tune on test data.
 **Requirements:** BENCH-006, BENCH-007, RAIL-001..004
 **Depends on:** Phases 10-12
-**Plans:** Not planned
+**Plans:** 1/1 source plan complete; external evidence remains open
+
+Plans:
+
+- [x] 13-01-PLAN.md — Bounded weekly/manual development regression workflow.
+
+**Boundary:** The MemoryAgentBench and BEAM source contracts are merged, and
+PR #86 merged the scheduled development-regression workflow at
+`main@661343ce`. Input-free manual run `30561430522` passed the same fixed
+four-test job, and exact post-merge main CI run `30561266140` passed on the
+merge commit. BENCH-006 remains Partial because official/upstream execution,
+rights, provider/model/judge disclosure, and operator evidence are still
+gated. BENCH-007 remains Partial until an actual scheduled-cadence receipt is
+retained; source and manual operability do not prove that cron event occurred.
 
 ### Phase 14: Reproducibility Standard
 
@@ -91,7 +104,17 @@ Independent third-party reproduction is recorded as
 strengthening evidence when offered, and does not gate the phase (revised v0.2.0).
 **Requirements:** REPRO-001, REPRO-002, RAIL-003, RAIL-004
 **Depends on:** Phases 11-13
-**Plans:** Not planned
+**Plans:** 1 plan frozen; implementation blocked
+
+Plans:
+
+- [ ] 14-01-PLAN.md — Neutral reproducibility bundle standard.
+
+**Boundary:** REPRO-001 is implementation-ready only after additive result-v2
+dispatch lands and the protected signed-publication lease is released.
+REPRO-002 additionally waits for a headline-eligible pinned official result
+with complete custody/operator evidence. No development fixture closes either
+evidence gate.
 
 ### Phase 15: Memory Capability and Evidence Closure
 
@@ -101,9 +124,16 @@ surprise-gated writes, security/calibration evidence, performance/scale
 closure, the cartridge A/B, and the activation-memory go/no-go research note.
 It also closes the physical 8 GiB compact grounded-QA path without weakening
 the shared quality or custody gates.
-**Requirements:** CAP-004..010, CAP-012, CAP-013, RAIL-001..004
+**Requirements:** CAP-004..011, CAP-012, CAP-013, RAIL-001..004
 **Depends on:** Phases 10-14
-**Plans:** Not planned
+**Plans:** 4 plans frozen; implementation remains dependency/evidence gated
+
+Plans:
+
+- [ ] 15-01-PLAN.md — S2 capability upgrades.
+- [ ] 15-02-PLAN.md — Security and calibration development evidence.
+- [ ] 15-03-PLAN.md — S4 performance, scale, and resource closure.
+- [ ] 15-04-PLAN.md — S5 research and go/no-go closure.
 
 **Required plan order:** S2 capability upgrades; S3 security/calibration; S4
 performance/scale; S5 research closure. S5 remains non-gating for public launch
@@ -116,7 +146,7 @@ and test-pinned by `tests/test_planning_traceability.py`. The same merge landed
 the W2 D5 signed deletion manifest and the W3 I0R signed-session public-action
 evaluator, whose PM-Bench/TriggerBench/Working-Memory suites are development-split
 and `publishable:false` — they add no public or headline benchmark result. The
-remaining Phase 15 items (CAP-004..010) stay planned, and the W1/W4/W5 GATEs
+remaining Phase 15 items (CAP-004..011) stay planned, and the W1/W4/W5 GATEs
 remain operator-gated; none of that gated or adapter work is claimed complete.
 
 ### Phase 16: Open Leaderboard Build and Launch

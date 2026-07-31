@@ -1,0 +1,36 @@
+name: Public regression
+
+on:
+  schedule:
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-regression
+  cancel-in-progress: false
+
+jobs:
+  public-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: python -m pip install pip==26.1.2 uv==0.11.16
+      - name: Sync locked development environment
+        run: uv sync --locked --group dev
+      - name: Run fixed public contract regression
+        run: |
+          uv run --locked python -m pytest \
+          tests/test_public_longmemeval.py \
+          tests/test_public_hipporag.py \
+          tests/test_public_memoryagentbench.py \
+          tests/test_public_beam.py \
+          -q
