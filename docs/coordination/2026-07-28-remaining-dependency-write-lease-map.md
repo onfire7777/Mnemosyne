@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-07-30
-Baseline: `main@661343ce05186e9a7f0f0740d1edef7c23532857`
+Updated: 2026-07-31
+Baseline: `main@4a891042c25d3a21d7ac4ecfe81a31b43d372370`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -21,6 +21,10 @@ The following packages are complete source history, not runnable work:
 - PR #84: M15 canonical replay and the composed M01-M03-M10 vertical slice.
 - PR #85: Phase 13-15 contract freeze.
 - PR #86: bounded weekly/manual development regression source.
+- PR #87: canonical truth reconciliation of the GOAL/GSD lifecycle files
+  (`main@2ba4ed80`, post-merge CI `30566984814`).
+- PR #88: public-regression README documentation and workflow contract-test
+  hardening (`main@4a891042`, post-merge CI `30659705054`).
 
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
@@ -50,11 +54,11 @@ exact lease, shared owner/integration edge, and external gate.
 
 | ID | Class | Package and prerequisites / consumes | Produces | Exact write lease and owner | Integration dependency / external gate |
 |---|---|---|---|---|---|
-| T0 | ACTIVE | Canonical truth PR after PR #86; consumes exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Normal PR #87 CI/review/merge/post-merge proof |
-| T1 | BLOCKED on T0 | GitHub Wiki reconciliation; consumes verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | T0 merged and local/remote wiki master clean/equal |
-| T2 | BLOCKED on T0/T1 | Deduplicated knowledge refresh; consumes final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Run once only if T0/T1 source changed; do not duplicate the refresh already completed at `90841427` |
+| T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@2ba4ed80` with post-merge CI `30566984814` |
+| T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
+| T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
-| P13-C | EXTERNAL EVENT | First real weekly cron receipt; consumes merged fixed workflow | Retained scheduled-cadence receipt for BENCH-007 | No code lease | A real `schedule` event must occur; manual dispatch is not a substitute |
+| P13-C | EXTERNAL EVENT | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Still open: only the manual dispatch `30561430522` exists; the first eligible real `schedule` event is 2026-08-03; manual dispatch is not a substitute |
 | P13-O | EXTERNAL/PLAN BLOCKED | Official MemoryAgentBench and BEAM; consumes P12-E plus pinned upstream revisions/protocols | BENCH-006 conforming upstream evidence | No admitted lease; a future exact plan must name every source/evidence path | Rights/license, provider/model/judge disclosure, capacity, operator admission |
 | SBOX | QUARANTINED | Development sandbox/external-meter candidate; consumes the common ABI and local reviewed sandbox commits | Only development-source isolation receipts until enforcement is proven | Current local source/test lease: `eval/public/sandbox.py`, `eval/public/sandbox/Dockerfile`, `tests/test_public_sandbox.py`; public-harness owner for any later shared integration | No push/PR/merge until immutable image, daemon probe, filesystem/network/write-boundary enforcement, SBOM, provenance, and resource receipts exist |
 | N12 | LEASE BLOCKED | Additive result-v2 and M20 publication-integrity dispatch; consumes result-v1, signed ledger, renderer/publisher/readiness, official/enhanced lineage, atomic attempt identities | Compatible result-v2 projections, visible safety failures, cross-version supersession | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; result-v2 owner only | Protected signed-publication patch/paths must be released on current main; result-v1 bytes and behavior remain immutable |
@@ -72,10 +76,12 @@ exact lease, shared owner/integration edge, and external gate.
 Only dependency-ready and exact-lease-disjoint nodes may share a wave.
 
 ```text
-Current delivery wave
-  T0 PR #87 canonical truth
-    -> T1 GitHub Wiki reconciliation
-      -> T2 one deduplicated CBM/Gbrain refresh
+Current delivery wave (complete; no admitted source node)
+  T0 PR #87 canonical truth            [merged main@2ba4ed80]
+    -> T1 GitHub Wiki reconciliation   [wiki 46c34287]
+      -> T2 one deduplicated CBM/Gbrain refresh [done 2026-07-30]
+  PR #88 documentation/contract-test hardening merged at main@4a891042
+  and admitted no new implementation package.
 
 Independent external gates (do not block T0-T2)
   P12-E operator measurement
