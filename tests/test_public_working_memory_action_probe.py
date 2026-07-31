@@ -122,7 +122,7 @@ def fixture() -> dict[str, Any]:
 
 def test_public_readme_records_development_evidence_gaps() -> None:
     readme = (
-        Path(__file__).parents[1] / "eval" / "public" / "README.md"
+        Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md"
     ).read_text()
     assert "one seed (`94125`) and six cases" in readme
     assert "no capacity parameter" in readme
