@@ -63,9 +63,9 @@ Hard constraints:
 - `gh pr view <pr> --json state,mergeable,reviewDecision,statusCheckRollup`
 
 ### Task 1: Open an isolated execution lane
-- [ ] `git -C /Users/admin/Mnemosyne fetch --prune origin`; confirm `main == origin/main == 4a891042c25d3a21d7ac4ecfe81a31b43d372370`, `git -C /Users/admin/Mnemosyne status --porcelain` is empty, and `gh pr list --state open` is empty.
-- [ ] Preferred lane: `git -C /Users/admin/Mnemosyne worktree add /Users/admin/Mnemosyne.codex-lease-map-r36 -b codex/lease-map-post-pr88 origin/main`. If (and only if) worktree creation is unavailable in this environment, fall back to working in `/Users/admin/Mnemosyne` itself via `git -C /Users/admin/Mnemosyne checkout -b codex/lease-map-post-pr88 origin/main`, and restore it to `main` in Task 3.
-- [ ] Confirm the execution checkout is clean and that no other checkout has dirty `.planning/` or `docs/coordination/` files (`git -C <each relevant worktree> status --porcelain`); if another writer holds those surfaces, stop and report instead of overwriting.
+- [x] `git -C /Users/admin/Mnemosyne fetch --prune origin`; confirm `main == origin/main == 4a891042c25d3a21d7ac4ecfe81a31b43d372370`, `git -C /Users/admin/Mnemosyne status --porcelain` is empty, and `gh pr list --state open` is empty.
+- [x] Preferred lane: `git -C /Users/admin/Mnemosyne worktree add /Users/admin/Mnemosyne.codex-lease-map-r36 -b codex/lease-map-post-pr88 origin/main`. If (and only if) worktree creation is unavailable in this environment, fall back to working in `/Users/admin/Mnemosyne` itself via `git -C /Users/admin/Mnemosyne checkout -b codex/lease-map-post-pr88 origin/main`, and restore it to `main` in Task 3.
+- [x] Confirm the execution checkout is clean and that no other checkout has dirty `.planning/` or `docs/coordination/` files (`git -C <each relevant worktree> status --porcelain`); if another writer holds those surfaces, stop and report instead of overwriting.
 
 ### Task 2: Recompute the two leased files and prove them locally
 - [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`: set `Updated: 2026-07-31` and `Baseline: main@4a891042c25d3a21d7ac4ecfe81a31b43d372370`; append to the "Merged baseline" list PR #87 (canonical truth, `main@2ba4ed80`, post-merge CI `30566984814`) and PR #88 (public-regression documentation and contract-test hardening, `main@4a891042`, post-merge CI `30659705054`).
