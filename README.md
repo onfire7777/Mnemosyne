@@ -353,7 +353,7 @@ Mnemosyne/
 ├── services/embedding/      # standalone embedding provider service
 ├── services/answering-ort/  # Rust ONNX (ort) compact-answering sidecar (W5); bounded local-only skeleton, fails closed with runtime_unavailable
 ├── docs/ROADMAP-TO-100.md   # sequenced path to 1:1 blueprint parity
-└── .github/workflows/ci.yml # ruff + pytest + Postgres integration job
+└── .github/workflows/       # required CI plus bounded public regression
 ```
 
 ---
@@ -395,6 +395,7 @@ Controlling artifacts: [`docs/ROADMAP-TO-100.md`](docs/ROADMAP-TO-100.md) (blend
 ## Testing & CI
 
 - `.github/workflows/ci.yml` installs the committed `uv.lock` environment and runs **ruff** lint, the full **pytest** suite (configuration / invariant-rail drift checks included), and a **Postgres integration** job on pushes to `main` and pull requests.
+- `.github/workflows/public-regression.yml` runs the fixed public LongMemEval, HippoRAG, MemoryAgentBench, and BEAM contract-test allowlist every Monday at 07:23 UTC and on manual dispatch from `main`. It is a bounded development regression only: it does not execute official or held-out evaluation, produce evidence or leaderboard receipts, or authorize publication.
 - With `MNEMOSYNE_POSTGRES_DSN` **unset**, the suite runs the local deterministic tests and skips live-DB integration tests — this no-DSN run is one required CI gate and must stay green.
 - With Docker-compose Postgres running and the DSN set, the local full suite additionally runs live coverage in `tests/test_postgres_engine_live.py` and `tests/test_shared_engine_contract.py`, covering tenant RLS, FTS, pgvector search, recursive graph/PPR, bitemporal supersession, branch/merge/discard, tombstone + hard-delete forget modes, command-backed KMS, and **local↔Postgres parity** of the engine contract. CI runs the dedicated `tests/test_postgres_engine_live.py` Postgres job as the always-on live-DB gate.
 

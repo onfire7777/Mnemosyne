@@ -25,7 +25,7 @@ def _top_level_blocks(lines: list[str]) -> dict[str, list[str]]:
     blocks: dict[str, list[str]] = {}
     current: str | None = None
     for line in lines:
-        match = re.fullmatch(r"([a-z][a-z0-9_-]*):(?: .*)?", line)
+        match = re.fullmatch(r"([^\s#][^:]*):(?: .*)?", line)
         if match:
             current = match.group(1)
             assert current not in blocks, f"duplicate top-level key: {current}"
@@ -46,6 +46,26 @@ def _mapping_keys(block: list[str], indent: int) -> list[str]:
             keys.append(match.group(1))
     assert len(keys) == len(set(keys)), f"duplicate key at indent {indent}: {keys}"
     return keys
+
+
+def _mapping_items(block: list[str], indent: int) -> dict[str, str]:
+    """Parse a flat ``key: value`` mapping at ``indent``.
+
+    Layout-independent on purpose: blank lines, trailing whitespace, and key
+    order are ignored so a harmless reformat cannot fail the contract, while
+    the keys and their values are still compared exactly.
+    """
+    prefix = " " * indent
+    items: dict[str, str] = {}
+    for line in block:
+        if not line.startswith(prefix) or line.startswith(prefix + " "):
+            continue
+        match = re.fullmatch(rf"{prefix}([a-z][a-z0-9_-]*):(?: (.*))?", line)
+        if match:
+            key = match.group(1)
+            assert key not in items, f"duplicate key at indent {indent}: {key}"
+            items[key] = (match.group(2) or "").strip()
+    return items
 
 
 def _single_run_command(lines: list[str]) -> list[str]:
@@ -111,10 +131,10 @@ def test_workflow_is_a_bounded_development_only_regression() -> None:
     cron = cron_line.removeprefix("- cron:").strip().strip("\"'")
     fields = cron.split()
     assert len(fields) == 5
+    # Monday, and the exact 07:23 UTC time README.md documents. Pinning the
+    # minute/hour keeps the prose and the cron from drifting apart silently.
     assert fields[2:] == ["*", "*", "1"]
-    assert all(field.isdigit() for field in fields[:2])
-    assert 0 <= int(fields[0]) <= 59
-    assert 0 <= int(fields[1]) <= 23
+    assert fields[:2] == ["23", "7"]
     assert "workflow_dispatch:" in (line.strip() for line in blocks["on"])
     assert "inputs:" not in (line.strip() for line in blocks["on"])
 
@@ -124,9 +144,10 @@ def test_workflow_is_a_bounded_development_only_regression() -> None:
     assert "runs-on: ubuntu-latest" in workflow
     assert re.search(r"(?m)^    timeout-minutes: (?:[1-9]|1[0-9]|20)$", workflow)
     assert "if: github.event_name == 'schedule' || github.ref == 'refs/heads/main'" in workflow
-    concurrency = [line.strip() for line in blocks["concurrency"]]
-    assert "group: public-regression" in concurrency
-    assert "cancel-in-progress: false" in concurrency
+    assert _mapping_items(blocks["concurrency"], 2) == {
+        "group": "public-regression",
+        "cancel-in-progress": "false",
+    }
 
     forbidden = re.compile(
         r"(?i)"
