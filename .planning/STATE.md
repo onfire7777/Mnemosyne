@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86 at main@661343ce; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-07-30T16:49:30Z"
-last_activity: 2026-07-30
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #88 at main@4a891042; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+last_updated: "2026-07-31T22:27:04Z"
+last_activity: 2026-07-31
 progress:
   total_phases: 7
   completed_phases: 2
@@ -39,12 +39,19 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-30 — PR #86 merged the two-file bounded scheduled
+Last activity: 2026-07-31 — PR #86 merged the two-file bounded scheduled
 development-regression workflow at `main@661343ce`; input-free manual run
-`30561430522` passed the fixed four-test contract job. The first actual
-scheduled-cadence receipt, official MemoryAgentBench/BEAM execution, and all
-benchmark/publication claims remain open. The earlier Phase 12 lease sweep
-remains delivered and its operator-only measurement boundary is unchanged.
+`30561430522` passed the fixed four-test contract job. PR #87 then merged the
+canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
+`30566984814`), and PR #88 merged public-regression README documentation plus
+hardened workflow contract tests at `main@4a891042` with post-merge CI
+`30659705054`. The first actual scheduled-cadence receipt is still open: the
+workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
+2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
+measurement, or publication claim changed in PR #87 or PR #88. Official
+MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
+open. The earlier Phase 12 lease sweep remains delivered and its operator-only
+measurement boundary is unchanged.
 
 ## Parallel Phase 16 Source Status
 
