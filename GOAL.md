@@ -75,13 +75,16 @@ state, or publication claim, and M12/M13 remain `PROPOSED` /
 `publishable:false` / `pbpp_headline_eligible:false`. The controller branch is
 merged to `main@061c2e1c`, so its remaining undelivered delta is exactly:
 `GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
-post-merge receipts), the pilots-plan PR #90 checkpoint, and 25
-`docs/plans/goalex-r14..r37*.md` round records that have accumulated since
-round 14 without ever being delivered through a PR. Landing all of them is
-deferred to the next round's GoalEx-owner PR so lifecycle and public-harness
-leases stay unmixed; the plan-doc backlog is disclosed here rather than left
-to accumulate silently. The first actual scheduled-cadence receipt and every official/upstream
-benchmark run remain open.
+post-merge receipts), the pilots-plan PR #90 checkpoint, and 25 round records
+touched since round 14 without being delivered through a PR: 23 new
+`docs/plans/goalex-r15..r37*.md` files, the new
+`docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
+`docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
+Landing all of them is deferred to the next round's GoalEx-owner PR so
+lifecycle and public-harness leases stay unmixed; the plan-doc backlog is
+disclosed here rather than left to accumulate silently. The first actual
+scheduled-cadence receipt and every official/upstream benchmark run remain
+open.
 
 Result-v2 remains blocked by the protected signed-publication lease. Local OCI
 sandbox commits are reviewed development-source receipts only and remain
