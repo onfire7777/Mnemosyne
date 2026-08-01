@@ -1,5 +1,9 @@
 # Plan: Cut Rule 11 Back to Its Minimal Invariant, Land PR #93, and Recompute Branch Truth
 
+Historical round record, superseded by PR #93's merge and the bounded `T5`
+delivery admitted after that independent merge lapsed the carve-out. The
+unchecked tasks below describe completed historical work, not pending work.
+
 ## Overview
 
 You are the executor for round 41 of an autonomous GoalEx loop on the Mnemosyne
