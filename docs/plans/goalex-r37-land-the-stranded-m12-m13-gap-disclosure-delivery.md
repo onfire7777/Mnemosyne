@@ -74,8 +74,11 @@ The round scoped itself to the non-plan, non-lifecycle stranded files, so the
 plan-doc backlog was excluded rather than cleared. After merging
 `main@061c2e1c` into the controller branch, the remaining undelivered delta is
 exactly those three lifecycle files, the pilots-plan PR #90 checkpoint, and 25
-`docs/plans/goalex-r14..r37*.md` round records accumulated since round 14 that
-have never been delivered through a PR. They carry the same next-round
+round records touched since round 14 without being delivered through a PR: 23
+new `docs/plans/goalex-r15..r37*.md` files, the new
+`docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
+`docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
+They carry the same next-round
 GoalEx-owner PR; this note exists so the backlog is disclosed with an owner
 instead of accumulating silently, which is the stranding pattern this round was
 opened to end.

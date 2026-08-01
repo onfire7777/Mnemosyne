@@ -1,6 +1,6 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-07-31
+Updated: 2026-08-01
 Baseline: `main@061c2e1c13cbf1fd5324361a6ff61f47cd2a6534`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
@@ -42,9 +42,11 @@ This map is recomputed from the new baseline `main@061c2e1c`, and the
 controller branch is merged to that baseline. Its remaining undelivered delta
 is **not yet on `main`** and is exactly: the three lifecycle files (`GOAL.md`,
 `.planning/STATE.md`, and this map) recording PR #90's post-merge receipts, the
-pilots-plan PR #90 checkpoint, and 25 `docs/plans/goalex-r14..r37*.md` round
-records that have accumulated since round 14 without ever being delivered
-through a PR. Landing all of them is deferred to the next round's GoalEx-owner
+pilots-plan PR #90 checkpoint, and 25 round records touched since round 14
+without being delivered through a PR: 23 new `docs/plans/goalex-r15..r37*.md`
+files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
+edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
+`main`). Landing all of them is deferred to the next round's GoalEx-owner
 PR so the GoalEx lifecycle lease and the public-harness lease stay unmixed; the
 plan-doc backlog is disclosed here rather than left to accumulate silently.
 
