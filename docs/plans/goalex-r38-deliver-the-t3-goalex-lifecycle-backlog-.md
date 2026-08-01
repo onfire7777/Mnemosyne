@@ -131,28 +131,63 @@ leases.
       insertions / 24 deletions exactly. No other path changed.
 
 ### Task 2: Make the delivered lifecycle text self-consistent post-merge
-- [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`:
+- [x] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`:
       flip node `T3` from `ADMITTED` to `DELIVERING` (or equivalent), stating
       that this PR is the delivery, that the map must be recomputed from the
       resulting `main` before any further admission, and that the only residual
       undelivered item after this merge is the follow-up receipt block (PR
       number, exact-head CI id, post-merge CI id) which cannot exist inside the
       commit it describes.
-- [ ] In `GOAL.md`, rewrite the Authority carve-out paragraph so it describes
+      Done in three places: the T3 DAG row (`ADMITTED` -> `DELIVERING`, "This
+      PR is the delivery", recompute-before-next-admission and receipt-residue
+      clauses added to its integration column); the narrative paragraph that
+      previously deferred landing to "the next round's GoalEx-owner PR"; and
+      the "Current delivery wave" block, which now reads
+      `[delivering: this PR]` and states the wave holds no admitted node after
+      the merge.
+- [x] In `GOAL.md`, rewrite the Authority carve-out paragraph so it describes
       the state this PR creates: the branch-resident map is being delivered to
       `main` by this PR, and the carve-out closes on merge except for the
       receipt-only residue named above. Do not delete the carve-out's lapse
       rule.
-- [ ] In `.planning/STATE.md`, keep the PR #81-#84 whole-memory Decisions entry
+      Rewritten in the past tense of the deferral state, naming this PR as the
+      deferred GoalEx-owner delivery and stating the carve-out closes on merge
+      except for the receipt-only residue. The lapse rule is preserved verbatim
+      in substance ("it lapses the moment any merge lands on `main` that the
+      branch-resident map does not already record ... recomputed from current
+      `main` before it is treated as operative again"), and the later
+      "for as long as that carve-out is open" reference still reads correctly.
+- [x] In `.planning/STATE.md`, keep the PR #81-#84 whole-memory Decisions entry
       and PR #90 receipts, and confirm no status, admission state, or
       publication claim is upgraded anywhere in the diff.
-- [ ] Confirm the pilots-plan correction still reads correctly on top of current
+      Both retained: the PR #81-#84 Decisions entry is intact (it still records
+      `PILOT-READY-DEV`/`PROPOSED` and non-publishable results), as are the
+      PR #90 receipts (`main@061c2e1c`, exact-head CI `30679262270`, post-merge
+      CI `30680201900`). Two sentences were made post-merge-consistent: the
+      deferral sentence now says this PR lands the delta and names the receipt
+      residue, and the "Until the deferred PR lands, that sentence on `main` is
+      known-stale" clause now records that staleness as closed by this PR.
+      Every status token added by the diff asserts `PROPOSED` /
+      `publishable:false` / `pbpp_headline_eligible:false`; none is upgraded.
+- [x] Confirm the pilots-plan correction still reads correctly on top of current
       `main` (the stale sentence claiming the M12/M13 gap-disclosure paragraphs
       "are not on main and are still pending PR delivery" must be replaced,
       because PR #90 falsified it; Tasks 7 and 8 are closed on `main`).
-- [ ] Re-grep the whole lane diff for forbidden upgrades: `publishable:true`,
+      Confirmed against `git diff main -- <pilots plan>`: the stale sentence is
+      replaced by one recording PR #90's separate delivery at `main@061c2e1c`
+      and closing Tasks 7 and 8 on canonical main, and the twelve-line
+      `Gap-disclosure delivery:` receipt block appends cleanly to the M12/M13
+      checkpoint section. Its `2026-08-01` date matches PR #90's UTC merge time
+      (`2026-08-01T02:32:10Z`).
+- [x] Re-grep the whole lane diff for forbidden upgrades: `publishable:true`,
       `pbpp_headline_eligible:true`, any `PILOT-READY` promotion, any
       leaderboard/certification/superiority wording. There must be none.
+      None found. The only added lines matching the patterns are this plan
+      file's own text quoting the prohibition, `PILOT-READY-DEV` preservation
+      statements (not promotions), and "certificate-rotator" test references
+      (not a certification claim). The out-of-lease pathspec diff is still
+      empty, and `python -m pytest tests/test_planning_traceability.py -q`
+      passes in the lane (6 passed).
 
 ### Task 3: Gate the lane locally, then open and merge the PR
 - [ ] Run `ruff check .` and `python -m pytest tests/test_planning_traceability.py -q`
