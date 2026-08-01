@@ -76,6 +76,67 @@ No row may advance merely because its tests pass. The exact §4 feasibility
 record, measured resource receipt, sandbox receipt, BOM, and replay evidence
 must exist for the claimed state.
 
+## M01/M10 delivery checkpoint
+
+On 2026-07-29, PR #81 merged exact source head
+`98b83e4be373cf0acd5411769b80b98dfd1a8caa` (reviewed candidate lineage
+`c9e7884e4263cdeedeaf2fe5b30f9796226082b3`) to
+`main@392b1fc173f454893e1b133ff3a727462586a8b0`. Exact-merge CI run
+`30506775012` passed all required jobs. The focused M01/M10/public-eval/
+reference suite passed 507 tests and Ruff passed.
+
+This is source delivery only. M01 remains `PILOT-READY-DEV` for Local and M10
+remains `PILOT-READY-DEV` for the deterministic reader. Every development
+result remains `publishable:false` and `pbpp_headline_eligible:false`; no
+official, enhanced-successor, measured, PBPP, certification, publication, or
+headline claim advanced. Task 5, the bounded M03 valid-time integration, was
+subsequently proven blocked because its authorized write path was outside the
+mapped lease. The integration owner has now admitted only
+`src/mnemosyne/mcp_tools.py` into that lease so the existing authorized facade
+can accept optional timezone-aware `valid_from`. PR #82 delivered the Task 7
+and Task 8 unit contracts only — the M12/M13 gap-disclosure paragraphs in
+`eval/public/README.md` and the tests pinning them are not on main and are
+still pending PR delivery, so Tasks 7 and 8 are complete on this branch but not
+yet on canonical main. Full transaction-time M03 remains deferred, M15 requires
+the admitted M03 cell, and result-v2 remains blocked by the protected
+signed-publication lease. PR #83 later delivered that bounded M03 cell and
+PR #84 delivered the dependent M15 development slice, as recorded below.
+
+## M12/M13 delivery checkpoint
+
+On 2026-07-30, PR #82 merged final candidate
+`a3ca8108c22de350810dc3f574931a0d85810ed5` to
+`main@7e9cd01feb2a31cbba96252943697245a4edd024`. Exact-head CI run
+`30521721192`, exact-merge CI run `30522846090`, the 46-test focused M12/M13
+suite, focused Ruff, and `git diff --check` passed.
+
+This remains bounded development evidence only. M12 and M13 retain
+`admission_state=PROPOSED`, `evidence_level=INTERNALLY_MEASURED`, and false
+publication, headline, independent-reproduction, and upstream-comparability
+flags. No official run, measured cell, recurrence or promotion experiment,
+certification, ranking, or publication gate advanced. The bounded M03 slice is
+now admitted with its explicit authorized-facade lease amendment; PR #84 later
+delivered the dependent M15 development slice. Result-v2 remains protected,
+and sandbox enforcement remains quarantined.
+
+## M15 delivery checkpoint
+
+On 2026-07-30, PR #84 merged final candidate
+`a4e5fd2b5d46583998821a8c146d98c512c88b73` as
+`main@e0dd41594cec890f598718160f919c13eee1e552`. Exact-head CI, independent
+review, mergeability, and the focused 339-test/Ruff/diff/lease gates passed;
+post-merge CI run `30543119233` is the exact-main receipt.
+
+The merged development cassette canonically replays M01, bounded M03, and M10
+and requires seven joint rails: deduplication, current state, historical state,
+deterministic answer, abstention, custody completeness, and canonical equality.
+Fixture references are validated against the fixture suite and
+`fixture_manifest_sha256`. This is output/fixture replay, not exact executable
+build provenance. It remains development-only, non-publishable,
+non-headline-eligible, non-independent, and non-upstream-comparable. Actual
+five-run/new-process reproduction and measured/operator evidence remain Task 11
+work behind the sandbox, hardware, resource, BOM/rights, and custody gates.
+
 ## Pilot tranche order
 
 1. **WMB-P1 — Contract freeze:** common ABI, fixtures, scorers, baselines,
@@ -98,8 +159,17 @@ must exist for the claimed state.
 
 **Status:** Closed-ABI slice completed at source head
 `8d64f554c565edeb0c43868ff6d436e6e09df33a`, merged by PR #79 at
-`a95fe4d291093253f8ce49adff32ba875a35e884`. Result-v2 compatibility and
-ledger fixtures remain open.
+`a95fe4d291093253f8ce49adff32ba875a35e884`. Its bounded remediation merged by
+PR #80 at `28805ccf54f99f098a5abc23fe6f1155400d0f22`, with exact-merge CI run
+`30484986865` green. PR #81 subsequently merged the reviewed M01/M10
+development pilots at `main@392b1fc1`; exact-merge CI run `30506775012`, 507
+focused tests, and Ruff passed. PR #83 then merged the bounded M03 valid-time
+development slice at `main@7f60d8ba`; exact-head CI run `30532543366` was
+green. PR #84 then merged M15 canonical replay and the composed M01→M03→M10
+development slice at `main@e0dd4159`. The result-v2 schema and RED
+compatibility/ledger fixtures remain blocked by the protected
+signed-publication lease. The sandbox branch stays quarantined until real OCI,
+filesystem, network, and write-boundary enforcement exists.
 
 **Files:**
 
@@ -139,9 +209,11 @@ ledger fixtures remain open.
 - Error codes: `INVALID_REQUEST`, `UNSUPPORTED_OPERATION`, `UNAUTHORIZED`,
   `CONFLICT`, `ORDER_VIOLATION`, `DEADLINE_EXCEEDED`, `RESOURCE_LIMIT`,
   `DEPENDENCY_UNAVAILABLE`, and `INTERNAL_ERROR`.
-- Freeze before any module cell: the M15 canonical/volatile-field projection
-  and the result-v2 fields, four digest meanings, version dispatch, and
-  append-only cross-version supersession semantics described in Task 10.
+- Freeze the M15 canonical/volatile-field projection before composed replay.
+  Freeze the result-v2 fields, four digest meanings, version dispatch, and
+  append-only cross-version supersession semantics described in Task 10 before
+  any M20, result-v2, admitted, measured, or publication work. The protected
+  result-v2 lease does not block development-only M03/M12/M13 cells.
 
 - [x] Write failing tests for every required field, unknown-field rejection,
       timezone-aware UTC normalization, bounded strings/arrays, finite numbers,
@@ -151,9 +223,11 @@ ledger fixtures remain open.
       SPDX/license and data-rights declarations, PII/consent/takedown fields,
       baseline pins, inferential fields, sandbox/meter provenance, and
       digest-bound cross-references.
-- [ ] Write the result-v2 schema and RED compatibility/ledger fixtures before
-      any module implementation. These fixtures freeze the contract; Task 10
-      later completes validator/ledger/render code without changing them.
+- [ ] After the protected signed-publication lease is released, write the
+      result-v2 schema and RED compatibility/ledger fixtures before M20 or any
+      admitted/measured result-v2 work. These fixtures freeze the contract;
+      Task 10 later completes validator/ledger/render code without changing
+      them.
 - [ ] Add RED fixtures proving atomic attempts cannot contain aggregate
       metrics, official records fail without a complete fidelity manifest,
       successor records fail without a parent/difference manifest, and no
@@ -249,6 +323,12 @@ rank.
 
 ### Task 3: Register the common harness without creating a second runner
 
+**Partial delivery:** PR #81 registered the M01 and M10 development suites
+through the existing runner, scorer, bundle, and registry paths with independent
+manifest-owned fixture/scorer digests and fail-closed non-publishable labels.
+M03, M20, CLI isolation routing, sandbox/resource receipts, and admitted bundle
+execution remain unchecked below.
+
 **Files:**
 
 - Modify: `eval/public/runner.py`
@@ -306,6 +386,12 @@ shape.
 
 ### Task 4: Implement the M01 Local capture pilot
 
+**Partial delivery:** PR #81 delivered the pure M01 development fixture,
+capture gate, exact-duplicate handling, canonical replay, scorer, and focused
+tests at `PILOT-READY-DEV` for Local. CLI metadata widening, admitted resource
+receipts, measured execution, SQLite/P32, and process-kill durability remain
+deferred and unchecked below.
+
 **Files:**
 
 - Create: `eval/public/fixtures/wmbs-m01-development.json`
@@ -355,9 +441,20 @@ validation, M01 remains `PROPOSED`.
 
 ### Task 5: Implement only the honest M03 valid-time development slice
 
+**Delivery checkpoint:** PR #83 merged reviewed source head
+`3189cc24c570f12be06e3d04252a06f48c71f971` as
+`main@7f60d8ba8274a8ac8036a80737467654f862008f`. Exact-head CI run
+`30532543366`, exact-merge CI run `30534061552`, CodeRabbit, Greptile, focused
+M03 tests, Ruff, Gitleaks, and `git diff --check` passed. The delivered cell
+remains `PROPOSED`,
+non-publishable, non-headline-eligible, non-independent, and
+non-upstream-comparable; it does not implement transaction-time queries or full
+bitemporal M03.
+
 **Files:**
 
 - Create: `eval/public/fixtures/wmbs-m03-valid-time-development.json`
+- Modify: `src/mnemosyne/mcp_tools.py`
 - Modify: `src/mnemosyne/cli.py`
 - Modify: `eval/harness/cli_driver.py`
 - Modify: `eval/public/adapters/whole_memory_reference.py`
@@ -369,25 +466,28 @@ validation, M01 remains `PROPOSED`.
 
 - Add public, timezone-aware `valid_from` input to assertion/supersession
   operations and the matching `MnemoCLI` wrapper.
+- Preserve `_authorize` as the first write decision; reject invalid or naive
+  timestamps and normalize aware timestamps to UTC.
+- Keep `valid_to` and `transaction_time` system-owned.
 - Use existing `graph-as-of`/engine `as_of` only for valid-time questions.
 - Do not expose or inspect internal validity tables.
 
-- [ ] Write RED tests for aware/naive timestamps, ordered/late events,
+- [x] Write RED tests for aware/naive timestamps, ordered/late events,
       retroactive corrections, exact boundaries, tied valid times, current
       answers, and historical answers.
-- [ ] Add the minimum public valid-time argument and thread it through the
+- [x] Add the minimum public valid-time argument and thread it through the
       existing shared write path.
-- [ ] Run the focused CLI/runtime contract:
+- [x] Run the focused CLI/runtime contract:
       `PYTHONPATH=src uv run --extra mcp pytest -q
       tests/test_cli_runtime_tools.py -k 'graph_as_of or supersede'`.
-- [ ] Build five bounded timelines across at least five seeds, with exact
+- [x] Build five bounded timelines across at least five seeds, with exact
       virtual-clock, event, and query order.
-- [ ] Score `M-ASOF-ACC=1.0`, zero stale-current leakage, and exact tie-policy
+- [x] Score `M-ASOF-ACC=1.0`, zero stale-current leakage, and exact tie-policy
       replay for the valid-time slice.
-- [ ] Unit-check the same observable queries through the CLI-only adapter; no
+- [x] Unit-check the same observable queries through the CLI-only adapter; no
       direct engine import in the scorer and no measured suite execution before
       Task 11.
-- [ ] Label the suite `wmbs-m03-valid-time-development`, not “full bitemporal.”
+- [x] Label the suite `wmbs-m03-valid-time-development`, not “full bitemporal.”
 
 **Acceptance evidence:** Golden valid-time vectors, exact current/history
 scores, five-seed canonical replay, and an explicit unsupported disclosure for
@@ -400,6 +500,12 @@ Do not broaden this pilot to implement that product feature without a separate
 approved goal.
 
 ### Task 6: Implement the M10 deterministic abstention pilot
+
+**Partial delivery:** PR #81 delivered the deterministic reader, disjoint
+calibration/scored custody, useful-coverage gate, optional-confidence handling,
+baseline disclosures, fixture/scorer digest binding, and focused tests at
+`PILOT-READY-DEV`. Model-backed/judged QA, admitted resource receipts, measured
+execution, and population-inference claims remain deferred.
 
 **Files:**
 
@@ -456,16 +562,16 @@ any applicable baseline is absent, M10 stays `PROPOSED`.
 - Modify: `tests/test_public_pm_bench_triggerbench.py`
 - Modify: `eval/public/README.md`
 
-- [ ] Re-run the existing PM-Bench and TriggerBench development tests unchanged
+- [x] Re-run the existing PM-Bench and TriggerBench development tests unchanged
       before editing.
-- [ ] Verify schedule/update/cancel/tick request fields, virtual time, and
+- [x] Verify schedule/update/cancel/tick request fields, virtual time, and
       idempotent test-sink behavior that the current code actually exposes.
-- [ ] Unit-check the existing adapter/fixture contracts. Defer isolated
+- [x] Unit-check the existing adapter/fixture contracts. Defer isolated
       measured runs and reproduction of `pm-bench-development` and
       `triggerbench-development` to Task 11.
-- [ ] Record the exact fixture counts, steps, unsupported recurrence field,
+- [x] Record the exact fixture counts, steps, unsupported recurrence field,
       baseline absence, and missing lateness/cost coverage.
-- [ ] Do not add a synthetic recurrence implementation merely to pass the
+- [x] Do not add a synthetic recurrence implementation merely to pass the
       benchmark.
 
 **Acceptance evidence:** Existing unit contracts remain green and a gap
@@ -487,15 +593,15 @@ Official PM-Bench/TriggerBench names also require upstream pins and rights.
 - Modify: `tests/test_public_working_memory_action_probe.py`
 - Modify: `eval/public/README.md`
 
-- [ ] Re-run the existing working-memory action tests unchanged before editing.
-- [ ] Verify session/tenant isolation, expiry, bounded capacity, and the
+- [x] Re-run the existing working-memory action tests unchanged before editing.
+- [x] Verify session/tenant isolation, expiry, bounded capacity, and the
       existing prohibition on automatic promotion.
-- [ ] Unit-check the existing adapter/fixture contract. Defer the isolated
+- [x] Unit-check the existing adapter/fixture contract. Defer the isolated
       measured run and reproduction of `working-memory-action-development` to
       Task 11.
-- [ ] Record the current seed count, capacity setting, case count, and absence
+- [x] Record the current seed count, capacity setting, case count, and absence
       of a promotion-versus-no-promotion control.
-- [ ] Do not infer promotion utility from “automatic promotion blocked.”
+- [x] Do not infer promotion utility from “automatic promotion blocked.”
 
 **Acceptance evidence:** Green unit contract plus explicit gap disclosure.
 After Task 11 produces an admitted reproducible bundle, record zero observed
@@ -508,6 +614,11 @@ control are frozen and measured.
 
 ### Task 9: Enforce M15 canonical replay across all pilot payloads
 
+**Status:** Development-only source slice completed at final candidate
+`a4e5fd2b5d46583998821a8c146d98c512c88b73`, merged by PR #84 as
+`main@e0dd41594cec890f598718160f919c13eee1e552`. Task 11 measured execution
+and exact executable-build provenance remain deferred.
+
 **Files:**
 
 - Modify: `eval/public/bundle.py`
@@ -515,23 +626,23 @@ control are frozen and measured.
 - Modify: `tests/test_public_whole_memory_reference.py`
 - Modify: `tests/test_public_eval.py`
 
-- [ ] Define the canonical projection: ABI schema, fixture/generator,
+- [x] Define the canonical projection: ABI schema, fixture/generator,
       candidate/config/build/judge data, metrics, traces, manifests, and
       deterministic SUT outputs.
-- [ ] Explicitly exclude volatile timestamps, signatures, host paths, wall/RSS
+- [x] Explicitly exclude volatile timestamps, signatures, host paths, wall/RSS
       samples, and runtime-generated receipt IDs from byte equality while
       retaining them in the bundle.
-- [ ] Write RED tests for missing seed/manifest data, unstable ordering,
+- [x] Write RED tests for missing seed/manifest data, unstable ordering,
       float/non-finite values, locale/timezone drift, and one-byte tampering.
-- [ ] Add one composed cassette, without duplicating fixture data: ingest the
+- [x] Add one composed cassette, without duplicating fixture data: ingest the
       M01 duplicates, apply an M03 valid-time correction, ask current,
       historical, answerable, and unanswerable M10 questions, then replay the
       exact sequence. Require dedup, current/history, abstention, and canonical
       replay gates to pass together.
-- [ ] Unit-check each deterministic suite projection against five golden
+- [x] Unit-check each deterministic suite projection against five golden
       payloads plus one new-process-shaped fixture. Actual five-run and
       `reproduce_bundle` execution waits for Task 11 admission.
-- [ ] Require exact canonical payload equality; stochastic metrics require all
+- [x] Require exact canonical payload equality; stochastic metrics require all
       seed outputs and frozen tolerances rather than byte equality.
 
 **Acceptance evidence:** A six-run digest table per admitted suite, exact
@@ -547,8 +658,8 @@ earn M15.
 
 **Files:**
 
-- Modify only to resolve reviewed contract defects:
-  `leaderboard/schema/result-v2.schema.json` (created and frozen in Task 1)
+- Create after the protected signed-publication lease is released:
+  `leaderboard/schema/result-v2.schema.json`
 - Modify: `leaderboard/validate.py`
 - Modify: `leaderboard/ledger.py`
 - Modify: `leaderboard/render.py`

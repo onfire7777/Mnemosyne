@@ -130,6 +130,54 @@ def committed_fixture() -> dict[str, Any]:
     return json.loads(_COMMITTED_FIXTURE_PATH.read_text())
 
 
+def _keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        return set(value) | {key for child in value.values() for key in _keys(child)}
+    if isinstance(value, (list, tuple)):
+        return {key for child in value for key in _keys(child)}
+    return set()
+
+
+def test_public_readme_records_development_evidence_gaps() -> None:
+    """Pin the M13 gap disclosure to the fixture it describes.
+
+    The README paragraph is the only place the M13 evidence limits are stated
+    for a reader, so it must neither be deleted nor drift away from the
+    committed fixture it summarizes.  Fixture shape is frozen separately by
+    ``test_committed_fixture_freezes_honest_development_evidence_through_public_adapter``;
+    only the two disclosed gaps are re-pinned here.
+    """
+    readme = " ".join(
+        (Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md")
+        .read_text()
+        .split()
+    )
+    fixture = committed_fixture()
+
+    # "one seed and six cases": the disclosure names the whole evidence base.
+    assert fixture["seed"] == 94125
+    assert len(fixture["cases"]) == len(ITEM_CATEGORIES) == 6
+    # "no capacity parameter": pin the literal operating point rather than the
+    # adapter constant, so adding a capacity knob to `OPERATING_POINT` (which
+    # the fixture must mirror for the adapter to accept it) fails here instead
+    # of silently making the README false.
+    assert fixture["operating_point"] == {
+        "policy": "highest-task-relevance-then-item-id",
+        "positive_threshold": 0.75,
+    }
+    assert fixture["operating_point"] == OPERATING_POINT
+    # "no promotion-versus-no-promotion control": pin that no arm label exists
+    # anywhere in the fixture. Scan every nesting depth, and the whole fixture
+    # rather than only `cases`: a per-case arm nested under metadata, or a
+    # fixture-level `control_group` block, is as natural a shape as a top-level
+    # case key and a shallow scan misses both.
+    assert not (_keys(fixture) & {"arm", "arms", "control", "control_group", "condition"})
+
+    assert "one seed (`94125`) and six cases" in readme
+    assert "no capacity parameter" in readme
+    assert "no promotion-versus-no-promotion control" in readme
+
+
 def test_probe_covers_categories_public_seam_and_score_recomputation() -> None:
     value = fixture()
     normalized, traces, metrics = run(value, FakeCLI())  # type: ignore[arg-type]
