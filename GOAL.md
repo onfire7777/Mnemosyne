@@ -64,10 +64,19 @@ exact merge commit. PR #87 then merged the canonical truth reconciliation at
 README documentation plus hardened workflow contract tests at `main@4a891042`
 (post-merge CI `30659705054`), and PR #89 merged the post-PR-#88 recomputation
 of the dependency/write-lease map and `.planning/STATE.md` at `main@a8e9444c`
-(post-merge CI `30672194635`), which is the current canonical baseline. PRs
-#87-#89 are documentation and test-contract only: none admitted a new
-implementation package or changed a benchmark, measurement, or publication
-claim. The first actual scheduled-cadence receipt and every official/upstream
+(post-merge CI `30672194635`). PR #90 then landed the previously stranded
+M12/M13 development gap disclosures in `eval/public/README.md`, their two
+pinning test suites, a cert-rotator lock-timeout flake fix, and the
+pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
+`30679262270`, post-merge CI `30680201900`), which is the current canonical
+baseline. PRs #87-#90 are documentation and test-contract only: none admitted
+a new implementation package or changed a benchmark, measurement, admission
+state, or publication claim, and M12/M13 remain `PROPOSED` /
+`publishable:false` / `pbpp_headline_eligible:false`. The controller-branch
+copies of `GOAL.md`, `.planning/STATE.md`, and the lease map that record PR
+#90's post-merge receipts are not yet on `main`; landing them is deferred to
+the next round's GoalEx-owner PR so lifecycle and public-harness leases stay
+unmixed. The first actual scheduled-cadence receipt and every official/upstream
 benchmark run remain open.
 
 Result-v2 remains blocked by the protected signed-publication lease. Local OCI
@@ -196,9 +205,10 @@ Achieved for the current development-source milestone:
   CI run `30561266140`;
 - documentation- and contract-test-only reconciliation through PR #87
   (`main@2ba4ed80`, post-merge CI `30566984814`), PR #88 (`main@4a891042`,
-  post-merge CI `30659705054`), and PR #89 (`main@a8e9444c`, post-merge CI
-  `30672194635`), none of which changed a benchmark, measurement, or
-  publication claim.
+  post-merge CI `30659705054`), PR #89 (`main@a8e9444c`, post-merge CI
+  `30672194635`), and PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
+  post-merge CI `30680201900`), none of which changed a benchmark,
+  measurement, admission state, or publication claim.
 
 The remaining whole-memory pilot milestone still requires:
 
