@@ -79,6 +79,9 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
   git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
   git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
   git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
+  # Exact canonical baseline; ancestry alone also passes on a moved `main`,
+  # which is exactly when the carve-out lapses.
+  test "$(git rev-parse main)" = "e157e0350c503c9cde4aca0eff71d643a4adb200"
   test -f .planning/STATE.md
   test -f .planning/ROADMAP.md
   test -f .planning/REQUIREMENTS.md
