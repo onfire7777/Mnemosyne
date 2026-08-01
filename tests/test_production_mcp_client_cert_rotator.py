@@ -26,6 +26,11 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 REPO = Path(__file__).resolve().parents[1]
 ROTATOR = REPO / "infra" / "scripts" / "rotate-production-mcp-client-cert.sh"
+ROTATOR_LOCK_TEST_TIMEOUT_SECONDS = 120
+# The lock-holding child starts its release deadline before the parent has
+# spent its own budget waiting for `entered` and running the deferred rotator,
+# so the child must outlast the whole parent path or it exits 96 spuriously.
+ROTATOR_LOCK_CHILD_TIMEOUT_SECONDS = 3 * ROTATOR_LOCK_TEST_TIMEOUT_SECONDS
 
 
 @pytest.fixture(autouse=True)
@@ -939,7 +944,7 @@ if arguments[:2] == ["-", "mark-completion-emitted"]:
     release = Path({str(release)!r})
     descriptor = os.open(entered, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     os.close(descriptor)
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + {ROTATOR_LOCK_CHILD_TIMEOUT_SECONDS}
     while not release.exists():
         if time.monotonic() >= deadline:
             raise SystemExit(96)
@@ -4217,7 +4222,7 @@ def test_rotator_holds_process_lock_for_entire_invocation(tmp_path: Path) -> Non
     first_stdout = ""
     first_stderr = ""
     try:
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + ROTATOR_LOCK_TEST_TIMEOUT_SECONDS
         while not entered.exists() and first.poll() is None:
             if time.monotonic() >= deadline:
                 pytest.fail("first rotator did not durably mark completion")
@@ -4246,7 +4251,9 @@ def test_rotator_holds_process_lock_for_entire_invocation(tmp_path: Path) -> Non
         assert deferred.stderr == ""
         assert first.poll() is None
         release.write_bytes(b"")
-        first_stdout, first_stderr = first.communicate(timeout=15)
+        first_stdout, first_stderr = first.communicate(
+            timeout=ROTATOR_LOCK_TEST_TIMEOUT_SECONDS,
+        )
     finally:
         release.touch(exist_ok=True)
         if first.poll() is None:

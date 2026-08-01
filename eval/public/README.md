@@ -45,6 +45,21 @@ operating point, action traces, null reader/judge fields, registry revision and
 dataset digest, and false publication/headline flags. None is an official
 PM-Bench, TriggerBench, or Working Memory reproduction.
 
+The M12 fixtures are deliberately small: `pm-bench-development` has one seed
+(`7`), one case, five tasks, and seven steps; `triggerbench-development` has
+one seed (`7`), twenty one-step cases, and no calibrated baseline. Recurrence
+is represented in fixture metadata but is not forwarded as production
+recurrence plumbing. Lateness is scored only as a binary `late` safety counter,
+which is zero on both committed fixtures because they are easy rather than
+because the counter is inert; neither suite measures lateness magnitude or
+cost.
+
+The M13 working-memory fixture has one seed (`94125`) and six cases, one for
+each declared item category. Its operating point has no capacity parameter,
+and the fixture contains no promotion-versus-no-promotion control. These are
+development gap disclosures, not evidence of capacity scaling or promotion
+utility.
+
 This is deterministic synthetic/development eval only: no official
 dataset/model download, no benchmark run against protected/upstream data, and no
 publication or headline claim. The authenticated action lane descends from A1
