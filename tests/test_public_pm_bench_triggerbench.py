@@ -609,14 +609,25 @@ def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
     ]
     # A calibrated baseline would land in the fixture, the way M10 carries
     # `baseline_manifests`, so pin the fixture too rather than only the
-    # fixed-schema registry entry.
-    assert not [key for key in triggerbench if "baseline" in key]
+    # fixed-schema registry entry. Scan every nesting depth: a per-case
+    # calibrated control is the natural shape and a top-level scan misses it.
+    assert not [key for key in _keys(triggerbench) if "baseline" in key]
 
     unwrapped = " ".join(readme.split())
     assert (
         "`pm-bench-development` has one seed (`7`), one case, five tasks, "
         "and seven steps; `triggerbench-development` has one seed (`7`), "
         "twenty one-step cases, and no calibrated baseline." in unwrapped
+    )
+    # "Recurrence is represented in fixture metadata but is not forwarded":
+    # the metadata half is pinned here, the non-forwarding half by
+    # `test_action_cli_..._without_forwarding_regularity`.
+    assert "recurring" in {
+        task["regularity"] for case in pm_cases for task in case["tasks"]
+    }
+    assert (
+        "Recurrence is represented in fixture metadata but is not forwarded "
+        "as production recurrence plumbing." in unwrapped
     )
     assert (
         "Lateness is scored only as a binary `late` safety counter" in unwrapped

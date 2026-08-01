@@ -93,8 +93,11 @@ headline claim advanced. Task 5, the bounded M03 valid-time integration, was
 subsequently proven blocked because its authorized write path was outside the
 mapped lease. The integration owner has now admitted only
 `src/mnemosyne/mcp_tools.py` into that lease so the existing authorized facade
-can accept optional timezone-aware `valid_from`. PR #82 delivered Tasks 7 and 8
-as recorded below. Full transaction-time M03 remains deferred, M15 requires
+can accept optional timezone-aware `valid_from`. PR #82 delivered the Task 7
+and Task 8 unit contracts only — the M12/M13 gap-disclosure paragraphs in
+`eval/public/README.md` and the tests pinning them are not on main and are
+still pending PR delivery, so Tasks 7 and 8 are complete on this branch but not
+yet on canonical main. Full transaction-time M03 remains deferred, M15 requires
 the admitted M03 cell, and result-v2 remains blocked by the protected
 signed-publication lease. PR #83 later delivered that bounded M03 cell and
 PR #84 delivered the dependent M15 development slice, as recorded below.
