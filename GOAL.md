@@ -45,24 +45,15 @@ merges behind. That receipt-level remainder has since been delivered too:
 `T4` merged as PR #92 at `main@39cfa67a` (exact-head CI `30693874030`,
 post-merge CI `30694818231`), landing the recomputation to
 `Baseline: main@e157e035` with `T3` as `MERGED` plus PR #91's receipt block, and
-the matching `GOAL.md` and `.planning/STATE.md` text, on `main`. The carve-out is
-therefore discharged down to the accepted one-block standing residue and nothing
-more. That residue is this update: `main@39cfa67a`'s copies of the map, this
-file, and `.planning/STATE.md` still read `Baseline: main@e157e035` with `T4` as
-`DELIVERING` and "**This PR is the delivery**", because PR #92 could not describe
-its own merge from inside the commit being merged. The recomputation to
-`Baseline: main@39cfa67a` with `T4` as `MERGED` and PR #92's receipt block exists
-only on the controller branch. `main`'s copy always lags the controller branch by
-exactly one receipt block, and that one-block lag is an accepted standing
-condition, not an open work item. `T4` was admitted once to discharge the
-accumulated receipt block; `T4`'s own residue admits **no successor node**,
-because admitting a fresh node for each regenerated residue would make the
-delivery wave non-terminating, so this recomputation is not itself delivered
-through a new node. The
-carve-out's lapse rule stands unchanged: it lapses the moment any merge lands on
-`main` that the branch-resident map does not already record, at which point the
-map must be recomputed from current `main` before it is treated as operative
-again.
+the matching `GOAL.md` and `.planning/STATE.md` text, on `main`. PR #93 then
+merged independently from a separate lane at `main@effc5e03` (exact-head CI
+`30718912376`, post-merge CI `30719645207`), so the carve-out's explicit lapse
+rule fired. The residue was no longer receipt-only: it contained an undelivered
+test contract and the r39, r40, and r41 round records. Exactly one node, `T5`,
+is admitted to discharge that bounded residue. **This PR is the `T5`
+delivery.** It admits no source node. This terminates because the lapse was
+triggered by an independent external merge, not by the residue regenerating
+itself; `T5` does not admit a successor for its own receipt residue.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -109,6 +100,9 @@ CI `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
 `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
 which is the current canonical baseline.
+This PR is the `T5` delivery of the three reconciled lifecycle files, both
+baseline-pinning tests, and the r39/r40/r41 round records. It admits no source
+node.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -130,9 +124,10 @@ recomputation was branch-resident until PR #92 — the documentation-only
 receipt-level lifecycle update carried by lease-map node `T4`, the sole writer
 admitted from that baseline, which admitted no source node — landed it,
 this file's and `.planning/STATE.md`'s matching post-merge text, and the
-round-38 and round-39 records on `main` at `39cfa67a`. The map has now been recomputed from
-that `main` with `T4` as `MERGED` and PR #92's receipt block, which is the
-accepted one-block receipt residue and admits **no successor node**. The
+round-38 and round-39 records on `main` at `39cfa67a`. PR #93's independent
+merge at `main@effc5e03` then lapsed the branch-resident carve-out. `T5` is the
+one bounded delivery admitted to discharge the resulting non-receipt-only
+residue; it admits **no source node**. The
 plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
@@ -158,12 +153,10 @@ enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
-under the accepted one-block receipt residue of the Authority carve-out above,
-which is a standing condition rather than an open work item; neither result-v2
+under the bounded `T5` Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
-That map admits no source node at this baseline — its last node was the
-documentation-only receipt-level lifecycle update `T4`, now `MERGED` as PR #92,
-whose one-block receipt residue admits no successor node — so the next source
+That map admits no source node at this baseline — its only admitted writer is
+the bounded lifecycle node `T5` — so the next source
 admission waits on an external gate opening, and the map must be recomputed
 from then-current `main` at that time.
 
@@ -420,8 +413,9 @@ Achieved for the current development-source milestone:
   post-merge CI `30659705054`), PR #89 (`main@a8e9444c`, post-merge CI
   `30672194635`), PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
   post-merge CI `30680201900`), PR #91 (`main@e157e035`, exact-head CI
-  `30686224929`, post-merge CI `30687385118`), and PR #92 (`main@39cfa67a`,
-  exact-head CI `30693874030`, post-merge CI `30694818231`), none of which
+  `30686224929`, post-merge CI `30687385118`), PR #92 (`main@39cfa67a`,
+  exact-head CI `30693874030`, post-merge CI `30694818231`), and PR #93
+  (`main@effc5e03`, exact-head CI `30718912376`, post-merge CI `30719645207`), none of which
   changed a benchmark, measurement, admission state, or publication claim.
 
 The remaining whole-memory pilot milestone still requires:
