@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-08-01
-Baseline: `main@39cfa67aa7692bf47d5dde5842af3d8ec0736bb0`
+Baseline: `main@effc5e039505c09e575ca5e4aeb2b96949676366`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -51,6 +51,10 @@ The following packages are complete source history, not runnable work:
   benchmark, measurement, admission state, or publication claim, and touched no
   source, test, or workflow path. This is node `T4`, now `MERGED`; the rows
   below are unchanged by it except for `T4`'s own state.
+- PR #93: fail-closed GoalEx round-cleanup and ignored-state custody contract,
+  including behavioral traceability (`main@effc5e03`, exact-head CI
+  `30718912376`, post-merge CI `30719645207`). It changed no benchmark source,
+  measurement, admission state, roadmap percentage, or publication claim.
 
 This map is recomputed from the new baseline `main@39cfa67a`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
@@ -133,7 +137,7 @@ exact lease, shared owner/integration edge, and external gate.
 | T4 | MERGED | Receipt-level lifecycle update discharging `T3`'s residue; consumed verified canonical `main@e157e035` and PR #91's post-merge receipts, delivered from a lane cut from `main@e157e035` | This map at `Baseline: main@e157e035` with `T3` as `MERGED`, the matching `GOAL.md` and `.planning/STATE.md` receipt text, the updated round-38 record (whose original text PR #91 already landed on `main`), and the round-39 record, delivered on `main`, plus the branch-resident receipt recomputation below and the `test_canonical_baseline_is_identical_across_the_three_lifecycle_files` pinning test that binds the three files to one baseline | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #92 at `main@39cfa67a` with exact-head CI `30693874030` and post-merge CI `30694818231`. Documentation only; exact-lease-disjoint from every public-harness, CI, result-v2, and evidence lease, and it admitted no source node. This map is recomputed here from that `main`, and the receipt block PR #92 could not contain is recorded above. That recomputation is `T4`'s own receipt residue, generated for the same structural reason `T3`'s was: no commit describes its own merge, so `main`'s copy of this map always lags by exactly one receipt block. That residual lag is an accepted standing condition and admits **no successor node** and **no source node**; `T4` is the last node this carve-out admits |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
-| P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
+| P12-E | PREPARED / OPERATOR GATED | Phase 12 measured closure; local candidate-readiness software is present (126 focused tests) and runtime regression coverage is green (311 focused tests), but consumes exact `main@effc5e03`, resolved model digest, production Postgres/PPR parity, runtime readiness, grounded-reader development QA, then the protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; serial evidence/custody paths in Phase 12 plan 12-04 | Host admission (>=55% free memory and load gates), canonical external mTLS inputs, exact external candidate/runtime manifest, protected-data custody and operator authorization |
 | P13-C | EXTERNAL EVENT | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Still open: only the manual dispatch `30561430522` exists; the first eligible real `schedule` event is 2026-08-03; manual dispatch is not a substitute |
 | P13-O | EXTERNAL/PLAN BLOCKED | Official MemoryAgentBench and BEAM; consumes P12-E plus pinned upstream revisions/protocols | BENCH-006 conforming upstream evidence | No admitted lease; a future exact plan must name every source/evidence path | Rights/license, provider/model/judge disclosure, capacity, operator admission |
 | SBOX | QUARANTINED | Development sandbox/external-meter candidate; consumes the common ABI and local reviewed sandbox commits | Only development-source isolation receipts until enforcement is proven | Current local source/test lease: `eval/public/sandbox.py`, `eval/public/sandbox/Dockerfile`, `tests/test_public_sandbox.py`; public-harness owner for any later shared integration | No push/PR/merge until immutable image, daemon probe, filesystem/network/write-boundary enforcement, SBOM, provenance, and resource receipts exist |
@@ -233,10 +237,14 @@ Quarantine
   lapses the moment a merge lands on `main` that the branch-resident map does
   not already record, and the map must then be recomputed from current `main`
   before it is treated as operative.
-- **Next dependency-ready candidate: none, and no source node.** `T4`, the
+- **Next dependency-ready candidate: Phase 12 evidence preparation, and no source node.** `T4`, the
   documentation-only receipt-level lifecycle update described above, is `MERGED`
   as PR #92; its one-block receipt residue admits no successor node. No
-  source node can be admitted from this baseline. `N12` is lease blocked (the protected
+  source node can be admitted from this baseline. The serial next path is
+  `P12-E`: exact candidate/runtime manifest and resolved model digest, repeated
+  synthetic plus 24-case `qa_scale_dev_v1`, then one protected `qa_hard_v2`
+  attempt, and only after that held-out LongMemEval/Hippo evidence. Host,
+  mTLS, custody, and operator gates remain fail-closed. `N12` is lease blocked (the protected
   signed-publication paths are not released on current `main`) and gates
   `P14-B` and the whole `P15-*` chain behind it; `SBOX` is quarantined until
   real enforcement receipts exist; `U-MODULES` lack approved exact plans;
