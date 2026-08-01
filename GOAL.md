@@ -253,6 +253,13 @@ For every GoalEx round:
 10. Self-repair routine transport, sandbox, CI, auth-independent, worktree, and
     review issues. Escalate only safety, authority, protected-environment, or
     product-direction decisions, then reassess the next lease-disjoint package.
+11. End every round with a clean controller worktree. Post-merge receipts,
+    canonical-truth reconciliation, and plan-checkbox closure are part of the
+    round, not afterthoughts: commit them on the controller branch as the
+    round's final step, before yielding. GoalEx aborts its next preflight on a
+    dirty tree, so residue left behind stalls the loop instead of carrying
+    forward. If a receipt genuinely cannot be committed yet, say so explicitly
+    in the round's closing summary rather than leaving the tree dirty.
 
 ## Runtime Contract
 
