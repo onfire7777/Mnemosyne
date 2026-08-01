@@ -89,8 +89,10 @@ pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
 baseline. PRs #87-#90 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
-`publishable:false` / `pbpp_headline_eligible:false`. The controller branch is
-merged to `main@061c2e1c`, so its remaining undelivered delta is exactly:
+`publishable:false` / `pbpp_headline_eligible:false`. The controller branch has
+`main@061c2e1c` fully merged into it and has never been merged into `main`;
+that merge has only ever run in the one direction, so its remaining undelivered
+delta is exactly:
 `GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
 post-merge receipts on top of earlier lifecycle content that was itself never
 delivered, including the PR #81-#84 whole-memory Decisions entry in

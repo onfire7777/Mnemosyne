@@ -57,8 +57,10 @@ lock-timeout flake fix, and the pilots-plan delivery checkpoints at
 PR #90 is development-source documentation and tests only: it moved no package
 status, left `eval/public/registry.json`, the fixtures, and all adapter and
 scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
-`pbpp_headline_eligible:false`. The controller branch is merged to
-`main@061c2e1c`, so its remaining undelivered delta is exactly: `GOAL.md`,
+`pbpp_headline_eligible:false`. The controller branch has `main@061c2e1c`
+fully merged into it and has never been merged into `main`; that merge has only
+ever run in the one direction, so its remaining undelivered delta is exactly:
+`GOAL.md`,
 this file, and the lease map (recording PR #90's post-merge receipts on top of
 earlier lifecycle content that was itself never delivered, including this
 file's PR #81-#84 whole-memory Decisions entry), the
