@@ -169,7 +169,6 @@ Prior delivery wave (complete)
   (current baseline) and admitted no new implementation package.
 
 Current delivery wave (closed; no node admitted)
-  T4 receipt-level lifecycle update   [MERGED as PR #92 at main@39cfa67a]
   T3 merged, so the wave that held it closed, and T4 merged, so the wave that
   held T4 is closed too. This map has now been recomputed from the resulting
   main@39cfa67a and carries T4's receipt block. That recomputation is T4's
@@ -179,7 +178,7 @@ Current delivery wave (closed; no node admitted)
   evidence-, or spec-blocked (see below), so the next source wave stays empty
   until an external gate opens one.
 
-Independent external gates (do not block T0-T2)
+Independent external gates (do not block T0-T4)
   P12-E operator measurement
   P13-C real scheduled event
   P13-O official upstream admission

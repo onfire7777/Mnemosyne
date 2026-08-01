@@ -128,7 +128,7 @@ recomputation was branch-resident until PR #92 — the documentation-only
 receipt-level lifecycle update carried by lease-map node `T4`, the sole writer
 admitted from that baseline, which admitted no source node — landed it,
 this file's and `.planning/STATE.md`'s matching post-merge text, and the
-round-38 record on `main` at `39cfa67a`. The map has now been recomputed from
+round-38 and round-39 records on `main` at `39cfa67a`. The map has now been recomputed from
 that `main` with `T4` as `MERGED` and PR #92's receipt block, which is the
 accepted one-block receipt residue and admits **no successor node**. The
 plan-doc backlog is
@@ -156,9 +156,9 @@ enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
-under the receipt-scope remainder of the Authority carve-out above for as long
-as that remainder is open; neither result-v2 nor sandbox delivery is implicitly
-admitted.
+under the accepted one-block receipt residue of the Authority carve-out above,
+which is a standing condition rather than an open work item; neither result-v2
+nor sandbox delivery is implicitly admitted.
 That map admits no source node at this baseline — its last node was the
 documentation-only receipt-level lifecycle update `T4`, now `MERGED` as PR #92,
 whose one-block receipt residue admits no successor node — so the next source
