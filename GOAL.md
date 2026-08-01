@@ -278,18 +278,33 @@ For every GoalEx round:
     Ignored paths that already exist at round start are a permitted baseline,
     not blockers: they never trip the start-of-round gate above, and no round
     may deliberately modify or remove one. At round start, capture them as a
-    manifest of path, content hash, and mode, and keep a lossless copy of their
-    contents outside the controller worktree. Both are needed: a bare
+    manifest that enumerates every entry recursively — an ignored directory is
+    one manifest row per entry beneath it, not a single row for the directory,
+    since a directory-level row cannot see a nested rewrite — each row carrying
+    relative path, object type, content hash or symlink target, and mode. Keep
+    a lossless copy of their contents outside the controller worktree, with one
+    carve-out: paths in the operator secret channel that
+    `CONFIG-DRIFT-CHECKS.md` designates (`.env`, `.env.*`, `*.pem`, `*.key`,
+    `credentials.json`, `service-account.json`, `secrets.json`) are manifested
+    but never copied out, because `Mnemosyne-Secret-Handling-Policy.md`'s P8
+    forbids materializing a secret value anywhere persistent outside the secret
+    store while explicitly permitting non-secret metadata, which a path, type,
+    mode, and content hash are. All of this is needed: a bare
     `git status --porcelain` reports no ignored file at all, the `--ignored`
     listing reports an unchanged path and a rewritten one identically, and a
     hash alone can detect an accidental rewrite without being able to undo it.
-    The residue check compares path, content hash, and mode against the full
-    start-of-round manifest — a mode-only change must fail it — alongside
+    The residue check compares every manifest row — path, object type, hash or
+    symlink target, and mode — against the full start-of-round manifest, so a
+    mode-only or nested-only change must fail it, alongside
     `git status --porcelain --untracked-files=all --ignored`. If a round does
     rewrite a baseline ignored file anyway, that is the one case where cleanup
     restores such a path: preserve the round's version externally under the
-    lossless procedure below, then restore the baseline bytes and mode from the
-    external copy and record the violation in the round record.
+    lossless procedure below, then restore the whole affected subtree — bytes,
+    modes, symlinks, and deletions — from the external copy and record the
+    violation in the round record. A secret-channel path has no external copy
+    to restore from by design, so a round that rewrites one restores nothing:
+    it escalates to the operator under rule 10 and parks under the handoff
+    above until they resolve it.
 
     If any round-owned change cannot be committed — a receipt, a scratch
     artifact, a partial edit, tracked, untracked, or ignored alike — preserve
