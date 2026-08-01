@@ -32,12 +32,16 @@ package statuses must be recomputed from current main after every merge; the
 map is not blanket permission to launch stale or overlapping lanes.
 
 One carve-out applies while the GoalEx lifecycle delivery is deferred: `main`'s
-copy of that map is currently one merge behind (`Baseline: main@4a891042`, no
+copy of that map is currently two merges behind (`Baseline: main@4a891042`;
+its merged-baseline list ends at PR #88, so it carries neither a PR #89 nor a
 PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` exists only on
 the controller branch. Until the deferred GoalEx-owner PR lands, the
 branch-resident map is the operative revision, and it must be delivered before
 the next admission so this carve-out closes rather than becoming standing
-practice.
+practice. The carve-out is scoped to exactly this gap: it lapses the moment any
+merge lands on `main` that the branch-resident map does not already record, at
+which point the map must be recomputed from current `main` before it is treated
+as operative again.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -91,7 +95,9 @@ touched since round 14 without being delivered through a PR: 23 new
 `docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
 `docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
 Landing all of them is deferred to the next round's GoalEx-owner PR so
-lifecycle and public-harness leases stay unmixed; the plan-doc backlog is
+lifecycle and public-harness leases stay unmixed; that delivery is admitted in
+the lease map as node `T3`, the only admitted node in its current wave, so it
+is scheduled rather than left implicit. The plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
 paragraph and adds a new twelve-line `Gap-disclosure delivery:` receipt in the
@@ -115,8 +121,9 @@ quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
-`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; neither
-result-v2 nor sandbox delivery is implicitly admitted.
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
+under the Authority carve-out above for as long as that carve-out is open;
+neither result-v2 nor sandbox delivery is implicitly admitted.
 
 ## Scope
 
