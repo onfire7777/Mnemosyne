@@ -607,6 +607,10 @@ def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
     assert not [
         key for key in registry["triggerbench-development"] if "baseline" in key
     ]
+    # A calibrated baseline would land in the fixture, the way M10 carries
+    # `baseline_manifests`, so pin the fixture too rather than only the
+    # fixed-schema registry entry.
+    assert not [key for key in triggerbench if "baseline" in key]
 
     unwrapped = " ".join(readme.split())
     assert (

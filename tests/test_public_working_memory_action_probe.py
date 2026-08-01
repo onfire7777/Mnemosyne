@@ -140,6 +140,9 @@ def test_public_readme_records_development_evidence_gaps() -> None:
     assert len(cases) == len(ITEM_CATEGORIES) == 6
     assert [case["category"] for case in cases] == list(ITEM_CATEGORIES)
     assert not [key for key in fixture["operating_point"] if "capacity" in key]
+    # The promotion-control disclosure is otherwise prose-only: a control arm
+    # would have to surface somewhere in the fixture, so pin its absence.
+    assert "promotion" not in json.dumps(fixture)
 
     assert "one seed (`94125`) and six cases" in readme
     assert "no capacity parameter" in readme
