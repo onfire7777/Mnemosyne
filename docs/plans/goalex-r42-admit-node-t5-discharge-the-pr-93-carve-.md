@@ -101,23 +101,23 @@ git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 
 ### Task 1: Extend the pinning test so a partial map recomputation fails
 
-- [ ] Read `tests/test_planning_traceability.py`, especially the existing
+- [x] Read `tests/test_planning_traceability.py`, especially the existing
       `test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
       and its `LEASE_BASELINE` / `CANONICAL_CLAIMS` regexes.
-- [ ] Add a new test (e.g. `test_lease_map_body_names_only_the_header_baseline`)
+- [x] Add a new test (e.g. `test_lease_map_body_names_only_the_header_baseline`)
       that parses the map's single `Baseline: \`main@<40hex>\`` header line and
       then asserts that every in-body *current-baseline* claim names that same
       SHA prefix. Cover at minimum these claim shapes, matched against
       whitespace-normalized text: "recomputed from the new baseline
       `main@X`", "(current baseline)" in the waves block, and "This revision
       **is** the recomputation from ... `main@X`".
-- [ ] Make the test fail-closed: if none of the recognized claim shapes is
+- [x] Make the test fail-closed: if none of the recognized claim shapes is
       found, the test must fail with a clear message rather than pass vacuously
       (mirror the existing `CANONICAL_CLAIM_PHRASE` count guard).
-- [ ] Verify the new test **fails** against the current branch content first
+- [x] Verify the new test **fails** against the current branch content first
       (it should, because line 59 says `39cfa67a` while the header says
       `effc5e03`), then keep it red until Task 2 makes it green.
-- [ ] Do not weaken or delete the existing pinning test.
+- [x] Do not weaken or delete the existing pinning test.
 
 ### Task 2: Fully recompute the three lifecycle files to `main@effc5e03`
 
