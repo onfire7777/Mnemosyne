@@ -253,27 +253,33 @@ For every GoalEx round:
 10. Self-repair routine transport, sandbox, CI, auth-independent, worktree, and
     review issues. Escalate only safety, authority, protected-environment, or
     product-direction decisions, then reassess the next lease-disjoint package.
-11. End every round with a clean controller worktree. This is unconditional:
-    no round outcome may leave the controller worktree dirty. Post-merge
-    receipts, canonical-truth reconciliation, and plan-checkbox closure are
-    part of the round, not afterthoughts — commit them on the controller
-    branch as the round's final step, before yielding. The external GoalEx
-    launcher aborts its next preflight on a dirty tree, so residue left behind
-    stalls the loop instead of carrying forward.
+11. End every round leaving no round-owned residue in the controller worktree.
+    This is unconditional for everything the round itself touched: no round
+    outcome may leave a round-owned change — tracked or untracked — sitting in
+    the controller worktree. Unowned dirty work that predates the round is the
+    sole exception; rule 3 still governs it, and it is preserved untouched.
+    Post-merge receipts, canonical-truth reconciliation, and plan-checkbox
+    closure are part of the round, not afterthoughts — commit them on the
+    controller branch as the round's final step, before yielding. The external
+    GoalEx launcher aborts its next preflight on a dirty tree, so residue left
+    behind stalls the loop instead of carrying forward.
 
-    If a receipt cannot be committed, preserve it without leaving residue:
-    copy its content to a path outside the controller worktree, then restore
-    only the tracked paths this round itself modified — never touching unowned
-    dirty work, per rule 3 — and confirm `git status --porcelain` reports
-    nothing for those paths. Record the external path and the blocker in a
+    If any round-owned change cannot be committed — a receipt, a scratch
+    artifact, a partial edit, tracked or untracked alike — preserve it without
+    leaving residue: copy its content to a path outside the controller
+    worktree, then clear it from the worktree. For tracked paths this round
+    modified, restore them; for untracked files this round created, remove
+    them. Touch nothing the round does not own. Then confirm
+    `git status --porcelain` reports nothing for every round-owned path,
+    tracked or untracked. Record the external path and the blocker in a
     summary that also lives outside the controller worktree. Relocation means
-    copy-then-restore: moving a tracked file leaves its original path deleted,
+    copy-then-clear: moving a tracked file leaves its original path deleted,
     which is still dirty.
 
-    A deliberate park is subject to the same invariant. Restore the worktree
-    and write the park's reason and owner outside the controller worktree
-    before stopping, so the loop can resume without a human first cleaning up
-    after it.
+    A deliberate park is subject to the same invariant. Clear every round-owned
+    change from the worktree and write the park's reason and owner outside the
+    controller worktree before stopping, so the loop can resume without a human
+    first cleaning up after it.
 
 ## Runtime Contract
 
