@@ -94,10 +94,11 @@ subsequently proven blocked because its authorized write path was outside the
 mapped lease. The integration owner has now admitted only
 `src/mnemosyne/mcp_tools.py` into that lease so the existing authorized facade
 can accept optional timezone-aware `valid_from`. PR #82 delivered the Task 7
-and Task 8 unit contracts only — the M12/M13 gap-disclosure paragraphs in
-`eval/public/README.md` and the tests pinning them are not on main and are
-still pending PR delivery, so Tasks 7 and 8 are complete on this branch but not
-yet on canonical main. Full transaction-time M03 remains deferred, M15 requires
+and Task 8 unit contracts only; the M12/M13 gap-disclosure paragraphs in
+`eval/public/README.md` and the tests pinning them were delivered separately by
+PR #90 at `main@061c2e1c` (exact-head CI `30679262270`, post-merge CI
+`30680201900`), which closes Tasks 7 and 8 on canonical main. Full
+transaction-time M03 remains deferred, M15 requires
 the admitted M03 cell, and result-v2 remains blocked by the protected
 signed-publication lease. PR #83 later delivered that bounded M03 cell and
 PR #84 delivered the dependent M15 development slice, as recorded below.
@@ -118,6 +119,18 @@ certification, ranking, or publication gate advanced. The bounded M03 slice is
 now admitted with its explicit authorized-facade lease amendment; PR #84 later
 delivered the dependent M15 development slice. Result-v2 remains protected,
 and sandbox enforcement remains quarantined.
+
+Gap-disclosure delivery: on 2026-08-01, PR #90 merged the M12 and M13
+development gap-disclosure paragraphs in `eval/public/README.md` together with
+their pinning suites
+(`tests/test_public_pm_bench_triggerbench.py::test_public_readme_m12_gap_disclosure_matches_committed_fixtures`
+and
+`tests/test_public_working_memory_action_probe.py::test_public_readme_records_development_evidence_gaps`)
+at `main@061c2e1c13cbf1fd5324361a6ff61f47cd2a6534`. Exact-head CI run
+`30679262270` and post-merge CI run `30680201900` passed. It moved no package
+status: `registry.json`, the fixtures, and all adapter and scoring code are
+untouched, and M12/M13 remain `PROPOSED`, `publishable:false`, and
+`pbpp_headline_eligible:false`.
 
 ## M15 delivery checkpoint
 
