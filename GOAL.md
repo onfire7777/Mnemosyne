@@ -48,8 +48,12 @@ the commit being merged. The recomputation to `Baseline: main@e157e035`
 carrying PR #91's receipt block and `T3` as `MERGED` exists only on the
 controller branch, which keeps the branch-resident map the operative revision
 at exactly that receipt-level scope until this update is itself delivered
-through a PR. The same applies to `main`'s `GOAL.md` and `.planning/STATE.md`,
-whose present-tense "this PR" self-references PR #91 falsified on merge. The
+through the admitted `T4` follow-up PR. The same applies to `main`'s `GOAL.md`
+and `.planning/STATE.md`,
+whose present-tense "this PR" self-references PR #91 falsified on merge. That
+`T4` delivery will regenerate a one-block residue of its own for the same
+structural reason, so receipt-scope lag is a standing invariant, not a state a
+single PR retires. The
 carve-out's lapse rule stands unchanged: it lapses the moment any merge lands on
 `main` that the branch-resident map does not already record, at which point the
 map must be recomputed from current `main` before it is treated as operative
@@ -110,12 +114,13 @@ records touched since round 14 without being delivered through a PR: 23 new
 `docs/plans/goalex-r14-*.md` (whose original text was already on `main`).
 That delivery kept the lifecycle and public-harness leases unmixed; it was
 carried by lease-map node `T3`, now `MERGED`. The wave that held it is closed
-and holds no admitted node. The lease map has been recomputed from the
+and admits no source node. The lease map has been recomputed from the
 resulting `main@e157e035` and now carries PR #91's own receipt block, but that
 recomputation is branch-resident: it, this file's and `.planning/STATE.md`'s
 matching post-merge text, and the round-38 record are the controller branch's
-entire remaining delta versus `main`, and they are undelivered until a
-follow-up GoalEx-owner PR lands them. The
+entire remaining delta versus `main`, and they are undelivered until the
+documentation-only lease-map node `T4` — the sole admitted writer from this
+baseline — lands them. The
 plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale

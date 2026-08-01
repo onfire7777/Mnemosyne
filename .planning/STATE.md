@@ -73,14 +73,17 @@ text was already on `main`). PR #91 is documentation only: it moved no package
 status and changed no benchmark, measurement, admission state, or publication
 claim. It was the GoalEx-owner delivery of lease-map
 node `T3`, now `MERGED`, and it kept the lifecycle and public-harness leases
-unmixed, and no admitted node remains in the wave. The lease map has since been
+unmixed, and no source node remains admitted in the wave. The lease map has since been
 recomputed from the resulting `main@e157e035` and carries PR #91's own receipt
 block — the residue that could not exist inside the commit it describes — but
 that recomputation is branch-resident, so the `GOAL.md` Authority carve-out is
 reduced to receipt scope rather than closed: `main@e157e035` still holds the
 pre-merge map (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`) and the
-pre-merge "this PR" text in this file and `GOAL.md`, until a follow-up
-GoalEx-owner PR delivers this receipt-level update. The plan-doc
+pre-merge "this PR" text in this file and `GOAL.md`, until the admitted
+documentation-only lease-map node `T4` — the sole admitted writer from this
+baseline — delivers this receipt-level update. `T4` will regenerate a one-block
+residue of its own for the same structural reason, so receipt-scope lag is a
+standing invariant rather than a state a single PR retires. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
