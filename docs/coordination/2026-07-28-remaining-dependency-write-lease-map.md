@@ -47,34 +47,33 @@ The following packages are complete source history, not runnable work:
 
 This map is recomputed from the new baseline `main@e157e035`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
-the controller branch. The merge has only ever run in that one direction: the
-controller branch has never been merged into `main`. Its remaining undelivered delta
-is **not yet on `main`** and is exactly: the three lifecycle files (`GOAL.md`,
+the controller branch. **The GoalEx lifecycle backlog is delivered.** PR #91
+landed the whole stranded delta on `main`: the three lifecycle files (`GOAL.md`,
 `.planning/STATE.md`, and this map) recording PR #90's post-merge receipts on
-top of earlier lifecycle content that was itself never delivered, including the
-PR #81-#84 whole-memory Decisions entry in `.planning/STATE.md`; the
-pilots-plan PR #90 checkpoint; and 26 round records touched since round 14
-without being delivered through a PR: 23 new `docs/plans/goalex-r15..r38*.md`
-files (including this round's own `goalex-r38-*.md` record), the two new
-`docs/plans/completed/goalex-r36-*.md` and `docs/plans/completed/goalex-r37-*.md`
-files, and an undelivered edit to `docs/plans/goalex-r14-*.md` (whose original
-text is already on `main`). **This PR is that delivery.** It is carried by node `T3` below, now
-`DELIVERING`, the only node in the current wave; the GoalEx lifecycle lease and
-the public-harness lease stay unmixed because this PR touches nothing outside
-the GoalEx lifecycle surfaces. This map must be recomputed from the `main` that
-results from this merge before any further admission. After the merge the only
-residual undelivered item is the follow-up receipt block — this PR's number, its
-exact-head CI run id, the merge SHA, and the post-merge `main` CI run id — which
-cannot exist inside the commit it describes and is therefore delivered by the
-next lifecycle update. The
+top of earlier lifecycle content that had itself never been delivered, including
+the PR #81-#84 whole-memory Decisions entry in `.planning/STATE.md`; the
+pilots-plan PR #90 checkpoint; and the 26 round records touched since round 14
+without being delivered through a PR — 23 new `docs/plans/goalex-r15..r38*.md`
+files, the two new `docs/plans/completed/goalex-r36-*.md` and
+`docs/plans/completed/goalex-r37-*.md` files, and the edit to
+`docs/plans/goalex-r14-*.md` (whose original text was already on `main`). Node
+`T3` below, which carried that delivery, is now `MERGED`. The GoalEx lifecycle
+lease and the public-harness lease stayed unmixed: PR #91 touched nothing
+outside the GoalEx lifecycle surfaces. This revision **is** the recomputation
+from the resulting `main@e157e035` that the delivery required before any further
+admission, and it discharges the receipt residue that could not exist inside the
+commit it describes: PR #91, exact-head CI `30686224929`, merge SHA
+`e157e035`, post-merge `main` CI `30687385118`. The controller branch's
+remaining delta versus `main` is now this receipt-level update and the round-38
+record alone. The
 plan-doc backlog is disclosed here rather than left to accumulate silently.
 That pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
-states that the M12/M13 gap-disclosure paragraphs and their pinning tests
+stated that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
 commit falsified. That sentence was known-stale on `main` from PR #90 until
-this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90.
+PR #91 replaced it; Tasks 7 and 8 are closed on `main` by PR #90.
 Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still carry
 unchecked task boxes: those boxes record the plan as written at the time and
 are not a delivery signal, because each round's merged receipts are recorded in
@@ -110,7 +109,7 @@ exact lease, shared owner/integration edge, and external gate.
 | ID | Class | Package and prerequisites / consumes | Produces | Exact write lease and owner | Integration dependency / external gate |
 |---|---|---|---|---|---|
 | T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@2ba4ed80` with post-merge CI `30566984814` |
-| T3 | DELIVERING | GoalEx lifecycle delivery of the undelivered delta enumerated above; consumes verified canonical `main@061c2e1c` and PR #90's post-merge receipts. **This PR is the delivery**, opened from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, closing the `GOAL.md` Authority carve-out except for the receipt-only residue | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Documentation only; disjoint from every public-harness, CI, and result-v2 lease. Must land before any further admission, so no other source node may be admitted in the same wave. This map must be recomputed from the resulting `main` before the next admission; the sole residual undelivered item after the merge is the receipt block (PR number, exact-head CI id, merge SHA, post-merge CI id), which cannot exist inside the commit it describes |
+| T3 | MERGED | GoalEx lifecycle delivery of the previously undelivered controller delta; consumed verified canonical `main@061c2e1c` and PR #90's post-merge receipts, delivered from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, closing the `GOAL.md` Authority carve-out | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #91 at `main@e157e035` with exact-head CI `30686224929` and post-merge CI `30687385118`. Documentation only; it was disjoint from every public-harness, CI, and result-v2 lease and admitted no new implementation package. This map is recomputed from that `main`, and the receipt block it could not contain is recorded here, so no residual undelivered item from `T3` remains |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
@@ -142,14 +141,17 @@ Prior delivery wave (complete)
   and admitted no new implementation package.
   PR #90 landed the stranded M12/M13 development gap disclosures, their
   pinning tests, and a cert-rotator lock-timeout flake fix at main@061c2e1c
+  and admitted no new implementation package.
+  T3 GoalEx lifecycle backlog delivery merged as PR #91 at main@e157e035
   (current baseline) and admitted no new implementation package.
 
-Current delivery wave (exactly one node; no source node)
-  T3 GoalEx lifecycle delivery of the undelivered delta [delivering: this PR]
-  It is documentation only, it is the sole node in this wave, and no other
-  package may be admitted until it merges and this map is recomputed from the
-  resulting main. After that merge the wave holds no admitted node and the only
-  undelivered residue is the receipt block for this PR.
+Current delivery wave (empty; no admitted node, source or otherwise)
+  T3 merged, so the wave that held it is closed. This map has been recomputed
+  from the resulting main@e157e035 and carries T3's receipt block, so nothing
+  from that delivery remains undelivered. No node is admissible into a new
+  wave: every remaining source package is dependency-, lease-, evidence-, or
+  spec-blocked (see below), so the next wave stays empty until an external
+  gate opens one.
 
 Independent external gates (do not block T0-T2)
   P12-E operator measurement
@@ -179,8 +181,28 @@ Quarantine
 
 - Current safe coding concurrency is **zero new implementation writers**:
   every remaining source package is dependency-, lease-, evidence-, or
-  spec-blocked. T3 is the single shared-owner writer; read-only reviews may run
-  beside it.
+  spec-blocked. With `T3` merged there is no admitted shared-owner writer
+  either; only read-only reviews may run.
+- **`GOAL.md` Authority carve-out status: closed.** It was scoped to exactly
+  the gap where the operative lease map lived only on the controller branch.
+  PR #91 delivered that map, and this revision is recomputed from the resulting
+  `main@e157e035` and carries the receipt block, so the carve-out does not even
+  re-open at receipt scope. `main`'s copy of this map is the operative revision
+  again. The carve-out's lapse rule stands unchanged for any future gap: it
+  lapses the moment a merge lands on `main` that the branch-resident map does
+  not already record, and the map must then be recomputed from current `main`
+  before it is treated as operative.
+- **Next dependency-ready candidate: none is admissible.** No source node can
+  be admitted from this baseline. `N12` is lease blocked (the protected
+  signed-publication paths are not released on current `main`) and gates
+  `P14-B` and the whole `P15-*` chain behind it; `SBOX` is quarantined until
+  real enforcement receipts exist; `U-MODULES` lack approved exact plans;
+  `P12-E`, `P13-O`, and `P14-R` are operator/evidence blocked; and `P16-L`
+  needs human approval. The one genuinely pending item is the external event
+  `P13-C` — the first real weekly `schedule` receipt, first eligible
+  2026-08-03 — which is an external gate, not an admissible writer. The next
+  admission therefore waits on an external gate opening, and this map must be
+  recomputed from then-current `main` at that time.
 - After N12 becomes genuinely admissible, sustain at most **4-6** useful
   exact-disjoint writers and burst to **7-8** only for short read-only review,
   focused-test, or plan-contract work. These are ceilings, never targets.

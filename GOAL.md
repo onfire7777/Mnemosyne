@@ -36,17 +36,17 @@ copy of that map was two merges behind (`Baseline: main@4a891042`; its
 merged-baseline list ended at PR #88, so it carried neither a PR #89 nor a
 PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` existed only on
 the controller branch, which made the branch-resident map the operative
-revision. **This PR is the deferred GoalEx-owner delivery**: it lands that
-recomputed map, `GOAL.md`, `.planning/STATE.md`, the pilots-plan PR #90
-checkpoint, and the round-record backlog on `main`. On merge the carve-out
-closes — the map on `main` becomes the operative revision again — except for
-one receipt-only residue that cannot exist inside the commit it describes: this
-PR's number, its exact-head CI run id, the merge SHA, and the post-merge `main`
-CI run id, which the next lifecycle update records. The carve-out remains scoped
-to exactly this gap, and its lapse rule is unchanged: it lapses the moment any
-merge lands on `main` that the branch-resident map does not already record, at
-which point the map must be recomputed from current `main` before it is treated
-as operative again.
+revision. **That carve-out is now closed.** PR #91 was the deferred GoalEx-owner
+delivery: it landed the recomputed map, `GOAL.md`, `.planning/STATE.md`, the
+pilots-plan PR #90 checkpoint, and the round-record backlog on `main`
+(merge `e157e035`, exact-head CI `30686224929`, post-merge CI `30687385118`).
+The map on `main` is the operative revision again, recomputed to
+`Baseline: main@e157e035` and carrying PR #91's own receipt block — the one
+residue that could not exist inside the commit it describes — so the carve-out
+does not re-open even at receipt scope. Its lapse rule stands unchanged for any
+future gap: it lapses the moment any merge lands on `main` that the
+branch-resident map does not already record, at which point the map must be
+recomputed from current `main` before it is treated as operative again.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -85,31 +85,28 @@ of the dependency/write-lease map and `.planning/STATE.md` at `main@a8e9444c`
 M12/M13 development gap disclosures in `eval/public/README.md`, their two
 pinning test suites, a cert-rotator lock-timeout flake fix, and the
 pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
-`30679262270`, post-merge CI `30680201900`), which is the current canonical
-baseline. PRs #87-#90 are documentation and test-contract only: none admitted
+`30679262270`, post-merge CI `30680201900`). PR #91 then delivered the stranded
+GoalEx lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`,
+post-merge CI `30687385118`), which is the current canonical baseline.
+PRs #87-#91 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
-`publishable:false` / `pbpp_headline_eligible:false`. The controller branch has
-`main@061c2e1c` fully merged into it and has never been merged into `main`;
-that merge has only ever run in the one direction, so its remaining undelivered
-delta is exactly:
+`publishable:false` / `pbpp_headline_eligible:false`. PR #91 landed exactly:
 `GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
-post-merge receipts on top of earlier lifecycle content that was itself never
-delivered, including the PR #81-#84 whole-memory Decisions entry in
-`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and 26 round records
-touched since round 14 without being delivered through a PR: 23 new
-`docs/plans/goalex-r15..r38*.md` files (including this round's own
-`goalex-r38-*.md` record), the two new
+post-merge receipts on top of earlier lifecycle content that had itself never
+been delivered, including the PR #81-#84 whole-memory Decisions entry in
+`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and the 26 round
+records touched since round 14 without being delivered through a PR: 23 new
+`docs/plans/goalex-r15..r38*.md` files, the two new
 `docs/plans/completed/goalex-r36-*.md` and
-`docs/plans/completed/goalex-r37-*.md` files, and an undelivered edit to
-`docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
-**This PR lands all of them** as the GoalEx-owner delivery, keeping the
-lifecycle and public-harness leases unmixed; it is carried by lease-map node
-`T3`, now `DELIVERING` and the only node in its current wave. After this merge
-the wave holds no admitted node, the lease map must be recomputed from the
-resulting `main` before any further admission, and the only undelivered residue
-is this PR's own receipt block (PR number, exact-head CI run id, merge SHA,
-post-merge CI run id), which cannot exist inside the commit it describes. The
+`docs/plans/completed/goalex-r37-*.md` files, and the edit to
+`docs/plans/goalex-r14-*.md` (whose original text was already on `main`).
+That delivery kept the lifecycle and public-harness leases unmixed; it was
+carried by lease-map node `T3`, now `MERGED`. The wave that held it is closed
+and holds no admitted node, the lease map has been recomputed from the
+resulting `main@e157e035` and carries PR #91's own receipt block, and the
+controller branch's remaining delta versus `main` is that receipt-level update
+and the round-38 record alone. The
 plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
@@ -117,10 +114,10 @@ paragraph and adds a new twelve-line `Gap-disclosure delivery:` receipt in the
 M12/M13 checkpoint section: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
-states that the M12/M13 gap-disclosure paragraphs and their pinning tests
+stated that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
 commit falsified. That sentence was known-stale on `main` from PR #90 until
-this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
+PR #91 replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
 records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked task boxes:
 those boxes record the plan as written at the time and are not a delivery
 signal, because each round's merged receipts are recorded here and in the
@@ -134,9 +131,12 @@ quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
-`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
-under the Authority carve-out above for as long as that carve-out is open;
-neither result-v2 nor sandbox delivery is implicitly admitted.
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, whose
+copy on `main` is again the operative revision now that the Authority carve-out
+above is closed; neither result-v2 nor sandbox delivery is implicitly admitted.
+That map records no admissible node at this baseline: the next admission waits
+on an external gate opening, and the map must be recomputed from then-current
+`main` at that time.
 
 ## Scope
 
@@ -256,9 +256,10 @@ Achieved for the current development-source milestone:
 - documentation- and contract-test-only reconciliation through PR #87
   (`main@2ba4ed80`, post-merge CI `30566984814`), PR #88 (`main@4a891042`,
   post-merge CI `30659705054`), PR #89 (`main@a8e9444c`, post-merge CI
-  `30672194635`), and PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
-  post-merge CI `30680201900`), none of which changed a benchmark,
-  measurement, admission state, or publication claim.
+  `30672194635`), PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
+  post-merge CI `30680201900`), and PR #91 (`main@e157e035`, exact-head CI
+  `30686224929`, post-merge CI `30687385118`), none of which changed a
+  benchmark, measurement, admission state, or publication claim.
 
 The remaining whole-memory pilot milestone still requires:
 
