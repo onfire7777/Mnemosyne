@@ -231,18 +231,61 @@ leases.
       branch was deleted on the remote by the merge; no force-push was used.
 
 ### Task 4: Reconcile the controller branch and disclose the residue
-- [ ] In the controller worktree: `git fetch --prune origin`, fast-forward local
+- [x] In the controller worktree: `git fetch --prune origin`, fast-forward local
       `main` to `origin/main`, and prove `git rev-parse main` equals
       `git rev-parse origin/main`. Merge the new `main` into
       `codex/goalex-whole-memory-pilot` (normal merge, no force-push, no reset).
-- [ ] Confirm `git diff --stat main...HEAD` now shows only the receipt-level
+      Done. `origin/main` fetched to `e157e0350c503c9cde4aca0eff71d643a4adb200`;
+      local `main` was fast-forwarded with `git merge --ff-only origin/main` in
+      the `/Users/admin/Mnemosyne` checkout that holds it (it was clean), so
+      `git rev-parse main` == `git rev-parse origin/main` == `e157e035`. The new
+      `main` was then merged into the controller branch with a normal
+      `git merge --no-edit main` (merge commit `c0e92d8c`; no force-push, no
+      reset). Four conflicts arose because the Task 2 rewrites were authored in
+      the lane, not on the controller: `GOAL.md`, `.planning/STATE.md`, and the
+      lease map resolved to `main`'s delivered text (`--theirs`, the lane
+      revision that PR #91 landed), and the round-38 record resolved to the
+      controller's more current copy (`--ours`, with Tasks 1-3 checked).
+- [x] Confirm `git diff --stat main...HEAD` now shows only the receipt-level
       residue, and update `GOAL.md`, `.planning/STATE.md`, and the lease map on
       the controller branch to record: the PR number, merge SHA, exact-head CI
       run id, post-merge CI run id; that `T3` is `MERGED`; that the map is
       recomputed from the new `main` baseline; and that the wave is now empty
       with no admitted node.
-- [ ] State explicitly in the map whether the `GOAL.md` Authority carve-out is
+      Confirmed immediately after the merge: `git diff --stat main...HEAD`
+      showed exactly one file — this round-38 record — proving the whole
+      lifecycle delta is on `main`. The three lifecycle files were then updated
+      to the post-merge state and now carry the full receipt set (PR #91, merge
+      `e157e0350c503c9cde4aca0eff71d643a4adb200`, exact-head CI `30686224929`,
+      post-merge CI `30687385118`). The lease map's `Baseline:` is recomputed to
+      `main@e157e035`, its merged-baseline list gains a PR #91 row, the `T3` DAG
+      row reads `MERGED` with those receipts, and the wave block now reads
+      "Current delivery wave (empty; no admitted node, source or otherwise)".
+      The out-of-lease pathspec diff is still empty and no status token is
+      upgraded: no `publishable:true`, no `pbpp_headline_eligible:true`, no
+      `PILOT-READY` promotion, and no leaderboard/certification/superiority
+      wording appears in the diff. The PR #81-#84 whole-memory Decisions entry
+      and PR #90 receipts are both retained.
+- [x] State explicitly in the map whether the `GOAL.md` Authority carve-out is
       now closed or has re-opened at receipt scope only, and name the next
       dependency-ready candidate (or record that none is admissible and why).
-- [ ] Run the full GOAL.md verification block from Validation Commands and
+      Both stated explicitly under "Concurrency and integration rules". The
+      carve-out is **closed** and does not re-open even at receipt scope,
+      because this same revision is the recomputation from `main@e157e035` and
+      carries the receipt block that could not exist inside the commit it
+      describes; `main`'s copy of the map is the operative revision again, and
+      the lapse rule is preserved verbatim in substance for any future gap.
+      **No next dependency-ready candidate is admissible**: `N12` is lease
+      blocked behind the protected signed-publication paths and gates `P14-B`
+      and the whole `P15-*` chain; `SBOX` is quarantined; `U-MODULES` lack exact
+      plans; `P12-E`, `P13-O`, and `P14-R` are operator/evidence blocked; and
+      `P16-L` needs human approval. The only pending item is the external event
+      `P13-C` (first real weekly `schedule` receipt, first eligible 2026-08-03),
+      which is a gate rather than an admissible writer. `GOAL.md` carries the
+      matching statement.
+- [x] Run the full GOAL.md verification block from Validation Commands and
       confirm exit code 0 with a clean working tree.
+      Ran verbatim under `set -euo pipefail` after committing: exit code 0 with
+      `git status --porcelain` empty. `ruff check .` -> "All checks passed!" and
+      `.venv/bin/python -m pytest tests/test_planning_traceability.py -q` ->
+      6 passed.
