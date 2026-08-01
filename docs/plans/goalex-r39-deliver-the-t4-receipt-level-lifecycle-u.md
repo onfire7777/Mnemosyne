@@ -160,17 +160,44 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
 
 ### Task 4: Open, gate, and merge the PR; prove post-merge main
 
-- [ ] Push the lane branch normally and open a PR against `main` whose body
+- [x] Push the lane branch normally and open a PR against `main` whose body
       states: documentation only, lease-map node `T4`, admits no source node,
       changes no benchmark/measurement/admission/publication claim, and names
       PR #91's receipts (`main@e157e035`, exact-head CI `30686224929`,
       post-merge CI `30687385118`) as the consumed baseline.
-- [ ] Watch exact-head CI with `gh pr checks <PR#> --watch` until green; resolve
+- [x] Watch exact-head CI with `gh pr checks <PR#> --watch` until green; resolve
       any review threads or mergeability blockers normally (never dismiss
       findings). Record the exact-head CI run id.
-- [ ] Merge through the normal PR flow, then record the merge commit SHA and
+- [x] Merge through the normal PR flow, then record the merge commit SHA and
       watch the post-merge `main` CI run (`gh run list --branch main --limit 5`)
       until it is green. Record its run id.
+
+**Task 4 receipts.** PR #92 (`codex/goalex-t4-receipt-delivery`). Exact-head CI
+`30693874030` (green on the final head `16a05e83`; the first head `cc1ede82` was
+green as `30692939187` before the review fixes). Merge commit
+`39cfa67aa7692bf47d5dde5842af3d8ec0736bb0`. Post-merge `main` CI `30694818231`
+(success). Four review threads were raised and all four resolved on their merits,
+none dismissed:
+
+- Markdown blank lines around fences/headings in this record — fixed in
+  `16a05e83`; `git diff --ignore-blank-lines` on the file is empty.
+- Ancestry-only baseline check in `GOAL.md` — accepted. `merge-base
+  --is-ancestor` also passes when `main` carries later, unrecorded merges, which
+  is exactly the condition under which the carve-out lapses, so ancestry could
+  not distinguish an operative baseline from a lapsed one. `bbf05b99` adds an
+  exact equality assertion against the recorded canonical baseline, making the
+  verification block itself the lapse detector; the prior ancestry assertions are
+  preserved. Recorded as a baseline that Task 5 advances rather than a frozen
+  literal.
+- The same ancestry-only check in this plan record's quoted copy of the block —
+  mirrored in `16a05e83`.
+- "T4 asserts a non-canonical baseline", claiming `main` resolved to
+  `2ba4ed80`. Verifiably incorrect and answered with evidence on the thread:
+  `2ba4ed80` is PR #87's merge commit and an *ancestor* of `main`, 14 commits
+  behind it, while `main` and `origin/main` both resolved to `e157e035` exactly
+  as asserted. The reading came from a checkout predating PRs #88-#91, and the
+  concern is inverted relative to the risk — a stale ancestor cannot stale the
+  delta; a newer `main` could, and that case now fails loudly.
 
 ### Task 5: Reconcile the controller branch and record the residue
 
