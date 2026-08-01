@@ -23,6 +23,9 @@ DEPENDENCY_LEASE_MAP = (
     / "coordination"
     / "2026-07-28-remaining-dependency-write-lease-map.md"
 )
+GOAL = ROOT / "GOAL.md"
+STATE = PLANNING / "STATE.md"
+LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
@@ -95,6 +98,31 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     ids = set(ID_PATTERN.findall(text))
     assert {f"REQ-{index:03d}" for index in range(1, 19)} <= ids
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
+
+
+def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> None:
+    """The lease map, GOAL.md, and STATE.md must name one canonical baseline.
+
+    Each reconciliation round restates the same merge SHA by hand in three
+    places, so a partial update silently leaves one authority pointing at a
+    superseded baseline. This pins them together.
+    """
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baselines = LEASE_BASELINE.findall(lease_text)
+    assert len(baselines) == 1, f"expected exactly one Baseline line, got {baselines}"
+    sha = baselines[0]
+    short = sha[:8]
+
+    goal_text = GOAL.read_text(encoding="utf-8")
+    # The GOAL.md verification block's lapse detector must assert this exact SHA,
+    # and the ancestry list must include it.
+    assert f'test "$(git rev-parse main)" = "{sha}"' in goal_text
+    assert f"git merge-base --is-ancestor {sha} main" in goal_text
+    assert f"`main@{short}`" in goal_text
+
+    state_text = STATE.read_text(encoding="utf-8")
+    assert f"current canonical baseline is `main@{short}`" in state_text
+    assert f"at main@{short}" in state_text
 
 
 def test_phase_13_truth_lease_names_existing_authoritative_files() -> None:
