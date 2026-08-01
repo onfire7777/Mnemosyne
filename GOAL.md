@@ -362,13 +362,14 @@ For every GoalEx round:
     nothing beyond the permitted baseline. Record the external path and the
     blocker in a summary that also lives outside the controller worktree.
     Relocation means preserve-then-clear: moving a tracked file leaves its
-    original path deleted, which is still dirty. Before removing a newly
-    created ignored artifact whose classification forbids export, complete and
-    verify a handoff into the canonical secret store or an operator-approved
-    custody destination that is allowed to hold that classification. If no
-    such destination is available, keep the controller stopped under the
-    durable park, disclose the remaining residue, and require operator action;
-    never delete the only copy or claim that the round ended clean.
+    original path deleted, which is still dirty. Before restoring or removing
+    any round-owned artifact whose classification forbids export — tracked,
+    untracked, or ignored — complete and verify a handoff into the canonical
+    secret store or an operator-approved custody destination that is allowed
+    to hold that classification. If no such destination is available, keep the
+    controller stopped under the durable park, disclose the remaining residue,
+    and require operator action; never delete the only copy or claim that the
+    round ended clean.
 
     A deliberate park of round-owned work is subject to the same invariant and
     to the same lossless preservation procedure — a park is not a licence to
