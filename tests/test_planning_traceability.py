@@ -290,6 +290,12 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         assert ignored_manifest(ignored) != baseline
         binary.chmod(0o640)
 
+        nested_mode = stat.S_IMODE(nested.stat().st_mode)
+        nested.chmod(nested_mode ^ stat.S_IXOTH)
+        assert ignored_manifest(ignored) != baseline
+        nested.chmod(nested_mode)
+        assert ignored_manifest(ignored) == baseline
+
         regular.unlink()
         regular.symlink_to("target-a")
         assert ignored_manifest(ignored) != baseline
