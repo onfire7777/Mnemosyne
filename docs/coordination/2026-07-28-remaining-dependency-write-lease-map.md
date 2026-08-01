@@ -205,8 +205,9 @@ Quarantine
   commit can describe its own merge. This revision is the recomputation from
   `main@e157e035` and carries the receipt block, and it is branch-resident, so
   the branch-resident map remains the operative revision at receipt scope until
-  the admitted `T4` follow-up delivers it. Read `T4` as the closing step. Note
-  that `T4` regenerates a one-block residue of its own for the same structural
+  the admitted `T4` follow-up delivers it. Read `T4` as the step that discharges
+  exactly this receipt block, not as a step that closes the carve-out: `T4`
+  regenerates a one-block residue of its own for the same structural
   reason, so this carve-out is a standing receipt-scope invariant rather than a
   state that any single PR can retire: `main`'s map always lags the controller
   branch by exactly one receipt block. It is only ever escalated beyond receipt
