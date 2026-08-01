@@ -291,14 +291,18 @@ leases.
       this update. The bulk gap is closed — `main` is no longer two merges
       behind — and the lapse rule is preserved verbatim in substance for any
       future gap.
-      **No next dependency-ready candidate is admissible**: `N12` is lease
+      **The only dependency-ready candidate is `T4`, and no source node is
+      admissible**: `N12` is lease
       blocked behind the protected signed-publication paths and gates `P14-B`
       and the whole `P15-*` chain; `SBOX` is quarantined; `U-MODULES` lack exact
       plans; `P12-E`, `P13-O`, and `P14-R` are operator/evidence blocked; and
-      `P16-L` needs human approval. The only pending item is the external event
-      `P13-C` (first real weekly `schedule` receipt, first eligible 2026-08-03),
-      which is a gate rather than an admissible writer. `GOAL.md` carries the
-      matching statement.
+      `P16-L` needs human approval. The only pending source-side item is the
+      external event `P13-C` (first real weekly `schedule` receipt, first
+      eligible 2026-08-03), which is a gate rather than an admissible writer, so
+      the next source admission waits on that gate opening. `GOAL.md` carries
+      the matching statement: the map "admits no source node at this baseline —
+      its only admitted node is the documentation-only receipt-level lifecycle
+      update `T4`".
 - [x] Run the full GOAL.md verification block from Validation Commands and
       confirm exit code 0 with a clean working tree.
       Ran verbatim under `set -euo pipefail` after committing: exit code 0 with
