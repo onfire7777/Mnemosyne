@@ -130,6 +130,14 @@ def committed_fixture() -> dict[str, Any]:
     return json.loads(_COMMITTED_FIXTURE_PATH.read_text())
 
 
+def _keys(value: object) -> set[str]:
+    if isinstance(value, dict):
+        return set(value) | {key for child in value.values() for key in _keys(child)}
+    if isinstance(value, (list, tuple)):
+        return {key for child in value for key in _keys(child)}
+    return set()
+
+
 def test_public_readme_records_development_evidence_gaps() -> None:
     """Pin the M13 gap disclosure to the fixture it describes.
 
@@ -158,9 +166,12 @@ def test_public_readme_records_development_evidence_gaps() -> None:
         "positive_threshold": 0.75,
     }
     assert fixture["operating_point"] == OPERATING_POINT
-    # "no promotion-versus-no-promotion control": a control arm would have to
-    # split the cases, so pin that every case is a single unlabelled arm.
-    assert not [key for case in fixture["cases"] for key in case if key in {"arm", "control", "condition"}]
+    # "no promotion-versus-no-promotion control": pin that no arm label exists
+    # anywhere in the fixture. Scan every nesting depth, and the whole fixture
+    # rather than only `cases`: a per-case arm nested under metadata, or a
+    # fixture-level `control_group` block, is as natural a shape as a top-level
+    # case key and a shallow scan misses both.
+    assert not (_keys(fixture) & {"arm", "arms", "control", "control_group", "condition"})
 
     assert "one seed (`94125`) and six cases" in readme
     assert "no capacity parameter" in readme
