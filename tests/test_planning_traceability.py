@@ -31,6 +31,19 @@ DEPENDENCY_LEASE_MAP = (
 GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
+LEASE_CURRENT_BASELINE_CLAIMS = (
+    re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
+    re.compile(r"at main@([0-9a-f]{8}) \(current baseline\)"),
+    re.compile(
+        r"This map has now been recomputed from the resulting "
+        r"`?main@([0-9a-f]{8})`?"
+    ),
+    re.compile(
+        r"## Concurrency and integration rules .*?This revision "
+        r"(?:\*\*)?is(?:\*\*)? the recomputation from "
+        r"(?:the resulting )?`?main@([0-9a-f]{8})`?"
+    ),
+)
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
@@ -158,7 +171,9 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         (".planning/STATE.md", state_normalized),
     ):
         claimed = [
-            match for pattern in CANONICAL_CLAIMS for match in pattern.findall(normalized)
+            match
+            for pattern in CANONICAL_CLAIMS
+            for match in pattern.findall(normalized)
         ]
         assert claimed, f"{label} makes no canonical-baseline claim"
         assert set(claimed) == {short}, (
@@ -175,6 +190,25 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
     claimed = STATE_STOPPED_AT_CLAIM.findall(stopped_at[0])
     assert claimed == [short], (
         f".planning/STATE.md stopped_at must name `main@{short}` exactly once, "
+        f"got {claimed}"
+    )
+
+
+def test_lease_map_body_names_only_the_header_baseline() -> None:
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baselines = LEASE_BASELINE.findall(lease_text)
+    assert len(baselines) == 1, f"expected exactly one Baseline line, got {baselines}"
+    short = baselines[0][:8]
+    normalized = " ".join(lease_text.split())
+
+    claimed = [
+        match
+        for pattern in LEASE_CURRENT_BASELINE_CLAIMS
+        for match in pattern.findall(normalized)
+    ]
+    assert claimed, "lease map makes no recognized in-body current-baseline claim"
+    assert set(claimed) == {short}, (
+        f"every current-baseline claim in the lease map must name `main@{short}`, "
         f"got {claimed}"
     )
 
