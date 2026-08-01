@@ -222,7 +222,9 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         "lstat object type and permission bits",
         "SHA-256 over raw bytes",
         "raw readlink target bytes",
+        "keyed digest of the local bytes",
         "round-start HEAD",
+        "current HEAD",
         "git diff --cached --quiet",
         "git diff --quiet",
     ):
@@ -307,6 +309,17 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
 
         assert git("show", ":tracked.txt").stdout == b"A\n"
         assert tracked.read_bytes() == b"A\n"
+
+        tracked.write_bytes(b"D\n")
+        git("add", "tracked.txt")
+        git("commit", "-qm", "valid round commit")
+        tracked.write_bytes(b"E\n")
+        git("add", "tracked.txt")
+        tracked.write_bytes(b"F\n")
+        git("restore", "--source=HEAD", "--staged", "--worktree", "--", "tracked.txt")
+
+        assert git("show", ":tracked.txt").stdout == b"D\n"
+        assert tracked.read_bytes() == b"D\n"
         assert git("diff", "--cached", "--quiet").returncode == 0
         assert git("diff", "--quiet").returncode == 0
         assert ignored_manifest(ignored) == baseline

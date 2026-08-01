@@ -295,10 +295,12 @@ For every GoalEx round:
     permitting non-secret metadata. A raw content hash is not such metadata
     here: for a guessable single-value secret like `keycloak/out/admin-password`
     it is an offline verification oracle for anyone who obtains the manifest.
-    So a secret-bearing row records path, type, and mode only, and takes its
-    identity field from secret-store version metadata where the store exposes
-    it, or otherwise from a keyed digest whose key lives in the secret store and
-    is never persisted alongside the manifest. The carve-out is a classification, not a fixed
+    So a secret-bearing row records path, type, and mode plus a keyed digest of
+    the local bytes whose key lives in the secret store and is never persisted
+    alongside the manifest. Record secret-store version metadata too where the
+    store exposes it, but never substitute that metadata for the keyed digest:
+    an unchanged store version cannot detect a rewrite of its materialized
+    local copy. The carve-out is a classification, not a fixed
     list: it covers the operator secret channel `CONFIG-DRIFT-CHECKS.md`
     designates and the secret patterns the root `.gitignore` carries (`.env`,
     `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `credentials.json`,
@@ -337,11 +339,13 @@ For every GoalEx round:
     it without leaving residue. Preserve it losslessly: write an exact patch or
     archive outside the controller worktree, one that carries deletions,
     renames, mode changes, symlinks, and binary content, since copying file
-    text alone silently drops all of those. Then restore every round-owned
-    tracked path in both the index and worktree to round-start `HEAD` — a
-    staged-but-uncommitted path left staged is still dirty — and remove only
-    the untracked or ignored files this round created. Touch nothing the round
-    does not own. Require targeted `git diff --cached --quiet` and
+    text alone silently drops all of those. Then restore each uncommitted
+    round-owned tracked path in both the index and worktree to current `HEAD` —
+    which is round-start `HEAD` when the round has made no valid commit — so a
+    staged-but-uncommitted path cannot remain dirty and an earlier valid round
+    commit is not overwritten. Remove only the untracked or ignored files this
+    round created. Touch nothing the round does not own. Require targeted
+    `git diff --cached --quiet` and
     `git diff --quiet` checks for those tracked paths, then confirm the ignored
     manifest equals its round-start value and the residue check above reports
     nothing beyond the permitted baseline. Record the external path and the
