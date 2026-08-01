@@ -282,13 +282,22 @@ For every GoalEx round:
     gets its own row *and* a row per entry beneath it, since a directory row
     alone cannot see a nested rewrite while omitting it would let a
     directory's own mode change unnoticed — each row carrying relative path,
-    object type, content hash or symlink target, and mode. Keep a lossless
-    copy of their contents outside the controller worktree, with one
-    carve-out: every ignored path known to be secret-bearing is manifested but
-    never copied out, because `Mnemosyne-Secret-Handling-Policy.md`'s P8
-    forbids materializing a secret value anywhere persistent outside the secret
-    store while explicitly permitting non-secret metadata, which a path, type,
-    mode, and content hash are. The carve-out is a classification, not a fixed
+    object type, and mode, plus a type-specific identity field: a content hash
+    for a regular file, the link target for a symlink, and for a directory no
+    identity field at all, since its contents are already covered by its
+    entries' own rows and path, type, and mode are what a directory can change
+    on its own. Keep a lossless copy of their contents outside the controller
+    worktree, with one carve-out: every ignored path known to be secret-bearing
+    is manifested but never copied out, because
+    `Mnemosyne-Secret-Handling-Policy.md`'s P8 forbids materializing a secret
+    value anywhere persistent outside the secret store while explicitly
+    permitting non-secret metadata. A raw content hash is not such metadata
+    here: for a guessable single-value secret like `keycloak/out/admin-password`
+    it is an offline verification oracle for anyone who obtains the manifest.
+    So a secret-bearing row records path, type, and mode only, and takes its
+    identity field from secret-store version metadata where the store exposes
+    it, or otherwise from a keyed digest whose key lives in the secret store and
+    is never persisted alongside the manifest. The carve-out is a classification, not a fixed
     list: it covers the operator secret channel `CONFIG-DRIFT-CHECKS.md`
     designates and the secret patterns the root `.gitignore` carries (`.env`,
     `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `credentials.json`,
@@ -302,9 +311,9 @@ For every GoalEx round:
     `git status --porcelain` reports no ignored file at all, the `--ignored`
     listing reports an unchanged path and a rewritten one identically, and a
     hash alone can detect an accidental rewrite without being able to undo it.
-    The residue check compares every manifest row — path, object type, hash or
-    symlink target, and mode — against the full start-of-round manifest, so a
-    mode-only or nested-only change must fail it, alongside
+    The residue check compares every manifest row — path, object type, mode,
+    and the type-specific identity field — against the full start-of-round
+    manifest, so a mode-only or nested-only change must fail it, alongside
     `git status --porcelain --untracked-files=all --ignored`. If a round does
     rewrite a baseline ignored file anyway, that is the one case where cleanup
     restores such a path: preserve the round's version externally under the
@@ -313,7 +322,14 @@ For every GoalEx round:
     violation in the round record. A secret-bearing path has no external copy
     to restore from by design, so a round that rewrites one restores nothing:
     it escalates to the operator under rule 10 and parks under the handoff
-    above until they resolve it.
+    above until they resolve it. That park must be durable, because the ignored
+    rewrite is invisible to the preflight that would otherwise catch it — a bare
+    `git status --porcelain` reports no ignored file, so the next invocation
+    would pass preflight and silently adopt the rewritten secret as its new
+    permitted baseline. Write a persistent park marker outside the controller
+    worktree naming the affected paths, and require the launcher to abort its
+    preflight while that marker exists. Only the operator clears it, once they
+    have restored or rotated the secret themselves.
 
     If any round-owned change cannot be committed — a receipt, a scratch
     artifact, a partial edit, tracked, untracked, or ignored alike — preserve
