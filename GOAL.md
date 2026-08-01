@@ -31,14 +31,19 @@ pinned SHA re-authorizes launches that later merges already retired. Its
 package statuses must be recomputed from current main after every merge; the
 map is not blanket permission to launch stale or overlapping lanes.
 
-One carve-out applies while the GoalEx lifecycle delivery is deferred: `main`'s
-copy of that map is currently two merges behind (`Baseline: main@4a891042`;
-its merged-baseline list ends at PR #88, so it carries neither a PR #89 nor a
-PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` exists only on
-the controller branch. Until the deferred GoalEx-owner PR lands, the
-branch-resident map is the operative revision, and it must be delivered before
-the next admission so this carve-out closes rather than becoming standing
-practice. The carve-out is scoped to exactly this gap: it lapses the moment any
+One carve-out applied while the GoalEx lifecycle delivery was deferred: `main`'s
+copy of that map was two merges behind (`Baseline: main@4a891042`; its
+merged-baseline list ended at PR #88, so it carried neither a PR #89 nor a
+PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` existed only on
+the controller branch, which made the branch-resident map the operative
+revision. **This PR is the deferred GoalEx-owner delivery**: it lands that
+recomputed map, `GOAL.md`, `.planning/STATE.md`, the pilots-plan PR #90
+checkpoint, and the round-record backlog on `main`. On merge the carve-out
+closes — the map on `main` becomes the operative revision again — except for
+one receipt-only residue that cannot exist inside the commit it describes: this
+PR's number, its exact-head CI run id, the merge SHA, and the post-merge `main`
+CI run id, which the next lifecycle update records. The carve-out remains scoped
+to exactly this gap, and its lapse rule is unchanged: it lapses the moment any
 merge lands on `main` that the branch-resident map does not already record, at
 which point the map must be recomputed from current `main` before it is treated
 as operative again.
@@ -84,20 +89,28 @@ pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
 baseline. PRs #87-#90 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
-`publishable:false` / `pbpp_headline_eligible:false`. The controller branch is
-merged to `main@061c2e1c`, so its remaining undelivered delta is exactly:
+`publishable:false` / `pbpp_headline_eligible:false`. The controller branch has
+`main@061c2e1c` fully merged into it and has never been merged into `main`;
+that merge has only ever run in the one direction, so its remaining undelivered
+delta is exactly:
 `GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
 post-merge receipts on top of earlier lifecycle content that was itself never
 delivered, including the PR #81-#84 whole-memory Decisions entry in
-`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and 25 round records
+`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and 26 round records
 touched since round 14 without being delivered through a PR: 23 new
-`docs/plans/goalex-r15..r37*.md` files, the new
-`docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
+`docs/plans/goalex-r15..r38*.md` files (including this round's own
+`goalex-r38-*.md` record), the two new
+`docs/plans/completed/goalex-r36-*.md` and
+`docs/plans/completed/goalex-r37-*.md` files, and an undelivered edit to
 `docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
-Landing all of them is deferred to the next round's GoalEx-owner PR so
-lifecycle and public-harness leases stay unmixed; that delivery is admitted in
-the lease map as node `T3`, the only admitted node in its current wave, so it
-is scheduled rather than left implicit. The plan-doc backlog is
+**This PR lands all of them** as the GoalEx-owner delivery, keeping the
+lifecycle and public-harness leases unmixed; it is carried by lease-map node
+`T3`, now `DELIVERING` and the only node in its current wave. After this merge
+the wave holds no admitted node, the lease map must be recomputed from the
+resulting `main` before any further admission, and the only undelivered residue
+is this PR's own receipt block (PR number, exact-head CI run id, merge SHA,
+post-merge CI run id), which cannot exist inside the commit it describes. The
+plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
 paragraph and adds a new twelve-line `Gap-disclosure delivery:` receipt in the
@@ -106,8 +119,8 @@ M12/M13 checkpoint section: PR #90 shipped
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
 states that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
-commit falsified. Until the deferred PR lands, read that sentence on `main`
-as known-stale; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
+commit falsified. That sentence was known-stale on `main` from PR #90 until
+this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
 records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked task boxes:
 those boxes record the plan as written at the time and are not a delivery
 signal, because each round's merged receipts are recorded here and in the
@@ -275,6 +288,7 @@ test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
 git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
+git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md

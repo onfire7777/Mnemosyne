@@ -57,17 +57,24 @@ lock-timeout flake fix, and the pilots-plan delivery checkpoints at
 PR #90 is development-source documentation and tests only: it moved no package
 status, left `eval/public/registry.json`, the fixtures, and all adapter and
 scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
-`pbpp_headline_eligible:false`. The controller branch is merged to
-`main@061c2e1c`, so its remaining undelivered delta is exactly: `GOAL.md`,
+`pbpp_headline_eligible:false`. The controller branch has `main@061c2e1c`
+fully merged into it and has never been merged into `main`; that merge has only
+ever run in the one direction, so its remaining undelivered delta is exactly:
+`GOAL.md`,
 this file, and the lease map (recording PR #90's post-merge receipts on top of
 earlier lifecycle content that was itself never delivered, including this
 file's PR #81-#84 whole-memory Decisions entry), the
-pilots-plan PR #90 checkpoint, and 25 round records touched since round 14
-without being delivered through a PR: 23 new `docs/plans/goalex-r15..r37*.md`
-files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
-edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
-`main`). Landing all of them is deferred to the next round's GoalEx-owner
-PR so the lifecycle and public-harness leases stay unmixed; the plan-doc
+pilots-plan PR #90 checkpoint, and 26 round records touched since round 14
+without being delivered through a PR: 23 new `docs/plans/goalex-r15..r38*.md`
+files (including this round's own `goalex-r38-*.md` record), the two new
+`docs/plans/completed/goalex-r36-*.md` and `docs/plans/completed/goalex-r37-*.md`
+files, and an undelivered edit to `docs/plans/goalex-r14-*.md` (whose original
+text is already on `main`). This PR lands all of them as the GoalEx-owner delivery of lease-map
+node `T3`, keeping the lifecycle and public-harness leases unmixed; after it
+merges the only undelivered residue is its own receipt block (PR number,
+exact-head CI run id, merge SHA, post-merge CI run id), which cannot exist
+inside the commit it describes, and the lease map must be recomputed from the
+resulting `main` before any further admission. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
@@ -76,8 +83,8 @@ delivery:` receipt in the M12/M13 checkpoint section: PR #90 shipped
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
 states that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
-commit falsified. Until the deferred PR lands, that sentence on `main` is
-known-stale; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
+commit falsified. That sentence was known-stale on `main` from PR #90 until
+this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
 of those records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked
 task boxes: those boxes record the plan as written at the time and are not a
 delivery signal, because each round's merged receipts are recorded in this
