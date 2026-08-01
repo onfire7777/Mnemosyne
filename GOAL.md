@@ -317,6 +317,12 @@ git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
 git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
 git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
+# Exact canonical baseline. Ancestry alone also passes when `main` carries later,
+# unrecorded merges, which is precisely the condition under which the Authority
+# carve-out lapses. This equality is the lapse detector: if it fails, `main` has
+# advanced past the recorded baseline and the carve-out must be recomputed from
+# the new `main` before any further admission.
+test "$(git rev-parse main)" = "e157e0350c503c9cde4aca0eff71d643a4adb200"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
