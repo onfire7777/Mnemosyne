@@ -275,19 +275,25 @@ For every GoalEx round:
     therefore always ends with an empty residue check, and the launcher's next
     preflight always finds a clean tree.
 
-    Also snapshot the controller worktree's ignored paths at round start. The
-    residue check is `git status --porcelain --untracked-files=all --ignored`
-    compared against that snapshot, not a bare `git status --porcelain`, which
-    reports no ignored file at all and would let a round-owned ignored scratch
-    artifact pass as clean.
+    Ignored paths that already exist at round start are a permitted baseline,
+    not blockers: they never trip the start-of-round gate above, and cleanup
+    never touches them. Snapshot them at round start by path, content hash, and
+    mode, because a bare `git status --porcelain` reports no ignored file at
+    all and the `--ignored` listing reports an unchanged path and a rewritten
+    one identically. The round is forbidden to modify a baseline ignored file,
+    and the snapshot is what makes a violation detectable. The residue check is
+    therefore `git status --porcelain --untracked-files=all --ignored` plus a
+    re-hash of the snapshotted baseline ignored paths; both must come back
+    unchanged.
 
     If any round-owned change cannot be committed — a receipt, a scratch
     artifact, a partial edit, tracked, untracked, or ignored alike — preserve
     it without leaving residue. Preserve it losslessly: write an exact patch or
     archive outside the controller worktree, one that carries deletions,
     renames, mode changes, symlinks, and binary content, since copying file
-    text alone silently drops all of those. Then clear the change from the
-    worktree: restore the tracked paths this round modified, and remove the
+    text alone silently drops all of those. Then clear the change from both the
+    index and the worktree — a staged-but-uncommitted path left staged is still
+    dirty — restoring the tracked paths this round modified and removing the
     untracked or ignored files this round created. Touch nothing the round does
     not own. Then confirm the residue check above reports nothing for every
     round-owned path. Record the external path and the blocker in a summary
@@ -295,10 +301,13 @@ For every GoalEx round:
     preserve-then-clear: moving a tracked file leaves its original path
     deleted, which is still dirty.
 
-    A deliberate park of round-owned work is subject to the same invariant.
-    Clear every round-owned change from the worktree and write the park's
-    reason and owner outside the controller worktree before stopping, so the
-    loop can resume without a human first cleaning up after it.
+    A deliberate park of round-owned work is subject to the same invariant and
+    to the same lossless preservation procedure — a park is not a licence to
+    discard a partial edit or an uncommitted receipt. Preserve every round-owned
+    change externally first, clear it from the index and worktree, then write
+    the park's reason, owner, and the archive's location outside the controller
+    worktree before stopping, so the loop can resume without a human first
+    cleaning up after it.
 
 ## Runtime Contract
 
