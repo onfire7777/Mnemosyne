@@ -278,18 +278,27 @@ For every GoalEx round:
     Ignored paths that already exist at round start are a permitted baseline,
     not blockers: they never trip the start-of-round gate above, and no round
     may deliberately modify or remove one. At round start, capture them as a
-    manifest that enumerates every entry recursively — an ignored directory is
-    one manifest row per entry beneath it, not a single row for the directory,
-    since a directory-level row cannot see a nested rewrite — each row carrying
-    relative path, object type, content hash or symlink target, and mode. Keep
-    a lossless copy of their contents outside the controller worktree, with one
-    carve-out: paths in the operator secret channel that
-    `CONFIG-DRIFT-CHECKS.md` designates (`.env`, `.env.*`, `*.pem`, `*.key`,
-    `credentials.json`, `service-account.json`, `secrets.json`) are manifested
-    but never copied out, because `Mnemosyne-Secret-Handling-Policy.md`'s P8
+    manifest that enumerates every entry recursively — an ignored directory
+    gets its own row *and* a row per entry beneath it, since a directory row
+    alone cannot see a nested rewrite while omitting it would let a
+    directory's own mode change unnoticed — each row carrying relative path,
+    object type, content hash or symlink target, and mode. Keep a lossless
+    copy of their contents outside the controller worktree, with one
+    carve-out: every ignored path known to be secret-bearing is manifested but
+    never copied out, because `Mnemosyne-Secret-Handling-Policy.md`'s P8
     forbids materializing a secret value anywhere persistent outside the secret
     store while explicitly permitting non-secret metadata, which a path, type,
-    mode, and content hash are. All of this is needed: a bare
+    mode, and content hash are. The carve-out is a classification, not a fixed
+    list: it covers the operator secret channel `CONFIG-DRIFT-CHECKS.md`
+    designates and the secret patterns the root `.gitignore` carries (`.env`,
+    `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `credentials.json`,
+    `service-account.json`, `secrets.json`), and equally the generated provider
+    material `infra/.gitignore` ignores and `infra/README.md` documents as
+    secrets, private keys, and tokens (`keycloak/out/`, `vault/out/`,
+    `c2pa/out/`, `**/wrapped-keys/`), whose members — `keycloak/out/admin-password`
+    among them — match no filename pattern at all. Any ignored path a later
+    `.gitignore` or its documentation designates the same way is covered on the
+    same footing without amending this rule. All of this is needed: a bare
     `git status --porcelain` reports no ignored file at all, the `--ignored`
     listing reports an unchanged path and a rewritten one identically, and a
     hash alone can detect an accidental rewrite without being able to undo it.
@@ -301,7 +310,7 @@ For every GoalEx round:
     restores such a path: preserve the round's version externally under the
     lossless procedure below, then restore the whole affected subtree — bytes,
     modes, symlinks, and deletions — from the external copy and record the
-    violation in the round record. A secret-channel path has no external copy
+    violation in the round record. A secret-bearing path has no external copy
     to restore from by design, so a round that rewrites one restores nothing:
     it escalates to the operator under rule 10 and parks under the handoff
     above until they resolve it.
