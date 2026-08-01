@@ -66,6 +66,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
 - `gh pr checks <PR#> --watch`
 - `gh run list --branch main --limit 5`
 - The GOAL.md verification block:
+
   ```bash
   set -euo pipefail
   test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"
@@ -78,6 +79,9 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
   git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
   git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
   git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
+  # Exact canonical baseline; ancestry alone also passes on a moved `main`,
+  # which is exactly when the carve-out lapses.
+  test "$(git rev-parse main)" = "e157e0350c503c9cde4aca0eff71d643a4adb200"
   test -f .planning/STATE.md
   test -f .planning/ROADMAP.md
   test -f .planning/REQUIREMENTS.md
@@ -90,6 +94,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
   ```
 
 ### Task 1: Recompute the exact T4 delta and open an isolated lane
+
 - [x] `git fetch --prune origin`; confirm `main == origin/main` and record the
       SHA. If any commit has landed on `main` since `e157e035`, the GOAL.md
       carve-out lapses: first merge `main` into the controller branch, then
@@ -115,6 +120,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       paths.
 
 ### Task 2: Make the delivered T4 text self-consistent post-merge
+
 - [x] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`,
       flip node `T4` from `ADMITTED` to `DELIVERING` (or equivalent) in its DAG
       row, the narrative paragraph, and the "Current delivery wave" block:
@@ -142,6 +148,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       is still empty.
 
 ### Task 3: Gate the lane locally
+
 - [x] In the lane worktree, run `ruff check .` and
       `python -m pytest tests/test_planning_traceability.py -q` with the repo
       venv interpreter. Grep `tests/` for the changed filenames and run any
@@ -152,6 +159,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       `T4`). Do not force-push and do not bypass hooks.
 
 ### Task 4: Open, gate, and merge the PR; prove post-merge main
+
 - [ ] Push the lane branch normally and open a PR against `main` whose body
       states: documentation only, lease-map node `T4`, admits no source node,
       changes no benchmark/measurement/admission/publication claim, and names
@@ -165,6 +173,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       until it is green. Record its run id.
 
 ### Task 5: Reconcile the controller branch and record the residue
+
 - [ ] In the controller worktree, `git fetch --prune origin` and fast-forward
       local `main` to `origin/main`; prove `git rev-parse main` equals
       `git rev-parse origin/main` and that the new merge commit is an ancestor
