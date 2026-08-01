@@ -325,6 +325,14 @@ git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
 # advanced past the recorded baseline and the carve-out must be recomputed from
 # the new `main` before any further admission.
+#
+# This block is written to be run on the controller branch, where the equality
+# holds. On canonical `main` it fails by exactly the accepted one-block receipt
+# lag — `main`'s copy names the baseline of the merge before its own, because no
+# commit can describe its own merge. That failure is discharged by the
+# branch-resident recomputation carried here, not by admitting a successor node;
+# see the lease map's `T4` residue. Only a failure on this branch, or a `main`
+# that has advanced by more than that one receipt block, is a real lapse.
 test "$(git rev-parse main)" = "39cfa67aa7692bf47d5dde5842af3d8ec0736bb0"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
