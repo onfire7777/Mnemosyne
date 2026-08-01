@@ -270,11 +270,18 @@ leases.
       now closed or has re-opened at receipt scope only, and name the next
       dependency-ready candidate (or record that none is admissible and why).
       Both stated explicitly under "Concurrency and integration rules". The
-      carve-out is **closed** and does not re-open even at receipt scope,
-      because this same revision is the recomputation from `main@e157e035` and
-      carries the receipt block that could not exist inside the commit it
-      describes; `main`'s copy of the map is the operative revision again, and
-      the lapse rule is preserved verbatim in substance for any future gap.
+      carve-out has **re-opened at receipt scope only**. Code review corrected
+      an earlier draft of this record and of the three lifecycle files that
+      claimed it was fully closed: `main@e157e035`'s copy of the map still reads
+      `Baseline: main@061c2e1c` with `T3` as `DELIVERING` and "**This PR is the
+      delivery**" (verified with `git show main:docs/coordination/...`), because
+      PR #91 could not describe its own merge from inside the merged commit. The
+      recomputation to `main@e157e035` carrying the receipt block is
+      branch-resident, so the branch-resident map stays the operative revision
+      at that receipt-level scope until a follow-up GoalEx-owner PR delivers
+      this update. The bulk gap is closed — `main` is no longer two merges
+      behind — and the lapse rule is preserved verbatim in substance for any
+      future gap.
       **No next dependency-ready candidate is admissible**: `N12` is lease
       blocked behind the protected signed-publication paths and gates `P14-B`
       and the whole `P15-*` chain; `SBOX` is quarantined; `U-MODULES` lack exact

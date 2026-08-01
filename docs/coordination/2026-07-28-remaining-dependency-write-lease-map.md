@@ -61,11 +61,17 @@ files, the two new `docs/plans/completed/goalex-r36-*.md` and
 lease and the public-harness lease stayed unmixed: PR #91 touched nothing
 outside the GoalEx lifecycle surfaces. This revision **is** the recomputation
 from the resulting `main@e157e035` that the delivery required before any further
-admission, and it discharges the receipt residue that could not exist inside the
+admission, and it records the receipt residue that could not exist inside the
 commit it describes: PR #91, exact-head CI `30686224929`, merge SHA
-`e157e035`, post-merge `main` CI `30687385118`. The controller branch's
-remaining delta versus `main` is now this receipt-level update and the round-38
-record alone. The
+`e157e035`, post-merge `main` CI `30687385118`. That recomputation is so far
+**branch-resident only**: `main@e157e035`'s copy of this file is still PR #91's
+own pre-merge text (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`, "**This PR
+is the delivery**", and a one-node current wave), and `main`'s `GOAL.md` and
+`.planning/STATE.md` likewise still carry the pre-merge "this PR" wording that
+the merge falsified. The residue is therefore recorded but not yet discharged on
+`main`. The controller branch's remaining delta versus `main` is exactly this
+receipt-level update to the three lifecycle files plus the round-38 record, and
+a follow-up GoalEx-owner PR must deliver it. The
 plan-doc backlog is disclosed here rather than left to accumulate silently.
 That pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
@@ -109,7 +115,7 @@ exact lease, shared owner/integration edge, and external gate.
 | ID | Class | Package and prerequisites / consumes | Produces | Exact write lease and owner | Integration dependency / external gate |
 |---|---|---|---|---|---|
 | T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@2ba4ed80` with post-merge CI `30566984814` |
-| T3 | MERGED | GoalEx lifecycle delivery of the previously undelivered controller delta; consumed verified canonical `main@061c2e1c` and PR #90's post-merge receipts, delivered from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, closing the `GOAL.md` Authority carve-out | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #91 at `main@e157e035` with exact-head CI `30686224929` and post-merge CI `30687385118`. Documentation only; it was disjoint from every public-harness, CI, and result-v2 lease and admitted no new implementation package. This map is recomputed from that `main`, and the receipt block it could not contain is recorded here, so no residual undelivered item from `T3` remains |
+| T3 | MERGED | GoalEx lifecycle delivery of the previously undelivered controller delta; consumed verified canonical `main@061c2e1c` and PR #90's post-merge receipts, delivered from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, reducing the `GOAL.md` Authority carve-out to receipt scope | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #91 at `main@e157e035` with exact-head CI `30686224929` and post-merge CI `30687385118`. Documentation only; it was disjoint from every public-harness, CI, and result-v2 lease and admitted no new implementation package. This map is recomputed from that `main` and the receipt block it could not contain is recorded here, but that recomputation is branch-resident, so `T3`'s residual undelivered item is exactly this receipt-level lifecycle update, pending a follow-up GoalEx-owner PR |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
@@ -147,11 +153,13 @@ Prior delivery wave (complete)
 
 Current delivery wave (empty; no admitted node, source or otherwise)
   T3 merged, so the wave that held it is closed. This map has been recomputed
-  from the resulting main@e157e035 and carries T3's receipt block, so nothing
-  from that delivery remains undelivered. No node is admissible into a new
-  wave: every remaining source package is dependency-, lease-, evidence-, or
-  spec-blocked (see below), so the next wave stays empty until an external
-  gate opens one.
+  from the resulting main@e157e035 and carries T3's receipt block, but that
+  recomputation is branch-resident, so the receipt-level lifecycle update
+  itself remains undelivered pending a follow-up GoalEx-owner PR. That
+  follow-up is documentation only and admits no source node. No node is
+  admissible into a new wave: every remaining source package is dependency-,
+  lease-, evidence-, or spec-blocked (see below), so the next wave stays empty
+  until an external gate opens one.
 
 Independent external gates (do not block T0-T2)
   P12-E operator measurement
@@ -183,12 +191,16 @@ Quarantine
   every remaining source package is dependency-, lease-, evidence-, or
   spec-blocked. With `T3` merged there is no admitted shared-owner writer
   either; only read-only reviews may run.
-- **`GOAL.md` Authority carve-out status: closed.** It was scoped to exactly
-  the gap where the operative lease map lived only on the controller branch.
-  PR #91 delivered that map, and this revision is recomputed from the resulting
-  `main@e157e035` and carries the receipt block, so the carve-out does not even
-  re-open at receipt scope. `main`'s copy of this map is the operative revision
-  again. The carve-out's lapse rule stands unchanged for any future gap: it
+- **`GOAL.md` Authority carve-out status: re-opened at receipt scope only.** It
+  was scoped to exactly the gap where the operative lease map lived only on the
+  controller branch. PR #91 closed the bulk of that gap — `main`'s copy is no
+  longer two merges behind — but `main@e157e035` still holds PR #91's own
+  pre-merge text (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`), because no
+  commit can describe its own merge. This revision is the recomputation from
+  `main@e157e035` and carries the receipt block, and it is branch-resident, so
+  the branch-resident map remains the operative revision at receipt scope until
+  a follow-up GoalEx-owner PR delivers it. Read that follow-up as the closing
+  step. The carve-out's lapse rule stands unchanged for any future gap: it
   lapses the moment a merge lands on `main` that the branch-resident map does
   not already record, and the map must then be recomputed from current `main`
   before it is treated as operative.
