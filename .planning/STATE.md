@@ -82,8 +82,9 @@ pre-merge map (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`) and the
 pre-merge "this PR" text in this file and `GOAL.md`, until the admitted
 documentation-only lease-map node `T4` — the sole admitted writer from this
 baseline — delivers this receipt-level update. `T4` will regenerate a one-block
-residue of its own for the same structural reason, so receipt-scope lag is a
-standing invariant rather than a state a single PR retires. The plan-doc
+residue of its own for the same structural reason, since no commit can describe
+its own merge; that residual lag is an accepted standing condition rather than
+an open work item, and it admits no successor node after `T4`. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure

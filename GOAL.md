@@ -31,8 +31,8 @@ pinned SHA re-authorizes launches that later merges already retired. Its
 package statuses must be recomputed from current main after every merge; the
 map is not blanket permission to launch stale or overlapping lanes.
 
-One carve-out applied while the GoalEx lifecycle delivery was deferred: `main`'s
-copy of that map was two merges behind (`Baseline: main@4a891042`; its
+One carve-out applies and has never closed. It arose while the GoalEx lifecycle
+delivery was deferred: `main`'s copy of that map was two merges behind (`Baseline: main@4a891042`; its
 merged-baseline list ended at PR #88, so it carried neither a PR #89 nor a
 PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` existed only on
 the controller branch, which made the branch-resident map the operative
@@ -52,8 +52,12 @@ through the admitted `T4` follow-up PR. The same applies to `main`'s `GOAL.md`
 and `.planning/STATE.md`,
 whose present-tense "this PR" self-references PR #91 falsified on merge. That
 `T4` delivery will regenerate a one-block residue of its own for the same
-structural reason, so receipt-scope lag is a standing invariant, not a state a
-single PR retires. The
+structural reason: no commit can describe its own merge, so `main`'s copy always
+lags the controller branch by exactly one receipt block. That one-block lag is
+an accepted standing condition, not an open work item. `T4` is admitted once to
+discharge the accumulated receipt block; `T4`'s own residue admits no successor
+node, because admitting a fresh node for each regenerated residue would make the
+delivery wave non-terminating. The
 carve-out's lapse rule stands unchanged: it lapses the moment any merge lands on
 `main` that the branch-resident map does not already record, at which point the
 map must be recomputed from current `main` before it is treated as operative

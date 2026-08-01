@@ -279,7 +279,8 @@ leases.
       now closed or has re-opened at receipt scope only, and name the next
       dependency-ready candidate (or record that none is admissible and why).
       Both stated explicitly under "Concurrency and integration rules". The
-      carve-out has **re-opened at receipt scope only**. Code review corrected
+      carve-out never closed; it is **reduced to receipt scope**. Code review
+      corrected
       an earlier draft of this record and of the three lifecycle files that
       claimed it was fully closed: `main@e157e035`'s copy of the map still reads
       `Baseline: main@061c2e1c` with `T3` as `DELIVERING` and "**This PR is the
