@@ -281,10 +281,11 @@ For every GoalEx round:
     manifest that enumerates every entry recursively — an ignored directory
     gets its own row *and* a row per entry beneath it, since a directory row
     alone cannot see a nested rewrite while omitting it would let a
-    directory's own mode change unnoticed — each row carrying relative path,
-    object type, and mode, plus a type-specific identity field: a content hash
-    for a regular file, the link target for a symlink, and for a directory no
-    identity field at all, since its contents are already covered by its
+    directory's own mode change unnoticed. Build each row from relative path
+    bytes plus the `lstat` object type and permission bits, then add a
+    type-specific identity field: SHA-256 over raw bytes for a non-secret
+    regular file, raw `readlink` target bytes for a symlink, and for a directory
+    no identity field at all, since its contents are already covered by its
     entries' own rows and path, type, and mode are what a directory can change
     on its own. Keep a lossless copy of their contents outside the controller
     worktree, with one carve-out: every ignored path known to be secret-bearing
@@ -336,15 +337,17 @@ For every GoalEx round:
     it without leaving residue. Preserve it losslessly: write an exact patch or
     archive outside the controller worktree, one that carries deletions,
     renames, mode changes, symlinks, and binary content, since copying file
-    text alone silently drops all of those. Then clear the change from both the
-    index and the worktree — a staged-but-uncommitted path left staged is still
-    dirty — restoring the tracked paths this round modified and removing the
-    untracked or ignored files this round created. Touch nothing the round does
-    not own. Then confirm the residue check above reports nothing for every
-    round-owned path. Record the external path and the blocker in a summary
-    that also lives outside the controller worktree. Relocation means
-    preserve-then-clear: moving a tracked file leaves its original path
-    deleted, which is still dirty.
+    text alone silently drops all of those. Then restore every round-owned
+    tracked path in both the index and worktree to round-start `HEAD` — a
+    staged-but-uncommitted path left staged is still dirty — and remove only
+    the untracked or ignored files this round created. Touch nothing the round
+    does not own. Require targeted `git diff --cached --quiet` and
+    `git diff --quiet` checks for those tracked paths, then confirm the ignored
+    manifest equals its round-start value and the residue check above reports
+    nothing beyond the permitted baseline. Record the external path and the
+    blocker in a summary that also lives outside the controller worktree.
+    Relocation means preserve-then-clear: moving a tracked file leaves its
+    original path deleted, which is still dirty.
 
     A deliberate park of round-owned work is subject to the same invariant and
     to the same lossless preservation procedure — a park is not a licence to
