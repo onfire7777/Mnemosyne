@@ -115,7 +115,7 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       paths.
 
 ### Task 2: Make the delivered T4 text self-consistent post-merge
-- [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`,
+- [x] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`,
       flip node `T4` from `ADMITTED` to `DELIVERING` (or equivalent) in its DAG
       row, the narrative paragraph, and the "Current delivery wave" block:
       state that this PR is the T4 delivery, that the map must be recomputed
@@ -125,20 +125,20 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       describes. Preserve the map's existing statement that this residual lag is
       an accepted standing condition admitting **no successor node** and that
       `T4` is the last node the carve-out admits.
-- [ ] In `GOAL.md`, rewrite the Authority carve-out and Current Phase text so
+- [x] In `GOAL.md`, rewrite the Authority carve-out and Current Phase text so
       they describe the state this PR creates (this PR is the `T4` delivery;
       after merge the carve-out is discharged down to the accepted one-block
       standing residue). Preserve the lapse rule verbatim in substance and
       preserve the statement that `T4`'s residue admits no successor node.
-- [ ] In `.planning/STATE.md`, make the matching receipt text post-merge
+- [x] In `.planning/STATE.md`, make the matching receipt text post-merge
       consistent, keeping the PR #81-#84 whole-memory Decisions entry and the
       PR #90/#91 receipts intact. Confirm no status, admission state, or
       publication claim is upgraded anywhere in the diff.
-- [ ] Re-grep the whole lane diff for forbidden upgrades: `publishable:true`,
+- [x] Re-grep the whole lane diff for forbidden upgrades: `publishable:true`,
       `pbpp_headline_eligible:true`, any `PILOT-READY` promotion, and any
       leaderboard/certification/superiority wording. There must be none beyond
       text that quotes the prohibition itself.
-- [ ] Re-run the documentation-only pathspec diff against the lane to confirm it
+- [x] Re-run the documentation-only pathspec diff against the lane to confirm it
       is still empty.
 
 ### Task 3: Gate the lane locally
