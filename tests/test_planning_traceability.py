@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import stat
+import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -145,16 +150,14 @@ def test_v2_memory_plane_requirements_are_complete_and_traceable() -> None:
         PHASE_15_S4_PLAN.read_text(encoding="utf-8"), "requirements"
     ) == {"CAP-006", "CAP-011", "RAIL-001", "RAIL-002", "RAIL-003", "RAIL-004"}
     roadmap = V2_ROADMAP.read_text(encoding="utf-8")
-    phase_15_roadmap = roadmap.split("### Phase 15:", 1)[1].split(
-        "\n### Phase 16:", 1
-    )[0]
+    phase_15_roadmap = roadmap.split("### Phase 15:", 1)[1].split("\n### Phase 16:", 1)[
+        0
+    ]
     assert (
         "**Requirements:** CAP-004..011, CAP-012, CAP-013, RAIL-001..004"
         in phase_15_roadmap
     )
-    assert (
-        "remaining Phase 15 items (CAP-004..011) stay planned" in phase_15_roadmap
-    )
+    assert "remaining Phase 15 items (CAP-004..011) stay planned" in phase_15_roadmap
 
 
 def test_memory_plane_architecture_documents_routes_and_ownership() -> None:
@@ -208,3 +211,134 @@ def test_engine_contract_documents_three_engine_memory_plane_parity() -> None:
         "SqliteEngine (`src/mnemosyne/sqlite_engine.py`)",
     ):
         assert expected in normalized
+
+
+def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
+    goal = " ".join((ROOT / "GOAL.md").read_text(encoding="utf-8").split()).replace(
+        "`", ""
+    )
+    for primitive in (
+        "relative path bytes",
+        "lstat object type and permission bits",
+        "SHA-256 over raw bytes",
+        "raw readlink target bytes",
+        "keyed digest of the local bytes",
+        "secret-bearing regular-file row",
+        "operator-approved encrypted custody location",
+        "owner's lock/quiescence",
+        "temporary access-controlled snapshot",
+        "Delete it after the final successful manifest comparison",
+        "subject to the secret/privacy/custody export restrictions above",
+        "any round-owned artifact whose classification forbids export",
+        "round-start HEAD",
+        "current HEAD",
+        "git diff --cached --quiet",
+        "git diff --quiet",
+    ):
+        assert primitive in goal
+
+    with tempfile.TemporaryDirectory(prefix="mnemo-goalex-clean-") as tmp:
+        repo = Path(tmp)
+
+        def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[bytes]:
+            return subprocess.run(
+                ["git", *args], cwd=repo, check=check, capture_output=True
+            )
+
+        def ignored_manifest(root: Path) -> tuple[tuple[bytes, int, int, bytes], ...]:
+            rows: list[tuple[bytes, int, int, bytes]] = []
+            pending = [root]
+            while pending:
+                path = pending.pop()
+                metadata = path.lstat()
+                relative = os.fsencode(str(path.relative_to(repo)))
+                object_type = stat.S_IFMT(metadata.st_mode)
+                permissions = stat.S_IMODE(metadata.st_mode)
+                if stat.S_ISREG(metadata.st_mode):
+                    identity = hashlib.sha256(path.read_bytes()).digest()
+                elif stat.S_ISLNK(metadata.st_mode):
+                    identity = os.readlink(os.fsencode(path))
+                else:
+                    identity = b""
+                rows.append((relative, object_type, permissions, identity))
+                if stat.S_ISDIR(metadata.st_mode):
+                    pending.extend(path.iterdir())
+            return tuple(sorted(rows))
+
+        git("init", "-q")
+        git("config", "user.email", "test@example.invalid")
+        git("config", "user.name", "Test")
+        (repo / ".gitignore").write_text("ignored/\n", encoding="utf-8")
+        tracked = repo / "tracked.txt"
+        tracked.write_bytes(b"A\n")
+        git("add", ".gitignore", "tracked.txt")
+        git("commit", "-qm", "fixture")
+
+        ignored = repo / "ignored"
+        nested = ignored / "nested"
+        nested.mkdir(parents=True)
+        binary = ignored / "binary.dat"
+        binary.write_bytes(b"alpha\x00omega")
+        binary.chmod(0o640)
+        child = nested / "child.dat"
+        child.write_bytes(b"child")
+        regular = ignored / "object"
+        regular.write_bytes(b"regular")
+        baseline = ignored_manifest(ignored)
+
+        binary.write_bytes(b"changed\x00omega")
+        assert ignored_manifest(ignored) != baseline
+        binary.write_bytes(b"alpha\x00omega")
+
+        binary.chmod(0o600)
+        assert ignored_manifest(ignored) != baseline
+        binary.chmod(0o640)
+
+        nested_mode = stat.S_IMODE(nested.stat().st_mode)
+        nested.chmod(nested_mode ^ stat.S_IXOTH)
+        assert ignored_manifest(ignored) != baseline
+        nested.chmod(nested_mode)
+        assert ignored_manifest(ignored) == baseline
+
+        regular.unlink()
+        regular.symlink_to("target-a")
+        assert ignored_manifest(ignored) != baseline
+        symlink_manifest = ignored_manifest(ignored)
+        regular.unlink()
+        regular.symlink_to("target-b")
+        assert ignored_manifest(ignored) != symlink_manifest
+        regular.unlink()
+        regular.write_bytes(b"regular")
+
+        child.write_bytes(b"nested-change")
+        assert ignored_manifest(ignored) != baseline
+        child.write_bytes(b"child")
+        assert ignored_manifest(ignored) == baseline
+
+        tracked.write_bytes(b"B\n")
+        git("add", "tracked.txt")
+        tracked.write_bytes(b"C\n")
+        git("restore", "--source=HEAD", "--staged", "--worktree", "--", "tracked.txt")
+
+        assert git("show", ":tracked.txt").stdout == b"A\n"
+        assert tracked.read_bytes() == b"A\n"
+
+        tracked.write_bytes(b"D\n")
+        git("add", "tracked.txt")
+        git("commit", "-qm", "valid round commit")
+        tracked.write_bytes(b"E\n")
+        git("add", "tracked.txt")
+        tracked.write_bytes(b"F\n")
+        git("restore", "--source=HEAD", "--staged", "--worktree", "--", "tracked.txt")
+
+        assert git("show", ":tracked.txt").stdout == b"D\n"
+        assert tracked.read_bytes() == b"D\n"
+        assert git("diff", "--cached", "--quiet").returncode == 0
+        assert git("diff", "--quiet").returncode == 0
+        assert ignored_manifest(ignored) == baseline
+        assert git("status", "--porcelain", "--untracked-files=all").stdout == b""
+        assert git(
+            "status", "--porcelain", "--untracked-files=all", "--ignored"
+        ).stdout == (
+            b"!! ignored/binary.dat\n!! ignored/nested/child.dat\n!! ignored/object\n"
+        )
