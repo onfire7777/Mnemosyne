@@ -82,7 +82,11 @@ touched since round 14 without being delivered through a PR: 23 new
 `docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
 Landing all of them is deferred to the next round's GoalEx-owner PR so
 lifecycle and public-harness leases stay unmixed; the plan-doc backlog is
-disclosed here rather than left to accumulate silently. The first actual
+disclosed here rather than left to accumulate silently. Fifteen of those
+records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked task boxes:
+those boxes record the plan as written at the time and are not a delivery
+signal, because each round's merged receipts are recorded here and in the
+lease map rather than back-filled into the round record. The first actual
 scheduled-cadence receipt and every official/upstream benchmark run remain
 open.
 

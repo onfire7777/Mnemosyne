@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, and the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, at main@061c2e1c; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-08-01T03:05:00Z"
+last_updated: "2026-08-01T03:40:00Z"
 last_activity: 2026-08-01
 progress:
   total_phases: 7
@@ -66,7 +66,11 @@ files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
 edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
 `main`). Landing all of them is deferred to the next round's GoalEx-owner
 PR so the lifecycle and public-harness leases stay unmixed; the plan-doc
-backlog is disclosed here rather than left to accumulate silently. The
+backlog is disclosed here rather than left to accumulate silently. Fifteen
+of those records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked
+task boxes: those boxes record the plan as written at the time and are not a
+delivery signal, because each round's merged receipts are recorded in this
+file and in the lease map rather than back-filled into the round record. The
 first actual scheduled-cadence receipt is still open: the
 workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
 2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
