@@ -201,20 +201,34 @@ none dismissed:
 
 ### Task 5: Reconcile the controller branch and record the residue
 
-- [ ] In the controller worktree, `git fetch --prune origin` and fast-forward
+- [x] In the controller worktree, `git fetch --prune origin` and fast-forward
       local `main` to `origin/main`; prove `git rev-parse main` equals
       `git rev-parse origin/main` and that the new merge commit is an ancestor
       of `main`. Merge `main` into `codex/goalex-whole-memory-pilot` normally.
-- [ ] Recompute the lease map from the new `main`: set `Baseline:` to the new
+- [x] Recompute the lease map from the new `main`: set `Baseline:` to the new
       merge SHA, flip `T4` to `MERGED` with its receipt block (PR number,
       exact-head CI id, post-merge CI id), and record that this recomputation
       is the accepted one-block standing residue which admits **no** successor
       node and **no** source node. Update `GOAL.md` and `.planning/STATE.md` to
       the matching post-merge text (including the new SHA in the GOAL.md
       verification block's `merge-base --is-ancestor` assertions).
-- [ ] Commit that reconciliation on the controller branch and confirm
+- [x] Commit that reconciliation on the controller branch and confirm
       `git status --porcelain` is empty and the GOAL.md verification block
       exits 0. Report in the round summary: the PR number, merge SHA,
       exact-head CI id, post-merge CI id, and the explicit statement that the
       map admits no source node at the new baseline, so the next source
       admission waits on an external gate opening.
+
+**Task 5 receipts.** Local `main` fast-forwarded to `origin/main` at
+`39cfa67aa7692bf47d5dde5842af3d8ec0736bb0` (PR #92's merge commit, verified an
+ancestor of `main`), then merged into `codex/goalex-whole-memory-pilot`. The
+four conflicting lifecycle/record files were resolved by taking `main`'s
+delivered text as the base and applying the post-merge recomputation on top; the
+round-39 record kept the controller copy, which already carried the Task 4
+receipts. The lease map is now at `Baseline: main@39cfa67a` with `T4` as
+`MERGED` and PR #92's receipt block (exact-head CI `30693874030`, post-merge CI
+`30694818231`), the current wave is closed, and the map admits **no successor
+node** and **no source node** at this baseline — the next source admission waits
+on an external gate opening (`P13-C`, first eligible 2026-08-03, is an external
+event, not an admissible writer). `GOAL.md`'s verification block now asserts
+exact equality against `39cfa67a` and adds the matching ancestry assertion.

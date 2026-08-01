@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, and the stranded GoalEx lifecycle backlog through PR #91, at main@e157e035; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, the stranded GoalEx lifecycle backlog through PR #91, and its receipt-level lifecycle residue through PR #92, at main@39cfa67a; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
 last_updated: "2026-08-01T06:40:00Z"
 last_activity: 2026-08-01
 progress:
@@ -59,7 +59,7 @@ status, left `eval/public/registry.json`, the fixtures, and all adapter and
 scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
 `pbpp_headline_eligible:false`. PR #91 then delivered the stranded GoalEx
 lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`, post-merge
-CI `30687385118`), which is the current canonical baseline. It landed exactly:
+CI `30687385118`). It landed exactly:
 `GOAL.md`,
 this file, and the lease map (recording PR #90's post-merge receipts on top of
 earlier lifecycle content that had itself never been delivered, including this
@@ -73,18 +73,23 @@ text was already on `main`). PR #91 is documentation only: it moved no package
 status and changed no benchmark, measurement, admission state, or publication
 claim. It was the GoalEx-owner delivery of lease-map
 node `T3`, now `MERGED`, and it kept the lifecycle and public-harness leases
-unmixed, and no source node remains admitted in the wave. The lease map has since been
+unmixed, and no source node remains admitted in the wave. The lease map was
 recomputed from the resulting `main@e157e035` and carries PR #91's own receipt
-block — the residue that could not exist inside the commit it describes — but
-that recomputation is branch-resident, so the `GOAL.md` Authority carve-out is
-reduced to receipt scope rather than closed: `main@e157e035` still holds the
-pre-merge map (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`) and the
-pre-merge "this PR" text in this file and `GOAL.md`, until the admitted
-documentation-only lease-map node `T4` — the sole admitted writer from this
-baseline — delivers this receipt-level update. `T4` will regenerate a one-block
+block — the residue that could not exist inside the commit it describes — and
+that recomputation was branch-resident until PR #92 delivered it as
+documentation-only lease-map node `T4` at `main@39cfa67a` (exact-head CI
+`30693874030`, post-merge CI `30694818231`), which is the current canonical
+baseline. PR #92 is documentation only, admitted no source node, and moved no
+package status or publication claim. The `GOAL.md` Authority carve-out is
+therefore discharged down to the accepted one-block residue rather than closed:
+`main@39cfa67a` still holds the pre-merge map (`Baseline: main@e157e035`, `T4`
+as `DELIVERING`) and the pre-merge "this PR" text in this file and `GOAL.md`,
+and the lease map has now been recomputed from that `main` with `T4` as
+`MERGED` and PR #92's receipt block. `T4` thereby regenerates a one-block
 residue of its own for the same structural reason, since no commit can describe
 its own merge; that residual lag is an accepted standing condition rather than
-an open work item, and it admits no successor node after `T4`. The plan-doc
+an open work item, and it admits no successor node and no source node after
+`T4`. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
@@ -332,11 +337,11 @@ Latest checkpoint (2026-08-01): see the **Decisions** entry under **Accumulated
 Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
-the PR #87, PR #88, PR #89, PR #90, and PR #91 merge receipts. The current
-canonical baseline is `main@e157e035` (PR #91, exact-head CI `30686224929`,
-post-merge CI `30687385118`). PR #90 is development-source documentation and
-tests only and PR #91 is lifecycle documentation only; neither moved a package
-status. Evidence boundaries are unchanged.
+the PR #87, PR #88, PR #89, PR #90, PR #91, and PR #92 merge receipts. The
+current canonical baseline is `main@39cfa67a` (PR #92, exact-head CI
+`30693874030`, post-merge CI `30694818231`). PR #90 is development-source
+documentation and tests only and PRs #91-#92 are lifecycle documentation only;
+none moved a package status. Evidence boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
