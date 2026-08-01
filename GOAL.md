@@ -72,11 +72,15 @@ pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
 baseline. PRs #87-#90 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
-`publishable:false` / `pbpp_headline_eligible:false`. The controller-branch
-copies of `GOAL.md`, `.planning/STATE.md`, and the lease map that record PR
-#90's post-merge receipts are not yet on `main`; landing them is deferred to
-the next round's GoalEx-owner PR so lifecycle and public-harness leases stay
-unmixed. The first actual scheduled-cadence receipt and every official/upstream
+`publishable:false` / `pbpp_headline_eligible:false`. The controller branch is
+merged to `main@061c2e1c`, so its remaining undelivered delta is exactly:
+`GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
+post-merge receipts), the pilots-plan PR #90 checkpoint, and 25
+`docs/plans/goalex-r14..r37*.md` round records that have accumulated since
+round 14 without ever being delivered through a PR. Landing all of them is
+deferred to the next round's GoalEx-owner PR so lifecycle and public-harness
+leases stay unmixed; the plan-doc backlog is disclosed here rather than left
+to accumulate silently. The first actual scheduled-cadence receipt and every official/upstream
 benchmark run remain open.
 
 Result-v2 remains blocked by the protected signed-publication lease. Local OCI

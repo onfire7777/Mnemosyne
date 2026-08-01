@@ -70,6 +70,16 @@ are **not on `main`**; landing them is deferred to the next round's
 GoalEx-owner PR so the GoalEx lifecycle lease and the public-harness lease
 stay unmixed.
 
+The round scoped itself to the non-plan, non-lifecycle stranded files, so the
+plan-doc backlog was excluded rather than cleared. After merging
+`main@061c2e1c` into the controller branch, the remaining undelivered delta is
+exactly those three lifecycle files, the pilots-plan PR #90 checkpoint, and 25
+`docs/plans/goalex-r14..r37*.md` round records accumulated since round 14 that
+have never been delivered through a PR. They carry the same next-round
+GoalEx-owner PR; this note exists so the backlog is disclosed with an owner
+instead of accumulating silently, which is the stranding pattern this round was
+opened to end.
+
 ## Remaining open gates
 
 - **P13-C** — first real scheduled-cadence receipt. The workflow cron is
