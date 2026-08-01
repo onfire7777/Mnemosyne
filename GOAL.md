@@ -94,15 +94,21 @@ merged to `main@061c2e1c`, so its remaining undelivered delta is exactly:
 `GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
 post-merge receipts on top of earlier lifecycle content that was itself never
 delivered, including the PR #81-#84 whole-memory Decisions entry in
-`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and 25 round records
+`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and 26 round records
 touched since round 14 without being delivered through a PR: 23 new
-`docs/plans/goalex-r15..r37*.md` files, the new
-`docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
+`docs/plans/goalex-r15..r38*.md` files (including this round's own
+`goalex-r38-*.md` record), the two new
+`docs/plans/completed/goalex-r36-*.md` and
+`docs/plans/completed/goalex-r37-*.md` files, and an undelivered edit to
 `docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
-Landing all of them is deferred to the next round's GoalEx-owner PR so
-lifecycle and public-harness leases stay unmixed; that delivery is admitted in
-the lease map as node `T3`, the only admitted node in its current wave, so it
-is scheduled rather than left implicit. The plan-doc backlog is
+**This PR lands all of them** as the GoalEx-owner delivery, keeping the
+lifecycle and public-harness leases unmixed; it is carried by lease-map node
+`T3`, now `DELIVERING` and the only node in its current wave. After this merge
+the wave holds no admitted node, the lease map must be recomputed from the
+resulting `main` before any further admission, and the only undelivered residue
+is this PR's own receipt block (PR number, exact-head CI run id, merge SHA,
+post-merge CI run id), which cannot exist inside the commit it describes. The
+plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
 paragraph and adds a new twelve-line `Gap-disclosure delivery:` receipt in the
@@ -111,8 +117,8 @@ M12/M13 checkpoint section: PR #90 shipped
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
 states that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
-commit falsified. Until the deferred PR lands, read that sentence on `main`
-as known-stale; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
+commit falsified. That sentence was known-stale on `main` from PR #90 until
+this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
 records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked task boxes:
 those boxes record the plan as written at the time and are not a delivery
 signal, because each round's merged receipts are recorded here and in the
