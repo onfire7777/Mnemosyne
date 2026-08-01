@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-07-31
-Baseline: `main@a8e9444ca54633707e88263ce3e0307c5731fc9d`
+Baseline: `main@061c2e1c13cbf1fd5324361a6ff61f47cd2a6534`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -28,6 +28,21 @@ The following packages are complete source history, not runnable work:
 - PR #89: this map and `.planning/STATE.md` recomputed after PR #88
   (`main@a8e9444c`, post-merge CI `30672194635`). Documentation only: it moved
   no package status, so the rows below are unchanged by it.
+- PR #90: the previously stranded M12/M13 development gap disclosures in
+  `eval/public/README.md`, their two pinning test suites, a cert-rotator
+  lock-timeout flake fix, and the pilots-plan delivery checkpoints
+  (`main@061c2e1c`, exact-head CI `30679262270`, post-merge CI `30680201900`).
+  Development-source documentation and tests only: it moved no package status,
+  changed no benchmark, measurement, admission state, or publication claim, and
+  left `eval/public/registry.json`, the fixtures, and all adapter/scoring code
+  untouched. M12/M13 remain `PROPOSED` / `publishable:false` /
+  `pbpp_headline_eligible:false`, so the rows below are unchanged by it.
+
+This map is recomputed from the new baseline `main@061c2e1c`. The three
+controller-branch lifecycle files (`GOAL.md`, `.planning/STATE.md`, and this
+map) that record PR #90's post-merge receipts are **not yet on `main`**:
+landing them is deferred to the next round's GoalEx-owner PR so the GoalEx
+lifecycle lease and the public-harness lease stay unmixed.
 
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
@@ -85,8 +100,11 @@ Current delivery wave (complete; no admitted source node)
       -> T2 one deduplicated CBM/Gbrain refresh [done 2026-07-30]
   PR #88 documentation/contract-test hardening merged at main@4a891042
   and admitted no new implementation package.
-  PR #89 recomputed this map and STATE at main@a8e9444c (current baseline)
+  PR #89 recomputed this map and STATE at main@a8e9444c
   and admitted no new implementation package.
+  PR #90 landed the stranded M12/M13 development gap disclosures, their
+  pinning tests, and a cert-rotator lock-timeout flake fix at main@061c2e1c
+  (current baseline) and admitted no new implementation package.
 
 Independent external gates (do not block T0-T2)
   P12-E operator measurement

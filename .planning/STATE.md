@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, and the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, at main@a8e9444c; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-07-31T23:11:27Z"
-last_activity: 2026-07-31
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, and the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, at main@061c2e1c; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+last_updated: "2026-08-01T03:05:00Z"
+last_activity: 2026-08-01
 progress:
   total_phases: 7
   completed_phases: 2
@@ -47,7 +47,20 @@ canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
 hardened workflow contract tests at `main@4a891042` with post-merge CI
 `30659705054`. PR #89 then merged the post-PR-#88 recomputation of the
 dependency/write-lease map and this file at `main@a8e9444c` (post-merge CI
-`30672194635`); it is documentation only and moved no package status. The
+`30672194635`); it is documentation only and moved no package status. PR #90
+then landed the previously stranded M12/M13 development gap disclosures in
+`eval/public/README.md`, their two pinning suites
+(`tests/test_public_pm_bench_triggerbench.py`,
+`tests/test_public_working_memory_action_probe.py`), a cert-rotator
+lock-timeout flake fix, and the pilots-plan delivery checkpoints at
+`main@061c2e1c` (exact-head CI `30679262270`, post-merge CI `30680201900`).
+PR #90 is development-source documentation and tests only: it moved no package
+status, left `eval/public/registry.json`, the fixtures, and all adapter and
+scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
+`pbpp_headline_eligible:false`. The controller-branch copies of `GOAL.md`,
+this file, and the lease map that record PR #90's post-merge receipts are not
+yet on `main`; landing them is deferred to the next round's GoalEx-owner PR so
+the lifecycle and public-harness leases stay unmixed. The
 first actual scheduled-cadence receipt is still open: the
 workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
 2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
@@ -277,12 +290,14 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 Current continuation: see **Latest checkpoint** below.
 
-Latest checkpoint (2026-07-31): see the **Decisions** entry under **Accumulated
+Latest checkpoint (2026-08-01): see the **Decisions** entry under **Accumulated
 Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
-the PR #87, PR #88, and PR #89 merge receipts. The current canonical baseline
-is `main@a8e9444c` (PR #89). Evidence boundaries are unchanged.
+the PR #87, PR #88, PR #89, and PR #90 merge receipts. The current canonical
+baseline is `main@061c2e1c` (PR #90, post-merge CI `30680201900`). PR #90 is
+development-source documentation and tests only and moved no package status.
+Evidence boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
