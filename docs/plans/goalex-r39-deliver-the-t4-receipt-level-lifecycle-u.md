@@ -142,12 +142,12 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
       is still empty.
 
 ### Task 3: Gate the lane locally
-- [ ] In the lane worktree, run `ruff check .` and
+- [x] In the lane worktree, run `ruff check .` and
       `python -m pytest tests/test_planning_traceability.py -q` with the repo
       venv interpreter. Grep `tests/` for the changed filenames and run any
       other module that pins their text. Fix real failures at the root cause;
       never weaken a test to pass.
-- [ ] Commit the lane with a clear message (documentation-only receipt-level
+- [x] Commit the lane with a clear message (documentation-only receipt-level
       lifecycle update discharging the `T3` residue, carried by lease-map node
       `T4`). Do not force-push and do not bypass hooks.
 
