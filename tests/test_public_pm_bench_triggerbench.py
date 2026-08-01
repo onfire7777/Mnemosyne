@@ -604,14 +604,20 @@ def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
     assert all(len(case["steps"]) == 1 for case in trigger_cases)
 
     registry = load_registry()
-    assert "baseline" not in registry["triggerbench-development"]
+    assert not [
+        key for key in registry["triggerbench-development"] if "baseline" in key
+    ]
 
+    unwrapped = " ".join(readme.split())
     assert (
-        "`pm-bench-development` has one seed\n(`7`), one case, five tasks, "
-        "and seven steps; `triggerbench-development` has\none seed (`7`), "
-        "twenty one-step cases, and no calibrated baseline." in readme
+        "`pm-bench-development` has one seed (`7`), one case, five tasks, "
+        "and seven steps; `triggerbench-development` has one seed (`7`), "
+        "twenty one-step cases, and no calibrated baseline." in unwrapped
     )
-    assert "neither suite measures lateness or cost" in readme
+    assert (
+        "Lateness is scored only as a binary `late` safety counter" in unwrapped
+    )
+    assert "neither suite measures lateness magnitude or cost" in unwrapped
 
 
 def test_committed_pm_bench_and_triggerbench_fixtures_freeze_shape_seed_and_custody() -> None:

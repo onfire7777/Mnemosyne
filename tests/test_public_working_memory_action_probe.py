@@ -121,9 +121,26 @@ def fixture() -> dict[str, Any]:
 
 
 def test_public_readme_records_development_evidence_gaps() -> None:
-    readme = (
-        Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md"
-    ).read_text()
+    """Pin the M13 gap disclosure to the fixture it describes.
+
+    The README paragraph is the only place the M13 evidence limits are stated
+    for a reader, so it must neither be deleted nor drift away from the
+    committed fixture it summarizes.
+    """
+    readme = " ".join(
+        (Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md")
+        .read_text()
+        .split()
+    )
+    fixture = json.loads(_COMMITTED_FIXTURE_PATH.read_text())
+
+    cases = fixture["cases"]
+    assert isinstance(cases, list)
+    assert fixture["seed"] == 94125
+    assert len(cases) == len(ITEM_CATEGORIES) == 6
+    assert [case["category"] for case in cases] == list(ITEM_CATEGORIES)
+    assert not [key for key in fixture["operating_point"] if "capacity" in key]
+
     assert "one seed (`94125`) and six cases" in readme
     assert "no capacity parameter" in readme
     assert "no promotion-versus-no-promotion control" in readme
