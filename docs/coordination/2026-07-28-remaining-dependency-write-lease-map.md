@@ -46,11 +46,12 @@ is **not yet on `main`** and is exactly: the three lifecycle files (`GOAL.md`,
 `.planning/STATE.md`, and this map) recording PR #90's post-merge receipts on
 top of earlier lifecycle content that was itself never delivered, including the
 PR #81-#84 whole-memory Decisions entry in `.planning/STATE.md`; the
-pilots-plan PR #90 checkpoint; and 25 round records touched since round 14
-without being delivered through a PR: 23 new `docs/plans/goalex-r15..r37*.md`
-files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
-edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
-`main`). **This PR is that delivery.** It is carried by node `T3` below, now
+pilots-plan PR #90 checkpoint; and 26 round records touched since round 14
+without being delivered through a PR: 23 new `docs/plans/goalex-r15..r38*.md`
+files (including this round's own `goalex-r38-*.md` record), the two new
+`docs/plans/completed/goalex-r36-*.md` and `docs/plans/completed/goalex-r37-*.md`
+files, and an undelivered edit to `docs/plans/goalex-r14-*.md` (whose original
+text is already on `main`). **This PR is that delivery.** It is carried by node `T3` below, now
 `DELIVERING`, the only node in the current wave; the GoalEx lifecycle lease and
 the public-harness lease stay unmixed because this PR touches nothing outside
 the GoalEx lifecycle surfaces. This map must be recomputed from the `main` that
@@ -65,8 +66,8 @@ That pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
 states that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
-commit falsified. Until the deferred PR lands, that sentence on `main` is
-known-stale; Tasks 7 and 8 are closed on `main` by PR #90.
+commit falsified. That sentence was known-stale on `main` from PR #90 until
+this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90.
 Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still carry
 unchecked task boxes: those boxes record the plan as written at the time and
 are not a delivery signal, because each round's merged receipts are recorded in
@@ -85,7 +86,7 @@ repository.
 
 | Owner | Exclusive surfaces | Admission rule |
 |---|---|---|
-| GoalEx lifecycle/integration owner | `GOAL.md`; `.planning/`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md` | One writer. Update only from verified merged reality. |
+| GoalEx lifecycle/integration owner | `GOAL.md`; `.planning/`; `docs/plans/`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md` | One writer. Update only from verified merged reality. |
 | Public-harness integration owner | `eval/public/runner.py`; `eval/public/scoring.py`; `eval/public/bundle.py`; `eval/public/registry.json`; `eval/public/README.md`; `eval/public/adapters/whole_memory_reference.py`; `eval/public/schema/wmbs-0.1-draft.schema.json`; `tests/test_public_whole_memory_reference.py`; `src/mnemosyne/cli.py`; `eval/harness/cli_driver.py` | One writer; serialize any package touching one of these paths. |
 | Result-v2 integration owner | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; `tests/test_leaderboard_readiness.py` | No admission until the protected signed-publication paths are released on current main. |
 | CI integration owner | `.github/workflows/`; `tests/test_public_regression_workflow.py` | One writer; one exact-head authoritative full suite. |
@@ -102,7 +103,7 @@ exact lease, shared owner/integration edge, and external gate.
 | ID | Class | Package and prerequisites / consumes | Produces | Exact write lease and owner | Integration dependency / external gate |
 |---|---|---|---|---|---|
 | T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@2ba4ed80` with post-merge CI `30566984814` |
-| T3 | DELIVERING | GoalEx lifecycle delivery of the undelivered delta enumerated above; consumes verified canonical `main@061c2e1c` and PR #90's post-merge receipts. **This PR is the delivery**, opened from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 25 round records delivered on `main`, closing the `GOAL.md` Authority carve-out except for the receipt-only residue | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Documentation only; disjoint from every public-harness, CI, and result-v2 lease. Must land before any further admission, so no other source node may be admitted in the same wave. This map must be recomputed from the resulting `main` before the next admission; the sole residual undelivered item after the merge is the receipt block (PR number, exact-head CI id, merge SHA, post-merge CI id), which cannot exist inside the commit it describes |
+| T3 | DELIVERING | GoalEx lifecycle delivery of the undelivered delta enumerated above; consumes verified canonical `main@061c2e1c` and PR #90's post-merge receipts. **This PR is the delivery**, opened from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, closing the `GOAL.md` Authority carve-out except for the receipt-only residue | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Documentation only; disjoint from every public-harness, CI, and result-v2 lease. Must land before any further admission, so no other source node may be admitted in the same wave. This map must be recomputed from the resulting `main` before the next admission; the sole residual undelivered item after the merge is the receipt block (PR number, exact-head CI id, merge SHA, post-merge CI id), which cannot exist inside the commit it describes |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |

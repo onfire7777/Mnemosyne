@@ -62,11 +62,12 @@ scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
 this file, and the lease map (recording PR #90's post-merge receipts on top of
 earlier lifecycle content that was itself never delivered, including this
 file's PR #81-#84 whole-memory Decisions entry), the
-pilots-plan PR #90 checkpoint, and 25 round records touched since round 14
-without being delivered through a PR: 23 new `docs/plans/goalex-r15..r37*.md`
-files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
-edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
-`main`). This PR lands all of them as the GoalEx-owner delivery of lease-map
+pilots-plan PR #90 checkpoint, and 26 round records touched since round 14
+without being delivered through a PR: 23 new `docs/plans/goalex-r15..r38*.md`
+files (including this round's own `goalex-r38-*.md` record), the two new
+`docs/plans/completed/goalex-r36-*.md` and `docs/plans/completed/goalex-r37-*.md`
+files, and an undelivered edit to `docs/plans/goalex-r14-*.md` (whose original
+text is already on `main`). This PR lands all of them as the GoalEx-owner delivery of lease-map
 node `T3`, keeping the lifecycle and public-harness leases unmixed; after it
 merges the only undelivered residue is its own receipt block (PR number,
 exact-head CI run id, merge SHA, post-merge CI run id), which cannot exist
