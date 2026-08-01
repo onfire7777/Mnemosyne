@@ -2,7 +2,7 @@
 
 ## Overview
 
-Work only in `/Users/admin/.codex/worktrees/9697/Mnemosyne` on `codex/goalex-whole-memory-pilot`. PR #79 already merged the closed ABI at `main@a95fe4d291093253f8ce49adff32ba875a35e884`. Rounds 12–13 and subsequent review commits produced the bounded post-merge remediation now ending at `eb1e15be6b35b41f64b6b9b0b76663218b5313fb`.
+Work only in `/Users/admin/.codex/worktrees/9697/Mnemosyne` on `codex/goalex-whole-memory-pilot`. PR #79 already merged the closed ABI at `main@a95fe4d291093253f8ce49adff32ba875a35e884`. Rounds 12–13 produced preliminary remediation head `eb1e15be6b35b41f64b6b9b0b76663218b5313fb`; normal Task 2 review fixes advanced the final remediation head to `0d42f9436397a04e12ceaa3bdbd60d925e2640e9`.
 
 Do not start result-v2, execute benchmark cells, alter result-v1/leaderboard behavior, consume external worktrees, add dependencies, or rewrite branch history. At plan creation, the current checkout was clean and its remote branch pointed to the same head, but live GitHub state could not be queried because `api.github.com` was unreachable. Reconcile the PR and exact-head gates live, address only confirmed remediation findings, then merge normally and prove post-merge `main`. No independent post-round findings were supplied.
 
@@ -40,9 +40,31 @@ unchanged result-v1 boundary, and the explicit result-v2 deferral.
 - [x] Inspect every current review, security, CI, and unresolved-thread finding. Reproduce confirmed findings before making the smallest root-cause fix with a focused regression test; dismiss false positives only with code-and-test evidence.
 - [x] Push any fixes normally, capture the new immutable head SHA, and restart the gate check. Do not merge until all required checks have completed successfully for that exact SHA and review/thread/mergeability gates are clear.
 
+Task 2 receipt: two CodeRabbit findings in this plan were reproduced and fixed
+without widening the twelve-path lease. Diff hygiene, lease/risky-file checks,
+the changed-file secret scan, Ruff, focused adapter/runtime-lock tests, and the
+locked full suite were exercised; local runtime-lock timeouts were traced to
+host saturation while exact-head CI passed the same suite. The fixes were
+pushed normally as final remediation head
+`0d42f9436397a04e12ceaa3bdbd60d925e2640e9`. All required CI and review checks
+then passed on that head, PR #80 was mergeable and clean, and zero review
+threads remained unresolved.
+
 ### Task 3: Merge and prove post-merge state
 
-- [ ] Merge the cleared PR normally without bypassing protections, then identify the resulting merge SHA and verify the remediation head is its ancestor.
-- [ ] Safely fast-forward the clean canonical `/Users/admin/Mnemosyne` checkout, proving local `main` equals clean `origin/main`. Do not touch the benchmark-spec or signed-publication worktrees.
-- [ ] Require the post-merge CI run on the exact merge SHA to finish green. Refresh CBM once and record one deduplicated, source-grounded Gbrain milestone.
-- [ ] Reassess the authoritative pilot plan only after this proof. If no new blocker or lease exists, leave result-v2 compatibility and ledger support as the next dependency-ready increment without implementing it in this round.
+- [x] Merge the cleared PR normally without bypassing protections, then identify the resulting merge SHA and verify the remediation head is its ancestor.
+- [x] Safely fast-forward the clean canonical `/Users/admin/Mnemosyne` checkout, proving local `main` equals clean `origin/main`. Do not touch the benchmark-spec or signed-publication worktrees.
+- [x] Require the post-merge CI run on the exact merge SHA to finish green. Refresh CBM once and record one deduplicated, source-grounded Gbrain milestone.
+- [x] Reassess the authoritative pilot plan only after this proof. If no new blocker or lease exists, leave result-v2 compatibility and ledger support as the next dependency-ready increment without implementing it in this round.
+
+Task 3 receipt: PR #80 merged normally as
+`28805ccf54f99f098a5abc23fe6f1155400d0f22`; remediation head
+`0d42f9436397a04e12ceaa3bdbd60d925e2640e9` is its ancestor. Canonical
+`/Users/admin/Mnemosyne` was cleanly fast-forwarded so local `main` equals
+`origin/main` at the merge SHA, without touching the benchmark-spec or
+signed-publication worktrees. Exact-merge CI run `30484986865` completed green
+across all required jobs. CBM was refreshed once after proof, and Gbrain
+milestone `milestones/whole-memory-abi-remediation-merged` was recorded after a
+deduplication search. Reassessment found no new blocker or overlapping lease;
+result-v2 compatibility fixtures and local ledger support remain the next
+dependency-ready increment, and neither was implemented in this round.
