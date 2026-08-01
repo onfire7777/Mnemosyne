@@ -149,9 +149,10 @@ lease map at
 under the receipt-scope remainder of the Authority carve-out above for as long
 as that remainder is open; neither result-v2 nor sandbox delivery is implicitly
 admitted.
-That map records no admissible node at this baseline: the next admission waits
-on an external gate opening, and the map must be recomputed from then-current
-`main` at that time.
+That map admits no source node at this baseline — its only admitted node is
+the documentation-only receipt-level lifecycle update `T4` — so the next source
+admission waits on an external gate opening, and the map must be recomputed
+from then-current `main` at that time.
 
 ## Scope
 

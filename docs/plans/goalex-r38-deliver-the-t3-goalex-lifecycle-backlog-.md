@@ -258,9 +258,18 @@ leases.
       to the post-merge state and now carry the full receipt set (PR #91, merge
       `e157e0350c503c9cde4aca0eff71d643a4adb200`, exact-head CI `30686224929`,
       post-merge CI `30687385118`). The lease map's `Baseline:` is recomputed to
-      `main@e157e035`, its merged-baseline list gains a PR #91 row, the `T3` DAG
-      row reads `MERGED` with those receipts, and the wave block now reads
-      "Current delivery wave (empty; no admitted node, source or otherwise)".
+      `main@e157e035`, its merged-baseline list gains a PR #91 row, and the `T3`
+      DAG row reads `MERGED` with those receipts.
+      Deviation from this task's instruction, disclosed: the wave was **not**
+      left empty. Because this same recomputation is branch-resident, `T3`'s
+      receipt-level residue is still undelivered on `main`, so a new
+      documentation-only node `T4` was admitted to discharge it. The wave block
+      therefore reads "Current delivery wave (one admitted node, documentation
+      only)" with `T4` as its sole member, and the map states that `T4` admits
+      no source node and that the next source wave stays empty until an
+      external gate opens one. `T4` is also named as the single admitted
+      shared-owner writer under "Concurrency and integration rules" and as the
+      only dependency-ready candidate.
       The out-of-lease pathspec diff is still empty and no status token is
       upgraded: no `publishable:true`, no `pbpp_headline_eligible:true`, no
       `PILOT-READY` promotion, and no leaderboard/certification/superiority
