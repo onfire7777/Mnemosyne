@@ -38,11 +38,15 @@ The following packages are complete source history, not runnable work:
   untouched. M12/M13 remain `PROPOSED` / `publishable:false` /
   `pbpp_headline_eligible:false`, so the rows below are unchanged by it.
 
-This map is recomputed from the new baseline `main@061c2e1c`. The three
-controller-branch lifecycle files (`GOAL.md`, `.planning/STATE.md`, and this
-map) that record PR #90's post-merge receipts are **not yet on `main`**:
-landing them is deferred to the next round's GoalEx-owner PR so the GoalEx
-lifecycle lease and the public-harness lease stay unmixed.
+This map is recomputed from the new baseline `main@061c2e1c`, and the
+controller branch is merged to that baseline. Its remaining undelivered delta
+is **not yet on `main`** and is exactly: the three lifecycle files (`GOAL.md`,
+`.planning/STATE.md`, and this map) recording PR #90's post-merge receipts, the
+pilots-plan PR #90 checkpoint, and 25 `docs/plans/goalex-r14..r37*.md` round
+records that have accumulated since round 14 without ever being delivered
+through a PR. Landing all of them is deferred to the next round's GoalEx-owner
+PR so the GoalEx lifecycle lease and the public-harness lease stay unmixed; the
+plan-doc backlog is disclosed here rather than left to accumulate silently.
 
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
