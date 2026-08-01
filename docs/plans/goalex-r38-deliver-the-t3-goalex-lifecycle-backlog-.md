@@ -190,22 +190,45 @@ leases.
       passes in the lane (6 passed).
 
 ### Task 3: Gate the lane locally, then open and merge the PR
-- [ ] Run `ruff check .` and `python -m pytest tests/test_planning_traceability.py -q`
+- [x] Run `ruff check .` and `python -m pytest tests/test_planning_traceability.py -q`
       in the lane. If other test modules pin the text of any changed file (grep
       `tests/` for the changed filenames), run those too. Fix real failures at
       the root cause; do not weaken a test to pass.
-- [ ] Commit with a documentation-scoped message (e.g.
+      Both green in the lane worktree
+      (`/Users/admin/.codex/worktrees/9697/lane-lifecycle-backlog`) using the
+      repo venv interpreter: `ruff check .` -> "All checks passed!";
+      `pytest tests/test_planning_traceability.py -q` -> 6 passed.
+      `grep -rlE 'GOAL\.md|STATE\.md|docs/plans|remaining-dependency-write-lease-map|whole-memory-reference-harness-pilots' tests/`
+      returns only `tests/test_planning_traceability.py`, so no other module
+      pins the changed filenames. No test was weakened.
+- [x] Commit with a documentation-scoped message (e.g.
       `docs(goalex): deliver the stranded lifecycle and round-record backlog`),
       push the lane branch normally, and open a PR against `main` whose body
       enumerates the delivered files, states the change is documentation-only,
       and states that it admits no new implementation package and changes no
       benchmark, measurement, admission state, or publication claim.
-- [ ] Watch exact-head CI to green with `gh pr checks <PR#> --watch`. Resolve
+      Committed as five documentation-scoped commits on
+      `codex/goalex-lifecycle-backlog-delivery`
+      (`a066e5e1` "docs(goalex): deliver the stranded lifecycle and round-record
+      backlog", then `ac7463d2`, `63570914`, `5867c45b`, and head `45cc6c0c`),
+      pushed normally (no force-push), and opened as PR #91
+      <https://github.com/onfire7777/Mnemosyne/pull/91> against `main`. The lane
+      diff versus `main` is 30 files / 1632 insertions / 25 deletions, and the
+      documentation-only pathspec diff is still empty.
+- [x] Watch exact-head CI to green with `gh pr checks <PR#> --watch`. Resolve
       any review thread or mergeability blocker on its merits; self-repair
       routine CI/transport failures. Record the exact-head run id.
-- [ ] Merge through the normal GitHub merge path once CI and review are clear.
+      Exact-head CI run id `30686224929` (workflow `CI`, event
+      `pull_request`, head `45cc6c0c`) concluded `success`. No review thread or
+      mergeability blocker was outstanding and no finding was dismissed.
+- [x] Merge through the normal GitHub merge path once CI and review are clear.
       Record the merge commit SHA and the post-merge `main` CI run id from
       `gh run list --branch main`; wait for it to pass.
+      Merged through the normal GitHub merge path at `2026-08-01T06:15:05Z`.
+      Merge commit `e157e0350c503c9cde4aca0eff71d643a4adb200`, which is now
+      `origin/main`. Post-merge `main` CI run id `30687385118` (head
+      `e157e035`) was watched to completion and concluded `success`. The lane
+      branch was deleted on the remote by the merge; no force-push was used.
 
 ### Task 4: Reconcile the controller branch and disclose the residue
 - [ ] In the controller worktree: `git fetch --prune origin`, fast-forward local
