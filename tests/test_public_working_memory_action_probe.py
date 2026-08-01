@@ -120,35 +120,6 @@ def fixture() -> dict[str, Any]:
     }
 
 
-def test_public_readme_records_development_evidence_gaps() -> None:
-    """Pin the M13 gap disclosure to the fixture it describes.
-
-    The README paragraph is the only place the M13 evidence limits are stated
-    for a reader, so it must neither be deleted nor drift away from the
-    committed fixture it summarizes.
-    """
-    readme = " ".join(
-        (Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md")
-        .read_text()
-        .split()
-    )
-    fixture = json.loads(_COMMITTED_FIXTURE_PATH.read_text())
-
-    cases = fixture["cases"]
-    assert isinstance(cases, list)
-    assert fixture["seed"] == 94125
-    assert len(cases) == len(ITEM_CATEGORIES) == 6
-    assert [case["category"] for case in cases] == list(ITEM_CATEGORIES)
-    assert not [key for key in fixture["operating_point"] if "capacity" in key]
-    # The promotion-control disclosure is otherwise prose-only: a control arm
-    # would have to surface somewhere in the fixture, so pin its absence.
-    assert "promotion" not in json.dumps(fixture)
-
-    assert "one seed (`94125`) and six cases" in readme
-    assert "no capacity parameter" in readme
-    assert "no promotion-versus-no-promotion control" in readme
-
-
 _COMMITTED_FIXTURE_PATH = (
     Path(__file__).resolve().parent.parent
     / "eval" / "public" / "fixtures" / "working-memory-action-development.json"
@@ -157,6 +128,37 @@ _COMMITTED_FIXTURE_PATH = (
 
 def committed_fixture() -> dict[str, Any]:
     return json.loads(_COMMITTED_FIXTURE_PATH.read_text())
+
+
+def test_public_readme_records_development_evidence_gaps() -> None:
+    """Pin the M13 gap disclosure to the fixture it describes.
+
+    The README paragraph is the only place the M13 evidence limits are stated
+    for a reader, so it must neither be deleted nor drift away from the
+    committed fixture it summarizes.  Fixture shape is frozen separately by
+    ``test_committed_fixture_freezes_honest_development_evidence_through_public_adapter``;
+    only the two disclosed gaps are re-pinned here.
+    """
+    readme = " ".join(
+        (Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md")
+        .read_text()
+        .split()
+    )
+    fixture = committed_fixture()
+
+    # "one seed and six cases": the disclosure names the whole evidence base.
+    assert fixture["seed"] == 94125
+    assert len(fixture["cases"]) == len(ITEM_CATEGORIES) == 6
+    # "no capacity parameter": the operating point is exactly the frozen pair,
+    # so no capacity knob under any name can hide in it.
+    assert fixture["operating_point"] == OPERATING_POINT
+    # "no promotion-versus-no-promotion control": a control arm would have to
+    # split the cases, so pin that every case is a single unlabelled arm.
+    assert not [key for case in fixture["cases"] for key in case if key in {"arm", "control", "condition"}]
+
+    assert "one seed (`94125`) and six cases" in readme
+    assert "no capacity parameter" in readme
+    assert "no promotion-versus-no-promotion control" in readme
 
 
 def test_probe_covers_categories_public_seam_and_score_recomputation() -> None:
