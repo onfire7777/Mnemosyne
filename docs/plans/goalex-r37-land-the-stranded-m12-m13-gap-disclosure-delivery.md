@@ -81,7 +81,11 @@ new `docs/plans/goalex-r15..r37*.md` files, the new
 They carry the same next-round
 GoalEx-owner PR; this note exists so the backlog is disclosed with an owner
 instead of accumulating silently, which is the stranding pattern this round was
-opened to end.
+opened to end. Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still
+carry unchecked task boxes: those boxes record the plan as written at the time
+and are not a delivery signal, because each round's merged receipts are
+recorded in `GOAL.md`, `.planning/STATE.md`, and the lease map rather than
+back-filled into the round record.
 
 ## Remaining open gates
 

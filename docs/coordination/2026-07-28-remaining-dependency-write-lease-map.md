@@ -49,6 +49,11 @@ edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
 `main`). Landing all of them is deferred to the next round's GoalEx-owner
 PR so the GoalEx lifecycle lease and the public-harness lease stay unmixed; the
 plan-doc backlog is disclosed here rather than left to accumulate silently.
+Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still carry
+unchecked task boxes: those boxes record the plan as written at the time and
+are not a delivery signal, because each round's merged receipts are recorded in
+this map and in `.planning/STATE.md` rather than back-filled into the round
+record.
 
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.

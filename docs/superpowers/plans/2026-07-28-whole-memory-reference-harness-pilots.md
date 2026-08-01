@@ -120,7 +120,7 @@ now admitted with its explicit authorized-facade lease amendment; PR #84 later
 delivered the dependent M15 development slice. Result-v2 remains protected,
 and sandbox enforcement remains quarantined.
 
-Gap-disclosure delivery: on 2026-07-31, PR #90 merged the M12 and M13
+Gap-disclosure delivery: on 2026-08-01, PR #90 merged the M12 and M13
 development gap-disclosure paragraphs in `eval/public/README.md` together with
 their pinning suites
 (`tests/test_public_pm_bench_triggerbench.py::test_public_readme_m12_gap_disclosure_matches_committed_fixtures`
