@@ -73,7 +73,9 @@ stay unmixed.
 The round scoped itself to the non-plan, non-lifecycle stranded files, so the
 plan-doc backlog was excluded rather than cleared. After merging
 `main@061c2e1c` into the controller branch, the remaining undelivered delta is
-exactly those three lifecycle files, the pilots-plan PR #90 checkpoint, and 25
+exactly those three lifecycle files (whose undelivered content predates this
+round — `.planning/STATE.md` still carries a never-delivered PR #81-#84
+whole-memory Decisions entry), the pilots-plan PR #90 checkpoint, and 25
 round records touched since round 14 without being delivered through a PR: 23
 new `docs/plans/goalex-r15..r37*.md` files, the new
 `docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
@@ -81,7 +83,16 @@ new `docs/plans/goalex-r15..r37*.md` files, the new
 They carry the same next-round
 GoalEx-owner PR; this note exists so the backlog is disclosed with an owner
 instead of accumulating silently, which is the stranding pattern this round was
-opened to end. Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still
+opened to end. The pilots-plan item in that backlog is a correction, not an
+addition, and is this round's own residue: PR #90 shipped
+`docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+as one of its five files but only appended the delivery checkpoint, leaving the
+earlier paragraph untouched. Canonical `main@061c2e1c` therefore still states
+that the M12/M13 gap-disclosure paragraphs and their pinning tests "are not on
+main and are still pending PR delivery" — a claim that same commit falsified.
+The corrected wording exists only on this controller branch. Until the deferred
+PR lands, that sentence on `main` is known-stale and must not be read as
+re-opening Tasks 7 and 8, which PR #90 closed on `main`. Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still
 carry unchecked task boxes: those boxes record the plan as written at the time
 and are not a delivery signal, because each round's merged receipts are
 recorded in `GOAL.md`, `.planning/STATE.md`, and the lease map rather than

@@ -41,14 +41,23 @@ The following packages are complete source history, not runnable work:
 This map is recomputed from the new baseline `main@061c2e1c`, and the
 controller branch is merged to that baseline. Its remaining undelivered delta
 is **not yet on `main`** and is exactly: the three lifecycle files (`GOAL.md`,
-`.planning/STATE.md`, and this map) recording PR #90's post-merge receipts, the
-pilots-plan PR #90 checkpoint, and 25 round records touched since round 14
+`.planning/STATE.md`, and this map) recording PR #90's post-merge receipts on
+top of earlier lifecycle content that was itself never delivered, including the
+PR #81-#84 whole-memory Decisions entry in `.planning/STATE.md`; the
+pilots-plan PR #90 checkpoint; and 25 round records touched since round 14
 without being delivered through a PR: 23 new `docs/plans/goalex-r15..r37*.md`
 files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
 edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
 `main`). Landing all of them is deferred to the next round's GoalEx-owner
 PR so the GoalEx lifecycle lease and the public-harness lease stay unmixed; the
 plan-doc backlog is disclosed here rather than left to accumulate silently.
+That pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
+`docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+without updating its earlier paragraph, so canonical `main@061c2e1c` still
+states that the M12/M13 gap-disclosure paragraphs and their pinning tests
+"are not on main and are still pending PR delivery" — a claim that same
+commit falsified. Until the deferred PR lands, that sentence on `main` is
+known-stale; Tasks 7 and 8 are closed on `main` by PR #90.
 Fifteen of those records (r17, r19-r21, r23-r31, r34, r35) still carry
 unchecked task boxes: those boxes record the plan as written at the time and
 are not a delivery signal, because each round's merged receipts are recorded in
