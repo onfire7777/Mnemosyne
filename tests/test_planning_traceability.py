@@ -32,6 +32,21 @@ TRACE_ROW = re.compile(
     r"\| ([^|]+) \| \[x\] Verified \|$"
 )
 V2_CAP_ROW = re.compile(r"^\| \[[ x]\] (CAP-\d{3}) \|")
+CANONICAL_CLAIM_PHRASE = "current canonical baseline"
+# The two phrasings the lifecycle prose uses for a canonical-baseline claim:
+# "...at `main@X` (...), which is the current canonical baseline" and
+# "The current canonical baseline is `main@X`".
+CANONICAL_CLAIMS = (
+    # Bind to the nearest preceding SHA: these sentences also cite historical
+    # merges, so the match must not cross another `main@` reference.
+    re.compile(
+        r"`main@([0-9a-f]{8})`(?:(?!main@)[^.])*?"
+        r"which is the current canonical baseline"
+    ),
+    re.compile(r"current canonical baseline is `main@([0-9a-f]{8})`"),
+)
+STATE_STOPPED_AT = re.compile(r'^stopped_at: "(.*)"$', re.MULTILINE)
+STATE_STOPPED_AT_CLAIM = re.compile(r"at `?main@([0-9a-f]{8})`?;")
 
 
 def _frontmatter_list(text: str, key: str) -> set[str]:
@@ -106,6 +121,12 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
     Each reconciliation round restates the same merge SHA by hand in three
     places, so a partial update silently leaves one authority pointing at a
     superseded baseline. This pins them together.
+
+    Presence of the new SHA is not enough: a partial update leaves the *stale*
+    claim behind, and a stale claim is still a claim. So each file must make
+    exactly one canonical-baseline claim, and it must name the lease map's
+    baseline. Prose here is hand-wrapped and rewritten every round, so match
+    against whitespace-normalized text rather than raw lines.
     """
     lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
     baselines = LEASE_BASELINE.findall(lease_text)
@@ -115,14 +136,42 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
 
     goal_text = GOAL.read_text(encoding="utf-8")
     # The GOAL.md verification block's lapse detector must assert this exact SHA,
-    # and the ancestry list must include it.
+    # and the ancestry list must include it. These are shell lines, so they are
+    # matched unnormalized.
     assert f'test "$(git rev-parse main)" = "{sha}"' in goal_text
     assert f"git merge-base --is-ancestor {sha} main" in goal_text
-    assert f"`main@{short}`" in goal_text
 
+    goal_normalized = " ".join(goal_text.split())
     state_text = STATE.read_text(encoding="utf-8")
-    assert f"current canonical baseline is `main@{short}`" in state_text
-    assert f"at main@{short}" in state_text
+    state_normalized = " ".join(state_text.split())
+
+    stopped_at = STATE_STOPPED_AT.findall(state_text)
+    assert len(stopped_at) == 1, f"expected one stopped_at line, got {stopped_at}"
+
+    for label, normalized in (
+        ("GOAL.md", goal_normalized),
+        (".planning/STATE.md", state_normalized),
+    ):
+        claimed = [
+            match for pattern in CANONICAL_CLAIMS for match in pattern.findall(normalized)
+        ]
+        assert claimed, f"{label} makes no canonical-baseline claim"
+        assert set(claimed) == {short}, (
+            f"every canonical-baseline claim in {label} must name `main@{short}`, "
+            f"got {claimed}"
+        )
+        # Guard the regexes against a reworded claim slipping past them: every
+        # occurrence of the phrase must be one of the matched claims.
+        assert normalized.count(CANONICAL_CLAIM_PHRASE) == len(claimed), (
+            f"{label} has a '{CANONICAL_CLAIM_PHRASE}' claim that names no SHA "
+            f"in a recognized form"
+        )
+
+    claimed = STATE_STOPPED_AT_CLAIM.findall(stopped_at[0])
+    assert claimed == [short], (
+        f".planning/STATE.md stopped_at must name `main@{short}` exactly once, "
+        f"got {claimed}"
+    )
 
 
 def test_phase_13_truth_lease_names_existing_authoritative_files() -> None:
