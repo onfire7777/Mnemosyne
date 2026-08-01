@@ -264,6 +264,15 @@ For every GoalEx round:
     GoalEx launcher aborts its next preflight on a dirty tree, so residue left
     behind stalls the loop instead of carrying forward.
 
+    The unowned-work exception is checked at round start, not round end. If the
+    controller worktree already carries unowned dirty work when the round
+    begins, do not start the round: the tree cannot be brought clean without
+    violating rule 3, so park immediately under the park paragraph below and
+    record the unowned paths and their owner outside the controller worktree,
+    leaving resolution to that owner. A round that does start therefore always
+    ends with `git status --porcelain` empty, and the launcher's next preflight
+    always finds a clean tree.
+
     If any round-owned change cannot be committed — a receipt, a scratch
     artifact, a partial edit, tracked or untracked alike — preserve it without
     leaving residue: copy its content to a path outside the controller
