@@ -39,7 +39,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-31 — PR #86 merged the two-file bounded scheduled
+Last activity: 2026-08-01 — PR #86 merged the two-file bounded scheduled
 development-regression workflow at `main@661343ce`; input-free manual run
 `30561430522` passed the fixed four-test contract job. PR #87 then merged the
 canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
@@ -69,7 +69,9 @@ edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
 `main`). Landing all of them is deferred to the next round's GoalEx-owner
 PR so the lifecycle and public-harness leases stay unmixed; the plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
-pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
+pilots-plan checkpoint is a correction plus PR #90's receipt block — it
+rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
+delivery:` receipt in the M12/M13 checkpoint section: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
 states that the M12/M13 gap-disclosure paragraphs and their pinning tests
@@ -83,7 +85,7 @@ file and in the lease map rather than back-filled into the round record. The
 first actual scheduled-cadence receipt is still open: the
 workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
 2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
-measurement, or publication claim changed in PR #87 or PR #88. Official
+measurement, or publication claim changed in PRs #87-#90. Official
 MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
 open. The earlier Phase 12 lease sweep remains delivered and its operator-only
 measurement boundary is unchanged.
