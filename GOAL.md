@@ -254,6 +254,138 @@ For every GoalEx round:
 10. Self-repair routine transport, sandbox, CI, auth-independent, worktree, and
     review issues. Escalate only safety, authority, protected-environment, or
     product-direction decisions, then reassess the next lease-disjoint package.
+11. End every round leaving no round-owned residue in the controller worktree.
+    This is unconditional for everything the round itself touched: no round
+    outcome may leave a round-owned change — tracked or untracked — sitting in
+    the controller worktree. Unowned dirty work that predates the round is the
+    sole exception; rule 3 still governs it, and it is preserved untouched.
+    Post-merge receipts, canonical-truth reconciliation, and plan-checkbox
+    closure are part of the round, not afterthoughts — commit them on the
+    controller branch as the round's final step, before yielding. The external
+    GoalEx launcher aborts its next preflight on a dirty tree, so residue left
+    behind stalls the loop instead of carrying forward.
+
+    The unowned-work exception is checked at round start, not round end. If the
+    controller worktree already carries unowned dirty work when the round
+    begins, do not start the round: the tree cannot be brought clean without
+    violating rule 3. Park instead, as an explicit owner handoff — record the
+    unowned paths and their owner outside the controller worktree, and treat
+    the loop as halted, not merely paused. This park is the one case that does
+    not resume automatically: the launcher's preflight will keep aborting, by
+    design, until that owner resolves their own paths. A round that does start
+    therefore always ends with an empty residue check, and the launcher's next
+    preflight always finds a clean tree.
+
+    Ignored paths that already exist at round start are a permitted baseline,
+    not blockers: they never trip the start-of-round gate above, and no round
+    may deliberately modify or remove one. At round start, capture them as a
+    manifest that enumerates every entry recursively — an ignored directory
+    gets its own row *and* a row per entry beneath it, since a directory row
+    alone cannot see a nested rewrite while omitting it would let a
+    directory's own mode change unnoticed. Build each row from relative path
+    bytes plus the `lstat` object type and permission bits, then add a
+    type-specific identity field: SHA-256 over raw bytes for a non-secret
+    regular file, raw `readlink` target bytes for a symlink, and for a directory
+    no identity field at all, since its contents are already covered by its
+    entries' own rows and path, type, and mode are what a directory can change
+    on its own. Keep a lossless copy of their contents outside the controller
+    worktree only when its classification permits export under the rules
+    below. Secret-bearing paths are manifested but never copied out, because
+    `Mnemosyne-Secret-Handling-Policy.md`'s P8 forbids materializing a secret
+    value anywhere persistent outside the secret store while explicitly
+    permitting non-secret metadata. A raw content hash is not such metadata
+    here: for a guessable single-value secret like `keycloak/out/admin-password`
+    it is an offline verification oracle for anyone who obtains the manifest.
+    So a secret-bearing regular-file row records path, type, and mode plus a
+    keyed digest of the local bytes whose key lives in the secret store and is
+    never persisted alongside the manifest; a secret-bearing symlink applies
+    the same keyed digest to its raw `readlink` target bytes, while a directory
+    row still has no identity field and relies on its recursively manifested
+    entries. Record secret-store version metadata too where the
+    store exposes it, but never substitute that metadata for the keyed digest:
+    an unchanged store version cannot detect a rewrite of its materialized
+    local copy. The carve-out is a classification, not a fixed
+    list: it covers the operator secret channel `CONFIG-DRIFT-CHECKS.md`
+    designates and the secret patterns the root `.gitignore` carries (`.env`,
+    `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `credentials.json`,
+    `service-account.json`, `secrets.json`), and equally the generated provider
+    material `infra/.gitignore` ignores and `infra/README.md` documents as
+    secrets, private keys, and tokens (`keycloak/out/`, `vault/out/`,
+    `c2pa/out/`, `**/wrapped-keys/`), whose members — `keycloak/out/admin-password`
+    among them — match no filename pattern at all. Any ignored path a later
+    `.gitignore` or its documentation designates the same way is covered on the
+    same footing without amending this rule. All of this is needed: a bare
+    `git status --porcelain` reports no ignored file at all, the `--ignored`
+    listing reports an unchanged path and a rewritten one identically, and a
+    hash alone can detect an accidental rewrite without being able to undo it.
+    Privacy- or custody-bearing ignored state, including `.mnemosyne/` object
+    stores and ignored `*.db` or `*.sqlite` files, may be copied only to an
+    operator-approved encrypted custody location with explicit access and
+    retention controls; absent that approval it follows the same durable park
+    and operator-handoff path as secret-bearing state.
+    Before admitting mutable ignored runtime state as baseline, obtain its
+    owner's lock/quiescence or use the engine's native consistent-snapshot
+    operation; if neither is available, park instead of hashing, copying, or
+    later restoring a racing tree. Treat every permitted baseline copy as a
+    temporary access-controlled snapshot. Delete it after the final successful
+    manifest comparison, retaining an external archive only when an actual
+    cleanup or park handoff requires recovery evidence.
+    The residue check compares every manifest row — path, object type, mode,
+    and the type-specific identity field — against the full start-of-round
+    manifest, so a mode-only or nested-only change must fail it, alongside
+    `git status --porcelain --untracked-files=all --ignored`. If a round does
+    rewrite a baseline ignored file anyway, that is the one case where cleanup
+    restores such a path: preserve the round's version externally under the
+    lossless procedure below only when its classification permits export, then
+    restore the whole affected subtree — bytes,
+    modes, symlinks, and deletions — from the external copy and record the
+    violation in the round record. A secret-bearing path has no external copy
+    to restore from by design, so a round that rewrites one restores nothing:
+    it escalates to the operator under rule 10 and parks under the handoff
+    above until they resolve it. That park must be durable, because the ignored
+    rewrite is invisible to the preflight that would otherwise catch it — a bare
+    `git status --porcelain` reports no ignored file, so the next invocation
+    would pass preflight and silently adopt the rewritten secret as its new
+    permitted baseline. Write a persistent park marker outside the controller
+    worktree naming the affected paths, and require the launcher to abort its
+    preflight while that marker exists. Only the operator clears it, once they
+    have restored or rotated the secret themselves.
+
+    If any round-owned change cannot be committed — a receipt, a scratch
+    artifact, a partial edit, tracked, untracked, or ignored alike — preserve
+    it without leaving residue, subject to the secret/privacy/custody export
+    restrictions above. When export is permitted, preserve it losslessly:
+    write an exact patch or archive outside the controller worktree, one that
+    carries deletions,
+    renames, mode changes, symlinks, and binary content, since copying file
+    text alone silently drops all of those. Then restore each uncommitted
+    round-owned tracked path in both the index and worktree to current `HEAD` —
+    which is round-start `HEAD` when the round has made no valid commit — so a
+    staged-but-uncommitted path cannot remain dirty and an earlier valid round
+    commit is not overwritten. Remove only the untracked or ignored files this
+    round created. Touch nothing the round does not own. Require targeted
+    `git diff --cached --quiet` and
+    `git diff --quiet` checks for those tracked paths, then confirm the ignored
+    manifest equals its round-start value and the residue check above reports
+    nothing beyond the permitted baseline. Record the external path and the
+    blocker in a summary that also lives outside the controller worktree.
+    Relocation means preserve-then-clear: moving a tracked file leaves its
+    original path deleted, which is still dirty. Before restoring or removing
+    any round-owned artifact whose classification forbids export — tracked,
+    untracked, or ignored — complete and verify a handoff into the canonical
+    secret store or an operator-approved custody destination that is allowed
+    to hold that classification. If no such destination is available, keep the
+    controller stopped under the durable park, disclose the remaining residue,
+    and require operator action; never delete the only copy or claim that the
+    round ended clean.
+
+    A deliberate park of round-owned work is subject to the same invariant and
+    to the same lossless preservation procedure — a park is not a licence to
+    discard a partial edit or an uncommitted receipt. Preserve every round-owned
+    change externally first, clear it from the index and worktree, then write
+    the park's reason, owner, and the archive's location outside the controller
+    worktree before stopping, so the loop can resume without a human first
+    cleaning up after it.
 
 ## Runtime Contract
 
