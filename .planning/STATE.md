@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, and the stranded GoalEx lifecycle backlog through PR #91, at main@e157e035; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-08-01T03:40:00Z"
+last_updated: "2026-08-01T06:40:00Z"
 last_activity: 2026-08-01
 progress:
   total_phases: 7
@@ -73,10 +73,14 @@ text was already on `main`). PR #91 is documentation only: it moved no package
 status and changed no benchmark, measurement, admission state, or publication
 claim. It was the GoalEx-owner delivery of lease-map
 node `T3`, now `MERGED`, and it kept the lifecycle and public-harness leases
-unmixed. The lease map has since been recomputed from the resulting
-`main@e157e035` and carries PR #91's own receipt block — the residue that could
-not exist inside the commit it describes — so the `GOAL.md` Authority carve-out
-is closed and no admitted node remains in the wave. The plan-doc
+unmixed, and no admitted node remains in the wave. The lease map has since been
+recomputed from the resulting `main@e157e035` and carries PR #91's own receipt
+block — the residue that could not exist inside the commit it describes — but
+that recomputation is branch-resident, so the `GOAL.md` Authority carve-out is
+reduced to receipt scope rather than closed: `main@e157e035` still holds the
+pre-merge map (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`) and the
+pre-merge "this PR" text in this file and `GOAL.md`, until a follow-up
+GoalEx-owner PR delivers this receipt-level update. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
@@ -94,7 +98,7 @@ file and in the lease map rather than back-filled into the round record. The
 first actual scheduled-cadence receipt is still open: the
 workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
 2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
-measurement, or publication claim changed in PRs #87-#90. Official
+measurement, or publication claim changed in PRs #87-#91. Official
 MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
 open. The earlier Phase 12 lease sweep remains delivered and its operator-only
 measurement boundary is unchanged.
