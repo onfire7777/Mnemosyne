@@ -274,7 +274,7 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 Current continuation: see **Latest checkpoint** below.
 
-Latest checkpoint (2026-07-30): see the **Decisions** entry under **Accumulated
+Latest checkpoint (2026-07-31): see the **Decisions** entry under **Accumulated
 Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
