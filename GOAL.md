@@ -41,23 +41,24 @@ deferred GoalEx-owner delivery: it landed the recomputed map, `GOAL.md`,
 `.planning/STATE.md`, the pilots-plan PR #90 checkpoint, and the round-record
 backlog on `main` (merge `e157e035`, exact-head CI `30686224929`, post-merge CI
 `30687385118`), so the bulk gap is closed and `main`'s map is no longer two
-merges behind. It is **not** yet fully closed. `main@e157e035`'s copy of the map
-still reads `Baseline: main@061c2e1c` with `T3` as `DELIVERING` and "**This PR
-is the delivery**", because PR #91 could not describe its own merge from inside
-the commit being merged. The recomputation to `Baseline: main@e157e035`
-carrying PR #91's receipt block and `T3` as `MERGED` exists only on the
-controller branch, which keeps the branch-resident map the operative revision
-at exactly that receipt-level scope until this update is itself delivered
-through the admitted `T4` follow-up PR. The same applies to `main`'s `GOAL.md`
-and `.planning/STATE.md`,
-whose present-tense "this PR" self-references PR #91 falsified on merge. That
-`T4` delivery will regenerate a one-block residue of its own for the same
-structural reason: no commit can describe its own merge, so `main`'s copy always
-lags the controller branch by exactly one receipt block. That one-block lag is
-an accepted standing condition, not an open work item. `T4` is admitted once to
-discharge the accumulated receipt block; `T4`'s own residue admits no successor
-node, because admitting a fresh node for each regenerated residue would make the
-delivery wave non-terminating. The
+merges behind. That receipt-level remainder has since been delivered too:
+`T4` merged as PR #92 at `main@39cfa67a` (exact-head CI `30693874030`,
+post-merge CI `30694818231`), landing the recomputation to
+`Baseline: main@e157e035` with `T3` as `MERGED` plus PR #91's receipt block, and
+the matching `GOAL.md` and `.planning/STATE.md` text, on `main`. The carve-out is
+therefore discharged down to the accepted one-block standing residue and nothing
+more. That residue is this update: `main@39cfa67a`'s copies of the map, this
+file, and `.planning/STATE.md` still read `Baseline: main@e157e035` with `T4` as
+`DELIVERING` and "**This PR is the delivery**", because PR #92 could not describe
+its own merge from inside the commit being merged. The recomputation to
+`Baseline: main@39cfa67a` with `T4` as `MERGED` and PR #92's receipt block exists
+only on the controller branch. `main`'s copy always lags the controller branch by
+exactly one receipt block, and that one-block lag is an accepted standing
+condition, not an open work item. `T4` was admitted once to discharge the
+accumulated receipt block; `T4`'s own residue admits **no successor node**,
+because admitting a fresh node for each regenerated residue would make the
+delivery wave non-terminating, so this recomputation is not itself delivered
+through a new node. The
 carve-out's lapse rule stands unchanged: it lapses the moment any merge lands on
 `main` that the branch-resident map does not already record, at which point the
 map must be recomputed from current `main` before it is treated as operative
@@ -102,8 +103,11 @@ pinning test suites, a cert-rotator lock-timeout flake fix, and the
 pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
 `30679262270`, post-merge CI `30680201900`). PR #91 then delivered the stranded
 GoalEx lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`,
-post-merge CI `30687385118`), which is the current canonical baseline.
-PRs #87-#91 are documentation and test-contract only: none admitted
+post-merge CI `30687385118`). PR #92 then delivered the receipt-level
+lifecycle update carried by lease-map node `T4` at `main@39cfa67a` (exact-head
+CI `30693874030`, post-merge CI `30694818231`), which is the current canonical
+baseline.
+PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
 `publishable:false` / `pbpp_headline_eligible:false`. PR #91 landed exactly:
@@ -118,13 +122,15 @@ records touched since round 14 without being delivered through a PR: 23 new
 `docs/plans/goalex-r14-*.md` (whose original text was already on `main`).
 That delivery kept the lifecycle and public-harness leases unmixed; it was
 carried by lease-map node `T3`, now `MERGED`. The wave that held it is closed
-and admits no source node. The lease map has been recomputed from the
-resulting `main@e157e035` and now carries PR #91's own receipt block, but that
-recomputation is branch-resident: it, this file's and `.planning/STATE.md`'s
-matching post-merge text, and the round-38 record are the controller branch's
-entire remaining delta versus `main`, and they are undelivered until the
-documentation-only lease-map node `T4` — the sole admitted writer from this
-baseline — lands them. The
+and admits no source node. The lease map was recomputed from the
+resulting `main@e157e035` and carried PR #91's own receipt block; that
+recomputation was branch-resident until PR #92 — the documentation-only
+receipt-level lifecycle update carried by lease-map node `T4`, the sole writer
+admitted from that baseline, which admitted no source node — landed it,
+this file's and `.planning/STATE.md`'s matching post-merge text, and the
+round-38 record on `main` at `39cfa67a`. The map has now been recomputed from
+that `main` with `T4` as `MERGED` and PR #92's receipt block, which is the
+accepted one-block receipt residue and admits **no successor node**. The
 plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
@@ -153,8 +159,9 @@ lease map at
 under the receipt-scope remainder of the Authority carve-out above for as long
 as that remainder is open; neither result-v2 nor sandbox delivery is implicitly
 admitted.
-That map admits no source node at this baseline — its only admitted node is
-the documentation-only receipt-level lifecycle update `T4` — so the next source
+That map admits no source node at this baseline — its last node was the
+documentation-only receipt-level lifecycle update `T4`, now `MERGED` as PR #92,
+whose one-block receipt residue admits no successor node — so the next source
 admission waits on an external gate opening, and the map must be recomputed
 from then-current `main` at that time.
 
@@ -277,9 +284,10 @@ Achieved for the current development-source milestone:
   (`main@2ba4ed80`, post-merge CI `30566984814`), PR #88 (`main@4a891042`,
   post-merge CI `30659705054`), PR #89 (`main@a8e9444c`, post-merge CI
   `30672194635`), PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
-  post-merge CI `30680201900`), and PR #91 (`main@e157e035`, exact-head CI
-  `30686224929`, post-merge CI `30687385118`), none of which changed a
-  benchmark, measurement, admission state, or publication claim.
+  post-merge CI `30680201900`), PR #91 (`main@e157e035`, exact-head CI
+  `30686224929`, post-merge CI `30687385118`), and PR #92 (`main@39cfa67a`,
+  exact-head CI `30693874030`, post-merge CI `30694818231`), none of which
+  changed a benchmark, measurement, admission state, or publication claim.
 
 The remaining whole-memory pilot milestone still requires:
 
@@ -311,6 +319,13 @@ git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
 git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
 git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
+git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
+# Exact canonical baseline. Ancestry alone also passes when `main` carries later,
+# unrecorded merges, which is precisely the condition under which the Authority
+# carve-out lapses. This equality is the lapse detector: if it fails, `main` has
+# advanced past the recorded baseline and the carve-out must be recomputed from
+# the new `main` before any further admission.
+test "$(git rev-parse main)" = "39cfa67aa7692bf47d5dde5842af3d8ec0736bb0"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
