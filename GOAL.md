@@ -256,10 +256,14 @@ For every GoalEx round:
 11. End every round with a clean controller worktree. Post-merge receipts,
     canonical-truth reconciliation, and plan-checkbox closure are part of the
     round, not afterthoughts: commit them on the controller branch as the
-    round's final step, before yielding. GoalEx aborts its next preflight on a
-    dirty tree, so residue left behind stalls the loop instead of carrying
-    forward. If a receipt genuinely cannot be committed yet, say so explicitly
-    in the round's closing summary rather than leaving the tree dirty.
+    round's final step, before yielding. The external GoalEx launcher aborts
+    its next preflight on a dirty tree, so residue left behind stalls the loop
+    instead of carrying forward. If a receipt cannot be committed yet, the tree
+    must still end clean: move the change outside the controller worktree,
+    record where it went, and name the blocker in the round's closing summary.
+    If even that is impossible, stop and declare a deliberate park with its
+    reason and owner — a stall must never be left looking like a satisfied
+    round.
 
 ## Runtime Contract
 
