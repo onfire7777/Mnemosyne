@@ -276,15 +276,20 @@ For every GoalEx round:
     preflight always finds a clean tree.
 
     Ignored paths that already exist at round start are a permitted baseline,
-    not blockers: they never trip the start-of-round gate above, and cleanup
-    never touches them. Snapshot them at round start by path, content hash, and
-    mode, because a bare `git status --porcelain` reports no ignored file at
-    all and the `--ignored` listing reports an unchanged path and a rewritten
-    one identically. The round is forbidden to modify a baseline ignored file,
-    and the snapshot is what makes a violation detectable. The residue check is
-    therefore `git status --porcelain --untracked-files=all --ignored` plus a
-    re-hash of the snapshotted baseline ignored paths; both must come back
-    unchanged.
+    not blockers: they never trip the start-of-round gate above, and no round
+    may deliberately modify or remove one. At round start, capture them as a
+    manifest of path, content hash, and mode, and keep a lossless copy of their
+    contents outside the controller worktree. Both are needed: a bare
+    `git status --porcelain` reports no ignored file at all, the `--ignored`
+    listing reports an unchanged path and a rewritten one identically, and a
+    hash alone can detect an accidental rewrite without being able to undo it.
+    The residue check compares path, content hash, and mode against the full
+    start-of-round manifest — a mode-only change must fail it — alongside
+    `git status --porcelain --untracked-files=all --ignored`. If a round does
+    rewrite a baseline ignored file anyway, that is the one case where cleanup
+    restores such a path: preserve the round's version externally under the
+    lossless procedure below, then restore the baseline bytes and mode from the
+    external copy and record the violation in the round record.
 
     If any round-owned change cannot be committed — a receipt, a scratch
     artifact, a partial edit, tracked, untracked, or ignored alike — preserve
