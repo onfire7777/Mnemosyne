@@ -121,7 +121,7 @@ git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 
 ### Task 2: Fully recompute the three lifecycle files to `main@effc5e03`
 
-- [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`:
+- [x] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`:
       rewrite every stale in-body baseline claim (lines ~59, ~172, ~178,
       ~223-224 and any other hit of `39cfa67a` framed as current) so the file
       consistently states it is recomputed from `main@effc5e03` and records
@@ -129,32 +129,32 @@ git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
       post-merge CI `30719645207`). Keep historical statements about what
       `main@39cfa67a` *held* only where they are explicitly past-tense and
       correct.
-- [ ] Add a `T5` row to the **Remaining package DAG** with class `DELIVERING`,
+- [x] Add a `T5` row to the **Remaining package DAG** with class `DELIVERING`,
       prerequisites (verified canonical `main@effc5e03` and PR #93's post-merge
       receipts; lane cut from `main@effc5e03`), produces (the three lifecycle
       files at `Baseline: main@effc5e03`, the pinning tests, and the r39/r40/r41
       round records on `main`), exact lease (`GOAL.md`; `.planning/STATE.md`;
       this map; `docs/plans/`; `tests/test_planning_traceability.py`, GoalEx
       owner only), and the gate note that it admits **no source node**.
-- [ ] Update the **Topological waves** and **Concurrency and integration rules**
+- [x] Update the **Topological waves** and **Concurrency and integration rules**
       sections: record that PR #93's merge lapsed the carve-out, that the
       residue at that point was no longer receipt-only (an undelivered test
       contract plus three undelivered round records), and that exactly one node
       `T5` is admitted to discharge it. State plainly why this terminates.
-- [ ] In `GOAL.md`: rewrite the Authority carve-out paragraph to the post-PR-#93
+- [x] In `GOAL.md`: rewrite the Authority carve-out paragraph to the post-PR-#93
       truth and state that **this PR is the `T5` delivery**; add PR #93 and the
       `T5` delivery to the Current Phase narrative; add a PR #93 entry to the
       **Success Evidence** merged-receipts list. Leave the Verification block's
       `effc5e03` pin and ancestry line as they are for now (Task 5 updates them
       post-merge).
-- [ ] In `.planning/STATE.md`: fix lines ~80 and ~87 and the "Latest checkpoint"
+- [x] In `.planning/STATE.md`: fix lines ~80 and ~87 and the "Latest checkpoint"
       paragraph so every canonical-baseline claim names `main@effc5e03`; keep
       `stopped_at` naming `main@effc5e03` exactly once.
-- [ ] Change no benchmark, measurement, admission state, roadmap percentage, or
+- [x] Change no benchmark, measurement, admission state, roadmap percentage, or
       publication claim. Touch no `eval/`, `leaderboard/`, `src/`, or
       `.github/workflows/` path.
-- [ ] Run all four validation commands; both pinning tests must now pass.
-- [ ] Commit on the controller branch.
+- [x] Run all four validation commands; both pinning tests must now pass.
+- [x] Commit on the controller branch.
 
 ### Task 3: Deliver `T5` through an isolated reviewed PR
 
