@@ -288,16 +288,19 @@ For every GoalEx round:
     no identity field at all, since its contents are already covered by its
     entries' own rows and path, type, and mode are what a directory can change
     on its own. Keep a lossless copy of their contents outside the controller
-    worktree, with one carve-out: every ignored path known to be secret-bearing
-    is manifested but never copied out, because
+    worktree only when its classification permits export under the rules
+    below. Secret-bearing paths are manifested but never copied out, because
     `Mnemosyne-Secret-Handling-Policy.md`'s P8 forbids materializing a secret
     value anywhere persistent outside the secret store while explicitly
     permitting non-secret metadata. A raw content hash is not such metadata
     here: for a guessable single-value secret like `keycloak/out/admin-password`
     it is an offline verification oracle for anyone who obtains the manifest.
-    So a secret-bearing row records path, type, and mode plus a keyed digest of
-    the local bytes whose key lives in the secret store and is never persisted
-    alongside the manifest. Record secret-store version metadata too where the
+    So a secret-bearing regular-file row records path, type, and mode plus a
+    keyed digest of the local bytes whose key lives in the secret store and is
+    never persisted alongside the manifest; a secret-bearing symlink applies
+    the same keyed digest to its raw `readlink` target bytes, while a directory
+    row still has no identity field and relies on its recursively manifested
+    entries. Record secret-store version metadata too where the
     store exposes it, but never substitute that metadata for the keyed digest:
     an unchanged store version cannot detect a rewrite of its materialized
     local copy. The carve-out is a classification, not a fixed
@@ -314,13 +317,19 @@ For every GoalEx round:
     `git status --porcelain` reports no ignored file at all, the `--ignored`
     listing reports an unchanged path and a rewritten one identically, and a
     hash alone can detect an accidental rewrite without being able to undo it.
+    Privacy- or custody-bearing ignored state, including `.mnemosyne/` object
+    stores and ignored `*.db` or `*.sqlite` files, may be copied only to an
+    operator-approved encrypted custody location with explicit access and
+    retention controls; absent that approval it follows the same durable park
+    and operator-handoff path as secret-bearing state.
     The residue check compares every manifest row — path, object type, mode,
     and the type-specific identity field — against the full start-of-round
     manifest, so a mode-only or nested-only change must fail it, alongside
     `git status --porcelain --untracked-files=all --ignored`. If a round does
     rewrite a baseline ignored file anyway, that is the one case where cleanup
     restores such a path: preserve the round's version externally under the
-    lossless procedure below, then restore the whole affected subtree — bytes,
+    lossless procedure below only when its classification permits export, then
+    restore the whole affected subtree — bytes,
     modes, symlinks, and deletions — from the external copy and record the
     violation in the round record. A secret-bearing path has no external copy
     to restore from by design, so a round that rewrites one restores nothing:
@@ -336,8 +345,10 @@ For every GoalEx round:
 
     If any round-owned change cannot be committed — a receipt, a scratch
     artifact, a partial edit, tracked, untracked, or ignored alike — preserve
-    it without leaving residue. Preserve it losslessly: write an exact patch or
-    archive outside the controller worktree, one that carries deletions,
+    it without leaving residue, subject to the secret/privacy/custody export
+    restrictions above. When export is permitted, preserve it losslessly:
+    write an exact patch or archive outside the controller worktree, one that
+    carries deletions,
     renames, mode changes, symlinks, and binary content, since copying file
     text alone silently drops all of those. Then restore each uncommitted
     round-owned tracked path in both the index and worktree to current `HEAD` —
