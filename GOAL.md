@@ -253,17 +253,27 @@ For every GoalEx round:
 10. Self-repair routine transport, sandbox, CI, auth-independent, worktree, and
     review issues. Escalate only safety, authority, protected-environment, or
     product-direction decisions, then reassess the next lease-disjoint package.
-11. End every round with a clean controller worktree. Post-merge receipts,
-    canonical-truth reconciliation, and plan-checkbox closure are part of the
-    round, not afterthoughts: commit them on the controller branch as the
-    round's final step, before yielding. The external GoalEx launcher aborts
-    its next preflight on a dirty tree, so residue left behind stalls the loop
-    instead of carrying forward. If a receipt cannot be committed yet, the tree
-    must still end clean: move the change outside the controller worktree,
-    record where it went, and name the blocker in the round's closing summary.
-    If even that is impossible, stop and declare a deliberate park with its
-    reason and owner — a stall must never be left looking like a satisfied
-    round.
+11. End every round with a clean controller worktree. This is unconditional:
+    no round outcome may leave the controller worktree dirty. Post-merge
+    receipts, canonical-truth reconciliation, and plan-checkbox closure are
+    part of the round, not afterthoughts — commit them on the controller
+    branch as the round's final step, before yielding. The external GoalEx
+    launcher aborts its next preflight on a dirty tree, so residue left behind
+    stalls the loop instead of carrying forward.
+
+    If a receipt cannot be committed, preserve it without leaving residue:
+    copy its content to a path outside the controller worktree, then restore
+    only the tracked paths this round itself modified — never touching unowned
+    dirty work, per rule 3 — and confirm `git status --porcelain` reports
+    nothing for those paths. Record the external path and the blocker in a
+    summary that also lives outside the controller worktree. Relocation means
+    copy-then-restore: moving a tracked file leaves its original path deleted,
+    which is still dirty.
+
+    A deliberate park is subject to the same invariant. Restore the worktree
+    and write the park's reason and owner outside the controller worktree
+    before stopping, so the loop can resume without a human first cleaning up
+    after it.
 
 ## Runtime Contract
 
