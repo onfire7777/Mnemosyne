@@ -90,21 +90,21 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
   ```
 
 ### Task 1: Recompute the exact T4 delta and open an isolated lane
-- [ ] `git fetch --prune origin`; confirm `main == origin/main` and record the
+- [x] `git fetch --prune origin`; confirm `main == origin/main` and record the
       SHA. If any commit has landed on `main` since `e157e035`, the GOAL.md
       carve-out lapses: first merge `main` into the controller branch, then
       recompute the lease map from the new `main` before continuing.
-- [ ] Run `git diff --name-status main...HEAD` and record the exact file list.
+- [x] Run `git diff --name-status main...HEAD` and record the exact file list.
       It must contain only `GOAL.md`, `.planning/STATE.md`,
       `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`,
       and paths under `docs/plans/`. If anything else appears, stop and report.
-- [ ] Run the documentation-only pathspec diff from Validation Commands and
+- [x] Run the documentation-only pathspec diff from Validation Commands and
       confirm it is empty. If it is not, stop — the lease is not disjoint.
-- [ ] Create an isolated lane worktree/branch cut from current `main`, e.g.
+- [x] Create an isolated lane worktree/branch cut from current `main`, e.g.
       `git worktree add -b codex/goalex-t4-receipt-delivery
       /Users/admin/.codex/worktrees/9697/lane-t4-receipt main`. Do not develop
       on the controller branch itself.
-- [ ] Materialize exactly the delta in the lane: for each path from
+- [x] Materialize exactly the delta in the lane: for each path from
       `git diff --name-only main...HEAD`, write
       `git show codex/goalex-whole-memory-pilot:<path> > <path>` (creating
       parent dirs as needed), and `git rm` the old
