@@ -288,6 +288,7 @@ test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
 git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
+git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
