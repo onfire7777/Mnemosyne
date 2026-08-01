@@ -267,28 +267,38 @@ For every GoalEx round:
     The unowned-work exception is checked at round start, not round end. If the
     controller worktree already carries unowned dirty work when the round
     begins, do not start the round: the tree cannot be brought clean without
-    violating rule 3, so park immediately under the park paragraph below and
-    record the unowned paths and their owner outside the controller worktree,
-    leaving resolution to that owner. A round that does start therefore always
-    ends with `git status --porcelain` empty, and the launcher's next preflight
-    always finds a clean tree.
+    violating rule 3. Park instead, as an explicit owner handoff — record the
+    unowned paths and their owner outside the controller worktree, and treat
+    the loop as halted, not merely paused. This park is the one case that does
+    not resume automatically: the launcher's preflight will keep aborting, by
+    design, until that owner resolves their own paths. A round that does start
+    therefore always ends with an empty residue check, and the launcher's next
+    preflight always finds a clean tree.
+
+    Also snapshot the controller worktree's ignored paths at round start. The
+    residue check is `git status --porcelain --untracked-files=all --ignored`
+    compared against that snapshot, not a bare `git status --porcelain`, which
+    reports no ignored file at all and would let a round-owned ignored scratch
+    artifact pass as clean.
 
     If any round-owned change cannot be committed — a receipt, a scratch
-    artifact, a partial edit, tracked or untracked alike — preserve it without
-    leaving residue: copy its content to a path outside the controller
-    worktree, then clear it from the worktree. For tracked paths this round
-    modified, restore them; for untracked files this round created, remove
-    them. Touch nothing the round does not own. Then confirm
-    `git status --porcelain` reports nothing for every round-owned path,
-    tracked or untracked. Record the external path and the blocker in a
-    summary that also lives outside the controller worktree. Relocation means
-    copy-then-clear: moving a tracked file leaves its original path deleted,
-    which is still dirty.
+    artifact, a partial edit, tracked, untracked, or ignored alike — preserve
+    it without leaving residue. Preserve it losslessly: write an exact patch or
+    archive outside the controller worktree, one that carries deletions,
+    renames, mode changes, symlinks, and binary content, since copying file
+    text alone silently drops all of those. Then clear the change from the
+    worktree: restore the tracked paths this round modified, and remove the
+    untracked or ignored files this round created. Touch nothing the round does
+    not own. Then confirm the residue check above reports nothing for every
+    round-owned path. Record the external path and the blocker in a summary
+    that also lives outside the controller worktree. Relocation means
+    preserve-then-clear: moving a tracked file leaves its original path
+    deleted, which is still dirty.
 
-    A deliberate park is subject to the same invariant. Clear every round-owned
-    change from the worktree and write the park's reason and owner outside the
-    controller worktree before stopping, so the loop can resume without a human
-    first cleaning up after it.
+    A deliberate park of round-owned work is subject to the same invariant.
+    Clear every round-owned change from the worktree and write the park's
+    reason and owner outside the controller worktree before stopping, so the
+    loop can resume without a human first cleaning up after it.
 
 ## Runtime Contract
 
