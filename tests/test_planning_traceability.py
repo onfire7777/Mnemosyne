@@ -226,6 +226,7 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         "secret-bearing regular-file row",
         "operator-approved encrypted custody location",
         "subject to the secret/privacy/custody export restrictions above",
+        "any round-owned artifact whose classification forbids export",
         "round-start HEAD",
         "current HEAD",
         "git diff --cached --quiet",
