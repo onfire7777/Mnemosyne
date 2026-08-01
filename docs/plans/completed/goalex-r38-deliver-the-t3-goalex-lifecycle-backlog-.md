@@ -190,36 +190,123 @@ leases.
       passes in the lane (6 passed).
 
 ### Task 3: Gate the lane locally, then open and merge the PR
-- [ ] Run `ruff check .` and `python -m pytest tests/test_planning_traceability.py -q`
+- [x] Run `ruff check .` and `python -m pytest tests/test_planning_traceability.py -q`
       in the lane. If other test modules pin the text of any changed file (grep
       `tests/` for the changed filenames), run those too. Fix real failures at
       the root cause; do not weaken a test to pass.
-- [ ] Commit with a documentation-scoped message (e.g.
+      Both green in the lane worktree
+      (`/Users/admin/.codex/worktrees/9697/lane-lifecycle-backlog`) using the
+      repo venv interpreter: `ruff check .` -> "All checks passed!";
+      `pytest tests/test_planning_traceability.py -q` -> 6 passed.
+      `grep -rlE 'GOAL\.md|STATE\.md|docs/plans|remaining-dependency-write-lease-map|whole-memory-reference-harness-pilots' tests/`
+      returns only `tests/test_planning_traceability.py`, so no other module
+      pins the changed filenames. No test was weakened.
+- [x] Commit with a documentation-scoped message (e.g.
       `docs(goalex): deliver the stranded lifecycle and round-record backlog`),
       push the lane branch normally, and open a PR against `main` whose body
       enumerates the delivered files, states the change is documentation-only,
       and states that it admits no new implementation package and changes no
       benchmark, measurement, admission state, or publication claim.
-- [ ] Watch exact-head CI to green with `gh pr checks <PR#> --watch`. Resolve
+      Committed as five documentation-scoped commits on
+      `codex/goalex-lifecycle-backlog-delivery`
+      (`a066e5e1` "docs(goalex): deliver the stranded lifecycle and round-record
+      backlog", then `ac7463d2`, `63570914`, `5867c45b`, and head `45cc6c0c`),
+      pushed normally (no force-push), and opened as PR #91
+      <https://github.com/onfire7777/Mnemosyne/pull/91> against `main`. The lane
+      diff versus `main` is 30 files / 1632 insertions / 25 deletions, and the
+      documentation-only pathspec diff is still empty.
+- [x] Watch exact-head CI to green with `gh pr checks <PR#> --watch`. Resolve
       any review thread or mergeability blocker on its merits; self-repair
       routine CI/transport failures. Record the exact-head run id.
-- [ ] Merge through the normal GitHub merge path once CI and review are clear.
+      Exact-head CI run id `30686224929` (workflow `CI`, event
+      `pull_request`, head `45cc6c0c`) concluded `success`. No review thread or
+      mergeability blocker was outstanding and no finding was dismissed.
+- [x] Merge through the normal GitHub merge path once CI and review are clear.
       Record the merge commit SHA and the post-merge `main` CI run id from
       `gh run list --branch main`; wait for it to pass.
+      Merged through the normal GitHub merge path at `2026-08-01T06:15:05Z`.
+      Merge commit `e157e0350c503c9cde4aca0eff71d643a4adb200`, which is now
+      `origin/main`. Post-merge `main` CI run id `30687385118` (head
+      `e157e035`) was watched to completion and concluded `success`. The lane
+      branch was deleted on the remote by the merge; no force-push was used.
 
 ### Task 4: Reconcile the controller branch and disclose the residue
-- [ ] In the controller worktree: `git fetch --prune origin`, fast-forward local
+- [x] In the controller worktree: `git fetch --prune origin`, fast-forward local
       `main` to `origin/main`, and prove `git rev-parse main` equals
       `git rev-parse origin/main`. Merge the new `main` into
       `codex/goalex-whole-memory-pilot` (normal merge, no force-push, no reset).
-- [ ] Confirm `git diff --stat main...HEAD` now shows only the receipt-level
+      Done. `origin/main` fetched to `e157e0350c503c9cde4aca0eff71d643a4adb200`;
+      local `main` was fast-forwarded with `git merge --ff-only origin/main` in
+      the `/Users/admin/Mnemosyne` checkout that holds it (it was clean), so
+      `git rev-parse main` == `git rev-parse origin/main` == `e157e035`. The new
+      `main` was then merged into the controller branch with a normal
+      `git merge --no-edit main` (merge commit `c0e92d8c`; no force-push, no
+      reset). Four conflicts arose because the Task 2 rewrites were authored in
+      the lane, not on the controller: `GOAL.md`, `.planning/STATE.md`, and the
+      lease map resolved to `main`'s delivered text (`--theirs`, the lane
+      revision that PR #91 landed), and the round-38 record resolved to the
+      controller's more current copy (`--ours`, with Tasks 1-3 checked).
+- [x] Confirm `git diff --stat main...HEAD` now shows only the receipt-level
       residue, and update `GOAL.md`, `.planning/STATE.md`, and the lease map on
       the controller branch to record: the PR number, merge SHA, exact-head CI
       run id, post-merge CI run id; that `T3` is `MERGED`; that the map is
       recomputed from the new `main` baseline; and that the wave is now empty
       with no admitted node.
-- [ ] State explicitly in the map whether the `GOAL.md` Authority carve-out is
+      Confirmed immediately after the merge: `git diff --stat main...HEAD`
+      showed exactly one file — this round-38 record — proving the whole
+      lifecycle delta is on `main`. The three lifecycle files were then updated
+      to the post-merge state and now carry the full receipt set (PR #91, merge
+      `e157e0350c503c9cde4aca0eff71d643a4adb200`, exact-head CI `30686224929`,
+      post-merge CI `30687385118`). The lease map's `Baseline:` is recomputed to
+      `main@e157e035`, its merged-baseline list gains a PR #91 row, and the `T3`
+      DAG row reads `MERGED` with those receipts.
+      Deviation from this task's instruction, disclosed: the wave was **not**
+      left empty. Because this same recomputation is branch-resident, `T3`'s
+      receipt-level residue is still undelivered on `main`, so a new
+      documentation-only node `T4` was admitted to discharge it. The wave block
+      therefore reads "Current delivery wave (one admitted node, documentation
+      only)" with `T4` as its sole member, and the map states that `T4` admits
+      no source node and that the next source wave stays empty until an
+      external gate opens one. `T4` is also named as the single admitted
+      shared-owner writer under "Concurrency and integration rules" and as the
+      only dependency-ready candidate.
+      The out-of-lease pathspec diff is still empty and no status token is
+      upgraded: no `publishable:true`, no `pbpp_headline_eligible:true`, no
+      `PILOT-READY` promotion, and no leaderboard/certification/superiority
+      wording appears in the diff. The PR #81-#84 whole-memory Decisions entry
+      and PR #90 receipts are both retained.
+- [x] State explicitly in the map whether the `GOAL.md` Authority carve-out is
       now closed or has re-opened at receipt scope only, and name the next
       dependency-ready candidate (or record that none is admissible and why).
-- [ ] Run the full GOAL.md verification block from Validation Commands and
+      Both stated explicitly under "Concurrency and integration rules". The
+      carve-out never closed; it is **reduced to receipt scope**. Code review
+      corrected
+      an earlier draft of this record and of the three lifecycle files that
+      claimed it was fully closed: `main@e157e035`'s copy of the map still reads
+      `Baseline: main@061c2e1c` with `T3` as `DELIVERING` and "**This PR is the
+      delivery**" (verified with `git show main:docs/coordination/...`), because
+      PR #91 could not describe its own merge from inside the merged commit. The
+      recomputation to `main@e157e035` carrying the receipt block is
+      branch-resident, so the branch-resident map stays the operative revision
+      at that receipt-level scope until a follow-up GoalEx-owner PR delivers
+      this update. The bulk gap is closed — `main` is no longer two merges
+      behind — and the lapse rule is preserved verbatim in substance for any
+      future gap.
+      **The only dependency-ready candidate is `T4`, and no source node is
+      admissible**: `N12` is lease
+      blocked behind the protected signed-publication paths and gates `P14-B`
+      and the whole `P15-*` chain; `SBOX` is quarantined; `U-MODULES` lack exact
+      plans; `P12-E`, `P13-O`, and `P14-R` are operator/evidence blocked; and
+      `P16-L` needs human approval. The only pending source-side item is the
+      external event `P13-C` (first real weekly `schedule` receipt, first
+      eligible 2026-08-03), which is a gate rather than an admissible writer, so
+      the next source admission waits on that gate opening. `GOAL.md` carries
+      the matching statement: the map "admits no source node at this baseline —
+      its only admitted node is the documentation-only receipt-level lifecycle
+      update `T4`".
+- [x] Run the full GOAL.md verification block from Validation Commands and
       confirm exit code 0 with a clean working tree.
+      Ran verbatim under `set -euo pipefail` after committing: exit code 0 with
+      `git status --porcelain` empty. `ruff check .` -> "All checks passed!" and
+      `.venv/bin/python -m pytest tests/test_planning_traceability.py -q` ->
+      6 passed.

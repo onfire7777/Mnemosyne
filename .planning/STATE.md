@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, and the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, at main@061c2e1c; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-08-01T03:40:00Z"
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, and the stranded GoalEx lifecycle backlog through PR #91, at main@e157e035; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+last_updated: "2026-08-01T06:40:00Z"
 last_activity: 2026-08-01
 progress:
   total_phases: 7
@@ -57,34 +57,46 @@ lock-timeout flake fix, and the pilots-plan delivery checkpoints at
 PR #90 is development-source documentation and tests only: it moved no package
 status, left `eval/public/registry.json`, the fixtures, and all adapter and
 scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
-`pbpp_headline_eligible:false`. The controller branch has `main@061c2e1c`
-fully merged into it and has never been merged into `main`; that merge has only
-ever run in the one direction, so its remaining undelivered delta is exactly:
+`pbpp_headline_eligible:false`. PR #91 then delivered the stranded GoalEx
+lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`, post-merge
+CI `30687385118`), which is the current canonical baseline. It landed exactly:
 `GOAL.md`,
 this file, and the lease map (recording PR #90's post-merge receipts on top of
-earlier lifecycle content that was itself never delivered, including this
+earlier lifecycle content that had itself never been delivered, including this
 file's PR #81-#84 whole-memory Decisions entry), the
-pilots-plan PR #90 checkpoint, and 26 round records touched since round 14
+pilots-plan PR #90 checkpoint, and the 26 round records touched since round 14
 without being delivered through a PR: 23 new `docs/plans/goalex-r15..r38*.md`
-files (including this round's own `goalex-r38-*.md` record), the two new
+files, the two new
 `docs/plans/completed/goalex-r36-*.md` and `docs/plans/completed/goalex-r37-*.md`
-files, and an undelivered edit to `docs/plans/goalex-r14-*.md` (whose original
-text is already on `main`). This PR lands all of them as the GoalEx-owner delivery of lease-map
-node `T3`, keeping the lifecycle and public-harness leases unmixed; after it
-merges the only undelivered residue is its own receipt block (PR number,
-exact-head CI run id, merge SHA, post-merge CI run id), which cannot exist
-inside the commit it describes, and the lease map must be recomputed from the
-resulting `main` before any further admission. The plan-doc
+files, and the edit to `docs/plans/goalex-r14-*.md` (whose original
+text was already on `main`). PR #91 is documentation only: it moved no package
+status and changed no benchmark, measurement, admission state, or publication
+claim. It was the GoalEx-owner delivery of lease-map
+node `T3`, now `MERGED`, and it kept the lifecycle and public-harness leases
+unmixed, and no source node remains admitted in the wave. The lease map has since been
+recomputed from the resulting `main@e157e035` and carries PR #91's own receipt
+block — the residue that could not exist inside the commit it describes — but
+that recomputation was branch-resident, so the `GOAL.md` Authority carve-out is
+reduced to receipt scope rather than closed: `main@e157e035` still holds the
+pre-merge map (`Baseline: main@061c2e1c`, `T3` as `DELIVERING`) and the
+pre-merge "this PR" text in this file and `GOAL.md`. **This PR delivers that
+receipt-level update** as documentation-only lease-map node `T4`, the sole
+writer admitted from this baseline, which admits no source node; after it
+merges the lease map must be recomputed from the resulting `main` before any
+further admission. `T4` regenerates a one-block
+residue of its own for the same structural reason, since no commit can describe
+its own merge; that residual lag is an accepted standing condition rather than
+an open work item, and it admits no successor node after `T4`. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
 delivery:` receipt in the M12/M13 checkpoint section: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
-states that the M12/M13 gap-disclosure paragraphs and their pinning tests
+stated that the M12/M13 gap-disclosure paragraphs and their pinning tests
 "are not on main and are still pending PR delivery" — a claim that same
 commit falsified. That sentence was known-stale on `main` from PR #90 until
-this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
+PR #91 replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
 of those records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked
 task boxes: those boxes record the plan as written at the time and are not a
 delivery signal, because each round's merged receipts are recorded in this
@@ -92,7 +104,7 @@ file and in the lease map rather than back-filled into the round record. The
 first actual scheduled-cadence receipt is still open: the
 workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
 2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
-measurement, or publication claim changed in PRs #87-#90. Official
+measurement, or publication claim changed in PRs #87-#91. Official
 MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
 open. The earlier Phase 12 lease sweep remains delivered and its operator-only
 measurement boundary is unchanged.
@@ -322,10 +334,11 @@ Latest checkpoint (2026-08-01): see the **Decisions** entry under **Accumulated
 Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
-the PR #87, PR #88, PR #89, and PR #90 merge receipts. The current canonical
-baseline is `main@061c2e1c` (PR #90, post-merge CI `30680201900`). PR #90 is
-development-source documentation and tests only and moved no package status.
-Evidence boundaries are unchanged.
+the PR #87, PR #88, PR #89, PR #90, and PR #91 merge receipts. The current
+canonical baseline is `main@e157e035` (PR #91, exact-head CI `30686224929`,
+post-merge CI `30687385118`). PR #90 is development-source documentation and
+tests only and PR #91 is lifecycle documentation only; neither moved a package
+status. Evidence boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
