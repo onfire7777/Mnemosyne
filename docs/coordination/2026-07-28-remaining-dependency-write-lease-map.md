@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-08-01
-Baseline: `main@061c2e1c13cbf1fd5324361a6ff61f47cd2a6534`
+Baseline: `main@e157e0350c503c9cde4aca0eff71d643a4adb200`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -37,8 +37,15 @@ The following packages are complete source history, not runnable work:
   left `eval/public/registry.json`, the fixtures, and all adapter/scoring code
   untouched. M12/M13 remain `PROPOSED` / `publishable:false` /
   `pbpp_headline_eligible:false`, so the rows below are unchanged by it.
+- PR #91: the GoalEx lifecycle delivery of the previously stranded controller
+  delta — the three lifecycle files, the pilots-plan PR #90 checkpoint, and the
+  26 round records (`main@e157e035`, exact-head CI `30686224929`, post-merge CI
+  `30687385118`). Documentation only: it moved no package status, changed no
+  benchmark, measurement, admission state, or publication claim, and touched no
+  source, test, or workflow path. This is node `T3`, now `MERGED`; the rows
+  below are unchanged by it except for `T3`'s own state.
 
-This map is recomputed from the new baseline `main@061c2e1c`, which the
+This map is recomputed from the new baseline `main@e157e035`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. The merge has only ever run in that one direction: the
 controller branch has never been merged into `main`. Its remaining undelivered delta
