@@ -59,8 +59,16 @@ plan, and four ordered Phase 15 plans without claiming their gated evidence.
 PR #86 merged the two-file scheduled-regression source at exact head
 `baf5c1852593885e37eed75da69b02d93e1bff11`; manual development operability
 run `30561430522` and exact post-merge main CI run `30561266140` passed on the
-exact merge commit. The first actual scheduled-cadence receipt and every
-official/upstream benchmark run remain open.
+exact merge commit. PR #87 then merged the canonical truth reconciliation at
+`main@2ba4ed80` (post-merge CI `30566984814`), PR #88 merged public-regression
+README documentation plus hardened workflow contract tests at `main@4a891042`
+(post-merge CI `30659705054`), and PR #89 merged the post-PR-#88 recomputation
+of the dependency/write-lease map and `.planning/STATE.md` at `main@a8e9444c`
+(post-merge CI `30672194635`), which is the current canonical baseline. PRs
+#87-#89 are documentation and test-contract only: none admitted a new
+implementation package or changed a benchmark, measurement, or publication
+claim. The first actual scheduled-cadence receipt and every official/upstream
+benchmark run remain open.
 
 Result-v2 remains blocked by the protected signed-publication lease. Local OCI
 sandbox commits are reviewed development-source receipts only and remain
@@ -185,7 +193,12 @@ Achieved for the current development-source milestone:
 - frozen Phase 13-15 execution contracts through PR #85;
 - normal PR #86 exact-head CI/review/merge gates plus passing input-free manual
   development operability run `30561430522` and passing exact post-merge main
-  CI run `30561266140`.
+  CI run `30561266140`;
+- documentation- and contract-test-only reconciliation through PR #87
+  (`main@2ba4ed80`, post-merge CI `30566984814`), PR #88 (`main@4a891042`,
+  post-merge CI `30659705054`), and PR #89 (`main@a8e9444c`, post-merge CI
+  `30672194635`), none of which changed a benchmark, measurement, or
+  publication claim.
 
 The remaining whole-memory pilot milestone still requires:
 

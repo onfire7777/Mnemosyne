@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-07-31
-Baseline: `main@4a891042c25d3a21d7ac4ecfe81a31b43d372370`
+Baseline: `main@a8e9444ca54633707e88263ce3e0307c5731fc9d`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -25,6 +25,9 @@ The following packages are complete source history, not runnable work:
   (`main@2ba4ed80`, post-merge CI `30566984814`).
 - PR #88: public-regression README documentation and workflow contract-test
   hardening (`main@4a891042`, post-merge CI `30659705054`).
+- PR #89: this map and `.planning/STATE.md` recomputed after PR #88
+  (`main@a8e9444c`, post-merge CI `30672194635`). Documentation only: it moved
+  no package status, so the rows below are unchanged by it.
 
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
@@ -81,6 +84,8 @@ Current delivery wave (complete; no admitted source node)
     -> T1 GitHub Wiki reconciliation   [wiki 46c34287]
       -> T2 one deduplicated CBM/Gbrain refresh [done 2026-07-30]
   PR #88 documentation/contract-test hardening merged at main@4a891042
+  and admitted no new implementation package.
+  PR #89 recomputed this map and STATE at main@a8e9444c (current baseline)
   and admitted no new implementation package.
 
 Independent external gates (do not block T0-T2)
