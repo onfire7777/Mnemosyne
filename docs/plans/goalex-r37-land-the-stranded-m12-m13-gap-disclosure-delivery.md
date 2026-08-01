@@ -10,8 +10,10 @@ Baseline leaving the round: `main@061c2e1c13cbf1fd5324361a6ff61f47cd2a6534`
 ## What was delivered
 
 Rounds 19–36 left committed work on the controller branch that had never been
-delivered through a PR. Round 37 moved exactly that stranded delta onto `main`
-through one normal reviewed PR, from a lane branched off then-current clean
+delivered through a PR. Round 37 moved the non-plan, non-lifecycle portion of
+that stranded delta onto `main` through one normal reviewed PR — the plan-doc
+and lifecycle backlog was excluded rather than cleared, as recorded below —
+from a lane branched off then-current clean
 `origin/main` (branch `codex/m12-m13-gap-disclosure-delivery`, worktree
 `/Users/admin/Mnemosyne.codex-m12-m13-gap-disclosure-delivery`).
 
