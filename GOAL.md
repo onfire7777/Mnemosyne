@@ -24,6 +24,30 @@ remain owned by:
 - approved repository plans and specifications
 - live GitHub PR, review, and CI state
 
+The active scheduling policy is the committed DAG/write-lease map at
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md` **as it
+stands on current `main`** — never a frozen revision of that file, since any
+pinned SHA re-authorizes launches that later merges already retired. Its
+package statuses must be recomputed from current main after every merge; the
+map is not blanket permission to launch stale or overlapping lanes.
+
+One carve-out applied while the GoalEx lifecycle delivery was deferred: `main`'s
+copy of that map was two merges behind (`Baseline: main@4a891042`; its
+merged-baseline list ended at PR #88, so it carried neither a PR #89 nor a
+PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` existed only on
+the controller branch, which made the branch-resident map the operative
+revision. **This PR is the deferred GoalEx-owner delivery**: it lands that
+recomputed map, `GOAL.md`, `.planning/STATE.md`, the pilots-plan PR #90
+checkpoint, and the round-record backlog on `main`. On merge the carve-out
+closes — the map on `main` becomes the operative revision again — except for
+one receipt-only residue that cannot exist inside the commit it describes: this
+PR's number, its exact-head CI run id, the merge SHA, and the post-merge `main`
+CI run id, which the next lifecycle update records. The carve-out remains scoped
+to exactly this gap, and its lapse rule is unchanged: it lapses the moment any
+merge lands on `main` that the branch-resident map does not already record, at
+which point the map must be recomputed from current `main` before it is treated
+as operative again.
+
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
 `605ecd3ddf7faf308f664f0869e5e2eb431afa7d`. The closed ABI and bounded
@@ -52,8 +76,49 @@ plan, and four ordered Phase 15 plans without claiming their gated evidence.
 PR #86 merged the two-file scheduled-regression source at exact head
 `baf5c1852593885e37eed75da69b02d93e1bff11`; manual development operability
 run `30561430522` and exact post-merge main CI run `30561266140` passed on the
-exact merge commit. The first actual scheduled-cadence receipt and every
-official/upstream benchmark run remain open.
+exact merge commit. PR #87 then merged the canonical truth reconciliation at
+`main@2ba4ed80` (post-merge CI `30566984814`), PR #88 merged public-regression
+README documentation plus hardened workflow contract tests at `main@4a891042`
+(post-merge CI `30659705054`), and PR #89 merged the post-PR-#88 recomputation
+of the dependency/write-lease map and `.planning/STATE.md` at `main@a8e9444c`
+(post-merge CI `30672194635`). PR #90 then landed the previously stranded
+M12/M13 development gap disclosures in `eval/public/README.md`, their two
+pinning test suites, a cert-rotator lock-timeout flake fix, and the
+pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
+`30679262270`, post-merge CI `30680201900`), which is the current canonical
+baseline. PRs #87-#90 are documentation and test-contract only: none admitted
+a new implementation package or changed a benchmark, measurement, admission
+state, or publication claim, and M12/M13 remain `PROPOSED` /
+`publishable:false` / `pbpp_headline_eligible:false`. The controller branch is
+merged to `main@061c2e1c`, so its remaining undelivered delta is exactly:
+`GOAL.md`, `.planning/STATE.md`, and the lease map (recording PR #90's
+post-merge receipts on top of earlier lifecycle content that was itself never
+delivered, including the PR #81-#84 whole-memory Decisions entry in
+`.planning/STATE.md`), the pilots-plan PR #90 checkpoint, and 25 round records
+touched since round 14 without being delivered through a PR: 23 new
+`docs/plans/goalex-r15..r37*.md` files, the new
+`docs/plans/completed/goalex-r36-*.md` file, and an undelivered edit to
+`docs/plans/goalex-r14-*.md` (whose original text is already on `main`).
+Landing all of them is deferred to the next round's GoalEx-owner PR so
+lifecycle and public-harness leases stay unmixed; that delivery is admitted in
+the lease map as node `T3`, the only admitted node in its current wave, so it
+is scheduled rather than left implicit. The plan-doc backlog is
+disclosed here rather than left to accumulate silently. That pilots-plan
+checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
+paragraph and adds a new twelve-line `Gap-disclosure delivery:` receipt in the
+M12/M13 checkpoint section: PR #90 shipped
+`docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+without updating its earlier paragraph, so canonical `main@061c2e1c` still
+states that the M12/M13 gap-disclosure paragraphs and their pinning tests
+"are not on main and are still pending PR delivery" — a claim that same
+commit falsified. Until the deferred PR lands, read that sentence on `main`
+as known-stale; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of those
+records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked task boxes:
+those boxes record the plan as written at the time and are not a delivery
+signal, because each round's merged receipts are recorded here and in the
+lease map rather than back-filled into the round record. The first actual
+scheduled-cadence receipt and every official/upstream benchmark run remain
+open.
 
 Result-v2 remains blocked by the protected signed-publication lease. Local OCI
 sandbox commits are reviewed development-source receipts only and remain
@@ -61,8 +126,9 @@ quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
-`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; neither
-result-v2 nor sandbox delivery is implicitly admitted.
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
+under the Authority carve-out above for as long as that carve-out is open;
+neither result-v2 nor sandbox delivery is implicitly admitted.
 
 ## Scope
 
@@ -178,7 +244,13 @@ Achieved for the current development-source milestone:
 - frozen Phase 13-15 execution contracts through PR #85;
 - normal PR #86 exact-head CI/review/merge gates plus passing input-free manual
   development operability run `30561430522` and passing exact post-merge main
-  CI run `30561266140`.
+  CI run `30561266140`;
+- documentation- and contract-test-only reconciliation through PR #87
+  (`main@2ba4ed80`, post-merge CI `30566984814`), PR #88 (`main@4a891042`,
+  post-merge CI `30659705054`), PR #89 (`main@a8e9444c`, post-merge CI
+  `30672194635`), and PR #90 (`main@061c2e1c`, exact-head CI `30679262270`,
+  post-merge CI `30680201900`), none of which changed a benchmark,
+  measurement, admission state, or publication claim.
 
 The remaining whole-memory pilot milestone still requires:
 

@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87 and public-regression documentation plus workflow contract-test hardening through PR #88, at main@4a891042; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-07-31T22:27:04Z"
-last_activity: 2026-07-31
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, and the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, at main@061c2e1c; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
+last_updated: "2026-08-01T03:40:00Z"
+last_activity: 2026-08-01
 progress:
   total_phases: 7
   completed_phases: 2
@@ -39,16 +39,57 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-07-31 — PR #86 merged the two-file bounded scheduled
+Last activity: 2026-08-01 — PR #86 merged the two-file bounded scheduled
 development-regression workflow at `main@661343ce`; input-free manual run
 `30561430522` passed the fixed four-test contract job. PR #87 then merged the
 canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
 `30566984814`), and PR #88 merged public-regression README documentation plus
 hardened workflow contract tests at `main@4a891042` with post-merge CI
-`30659705054`. The first actual scheduled-cadence receipt is still open: the
+`30659705054`. PR #89 then merged the post-PR-#88 recomputation of the
+dependency/write-lease map and this file at `main@a8e9444c` (post-merge CI
+`30672194635`); it is documentation only and moved no package status. PR #90
+then landed the previously stranded M12/M13 development gap disclosures in
+`eval/public/README.md`, their two pinning suites
+(`tests/test_public_pm_bench_triggerbench.py`,
+`tests/test_public_working_memory_action_probe.py`), a cert-rotator
+lock-timeout flake fix, and the pilots-plan delivery checkpoints at
+`main@061c2e1c` (exact-head CI `30679262270`, post-merge CI `30680201900`).
+PR #90 is development-source documentation and tests only: it moved no package
+status, left `eval/public/registry.json`, the fixtures, and all adapter and
+scoring code untouched, and M12/M13 remain `PROPOSED` / `publishable:false` /
+`pbpp_headline_eligible:false`. The controller branch is merged to
+`main@061c2e1c`, so its remaining undelivered delta is exactly: `GOAL.md`,
+this file, and the lease map (recording PR #90's post-merge receipts on top of
+earlier lifecycle content that was itself never delivered, including this
+file's PR #81-#84 whole-memory Decisions entry), the
+pilots-plan PR #90 checkpoint, and 25 round records touched since round 14
+without being delivered through a PR: 23 new `docs/plans/goalex-r15..r37*.md`
+files, the new `docs/plans/completed/goalex-r36-*.md` file, and an undelivered
+edit to `docs/plans/goalex-r14-*.md` (whose original text is already on
+`main`). This PR lands all of them as the GoalEx-owner delivery of lease-map
+node `T3`, keeping the lifecycle and public-harness leases unmixed; after it
+merges the only undelivered residue is its own receipt block (PR number,
+exact-head CI run id, merge SHA, post-merge CI run id), which cannot exist
+inside the commit it describes, and the lease map must be recomputed from the
+resulting `main` before any further admission. The plan-doc
+backlog is disclosed here rather than left to accumulate silently. That
+pilots-plan checkpoint is a correction plus PR #90's receipt block — it
+rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
+delivery:` receipt in the M12/M13 checkpoint section: PR #90 shipped
+`docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+without updating its earlier paragraph, so canonical `main@061c2e1c` still
+states that the M12/M13 gap-disclosure paragraphs and their pinning tests
+"are not on main and are still pending PR delivery" — a claim that same
+commit falsified. That sentence was known-stale on `main` from PR #90 until
+this PR replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
+of those records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked
+task boxes: those boxes record the plan as written at the time and are not a
+delivery signal, because each round's merged receipts are recorded in this
+file and in the lease map rather than back-filled into the round record. The
+first actual scheduled-cadence receipt is still open: the
 workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
 2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
-measurement, or publication claim changed in PR #87 or PR #88. Official
+measurement, or publication claim changed in PRs #87-#90. Official
 MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
 open. The earlier Phase 12 lease sweep remains delivered and its operator-only
 measurement boundary is unchanged.
@@ -114,6 +155,7 @@ reported as implemented evidence.
 
 ### Decisions
 
+- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 merged bounded M12/M13 evidence to `main@7e9cd01feb2a31cbba96252943697245a4edd024`; PR #83 merged bounded M03 valid-time source head `3189cc24c570f12be06e3d04252a06f48c71f971` to `main@7f60d8ba8274a8ac8036a80737467654f862008f`; PR #84 merged M15 canonical replay and the composed M01→M03→M10 cassette to `main@e0dd41594cec890f598718160f919c13eee1e552`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, M15 remains development-only, and all results remain non-publishable. The next package requires fresh dependency/write-lease admission; result-v2 and sandbox retain their stated blockers.
 - [Phase 12]: W1 local development is complete through the baseline, Fix A, and Fix B receipts, but it does not close CAP-003, BENCH-005, or Plan 12-04 without production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt.
 - [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@0784340` (Phase 1 hardening had landed earlier via PR #37 `7a1db210`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
 - [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@7a1db210`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
@@ -272,6 +314,15 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 ## Session Continuity
 
 Current continuation: see **Latest checkpoint** below.
+
+Latest checkpoint (2026-08-01): see the **Decisions** entry under **Accumulated
+Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
+receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
+contracts merged through PR #86, and **Current Position → Last activity** for
+the PR #87, PR #88, PR #89, and PR #90 merge receipts. The current canonical
+baseline is `main@061c2e1c` (PR #90, post-merge CI `30680201900`). PR #90 is
+development-source documentation and tests only and moved no package status.
+Evidence boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
 
