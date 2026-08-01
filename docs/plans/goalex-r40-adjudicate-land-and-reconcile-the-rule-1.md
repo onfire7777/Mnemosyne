@@ -80,12 +80,43 @@ dismiss a finding without written evidence, never write directly to `main`.
 - The full `GOAL.md` Verification block (run it on this branch after Task 4; it must exit 0)
 
 ### Task 1: Refresh state and adjudicate the PR #93 review finding
-- [ ] `git fetch --prune origin`; confirm you are on `codex/goalex-whole-memory-pilot` in `/Users/admin/.codex/worktrees/9697/Mnemosyne` with a clean worktree.
-- [ ] Re-read the live state of PR #93: `gh pr view 93 --json state,mergeable,mergeStateStatus,reviewDecision,files` and `gh pr checks 93`.
-- [ ] Re-confirm the diff is `GOAL.md` only: `git diff --name-only main...origin/codex/goalmd-round-ends-clean` must print exactly `GOAL.md`.
-- [ ] Read the `Runtime Contract` section of `GOAL.md` and quote the line that declares `.goalex/bin/goalex-sol` an isolated derived launcher.
-- [ ] Post one adjudication comment on PR #93 with `gh pr comment 93 --body '...'` that: names the Greptile P1 finding; dismisses it with the evidence that the launcher is external operator runtime by existing contract and that rule 11 already says "external"; states that vendoring a launcher and its test into this repo would exceed the approved documentation-only scope of this PR; and confirms the PR changes no benchmark, measurement, admission state, or publication claim.
-- [ ] Resolve or reply to the Greptile inline comment on `GOAL.md` the same way, so no review thread is left unanswered.
+- [x] `git fetch --prune origin`; confirm you are on `codex/goalex-whole-memory-pilot` in `/Users/admin/.codex/worktrees/9697/Mnemosyne` with a clean worktree.
+- [x] Re-read the live state of PR #93: `gh pr view 93 --json state,mergeable,mergeStateStatus,reviewDecision,files` and `gh pr checks 93`.
+- [x] Re-confirm the diff is `GOAL.md` only: `git diff --name-only main...origin/codex/goalmd-round-ends-clean` must print exactly `GOAL.md`.
+- [x] Read the `Runtime Contract` section of `GOAL.md` and quote the line that declares `.goalex/bin/goalex-sol` an isolated derived launcher.
+- [x] Post one adjudication comment on PR #93 with `gh pr comment 93 --body '...'` that: names the Greptile P1 finding; dismisses it with the evidence that the launcher is external operator runtime by existing contract and that rule 11 already says "external"; states that vendoring a launcher and its test into this repo would exceed the approved documentation-only scope of this PR; and confirms the PR changes no benchmark, measurement, admission state, or publication claim.
+- [x] Resolve or reply to the Greptile inline comment on `GOAL.md` the same way, so no review thread is left unanswered.
+
+**Task 1 record (round 40).** Live state at head `22f7dcfe`: `state OPEN`,
+`mergeable MERGEABLE`, `mergeStateStatus BLOCKED`, `reviewDecision
+CHANGES_REQUESTED`; diff is `GOAL.md` only (+21/-0). All gating checks pass
+except `Unit + drift checks`, still pending. Evidence gathered for the
+adjudication: `git ls-files | grep -i goalex` returns 40 paths, every one a
+document under `docs/plans/` or `.planning/` — no launcher source — and
+`git grep -l "status --porcelain"` hits only markdown. Runtime Contract quote
+used: "GoalEx planner/verifier: isolated derived launcher `.goalex/bin/goalex-sol`
+using `gpt-5.6-sol:low`." The plan's target Greptile P1 ("no tracked
+enforcement", comment `3696117548`) was already answered inline and its thread
+is resolved and outdated; the dismissal is now also recorded at PR level in
+[comment 5152550705](https://github.com/onfire7777/Mnemosyne/pull/93#issuecomment-5152550705).
+
+**Scope note — the plan's "one open review finding" is stale.** Three *later*
+threads on the current head are unresolved, and they are text defects in rule 11
+itself rather than questions about external tooling, so each was adjudicated on
+its own merits and **accepted**, not dismissed:
+
+- Greptile P1 `3696167619` — rule 3 (preserve unowned dirty work) contradicts
+  rule 11's unconditional whole-tree clean invariant. Replied `r3696179014`.
+- Codex P2 `3696167066` — round-owned *untracked* files survive a restore
+  scoped to tracked paths, so the tree stays dirty. Replied `r3696179107`.
+- CodeRabbit `3696163764` — the uncommittable-change fallback names only
+  receipts, not every round-owned change. Replied `r3696179209`.
+
+All three rewrite the same rule 11 paragraph and will be fixed as one
+documentation-only edit on `codex/goalmd-round-ends-clean` under Task 2's
+"fix it with the smallest change, push normally" checkbox. No review thread is
+left unanswered. `pytest tests/test_planning_traceability.py` (7 passed) and
+`ruff check .` both green.
 
 ### Task 2: Drive PR #93 to green and merge it normally
 - [ ] Poll `gh pr checks 93` until `Unit + drift checks` and `Greptile Review` reach a terminal state. If a check fails for a transport/flake reason, re-run it (`gh run rerun <run-id> --failed`) rather than changing the PR.
