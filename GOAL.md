@@ -36,17 +36,24 @@ copy of that map was two merges behind (`Baseline: main@4a891042`; its
 merged-baseline list ended at PR #88, so it carried neither a PR #89 nor a
 PR #90 row), and the recomputed map at `Baseline: main@061c2e1c` existed only on
 the controller branch, which made the branch-resident map the operative
-revision. **That carve-out is now closed.** PR #91 was the deferred GoalEx-owner
-delivery: it landed the recomputed map, `GOAL.md`, `.planning/STATE.md`, the
-pilots-plan PR #90 checkpoint, and the round-record backlog on `main`
-(merge `e157e035`, exact-head CI `30686224929`, post-merge CI `30687385118`).
-The map on `main` is the operative revision again, recomputed to
-`Baseline: main@e157e035` and carrying PR #91's own receipt block — the one
-residue that could not exist inside the commit it describes — so the carve-out
-does not re-open even at receipt scope. Its lapse rule stands unchanged for any
-future gap: it lapses the moment any merge lands on `main` that the
-branch-resident map does not already record, at which point the map must be
-recomputed from current `main` before it is treated as operative again.
+revision. **That carve-out is now reduced to receipt scope.** PR #91 was the
+deferred GoalEx-owner delivery: it landed the recomputed map, `GOAL.md`,
+`.planning/STATE.md`, the pilots-plan PR #90 checkpoint, and the round-record
+backlog on `main` (merge `e157e035`, exact-head CI `30686224929`, post-merge CI
+`30687385118`), so the bulk gap is closed and `main`'s map is no longer two
+merges behind. It is **not** yet fully closed. `main@e157e035`'s copy of the map
+still reads `Baseline: main@061c2e1c` with `T3` as `DELIVERING` and "**This PR
+is the delivery**", because PR #91 could not describe its own merge from inside
+the commit being merged. The recomputation to `Baseline: main@e157e035`
+carrying PR #91's receipt block and `T3` as `MERGED` exists only on the
+controller branch, which keeps the branch-resident map the operative revision
+at exactly that receipt-level scope until this update is itself delivered
+through a PR. The same applies to `main`'s `GOAL.md` and `.planning/STATE.md`,
+whose present-tense "this PR" self-references PR #91 falsified on merge. The
+carve-out's lapse rule stands unchanged: it lapses the moment any merge lands on
+`main` that the branch-resident map does not already record, at which point the
+map must be recomputed from current `main` before it is treated as operative
+again.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -103,10 +110,12 @@ records touched since round 14 without being delivered through a PR: 23 new
 `docs/plans/goalex-r14-*.md` (whose original text was already on `main`).
 That delivery kept the lifecycle and public-harness leases unmixed; it was
 carried by lease-map node `T3`, now `MERGED`. The wave that held it is closed
-and holds no admitted node, the lease map has been recomputed from the
-resulting `main@e157e035` and carries PR #91's own receipt block, and the
-controller branch's remaining delta versus `main` is that receipt-level update
-and the round-38 record alone. The
+and holds no admitted node. The lease map has been recomputed from the
+resulting `main@e157e035` and now carries PR #91's own receipt block, but that
+recomputation is branch-resident: it, this file's and `.planning/STATE.md`'s
+matching post-merge text, and the round-38 record are the controller branch's
+entire remaining delta versus `main`, and they are undelivered until a
+follow-up GoalEx-owner PR lands them. The
 plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
@@ -131,9 +140,10 @@ quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
-`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, whose
-copy on `main` is again the operative revision now that the Authority carve-out
-above is closed; neither result-v2 nor sandbox delivery is implicitly admitted.
+`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
+under the receipt-scope remainder of the Authority carve-out above for as long
+as that remainder is open; neither result-v2 nor sandbox delivery is implicitly
+admitted.
 That map records no admissible node at this baseline: the next admission waits
 on an external gate opening, and the map must be recomputed from then-current
 `main` at that time.
@@ -290,6 +300,7 @@ git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
 git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
+git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
