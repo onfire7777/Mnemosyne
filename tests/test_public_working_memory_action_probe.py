@@ -149,8 +149,14 @@ def test_public_readme_records_development_evidence_gaps() -> None:
     # "one seed and six cases": the disclosure names the whole evidence base.
     assert fixture["seed"] == 94125
     assert len(fixture["cases"]) == len(ITEM_CATEGORIES) == 6
-    # "no capacity parameter": the operating point is exactly the frozen pair,
-    # so no capacity knob under any name can hide in it.
+    # "no capacity parameter": pin the literal operating point rather than the
+    # adapter constant, so adding a capacity knob to `OPERATING_POINT` (which
+    # the fixture must mirror for the adapter to accept it) fails here instead
+    # of silently making the README false.
+    assert fixture["operating_point"] == {
+        "policy": "highest-task-relevance-then-item-id",
+        "positive_threshold": 0.75,
+    }
     assert fixture["operating_point"] == OPERATING_POINT
     # "no promotion-versus-no-promotion control": a control arm would have to
     # split the cases, so pin that every case is a single unlabelled arm.
