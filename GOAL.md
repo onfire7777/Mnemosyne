@@ -322,6 +322,13 @@ For every GoalEx round:
     operator-approved encrypted custody location with explicit access and
     retention controls; absent that approval it follows the same durable park
     and operator-handoff path as secret-bearing state.
+    Before admitting mutable ignored runtime state as baseline, obtain its
+    owner's lock/quiescence or use the engine's native consistent-snapshot
+    operation; if neither is available, park instead of hashing, copying, or
+    later restoring a racing tree. Treat every permitted baseline copy as a
+    temporary access-controlled snapshot. Delete it after the final successful
+    manifest comparison, retaining an external archive only when an actual
+    cleanup or park handoff requires recovery evidence.
     The residue check compares every manifest row — path, object type, mode,
     and the type-specific identity field — against the full start-of-round
     manifest, so a mode-only or nested-only change must fail it, alongside
