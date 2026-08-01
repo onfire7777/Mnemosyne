@@ -83,7 +83,7 @@ leases until their owners land or hand them off.
 
 ## Current Phase
 
-**Phase 13 development-source lane delivered; reconcile truth before fresh admission.**
+**Phase 12 evidence closure is the serial critical path; no fresh source node is admitted.**
 
 WMBS-A/WMB-P1 authority, traceability, the closed common ABI, fail-closed
 reference validation, and the bounded M01/M03/M10/M12/M13/M15 development
@@ -105,8 +105,10 @@ pilots-plan delivery checkpoints at `main@061c2e1c` (exact-head CI
 GoalEx lifecycle backlog at `main@e157e035` (exact-head CI `30686224929`,
 post-merge CI `30687385118`). PR #92 then delivered the receipt-level
 lifecycle update carried by lease-map node `T4` at `main@39cfa67a` (exact-head
-CI `30693874030`, post-merge CI `30694818231`), which is the current canonical
-baseline.
+CI `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
+fail-closed round-cleanup and ignored-state custody contract at
+`main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
+which is the current canonical baseline.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -392,10 +394,11 @@ For every GoalEx round:
 - Dedicated worktree:
   `/Users/admin/.codex/worktrees/9697/Mnemosyne`
 - Branch: `codex/goalex-whole-memory-pilot`
-- GoalEx planner/verifier: isolated derived launcher
-  `.goalex/bin/goalex-sol` using `gpt-5.6-sol:low`.
+- GoalEx planner/verifier: Opus 5 High through the canonical GoalEx planner.
 - Bounded RalphEx plan, task, and review stages: `gpt-5.6-sol:low`.
-- Claude/Fable planning, dual planning, dual review, and Hermes are disabled.
+- Independent post-round GoalEx review/adjudication: Opus 5 High via
+  `GOALEX_DUAL_REVIEW_MODEL=opus:high`.
+- Dual planning, Fable, mixed-provider native RalphEx, and Hermes are disabled.
 - Bounded guards: at most 20 rounds per process, three consecutive execution
   failures, three consecutive no-commit stalls, 15-minute idle timeout, and
   two-hour per-session timeout.
@@ -452,6 +455,7 @@ git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
 git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
 git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
 git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
+git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -465,7 +469,7 @@ git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
 # branch-resident recomputation carried here, not by admitting a successor node;
 # see the lease map's `T4` residue. Only a failure on this branch, or a `main`
 # that has advanced by more than that one receipt block, is a real lapse.
-test "$(git rev-parse main)" = "39cfa67aa7692bf47d5dde5842af3d8ec0736bb0"
+test "$(git rev-parse main)" = "effc5e039505c09e575ca5e4aeb2b96949676366"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md

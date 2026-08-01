@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path. Phase 13 source contracts and scheduled development CI are merged through PR #86, with lifecycle reconciliation through PR #87, public-regression documentation plus workflow contract-test hardening through PR #88, the post-PR-#88 dependency/write-lease and STATE recomputation through PR #89, the previously stranded M12/M13 development gap disclosures plus their pinning tests through PR #90, the stranded GoalEx lifecycle backlog through PR #91, and its receipt-level lifecycle residue through PR #92, at main@39cfa67a; Phase 14-15 plans are frozen but dependency/evidence gated; Phase 16 source is complete while launch remains gated."
-last_updated: "2026-08-01T10:30:00Z"
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at main@effc5e03; PR #93 is merged and post-main CI is green. Candidate-readiness and runtime software gates are locally green, but exact external candidate/runtime custody, host admission, canonical mTLS inputs, development QA, and protected/held-out evidence remain open. No fresh source node is admitted; Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-01T22:07:00Z"
 last_activity: 2026-08-01
 progress:
   total_phases: 7
@@ -78,8 +78,10 @@ recomputed from the resulting `main@e157e035` and carries PR #91's own receipt
 block — the residue that could not exist inside the commit it describes — and
 that recomputation was branch-resident until PR #92 delivered it as
 documentation-only lease-map node `T4` at `main@39cfa67a` (exact-head CI
-`30693874030`, post-merge CI `30694818231`), which is the current canonical
-baseline. PR #92 is documentation only, admitted no source node, and moved no
+`30693874030`, post-merge CI `30694818231`). PR #93 then merged the
+fail-closed round-cleanup and ignored-state custody contract at
+`main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
+which is the current canonical baseline. PR #92 is documentation only, admitted no source node, and moved no
 package status or publication claim. The `GOAL.md` Authority carve-out is
 therefore discharged down to the accepted one-block residue rather than closed:
 `main@39cfa67a` still holds the pre-merge map (`Baseline: main@e157e035`, `T4`
@@ -338,8 +340,8 @@ Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
 the PR #87, PR #88, PR #89, PR #90, PR #91, and PR #92 merge receipts. The
-current canonical baseline is `main@39cfa67a` (PR #92, exact-head CI
-`30693874030`, post-merge CI `30694818231`). PR #90 is development-source
+current canonical baseline is `main@effc5e03` (PR #93, exact-head CI
+`30718912376`, post-merge CI `30719645207`). PR #90 is development-source
 documentation and tests only and PRs #91-#92 are lifecycle documentation only;
 none moved a package status. Evidence boundaries are unchanged.
 
