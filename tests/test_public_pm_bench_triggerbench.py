@@ -578,6 +578,63 @@ def _load_committed_fixture(name: str) -> dict[str, object]:
     return json.loads((_FIXTURES_DIR / name).read_text())
 
 
+def test_public_readme_m12_gap_disclosure_matches_committed_fixtures() -> None:
+    """Pin the M12 development-gap disclosure to the fixtures it describes.
+
+    The README paragraph is the only place the M12 evidence limits are stated
+    for a reader, so it must neither be deleted nor drift away from the
+    committed fixtures it summarizes.
+    """
+    readme = (
+        Path(__file__).resolve().parents[1] / "eval" / "public" / "README.md"
+    ).read_text()
+    pm_bench = _load_committed_fixture("pm-bench-development.json")
+    triggerbench = _load_committed_fixture("triggerbench-development.json")
+
+    pm_cases = pm_bench["cases"]
+    trigger_cases = triggerbench["cases"]
+    assert isinstance(pm_cases, list)
+    assert isinstance(trigger_cases, list)
+    assert pm_bench["seed"] == 7
+    assert triggerbench["seed"] == 7
+    assert len(pm_cases) == 1
+    assert len(pm_cases[0]["tasks"]) == 5
+    assert sum(len(case["steps"]) for case in pm_cases) == 7
+    assert len(trigger_cases) == 20
+    assert all(len(case["steps"]) == 1 for case in trigger_cases)
+
+    registry = load_registry()
+    assert not [
+        key for key in registry["triggerbench-development"] if "baseline" in key
+    ]
+    # A calibrated baseline would land in the fixture, the way M10 carries
+    # `baseline_manifests`, so pin the fixture too rather than only the
+    # fixed-schema registry entry. Scan every nesting depth: a per-case
+    # calibrated control is the natural shape and a top-level scan misses it.
+    assert not [key for key in _keys(triggerbench) if "baseline" in key]
+
+    unwrapped = " ".join(readme.split())
+    assert (
+        "`pm-bench-development` has one seed (`7`), one case, five tasks, "
+        "and seven steps; `triggerbench-development` has one seed (`7`), "
+        "twenty one-step cases, and no calibrated baseline." in unwrapped
+    )
+    # "Recurrence is represented in fixture metadata but is not forwarded":
+    # the metadata half is pinned here, the non-forwarding half by
+    # `test_action_cli_..._without_forwarding_regularity`.
+    assert "recurring" in {
+        task["regularity"] for case in pm_cases for task in case["tasks"]
+    }
+    assert (
+        "Recurrence is represented in fixture metadata but is not forwarded "
+        "as production recurrence plumbing." in unwrapped
+    )
+    assert (
+        "Lateness is scored only as a binary `late` safety counter" in unwrapped
+    )
+    assert "neither suite measures lateness magnitude or cost" in unwrapped
+
+
 def test_committed_pm_bench_and_triggerbench_fixtures_freeze_shape_seed_and_custody() -> None:
     """Freeze the honest development-evidence shape of the two committed fixtures.
 
