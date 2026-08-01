@@ -38,8 +38,10 @@ The following packages are complete source history, not runnable work:
   untouched. M12/M13 remain `PROPOSED` / `publishable:false` /
   `pbpp_headline_eligible:false`, so the rows below are unchanged by it.
 
-This map is recomputed from the new baseline `main@061c2e1c`, and the
-controller branch is merged to that baseline. Its remaining undelivered delta
+This map is recomputed from the new baseline `main@061c2e1c`, which the
+controller branch has fully merged into it — no commit on `main` is absent from
+the controller branch. The merge has only ever run in that one direction: the
+controller branch has never been merged into `main`. Its remaining undelivered delta
 is **not yet on `main`** and is exactly: the three lifecycle files (`GOAL.md`,
 `.planning/STATE.md`, and this map) recording PR #90's post-merge receipts on
 top of earlier lifecycle content that was itself never delivered, including the
