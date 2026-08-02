@@ -329,6 +329,11 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
     ):
         raise WmbsM04Error("fixture identity mismatch")
     if (
+        fixture["generator_id"] != GENERATOR_ID
+        or fixture["generator_version"] != GENERATOR_VERSION
+    ):
+        raise WmbsM04Error("generator identity mismatch")
+    if (
         tuple(fixture["seeds"]) != SEEDS
         or tuple(fixture["permutations"]) != PERMUTATIONS
         or tuple(fixture["source_classes"]) != SOURCE_CLASSES
@@ -433,6 +438,8 @@ def _projection(value: object, label: str) -> Mapping[str, Any]:
         isinstance(item, str) for item in value["objects"]
     ):
         raise WmbsM04Error(f"{label}.objects must be a list of strings")
+    if len(value["objects"]) != len(set(value["objects"])):
+        raise WmbsM04Error(f"{label}.objects must be unique strings")
     if not isinstance(value["as_of"], str):
         raise WmbsM04Error(f"{label}.as_of must be a string")
     return value
