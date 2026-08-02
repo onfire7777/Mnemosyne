@@ -318,6 +318,23 @@ def test_answer_envelope_matches_closed_schema_contract() -> None:
         m04.score_unresolved_calibration(fixture, invalid)
 
 
+@pytest.mark.parametrize(
+    "invalid_handle",
+    ["contains space", "a" * 129, "-invalid-start", "_invalid-start"],
+)
+def test_evidence_handles_enforce_frozen_identifier_items(
+    invalid_handle: str,
+) -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    observations[0]["answer"]["evidence_handles"] = ["A.valid_1:/-handle"]
+    m04.score_unresolved_calibration(fixture, observations)
+    observations[0]["answer"]["evidence_handles"] = [invalid_handle]
+
+    with pytest.raises(m04.WmbsM04Error, match="identifier schema"):
+        m04.score_unresolved_calibration(fixture, observations)
+
+
 def test_false_resolution_and_monotonic_violations_fail_closed() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)

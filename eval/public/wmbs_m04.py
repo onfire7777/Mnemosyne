@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -475,9 +476,16 @@ def _answer(value: object) -> Mapping[str, Any]:
             not isinstance(handles, list)
             or len(handles) > 1000
             or len(handles) != len(set(handles))
-            or not all(isinstance(item, str) and item for item in handles)
+            or not all(
+                isinstance(item, str)
+                and len(item) <= 128
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]*", item)
+                for item in handles
+            )
         ):
-            raise WmbsM04Error(f"answer.{key} must contain unique identifiers")
+            raise WmbsM04Error(
+                f"answer.{key} must satisfy the unique identifier schema"
+            )
     if value["action_handles"]:
         raise WmbsM04Error("M04 has no action surface")
     if not isinstance(value["adapter_metadata"], Mapping) or set(
