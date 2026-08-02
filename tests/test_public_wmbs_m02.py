@@ -76,6 +76,22 @@ def test_generator_is_seed_deterministic_and_seed_sensitive() -> None:
     assert first != m02.canonical_json(m02.generate_fixture(8))
 
 
+def test_multi_document_gold_is_observable_from_query_and_corpus() -> None:
+    for fixture in (m02.generate_fixture(), m02.load_fixture()):
+        corpus = {
+            document["stable_item_id"]: document for document in fixture["corpus"]
+        }
+        for question in fixture["questions"]:
+            if len(question["gold_doc_ids"]) < 2:
+                continue
+            marker = question["answers"][0]
+            assert marker in question["text"]
+            assert all(
+                marker in corpus[doc_id]["content"]
+                for doc_id in question["gold_doc_ids"]
+            )
+
+
 def test_scorer_scores_the_committed_fixture() -> None:
     fixture = m02.load_fixture()
     result = m02.score_retrieval(fixture, _perfect_traces(fixture))
@@ -231,6 +247,23 @@ def test_unsupported_claim_rate_uses_retrieved_gold_not_answer_correctness() -> 
     metrics = m02.score_retrieval(fixture, traces)["metrics"]
     assert metrics["unsupported_claim_rate"] == 0.0
     assert metrics["exact_match"] == 0.98
+
+
+def test_article_only_non_abstained_answer_counts_as_unsupported_claim() -> None:
+    fixture = m02.generate_fixture()
+    traces = _perfect_traces(fixture)
+    index, question = _case(fixture, "exact")
+    wrong_doc_id = next(
+        document["stable_item_id"]
+        for document in fixture["corpus"]
+        if document["stable_item_id"] not in question["gold_doc_ids"]
+    )
+    traces[index]["answer"] = "the"
+    traces[index]["ranked_hits"] = [{"rank": 1, "stable_item_id": wrong_doc_id}]
+    assert (
+        m02.score_retrieval(fixture, traces)["metrics"]["unsupported_claim_rate"]
+        == 0.02
+    )
 
 
 @pytest.mark.parametrize(

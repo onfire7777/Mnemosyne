@@ -117,6 +117,8 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
             if family in {"relation", "multi-hop"}:
                 gold.append(f"m02-doc-{primary + 1:03d}")
             value = values[primary]
+            if len(gold) > 1:
+                corpus[primary + 1]["content"] += f" Linked retrieval marker {value}."
             questions.append(
                 {
                     "question_id": f"m02-{family}-{index:02d}",
@@ -441,7 +443,7 @@ def score_retrieval(
     answered_count = 0
     for question in questions.values():
         trace, ranked_ids = bound[question["question_id"]]
-        if _normalized_answer(trace["answer"]):
+        if trace["answer"] is not None and not trace["abstained"]:
             answered_count += 1
             unsupported_claims += not bool(
                 set(ranked_ids).intersection(question["gold_doc_ids"])
