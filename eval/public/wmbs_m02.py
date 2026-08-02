@@ -408,6 +408,10 @@ def score_retrieval(
             evidence = _nonempty_strings(
                 evidence_ids, "trace.evidence_ids", allow_empty=True
             )
+            if not set(evidence).issubset(corpus_ids):
+                raise WmbsM02Error("trace evidence_ids must reference the corpus")
+            if not set(evidence).issubset(ranked_ids):
+                raise WmbsM02Error("trace evidence_ids must be a subset of ranked hits")
             gold = set(question["gold_doc_ids"])
             if gold:
                 evidence_id_count += len(evidence)
