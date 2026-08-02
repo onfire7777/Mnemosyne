@@ -397,6 +397,15 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
             gold["ablation_objects"], Mapping
         ):
             raise WmbsM04Error("invalid gold contract")
+        current_objects = gold["current_objects"]
+        if not isinstance(current_objects, list) or not all(
+            isinstance(item, str) for item in current_objects
+        ):
+            raise WmbsM04Error("gold.current_objects must be a list of strings")
+        if len(current_objects) != len(set(current_objects)):
+            raise WmbsM04Error("gold.current_objects must contain unique strings")
+        if not gold["unresolved"] and not current_objects:
+            raise WmbsM04Error("gold.current_objects must be nonempty when resolved")
         unresolved_states.append(gold["unresolved"])
         has_historical_gold = has_historical_gold or bool(gold["historical_objects"])
         if not gold["ablation_objects"]:
