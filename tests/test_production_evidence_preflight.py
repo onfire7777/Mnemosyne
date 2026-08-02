@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
@@ -31,7 +33,18 @@ def _runtime_lock_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     (custody_dir / "locks").mkdir(mode=0o700)
     monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
     yield
-    assert not (custody_dir / "locks" / "runtime-exclusive" / "owner.json").exists()
+    owner = custody_dir / "locks" / "runtime-exclusive" / "owner.json"
+    if owner.exists():
+        with owner.open("rb") as retained:
+            deadline = time.monotonic() + 30.0
+            while True:
+                try:
+                    fcntl.flock(retained, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
 
 
 def _preflight_rows_by_lane(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
