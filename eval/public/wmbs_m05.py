@@ -302,6 +302,9 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
         raise WmbsM05Error("protected source sensitivity binding is missing")
     for slice_ in slices:
         slice_id = slice_["slice_id"]
+        cases = slice_["cases"]
+        if not all(isinstance(case, Mapping) for case in cases):
+            raise WmbsM05Error("fixture case identity matrix mismatch")
         expected_identities = tuple(
             (f"m05-{seed}-{slice_id}-{index}", seed, slice_id, index)
             for seed in SEEDS
@@ -314,11 +317,11 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
                 case.get("slice_id"),
                 case.get("index"),
             )
-            for case in slice_["cases"]
+            for case in cases
         )
         if identities != expected_identities:
             raise WmbsM05Error("fixture case identity matrix mismatch")
-        for case in slice_["cases"]:
+        for case in cases:
             if case.get("sensitivity") != 2:
                 raise WmbsM05Error("every case must retain sensitivity tier 2")
             if case.get("retrieval_stages") != ["lexical"]:
