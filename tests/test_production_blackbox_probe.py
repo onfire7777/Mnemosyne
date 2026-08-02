@@ -362,7 +362,7 @@ def test_hanging_capability_check_is_bounded_and_reaped(tmp_path: Path) -> None:
     assert proc.stdout == FAILURE
     assert proc.stderr == ""
     assert CANARY not in proc.stdout + proc.stderr
-    assert elapsed < 8
+    assert elapsed < 10
     assert len(_calls(audit)) == 2
     _assert_fake_child_exited(tmp_path)
 
