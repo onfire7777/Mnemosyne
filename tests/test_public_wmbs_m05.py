@@ -70,6 +70,17 @@ def test_claim_source_completeness_is_a_hard_rail() -> None:
     assert result["passed"] is True
 
 
+def test_protected_credit_requires_answer_text_to_match_fixture_claim() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"]["answer_text"] = "Unrelated nonempty answer."
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["M-PROV-COMPLETE"] < 1.0
+    assert result["metrics"]["M-EXPLAIN-COV"] < 1.0
+    assert result["passed"] is False
+
+
 @pytest.mark.parametrize("stages", [None, ["unknown-stage"]])
 def test_explanation_contract_requires_complete_retrieval_stages(stages) -> None:
     m05 = _module()
