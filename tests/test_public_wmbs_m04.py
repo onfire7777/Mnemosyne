@@ -175,6 +175,25 @@ def test_current_answer_rejects_wrong_as_of_and_fails_aggregate() -> None:
     assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
 
 
+def test_current_answer_rejects_wrong_resolved_text_for_ordered_projection() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    target = next(
+        row
+        for row in observations
+        if row["case_id"].split("-")[2] == "independent"
+        and row["permutation"] == m04.PERMUTATIONS[0]
+    )
+    assert len(target["current"]["objects"]) > 1
+    assert target["answer"]["answer_text"] == target["current"]["objects"][0]
+    target["answer"]["answer_text"] = "wrong-but-nonempty"
+
+    metric = m04.score_current_answer(fixture, observations)
+    assert metric["correct_count"] == metric["total_count"] - 1
+    assert metric["passed"] is False
+    assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
+
+
 def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)
@@ -183,6 +202,24 @@ def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
     poisoned[0]["current"]["status"] = "contested"
     with pytest.raises(m04.WmbsM04Error):
         m04.score_unresolved_calibration(fixture, poisoned)
+
+
+@pytest.mark.parametrize("drift", ["objects", "as_of"])
+def test_unresolved_calibration_rejects_fabricated_gold_projection(
+    drift: str,
+) -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    target = next(row for row in observations if row["answer"]["abstained"])
+    if drift == "objects":
+        target["current"]["objects"] = ["fabricated-alpha", "fabricated-beta"]
+    else:
+        target["current"]["as_of"] = "2026-07-19T00:00:00Z"
+
+    metric = m04.score_unresolved_calibration(fixture, observations)
+    assert metric["correct_count"] == metric["total_count"] - 1
+    assert metric["passed"] is False
+    assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
 
 
 def test_wrong_confidences_do_not_claim_calibration_support() -> None:
