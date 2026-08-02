@@ -234,6 +234,32 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
     )
 
 
+def test_t6_terminal_receipts_are_consistent_across_lifecycle_files() -> None:
+    """T6 must remain closed with one shared PR #95 receipt tuple."""
+    lifecycle_texts = {
+        "GOAL.md": GOAL.read_text(encoding="utf-8"),
+        ".planning/STATE.md": STATE.read_text(encoding="utf-8"),
+        "lease map": DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8"),
+    }
+    normalized = {
+        label: " ".join(text.split()) for label, text in lifecycle_texts.items()
+    }
+    receipt_pattern = re.compile(
+        r"PR #95 at `main@([0-9a-f]{8})`(?: \(|, )exact head `([0-9a-f]{8})`, "
+        r"exact-head CI `([0-9]+)`, (?:and )?post-merge CI `([0-9]+)`\)?"
+    )
+    expected = {("42abaab7", "d7c0938f", "30737466988", "30738303497")}
+    for label, text in normalized.items():
+        assert set(receipt_pattern.findall(text)) == expected, (
+            f"{label} has inconsistent T6 receipts"
+        )
+
+    assert "| T6 | MERGED |" in lifecycle_texts["lease map"]
+    assert "No lifecycle or source node is admitted" in normalized["lease map"]
+    assert "No lifecycle or source node is" in normalized["GOAL.md"]
+    assert "no lifecycle writer is now admitted" in normalized[".planning/STATE.md"]
+
+
 def test_stale_alternate_canonical_baseline_claim_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
