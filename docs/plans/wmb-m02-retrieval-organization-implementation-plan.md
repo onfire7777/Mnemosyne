@@ -107,7 +107,7 @@ the first reference-harness pilot.
 
 The lease map on the branch records `Baseline: main@e157e035`. The verified base
 of this checkout is `main@effc5e03`, which is **22 commits ahead** of that
-baseline (`git log --oneline e157e035..HEAD | wc -l` → 22, spanning PR #92 and
+baseline (`git log --oneline e157e035..effc5e03 | wc -l` → 22, spanning PR #92 and
 PR #93). `GOAL.md`'s own verification block asserts
 `test "$(git rev-parse main)" = "e157e0350c503c9cde4aca0eff71d643a4adb200"` and
 annotates it as the carve-out's **lapse detector**: "if it fails, `main` has
