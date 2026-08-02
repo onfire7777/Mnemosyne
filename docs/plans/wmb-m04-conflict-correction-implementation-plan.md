@@ -304,7 +304,7 @@ discipline and excluding every volatile field named in §3.4.1.
 | `M04-UNRESOLVED-CAL` | Exact current projection agreement plus agreement between observed multiplicity/abstention and gold unresolved state. | **`= 1.0`** for the deterministic Stage A matrix and included in aggregate `passed`. Numeric calibration remains `unsupported` until a frozen calibration statistic contract exists; supplying confidence alone does not establish support. |
 | `M04-ABLATION-SENS` | Change in current answer when one source is withheld, versus gold sensitivity. | **`= 1.0`** for the deterministic Stage A matrix and included in aggregate `passed`. |
 | `M04-PERM-INVARIANT` | Fraction of cases whose scored outcome is identical across all three source-order permutations. | **`= 1.0`** for every non-`unresolved` class. Deterministic tie policy applies to `unresolved`. |
-| `M04-REPLAY-EQ` | Byte equality of the closed canonical projection across five seeds plus one clean-process replay. | **`= 1.0`** (M15 discipline, applied locally in Stage A). |
+| `M04-REPLAY-EQ` | Byte equality with the frozen `generate_fixture(DEFAULT_SEED)` canonical projection, which contains the five declared case seeds, plus one clean-process replay. | **`= 1.0`** (M15 discipline, applied locally in Stage A). |
 
 Inherited rails are not restated as new thresholds. `RAIL-001`,
 `M-PROTECTED-REG`, `M-AUDIT-COMPLETE`, `M-POISON-BLOCK`, and `M-BENIGN-DROP`
@@ -410,7 +410,7 @@ invalidates a committed digest.
 | R4 | `test_historical_preservation_gate_is_exact` | `M04-HIST-PRESERVE < 1.0` fails; a single dropped superseded value fails. | `score_historical_preservation`. |
 | R5 | `test_unresolved_state_is_scored_by_multiplicity_not_by_status` | A gold-conformant observation carrying only `object` values scores correctly; injecting a `status` field into the observation is rejected. | Closed observation allowlist. |
 | R6 | `test_false_resolution_and_monotonic_violations_fail_closed` | Any single false high-confidence resolution and any monotonic violation fail. | `score_false_supersession`, monotonic check. |
-| R7 | `test_permutation_invariance_and_clean_process_replay_equality` | Reordering sources changes no non-`unresolved` outcome; the closed canonical projection is byte-identical across five seeds and one clean-process replay. | `score_permutation_invariance`, canonical projection. |
+| R7 | `test_permutation_invariance_and_clean_process_replay_equality` | Reordering sources changes no non-`unresolved` outcome; the closed canonical projection is byte-identical to `generate_fixture(DEFAULT_SEED)`, including its five declared case seeds, and one clean-process replay. | `score_permutation_invariance`, canonical projection. |
 | R8 | `test_source_ablation_sensitivity_matches_gold` | Withholding a source moves the current answer exactly where gold says it should, and nowhere else. | `score_source_ablation_sensitivity`. |
 | R9 | `test_scorer_emits_no_publication_or_measurement_claim` | The aggregate result carries `admission_state="PROPOSED"`, `publishable=false`, `pbpp_headline_eligible=false`, `headline_eligible=false`, `independent_external_reproduction=false`, `upstream_comparable=false`, `interval={"method":"descriptive"}`, and no `evidence_level` above `IMPLEMENTED`. | Aggregate result envelope. |
 | R10 | `test_branch_merge_and_transaction_time_are_declared_unsupported` | The module declares branch/merge `UNSUPPORTED-BY-SYSTEM` and transaction-time `unsupported`, and fails closed if either is asserted supported. | Explicit disclosure block. |

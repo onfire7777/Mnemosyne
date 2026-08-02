@@ -750,7 +750,7 @@ def _score_monotonic(fixture: object, observations: object) -> dict[str, Any]:
 def _score_replay_equality(fixture: object) -> dict[str, Any]:
     fixture = validate_fixture(fixture)
     equal = int(
-        canonical_json(fixture) == canonical_json(generate_fixture(fixture["seed"]))
+        canonical_json(fixture) == canonical_json(generate_fixture(DEFAULT_SEED))
     )
     return {
         "metric_id": "M04-REPLAY-EQ",
