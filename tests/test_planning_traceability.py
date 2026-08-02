@@ -30,6 +30,7 @@ DEPENDENCY_LEASE_MAP = (
 )
 GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
 LEASE_CURRENT_BASELINE_CLAIMS = (
     re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
@@ -133,6 +134,24 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
 
 
+def test_unit_drift_checkout_fetches_canonical_main_history() -> None:
+    lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    job_start = lines.index("  test:")
+    job_end = next(
+        index
+        for index in range(job_start + 1, len(lines))
+        if lines[index].startswith("  ") and not lines[index].startswith("    ")
+    )
+    job = lines[job_start:job_end]
+    checkout = job.index(
+        "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+    )
+    assert job[checkout + 1 : checkout + 3] == [
+        "        with:",
+        "          fetch-depth: 0",
+    ]
+
+
 def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> None:
     """The lease map, GOAL.md, and STATE.md must name one canonical baseline.
 
@@ -171,18 +190,21 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         (".planning/STATE.md", state_normalized),
     ):
         claimed = [
-            match
+            claim
             for pattern in CANONICAL_CLAIMS
-            for match in pattern.findall(normalized)
+            for claim in pattern.findall(normalized)
         ]
-        assert claimed, f"{label} makes no canonical-baseline claim"
-        assert set(claimed) == {short}, (
-            f"every canonical-baseline claim in {label} must name `main@{short}`, "
-            f"got {claimed}"
+        assert len(claimed) == 1, (
+            f"{label} must make exactly one canonical-baseline claim, got {claimed}"
+        )
+        assert claimed[0] == short, (
+            f"the canonical-baseline claim in {label} must name `main@{short}`, "
+            f"got {claimed[0]}"
         )
         # Guard the regexes against a reworded claim slipping past them: every
         # occurrence of the phrase must be one of the matched claims.
-        assert normalized.count(CANONICAL_CLAIM_PHRASE) == len(claimed), (
+        recognized_claim_count = len(claimed)
+        assert normalized.count(CANONICAL_CLAIM_PHRASE) == recognized_claim_count, (
             f"{label} has a '{CANONICAL_CLAIM_PHRASE}' claim that names no SHA "
             f"in a recognized form"
         )
@@ -192,6 +214,96 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         f".planning/STATE.md stopped_at must name `main@{short}` exactly once, "
         f"got {claimed}"
     )
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            sha,
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_stale_alternate_canonical_baseline_claim_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    goal_text = GOAL.read_text(encoding="utf-8")
+    duplicate_goal = tmp_path / "GOAL.md"
+    duplicate_goal.write_text(
+        goal_text + "\nThe current canonical baseline is `main@deadbeef`.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "GOAL", duplicate_goal)
+
+    try:
+        test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
+    except AssertionError:
+        return
+    raise AssertionError("stale alternate canonical-baseline claim was accepted")
+
+
+def test_non_ancestral_baseline_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    commit_env = os.environ | {
+        "GIT_AUTHOR_NAME": "planning-traceability-test",
+        "GIT_AUTHOR_EMAIL": "planning-traceability-test@example.invalid",
+        "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+        "GIT_COMMITTER_NAME": "planning-traceability-test",
+        "GIT_COMMITTER_EMAIL": "planning-traceability-test@example.invalid",
+        "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+    }
+    non_ancestor = subprocess.run(
+        ["git", "commit-tree", "HEAD^{tree}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        input="object-only non-ancestral baseline\n",
+        text=True,
+        env=commit_env,
+    ).stdout.strip()
+    ancestry = subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            non_ancestor,
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    assert ancestry.returncode == 1
+
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baseline = LEASE_BASELINE.findall(lease_text)[0]
+    for global_name, source in (
+        ("GOAL", GOAL),
+        ("STATE", STATE),
+        ("DEPENDENCY_LEASE_MAP", DEPENDENCY_LEASE_MAP),
+    ):
+        substituted = tmp_path / global_name
+        substituted.write_text(
+            source.read_text(encoding="utf-8")
+            .replace(baseline, non_ancestor)
+            .replace(baseline[:8], non_ancestor[:8]),
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(globals(), global_name, substituted)
+
+    try:
+        test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
+    except subprocess.CalledProcessError:
+        return
+    raise AssertionError("non-ancestral baseline commit was accepted")
 
 
 def test_lease_map_body_names_only_the_header_baseline() -> None:
@@ -202,14 +314,17 @@ def test_lease_map_body_names_only_the_header_baseline() -> None:
     normalized = " ".join(lease_text.split())
 
     claimed = [
-        match
+        claim
         for pattern in LEASE_CURRENT_BASELINE_CLAIMS
-        for match in pattern.findall(normalized)
+        for claim in pattern.findall(normalized)
     ]
-    assert claimed, "lease map makes no recognized in-body current-baseline claim"
-    assert set(claimed) == {short}, (
-        f"every current-baseline claim in the lease map must name `main@{short}`, "
+    assert len(claimed) == 1, (
+        "lease map must make exactly one recognized in-body current-baseline claim, "
         f"got {claimed}"
+    )
+    assert claimed[0] == short, (
+        f"the lease map's current-baseline claim must name `main@{short}`, "
+        f"got {claimed[0]}"
     )
 
 

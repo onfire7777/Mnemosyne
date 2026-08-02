@@ -1,5 +1,9 @@
 # Plan: Adjudicate, Land, and Reconcile the Rule-11 GOAL.md PR #93
 
+Historical round record, superseded by PR #93's merge and the bounded `T5`
+delivery admitted after that independent merge lapsed the carve-out. The
+instructions below are retained as executed context, not active work.
+
 ## Overview
 
 You are the executor for round 40 of an autonomous GoalEx loop on the Mnemosyne
