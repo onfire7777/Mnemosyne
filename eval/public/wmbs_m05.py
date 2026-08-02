@@ -24,6 +24,7 @@ FIXTURE_ID = "wmbs-m05-provenance-development"
 FIXTURE_SCHEMA_ID = "wmbs-m05-provenance-development/fixture/0.1"
 GENERATOR_ID = "wmbs-m05-deterministic-generator"
 GENERATOR_VERSION = "1.0.0"
+LICENSE = "CC0-1.0"
 SEEDS = (13, 29, 41, 59, 73)
 PROTECTED_SLICE_ID = "protected-grounding"
 SLICE_IDS = (
@@ -67,6 +68,10 @@ _CAPTURE = {
     "source_type": "synthetic-portable-event",
     "modality": "text",
     "sensitivity": 2,
+}
+_SOURCE_MANIFEST = {
+    "signed": False,
+    "reason": "signing deferred behind the protected lease",
 }
 
 
@@ -218,17 +223,14 @@ def generate_fixture(seed: int = SEEDS[0]) -> dict[str, Any]:
         "generator_seed": seed,
         "integration_dependencies": list(INTEGRATION_DEPENDENCIES),
         "disclosure": FINITE_CORPUS_DISCLOSURE,
-        "license": "CC0-1.0",
+        "license": LICENSE,
         "seeds": list(SEEDS),
         "sensitivity_binding": {
             "protected_slice_sensitivity": 2,
             "reason": "Q8",
         },
         "slices": slices,
-        "source_manifest": {
-            "signed": False,
-            "reason": "signing deferred behind the protected lease",
-        },
+        "source_manifest": dict(_SOURCE_MANIFEST),
     }
     fixture["dataset_sha256"] = canonical_sha256(fixture)
     return fixture
@@ -249,6 +251,16 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
         raise WmbsM05Error("fixture disclosure mismatch")
     if fixture.get("generator_seed") not in SEEDS:
         raise WmbsM05Error(f"fixture generator_seed must be one of {SEEDS}")
+    identity = {
+        "license": LICENSE,
+        "source_manifest": _SOURCE_MANIFEST,
+        "seeds": list(SEEDS),
+        "generator_id": GENERATOR_ID,
+        "generator_version": GENERATOR_VERSION,
+    }
+    for field, expected in identity.items():
+        if fixture.get(field) != expected:
+            raise WmbsM05Error(f"fixture {field} mismatch")
     slices = fixture.get("slices")
     if (
         not isinstance(slices, list)
