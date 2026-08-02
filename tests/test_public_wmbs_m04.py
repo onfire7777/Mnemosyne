@@ -92,6 +92,15 @@ def test_fixture_covers_seven_source_classes_five_seeds_three_permutations() -> 
         m04.validate_fixture(reduced)
 
 
+def test_fixture_rejects_resigned_duplicate_case_id_before_indexing() -> None:
+    fixture = m04.generate_fixture()
+    fixture["cases"][4]["case_id"] = fixture["cases"][0]["case_id"]
+    _redigest(fixture)
+
+    with pytest.raises(m04.WmbsM04Error, match="case_id"):
+        m04.validate_fixture(fixture)
+
+
 def test_every_case_has_three_pairwise_distinct_source_orders() -> None:
     for case in m04.generate_fixture()["cases"]:
         orders = {
@@ -121,6 +130,17 @@ def test_historical_preservation_gate_is_exact() -> None:
     result = m04.score_historical_preservation(fixture, observations)
     assert result["rate"] < 1.0
     assert result["passed"] is False
+
+
+def test_historical_preservation_rejects_wrong_as_of() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    target = next(row for row in observations if row["historical"]["objects"])
+    target["historical"]["as_of"] = "2026-07-19T00:00:00Z"
+
+    metric = m04.score_historical_preservation(fixture, observations)
+    assert metric["passed"] is False
+    assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
 
 
 def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
