@@ -656,17 +656,20 @@ budget is `1 + (2 * max_turns) + 1 + declared_extra_requests` per episode: one
 `reset`, at most `max_turns` each of `observe` and `act`, one `finish_episode`,
 plus the declared extras. `declared_extra_requests` must be an explicit,
 non-negative manifest value covering every additional protocol request; it may
-not hide retries or setup calls. Admission computes
-`3 + (task_count * 5 seeds * 2 arms * requests_per_episode)`: one attempt-level
-`negotiate`, `create_run`, and `finalize`, plus every episode request. It rejects
-the fixture when that value exceeds 10,000. The budget is complete rather than
+not hide retries or setup calls. Admission computes three attempt-level requests
+(`negotiate`, `create_run`, and `finalize`) plus the concrete request budget of
+**every** `EpisodeManifest`; it sums each manifest's own maximum turns and
+declared extras rather than multiplying one representative budget. It rejects
+the fixture when that total exceeds 10,000. The budget is complete rather than
 a lower bound: omitted request classes are a validation error, not permission
-to exceed the ceiling. Admission must also sum the declared maximum canonical
-request bytes for those three attempt-level requests and every declared episode
-request, rejecting the fixture before execution when the attempt-wide upper
-bound exceeds 64 MiB. Every request class must declare its canonical-byte upper
-bound; omitted classes or undeclared retries fail validation rather than
-borrowing unbudgeted retention. Because the validator does no persistence,
+to exceed the ceiling. Admission likewise sums the maximum canonical request
+bytes for the three attempt-level requests and every request in every concrete
+episode, rejecting the fixture before execution when the attempt-wide upper
+bound exceeds 64 MiB. Each per-request bound must be a non-negative integer and
+must be independently recomputed from, or validated against, the canonical
+payload bytes; this applies to declared extras and retries as well. Omitted or
+underestimated classes fail validation rather than borrowing unbudgeted
+retention. Because the validator does no persistence,
 network, or model work,
 any M14 component needing those must live outside it and is gated by P4/P7.
 
