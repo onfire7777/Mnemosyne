@@ -853,7 +853,7 @@ repository currently gets wrong — before any code can inherit that mistake.
    M14-specific.
 3. **Stage 2 — public-harness owner.** Disposition Q1, Q2, Q4, Q5, and Q6 (P6).
    Doing this before M14 exists prevents a third stranded cell, a third
-   self-asserted replay claim, and a fourth tautological five-run gate.
+   self-asserted replay claim, and a third tautological five-run gate.
 4. **Stage 3 — M14 lane, Stage-A lease.** Deterministic environment, generator,
    five-seed fixture, executed-run ledger, adapter, tests. RED-first from R2,
    then R8.
