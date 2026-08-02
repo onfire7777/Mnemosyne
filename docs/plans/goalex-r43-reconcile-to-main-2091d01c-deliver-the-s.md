@@ -83,30 +83,35 @@ afterthoughts — commit them on the controller branch as the final step.
   controller worktree on branch `codex/goalex-whole-memory-pilot`.
 
 ### Task 1: Refresh canonical main and bring the controller branch up to it
-- [ ] `cd /Users/admin/.codex/worktrees/9697/Mnemosyne`; confirm
+- [x] `cd /Users/admin/.codex/worktrees/9697/Mnemosyne`; confirm
       `git branch --show-current` is `codex/goalex-whole-memory-pilot` and
       `git status --porcelain --untracked-files=all` is empty. If it is not
       empty and the dirt is not yours, stop and park per rule 11 instead of
       cleaning it.
-- [ ] Record the start-of-round ignored-state baseline:
+- [x] Record the start-of-round ignored-state baseline:
       `git status --porcelain --untracked-files=all --ignored` output saved
       outside the worktree (e.g. `/tmp/goalex-r43-ignored-baseline.txt`).
-- [ ] `git fetch --prune origin`; fast-forward local `main` to `origin/main`
+- [x] `git fetch --prune origin`; fast-forward local `main` to `origin/main`
       and assert both equal `2091d01c8cea22da49a50bb1f0859d8108102f29`.
-- [ ] Merge `main` into `codex/goalex-whole-memory-pilot` with a normal merge
+- [x] Merge `main` into `codex/goalex-whole-memory-pilot` with a normal merge
       commit. For `tests/test_planning_traceability.py`,
       `.github/workflows/ci.yml`, `docs/plans/goalex-r40-*.md`, and
       `docs/plans/goalex-r41-*.md`, resolve by taking **main's** version exactly
       (`git checkout --theirs`-equivalent: the branch is behind, not ahead, on
       these). Keep `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`
       from the branch.
-- [ ] Verify the reconciliation: `git diff main HEAD --stat` must now list
+- [x] Verify the reconciliation: `git diff main HEAD --stat` must now list
       **only** `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`.
       If anything else appears, fix the merge resolution before continuing.
-- [ ] Run `python -m pytest tests/test_planning_traceability.py -q` and confirm
+      The active r43 execution plan is also branch-resident by necessity; all
+      main-owned reconciliation paths match `main` exactly.
+- [x] Run `python -m pytest tests/test_planning_traceability.py -q` and confirm
       the current failure(s) are exactly the stale-baseline assertions (the files
       still say `effc5e03` while `origin/main` is `2091d01c`). Do not "fix" them
       yet — Task 2 does that.
+      Observed 2026-08-01: all 12 tests pass because the contract currently
+      requires the recorded baseline to be an ancestor of `origin/main`, not
+      equal to it; Task 2 still owns the lifecycle-file recomputation.
 
 ### Task 2: Open an isolated delivery lane and recompute the three lifecycle files to main@2091d01c
 - [ ] Create an isolated Worktrunk/worktree lane cut from `main@2091d01c` on a
