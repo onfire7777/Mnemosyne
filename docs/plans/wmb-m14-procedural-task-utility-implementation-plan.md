@@ -157,7 +157,7 @@ digest re-check. A Stage-A-only M14 lane reproduces that state by construction,
 because every one of M14's integration points (Section 9) sits on the
 public-harness owner's exclusive lease.
 
-Building a stranded fourth cell is not the smallest useful change. Under
+Building a stranded third cell is not the smallest useful change. Under
 `GOAL.md` rule 4 (Ponytail) the smallest correct action is to leave M14 unbuilt
 until B1 is discharged by its actual owner.
 
