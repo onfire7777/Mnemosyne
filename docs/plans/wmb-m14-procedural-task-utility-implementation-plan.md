@@ -657,10 +657,12 @@ budget is `1 + (2 * max_turns) + 1 + declared_extra_requests` per episode: one
 plus the declared extras. `declared_extra_requests` must be an explicit,
 non-negative manifest value covering every additional protocol request; it may
 not hide retries or setup calls. Admission computes
-`task_count * 5 seeds * 2 arms * requests_per_episode` and rejects the fixture
-when that value exceeds 10,000. The budget is complete rather than a lower
-bound: omitted request classes are a validation error, not permission to exceed
-the ceiling. Because the validator does no persistence, network, or model work,
+`3 + (task_count * 5 seeds * 2 arms * requests_per_episode)`: one attempt-level
+`negotiate`, `create_run`, and `finalize`, plus every episode request. It rejects
+the fixture when that value exceeds 10,000. The budget is complete rather than
+a lower bound: omitted request classes are a validation error, not permission
+to exceed the ceiling. Because the validator does no persistence, network, or
+model work,
 any M14 component needing those must live outside it and is gated by P4/P7.
 
 ---
