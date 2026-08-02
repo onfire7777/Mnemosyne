@@ -114,22 +114,22 @@ afterthoughts — commit them on the controller branch as the final step.
       equal to it; Task 2 still owns the lifecycle-file recomputation.
 
 ### Task 2: Open an isolated delivery lane and recompute the three lifecycle files to main@2091d01c
-- [ ] Create an isolated Worktrunk/worktree lane cut from `main@2091d01c` on a
+- [x] Create an isolated Worktrunk/worktree lane cut from `main@2091d01c` on a
       new branch (suggested name `codex/goalex-t6-post-pr94-lifecycle-delivery`).
       Do all Task 2 and Task 3 edits there, not in the controller worktree.
-- [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`:
+- [x] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`:
       set `Baseline:` to `` `main@2091d01c8cea22da49a50bb1f0859d8108102f29` ``;
       bump `Updated:` to `2026-08-02`; add a `- PR #94:` entry to the
       **Merged baseline** list recording the `T5` delivery at `main@2091d01c`
       with exact-head CI `30730185494` and post-merge CI `30730918452`; and
       rewrite every in-body current-baseline claim so it names `main@2091d01c`.
-- [ ] Flip the `T5` row to `MERGED` with its factual outcome: merged as PR #94
+- [x] Flip the `T5` row to `MERGED` with its factual outcome: merged as PR #94
       at `main@2091d01c`, exact head `41b21305`, exact-head CI `30730185494`,
       post-merge CI `30730918452`; documentation and contract-test only; it
       admitted no source node. State plainly that its delivery **omitted the
       round-42 record from its own `docs/plans/` lease**, which is the
       non-receipt residue this round discharges.
-- [ ] Add exactly one new row `T6` — status `DELIVERING` — with: prerequisites
+- [x] Add exactly one new row `T6` — status `DELIVERING` — with: prerequisites
       (verified canonical `main@2091d01c` plus PR #94's receipts, lane cut from
       `main@2091d01c`); produces (the three lifecycle files at
       `Baseline: main@2091d01c` with `T5` as `MERGED`, plus the r42 and r43
@@ -137,7 +137,7 @@ afterthoughts — commit them on the controller branch as the final step.
       `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`;
       `docs/plans/` — GoalEx owner only; and the explicit statement that `T6`
       admits **no source node** and **no successor node**.
-- [ ] Update the **Topological waves** and **Concurrency and integration rules**
+- [x] Update the **Topological waves** and **Concurrency and integration rules**
       sections: move PR #94 / `T5` into the completed wave, make `T6` the sole
       current writer, and rewrite the carve-out status paragraph to record that
       from `T6` onward **both** the one-block receipt lag *and* the current
@@ -147,21 +147,21 @@ afterthoughts — commit them on the controller branch as the final step.
       current safe coding concurrency is zero new implementation writers and
       that the next source admission waits on an external gate (`P13-C` first
       eligible 2026-08-03).
-- [ ] In `GOAL.md`: add `git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main`
+- [x] In `GOAL.md`: add `git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main`
       to the ancestry list in the `## Verification` block and change the pin line
       to `test "$(git rev-parse main)" = "2091d01c8cea22da49a50bb1f0859d8108102f29"`.
       Update the `## Authority`, `## Current Phase`, and `## Success Evidence`
       prose to record PR #94 as merged with its two run IDs, `T5` as discharged,
       and `T6` as the single bounded node now delivering. Ensure every occurrence
       of the phrase `current canonical baseline` names `main@2091d01c`.
-- [ ] In `.planning/STATE.md`: update the single `stopped_at:` line so its
+- [x] In `.planning/STATE.md`: update the single `stopped_at:` line so its
       `at \`main@2091d01c\`;` claim names the new baseline and its narrative
       cites PR #94 as merged with green post-merge CI, and update the
       `current canonical baseline is \`main@2091d01c\`` sentence with the PR #94
       exact-head and post-merge run IDs. Keep the Phase 12 operator-gate,
       Phase 14-15 dependency-gate, and Phase 16 launch-gate language intact —
       no admission state, benchmark, measurement, or publication claim changes.
-- [ ] Run `python -m pytest tests/test_planning_traceability.py -q` and
+- [x] Run `python -m pytest tests/test_planning_traceability.py -q` and
       `python -m ruff check .` in the lane; both must pass before Task 3.
 
 ### Task 3: Deliver the stranded r42 record and the r43 record through a reviewed PR
