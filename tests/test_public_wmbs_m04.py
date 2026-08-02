@@ -54,6 +54,12 @@ def _perfect(
     return observations, ablations
 
 
+def _redigest(fixture: dict[str, object]) -> None:
+    unsigned = dict(fixture)
+    unsigned.pop("fixture_sha256")
+    fixture["fixture_sha256"] = m04.canonical_sha256(unsigned)
+
+
 def test_fixture_schema_is_label_neutral() -> None:
     fixture = m04.generate_fixture()
     m04.validate_fixture(fixture)
@@ -84,6 +90,15 @@ def test_fixture_covers_seven_source_classes_five_seeds_three_permutations() -> 
     reduced["cases"].pop()
     with pytest.raises(m04.WmbsM04Error):
         m04.validate_fixture(reduced)
+
+
+def test_every_case_has_three_pairwise_distinct_source_orders() -> None:
+    for case in m04.generate_fixture()["cases"]:
+        orders = {
+            tuple(event["event_id"] for event in case["events_by_permutation"][name])
+            for name in m04.PERMUTATIONS
+        }
+        assert len(orders) == len(m04.PERMUTATIONS), case["case_id"]
 
 
 def test_generate_fixture_is_byte_reproducible() -> None:
@@ -210,6 +225,37 @@ def test_scorer_emits_no_publication_or_measurement_claim() -> None:
     ):
         assert result[key] is False
     assert result["interval"] == {"method": "descriptive"}
+    assert result["metrics"]["replay_equality"] == {
+        "metric_id": "M04-REPLAY-EQ",
+        "equal_count": 5,
+        "total_count": 5,
+        "rate": 1.0,
+        "passed": True,
+    }
+    assert result["metrics"]["monotonic"] == {
+        "metric_id": "M04-MONOTONIC",
+        "violation_count": 0,
+        "total_count": 420,
+        "passed": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "zero_denominator", ["unresolved", "non_unresolved", "ablations"]
+)
+def test_zero_denominator_gold_fails_closed(zero_denominator: str) -> None:
+    fixture = m04.generate_fixture()
+    for case in fixture["cases"]:
+        if zero_denominator == "unresolved":
+            case["gold"]["unresolved"] = False
+        elif zero_denominator == "non_unresolved":
+            case["gold"]["unresolved"] = True
+        else:
+            case["gold"]["ablation_objects"] = {}
+    _redigest(fixture)
+    observations, ablations = _perfect(fixture)
+    with pytest.raises(m04.WmbsM04Error, match="zero denominator"):
+        m04.score_conflict(fixture, observations, ablations)
 
 
 def test_branch_merge_and_transaction_time_are_declared_unsupported() -> None:

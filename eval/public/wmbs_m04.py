@@ -173,16 +173,26 @@ def _case(
     old = f"{source_class}-old-{seed}-{ordinal}"
     alpha = f"{source_class}-alpha-{seed}-{ordinal}"
     beta = f"{source_class}-beta-{seed}-{ordinal}"
+    gamma = f"{source_class}-gamma-{seed}-{ordinal}"
     current = f"{source_class}-current-{seed}-{ordinal}"
     t0, t1, t2 = "2026-07-20T00:00:00Z", "2026-07-21T00:00:00Z", "2026-07-22T00:00:00Z"
 
     if source_class == "independent":
-        values = [("source-a", "actor-a", alpha, t1), ("source-b", "actor-b", beta, t1)]
-        current_objects, historical_objects, unresolved = [alpha, beta], [], False
+        values = [
+            ("source-a", "actor-a", alpha, t1),
+            ("source-b", "actor-b", beta, t1),
+            ("source-c", "actor-c", gamma, t1),
+        ]
+        current_objects, historical_objects, unresolved = (
+            [alpha, beta, gamma],
+            [],
+            False,
+        )
     elif source_class == "duplicated":
         values = [
             ("source-a", "actor-a", current, t1),
             ("source-b", "actor-b", current, t1),
+            ("source-c", "actor-c", current, t1),
         ]
         current_objects, historical_objects, unresolved = [current], [], False
     elif source_class == "low_quality":
@@ -244,8 +254,9 @@ def _case(
     sources = sorted({event["source_id"] for event in events})
     ablations = {source: list(current_objects) for source in sources}
     if source_class == "independent":
-        ablations["source-a"] = [beta]
-        ablations["source-b"] = [alpha]
+        ablations["source-a"] = [beta, gamma]
+        ablations["source-b"] = [alpha, gamma]
+        ablations["source-c"] = [alpha, beta]
     return {
         "case_id": case_id,
         "source_class": source_class,
@@ -333,6 +344,7 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
         for ordinal in range(4)
     }
     seen: set[tuple[int, str, int]] = set()
+    unresolved_states: list[bool] = []
     for case in cases:
         case = _closed(case, _CASE_KEYS, "case")
         parts = str(case["case_id"]).rsplit("-", 1)
@@ -343,6 +355,7 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
         if not isinstance(event_sets, Mapping) or set(event_sets) != set(PERMUTATIONS):
             raise WmbsM04Error("case permutation matrix mismatch")
         canonical_ids: set[str] | None = None
+        orders: set[tuple[str, ...]] = set()
         for permutation in PERMUTATIONS:
             events = event_sets[permutation]
             if not isinstance(events, list) or not events:
@@ -356,16 +369,26 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
                 ):
                     raise WmbsM04Error("event content digest mismatch")
                 ids.add(event["event_id"])
+            orders.add(tuple(event["event_id"] for event in events))
             canonical_ids = ids if canonical_ids is None else canonical_ids
             if ids != canonical_ids:
                 raise WmbsM04Error("permutations must contain identical events")
+        if len(orders) != len(PERMUTATIONS):
+            raise WmbsM04Error("case source orders must be pairwise distinct")
         gold = _closed(case["gold"], _GOLD_KEYS, "gold")
         if not isinstance(gold["unresolved"], bool) or not isinstance(
             gold["ablation_objects"], Mapping
         ):
             raise WmbsM04Error("invalid gold contract")
+        unresolved_states.append(gold["unresolved"])
+        if not gold["ablation_objects"]:
+            raise WmbsM04Error("ablation metric has a zero denominator")
     if seen != expected:
         raise WmbsM04Error("case matrix is incomplete or duplicated")
+    if not any(unresolved_states):
+        raise WmbsM04Error("unresolved metrics have a zero denominator")
+    if all(unresolved_states):
+        raise WmbsM04Error("permutation metric has a zero denominator")
     unsigned = dict(fixture)
     digest = unsigned.pop("fixture_sha256")
     if digest != canonical_sha256(unsigned):
@@ -479,6 +502,12 @@ def _observations(
     return cases, checked
 
 
+def _rate(numerator: int, denominator: int, label: str) -> float:
+    if denominator == 0:
+        raise WmbsM04Error(f"{label} has a zero denominator")
+    return numerator / denominator
+
+
 def score_current_answer(fixture: object, observations: object) -> dict[str, Any]:
     cases, rows = _observations(fixture, observations)
     correct = sum(
@@ -489,7 +518,7 @@ def score_current_answer(fixture: object, observations: object) -> dict[str, Any
         "metric_id": "M04-CURRENT-ACC",
         "correct_count": correct,
         "total_count": len(rows),
-        "rate": correct / len(rows),
+        "rate": _rate(correct, len(rows), "current-answer metric"),
     }
 
 
@@ -505,7 +534,7 @@ def score_historical_preservation(
         == cases[row["case_id"]]["gold"]["historical_objects"]
         for row in eligible
     )
-    rate = preserved / len(eligible) if eligible else 1.0
+    rate = _rate(preserved, len(eligible), "historical-preservation metric")
     return {
         "metric_id": "M04-HIST-PRESERVE",
         "preserved_count": preserved,
@@ -533,7 +562,7 @@ def score_unresolved_calibration(
         "metric_id": "M04-UNRESOLVED-CAL",
         "correct_count": correct,
         "total_count": len(eligible),
-        "rate": correct / len(eligible),
+        "rate": _rate(correct, len(eligible), "unresolved-calibration metric"),
         "confidence_calibration": "supported" if supplied else "unsupported",
         "passed": correct == len(eligible),
     }
@@ -547,7 +576,7 @@ def score_false_supersession(fixture: object, observations: object) -> dict[str,
         for row in unresolved
     )
     monotonic = sum(row["monotonic_violation"] for row in rows)
-    rate = false_resolutions / len(unresolved)
+    rate = _rate(false_resolutions, len(unresolved), "false-resolution metric")
     return {
         "metric_id": "M04-FALSE-RESOLVE",
         "false_resolution_count": false_resolutions,
@@ -586,7 +615,7 @@ def score_source_ablation_sensitivity(
         "metric_id": "M04-ABLATION-SENS",
         "correct_count": correct,
         "total_count": len(expected),
-        "rate": correct / len(expected),
+        "rate": _rate(correct, len(expected), "source-ablation metric"),
         "passed": correct == len(expected),
     }
 
@@ -603,13 +632,39 @@ def score_permutation_invariance(
     invariant = sum(
         all(value == values[0] for value in values[1:]) for values in eligible
     )
-    rate = invariant / len(eligible)
+    rate = _rate(invariant, len(eligible), "permutation metric")
     return {
         "metric_id": "M04-PERM-INVARIANT",
         "invariant_count": invariant,
         "total_count": len(eligible),
         "rate": rate,
         "passed": rate == 1.0,
+    }
+
+
+def _score_monotonic(fixture: object, observations: object) -> dict[str, Any]:
+    _, rows = _observations(fixture, observations)
+    violations = sum(row["monotonic_violation"] for row in rows)
+    return {
+        "metric_id": "M04-MONOTONIC",
+        "violation_count": violations,
+        "total_count": len(rows),
+        "passed": violations == 0,
+    }
+
+
+def _score_replay_equality(fixture: object) -> dict[str, Any]:
+    validate_fixture(fixture)
+    equal = sum(
+        canonical_json(generate_fixture(seed)) == canonical_json(generate_fixture(seed))
+        for seed in SEEDS
+    )
+    return {
+        "metric_id": "M04-REPLAY-EQ",
+        "equal_count": equal,
+        "total_count": len(SEEDS),
+        "rate": _rate(equal, len(SEEDS), "replay-equality metric"),
+        "passed": equal == len(SEEDS),
     }
 
 
@@ -625,6 +680,8 @@ def score_conflict(
             fixture, observations, ablations
         ),
         "permutation_invariance": score_permutation_invariance(fixture, observations),
+        "monotonic": _score_monotonic(fixture, observations),
+        "replay_equality": _score_replay_equality(fixture),
     }
     return {
         "module_id": MODULE_ID,
