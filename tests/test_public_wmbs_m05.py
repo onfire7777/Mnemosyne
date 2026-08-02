@@ -490,6 +490,34 @@ def test_trace_rejects_nonempty_action_handles() -> None:
         m05.score(fixture, traces)
 
 
+def test_trace_rejects_duplicate_evidence_handles_before_set_scoring() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    handle = traces[0]["answer_envelope"]["evidence_handles"][0]
+    traces[0]["answer_envelope"]["evidence_handles"] = [handle, handle]
+    with pytest.raises(m05.WmbsM05Error, match="evidence_handles"):
+        m05.score(fixture, traces)
+
+
+@pytest.mark.parametrize(
+    "handles",
+    [
+        [f"h{index}" for index in range(1001)],
+        [""],
+        ["a" * 129],
+        ["invalid handle"],
+    ],
+)
+def test_trace_enforces_frozen_evidence_handle_bounds(handles) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"]["evidence_handles"] = handles
+    with pytest.raises(m05.WmbsM05Error, match="evidence_handles"):
+        m05.score(fixture, traces)
+
+
 @pytest.mark.parametrize(
     ("abstained", "answer_text", "missing"),
     [

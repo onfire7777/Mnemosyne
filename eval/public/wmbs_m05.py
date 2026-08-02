@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -73,6 +74,8 @@ _SOURCE_MANIFEST = {
     "signed": False,
     "reason": "signing deferred behind the protected lease",
 }
+_MAX_EVIDENCE_HANDLES = 1000
+_IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
 
 
 class WmbsM05Error(ValueError):
@@ -414,6 +417,17 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
                 isinstance(handle, str) for handle in handles
             ):
                 raise WmbsM05Error(f"answer_envelope {key} must be a list of strings")
+        evidence_handles = envelope["evidence_handles"]
+        if (
+            len(evidence_handles) > _MAX_EVIDENCE_HANDLES
+            or len(evidence_handles) != len(set(evidence_handles))
+            or any(
+                _IDENTIFIER_RE.fullmatch(handle) is None for handle in evidence_handles
+            )
+        ):
+            raise WmbsM05Error(
+                "answer_envelope evidence_handles violate frozen ABI bounds"
+            )
         if envelope["action_handles"]:
             raise WmbsM05Error("answer_envelope action_handles must be empty")
         if not isinstance(envelope["adapter_metadata"], Mapping):
