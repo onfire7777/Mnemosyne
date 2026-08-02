@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-08-02
-Baseline: `main@42abaab7ba4fa83f9838c3d32ee96db4256bfcad`
+Baseline: `main@088e2f31003e3a7e96119bc8cdba162252226ac1`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -66,8 +66,12 @@ The following packages are complete source history, not runnable work:
   Documentation only: it delivered the r42 and r43 round records, admitted no
   source node, and changed no benchmark, measurement, admission state, or
   publication claim.
+- PR #96: the independently delivered development-only M02/M04/M05 evaluation
+  oracles (`main@088e2f31`, exact head `1050749a`, CI `30744318093`). This
+  advanced canonical `main` outside the GoalEx lifecycle-node sequence without
+  changing publication eligibility.
 
-This map is recomputed from the new baseline `main@42abaab7`, which the
+This map is recomputed from the new baseline `main@088e2f31`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
@@ -199,8 +203,9 @@ Prior delivery wave (complete)
   recomputation is T6's own accepted standing-condition residue.
 
 Current delivery wave
-  No lifecycle or source node is admitted. Every source package remains
-  dependency-, lease-, evidence-, or spec-blocked.
+  No GoalEx lifecycle or source node is admitted. PR #96 independently merged
+  development-only M02/M04/M05 evaluation oracles; no writer for them remains
+  active, and their publication eligibility is unchanged.
 
 Independent external gates (do not block T0-T6)
   P12-E operator measurement

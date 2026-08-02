@@ -232,6 +232,53 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         check=True,
         capture_output=True,
     )
+    # Ancestry alone passes for *any* superseded baseline, so it can never
+    # detect the lapse GOAL.md's canonical-baseline gate exists to catch: a PR
+    # landing on `main` while the lifecycle files still name an older baseline.
+    #
+    # Tip equality (`recorded == origin/main`) cannot express that invariant
+    # either — the commit that records a baseline necessarily lands *after* it,
+    # so the claim is stale the instant it merges and `main` would never be
+    # green. The enforceable form is: every PR merged into `main` since the
+    # recorded baseline must be accounted for in the lease map.
+    unrecorded = _unrecorded_merged_prs(sha)
+    assert not unrecorded, (
+        "these PRs merged into origin/main after the recorded baseline "
+        f"`main@{short}` but appear nowhere in {DEPENDENCY_LEASE_MAP.name}: "
+        + ", ".join(f"PR #{pr}" for pr in unrecorded)
+        + " — recompute the canonical baseline and record their receipts "
+        "before admitting further work"
+    )
+
+
+MERGED_PR = re.compile(r"^Merge pull request #(\d+) from ", re.MULTILINE)
+
+
+def _unrecorded_merged_prs(baseline_sha: str) -> list[str]:
+    """PR numbers merged into origin/main since `baseline_sha` and not recorded.
+
+    Returns the sorted PR numbers whose merge commits are reachable from
+    `origin/main` but not from the recorded baseline, and which the dependency
+    lease map does not mention. An empty list means the lease map accounts for
+    everything that has landed since the baseline.
+    """
+    subjects = subprocess.run(
+        [
+            "git",
+            "log",
+            "--merges",
+            "--format=%s",
+            f"{baseline_sha}..refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    recorded = set(re.findall(r"PR #(\d+)", lease_text))
+    landed = set(MERGED_PR.findall(subjects))
+    return sorted(landed - recorded, key=int)
 
 
 def test_t6_terminal_receipts_are_consistent_across_lifecycle_files() -> None:
@@ -255,9 +302,62 @@ def test_t6_terminal_receipts_are_consistent_across_lifecycle_files() -> None:
         )
 
     assert "| T6 | MERGED |" in lifecycle_texts["lease map"]
-    assert "No lifecycle or source node is admitted" in normalized["lease map"]
-    assert "No lifecycle or source node is" in normalized["GOAL.md"]
+    assert "No GoalEx lifecycle or source node is admitted" in normalized["lease map"]
+    assert "no GoalEx lifecycle or source node is currently admitted" in normalized[
+        "GOAL.md"
+    ]
     assert "no lifecycle writer is now admitted" in normalized[".planning/STATE.md"]
+
+
+def test_unrecorded_post_baseline_merge_is_detected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A PR landing on main after the baseline must not pass unrecorded.
+
+    Ancestry-only checking accepted any superseded baseline; this pins the
+    replacement so the detector cannot silently regress to that behaviour.
+    """
+    last_pr_merge = subprocess.run(
+        [
+            "git",
+            "log",
+            "--merges",
+            "--grep=^Merge pull request #",
+            "-1",
+            "--format=%H %s",
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert last_pr_merge, "expected at least one PR merge on origin/main"
+
+    merge_sha, subject = last_pr_merge.split(" ", 1)
+    matched = MERGED_PR.match(subject)
+    assert matched, f"unparsable merge subject: {subject}"
+    pr_number = matched.group(1)
+
+    # The commit main sat on immediately before that PR landed: a baseline
+    # recorded there is stale by exactly one merge.
+    stale_baseline = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    lease_without_receipt = tmp_path / "lease-map-missing-receipt.md"
+    lease_without_receipt.write_text(
+        "This lease map records no receipts.\n", encoding="utf-8"
+    )
+    monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", lease_without_receipt)
+    assert pr_number in _unrecorded_merged_prs(stale_baseline), (
+        f"PR #{pr_number} landed after {stale_baseline} and is absent from the "
+        "lease map, so it must be reported as unrecorded"
+    )
 
 
 def test_stale_alternate_canonical_baseline_claim_fails(
@@ -327,7 +427,7 @@ def test_non_ancestral_baseline_commit_fails(tmp_path: Path, monkeypatch) -> Non
 
     try:
         test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
-    except subprocess.CalledProcessError:
+    except (AssertionError, subprocess.CalledProcessError):
         return
     raise AssertionError("non-ancestral baseline commit was accepted")
 
