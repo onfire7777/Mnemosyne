@@ -409,8 +409,11 @@ score(fixture: Mapping, traces: Sequence[Mapping]) -> dict   # pure; no engine i
 
 `passed` is `True` only when all four provenance rails hold simultaneously and
 `five_seed_canonical_replay == 1.0`. Citation precision/recall never contribute
-to `passed` — they are diagnostics per §8 M05. Before scoring, the trace set
-must contain exactly one trace for each of the 80 scored cases; the 20 deferred
+to `passed` — they are diagnostics per §8 M05. Before scoring, the fixture must
+canonically equal
+`generate_fixture(generator_seed)`, so a recomputed self-digest cannot admit
+semantic drift. The trace set must contain exactly one trace for each of the 80
+scored cases; the 20 deferred
 derived-claim cases remain outside that required trace matrix. Each trace is a
 closed object with exactly `case_id`, `answer_envelope`, `explanation`, and
 `provenance_status`; the latter remains self-declared and ignored by scoring
@@ -620,7 +623,8 @@ Q6 and Q11 are **not** M05 tests — they are prerequisite edges owned elsewhere
 Label gate (each of the nine custody fields, missing and permissive variants,
 parametrized, mirroring the validated M03 pattern); canonical-matrix gate (slice
 reduction, reorder, duplication, rename); fixture/generator byte-identity;
-`dataset_sha256` recomputation in both directions; five-seed canonical replay
+`dataset_sha256` recomputation in both directions, including rejection of
+rehashed semantic drift; five-seed canonical replay
 with the frozen volatile-field set; citation-order invariance.
 
 **Canonicaliser equality (B2).** One test asserts that the module-local

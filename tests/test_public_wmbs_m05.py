@@ -236,6 +236,15 @@ def test_fixture_rejects_matrix_mutation(mutation: str) -> None:
         m05.validate_fixture(fixture)
 
 
+def test_fixture_rejects_rehashed_protected_expected_outcome_drift() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    fixture["slices"][0]["cases"][0]["expected"] = "abstain"
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match="generated fixture"):
+        m05.validate_fixture(fixture)
+
+
 def test_derived_claims_and_sensitivity_binding_remain_explicitly_deferred() -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)
@@ -259,10 +268,10 @@ def test_fixture_digest_and_runner_canonicalizer_agree() -> None:
     assert digest == m05.canonical_sha256(without_digest)
 
 
-def test_manifest_changes_when_fixture_content_changes() -> None:
+def test_manifest_rejects_fixture_content_drift() -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)
-    before = m05.source_manifest(fixture)
+    assert m05.source_manifest(fixture)["source_count"] > 0
     mutated = deepcopy(fixture)
     event = mutated["slices"][1]["cases"][0]["source_events"][1]
     event["content"] += "x"
@@ -270,9 +279,8 @@ def test_manifest_changes_when_fixture_content_changes() -> None:
     check = dict(mutated)
     check.pop("dataset_sha256")
     mutated["dataset_sha256"] = m05.canonical_sha256(check)
-    after = m05.source_manifest(mutated)
-    assert before["fixture_sha256"] != after["fixture_sha256"]
-    assert before["source_cids_sha256"] != after["source_cids_sha256"]
+    with pytest.raises(m05.WmbsM05Error, match="generated fixture"):
+        m05.source_manifest(mutated)
 
 
 def test_abstained_envelope_with_citations_is_malformed() -> None:
@@ -395,8 +403,8 @@ def test_replay_is_bound_to_fixture_and_generation_seed() -> None:
     event["content"] += " mutation"
     event["content_sha256"] = hashlib.sha256(event["content"].encode()).hexdigest()
     _rehash(m05, fixture)
-    result = m05.score(fixture, _traces(fixture))
-    assert result["metrics"]["five_seed_canonical_replay"] == 0.0
+    with pytest.raises(m05.WmbsM05Error, match="generated fixture"):
+        m05.score(fixture, _traces(fixture))
 
 
 def test_clean_fixture_passes_five_seed_canonical_replay() -> None:
@@ -487,16 +495,15 @@ def test_fixture_rejects_incomplete_or_reused_case_identity_matrix(mutation) -> 
         m05.validate_fixture(fixture)
 
 
-def test_replay_drift_is_a_hard_aggregate_failure() -> None:
+def test_replay_drift_is_rejected_before_scoring() -> None:
     m05 = _module()
     fixture = deepcopy(m05.generate_fixture(13))
     event = fixture["slices"][1]["cases"][0]["source_events"][1]
     event["content"] += " replay drift"
     event["content_sha256"] = hashlib.sha256(event["content"].encode()).hexdigest()
     _rehash(m05, fixture)
-    result = m05.score(fixture, _traces(fixture))
-    assert result["metrics"]["five_seed_canonical_replay"] == 0.0
-    assert result["passed"] is False
+    with pytest.raises(m05.WmbsM05Error, match="generated fixture"):
+        m05.score(fixture, _traces(fixture))
 
 
 @pytest.mark.parametrize(

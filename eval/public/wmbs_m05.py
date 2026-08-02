@@ -375,6 +375,9 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
     digest = check.pop("dataset_sha256", None)
     if digest != canonical_sha256(check):
         raise WmbsM05Error("dataset_sha256 mismatch")
+    expected_fixture = generate_fixture(int(fixture["generator_seed"]))
+    if canonical_json(fixture) != canonical_json(expected_fixture):
+        raise WmbsM05Error("fixture must match the generated fixture")
     return fixture
 
 
