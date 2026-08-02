@@ -4,10 +4,21 @@ Status: `PROPOSED` planning artifact. This document authorizes no code, no
 benchmark execution, no measured run, no push, no pull request, and no claim.
 
 Authored: 2026-08-01
-Baseline: verified `origin/main@effc5e039505c09e575ca5e4aeb2b96949676366`
+Verification baseline (all §3 facts recomputed here):
+`origin/main@effc5e039505c09e575ca5e4aeb2b96949676366`
+Integration baseline: `origin/main@2091d01c8cea22da49a50bb1f0859d8108102f29`
 Lane: `codex/wmb-m04-plan`
 Exact write lease for this lane:
 `docs/plans/wmb-m04-conflict-correction-implementation-plan.md` (new file only).
+
+The two baselines are interchangeable **for this plan's subject matter and for
+no other purpose**: `git diff --stat effc5e03 2091d01c` touches only
+`.github/workflows/ci.yml`, `GOAL.md`, `.planning/STATE.md`, the dependency
+lease map, three `docs/plans/goalex-r39..r41` round records, and
+`tests/test_planning_traceability.py`. No file under `eval/`, `src/`,
+`tests/test_public_*`, or any fixture changed, so every digest, dispatch-table,
+and quarantine finding in §3 was re-checked and still holds verbatim at
+`2091d01c`. Any later drift in those trees re-opens §3.
 
 ---
 
@@ -17,8 +28,36 @@ Exact write lease for this lane:
 |---|---|
 | `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md` | Controlling design. §3 evidence language, §4 admission gate, §6.2/§6.4 ABI and hooks, §7.1 C05, §7.4 inherited rails, §8 "M04 — Conflict and correction", §9.5 result contract, §11 rights, §14 labels. |
 | `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md` | Precedent for module shape, task structure, and delivery-checkpoint honesty. **Not** an authorization for M04: its §17-derived boundary covers only M01, M03, M10, M12, M13, M15, M20, and it states the implementation lane "may not touch M02, M04–M09, M11, M14, or M16–M19". |
-| `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md` | Row `U-MODULES` (`SPEC UNSTABLE`) covers M04: "No artifact authorized / No lease / Each needs an approved exact plan, protocol, scorer, license/custody, and dependency placement before code." This document is exactly that plan; it does not itself admit a node. |
+| `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md` | Row `U-MODULES` (`SPEC UNSTABLE`) covers M04: "No artifact authorized / No lease / Each needs an approved exact plan, protocol, scorer, license/custody, and dependency placement before code." This document is exactly that plan; it does not itself admit a node. **The map is lapsed — see §1.2.** |
 | `.planning/STATE.md`, `GOAL.md` | Lifecycle authorities. Not edited by this lane. |
+
+### 1.2 The dependency lease map is lapsed and is not present admission authority
+
+At the integration baseline `main@2091d01c` (PR #94, node `T5`), the committed
+lease map still carries `Baseline: main@effc5e03` in its header and still shows
+`T5` as `DELIVERING` with the text "This PR is the `T5` delivery". That is
+PR #94's own pre-merge text: by the map's own standing rule, no commit can
+describe its own merge, so `main`'s copy always lags by at least one receipt
+block.
+
+Consequences this plan accepts rather than papers over:
+
+1. Every lease-map row cited below — `U-MODULES`, the shared-file owner table,
+   the `T5` lease — is read from a revision that the map itself declares must
+   be **recomputed from then-current `main` before any further admission**.
+2. This plan therefore claims **no present admission authority**. It is a
+   proposal for the GoalEx lifecycle owner to evaluate *after* recomputing the
+   map from the `main` that PR #94 produced.
+3. `T5`'s lease is broader than earlier nodes: it names `GOAL.md`,
+   `.planning/STATE.md`, the lease map, `docs/plans/`,
+   `tests/test_planning_traceability.py`, and `.github/workflows/ci.yml`, under
+   "GoalEx owner with CI integration shared-owner serialization". Node `M04-A`
+   in §5 must be re-validated against the recomputed map, not against the row
+   quoted here.
+4. The one fact that is *stable* across the lapse is the one this plan depends
+   on: `U-MODULES` still lists M04 with "No artifact authorized / No lease" at
+   `2091d01c`, unchanged from `effc5e03`. The lapse does not create an M04
+   admission; it only means the surrounding rows must be re-derived.
 
 **Authorization boundary.** Design spec §17 scopes the *pilots* plan. It does not
 extend to M04. Admission of any M04 implementation node remains the GoalEx
@@ -80,7 +119,7 @@ and runtime assumptions. Verified facts are recorded with the value observed.
 | `eval/public/bundle.py` `write_bundle` / `verify_bundle` and its scorer recomputation | **Development bundles only.** M04 must not assume bundle custody proves executable build provenance. | `verify_bundle` recomputes scoring and fails closed on unknown trace fields; `_canonical` is `json.dumps(sort_keys, (",",":"), allow_nan=False) + "\n"`. |
 | `eval/public/wmbs_m01.py` fixture + scorer | Deterministic harness **oracle/pattern** only: pure stdlib generator, frozen bytes, pure scorer, closed field sets, canonical replay projection over a closed field list. | Registry `dataset_sha256` for `wmbs-m01-development` = `81f3d4483729989876dfce71a2aabcf4681fd4edcff6f74b228c8473f4adb462`; recomputed canonical digest of the committed fixture **matches exactly**. |
 | `eval/public/wmbs_m10.py` fixture + core + scorer | Deterministic **baseline/abstention oracle** only, for the shape of a "calibrated unresolved state" metric and for disjoint calibration/scored partitioning. | Registry `dataset_sha256` for `wmbs-m10-development` = `41820cefb6e2a853a75bedb61d31b5a92045df8783544ebbbbcb18e7a77530f4`; recomputed canonical digest **matches exactly**. (The raw file bytes differ from this value by design — the pin is over canonical JSON, not raw bytes.) |
-| `eval/public/adapters/whole_memory_reference.py::run_m03_valid_time_development` and `eval/public/scoring.py::_score_wmbs_m03_valid_time` | **Bounded valid-time development only.** No transaction-time semantics. M04 reuses (a) the CLI-only observation discipline, (b) the projection of `graph_as_of` down to `object` values, (c) the temp-store clean-process replay pattern. | Fixture declares `transaction_time.supported = false`; scorer returns `full_bitemporal_m03: false`; adapter observes only through `MnemoCLI`. Focused selection `-k "m03 or m15_composed"` executed in this checkout and reported 17 passing selections with no failure or error. |
+| `eval/public/adapters/whole_memory_reference.py::run_m03_valid_time_development` and `eval/public/scoring.py::_score_wmbs_m03_valid_time` | **Bounded valid-time development only.** No transaction-time semantics. M04 reuses (a) the CLI-only observation discipline, (b) the projection of `graph_as_of` down to `object` values, (c) the temp-store clean-process replay pattern. | Fixture declares `transaction_time.supported = false`; scorer returns `full_bitemporal_m03: false`; adapter observes only through `MnemoCLI`. The focused selection `pytest -q tests/test_public_whole_memory_reference.py -k "m03 or m15_composed"` was executed once in this checkout and reported no failure and no error (see §10 for the recorded scope of that observation). |
 | `eval/public/adapters/working_memory_action_probe.py` (M13) | **Disclosed 1-seed / 6-case development probe only.** Cited solely as precedent for publishing an explicit gap disclosure beside a development metric. | `eval/public/README.md` carries the M13 gap disclosure pinned by `tests/test_public_working_memory_action_probe.py::test_public_readme_records_development_evidence_gaps` (delivered by PR #90 at `main@061c2e1c`). |
 
 ### 3.2 QUARANTINE — cited defects; **do not** consume as evidence, **do not** edit here
@@ -98,7 +137,7 @@ unit contract.
 | Q3 | `run_m15_composed_development` composes reference-only M01 and M10 around the one real-CLI cell (M03), asserts seven gates directly, and never invokes `score_profile` for the constituent cells. | "Composed replay" therefore does not prove one shared SUT state, and a corrupted constituent scorer would not be detected by the composition. | Three RED tests: (a) shared-state — mutating state through one cell must be visible to the next; (b) constituent-scorer corruption must fail the composition; (c) the exact M10 trace set must be asserted, not sampled. |
 | Q4 | `eval/public/registry.json` M12 rows carry stale `revision` pins even though their normalized `dataset_sha256` values still verify. | A matching content hash beside a stale commit pin makes provenance look bound when the lineage claim is false. | A `git show`-based registry-revision identity test proving each row's `revision` actually contains the pinned fixture bytes; then split/repair the M12 revisions. |
 | Q5 | `wmbs-m03-valid-time-development` has **no** `eval/public/registry.json` entry, no `_ADAPTERS` entry, no `_NORMALIZERS` entry and no `_PROFILE_CONTRACTS` entry in `eval/public/runner.py` — while `eval/public/bundle.py::_CANONICAL_REPLAY_SEEDS` *does* carry `"wmbs-m03-valid-time-development": (11, 23, 37, 53, 71)`. | The M03 cell is reachable only by direct adapter/scorer calls from `tests/test_public_whole_memory_reference.py`. It has no frozen dataset digest, no license row, no custody anchor, and cannot be run through `run_public_suite`. Task 3 of the pilots plan lists the suite ID with an **unchecked** box, so this is a disclosed incompleteness, not a hidden one — but it is still not a custody-bound asset. | Pin M03's exact fixture and schema: a registry row whose `dataset_sha256` equals the canonical digest of the committed fixture, plus a runner-routing test. The recomputed canonical digest today is `04c8e8a89d25c281744d57c20654bd035d85cb2f2cf96fbbd631592e4488bb91` (raw file SHA-256 `5162dbcb9228f289db8566aee85cf293eb5947d2a8acfce9e18121525f6c0823`). This plan records the value; it does not write it. |
-| Q6 | `bundle.canonical_replay_fixture_custody` accepts any 64-hex string that matches `manifests.fixture_manifest_sha256`; the two values are compared to each other, not to real content. Volatile-field projections also diverge: `bundle.CANONICAL_REPLAY_VOLATILE_FIELDS` (8 fields incl. `host_path`, `receipt_id`) vs `whole_memory_reference.VOLATILE_FIELDS` (5 fields) vs `wmbs_m01._CANONICAL_REPLAY_VOLATILE_FIELDS` (`evidence_handle` only). | A fabricated but self-consistent hash pair passes custody. Three divergent volatile definitions mean "the canonical projection" is not one thing. | (a) Reject fabricated custody hashes by binding schema, fixture, generator, code, and traces to real content; (b) collapse to **one** shared volatile projection consumed by all three call sites. |
+| Q6 | `bundle.canonical_replay_fixture_custody` accepts any 64-hex string that matches `manifests.fixture_manifest_sha256`; the two values are compared to each other, not to real content. Volatile-field projections also diverge across three definitions: `bundle.CANONICAL_REPLAY_VOLATILE_FIELDS` is exactly the **seven** members `host_path`, `path`, `receipt_id`, `rss_samples_bytes`, `runtime_timestamp_utc`, `signature`, `wall_time_ms`; `whole_memory_reference.VOLATILE_FIELDS` is the five members `wall_time_ms`, `rss_samples_bytes`, `signature`, `path`, `runtime_timestamp_utc`; `wmbs_m01._CANONICAL_REPLAY_VOLATILE_FIELDS` is `("evidence_handle",)` alone. | A fabricated but self-consistent hash pair passes custody. The three sets are not nested consistently — `bundle` adds `host_path` and `receipt_id` that the adapter omits, and `wmbs_m01` shares no member with either — so "the canonical projection" is not one thing. | (a) Reject fabricated custody hashes by binding schema, fixture, generator, code, and traces to real content; (b) collapse to **one** shared volatile projection consumed by all three call sites. |
 
 ### 3.3 Assets deliberately **not** reused
 
@@ -186,7 +225,7 @@ unit contract.
 |---|---|---|
 | `wmbs/0.1-draft` portable event shape | spec §6.2 | Fixture rows carry `event_id`, `content`, `actor_label`, `event_time`, `ingestion_time`, `content_sha256`, `public_metadata`. `valid_from`/`valid_to` are used only where the case is a dated correction. |
 | `IngestReceipt` outcome enum | spec §6.2 | `accepted` / `deduplicated` / `rejected` only. |
-| `AnswerEnvelope` | spec §6.2 | `answer_text?`, `abstained`, `confidence?`, `evidence_handles[]`. Confidence is **optional** and is never synthesized when absent (M10 precedent). |
+| `AnswerEnvelope` | spec §6.2 | The complete closed shape is `answer_text?`, `abstained`, `confidence?`, `evidence_handles[]`, `action_handles[]`, `adapter_metadata`. `eval/public/wmbs_m10.py` splits it as required `{answer_text, abstained, confidence, evidence_handles}` and optional `{action_handles, adapter_metadata}`; M04 adopts that split unchanged. `abstained` is mandatory and carries the unresolved signal; `evidence_handles[]` is mandatory and may be empty; `action_handles[]` is always empty for M04 (no action surface) and `adapter_metadata` is restricted to a closed key set. `confidence` is optional and is never synthesized when the SUT omits it (M10 precedent). |
 | `update(selector, replacement)` §6.4 hook | spec §6.4 | Declared `emulated` for Local: emulated through the public `supersede` / `correct` commands. Every emulated call's cost counts. It is **never** declared `native`. |
 | `graph_as_of(subject, predicate, valid_time)` | `MnemoCLI.graph_as_of` | Used for valid-time questions only. Projection is a closed allowlist (§4.6). |
 | M01 scorer shape | `eval/public/wmbs_m01.py` | Pattern only, per §3.1. |
@@ -260,7 +299,7 @@ discipline and excluding every volatile field named in §3.4.1.
 |---|---|---|
 | `M04-CURRENT-ACC` | Fraction of cases whose current answer set equals gold exactly (ordered). | Reported; no floor asserted at `PROPOSED`. |
 | `M04-HIST-PRESERVE` | Fraction of superseded values still retrievable at their historical `as_of`. | **`= 1.0`.** Spec acceptance: 100% preservation of superseded history. |
-| `M04-FALSE-RESOLVE` | Fraction of `unresolved` cases returning a single non-abstained current value. | **`<= 0.01`.** Spec acceptance: at most 1% false high-confidence resolution. With 20 unresolved observations per seed this bound is *not* statistically resolvable — it is recorded as `unresolvable-at-this-n` and any non-zero count is a hard failure at development scale. |
+| `M04-FALSE-RESOLVE` | Fraction of `unresolved` observations returning a single non-abstained current value. | **`<= 0.01`.** Spec acceptance: at most 1% false high-confidence resolution. The `unresolved` class is 4 cases × 3 permutations = **12 observations per seed**, hence **60 across the five seeds**, inside the 420-observation total. The smallest non-zero rate expressible is 1/60 ≈ 0.0167, which is already above the 1% bound, so the bound is **not resolvable at this n**. It is reported as `unresolvable-at-this-n` and, at development scale, **any** non-zero count is a hard failure. Raising n to resolve 1% honestly is Stage C work behind a power plan, not a fixture-size tweak. |
 | `M04-MONOTONIC` | Count of outcomes where a strictly-weaker-evidence source supersedes a strictly-stronger one. | **`= 0`.** Spec acceptance: no monotonic-source-policy violation. |
 | `M04-UNRESOLVED-CAL` | Agreement between observed multiplicity/abstention and gold unresolved state. | Reported. Numeric ECE only when the SUT supplies confidence; otherwise `unsupported` (M10 precedent). |
 | `M04-ABLATION-SENS` | Change in current answer when one source is withheld, versus gold sensitivity. | Reported. |
@@ -312,8 +351,48 @@ owner's list, or in the evidence owner's list. The precedent is exact:
 shared lease today for the same reason.
 
 `M04-A` also does not touch `GOAL.md`, `.planning/STATE.md`, the lease map,
-`tests/test_planning_traceability.py` (which reads only `.planning/`, verified),
-`.github/workflows/ci.yml`, any fixture, or any registry.
+`tests/test_planning_traceability.py`, `.github/workflows/ci.yml`, any fixture,
+or any registry.
+
+### 5.1 This plan file's own interaction with planning traceability
+
+An earlier revision of this document asserted that
+`tests/test_planning_traceability.py` "reads only `.planning/`". **That was
+false and is retracted.** At `main@2091d01c` the suite reads, outside
+`.planning/`: `GOAL.md`, `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`,
+`docs/ARCHITECTURE-OVERVIEW.md`, `docs/ENGINE-CONTRACT.md`, and — through
+`test_unit_drift_checkout_fetches_canonical_main_history` — `.github/workflows/ci.yml`.
+The correct analysis is narrower and is stated here in full rather than as a
+blanket exemption.
+
+**What was checked.** `grep -rl "docs/plans" tests/ .github/` returns nothing at
+either baseline, and no test in the suite globs or enumerates a directory; every
+source is a named constant resolved to one file. `docs/plans/` is therefore not
+an input to any assertion, and adding a file to it changes no test outcome.
+
+**Two live interactions remain, and neither is an exemption.**
+
+1. **Ownership, not enumeration.** `docs/plans/` *is* inside the GoalEx
+   lifecycle owner's exclusive surface — the `T4` and `T5` lease rows both name
+   it. This file's write lease was granted explicitly for this one new path, but
+   the directory around it is leased. Integration of this plan must therefore be
+   serialized with the GoalEx owner exactly as any other `docs/plans/` write,
+   and §1.2's recomputation requirement applies before that serialization is
+   judged.
+2. **A maintenance constraint this file must keep honouring.** PR #94 added
+   `LEASE_BASELINE = re.compile(r"^Baseline: \`main@([0-9a-f]{40})\`$", re.MULTILINE)`
+   and two tests —
+   `test_canonical_baseline_is_identical_across_the_three_lifecycle_files` and
+   `test_lease_map_body_names_only_the_header_baseline` — which require
+   **exactly one** canonical-baseline claim per lifecycle file. Their file set is
+   the lease map, `GOAL.md`, and `.planning/STATE.md`; this plan is not in it.
+   This document's own baseline lines are deliberately written as
+   `Verification baseline (...)` / `Integration baseline: ...` with an
+   `origin/main@` prefix, so they do not match that anchored pattern even by
+   accident. A future editor must not introduce a bare
+   ``Baseline: `main@<40-hex>` `` line here: if the pinned set were ever widened
+   to `docs/plans/`, such a line would register as a second canonical-baseline
+   claim and break both tests.
 
 ---
 
@@ -368,6 +447,30 @@ byte- and digest-verified against its registry pin at this baseline; the
 fixture/scorer pattern is stdlib-only and self-contained; and the module needs
 no CLI, no adapter, no registry, no bundle, and therefore inherits none of
 Q1–Q6.
+
+**What Stage A's numbers are, exactly.** Every metric in §4.6 that Stage A can
+produce — including `M04-HIST-PRESERVE`, `M04-MONOTONIC`, `M04-PERM-INVARIANT`,
+and `M04-REPLAY-EQ` — is measured over **fixture-supplied observations**, not
+over any system's output. Stage A therefore evidences exactly two things:
+*generator determinism* (the committed bytes are reproducible from the pinned
+seed) and *scorer determinism and fail-closed behaviour* (the scorer accepts
+gold-conformant input, rejects every malformed or label-bearing input, and
+projects identically across seeds and a clean process). It evidences **nothing
+about any SUT.** A green Stage A run is not a conformance result, not a
+capability claim, and not `INTERNALLY_MEASURED` evidence about Mnemosyne or any
+entrant.
+
+**How Stage A avoids the Q1/Q2 self-scoring shape.** It does *not* avoid it by
+observing a SUT — Stage A observes nothing. It avoids it by **making no claim
+that would require an observation**. The failure in Q1/Q2 is not that the M01
+and M10 adapters compute against harness-authored data; it is that they do so
+while sitting behind a registered suite whose output is labelled a module
+"pilot" result. Stage A ships no adapter, no registry row, and no runner
+routing, so there is no surface on which a self-scored number could be mistaken
+for a measurement. The moment Stage B adds that surface, the Q1/Q2 hazard
+becomes live for M04 too — which is why Stage B is gated on Q1 and Q2 being
+fixed first, and why the R9 disclosure test exists to keep Stage A's envelope
+honest in the interim.
 
 Exact lease for the implementing session — **these three new files and nothing
 else**:
@@ -439,8 +542,15 @@ shared document.
 
 ## 10. Verification performed for this document
 
-- Baseline confirmed at `main@effc5e039505c09e575ca5e4aeb2b96949676366`;
-  working tree clean at start.
+- Verification baseline confirmed at
+  `main@effc5e039505c09e575ca5e4aeb2b96949676366`; working tree clean at start.
+- Integration baseline `main@2091d01c8cea22da49a50bb1f0859d8108102f29` confirmed
+  present locally, and `git diff --stat` between the two was taken to establish
+  that no `eval/`, `src/`, fixture, or `tests/test_public_*` path changed, so
+  every §3 finding was re-checked and carried forward rather than re-asserted on
+  faith. The lease map's lapsed state at that baseline was read directly from
+  `git show origin/main:docs/coordination/...` and is disclosed in §1.2. No
+  rebase, checkout, or fetch-mutating operation was performed.
 - Registry ↔ fixture custody recomputed independently for
   `wmbs-m01-development` and `wmbs-m10-development`; both match under the
   canonical-JSON pin. The M03 fixture's canonical and raw digests were computed
@@ -454,12 +564,22 @@ shared document.
 - `MemoryTools.graph_as_of` and the committed M03 `tied-valid-time` timeline
   were read to confirm that unresolved multiplicity is observable without any
   Mnemosyne-specific label.
-- `tests/test_planning_traceability.py` was read: it resolves only under
-  `.planning/`, so this new document does not affect it.
+- `tests/test_planning_traceability.py` was read in full at both baselines. It
+  reads `GOAL.md`, the dependency lease map, `docs/ARCHITECTURE-OVERVIEW.md`,
+  `docs/ENGINE-CONTRACT.md`, and `.github/workflows/ci.yml` in addition to
+  `.planning/`. The earlier "reads only `.planning/`" claim is retracted; the
+  corrected analysis is §5.1.
 - One focused selection
   (`pytest -q tests/test_public_whole_memory_reference.py -k "m03 or m15_composed"`)
-  ran in this checkout and reported 17 passing selections with no failure or
-  error. No broad or full suite was run in this lane.
+  ran once in this checkout at `b88dac0e`'s tree and reported **no failure and
+  no error**. No selection count is asserted: the count previously recorded here
+  (17) was read off streaming progress dots from a truncated tail, not off a
+  pytest summary line, and an independent review reports the same command
+  selecting 28 passing tests. The count is therefore unverified from this lane's
+  own evidence and has been dropped rather than restated. The pass/fail
+  observation stands; the cardinality does not, and nothing in this plan depends
+  on it. No broad or full suite was run in this lane, and none was re-run for
+  this revision under the standing resource guard.
 - Diff scope, markdown structure, and secret scan were checked before commit.
   This document contains no credential, token, key, or endpoint.
 
