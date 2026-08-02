@@ -1,9 +1,9 @@
 # WMB M14 — Procedural Task Utility Implementation Plan
 
 Status: **PLANNING ARTIFACT ONLY — NOT CODE-READY.**
-Authored: 2026-08-01. Revised: 2026-08-01 (independent review pass).
+Authored: 2026-08-01. Revised: 2026-08-02 (PR #96 review repair).
 Lane base: `origin/main@effc5e039505c09e575ca5e4aeb2b96949676366`.
-Lane: `codex/wmb-m14-plan` in `/Users/admin/Mnemosyne.codex-wmb-m14-plan`.
+Original plan lane: `codex/wmb-m14-plan`.
 Write lease exercised by this document: exactly
 `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md`.
 
@@ -11,9 +11,14 @@ Write lease exercised by this document: exactly
 `2091d01c8cea22da49a50bb1f0859d8108102f29` since this lane was cut. This lane
 was **not** rebased. Every "at base" / "verified" statement in this document is
 scoped to `effc5e03` and to no later commit. A future admitting owner must
-re-verify Sections 3, 5, and 6 against then-current `main` before treating any
-finding here as current. Where this document asserts currentness, read it as
-currentness *at `effc5e03`*.
+re-verify **every repository-state assertion in this document** against
+then-current `main`, then revise every affected section, table, prerequisite,
+quarantine, integration step, and validation receipt before treating any
+finding here as current. Rechecking only Sections 3, 5, and 6 is insufficient:
+base drift can invalidate downstream ownership, budgets, custody, scheduling,
+and claim-boundary text anywhere in the plan. Where this document asserts
+currentness, read it as currentness *at `effc5e03`*. This review successor does
+not refresh those historical assertions.
 
 This document authorizes no code, no benchmark execution, no measurement, no
 admission-state change, no push, no pull request, and no publication claim. It
@@ -213,7 +218,7 @@ The replay evidence is stronger than "unexecuted"; it is tautological.
 rejects `len(clean_run_payloads) < MIN_CLEAN_REPLAY_RUNS`. The adapter
 satisfies that check with
 
-```
+```python
 "clean_run_payloads": [receipts for _ in range(m01.MIN_CLEAN_REPLAY_RUNS)],
 "restart_replay_payload": receipts,
 ```
@@ -452,7 +457,7 @@ an M14 lane.
 **Evidence (base `effc5e03`).** `src/mnemosyne/self_optimization.py`
 `_session_succeeds` decides whether a replayed session succeeded by:
 
-```
+```python
 rendered = "\n".join(getattr(hit, "text", "") for hit in result.hits)
 return session.expected_substring.lower() in rendered.lower() and not getattr(result, "abstained", False)
 ```
@@ -490,7 +495,7 @@ hit text with no provenance or trust condition.
 #### Q8 — The whole-memory contract suite has an undeclared test-time dependency on the `mcp` extra
 
 **Owner:** CI integration owner / dependency owner (`pyproject.toml`,
-`.github/workflows/ci.yml`).
+`uv.lock`, `.github/workflows/ci.yml`).
 
 **Evidence (base `effc5e03`, reproduced locally).**
 `tests/test_public_whole_memory_reference.py` imports
@@ -531,6 +536,7 @@ true on then-current `main`. This list is exhaustive and ordered.
 | P6 | Q1, Q2, Q4, Q5, and Q6 are dispositioned by the public-harness owner — either fixed or converted into declared, tested disclosures. | Public-harness integration owner | Q1, Q2, Q4, Q5, Q6 |
 | P7 | A sandbox/metering receipt path exists for the episode environment, or the M14 cell is explicitly restricted to the in-process harness-owned seam with no entrant-supplied code, and labelled as such. Cost is claimable only after this holds (Section 10). | `SBOX` owner + operator | B2 (partial), cost |
 | P8 | A protected regression suite is executable against the M14 SUT boundary, its pass criterion is stronger than substring containment (Q7), and its result is bound to the M14 attempt. | Engine/product owner + operator | Q7, the "zero protected regressions" term |
+| P9 | `jsonschema` is an explicit member of `[dependency-groups].dev`, the lockfile records that direct dependency, and a clean environment synced with `uv sync --locked --group dev` can import it and collect the whole-memory contract suite without relying on the `mcp` extra. | CI integration owner / dependency owner | Q8, contract-test availability |
 
 P1 is false at this base: the lease map reads
 `Baseline: main@e157e0350c503c9cde4aca0eff71d643a4adb200` and carries `T4` as
@@ -559,7 +565,7 @@ quality. This plan does not create one.
 ## 8. Exact future source and test file lease
 
 Recorded so that a future admitted lane inherits an exact, checkable lease.
-This lease is **not claimed by this document** and confers nothing until P1–P8
+This lease is **not claimed by this document** and confers nothing until P1–P9
 hold.
 
 ### Stage A — M14-owned, disjoint from every current exclusive surface
@@ -576,12 +582,12 @@ hold.
 | Path | Required edit |
 |---|---|
 | `eval/public/schema/wmbs-0.1-draft.schema.json` | P2 agent-ABI definitions. |
-| `eval/public/adapters/whole_memory_reference.py` | `ProtocolValidator` operation table and response binding for the four new operations. |
+| `eval/public/adapters/whole_memory_reference.py` | `ProtocolValidator` operation table and response binding for the four new operations; public-harness-owned binding of the future M14 dataset item into the attempt's `SoftwareDataBOM.datasets` artifact. |
 | `eval/public/runner.py` | `_ADAPTERS["wmbs-m14-task-reference"]`, `_PROFILE_CONTRACTS["wmbs-m14-v1"]`. |
 | `eval/public/scoring.py` | `score_profile` dispatch to `_score_wmbs_m14`; paired-difference estimator from P5. |
 | `eval/public/registry.json` | Suite entry `wmbs-m14-task-utility-development`. |
 | `eval/public/README.md` | Development gap disclosures, in the style already used for M12/M13. |
-| `tests/test_public_whole_memory_reference.py` | Agent-ABI validator tests. |
+| `tests/test_public_whole_memory_reference.py` | Agent-ABI validator tests and the public-harness-owned M14 BOM integration test: construct the attempt's `SoftwareDataBOM` with the M14 `datasets` item, validate all twelve fields, bind its artifact reference, and prove lineage regeneration reproduces the fixture digest. This test and binding are future Stage-B work; neither is claimed to exist now. |
 
 Stage B is the whole reason for the `NOT CODE-READY` verdict: without it,
 Stage A is Q2/Q5 again.
@@ -645,12 +651,17 @@ ranking, or publication work" (`eval/public/README.md`).
 that the **whole** episode set for one attempt fits inside these bounds:
 every `reset`/`observe`/`act`/`finish_episode` call counts against the 10,000
 request ceiling and the 64 MiB retention ceiling, and no single `Observation` or
-`ActionReceipt` may exceed 16 MiB or 64 levels of nesting. An M14 fixture whose
-task count multiplied by five seeds multiplied by two arms multiplied by
-maximum turns exceeds 10,000 requests is inadmissible as specified and must be
-reduced, not granted a raised bound. Because the validator does no persistence,
-network, or model work, any M14 component needing those must live outside it and
-is gated by P4/P7.
+`ActionReceipt` may exceed 16 MiB or 64 levels of nesting. The complete request
+budget is `1 + (2 * max_turns) + 1 + declared_extra_requests` per episode: one
+`reset`, at most `max_turns` each of `observe` and `act`, one `finish_episode`,
+plus the declared extras. `declared_extra_requests` must be an explicit,
+non-negative manifest value covering every additional protocol request; it may
+not hide retries or setup calls. Admission computes
+`task_count * 5 seeds * 2 arms * requests_per_episode` and rejects the fixture
+when that value exceeds 10,000. The budget is complete rather than a lower
+bound: omitted request classes are a validation error, not permission to exceed
+the ceiling. Because the validator does no persistence, network, or model work,
+any M14 component needing those must live outside it and is gated by P4/P7.
 
 ---
 
@@ -808,7 +819,7 @@ digest. That is what RED `R9` checks.
   leaderboard, or result-v2 statement.
 
 M14's `feasibility_disposition.development` remains **`DEFERRED`** at this base
-and does not move to `PROPOSED` until P1–P8 hold. This document does not move
+and does not move to `PROPOSED` until P1–P9 hold. This document does not move
 it.
 
 ---
@@ -851,22 +862,29 @@ repository currently gets wrong — before any code can inherit that mistake.
 2. **Stage 1 — public-harness owner.** Freeze the Section 6.3 agent ABI in the
    schema and `ProtocolValidator` (P2). Shared-protocol package; not
    M14-specific.
-3. **Stage 2 — public-harness owner.** Disposition Q1, Q2, Q4, Q5, and Q6 (P6).
+3. **Stage 2 — public-harness and dependency owners.** Disposition Q1, Q2, Q4,
+   Q5, and Q6 (P6), then make `jsonschema` explicitly available to the dev-only
+   contract-test environment and prove collection under `--group dev` (P9/Q8).
    Doing this before M14 exists prevents a third stranded cell, a third
-   self-asserted replay claim, and a third tautological five-run gate.
+   self-asserted replay claim, a third tautological five-run gate, and a contract
+   suite that collects only because an unrelated extra happens to be installed.
 4. **Stage 3 — M14 lane, Stage-A lease.** Deterministic environment, generator,
    five-seed fixture, executed-run ledger, adapter, tests. RED-first from R2,
    then R8.
 5. **Stage 4 — public-harness owner.** Paired estimator and non-descriptive
    family (P5), then scorer dispatch, `_PROFILE_CONTRACTS`, `_ADAPTERS`,
-   registry entry, README disclosure.
+   registry entry, README disclosure, and the M14
+   `SoftwareDataBOM.datasets` binding plus its lineage/integrity test. This
+   stage owns that integration; Stage A does not, and this plan does not claim
+   it has landed.
 6. **Stage 5 — operator.** Model policy (P4), sandbox/metering disposition and
    cost enablement (P7), and protected-suite executability (P8), or the
    explicit restriction labels those prerequisites permit.
 7. **Stage 6.** Development-tier evidence at `PROPOSED` only, with every
    Section 11 `DEFERRED` item stated as deferred.
 
-Stages 1, 2, 4 serialize on the public-harness owner's single-writer rule.
+Stages 1, 2, 4 serialize on the public-harness owner's single-writer rule;
+Stage 2 also serializes the P9 dependency edit with the CI/dependency owner.
 Stage 3 is the only stage an M14 lane owns. Stage 5's P8 additionally requires
 the engine/product owner, who is a third distinct writer.
 
@@ -886,6 +904,15 @@ the engine/product owner, who is a third distinct writer.
 
 ## 15. Validation performed by this lane
 
+- **PR #96 review repair.** Six current findings were reproduced against the
+  integration head before this successor was written: host-path leakage,
+  incomplete base-drift revalidation scope, two unlabelled Python fences, Q8
+  missing from prerequisites/order, an undercounted request budget, and an
+  unowned future M14 `SoftwareDataBOM.datasets` integration. The repair changes
+  planning text only and preserves every quarantine and `NOT CODE-READY` /
+  `DEFERRED` boundary. The focused traceability check reports 12 passing tests;
+  the structural Markdown check reports one H1, four balanced fence markers,
+  ordered heading levels, and no absolute host path.
 - **Revision pass (this commit).** Nine independent-review findings were
   reproduced against the tree before being applied; none was accepted on
   assertion. Reproduction notes: the `pass^5` tautology is not merely possible
