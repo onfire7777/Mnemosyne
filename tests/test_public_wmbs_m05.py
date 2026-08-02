@@ -92,6 +92,33 @@ def test_non_abstained_claim_without_valid_source_is_unsupported() -> None:
     assert result["passed"] is False
 
 
+def test_unsupported_cases_use_non_supporting_sources_that_cannot_become_gold() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    unsupported = fixture["slices"][3]["cases"]
+    assert all(
+        "supports claim" not in case["source_events"][0]["content"].lower()
+        for case in unsupported
+    )
+
+    traces = _traces(fixture)
+    target_case = unsupported[0]
+    target_trace = next(
+        trace for trace in traces if trace["case_id"] == target_case["case_id"]
+    )
+    supplied_cid = m05.recompute_source_cids(fixture)[
+        target_case["source_events"][0]["event_id"]
+    ]
+    assert supplied_cid not in target_case["gold_source_cids"]
+    target_trace["answer_envelope"]["abstained"] = False
+    target_trace["answer_envelope"]["evidence_handles"] = [supplied_cid]
+    target_trace["explanation"]["source_evidence_cids"] = [supplied_cid]
+
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["unsupported_claim_rate"] > 0.0
+    assert result["passed"] is False
+
+
 def test_tampered_lineage_is_rejected_despite_verified_self_declaration() -> None:
     m05 = _module()
     fixture = deepcopy(m05.generate_fixture(13))
