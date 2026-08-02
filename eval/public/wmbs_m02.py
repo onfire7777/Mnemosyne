@@ -91,12 +91,18 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
     if type(seed) is not int:
         raise WmbsM02Error("seed must be an int")
     rng = random.Random(seed)
-    retrieval_keys = [
-        f"key-{index:03d}-{rng.randrange(1_000_000):06d}" for index in range(240)
-    ]
-    payloads = [
-        f"payload-{index:03d}-{rng.randrange(1_000_000):06d}" for index in range(240)
-    ]
+    used_tokens: set[str] = set()
+
+    def opaque_token(prefix: str, index: int) -> str:
+        ordinal = f"{index:03d}"
+        while True:
+            token = f"{prefix}-{rng.getrandbits(96):024x}"
+            if token not in used_tokens and ordinal not in token:
+                used_tokens.add(token)
+                return token
+
+    retrieval_keys = [opaque_token("key", index) for index in range(240)]
+    payloads = [opaque_token("payload", index) for index in range(240)]
     corpus = [
         {
             "stable_item_id": f"m02-doc-{index:03d}",
