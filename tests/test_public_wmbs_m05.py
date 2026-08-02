@@ -520,6 +520,37 @@ def test_trace_rejects_malformed_explanation_and_handles(field, value) -> None:
         m05.score(fixture, traces)
 
 
+@pytest.mark.parametrize(
+    "traces",
+    ["not-a-trace-list", b"not-a-trace-list", {"case_id": "mapping-container"}],
+)
+def test_trace_container_rejects_strings_bytes_and_mappings(traces) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    with pytest.raises(m05.WmbsM05Error, match="trace container"):
+        m05.score(fixture, traces)
+
+
+def test_trace_container_rejects_non_mapping_items() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    with pytest.raises(m05.WmbsM05Error, match="trace item"):
+        m05.score(fixture, [None])
+
+
+@pytest.mark.parametrize("mutation", ["unknown", "missing"])
+def test_trace_top_level_fields_are_closed(mutation) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    if mutation == "unknown":
+        traces[0]["unknown_field"] = "not allowed"
+    else:
+        del traces[0]["provenance_status"]
+    with pytest.raises(m05.WmbsM05Error, match="trace fields"):
+        m05.score(fixture, traces)
+
+
 def test_trace_rejects_nonempty_action_handles() -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)

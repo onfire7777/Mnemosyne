@@ -87,6 +87,9 @@ _ANSWER_ENVELOPE_KEYS = frozenset(
         "adapter_metadata",
     }
 )
+_TRACE_KEYS = frozenset(
+    {"case_id", "answer_envelope", "explanation", "provenance_status"}
+)
 
 
 class WmbsM05Error(ValueError):
@@ -398,8 +401,19 @@ def source_manifest(fixture: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
+    if not isinstance(traces, Sequence) or isinstance(
+        traces, (str, bytes, bytearray, Mapping)
+    ):
+        raise WmbsM05Error("trace container must be a sequence of mappings")
     result = {}
     for trace in traces:
+        if not isinstance(trace, Mapping):
+            raise WmbsM05Error("trace item must be a mapping")
+        if set(trace) != _TRACE_KEYS:
+            raise WmbsM05Error(
+                "trace fields must be exactly case_id, answer_envelope, "
+                "explanation, and provenance_status"
+            )
         case_id = trace.get("case_id")
         if not isinstance(case_id, str) or case_id in result:
             raise WmbsM05Error("trace case_id must be unique and nonempty")
