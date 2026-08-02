@@ -71,7 +71,7 @@ def test_claim_source_completeness_is_a_hard_rail() -> None:
 
 
 @pytest.mark.parametrize("stages", [None, ["unknown-stage"]])
-def test_explanation_coverage_requires_complete_retrieval_stages(stages) -> None:
+def test_explanation_contract_requires_complete_retrieval_stages(stages) -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)
     traces = _traces(fixture)
@@ -82,9 +82,8 @@ def test_explanation_coverage_requires_complete_retrieval_stages(stages) -> None
         del target["explanation"]["stages"]
     else:
         target["explanation"]["stages"] = stages
-    result = m05.score(fixture, traces)
-    assert result["metrics"]["M-EXPLAIN-COV"] < 1.0
-    assert result["passed"] is False
+    with pytest.raises(m05.WmbsM05Error, match="stages"):
+        m05.score(fixture, traces)
 
 
 def test_fixture_declares_frozen_retrieval_stages() -> None:
@@ -554,6 +553,8 @@ def test_trace_enforces_frozen_evidence_handle_bounds(handles) -> None:
         (False, None, True),
         (False, None, False),
         (False, "", False),
+        (False, "   ", False),
+        (False, "x" * 65537, False),
         (True, "contradictory answer", False),
     ],
 )
@@ -592,4 +593,43 @@ def test_trace_enforces_frozen_optional_answer_envelope_fields(field, value) -> 
     traces = _traces(fixture)
     traces[0]["answer_envelope"][field] = value
     with pytest.raises(m05.WmbsM05Error):
+        m05.score(fixture, traces)
+
+
+@pytest.mark.parametrize("confidence", [None, 0, 1, 0.5])
+def test_trace_accepts_valid_optional_confidence_bounds(confidence) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"]["confidence"] = confidence
+    assert m05.score(fixture, traces)["passed"] is True
+
+
+@pytest.mark.parametrize("metadata", [{}, {"mode": "deterministic"}])
+def test_trace_accepts_adapter_metadata_with_absent_or_valid_mode(metadata) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"]["adapter_metadata"] = metadata
+    assert m05.score(fixture, traces)["passed"] is True
+
+
+def test_trace_accepts_absent_optional_confidence() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    assert "confidence" not in traces[0]["answer_envelope"]
+    assert m05.score(fixture, traces)["passed"] is True
+
+
+@pytest.mark.parametrize(
+    "stages",
+    ["lexical", [], ["lexical", "lexical"], ["unknown-stage"]],
+)
+def test_trace_rejects_malformed_duplicate_or_unknown_stages(stages) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["explanation"]["stages"] = stages
+    with pytest.raises(m05.WmbsM05Error, match="stages"):
         m05.score(fixture, traces)
