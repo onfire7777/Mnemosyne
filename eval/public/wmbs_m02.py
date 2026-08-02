@@ -373,8 +373,8 @@ def score_retrieval(
             raise WmbsM02Error("trace answer must be a string or null")
         if raw_trace["abstained"] and raw_trace["answer"] is not None:
             raise WmbsM02Error("abstained trace answer must be null")
-        if not raw_trace["abstained"] and raw_trace["answer"] is None:
-            raise WmbsM02Error("non-abstained trace answer must be a string")
+        if not raw_trace["abstained"] and raw_trace["answer"] in (None, ""):
+            raise WmbsM02Error("non-abstained trace answer must be a non-empty string")
         hits = raw_trace.get("ranked_hits")
         if not isinstance(hits, list):
             raise WmbsM02Error("ranked_hits must be a list")
@@ -451,14 +451,7 @@ def score_retrieval(
         else "unsupported"
     )
     metrics["unanswerable_correct_rate"] = (
-        sum(
-            bool(bound[q["question_id"]][0]["abstained"])
-            or (
-                not bound[q["question_id"]][1]
-                and not _normalized_answer(bound[q["question_id"]][0]["answer"])
-            )
-            for q in unanswerable
-        )
+        sum(bool(bound[q["question_id"]][0]["abstained"]) for q in unanswerable)
         / len(unanswerable)
         if unanswerable
         else 0.0
