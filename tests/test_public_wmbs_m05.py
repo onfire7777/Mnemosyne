@@ -256,6 +256,15 @@ def test_fixture_rejects_non_mapping_slice_items(invalid_slice) -> None:
         m05.validate_fixture(fixture)
 
 
+@pytest.mark.parametrize("invalid_case", [None, "not-a-case"])
+def test_fixture_rejects_non_mapping_case_items(invalid_case) -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    fixture["slices"][0]["cases"][0] = invalid_case
+    with pytest.raises(m05.WmbsM05Error, match="case identity matrix"):
+        m05.validate_fixture(fixture)
+
+
 def test_fixture_rejects_rehashed_protected_expected_outcome_drift() -> None:
     m05 = _module()
     fixture = deepcopy(m05.generate_fixture(13))
