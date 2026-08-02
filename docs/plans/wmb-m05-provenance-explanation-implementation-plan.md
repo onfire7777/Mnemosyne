@@ -407,8 +407,9 @@ score(fixture: Mapping, traces: Sequence[Mapping]) -> dict   # pure; no engine i
 }
 ```
 
-`passed` is `True` only when all four rails hold simultaneously. Citation
-precision/recall never contribute to `passed` — they are diagnostics per §8 M05.
+`passed` is `True` only when all four provenance rails hold simultaneously and
+`five_seed_canonical_replay == 1.0`. Citation precision/recall never contribute
+to `passed` — they are diagnostics per §8 M05.
 
 **`eval/public/fixtures/wmbs-m05-provenance-development.json`** — see §7.
 
