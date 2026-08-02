@@ -28,12 +28,44 @@ DEPENDENCY_LEASE_MAP = (
     / "coordination"
     / "2026-07-28-remaining-dependency-write-lease-map.md"
 )
+GOAL = ROOT / "GOAL.md"
+STATE = PLANNING / "STATE.md"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
+LEASE_CURRENT_BASELINE_CLAIMS = (
+    re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
+    re.compile(r"at main@([0-9a-f]{8}) \(current baseline\)"),
+    re.compile(
+        r"This map has now been recomputed from the resulting "
+        r"`?main@([0-9a-f]{8})`?"
+    ),
+    re.compile(
+        r"## Concurrency and integration rules .*?This revision "
+        r"(?:\*\*)?is(?:\*\*)? the recomputation from "
+        r"(?:the resulting )?`?main@([0-9a-f]{8})`?"
+    ),
+)
 ID_PATTERN = re.compile(r"(?:REQ|NFR)-\d{3}")
 TRACE_ROW = re.compile(
     r"^\| ((?:REQ|NFR)-\d{3}) \| ([^|]+) \| `([^`]+)` \| `([^`]+)` "
     r"\| ([^|]+) \| \[x\] Verified \|$"
 )
 V2_CAP_ROW = re.compile(r"^\| \[[ x]\] (CAP-\d{3}) \|")
+CANONICAL_CLAIM_PHRASE = "current canonical baseline"
+# The two phrasings the lifecycle prose uses for a canonical-baseline claim:
+# "...at `main@X` (...), which is the current canonical baseline" and
+# "The current canonical baseline is `main@X`".
+CANONICAL_CLAIMS = (
+    # Bind to the nearest preceding SHA: these sentences also cite historical
+    # merges, so the match must not cross another `main@` reference.
+    re.compile(
+        r"`main@([0-9a-f]{8})`(?:(?!main@)[^.])*?"
+        r"which is the current canonical baseline"
+    ),
+    re.compile(r"current canonical baseline is `main@([0-9a-f]{8})`"),
+)
+STATE_STOPPED_AT = re.compile(r'^stopped_at: "(.*)"$', re.MULTILINE)
+STATE_STOPPED_AT_CLAIM = re.compile(r"at `?main@([0-9a-f]{8})`?;")
 
 
 def _frontmatter_list(text: str, key: str) -> set[str]:
@@ -100,6 +132,200 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     ids = set(ID_PATTERN.findall(text))
     assert {f"REQ-{index:03d}" for index in range(1, 19)} <= ids
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
+
+
+def test_unit_drift_checkout_fetches_canonical_main_history() -> None:
+    lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    job_start = lines.index("  test:")
+    job_end = next(
+        index
+        for index in range(job_start + 1, len(lines))
+        if lines[index].startswith("  ") and not lines[index].startswith("    ")
+    )
+    job = lines[job_start:job_end]
+    checkout = job.index(
+        "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+    )
+    assert job[checkout + 1 : checkout + 3] == [
+        "        with:",
+        "          fetch-depth: 0",
+    ]
+
+
+def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> None:
+    """The lease map, GOAL.md, and STATE.md must name one canonical baseline.
+
+    Each reconciliation round restates the same merge SHA by hand in three
+    places, so a partial update silently leaves one authority pointing at a
+    superseded baseline. This pins them together.
+
+    Presence of the new SHA is not enough: a partial update leaves the *stale*
+    claim behind, and a stale claim is still a claim. So each file must make
+    exactly one canonical-baseline claim, and it must name the lease map's
+    baseline. Prose here is hand-wrapped and rewritten every round, so match
+    against whitespace-normalized text rather than raw lines.
+    """
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baselines = LEASE_BASELINE.findall(lease_text)
+    assert len(baselines) == 1, f"expected exactly one Baseline line, got {baselines}"
+    sha = baselines[0]
+    short = sha[:8]
+
+    goal_text = GOAL.read_text(encoding="utf-8")
+    # The GOAL.md verification block's lapse detector must assert this exact SHA,
+    # and the ancestry list must include it. These are shell lines, so they are
+    # matched unnormalized.
+    assert f'test "$(git rev-parse main)" = "{sha}"' in goal_text
+    assert f"git merge-base --is-ancestor {sha} main" in goal_text
+
+    goal_normalized = " ".join(goal_text.split())
+    state_text = STATE.read_text(encoding="utf-8")
+    state_normalized = " ".join(state_text.split())
+
+    stopped_at = STATE_STOPPED_AT.findall(state_text)
+    assert len(stopped_at) == 1, f"expected one stopped_at line, got {stopped_at}"
+
+    for label, normalized in (
+        ("GOAL.md", goal_normalized),
+        (".planning/STATE.md", state_normalized),
+    ):
+        claimed = [
+            claim
+            for pattern in CANONICAL_CLAIMS
+            for claim in pattern.findall(normalized)
+        ]
+        assert len(claimed) == 1, (
+            f"{label} must make exactly one canonical-baseline claim, got {claimed}"
+        )
+        assert claimed[0] == short, (
+            f"the canonical-baseline claim in {label} must name `main@{short}`, "
+            f"got {claimed[0]}"
+        )
+        # Guard the regexes against a reworded claim slipping past them: every
+        # occurrence of the phrase must be one of the matched claims.
+        recognized_claim_count = len(claimed)
+        assert normalized.count(CANONICAL_CLAIM_PHRASE) == recognized_claim_count, (
+            f"{label} has a '{CANONICAL_CLAIM_PHRASE}' claim that names no SHA "
+            f"in a recognized form"
+        )
+
+    claimed = STATE_STOPPED_AT_CLAIM.findall(stopped_at[0])
+    assert claimed == [short], (
+        f".planning/STATE.md stopped_at must name `main@{short}` exactly once, "
+        f"got {claimed}"
+    )
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            sha,
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_stale_alternate_canonical_baseline_claim_fails(
+    tmp_path: Path, monkeypatch
+) -> None:
+    goal_text = GOAL.read_text(encoding="utf-8")
+    duplicate_goal = tmp_path / "GOAL.md"
+    duplicate_goal.write_text(
+        goal_text + "\nThe current canonical baseline is `main@deadbeef`.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "GOAL", duplicate_goal)
+
+    try:
+        test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
+    except AssertionError:
+        return
+    raise AssertionError("stale alternate canonical-baseline claim was accepted")
+
+
+def test_non_ancestral_baseline_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    commit_env = os.environ | {
+        "GIT_AUTHOR_NAME": "planning-traceability-test",
+        "GIT_AUTHOR_EMAIL": "planning-traceability-test@example.invalid",
+        "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+        "GIT_COMMITTER_NAME": "planning-traceability-test",
+        "GIT_COMMITTER_EMAIL": "planning-traceability-test@example.invalid",
+        "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+    }
+    non_ancestor = subprocess.run(
+        ["git", "commit-tree", "HEAD^{tree}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        input="object-only non-ancestral baseline\n",
+        text=True,
+        env=commit_env,
+    ).stdout.strip()
+    ancestry = subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            non_ancestor,
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    assert ancestry.returncode == 1
+
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baseline = LEASE_BASELINE.findall(lease_text)[0]
+    for global_name, source in (
+        ("GOAL", GOAL),
+        ("STATE", STATE),
+        ("DEPENDENCY_LEASE_MAP", DEPENDENCY_LEASE_MAP),
+    ):
+        substituted = tmp_path / global_name
+        substituted.write_text(
+            source.read_text(encoding="utf-8")
+            .replace(baseline, non_ancestor)
+            .replace(baseline[:8], non_ancestor[:8]),
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(globals(), global_name, substituted)
+
+    try:
+        test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
+    except subprocess.CalledProcessError:
+        return
+    raise AssertionError("non-ancestral baseline commit was accepted")
+
+
+def test_lease_map_body_names_only_the_header_baseline() -> None:
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baselines = LEASE_BASELINE.findall(lease_text)
+    assert len(baselines) == 1, f"expected exactly one Baseline line, got {baselines}"
+    short = baselines[0][:8]
+    normalized = " ".join(lease_text.split())
+
+    claimed = [
+        claim
+        for pattern in LEASE_CURRENT_BASELINE_CLAIMS
+        for claim in pattern.findall(normalized)
+    ]
+    assert len(claimed) == 1, (
+        "lease map must make exactly one recognized in-body current-baseline claim, "
+        f"got {claimed}"
+    )
+    assert claimed[0] == short, (
+        f"the lease map's current-baseline claim must name `main@{short}`, "
+        f"got {claimed[0]}"
+    )
 
 
 def test_phase_13_truth_lease_names_existing_authoritative_files() -> None:
