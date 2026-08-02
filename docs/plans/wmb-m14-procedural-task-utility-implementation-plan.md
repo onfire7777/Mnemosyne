@@ -661,8 +661,13 @@ not hide retries or setup calls. Admission computes
 `negotiate`, `create_run`, and `finalize`, plus every episode request. It rejects
 the fixture when that value exceeds 10,000. The budget is complete rather than
 a lower bound: omitted request classes are a validation error, not permission
-to exceed the ceiling. Because the validator does no persistence, network, or
-model work,
+to exceed the ceiling. Admission must also sum the declared maximum canonical
+request bytes for those three attempt-level requests and every declared episode
+request, rejecting the fixture before execution when the attempt-wide upper
+bound exceeds 64 MiB. Every request class must declare its canonical-byte upper
+bound; omitted classes or undeclared retries fail validation rather than
+borrowing unbudgeted retention. Because the validator does no persistence,
+network, or model work,
 any M14 component needing those must live outside it and is gated by P4/P7.
 
 ---
