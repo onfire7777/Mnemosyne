@@ -527,6 +527,7 @@ def score_current_answer(fixture: object, observations: object) -> dict[str, Any
     cases, rows = _observations(fixture, observations)
     correct = sum(
         row["current"]["objects"] == cases[row["case_id"]]["gold"]["current_objects"]
+        and row["current"]["as_of"] == cases[row["case_id"]]["gold"]["current_as_of"]
         for row in rows
     )
     return {
@@ -534,6 +535,7 @@ def score_current_answer(fixture: object, observations: object) -> dict[str, Any
         "correct_count": correct,
         "total_count": len(rows),
         "rate": _rate(correct, len(rows), "current-answer metric"),
+        "passed": correct == len(rows),
     }
 
 
@@ -615,7 +617,7 @@ def score_source_ablation_sensitivity(
     if not isinstance(ablations, Sequence) or isinstance(ablations, (str, bytes)):
         raise WmbsM04Error("ablations must be a sequence")
     expected = {
-        (case_id, permutation, source): objects
+        (case_id, permutation, source): (objects, case["gold"]["current_as_of"])
         for case_id, case in cases.items()
         for permutation in PERMUTATIONS
         for source, objects in case["gold"]["ablation_objects"].items()
@@ -627,7 +629,7 @@ def score_source_ablation_sensitivity(
         if identity not in expected or identity in seen:
             raise WmbsM04Error("ablation identity is unknown or duplicated")
         current = _projection(row["current"], "ablation.current")
-        correct += current["objects"] == expected[identity]
+        correct += (current["objects"], current["as_of"]) == expected[identity]
         seen.add(identity)
     if seen != set(expected):
         raise WmbsM04Error("ablation matrix is incomplete")

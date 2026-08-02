@@ -143,6 +143,17 @@ def test_historical_preservation_rejects_wrong_as_of() -> None:
     assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
 
 
+def test_current_answer_rejects_wrong_as_of_and_fails_aggregate() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    for row in observations:
+        row["current"]["as_of"] = "2026-07-19T00:00:00Z"
+
+    metric = m04.score_current_answer(fixture, observations)
+    assert metric["correct_count"] == 0
+    assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
+
+
 def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)
@@ -251,6 +262,16 @@ def test_source_ablation_sensitivity_matches_gold() -> None:
         ]
         is False
     )
+
+
+def test_source_ablation_sensitivity_rejects_wrong_current_as_of() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    ablations[0]["current"]["as_of"] = "2026-07-19T00:00:00Z"
+
+    metric = m04.score_source_ablation_sensitivity(fixture, observations, ablations)
+    assert metric["correct_count"] == metric["total_count"] - 1
+    assert metric["passed"] is False
 
 
 def test_unresolved_ablation_recomputes_remaining_source_support() -> None:
