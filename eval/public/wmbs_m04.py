@@ -535,6 +535,11 @@ def score_current_answer(fixture: object, observations: object) -> dict[str, Any
     correct = sum(
         row["current"]["objects"] == cases[row["case_id"]]["gold"]["current_objects"]
         and row["current"]["as_of"] == cases[row["case_id"]]["gold"]["current_as_of"]
+        and (
+            cases[row["case_id"]]["gold"]["unresolved"]
+            or row["answer"]["answer_text"]
+            == cases[row["case_id"]]["gold"]["current_objects"][0]
+        )
         for row in rows
     )
     return {
@@ -577,9 +582,13 @@ def score_unresolved_calibration(
 ) -> dict[str, Any]:
     cases, rows = _observations(fixture, observations)
     correct = sum(
-        (len(row["current"]["objects"]) >= 2 and row["answer"]["abstained"])
-        if cases[row["case_id"]]["gold"]["unresolved"]
-        else not row["answer"]["abstained"]
+        row["current"]["objects"] == cases[row["case_id"]]["gold"]["current_objects"]
+        and row["current"]["as_of"] == cases[row["case_id"]]["gold"]["current_as_of"]
+        and (
+            (len(row["current"]["objects"]) >= 2 and row["answer"]["abstained"])
+            if cases[row["case_id"]]["gold"]["unresolved"]
+            else not row["answer"]["abstained"]
+        )
         for row in rows
     )
     return {
