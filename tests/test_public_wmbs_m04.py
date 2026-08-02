@@ -92,12 +92,12 @@ def test_fixture_covers_seven_source_classes_five_seeds_three_permutations() -> 
         m04.validate_fixture(reduced)
 
 
-def test_fixture_rejects_resigned_duplicate_case_id_before_indexing() -> None:
+def test_fixture_rejects_resigned_full_duplicate_case_before_indexing() -> None:
     fixture = m04.generate_fixture()
-    fixture["cases"][4]["case_id"] = fixture["cases"][0]["case_id"]
+    fixture["cases"][4] = copy.deepcopy(fixture["cases"][0])
     _redigest(fixture)
 
-    with pytest.raises(m04.WmbsM04Error, match="case_id"):
+    with pytest.raises(m04.WmbsM04Error, match="canonical and unique"):
         m04.validate_fixture(fixture)
 
 
