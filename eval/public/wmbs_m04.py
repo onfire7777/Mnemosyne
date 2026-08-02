@@ -582,17 +582,12 @@ def score_unresolved_calibration(
         else not row["answer"]["abstained"]
         for row in rows
     )
-    supplied = [
-        row["answer"]["confidence"]
-        for row in rows
-        if row["answer"].get("confidence") is not None
-    ]
     return {
         "metric_id": "M04-UNRESOLVED-CAL",
         "correct_count": correct,
         "total_count": len(rows),
         "rate": _rate(correct, len(rows), "unresolved-calibration metric"),
-        "confidence_calibration": "supported" if supplied else "unsupported",
+        "confidence_calibration": "unsupported",
         "passed": correct == len(rows),
     }
 

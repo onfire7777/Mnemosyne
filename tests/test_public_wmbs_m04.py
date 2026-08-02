@@ -185,6 +185,17 @@ def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
         m04.score_unresolved_calibration(fixture, poisoned)
 
 
+def test_wrong_confidences_do_not_claim_calibration_support() -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    for row in observations:
+        row["answer"]["confidence"] = 0.0
+
+    metric = m04.score_unresolved_calibration(fixture, observations)
+    assert metric["passed"] is True
+    assert metric["confidence_calibration"] == "unsupported"
+
+
 def test_unresolved_projection_rejects_duplicate_current_objects() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)
