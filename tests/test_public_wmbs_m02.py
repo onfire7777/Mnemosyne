@@ -135,6 +135,18 @@ def test_unanswerable_hallucination_is_incorrect_and_unsupported() -> None:
     assert metrics["unsupported_claim_rate"] == pytest.approx(1 / 51)
 
 
+def test_abstained_trace_rejects_fabricated_answer() -> None:
+    fixture = m02.load_fixture()
+    traces = _perfect_traces(fixture)
+    index, _ = _case(fixture, "unanswerable")
+    traces[index]["ranked_hits"] = [
+        {"rank": 1, "stable_item_id": fixture["corpus"][0]["stable_item_id"]}
+    ]
+    traces[index]["answer"] = "fabricated answer"
+    with pytest.raises(m02.WmbsM02Error, match="abstained trace answer must be null"):
+        m02.score_retrieval(fixture, traces)
+
+
 @pytest.mark.parametrize("abstained", [1, "false", None])
 def test_scorer_rejects_non_boolean_abstained(abstained: object) -> None:
     fixture = m02.generate_fixture()
@@ -228,6 +240,8 @@ def test_unsupported_claim_rate_uses_retrieved_gold_not_answer_correctness() -> 
 def test_em_and_f1_match_frozen_answer_normalization(
     gold: str, prediction: str
 ) -> None:
+    assert m02._normalized_answer(gold) == canonical_normalize_answer(gold)
+    assert m02._normalized_answer(prediction) == canonical_normalize_answer(prediction)
     assert canonical_normalize_answer(gold) == canonical_normalize_answer(prediction)
     fixture = m02.generate_fixture()
     index, question = _case(fixture, "exact")

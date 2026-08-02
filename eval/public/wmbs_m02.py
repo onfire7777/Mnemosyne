@@ -344,6 +344,8 @@ def score_retrieval(
             raise WmbsM02Error("trace abstained must be a bool when present")
         if raw_trace["answer"] is not None and not isinstance(raw_trace["answer"], str):
             raise WmbsM02Error("trace answer must be a string or null")
+        if raw_trace["abstained"] and raw_trace["answer"] is not None:
+            raise WmbsM02Error("abstained trace answer must be null")
         hits = raw_trace.get("ranked_hits")
         if not isinstance(hits, list):
             raise WmbsM02Error("ranked_hits must be a list")
