@@ -369,6 +369,25 @@ def test_fixture_rejects_attacker_controlled_capture_metadata() -> None:
 @pytest.mark.parametrize(
     ("field", "value"),
     [
+        ("license", "Proprietary"),
+        ("source_manifest", {"signed": True, "reason": "attacker"}),
+        ("seeds", [73, 59, 41, 29, 13]),
+        ("generator_id", "attacker-generator"),
+        ("generator_version", "9.9.9"),
+    ],
+)
+def test_fixture_rejects_mutated_identity_and_custody_fields(field, value) -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    fixture[field] = value
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match=field):
+        m05.validate_fixture(fixture)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
         ("explanation", None),
         ("evidence_handles", "not-a-list"),
         ("evidence_handles", [7]),
