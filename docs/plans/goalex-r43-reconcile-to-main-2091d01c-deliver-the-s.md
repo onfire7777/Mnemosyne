@@ -45,7 +45,7 @@ repository. You have no memory of prior rounds; everything you need is below.
 **Contract tests you must keep green** (in `tests/test_planning_traceability.py`
 as it exists on `main@2091d01c`):
 - `test_canonical_baseline_is_identical_across_the_three_lifecycle_files` —
-  the lease map must contain **exactly one** `Baseline: \`main@<40-hex>\`` line;
+  the lease map must contain **exactly one** `Baseline: main@<40-hex>` line;
   `GOAL.md` must contain both `test "$(git rev-parse main)" = "<that 40-hex>"`
   and `git merge-base --is-ancestor <that 40-hex> main`; `GOAL.md` and
   `.planning/STATE.md` must each make at least one canonical-baseline claim and
@@ -83,6 +83,7 @@ afterthoughts — commit them on the controller branch as the final step.
   controller worktree on branch `codex/goalex-whole-memory-pilot`.
 
 ### Task 1: Refresh canonical main and bring the controller branch up to it
+
 - [x] `cd /Users/admin/.codex/worktrees/9697/Mnemosyne`; confirm
       `git branch --show-current` is `codex/goalex-whole-memory-pilot` and
       `git status --porcelain --untracked-files=all` is empty. If it is not
@@ -101,19 +102,17 @@ afterthoughts — commit them on the controller branch as the final step.
       these). Keep `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`
       from the branch.
 - [x] Verify the reconciliation: `git diff main HEAD --stat` must now list
-      **only** `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`.
-      If anything else appears, fix the merge resolution before continuing.
-      The active r43 execution plan is also branch-resident by necessity; all
-      main-owned reconciliation paths match `main` exactly.
+      **only** `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`
+      and this active r43 execution plan, which is branch-resident by necessity.
+      If anything else appears, fix the merge resolution before continuing; all
+      main-owned reconciliation paths must match `main` exactly.
 - [x] Run `python -m pytest tests/test_planning_traceability.py -q` and confirm
-      the current failure(s) are exactly the stale-baseline assertions (the files
-      still say `effc5e03` while `origin/main` is `2091d01c`). Do not "fix" them
-      yet — Task 2 does that.
-      Observed 2026-08-01: all 12 tests pass because the contract currently
-      requires the recorded baseline to be an ancestor of `origin/main`, not
-      equal to it; Task 2 still owns the lifecycle-file recomputation.
+      all 12 tests pass. The recorded `main@effc5e03` baseline remains a valid
+      ancestor of `origin/main@2091d01c`; Task 2 still owns the lifecycle-file
+      recomputation to the new canonical baseline.
 
 ### Task 2: Open an isolated delivery lane and recompute the three lifecycle files to main@2091d01c
+
 - [x] Create an isolated Worktrunk/worktree lane cut from `main@2091d01c` on a
       new branch (suggested name `codex/goalex-t6-post-pr94-lifecycle-delivery`).
       Do all Task 2 and Task 3 edits there, not in the controller worktree.
@@ -165,28 +164,33 @@ afterthoughts — commit them on the controller branch as the final step.
       `python -m ruff check .` in the lane; both must pass before Task 3.
 
 ### Task 3: Deliver the stranded r42 record and the r43 record through a reviewed PR
-- [ ] Copy `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`
+
+- [x] Copy `docs/plans/goalex-r42-admit-node-t5-discharge-the-pr-93-carve-.md`
       from the controller branch into the lane unchanged — it is a historical
       record of the round as planned, so do not rewrite its task boxes.
-- [ ] Write this plan into the lane as
+- [x] Write this plan into the lane as
       `docs/plans/goalex-r43-reconcile-to-main-2091d01c-deliver-the-.md`
       (same format as the sibling `docs/plans/goalex-r*.md` files).
-- [ ] Commit the whole Task 2 + Task 3 delta as one coherent set of commits with
+- [x] Commit the whole Task 2 + Task 3 delta as one coherent set of commits with
       conventional-commit messages, push the lane branch normally, and open a PR
       against `main` describing it as documentation-only: it moves no benchmark,
       measurement, admission state, or publication claim, and admits no source
-      node.
-- [ ] Drive the PR to green: resolve every review thread and CI failure at the
+      node. Delivered as PR #95 at exact head `d7c0938f`.
+- [x] Drive the PR to green: resolve every review thread and CI failure at the
       exact PR head. Self-repair routine transport/CI/lint issues; do not
-      dismiss findings. Record the exact-head CI run ID.
-- [ ] Merge the PR normally (no force-push, no direct write to `main`). Record
+      dismiss findings. Exact-head CI run `30737466988` passed and all review
+      threads were resolved.
+- [x] Merge the PR normally (no force-push, no direct write to `main`). Record
       the merge commit SHA. Then poll
       `gh run list --branch main --limit 3 --json databaseId,headSha,conclusion,event`
       until the `push` run whose `headSha` equals that merge commit reports
       `success`; record that post-merge run ID. Do not claim completion on a
-      pending or failed run.
+      pending or failed run. PR #95 merged as
+      `42abaab7ba4fa83f9838c3d32ee96db4256bfcad`; matching post-merge `main`
+      CI run `30738303497` passed.
 
 ### Task 4: Reconcile the controller branch to the new main and end the round with zero residue
+
 - [ ] Back in `/Users/admin/.codex/worktrees/9697/Mnemosyne`:
       `git fetch --prune origin`, fast-forward local `main` to `origin/main`,
       and assert `git rev-parse main` equals `git rev-parse origin/main` equals
