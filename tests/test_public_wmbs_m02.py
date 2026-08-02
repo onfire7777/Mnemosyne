@@ -121,6 +121,30 @@ def test_queries_hide_answers_and_corpus_supplies_reference_payload() -> None:
     assert metrics["token_f1"] == 1.0
 
 
+def test_answerable_tokens_are_opaque_unique_and_disjoint() -> None:
+    fixture = m02.generate_fixture()
+    retrieval_keys = []
+    payloads = []
+    for question in fixture["questions"]:
+        if question["family"] == "unanswerable":
+            continue
+        key_match = re.search(r"retrieval key ([\w-]+)", question["text"])
+        assert key_match is not None
+        retrieval_key = key_match.group(1)
+        primary_doc_id = question["gold_doc_ids"][0]
+        doc_ordinal = primary_doc_id.removeprefix("m02-doc-")
+        assert primary_doc_id not in retrieval_key
+        assert doc_ordinal not in retrieval_key
+        assert primary_doc_id not in question["answers"][0]
+        assert doc_ordinal not in question["answers"][0]
+        retrieval_keys.append(retrieval_key)
+        payloads.append(question["answers"][0])
+
+    assert len(retrieval_keys) == len(set(retrieval_keys))
+    assert len(payloads) == len(set(payloads))
+    assert set(retrieval_keys).isdisjoint(payloads)
+
+
 def test_scorer_scores_the_committed_fixture() -> None:
     fixture = m02.load_fixture()
     result = m02.score_retrieval(fixture, _perfect_traces(fixture))
