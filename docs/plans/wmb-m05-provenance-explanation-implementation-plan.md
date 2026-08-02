@@ -341,7 +341,11 @@ All exact, all model-free, all present at base SHA. Nothing below is invented.
 envelope must emit `action_handles` (empty for this module, which takes no
 actions) or fail schema validation —
 `retrieval_envelope`/`retrieval_hit` (**excluding** `provenance_status`, Q3),
-`portable_event` (`event_id`, `content`, `content_sha256`, `public_metadata`),
+`portable_event` — whose `required` set is all seven of `event_id`, `content`,
+`actor_label`, `event_time`, `ingestion_time`, `content_sha256`, and
+`public_metadata` under `additionalProperties: false`, so every M05 source event
+carries all seven or fails ABI validation (`valid_from`, `valid_to`, and
+`modality_handle` remain optional and unused by M05) —
 `ingest_status.evidence_handle`, `error_envelope` with the exact nine-code enum,
 and `replay_protocol` constants.
 
