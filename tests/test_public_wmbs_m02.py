@@ -237,25 +237,17 @@ def test_unanswerable_hallucination_is_incorrect_and_unsupported() -> None:
     assert metrics["unsupported_claim_rate"] == pytest.approx(1 / 51)
 
 
-@pytest.mark.parametrize(
-    ("answer", "unsupported_claim_rate", "passed"),
-    [("", 0.0, True), ("the", 1 / 51, False)],
-)
-def test_unanswerable_claim_denominator_uses_raw_answer_presence(
-    answer: str, unsupported_claim_rate: float, passed: bool
-) -> None:
+def test_unanswerable_nonempty_normalization_empty_answer_is_a_claim() -> None:
     fixture = m02.load_fixture()
     traces = _perfect_traces(fixture)
     index, _ = _case(fixture, "unanswerable")
-    traces[index]["answer"] = answer
+    traces[index]["answer"] = "the"
     traces[index]["abstained"] = False
 
     result = m02.score_retrieval(fixture, traces)
-    assert result["metrics"]["unanswerable_correct_rate"] == 1.0
-    assert result["metrics"]["unsupported_claim_rate"] == pytest.approx(
-        unsupported_claim_rate
-    )
-    assert result["passed"] is passed
+    assert result["metrics"]["unanswerable_correct_rate"] == 0.9
+    assert result["metrics"]["unsupported_claim_rate"] == pytest.approx(1 / 51)
+    assert result["passed"] is False
 
 
 def test_abstained_trace_rejects_fabricated_answer() -> None:
@@ -270,14 +262,14 @@ def test_abstained_trace_rejects_fabricated_answer() -> None:
         m02.score_retrieval(fixture, traces)
 
 
-def test_non_abstained_trace_rejects_null_answer() -> None:
+@pytest.mark.parametrize("answer", [None, ""])
+def test_non_abstained_trace_rejects_empty_answer(answer: object) -> None:
     fixture = m02.load_fixture()
     traces = _perfect_traces(fixture)
     index, _ = _case(fixture, "unanswerable")
     traces[index]["abstained"] = False
-    with pytest.raises(
-        m02.WmbsM02Error, match="non-abstained trace answer must be a string"
-    ):
+    traces[index]["answer"] = answer
+    with pytest.raises(m02.WmbsM02Error, match="non-abstained trace answer"):
         m02.score_retrieval(fixture, traces)
 
 
