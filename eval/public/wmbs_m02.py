@@ -334,6 +334,7 @@ def score_retrieval(
 ) -> dict[str, Any]:
     """Score caller-supplied traces over fixed labels; execute no retrieval."""
     validate_fixture(fixture)
+    corpus_ids = {document["stable_item_id"] for document in fixture["corpus"]}
     raw_questions = fixture["questions"]
     questions = {}
     for index, raw in enumerate(raw_questions):
@@ -395,6 +396,8 @@ def score_retrieval(
             raise WmbsM02Error("ranked hit ranks must be contiguous 1..N")
         if len(ranked_ids) != len(set(ranked_ids)):
             raise WmbsM02Error("duplicate ranked stable_item_id")
+        if not set(ranked_ids).issubset(corpus_ids):
+            raise WmbsM02Error("ranked stable_item_id values must reference the corpus")
         question = questions[question_id]
         if question["family"] != "unanswerable" and not ranked_ids:
             raise WmbsM02Error(
@@ -484,13 +487,22 @@ def score_retrieval(
         {name: "unsupported" for name in ("latency", "tokens", "calls", "storage")}
     )
     interval = {"method": "descriptive"}
+    passed = (
+        metrics["recall_at_10"] == 1.0
+        and metrics["ndcg_at_10"] == 1.0
+        and metrics["evidence_recall"] in {"unsupported", 1.0}
+        and metrics["unanswerable_correct_rate"] == 1.0
+        and metrics["unsupported_claim_rate"] == 0.0
+        and metrics["exact_match"] == 1.0
+        and metrics["token_f1"] == 1.0
+    )
     return {
         "family": FAMILY,
         "finite_corpus_only": True,
         "interval": interval,
         "intervals": {name: dict(interval) for name in metrics},
         "metrics": metrics,
-        "passed": True,
+        "passed": passed,
         "profile": PROFILE,
         "profile_version": PROFILE_VERSION,
         "total": len(questions),
