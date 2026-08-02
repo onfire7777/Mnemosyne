@@ -412,6 +412,20 @@ def test_false_resolution_and_monotonic_violations_fail_closed() -> None:
     assert m04.score_false_supersession(fixture, observations)["passed"] is False
 
 
+def test_false_resolution_counts_unresolved_multi_object_answer_attempt() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    unresolved = next(row for row in observations if row["answer"]["abstained"])
+    assert len(unresolved["current"]["objects"]) > 1
+    unresolved["answer"].update(answer_text="guessed", abstained=False)
+
+    result = m04.score_false_supersession(fixture, observations)
+    assert result["false_resolution_count"] == 1
+    assert result["rate"] == 1 / result["unresolved_count"]
+    assert result["passed"] is False
+    assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
+
+
 def test_permutation_invariance_and_clean_process_replay_equality() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)
