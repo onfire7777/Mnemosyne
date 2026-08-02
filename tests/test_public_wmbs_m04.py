@@ -227,8 +227,8 @@ def test_scorer_emits_no_publication_or_measurement_claim() -> None:
     assert result["interval"] == {"method": "descriptive"}
     assert result["metrics"]["replay_equality"] == {
         "metric_id": "M04-REPLAY-EQ",
-        "equal_count": 5,
-        "total_count": 5,
+        "equal_count": 1,
+        "total_count": 1,
         "rate": 1.0,
         "passed": True,
     }
@@ -240,8 +240,23 @@ def test_scorer_emits_no_publication_or_measurement_claim() -> None:
     }
 
 
+def test_replay_equality_rejects_validation_legal_fixture_drift() -> None:
+    fixture = m04.generate_fixture()
+    fixture["cases"].reverse()
+    _redigest(fixture)
+    m04.validate_fixture(fixture)
+    observations, ablations = _perfect(fixture)
+    replay = m04.score_conflict(fixture, observations, ablations)["metrics"][
+        "replay_equality"
+    ]
+    assert replay["equal_count"] == 0
+    assert replay["rate"] == 0.0
+    assert replay["passed"] is False
+
+
 @pytest.mark.parametrize(
-    "zero_denominator", ["unresolved", "non_unresolved", "ablations"]
+    "zero_denominator",
+    ["unresolved", "non_unresolved", "historical", "ablations"],
 )
 def test_zero_denominator_gold_fails_closed(zero_denominator: str) -> None:
     fixture = m04.generate_fixture()
@@ -250,12 +265,13 @@ def test_zero_denominator_gold_fails_closed(zero_denominator: str) -> None:
             case["gold"]["unresolved"] = False
         elif zero_denominator == "non_unresolved":
             case["gold"]["unresolved"] = True
+        elif zero_denominator == "historical":
+            case["gold"]["historical_objects"] = []
         else:
             case["gold"]["ablation_objects"] = {}
     _redigest(fixture)
-    observations, ablations = _perfect(fixture)
     with pytest.raises(m04.WmbsM04Error, match="zero denominator"):
-        m04.score_conflict(fixture, observations, ablations)
+        m04.validate_fixture(fixture)
 
 
 def test_branch_merge_and_transaction_time_are_declared_unsupported() -> None:

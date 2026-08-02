@@ -345,6 +345,7 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
     }
     seen: set[tuple[int, str, int]] = set()
     unresolved_states: list[bool] = []
+    has_historical_gold = False
     for case in cases:
         case = _closed(case, _CASE_KEYS, "case")
         parts = str(case["case_id"]).rsplit("-", 1)
@@ -381,6 +382,7 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
         ):
             raise WmbsM04Error("invalid gold contract")
         unresolved_states.append(gold["unresolved"])
+        has_historical_gold = has_historical_gold or bool(gold["historical_objects"])
         if not gold["ablation_objects"]:
             raise WmbsM04Error("ablation metric has a zero denominator")
     if seen != expected:
@@ -389,6 +391,8 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
         raise WmbsM04Error("unresolved metrics have a zero denominator")
     if all(unresolved_states):
         raise WmbsM04Error("permutation metric has a zero denominator")
+    if not has_historical_gold:
+        raise WmbsM04Error("historical-preservation metric has a zero denominator")
     unsigned = dict(fixture)
     digest = unsigned.pop("fixture_sha256")
     if digest != canonical_sha256(unsigned):
@@ -654,17 +658,16 @@ def _score_monotonic(fixture: object, observations: object) -> dict[str, Any]:
 
 
 def _score_replay_equality(fixture: object) -> dict[str, Any]:
-    validate_fixture(fixture)
-    equal = sum(
-        canonical_json(generate_fixture(seed)) == canonical_json(generate_fixture(seed))
-        for seed in SEEDS
+    fixture = validate_fixture(fixture)
+    equal = int(
+        canonical_json(fixture) == canonical_json(generate_fixture(fixture["seed"]))
     )
     return {
         "metric_id": "M04-REPLAY-EQ",
         "equal_count": equal,
-        "total_count": len(SEEDS),
-        "rate": _rate(equal, len(SEEDS), "replay-equality metric"),
-        "passed": equal == len(SEEDS),
+        "total_count": 1,
+        "rate": float(equal),
+        "passed": equal == 1,
     }
 
 
