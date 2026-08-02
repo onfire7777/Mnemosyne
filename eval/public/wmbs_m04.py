@@ -502,10 +502,15 @@ def _answer(value: object) -> Mapping[str, Any]:
         raise WmbsM04Error("answer.abstained must be boolean")
     if value["abstained"] is (value["answer_text"] is not None):
         raise WmbsM04Error("answer_text must be null exactly when abstained is true")
-    if value["answer_text"] is not None and (
-        not isinstance(value["answer_text"], str) or not value["answer_text"]
+    answer_text = value["answer_text"]
+    if answer_text is not None and (
+        not isinstance(answer_text, str)
+        or not 1 <= len(answer_text) <= 65_536
+        or not any(not character.isspace() for character in answer_text)
     ):
-        raise WmbsM04Error("answer_text must be a nonempty string or null")
+        raise WmbsM04Error(
+            "answer_text must satisfy the nonempty_string schema or be null"
+        )
     for key in ("evidence_handles", "action_handles"):
         handles = value[key]
         if (

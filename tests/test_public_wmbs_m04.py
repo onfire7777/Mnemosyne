@@ -360,6 +360,19 @@ def test_answer_envelope_matches_closed_schema_contract() -> None:
         m04.score_unresolved_calibration(fixture, invalid)
 
 
+@pytest.mark.parametrize("invalid_text", [" \n\t", "x" * 65_537])
+def test_resolved_answer_text_enforces_frozen_nonempty_string(
+    invalid_text: str,
+) -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    resolved = next(row for row in observations if not row["answer"]["abstained"])
+    resolved["answer"]["answer_text"] = invalid_text
+
+    with pytest.raises(m04.WmbsM04Error, match="nonempty_string"):
+        m04.score_unresolved_calibration(fixture, observations)
+
+
 def test_adapter_metadata_allows_optional_mode() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)
