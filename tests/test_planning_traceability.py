@@ -303,9 +303,10 @@ def test_t6_terminal_receipts_are_consistent_across_lifecycle_files() -> None:
 
     assert "| T6 | MERGED |" in lifecycle_texts["lease map"]
     assert "No GoalEx lifecycle or source node is admitted" in normalized["lease map"]
-    assert "no GoalEx lifecycle or source node is currently admitted" in normalized[
-        "GOAL.md"
-    ]
+    assert (
+        "no GoalEx lifecycle or source node is currently admitted"
+        in normalized["GOAL.md"]
+    )
     assert "no lifecycle writer is now admitted" in normalized[".planning/STATE.md"]
 
 
