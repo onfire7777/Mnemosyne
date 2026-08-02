@@ -251,7 +251,8 @@ def test_abstained_envelope_with_citations_is_malformed() -> None:
     fixture = m05.generate_fixture(13)
     traces = _traces(fixture)
     traces[0]["answer_envelope"]["abstained"] = True
-    with pytest.raises(m05.WmbsM05Error):
+    traces[0]["answer_envelope"]["answer_text"] = None
+    with pytest.raises(m05.WmbsM05Error, match="evidence handles"):
         m05.score(fixture, traces)
 
 
