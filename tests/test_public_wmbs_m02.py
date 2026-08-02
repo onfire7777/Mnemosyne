@@ -187,6 +187,25 @@ def test_scorer_rejects_duplicate_ranked_ids() -> None:
         m02.score_retrieval(fixture, traces)
 
 
+def test_scorer_rejects_ranked_ids_outside_fixture_corpus() -> None:
+    fixture = m02.generate_fixture()
+    traces = _perfect_traces(fixture)
+    index, _ = _case(fixture, "exact")
+    traces[index]["ranked_hits"] = [{"rank": 1, "stable_item_id": "external-doc-001"}]
+    with pytest.raises(m02.WmbsM02Error, match="reference the corpus"):
+        m02.score_retrieval(fixture, traces)
+
+
+def test_scorer_passed_aggregates_frozen_development_gates() -> None:
+    fixture = m02.generate_fixture()
+    traces = _perfect_traces(fixture)
+    assert m02.score_retrieval(fixture, traces)["passed"] is True
+
+    index, _ = _case(fixture, "exact")
+    traces[index]["answer"] = "wrong answer"
+    assert m02.score_retrieval(fixture, traces)["passed"] is False
+
+
 def test_scorer_scores_unanswerable_with_empty_gold_and_empty_hits() -> None:
     fixture = m02.generate_fixture()
     result = m02.score_retrieval(fixture, _perfect_traces(fixture))
