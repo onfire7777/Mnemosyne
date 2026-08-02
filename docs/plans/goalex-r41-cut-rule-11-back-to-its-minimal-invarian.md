@@ -1,8 +1,11 @@
 # Plan: Cut Rule 11 Back to Its Minimal Invariant, Land PR #93, and Recompute Branch Truth
 
-Historical round record, superseded by PR #93's merge and the bounded `T5`
-delivery admitted after that independent merge lapsed the carve-out. The
-unchecked tasks below describe completed historical work, not pending work.
+Historical round record, abandoned and superseded by PR #93's merge and the
+bounded `T5` delivery admitted after that independent merge lapsed the
+carve-out. Task 1's planned removal of the ignored-path manifest, secret, and
+park-marker apparatus did not land; current `GOAL.md` and the traceability
+contract retain it. The unchecked tasks below preserve the historical plan and
+evidence; they do not claim completion.
 
 ## Overview
 
