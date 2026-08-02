@@ -79,9 +79,10 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
   git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
   git merge-base --is-ancestor 061c2e1c13cbf1fd5324361a6ff61f47cd2a6534 main
   git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
+  git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
   # Exact canonical baseline; ancestry alone also passes on a moved `main`,
   # which is exactly when the carve-out lapses.
-  test "$(git rev-parse main)" = "e157e0350c503c9cde4aca0eff71d643a4adb200"
+  test "$(git rev-parse main)" = "39cfa67aa7692bf47d5dde5842af3d8ec0736bb0"
   test -f .planning/STATE.md
   test -f .planning/ROADMAP.md
   test -f .planning/REQUIREMENTS.md
@@ -160,34 +161,75 @@ with `git show <branch>:<path> > <path>` per file instead; reuse that approach.
 
 ### Task 4: Open, gate, and merge the PR; prove post-merge main
 
-- [ ] Push the lane branch normally and open a PR against `main` whose body
+- [x] Push the lane branch normally and open a PR against `main` whose body
       states: documentation only, lease-map node `T4`, admits no source node,
       changes no benchmark/measurement/admission/publication claim, and names
       PR #91's receipts (`main@e157e035`, exact-head CI `30686224929`,
       post-merge CI `30687385118`) as the consumed baseline.
-- [ ] Watch exact-head CI with `gh pr checks <PR#> --watch` until green; resolve
+- [x] Watch exact-head CI with `gh pr checks <PR#> --watch` until green; resolve
       any review threads or mergeability blockers normally (never dismiss
       findings). Record the exact-head CI run id.
-- [ ] Merge through the normal PR flow, then record the merge commit SHA and
+- [x] Merge through the normal PR flow, then record the merge commit SHA and
       watch the post-merge `main` CI run (`gh run list --branch main --limit 5`)
       until it is green. Record its run id.
 
+**Task 4 receipts.** PR #92 (`codex/goalex-t4-receipt-delivery`). Exact-head CI
+`30693874030` (green on the final head `16a05e83`; the first head `cc1ede82` was
+green as `30692939187` before the review fixes). Merge commit
+`39cfa67aa7692bf47d5dde5842af3d8ec0736bb0`. Post-merge `main` CI `30694818231`
+(success). Four review threads were raised and all four resolved on their merits,
+none dismissed:
+
+- Markdown blank lines around fences/headings in this record — fixed in
+  `16a05e83`; `git diff --ignore-blank-lines` on the file is empty.
+- Ancestry-only baseline check in `GOAL.md` — accepted. `merge-base
+  --is-ancestor` also passes when `main` carries later, unrecorded merges, which
+  is exactly the condition under which the carve-out lapses, so ancestry could
+  not distinguish an operative baseline from a lapsed one. `bbf05b99` adds an
+  exact equality assertion against the recorded canonical baseline, making the
+  verification block itself the lapse detector; the prior ancestry assertions are
+  preserved. Recorded as a baseline that Task 5 advances rather than a frozen
+  literal.
+- The same ancestry-only check in this plan record's quoted copy of the block —
+  mirrored in `16a05e83`.
+- "T4 asserts a non-canonical baseline", claiming `main` resolved to
+  `2ba4ed80`. Verifiably incorrect and answered with evidence on the thread:
+  `2ba4ed80` is PR #87's merge commit and an *ancestor* of `main`, 14 commits
+  behind it, while `main` and `origin/main` both resolved to `e157e035` exactly
+  as asserted. The reading came from a checkout predating PRs #88-#91, and the
+  concern is inverted relative to the risk — a stale ancestor cannot stale the
+  delta; a newer `main` could, and that case now fails loudly.
+
 ### Task 5: Reconcile the controller branch and record the residue
 
-- [ ] In the controller worktree, `git fetch --prune origin` and fast-forward
+- [x] In the controller worktree, `git fetch --prune origin` and fast-forward
       local `main` to `origin/main`; prove `git rev-parse main` equals
       `git rev-parse origin/main` and that the new merge commit is an ancestor
       of `main`. Merge `main` into `codex/goalex-whole-memory-pilot` normally.
-- [ ] Recompute the lease map from the new `main`: set `Baseline:` to the new
+- [x] Recompute the lease map from the new `main`: set `Baseline:` to the new
       merge SHA, flip `T4` to `MERGED` with its receipt block (PR number,
       exact-head CI id, post-merge CI id), and record that this recomputation
       is the accepted one-block standing residue which admits **no** successor
       node and **no** source node. Update `GOAL.md` and `.planning/STATE.md` to
       the matching post-merge text (including the new SHA in the GOAL.md
       verification block's `merge-base --is-ancestor` assertions).
-- [ ] Commit that reconciliation on the controller branch and confirm
+- [x] Commit that reconciliation on the controller branch and confirm
       `git status --porcelain` is empty and the GOAL.md verification block
       exits 0. Report in the round summary: the PR number, merge SHA,
       exact-head CI id, post-merge CI id, and the explicit statement that the
       map admits no source node at the new baseline, so the next source
       admission waits on an external gate opening.
+
+**Task 5 receipts.** Local `main` fast-forwarded to `origin/main` at
+`39cfa67aa7692bf47d5dde5842af3d8ec0736bb0` (PR #92's merge commit, verified an
+ancestor of `main`), then merged into `codex/goalex-whole-memory-pilot`. The
+four conflicting lifecycle/record files were resolved by taking `main`'s
+delivered text as the base and applying the post-merge recomputation on top; the
+round-39 record kept the controller copy, which already carried the Task 4
+receipts. The lease map is now at `Baseline: main@39cfa67a` with `T4` as
+`MERGED` and PR #92's receipt block (exact-head CI `30693874030`, post-merge CI
+`30694818231`), the current wave is closed, and the map admits **no successor
+node** and **no source node** at this baseline — the next source admission waits
+on an external gate opening (`P13-C`, first eligible 2026-08-03, is an external
+event, not an admissible writer). `GOAL.md`'s verification block now asserts
+exact equality against `39cfa67a` and adds the matching ancestry assertion.
