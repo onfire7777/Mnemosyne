@@ -257,6 +257,11 @@ def _case(
         ablations["source-a"] = [beta, gamma]
         ablations["source-b"] = [alpha, gamma]
         ablations["source-c"] = [alpha, beta]
+    elif source_class == "unresolved":
+        ablations["source-a"] = [beta]
+        ablations["source-b"] = [beta]
+        ablations["source-c"] = [alpha]
+        ablations["source-d"] = [alpha]
     return {
         "case_id": case_id,
         "source_class": source_class,
@@ -552,23 +557,24 @@ def score_unresolved_calibration(
     fixture: object, observations: object
 ) -> dict[str, Any]:
     cases, rows = _observations(fixture, observations)
-    eligible = [row for row in rows if cases[row["case_id"]]["gold"]["unresolved"]]
     correct = sum(
-        len(row["current"]["objects"]) >= 2 and row["answer"]["abstained"]
-        for row in eligible
+        (len(row["current"]["objects"]) >= 2 and row["answer"]["abstained"])
+        if cases[row["case_id"]]["gold"]["unresolved"]
+        else not row["answer"]["abstained"]
+        for row in rows
     )
     supplied = [
         row["answer"]["confidence"]
-        for row in eligible
+        for row in rows
         if row["answer"].get("confidence") is not None
     ]
     return {
         "metric_id": "M04-UNRESOLVED-CAL",
         "correct_count": correct,
-        "total_count": len(eligible),
-        "rate": _rate(correct, len(eligible), "unresolved-calibration metric"),
+        "total_count": len(rows),
+        "rate": _rate(correct, len(rows), "unresolved-calibration metric"),
         "confidence_calibration": "supported" if supplied else "unsupported",
-        "passed": correct == len(eligible),
+        "passed": correct == len(rows),
     }
 
 
