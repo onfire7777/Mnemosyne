@@ -663,10 +663,7 @@ def score_unresolved_calibration(
 def score_false_supersession(fixture: object, observations: object) -> dict[str, Any]:
     cases, rows = _observations(fixture, observations)
     unresolved = [row for row in rows if cases[row["case_id"]]["gold"]["unresolved"]]
-    false_resolutions = sum(
-        len(row["current"]["objects"]) == 1 and not row["answer"]["abstained"]
-        for row in unresolved
-    )
+    false_resolutions = sum(not row["answer"]["abstained"] for row in unresolved)
     monotonic = sum(row["monotonic_violation"] for row in rows)
     rate = _rate(false_resolutions, len(unresolved), "false-resolution metric")
     return {
