@@ -117,11 +117,11 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
     ]
 
     prompts = {
-        "exact": "Which record contains retrieval key {key}?",
-        "paraphrase": "Find the document associated with retrieval key {key}.",
-        "entity": "Which document describes entity retrieval key {key}?",
-        "relation": "Which records establish the relation for retrieval key {key}?",
-        "multi-hop": "Which records connect the path for retrieval key {key}?",
+        "exact": "What answer payload is in the record with retrieval key {key}?",
+        "paraphrase": "Return the answer payload associated with retrieval key {key}.",
+        "entity": "What answer payload is in the document for entity retrieval key {key}?",
+        "relation": "What shared answer payload is in the records for relation retrieval key {key}?",
+        "multi-hop": "What shared answer payload is in the records for multi-hop retrieval key {key}?",
     }
     questions: list[dict[str, Any]] = []
     for family_index, family in enumerate(sorted(QUERY_FAMILIES - {"unanswerable"})):
