@@ -283,6 +283,24 @@ def test_distinct_source_contents_cannot_share_a_gold_evidence_handle() -> None:
         m05.score(fixture, _traces(fixture))
 
 
+def test_cross_case_real_cid_cannot_ground_a_different_protected_claim() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    fixture_bytes = m05.canonical_json(fixture)
+    traces = _traces(fixture)
+    protected = [trace for trace in traces if "protected-grounding" in trace["case_id"]]
+    foreign_cid = protected[0]["answer_envelope"]["evidence_handles"][0]
+    protected[1]["answer_envelope"]["evidence_handles"] = [foreign_cid]
+    protected[1]["explanation"]["source_evidence_cids"] = [foreign_cid]
+
+    result = m05.score(fixture, traces)
+
+    assert m05.canonical_json(fixture) == fixture_bytes
+    assert result["metrics"]["M-PROV-COMPLETE"] < 1.0
+    assert result["metrics"]["unsupported_claim_rate"] > 0.0
+    assert result["passed"] is False
+
+
 def test_trace_case_id_must_exist_in_fixture() -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)
