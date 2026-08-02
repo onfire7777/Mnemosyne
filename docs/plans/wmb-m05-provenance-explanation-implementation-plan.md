@@ -6,9 +6,21 @@
 code, no fixture, no benchmark execution, no measurement, no admission-state
 change, and no publication.
 
-**Base:** verified `origin/main@effc5e039505c09e575ca5e4aeb2b96949676366`
-(worktree `Mnemosyne.codex-wmb-m05-plan`, branch `codex/wmb-m05-plan`, clean at
-plan time).
+**Base:** all source inspection in this document was performed at
+`origin/main@effc5e039505c09e575ca5e4aeb2b96949676366` (worktree
+`Mnemosyne.codex-wmb-m05-plan`, branch `codex/wmb-m05-plan`, clean at plan
+time).
+
+**Base drift — acknowledged, not repaired here.** `origin/main` has since
+advanced to `2091d01c8cea22da49a50bb1f0859d8108102f29` (PR #94, the T5 lifecycle
+carve-out lapse delivery, which also changed the lease map and added a canonical
+baseline-ancestry CI check). This document therefore describes `effc5e03`, not
+current `main`. That does not invalidate any finding below — every quarantine
+concerns `eval/public/**`, `src/mnemosyne/**`, and the frozen ABI, and PR #94 is
+a lifecycle/CI delivery — but it does mean **every §2 asset validation and every
+§3 quarantine must be re-verified against the then-current base before Stage A
+begins**, exactly as P2 already requires for the lease map. No claim in this
+document may be treated as current-head-bound without that re-verification.
 
 **Lane lease (this document):** exactly
 `docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`. No other
@@ -74,7 +86,7 @@ of that evidence is stated honestly and is not upgraded by restatement.
 | Evidence | What it is | Custody label |
 |---|---|---|
 | File/AST reads of `eval/public/**`, `src/mnemosyne/**`, `tests/**` at base SHA | Direct inspection of current-main-bound source | **Reliable** for structure and control flow |
-| Recomputed `dataset_sha256` for `wmbs-m01-development` and `wmbs-m10-development` over `runner._canonical(fixture)` | Both matched the committed registry values exactly | **Reliable**; recomputed at base SHA, not quoted from a report |
+| Recomputed `dataset_sha256` for `wmbs-m01-development` and `wmbs-m10-development` over `runner._canonical(fixture)` | Both matched the committed registry values exactly | **Reliable**; recomputed at base SHA, not quoted from a report. This was a one-off *verification-time* use of a private helper by this planning lane; the M05 module must **not** import it (§5, §6) |
 | Local run of `tests/test_public_wmbs_m01.py`, `tests/test_public_wmbs_m10.py`, `tests/test_public_whole_memory_reference.py` at base SHA — exit 0 | Focused suites pass on the exact current head | **Development-local only.** No CI run id, no workflow receipt, no signed custody. It is *not* a publishable green and *not* a substitute for exact-head CI |
 
 **Integrity rule inherited and binding on every later M05 stage:** a historical
@@ -153,9 +165,13 @@ be `1.0` (tamper rejected), proving the scorer ignores the self-declaration.
 
 **Q4 — evidence handles carry no digest binding.**
 `evidence_handles` items are `identifier`-typed opaque strings. The schema
-already defines `digest_reference` (`name@sha256:<64hex>`) but uses it only for
-`modality_handle`. A tampered lineage record therefore yields a byte-identical
-envelope.
+defines `digest_reference` (`name@sha256:<64hex>`) and uses it **widely** — it is
+referenced from fifteen places across the ABI, including `modality_handle`,
+build/artifact, and manifest surfaces. The gap is therefore not that the schema
+lacks a digest idiom; it is that **`evidence_handles` specifically opted out of
+it** and remain opaque `identifier`-typed strings. Evidence is the one lineage
+surface the ABI leaves undigested. A tampered lineage record therefore yields a
+byte-identical envelope.
 *Consequence:* M05's gold fixture must carry its own `evidence_cid` and
 `slice_sha256` bindings; tamper detection is scorer-side recomputation, never
 envelope inspection.
@@ -292,6 +308,11 @@ Stage A may not begin until all of P1–P5 hold. P6–P8 gate Stage B only.
 - **P7 (Stage B).** Q6 is discharged for any M12/M13 asset actually reused.
 - **P8 (Stage B).** Q1 is discharged, or Stage B ships with `query_with_evidence`
   explicitly declared `unsupported` in the M05 cell's disclosures.
+- **P9 (gates D4 only, never Stage A or Stage B).** The Q11 shared
+  trajectory-lineage RED regression is landed by the promotion path's owner and
+  GREEN. Until then the promoted-item slice stays `DEFERRED` (§12, D4) and no
+  M05 metric covers a promoted item. M05 does not write this test and cannot
+  discharge it.
 
 ---
 
@@ -308,23 +329,28 @@ All exact, all model-free, all present at base SHA. Nothing below is invented.
 | Capture | `eval.harness.cli_driver.MnemoCLI.capture` / `.capture_batch` | Materialize source events and obtain their CIDs |
 | Grounded write | `MnemoCLI.assert_fact(..., evidence_cids=Sequence[str], trust_tier=int, valid_from=...)` | Create claims bound to declared source CIDs |
 | Grounded proposal | `MnemoCLI.propose(..., evidence_cid=str|None)` | Distractor and low-support cases |
-| Claim read | `MnemoCLI.get(tenant, id, branch=...)` | Read back a claim's `source_evidence_cids` |
+| Claim readback | `MnemoCLI.export(tenant)` — returns an `evidence` row set — and `MnemoCLI.search(...)`, whose hit metadata carries `source_evidence_cids` (`mnemosyne/retrieval.py`) | Read back each claim's declared source CIDs. **There is no `MnemoCLI.get`**; these two are the actually existing stable readbacks |
 | Lineage read | `MnemoCLI.explain(tenant, query, branch=...)` → `MemoryTools.explain` → `engine.deep_search(...).to_dict()` | Retrieval-level lineage for the explanation-coverage metric |
 | Tenant projection | `MnemoCLI.export(tenant)` | Retained source manifest input |
-| Canonical serialization | `eval.public.runner._canonical` | Digest-stable byte form |
+| Canonical serialization | **Module-local** `canonical_json` / `canonical_sha256` defined inside `eval/public/wmbs_m05.py`, matching the `wmbs_m01.py` and `wmbs_m10.py` precedent | Digest-stable byte form. M05 must **not** import `runner._canonical` or `bundle._canonical`: both are private helpers in shared-owner files, and importing them would contradict the module's stdlib-only, no-shared-internals promise. Byte-for-byte equality with the registry digest is asserted by test, not by shared import (§10.3) |
 | Replay projection | `eval.public.bundle.canonical_replay_digest`, `bundle.CANONICAL_REPLAY_VOLATILE_FIELDS` | Shape and volatile-field discipline only — evidence quarantined by Q7 |
 
 **From the frozen ABI (shape only, no new definitions authored by M05):**
-`answer_envelope` (`abstained`, `evidence_handles`, `adapter_metadata`),
+`answer_envelope` — whose `required` set is exactly `abstained`,
+`evidence_handles`, **`action_handles`**, and `adapter_metadata`, so every M05
+envelope must emit `action_handles` (empty for this module, which takes no
+actions) or fail schema validation —
 `retrieval_envelope`/`retrieval_hit` (**excluding** `provenance_status`, Q3),
 `portable_event` (`event_id`, `content`, `content_sha256`, `public_metadata`),
 `ingest_status.evidence_handle`, `error_envelope` with the exact nine-code enum,
 and `replay_protocol` constants.
 
 **Explicitly not consumed:** `mnemo answer` and every `CommandGroundedProvider`
-path (Q9); `retrieval_hit.provenance_status` (Q3); private validity tables;
-any `leaderboard/` module; any sandbox path; any signing surface; any
-M01/M10 adapter output treated as behavioral evidence (Q5).
+path (Q9); `retrieval_hit.provenance_status` (Q3); `runner._canonical` and
+`bundle._canonical` (private helpers in shared-owner files); a `MnemoCLI.get`
+readback, **which does not exist**; private validity tables; any `leaderboard/`
+module; any sandbox path; any signing surface; any M01/M10 adapter output
+treated as behavioral evidence (Q5).
 
 ---
 
@@ -346,6 +372,8 @@ FINITE_CORPUS_DISCLOSURE: str
 INTEGRATION_DEPENDENCIES: tuple[str, ...]           # carries Q1-Q4, Q7, Q9, Q10, Q12
 
 class WmbsM05Error(Exception)                       # base for every contract violation
+canonical_json(value) -> bytes                      # module-local; wmbs_m01/m10 precedent
+canonical_sha256(value) -> str                      # module-local; no shared-owner import
 generate_fixture(seed: int) -> dict                 # deterministic, no I/O, no clock
 validate_fixture(fixture: Mapping) -> Mapping       # label gate + canonical matrix gate
 source_manifest(fixture: Mapping) -> dict           # unsigned, content-addressed
@@ -426,7 +454,9 @@ Five seeds × five slices × four cases = 100 cases. Every case is generated by
 network, and no filesystem read. Citation order must not affect any set metric;
 the scorer sorts canonically before comparison.
 
-Integrity: `dataset_sha256` over `runner._canonical(fixture)`, verified in both
+Integrity: `dataset_sha256` over the module-local `canonical_json(fixture)`,
+whose bytes a test asserts are identical to those the runner's canonicaliser
+produces for the same object (§10.3), verified in both
 directions exactly as the M01/M10 cells are (§2, VALIDATED). Committed fixture
 bytes and generator output must be byte-identical.
 
@@ -455,13 +485,37 @@ Ordered, because each step depends on the previous one:
 5. `eval/public/runner.py` — register `wmbs-m05-reference` in `_ADAPTERS` and
    `"wmbs-m05-v1": ("whole-memory-development", "descriptive")` in
    `_PROFILE_CONTRACTS`.
-6. `eval/public/registry.json` — add the `wmbs-m05-development` cell with
-   `admission_state: "PROPOSED"`, `publishable: false`,
-   `headline_eligible: false`, `pbpp_headline_eligible: false`,
-   `independent_external_reproduction: false`, `upstream_comparable: false`,
-   `track_kind: "ENHANCED-SUCCESSOR"`, `split_role: "development"`,
-   `family: "whole-memory-development"`, `interval_method: "descriptive"`,
-   an exact 40-hex `revision`, and the verified `dataset_sha256`.
+6. `eval/public/registry.json` — add the `wmbs-m05-development` cell. It must be
+   **executable**, not merely well-labelled: `load_registry()` and the runner
+   dispatch resolve the cell through `adapter`, `fixture`, `scoring_profile`,
+   and `system_seam`, so all four are required alongside the custody fields.
+   The complete cell is:
+
+   ```json
+   "wmbs-m05-development": {
+     "adapter": "wmbs-m05-reference",
+     "fixture": "fixtures/wmbs-m05-provenance-development.json",
+     "scoring_profile": "wmbs-m05-v1",
+     "system_seam": "harness-owned-reference-core",
+     "license": "CC0-1.0",
+     "family": "whole-memory-development",
+     "interval_method": "descriptive",
+     "split_role": "development",
+     "track_kind": "ENHANCED-SUCCESSOR",
+     "admission_state": "PROPOSED",
+     "publishable": false,
+     "headline_eligible": false,
+     "pbpp_headline_eligible": false,
+     "independent_external_reproduction": false,
+     "upstream_comparable": false,
+     "revision": "<exact 40-hex pin>",
+     "dataset_sha256": "<verified digest>"
+   }
+   ```
+
+   `load_registry()` rejects a non-40-hex `revision`, a non-64-hex
+   `dataset_sha256`, and any `(scoring_profile, family, interval_method)` triple
+   that disagrees with `_PROFILE_CONTRACTS`, so step 5 must land before this one.
 7. `eval/public/README.md` — the M05 gap disclosure carrying Q1–Q4, Q7, Q9,
    Q10, Q12 in the same voice as the existing M12/M13 disclosures.
 8. `tests/test_public_whole_memory_reference.py` — adapter/scorer contract tests.
@@ -494,9 +548,19 @@ tests/test_public_wmbs_m05.py                              (new)
 Nothing else. In particular the Stage A lane must **not** touch
 `eval/public/{runner,scoring,bundle,registry.json,README.md}`,
 `eval/public/adapters/**`, `eval/public/schema/**`,
-`tests/test_public_whole_memory_reference.py`, `src/**`, `GOAL.md`,
-`.planning/**`, `docs/coordination/**`, `.github/workflows/**`,
+`tests/test_public_whole_memory_reference.py`, **`eval/harness/cli_driver.py`**,
+`src/mnemosyne/cli.py`, the rest of `src/**`, `GOAL.md`, `.planning/**`,
+`docs/coordination/**`, `.github/workflows/**`,
 `tests/test_planning_traceability.py`, or any `leaderboard/**` path.
+
+`eval/harness/cli_driver.py` deserves explicit mention because M05 consumes
+`MnemoCLI` heavily (§5) and the temptation to add a convenience readback there
+is real. It is an **exclusive surface of the public-harness integration owner**,
+alongside `src/mnemosyne/cli.py`. M05 must compose the methods that already
+exist — `capture`, `capture_batch`, `assert_fact`, `propose`, `search`,
+`explain`, `export` — and must not add, widen, or wrap a method on that class.
+If M05 genuinely needs a readback that `MnemoCLI` does not expose, that is a
+Stage B request to the public-harness owner, not a Stage A edit.
 
 ---
 
@@ -544,6 +608,14 @@ parametrized, mirroring the validated M03 pattern); canonical-matrix gate (slice
 reduction, reorder, duplication, rename); fixture/generator byte-identity;
 `dataset_sha256` recomputation in both directions; five-seed canonical replay
 with the frozen volatile-field set; citation-order invariance.
+
+**Canonicaliser equality (B2).** One test asserts that the module-local
+`canonical_json(fixture)` is byte-for-byte identical to the bytes the runner's
+own canonicaliser produces for the same object, and that
+`canonical_sha256(fixture)` equals the registry `dataset_sha256`. The test — not
+a shared private import — is what keeps the two canonicalisers in agreement, so
+the module keeps its stdlib-only, no-shared-internals promise while any future
+divergence fails loudly instead of silently producing a mismatched digest.
 
 ### 10.4 GREEN definition for Stage A
 
@@ -597,7 +669,17 @@ precision/recall as diagnostics on non-protected material. Nothing more.
   disclosed, budgeted, model-backed reader (Q9). The spec itself defers this.
 - **D3 — derived-claim / multi-hop lineage.** Gate: HowProvenance wired to a
   reachable public surface (Q10).
-- **D4 — promoted-item slice.** Gate: lineage survives promotion (Q11).
+- **D4 — promoted-item slice.** Gate: **the Q11 shared trajectory-lineage RED
+  exists, is owned by the promotion path's owner, and has gone GREEN against a
+  real fix.** This is a hard, explicit prerequisite, not a soft dependency: D4
+  may not be closed, and no promoted-item case may be added to the M05 fixture
+  or counted in `M-PROV-COMPLETE`, until that RED regression — asserting that a
+  promoted item's `source_evidence_cids` is a superset of the originating
+  trajectory's evidence CIDs — is landed and passing. Absent it, a promoted
+  claim presents as grounded while its lineage to source events is severed, so
+  scoring the slice would report a grounding completeness the system does not
+  have. M05 must not write that test (§9) and must not proxy, approximate, or
+  emulate it.
 - **D5 — M15 replay cited as behavioral evidence.** Gate: a real executed-path
   M15 regression and digests bound to actual artifacts (Q7).
 - **D6 — signed source manifest.** Gate: the protected signed-publication lease
@@ -621,11 +703,13 @@ publishable green (§1).
 RED contracts being written and observed failing first. The two technical
 conditions the verdict requires are met:
 
-- *Stable local inputs exist.* `evidence_cid` / `capture_cid`, `MnemoCLI.capture`,
-  `assert_fact(evidence_cids=...)`, `propose`, `get`, `explain`, `export`,
-  `runner._canonical`, and the `m15-v1` payload shape are all present at base
-  SHA, model-free, deterministic, stdlib- and repo-only. No new dependency and
-  no speculative abstraction is required.
+- *Stable local inputs exist.* `evidence_cid` / `capture_cid`,
+  `MnemoCLI.capture` / `capture_batch`, `assert_fact(evidence_cids=...)`,
+  `propose`, `search`, `explain`, `export`, and the `m15-v1` payload shape are
+  all present at the inspected base SHA, model-free, deterministic, stdlib- and
+  repo-only. Canonical serialisation is module-local, matching the
+  `wmbs_m01`/`wmbs_m10` precedent, not a shared private import. No new
+  dependency and no speculative abstraction is required.
 - *A disjoint implementation lease exists.* Exactly the three new paths in §9,
   verified absent at base SHA and outside every owner's exclusive surface list.
 
