@@ -427,6 +427,34 @@ def test_evidence_recall_requires_complete_answerable_disclosure() -> None:
     assert m02.score_retrieval(fixture, complete)["metrics"]["evidence_recall"] == 1.0
 
 
+def test_scorer_rejects_evidence_ids_outside_fixture_corpus() -> None:
+    fixture = m02.generate_fixture()
+    traces = _perfect_traces(fixture, evidence=True)
+    index, question = _case(fixture, "exact")
+    traces[index]["evidence_ids"] = [
+        question["gold_doc_ids"][0],
+        "external-doc-001",
+    ]
+
+    with pytest.raises(m02.WmbsM02Error, match="evidence_ids.*corpus"):
+        m02.score_retrieval(fixture, traces)
+
+
+def test_scorer_rejects_evidence_ids_absent_from_ranked_hits() -> None:
+    fixture = m02.generate_fixture()
+    traces = _perfect_traces(fixture, evidence=True)
+    index, question = _case(fixture, "exact")
+    wrong_doc_id = next(
+        document["stable_item_id"]
+        for document in fixture["corpus"]
+        if document["stable_item_id"] not in question["gold_doc_ids"]
+    )
+    traces[index]["ranked_hits"] = [{"rank": 1, "stable_item_id": wrong_doc_id}]
+
+    with pytest.raises(m02.WmbsM02Error, match="evidence_ids.*ranked"):
+        m02.score_retrieval(fixture, traces)
+
+
 def test_unmeasured_metrics_are_unsupported_not_estimated() -> None:
     fixture = m02.generate_fixture()
     metrics = m02.score_retrieval(fixture, _perfect_traces(fixture))["metrics"]
