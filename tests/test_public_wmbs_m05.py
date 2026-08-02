@@ -1,0 +1,227 @@
+"""Contract tests for the standalone M05 development core."""
+
+from __future__ import annotations
+
+import importlib
+import importlib.util
+from copy import deepcopy
+from pathlib import Path
+
+import pytest
+
+from eval.public import runner
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_PATH = REPO_ROOT / "eval/public/fixtures/wmbs-m05-provenance-development.json"
+
+
+def _module():
+    spec = importlib.util.find_spec("eval.public.wmbs_m05")
+    assert spec is not None, "M05 module must exist"
+    return importlib.import_module("eval.public.wmbs_m05")
+
+
+def _traces(fixture):
+    traces = []
+    for slice_ in fixture["slices"]:
+        for case in slice_["cases"]:
+            if not case["scored"]:
+                continue
+            handles = case["gold_source_cids"]
+            abstained = slice_["slice_id"] in {
+                "tampered-lineage",
+                "unsupported-claim",
+            }
+            traces.append(
+                {
+                    "case_id": case["case_id"],
+                    "answer_envelope": {
+                        "abstained": abstained,
+                        "evidence_handles": []
+                        if abstained
+                        else list(reversed(handles)),
+                        "action_handles": [],
+                        "adapter_metadata": {"mode": "deterministic"},
+                    },
+                    "explanation": {"source_evidence_cids": handles},
+                    "provenance_status": "verified",
+                }
+            )
+    return traces
+
+
+def test_claim_source_completeness_is_a_hard_rail() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    result = m05.score(fixture, _traces(fixture))
+    assert result["metrics"]["M-PROV-COMPLETE"] == 1.0
+    assert result["metrics"]["M-EXPLAIN-COV"] == 1.0
+    assert result["passed"] is True
+
+
+def test_citation_set_metrics_are_order_invariant_diagnostics() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    first = m05.score(fixture, traces)
+    for trace in traces:
+        trace["answer_envelope"]["evidence_handles"].reverse()
+    second = m05.score(fixture, traces)
+    assert first["metrics"]["citation_precision"] == 1.0
+    assert first["metrics"]["citation_recall"] == 1.0
+    assert first["metrics"] == second["metrics"]
+
+
+def test_non_abstained_claim_without_valid_source_is_unsupported() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    target = next(trace for trace in traces if "unsupported-claim" in trace["case_id"])
+    target["answer_envelope"]["evidence_handles"] = []
+    target["answer_envelope"]["abstained"] = False
+    target["explanation"]["source_evidence_cids"] = []
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["unsupported_claim_rate"] > 0
+    assert result["passed"] is False
+
+
+def test_tampered_lineage_is_rejected_despite_verified_self_declaration() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    traces = _traces(fixture)
+    assert all(trace["provenance_status"] == "verified" for trace in traces)
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["lineage_tamper_rejection"] == 1.0
+    assert result["passed"] is True
+
+
+def test_committed_fixture_exists_and_matches_generator_bytes() -> None:
+    m05 = _module()
+    assert FIXTURE_PATH.is_file(), "M05 fixture must exist"
+    assert FIXTURE_PATH.read_bytes() == m05.canonical_json(m05.generate_fixture(13))
+
+
+def test_fixture_has_fixed_matrix_and_all_portable_event_keys() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    assert tuple(slice_["slice_id"] for slice_ in fixture["slices"]) == m05.SLICE_IDS
+    assert sum(len(slice_["cases"]) for slice_ in fixture["slices"]) == 100
+    required = {
+        "event_id",
+        "content",
+        "actor_label",
+        "event_time",
+        "ingestion_time",
+        "content_sha256",
+        "public_metadata",
+    }
+    assert all(
+        set(event) == required
+        for slice_ in fixture["slices"]
+        for case in slice_["cases"]
+        for event in case["source_events"]
+    )
+
+
+@pytest.mark.parametrize(
+    "label",
+    sorted(
+        {
+            "admission_state",
+            "comparability",
+            "headline_eligible",
+            "independent_reproduction",
+            "module_id",
+            "pbpp_headline_eligible",
+            "publishable",
+            "track",
+            "upstream_comparable",
+        }
+    ),
+)
+def test_fixture_rejects_missing_or_permissive_custody_labels(label: str) -> None:
+    m05 = _module()
+    for mutation in ("missing", "permissive"):
+        fixture = deepcopy(m05.generate_fixture(13))
+        if mutation == "missing":
+            del fixture[label]
+        else:
+            fixture[label] = True if fixture[label] is not True else "permissive"
+        with pytest.raises(m05.WmbsM05Error):
+            m05.validate_fixture(fixture)
+
+
+@pytest.mark.parametrize("mutation", ["reduce", "reorder", "duplicate", "rename"])
+def test_fixture_rejects_matrix_mutation(mutation: str) -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    if mutation == "reduce":
+        fixture["slices"].pop()
+    elif mutation == "reorder":
+        fixture["slices"][0], fixture["slices"][1] = (
+            fixture["slices"][1],
+            fixture["slices"][0],
+        )
+    elif mutation == "duplicate":
+        fixture["slices"][1] = deepcopy(fixture["slices"][0])
+    else:
+        fixture["slices"][0]["slice_id"] = "renamed"
+    with pytest.raises(m05.WmbsM05Error):
+        m05.validate_fixture(fixture)
+
+
+def test_derived_claims_and_sensitivity_binding_remain_explicitly_deferred() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    assert fixture["sensitivity_binding"] == {
+        "protected_slice_sensitivity": 2,
+        "reason": "Q8",
+    }
+    derived = next(s for s in fixture["slices"] if s["slice_id"] == "derived-claims")
+    assert all(
+        case["scored"] is False and case["deferral_reason"] == "howprovenance-unwired"
+        for case in derived["cases"]
+    )
+
+
+def test_fixture_digest_and_runner_canonicalizer_agree() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    without_digest = dict(fixture)
+    digest = without_digest.pop("dataset_sha256")
+    assert m05.canonical_json(fixture) == runner._canonical(fixture)
+    assert digest == m05.canonical_sha256(without_digest)
+
+
+def test_manifest_changes_when_fixture_content_changes() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    before = m05.source_manifest(fixture)
+    mutated = deepcopy(fixture)
+    mutated["slices"][0]["cases"][0]["source_events"][0]["content"] += "x"
+    check = dict(mutated)
+    check.pop("dataset_sha256")
+    mutated["dataset_sha256"] = m05.canonical_sha256(check)
+    after = m05.source_manifest(mutated)
+    assert before["fixture_sha256"] != after["fixture_sha256"]
+    assert before["source_cids_sha256"] != after["source_cids_sha256"]
+
+
+def test_abstained_envelope_with_citations_is_malformed() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"]["abstained"] = True
+    with pytest.raises(m05.WmbsM05Error):
+        m05.score(fixture, traces)
+
+
+def test_missing_protected_trace_cannot_shrink_the_metric_denominator() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces.pop(0)
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["M-PROV-COMPLETE"] < 1.0
+    assert result["metrics"]["M-EXPLAIN-COV"] < 1.0
+    assert result["passed"] is False
