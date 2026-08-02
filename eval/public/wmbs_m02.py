@@ -168,7 +168,6 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
         "questions": questions,
     }
     fixture["fixture_sha256"] = _fixture_digest(fixture)
-    validate_fixture(fixture)
     return fixture
 
 
@@ -209,6 +208,8 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
             raise WmbsM02Error(f"fixture {field} does not match {expected!r}")
     if type(fixture["seed"]) is not int:
         raise WmbsM02Error("fixture seed must be an int")
+    if fixture["seed"] != DEFAULT_SEED:
+        raise WmbsM02Error("certified fixtures must use DEFAULT_SEED")
 
     corpus = fixture["corpus"]
     if not isinstance(corpus, list) or len(corpus) != CORPUS_SIZE:
@@ -243,6 +244,8 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
         raise WmbsM02Error("each query family must contain exactly 10 questions")
     if fixture["fixture_sha256"] != _fixture_digest(fixture):
         raise WmbsM02Error("fixture digest mismatch")
+    if canonical_json(fixture) != canonical_json(generate_fixture(fixture["seed"])):
+        raise WmbsM02Error("fixture does not match canonical generator output")
     return fixture
 
 
