@@ -397,6 +397,8 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
                 isinstance(handle, str) for handle in handles
             ):
                 raise WmbsM05Error(f"answer_envelope {key} must be a list of strings")
+        if envelope["action_handles"]:
+            raise WmbsM05Error("answer_envelope action_handles must be empty")
         if not isinstance(envelope["adapter_metadata"], Mapping):
             raise WmbsM05Error("answer_envelope adapter_metadata must be an object")
         explanation = trace.get("explanation")
