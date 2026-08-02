@@ -150,7 +150,13 @@ def _event(
 def _case(
     seed: int, slice_id: str, index: int, *, generator_seed: int
 ) -> dict[str, Any]:
-    source = _event(seed, slice_id, index, generator_seed=generator_seed)
+    source = _event(
+        seed,
+        slice_id,
+        index,
+        generator_seed=generator_seed,
+        distractor=slice_id == "unsupported-claim",
+    )
     original_content = source["content"]
     source_cid = _evidence_cid(source["content"], source["event_id"])
     sources = [source]
