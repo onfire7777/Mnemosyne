@@ -56,9 +56,11 @@ merge, not by the residue regenerating itself. `T5` merged as PR #94 at
 `main@2091d01c` (exact head `41b21305`,
 exact-head CI `30730185494`, post-merge CI `30730918452`). It discharged the
 test-contract residue without admitting a source node, but omitted the r42
-record from its own `docs/plans/` lease. `T6` is the single bounded lifecycle
-node now delivering the three-file recomputation and r42/r43 records. It admits
-no source node and no successor node.
+record from its own `docs/plans/` lease. `T6` discharged that residue and the
+r42/r43 records as PR #95 at `main@42abaab7` (exact head `d7c0938f`, exact-head
+CI `30737466988`, post-merge CI `30738303497`). It admitted no source node and
+no successor node; this branch-resident recomputation is its own accepted
+standing-condition residue.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -105,10 +107,11 @@ CI `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
 `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
 then PR #94 delivered `T5` at `main@2091d01c` (exact head `41b21305`,
-exact-head CI `30730185494`, post-merge CI `30730918452`), which is the current
-canonical baseline `main@2091d01c`. `T5` is discharged. `T6` is the single
-bounded lifecycle node now delivering the three-file recomputation plus the
-r42/r43 round records; it admits no source node and no successor node.
+exact-head CI `30730185494`, post-merge CI `30730918452`). PR #95 then
+delivered `T6` at `main@42abaab7`, which is the current canonical baseline
+(exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI
+`30738303497`). `T5` and `T6` are discharged. No lifecycle or source node is
+admitted.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -134,8 +137,9 @@ round-38 and round-39 records on `main` at `39cfa67a`. PR #93's independent
 merge at `main@effc5e03` then lapsed the branch-resident carve-out. `T5` was the
 one bounded delivery admitted to discharge the resulting non-receipt-only
 residue and merged as PR #94 at `main@2091d01c`; it admitted **no source node**.
-`T6` is now the sole bounded lifecycle writer and admits no source node or
-successor node. The
+`T6` then merged as PR #95 at `main@42abaab7` (exact head `d7c0938f`,
+exact-head CI `30737466988`, post-merge CI `30738303497`) and admitted no source
+node or successor node. No lifecycle writer is now admitted. The
 plan-doc backlog is
 disclosed here rather than left to accumulate silently. That pilots-plan
 checkpoint is a correction plus PR #90's receipt block — it rewrites one stale
@@ -161,10 +165,9 @@ enforcement receipt, SBOM, provenance, or admission evidence exists. The next
 package must be recomputed from current main and the committed dependency/write
 lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
-under the bounded `T6` Authority carve-out above; neither result-v2
+under the standing controller Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
-That map admits no source node at this baseline — its only admitted writer is
-the bounded lifecycle node `T6` — so the next source
+That map admits no source node and no lifecycle writer at this baseline, so the next source
 admission waits on an external gate opening, and the map must be recomputed
 from then-current `main` at that time.
 
@@ -466,12 +469,13 @@ git merge-base --is-ancestor e157e0350c503c9cde4aca0eff71d643a4adb200 main
 git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
 git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main
+git merge-base --is-ancestor 42abaab7ba4fa83f9838c3d32ee96db4256bfcad main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
 # advanced past the recorded baseline and the carve-out must be recomputed from
 # the new `main` before any further admission.
-test "$(git rev-parse main)" = "2091d01c8cea22da49a50bb1f0859d8108102f29"
+test "$(git rev-parse main)" = "42abaab7ba4fa83f9838c3d32ee96db4256bfcad"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
