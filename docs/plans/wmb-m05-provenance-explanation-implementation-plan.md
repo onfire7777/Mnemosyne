@@ -409,7 +409,9 @@ score(fixture: Mapping, traces: Sequence[Mapping]) -> dict   # pure; no engine i
 
 `passed` is `True` only when all four provenance rails hold simultaneously and
 `five_seed_canonical_replay == 1.0`. Citation precision/recall never contribute
-to `passed` — they are diagnostics per §8 M05.
+to `passed` — they are diagnostics per §8 M05. Before scoring, the trace set
+must contain exactly one trace for each of the 80 scored cases; the 20 deferred
+derived-claim cases remain outside that required trace matrix.
 
 **`eval/public/fixtures/wmbs-m05-provenance-development.json`** — see §7.
 

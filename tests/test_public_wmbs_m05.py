@@ -285,15 +285,25 @@ def test_abstained_envelope_with_citations_is_malformed() -> None:
         m05.score(fixture, traces)
 
 
-def test_missing_protected_trace_cannot_shrink_the_metric_denominator() -> None:
+def test_missing_protected_trace_fails_closed() -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)
     traces = _traces(fixture)
     traces.pop(0)
-    result = m05.score(fixture, traces)
-    assert result["metrics"]["M-PROV-COMPLETE"] < 1.0
-    assert result["metrics"]["M-EXPLAIN-COV"] < 1.0
-    assert result["passed"] is False
+    with pytest.raises(m05.WmbsM05Error, match="missing scored case_id"):
+        m05.score(fixture, traces)
+
+
+def test_omitting_all_distractor_traces_fails_closed() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = [
+        trace
+        for trace in _traces(fixture)
+        if "distractor-sources" not in trace["case_id"]
+    ]
+    with pytest.raises(m05.WmbsM05Error, match="missing scored case_id"):
+        m05.score(fixture, traces)
 
 
 def test_protected_non_abstained_claim_without_valid_source_is_unsupported() -> None:

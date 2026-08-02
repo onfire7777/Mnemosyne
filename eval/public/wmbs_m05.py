@@ -523,6 +523,11 @@ def score(
         raise WmbsM05Error(
             f"trace case_id is absent from fixture: {sorted(unknown_case_ids)}"
         )
+    missing_case_ids = known_case_ids - set(by_id)
+    if missing_case_ids:
+        raise WmbsM05Error(
+            f"trace set is missing scored case_id values: {sorted(missing_case_ids)}"
+        )
     provenance_ok = explanation_ok = protected_count = unsupported = (
         unsupported_total
     ) = 0
