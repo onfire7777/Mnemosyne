@@ -9,7 +9,9 @@ import pytest
 from eval.public import wmbs_m04 as m04
 
 
-def _perfect(fixture: dict[str, object]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+def _perfect(
+    fixture: dict[str, object],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
     observations: list[dict[str, object]] = []
     ablations: list[dict[str, object]] = []
     for case in fixture["cases"]:  # type: ignore[index]
@@ -20,10 +22,18 @@ def _perfect(fixture: dict[str, object]) -> tuple[list[dict[str, object]], list[
                 {
                     "case_id": case["case_id"],
                     "permutation": permutation,
-                    "current": {"objects": gold["current_objects"], "as_of": gold["current_as_of"]},
-                    "historical": {"objects": gold["historical_objects"], "as_of": gold["historical_as_of"]},
+                    "current": {
+                        "objects": gold["current_objects"],
+                        "as_of": gold["current_as_of"],
+                    },
+                    "historical": {
+                        "objects": gold["historical_objects"],
+                        "as_of": gold["historical_as_of"],
+                    },
                     "answer": {
-                        "answer_text": None if unresolved else gold["current_objects"][0],
+                        "answer_text": None
+                        if unresolved
+                        else gold["current_objects"][0],
                         "abstained": unresolved,
                         "evidence_handles": [],
                         "action_handles": [],
@@ -47,7 +57,14 @@ def _perfect(fixture: dict[str, object]) -> tuple[list[dict[str, object]], list[
 def test_fixture_schema_is_label_neutral() -> None:
     fixture = m04.generate_fixture()
     m04.validate_fixture(fixture)
-    for forbidden in ("trust_tier", "source_trust_tier", "status", "superseded_by", "contested", "confidence"):
+    for forbidden in (
+        "trust_tier",
+        "source_trust_tier",
+        "status",
+        "superseded_by",
+        "contested",
+        "confidence",
+    ):
         poisoned = copy.deepcopy(fixture)
         poisoned["cases"][0]["events_by_permutation"]["as_authored"][0][forbidden] = "x"
         with pytest.raises(m04.WmbsM04Error):
@@ -58,7 +75,11 @@ def test_fixture_covers_seven_source_classes_five_seeds_three_permutations() -> 
     fixture = m04.generate_fixture()
     assert len(fixture["cases"]) == 7 * 4 * 5
     assert tuple(fixture["seeds"]) == m04.SEEDS == (11, 23, 37, 53, 71)
-    assert tuple(fixture["permutations"]) == m04.PERMUTATIONS == ("as_authored", "reversed", "interleaved")
+    assert (
+        tuple(fixture["permutations"])
+        == m04.PERMUTATIONS
+        == ("as_authored", "reversed", "interleaved")
+    )
     reduced = copy.deepcopy(fixture)
     reduced["cases"].pop()
     with pytest.raises(m04.WmbsM04Error):
@@ -104,7 +125,13 @@ def test_answer_envelope_matches_closed_schema_contract() -> None:
     nullable_confidence[0]["answer"]["confidence"] = None
     nullable_confidence[0]["answer"]["adapter_metadata"]["mode"] = "deterministic"
     m04.score_unresolved_calibration(fixture, nullable_confidence)
-    for missing in ("answer_text", "abstained", "evidence_handles", "action_handles", "adapter_metadata"):
+    for missing in (
+        "answer_text",
+        "abstained",
+        "evidence_handles",
+        "action_handles",
+        "adapter_metadata",
+    ):
         invalid = copy.deepcopy(observations)
         invalid[0]["answer"].pop(missing)
         with pytest.raises(m04.WmbsM04Error):
@@ -144,16 +171,28 @@ def test_permutation_invariance_and_clean_process_replay_equality() -> None:
     assert result["rate"] == 1.0
     assert result["passed"] is True
     code = "from eval.public import wmbs_m04 as m; import sys; sys.stdout.buffer.write(m.canonical_json(m.generate_fixture()))"
-    replay = subprocess.run([sys.executable, "-c", code], check=True, capture_output=True).stdout
+    replay = subprocess.run(
+        [sys.executable, "-c", code], check=True, capture_output=True
+    ).stdout
     assert replay == m04.canonical_json(fixture)
 
 
 def test_source_ablation_sensitivity_matches_gold() -> None:
     fixture = m04.generate_fixture()
     observations, ablations = _perfect(fixture)
-    assert m04.score_source_ablation_sensitivity(fixture, observations, ablations)["passed"] is True
+    assert (
+        m04.score_source_ablation_sensitivity(fixture, observations, ablations)[
+            "passed"
+        ]
+        is True
+    )
     ablations[0]["current"]["objects"] = ["wrong"]
-    assert m04.score_source_ablation_sensitivity(fixture, observations, ablations)["passed"] is False
+    assert (
+        m04.score_source_ablation_sensitivity(fixture, observations, ablations)[
+            "passed"
+        ]
+        is False
+    )
 
 
 def test_scorer_emits_no_publication_or_measurement_claim() -> None:
@@ -162,7 +201,13 @@ def test_scorer_emits_no_publication_or_measurement_claim() -> None:
     result = m04.score_conflict(fixture, observations, ablations)
     assert result["admission_state"] == "PROPOSED"
     assert result["evidence_level"] == "IMPLEMENTED"
-    for key in ("publishable", "pbpp_headline_eligible", "headline_eligible", "independent_external_reproduction", "upstream_comparable"):
+    for key in (
+        "publishable",
+        "pbpp_headline_eligible",
+        "headline_eligible",
+        "independent_external_reproduction",
+        "upstream_comparable",
+    ):
         assert result[key] is False
     assert result["interval"] == {"method": "descriptive"}
 
@@ -173,7 +218,11 @@ def test_branch_merge_and_transaction_time_are_declared_unsupported() -> None:
         "branch_merge": "UNSUPPORTED-BY-SYSTEM",
         "transaction_time": "unsupported",
         "update_hook": "emulated",
-        "backends": {"local_json": "supported", "sqlite": "DEFERRED", "postgresql": "DEFERRED"},
+        "backends": {
+            "local_json": "supported",
+            "sqlite": "DEFERRED",
+            "postgresql": "DEFERRED",
+        },
     }
     invalid = copy.deepcopy(fixture)
     invalid["disclosures"]["transaction_time"] = "supported"
