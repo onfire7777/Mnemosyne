@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at main@effc5e03; PR #93 is merged and post-main CI is green. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No fresh source node is admitted; Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-01T22:07:00Z"
-last_activity: 2026-08-01
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@2091d01c`; PR #94 is merged and post-merge CI `30730918452` is green. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No fresh source node is admitted; Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-02T00:00:00Z"
+last_activity: 2026-08-02
 progress:
   total_phases: 7
   completed_phases: 2
@@ -81,13 +81,14 @@ documentation-only lease-map node `T4` at `main@39cfa67a` (exact-head CI
 `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
 `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
-which supplies the merge anchor for the bounded T5 reconciliation below. PR #92 is documentation only, admitted no source node, and moved no
+which supplied the merge anchor for the bounded T5 reconciliation below. PR #92 is documentation only, admitted no source node, and moved no
 package status or publication claim. PR #93's independent merge lapsed the
-branch-resident Authority carve-out. The lease map is recomputed from
-`main@effc5e03`, and exactly one bounded node, `T5`, is admitted to deliver the
-three reconciled lifecycle files, both baseline-pinning tests, and the r39/r40/r41
-round records. The residue is no longer receipt-only; `T5` admits no source node
-and no successor for its own receipt residue. The plan-doc
+branch-resident Authority carve-out. `T5` then merged as PR #94 at
+`main@2091d01c` (exact head `41b21305`, exact-head CI `30730185494`, post-merge
+CI `30730918452`). It admitted no source node, but omitted the r42 record from
+its own `docs/plans/` lease. `T6` is the sole bounded lifecycle writer now
+delivering the three-file recomputation plus the r42/r43 records; it admits no
+source node and no successor node. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
@@ -335,11 +336,11 @@ Latest checkpoint (2026-08-01): see the **Decisions** entry under **Accumulated
 Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
-the PR #87, PR #88, PR #89, PR #90, PR #91, PR #92, and PR #93 merge receipts. The
-current canonical baseline is `main@effc5e03` (PR #93, exact-head CI
-`30718912376`, post-merge CI `30719645207`). PR #90 is development-source
+the PR #87, PR #88, PR #89, PR #90, PR #91, PR #92, PR #93, and PR #94 merge receipts. The
+current canonical baseline is `main@2091d01c` (PR #94, exact head `41b21305`,
+exact-head CI `30730185494`, post-merge CI `30730918452`). PR #90 is development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
-and `T5` is the bounded lifecycle/test-contract delivery after PR #93;
+and `T5` is discharged as PR #94; `T6` is the sole bounded lifecycle delivery;
 none moved a package status. Evidence boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
