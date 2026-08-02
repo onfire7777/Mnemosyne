@@ -191,14 +191,14 @@ afterthoughts — commit them on the controller branch as the final step.
 
 ### Task 4: Reconcile the controller branch to the new main and end the round with zero residue
 
-- [ ] Back in `/Users/admin/.codex/worktrees/9697/Mnemosyne`:
+- [x] Back in `/Users/admin/.codex/worktrees/9697/Mnemosyne`:
       `git fetch --prune origin`, fast-forward local `main` to `origin/main`,
       and assert `git rev-parse main` equals `git rev-parse origin/main` equals
       the Task 3 merge commit.
-- [ ] Merge `main` into `codex/goalex-whole-memory-pilot`. Confirm
+- [x] Merge `main` into `codex/goalex-whole-memory-pilot`. Confirm
       `git diff main HEAD --stat` is now empty apart from what Task 4 is about
       to add.
-- [ ] Apply the branch-resident recomputation for the accepted one-block lag —
+- [x] Apply the branch-resident recomputation for the accepted one-block lag —
       this is the step round 42 skipped and it is what leaves verification
       passing. In all three lifecycle files, set the baseline to the **new**
       merge commit SHA (the Task 3 merge commit, full 40-hex in the lease map
@@ -207,15 +207,15 @@ afterthoughts — commit them on the controller branch as the final step.
       number, exact-head CI run ID, and post-merge CI run ID, and record in the
       lease map that this recomputation is `T6`'s own standing-condition residue
       which admits no successor and no source node.
-- [ ] Re-run `python -m pytest tests/test_planning_traceability.py -q` and
+- [x] Re-run `python -m pytest tests/test_planning_traceability.py -q` and
       `python -m ruff check .` on the controller branch; both must pass.
-- [ ] Commit that recomputation on `codex/goalex-whole-memory-pilot` as the
+- [x] Commit that recomputation on `codex/goalex-whole-memory-pilot` as the
       round's final commit.
-- [ ] Run the full `## Verification` block from `GOAL.md` verbatim in the
+- [x] Run the full `## Verification` block from `GOAL.md` verbatim in the
       controller worktree and confirm it exits 0 — in particular
       `test -z "$(git status --porcelain)"` and the pin equality against the new
       `main`.
-- [ ] Confirm zero residue: `git status --porcelain --untracked-files=all` is
+- [x] Confirm zero residue: `git status --porcelain --untracked-files=all` is
       empty, and `git status --porcelain --untracked-files=all --ignored` matches
       the Task 1 baseline exactly. Delete the temporary baseline file you wrote
       outside the worktree. If any round-owned change cannot be committed,
