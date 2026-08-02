@@ -524,13 +524,19 @@ def _answer(value: object) -> Mapping[str, Any]:
             )
     if value["action_handles"]:
         raise WmbsM04Error("M04 has no action surface")
-    if not isinstance(value["adapter_metadata"], Mapping) or set(
-        value["adapter_metadata"]
-    ) != {"mode"}:
-        raise WmbsM04Error("adapter_metadata has the closed key set {'mode'}")
-    mode = value["adapter_metadata"]["mode"]
-    if not isinstance(mode, str) or not mode:
-        raise WmbsM04Error("adapter_metadata.mode must be a nonempty string")
+    adapter_metadata = value["adapter_metadata"]
+    if not isinstance(adapter_metadata, Mapping) or set(adapter_metadata) - {"mode"}:
+        raise WmbsM04Error("adapter_metadata has the optional closed key {'mode'}")
+    if "mode" in adapter_metadata:
+        mode = adapter_metadata["mode"]
+        if (
+            not isinstance(mode, str)
+            or not 1 <= len(mode) <= 256
+            or not any(not character.isspace() for character in mode)
+        ):
+            raise WmbsM04Error(
+                "adapter_metadata.mode must satisfy the short_string schema"
+            )
     confidence = value.get("confidence")
     if (
         "confidence" in value
