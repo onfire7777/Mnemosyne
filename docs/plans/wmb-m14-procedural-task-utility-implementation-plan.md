@@ -816,7 +816,7 @@ it.
 ## 12. RED/GREEN checks for the future lane
 
 Every check is RED at base; none may be written before its prerequisites hold.
-Ownership is marked, because five of these belong to surfaces an M14 lane
+Ownership is marked, because six of these belong to surfaces an M14 lane
 cannot lease.
 
 | # | Owner | RED test | GREEN condition |
