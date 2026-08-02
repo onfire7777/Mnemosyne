@@ -101,6 +101,27 @@ def test_fixture_rejects_resigned_full_duplicate_case_before_indexing() -> None:
         m04.validate_fixture(fixture)
 
 
+@pytest.mark.parametrize(
+    ("field", "drifted"),
+    [
+        ("generator_id", "other.generate_fixture"),
+        ("generator_version", "1.0.1"),
+    ],
+)
+def test_fixture_and_standalone_scorer_reject_resigned_generator_drift(
+    field: str, drifted: str
+) -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    fixture[field] = drifted
+    _redigest(fixture)
+
+    with pytest.raises(m04.WmbsM04Error, match="generator identity mismatch"):
+        m04.validate_fixture(fixture)
+    with pytest.raises(m04.WmbsM04Error, match="generator identity mismatch"):
+        m04.score_current_answer(fixture, observations)
+
+
 def test_every_case_has_three_pairwise_distinct_source_orders() -> None:
     for case in m04.generate_fixture()["cases"]:
         orders = {
@@ -162,6 +183,17 @@ def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
     poisoned[0]["current"]["status"] = "contested"
     with pytest.raises(m04.WmbsM04Error):
         m04.score_unresolved_calibration(fixture, poisoned)
+
+
+def test_unresolved_projection_rejects_duplicate_current_objects() -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    unresolved = next(row for row in observations if row["answer"]["abstained"])
+    alpha = unresolved["current"]["objects"][0]
+    unresolved["current"]["objects"] = [alpha, alpha]
+
+    with pytest.raises(m04.WmbsM04Error, match="objects must be unique strings"):
+        m04.score_unresolved_calibration(fixture, observations)
 
 
 def test_unresolved_calibration_rejects_false_positive_on_resolved_case() -> None:
