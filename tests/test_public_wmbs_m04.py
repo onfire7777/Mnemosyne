@@ -360,6 +360,27 @@ def test_answer_envelope_matches_closed_schema_contract() -> None:
         m04.score_unresolved_calibration(fixture, invalid)
 
 
+def test_adapter_metadata_allows_optional_mode() -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    observations[0]["answer"]["adapter_metadata"] = {}
+    observations[1]["answer"]["adapter_metadata"] = {"mode": "x" * 256}
+
+    m04.score_unresolved_calibration(fixture, observations)
+
+
+@pytest.mark.parametrize("invalid_mode", [" \t", "x" * 257])
+def test_adapter_metadata_mode_enforces_frozen_short_string(
+    invalid_mode: str,
+) -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    observations[0]["answer"]["adapter_metadata"] = {"mode": invalid_mode}
+
+    with pytest.raises(m04.WmbsM04Error, match="short_string"):
+        m04.score_unresolved_calibration(fixture, observations)
+
+
 @pytest.mark.parametrize(
     "invalid_handle",
     ["contains space", "a" * 129, "-invalid-start", "_invalid-start"],
