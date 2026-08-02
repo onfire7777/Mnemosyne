@@ -133,6 +133,29 @@ def test_unresolved_state_is_scored_by_multiplicity_not_by_status() -> None:
         m04.score_unresolved_calibration(fixture, poisoned)
 
 
+def test_unresolved_calibration_rejects_false_positive_on_resolved_case() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    resolved = next(
+        row
+        for row in observations
+        if not next(
+            case for case in fixture["cases"] if case["case_id"] == row["case_id"]
+        )["gold"]["unresolved"]
+        and len(row["current"]["objects"]) == 1
+    )
+    resolved["current"]["objects"] = [
+        *resolved["current"]["objects"],
+        "spurious-conflict",
+    ]
+    resolved["answer"].update(answer_text=None, abstained=True)
+
+    metric = m04.score_unresolved_calibration(fixture, observations)
+    assert metric["total_count"] == 420
+    assert metric["passed"] is False
+    assert m04.score_conflict(fixture, observations, ablations)["passed"] is False
+
+
 def test_answer_envelope_matches_closed_schema_contract() -> None:
     fixture = m04.generate_fixture()
     observations, _ = _perfect(fixture)
@@ -202,6 +225,45 @@ def test_source_ablation_sensitivity_matches_gold() -> None:
         is True
     )
     ablations[0]["current"]["objects"] = ["wrong"]
+    assert (
+        m04.score_source_ablation_sensitivity(fixture, observations, ablations)[
+            "passed"
+        ]
+        is False
+    )
+
+
+def test_unresolved_ablation_recomputes_remaining_source_support() -> None:
+    fixture = m04.generate_fixture()
+    observations, ablations = _perfect(fixture)
+    case = next(
+        case for case in fixture["cases"] if case["source_class"] == "unresolved"
+    )
+    alpha, beta = case["gold"]["current_objects"]
+    expected = {
+        "source-a": [beta],
+        "source-b": [beta],
+        "source-c": [alpha],
+        "source-d": [alpha],
+    }
+    assert case["gold"]["ablation_objects"] == expected
+
+    for row in ablations:
+        if row["case_id"] == case["case_id"]:
+            row["current"]["objects"] = expected[row["source_id"]]
+    assert (
+        m04.score_source_ablation_sensitivity(fixture, observations, ablations)[
+            "passed"
+        ]
+        is True
+    )
+
+    ignored = next(
+        row
+        for row in ablations
+        if row["case_id"] == case["case_id"] and row["source_id"] == "source-a"
+    )
+    ignored["current"]["objects"] = [alpha, beta]
     assert (
         m04.score_source_ablation_sensitivity(fixture, observations, ablations)[
             "passed"
