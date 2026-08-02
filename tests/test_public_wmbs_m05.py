@@ -45,7 +45,10 @@ def _traces(fixture):
                         "action_handles": [],
                         "adapter_metadata": {"mode": "deterministic"},
                     },
-                    "explanation": {"source_evidence_cids": handles},
+                    "explanation": {
+                        "source_evidence_cids": handles,
+                        "stages": case.get("retrieval_stages", ["lexical"]),
+                    },
                     "provenance_status": "verified",
                 }
             )
@@ -65,6 +68,33 @@ def test_claim_source_completeness_is_a_hard_rail() -> None:
     assert result["metrics"]["M-PROV-COMPLETE"] == 1.0
     assert result["metrics"]["M-EXPLAIN-COV"] == 1.0
     assert result["passed"] is True
+
+
+@pytest.mark.parametrize("stages", [None, ["unknown-stage"]])
+def test_explanation_coverage_requires_complete_retrieval_stages(stages) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    target = next(
+        trace for trace in traces if "protected-grounding" in trace["case_id"]
+    )
+    if stages is None:
+        del target["explanation"]["stages"]
+    else:
+        target["explanation"]["stages"] = stages
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["M-EXPLAIN-COV"] < 1.0
+    assert result["passed"] is False
+
+
+def test_fixture_declares_frozen_retrieval_stages() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    assert all(
+        case["retrieval_stages"] == ["lexical"]
+        for slice_ in fixture["slices"]
+        for case in slice_["cases"]
+    )
 
 
 def test_citation_set_metrics_are_order_invariant_diagnostics() -> None:
@@ -540,4 +570,26 @@ def test_trace_rejects_missing_or_contradictory_answer_text(
     else:
         envelope["answer_text"] = answer_text
     with pytest.raises(m05.WmbsM05Error, match="answer_text"):
+        m05.score(fixture, traces)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("unknown_field", "not allowed"),
+        ("confidence", "0.5"),
+        ("confidence", -0.1),
+        ("confidence", 1.1),
+        ("adapter_metadata", {"unknown": "value"}),
+        ("adapter_metadata", {"mode": ""}),
+        ("adapter_metadata", {"mode": " "}),
+        ("adapter_metadata", {"mode": "x" * 257}),
+    ],
+)
+def test_trace_enforces_frozen_optional_answer_envelope_fields(field, value) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"][field] = value
+    with pytest.raises(m05.WmbsM05Error):
         m05.score(fixture, traces)
