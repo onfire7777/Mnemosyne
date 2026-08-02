@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-08-01
-Baseline: `main@effc5e039505c09e575ca5e4aeb2b96949676366`
+Updated: 2026-08-02
+Baseline: `main@2091d01c8cea22da49a50bb1f0859d8108102f29`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -55,8 +55,13 @@ The following packages are complete source history, not runnable work:
   including behavioral traceability (`main@effc5e03`, exact-head CI
   `30718912376`, post-merge CI `30719645207`). It changed no benchmark source,
   measurement, admission state, roadmap percentage, or publication claim.
+- PR #94: the `T5` lifecycle delivery (`main@2091d01c`, exact head
+  `41b21305`, exact-head CI `30730185494`, post-merge CI `30730918452`).
+  Documentation and contract-test only: it admitted no source node. Its own
+  `docs/plans/` lease omitted the round-42 record, which is the non-receipt
+  residue discharged by `T6`.
 
-This map is recomputed from the new baseline `main@effc5e03`, which the
+This map is recomputed from the new baseline `main@2091d01c`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
@@ -87,11 +92,13 @@ PR #93 then merged independently from the `codex/goalmd-round-ends-clean` lane
 at `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`).
 That external merge lapsed the branch-resident carve-out. At lapse, the residue
 was no longer receipt-only: it included the undelivered baseline-pinning test
-contract and the r39, r40, and r41 round records. Exactly one node, `T5`, is
-therefore admitted to discharge that bounded residue. **This PR is the `T5`
-delivery.** It admits no source node. This terminates because the trigger was an
-independent external merge, not a receipt residue regenerating itself. The
-plan-doc backlog is disclosed here rather than left to accumulate silently.
+contract and the r39, r40, and r41 round records. Node `T5` discharged that
+bounded residue as PR #94 at `main@2091d01c`, with exact-head CI `30730185494`
+and post-merge CI `30730918452`; it admitted no source node. Its delivery
+omitted the r42 record from its own `docs/plans/` lease. `T6` is the sole
+current writer that discharges that non-receipt residue together with the r43
+record; it admits no source node and no successor node. The plan-doc backlog is
+disclosed here rather than left to accumulate silently.
 That pilots-plan checkpoint is a correction, not an addition: PR #90 shipped
 `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 without updating its earlier paragraph, so canonical `main@061c2e1c` still
@@ -136,7 +143,8 @@ exact lease, shared owner/integration edge, and external gate.
 | T0 | MERGED | Canonical truth PR after PR #86; consumed exact-head CI `30559003114`, merge `661343ce`, manual run `30561430522`, and post-merge CI `30561266140` | Truthful GOAL/GSD lifecycle state and this current map | `GOAL.md`; `.planning/STATE.md`; `.planning/ROADMAP.md`; `.planning/REQUIREMENTS.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-PLAN.md`; `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `tests/test_planning_traceability.py`. GoalEx owner only | Complete: merged as PR #87 at `main@2ba4ed80` with post-merge CI `30566984814` |
 | T3 | MERGED | GoalEx lifecycle delivery of the previously undelivered controller delta; consumed verified canonical `main@061c2e1c` and PR #90's post-merge receipts, delivered from a lane cut from `main@061c2e1c` | The three lifecycle files, the pilots-plan PR #90 checkpoint, and the 26 round records delivered on `main`, reducing the `GOAL.md` Authority carve-out to receipt scope | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #91 at `main@e157e035` with exact-head CI `30686224929` and post-merge CI `30687385118`. Documentation only; it was disjoint from every public-harness, CI, and result-v2 lease and admitted no new implementation package. This map is recomputed from that `main` and the receipt block it could not contain is recorded here; that recomputation was branch-resident, so `T3`'s residual undelivered item was exactly the receipt-level lifecycle update carried by node `T4`, now `MERGED` as PR #92 |
 | T4 | MERGED | Receipt-level lifecycle update discharging `T3`'s residue; consumed verified canonical `main@e157e035` and PR #91's post-merge receipts, delivered from a lane cut from `main@e157e035` | This map at `Baseline: main@e157e035` with `T3` as `MERGED`, the matching `GOAL.md` and `.planning/STATE.md` receipt text, the updated round-38 record (whose original text PR #91 already landed on `main`), and the round-39 record, delivered on `main`, plus the branch-resident receipt recomputation below | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #92 at `main@39cfa67a` with exact-head CI `30693874030` and post-merge CI `30694818231`. Documentation only; exact-lease-disjoint from every public-harness, CI, result-v2, and evidence lease, and it admitted no source node. This map is recomputed here from that `main`, and the receipt block PR #92 could not contain is recorded above. That recomputation is `T4`'s own receipt residue, generated for the same structural reason `T3`'s was: no commit describes its own merge, so `main`'s copy of this map always lags by exactly one receipt block. That residual lag is an accepted standing condition and admits **no successor node** and **no source node**; `T4` is the last node this carve-out admits |
-| T5 | DELIVERING | Bounded GoalEx lifecycle delivery after PR #93's independent merge lapsed the branch-resident carve-out; consumes verified canonical `main@effc5e03`, PR #93 exact-head CI `30718912376` and post-merge CI `30719645207`, and a lane cut from `main@effc5e03` | The three lifecycle files at `Baseline: main@effc5e03`, both baseline-pinning tests, and the r39/r40/r41 round records to be delivered by this PR after merge | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`; `tests/test_planning_traceability.py`; `.github/workflows/ci.yml`. GoalEx owner with CI integration shared-owner serialization | This PR is the `T5` delivery. It discharges the non-receipt-only residue created when PR #93 lapsed the carve-out and admits **no source node** |
+| T5 | MERGED | Bounded GoalEx lifecycle delivery after PR #93's independent merge lapsed the branch-resident carve-out; consumed verified canonical `main@effc5e03`, PR #93 exact-head CI `30718912376` and post-merge CI `30719645207`, and a lane cut from `main@effc5e03` | The three lifecycle files, both baseline-pinning tests, and the r39/r40/r41 round records delivered by PR #94 | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`; `tests/test_planning_traceability.py`; `.github/workflows/ci.yml`. GoalEx owner with CI integration shared-owner serialization | Complete: merged as PR #94 at `main@2091d01c`, exact head `41b21305`, exact-head CI `30730185494`, post-merge CI `30730918452`. Documentation and contract-test only; it admitted no source node. Its delivery omitted the round-42 record from its own `docs/plans/` lease, the non-receipt residue discharged by `T6` |
+| T6 | DELIVERING | Verified canonical `main@2091d01c` plus PR #94 exact-head CI `30730185494` and post-merge CI `30730918452`; lane cut from `main@2091d01c` | The three lifecycle files at `Baseline: main@2091d01c` with `T5` as `MERGED`, plus the r42 and r43 round records | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | `T6` admits **no source node** and **no successor node** |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
@@ -175,17 +183,16 @@ Prior delivery wave (complete)
   and admitted no new implementation package.
   PR #93 independently merged at main@effc5e03 (the merge that lapsed the branch-resident carve-out), lapsing the
   branch-resident carve-out.
+  T5 lifecycle delivery merged as PR #94 at main@2091d01c
+  and admitted no source node.
 
 Current delivery wave
-  T5 [DELIVERING] discharges the bounded residue after PR #93's external merge
-  lapsed the carve-out. The residue is not receipt-only: it contains an
-  undelivered test contract plus the r39/r40/r41 round records. Exactly one T5
-  node is admitted, and it admits no source node. This terminates because the
-  trigger was an independent external merge, not a self-regenerating receipt
-  residue. Every source package remains dependency-, lease-, evidence-, or
-  spec-blocked.
+  T6 [DELIVERING] is the sole current writer. It recomputes the lifecycle files
+  from main@2091d01c and delivers the r42 and r43 round records. It admits no
+  source node and no successor node. Every source package remains dependency-,
+  lease-, evidence-, or spec-blocked.
 
-Independent external gates (do not block T0-T5)
+Independent external gates (do not block T0-T6)
   P12-E operator measurement
   P13-C real scheduled event
   P13-O official upstream admission
@@ -213,18 +220,16 @@ Quarantine
 
 - Current safe coding concurrency is **zero new implementation writers**:
   every remaining source package is dependency-, lease-, evidence-, or
-  spec-blocked. `T5` is the sole GoalEx lifecycle writer, bounded to its exact
+  spec-blocked. `T6` is the sole GoalEx lifecycle writer, bounded to its exact
   lease; only read-only reviews may run alongside it.
-- **`GOAL.md` Authority carve-out status: lapsed by PR #93 and bounded to
-  `T5`.** PR #93 was an independent external merge, so it lapsed the operative
-  branch-resident map. The resulting residue included an undelivered test
-  contract and three undelivered round records, not merely a regenerated
-  receipt block. Exactly one node, `T5`, is admitted to discharge it. This
-  terminates because the lapse trigger was external; `T5` does not admit a
-  successor for its own receipt residue.
-- **Next dependency-ready candidate: Phase 12 evidence preparation, and no source node.** `T5`
-  admits no source node. The serial next path is
-  `P12-E`: exact candidate/runtime manifest and resolved model digest, repeated
+- **`GOAL.md` Authority carve-out status: standing controller condition from
+  `T6` onward.** Both the one-block receipt lag and the current round's own plan
+  record are accepted standing conditions of the controller branch. They are
+  discharged only by branch-resident recomputation, never by admitting a
+  successor node. `T6` admits no successor node and no source node.
+- **Next dependency-ready candidate: external gate `P13-C`, and no source node.** `T6`
+  admits no source node. `P13-C` is first eligible 2026-08-03. The Phase 12
+  evidence path remains `P12-E`: exact candidate/runtime manifest and resolved model digest, repeated
   synthetic plus 24-case `qa_scale_dev_v1`, then one protected `qa_hard_v2`
   attempt, and only after that held-out LongMemEval/Hippo evidence. Host,
   mTLS, custody, and operator gates remain fail-closed. `N12` is lease blocked (the protected
