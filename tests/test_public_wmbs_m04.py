@@ -102,6 +102,25 @@ def test_fixture_rejects_resigned_full_duplicate_case_before_indexing() -> None:
 
 
 @pytest.mark.parametrize(
+    "invalid_objects",
+    [[], "not-a-list", ["duplicate", "duplicate"]],
+)
+def test_fixture_and_scorer_reject_invalid_resolved_gold_objects(
+    invalid_objects: object,
+) -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    resolved = next(case for case in fixture["cases"] if not case["gold"]["unresolved"])
+    resolved["gold"]["current_objects"] = invalid_objects
+    _redigest(fixture)
+
+    with pytest.raises(m04.WmbsM04Error, match="gold.current_objects"):
+        m04.validate_fixture(fixture)
+    with pytest.raises(m04.WmbsM04Error, match="gold.current_objects"):
+        m04.score_current_answer(fixture, observations)
+
+
+@pytest.mark.parametrize(
     ("field", "drifted"),
     [
         ("generator_id", "other.generate_fixture"),
