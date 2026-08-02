@@ -28,6 +28,7 @@ GENERATOR_VERSION = "1.0.0"
 LICENSE = "CC0-1.0"
 SEEDS = (13, 29, 41, 59, 73)
 PROTECTED_SLICE_ID = "protected-grounding"
+RETRIEVAL_STAGE_IDS = ("dense_hash", "lexical", "graph_ppr")
 SLICE_IDS = (
     PROTECTED_SLICE_ID,
     "distractor-sources",
@@ -76,6 +77,16 @@ _SOURCE_MANIFEST = {
 }
 _MAX_EVIDENCE_HANDLES = 1000
 _IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}")
+_ANSWER_ENVELOPE_KEYS = frozenset(
+    {
+        "answer_text",
+        "abstained",
+        "confidence",
+        "evidence_handles",
+        "action_handles",
+        "adapter_metadata",
+    }
+)
 
 
 class WmbsM05Error(ValueError):
@@ -192,6 +203,7 @@ def _case(
         "seed": seed,
         "slice_id": slice_id,
         "index": index,
+        "retrieval_stages": ["lexical"],
         "claim": f"Claim {index} for seed {seed}, generation {generator_seed}.",
         "source_events": sources,
         "gold_source_cids": gold,
@@ -305,6 +317,10 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
         for case in slice_["cases"]:
             if case.get("sensitivity") != 2:
                 raise WmbsM05Error("every case must retain sensitivity tier 2")
+            if case.get("retrieval_stages") != ["lexical"]:
+                raise WmbsM05Error(
+                    "case retrieval_stages must use the frozen lexical stage"
+                )
             if slice_["slice_id"] == "derived-claims" and (
                 case.get("scored") is not False
                 or case.get("deferral_reason") != "howprovenance-unwired"
@@ -390,6 +406,11 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
         envelope = trace.get("answer_envelope")
         if not isinstance(envelope, Mapping):
             raise WmbsM05Error("trace answer_envelope must be an object")
+        unknown_envelope_keys = set(envelope) - _ANSWER_ENVELOPE_KEYS
+        if unknown_envelope_keys:
+            raise WmbsM05Error(
+                f"answer_envelope has unknown fields: {sorted(unknown_envelope_keys)}"
+            )
         for key in (
             "abstained",
             "answer_text",
@@ -432,6 +453,29 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
             raise WmbsM05Error("answer_envelope action_handles must be empty")
         if not isinstance(envelope["adapter_metadata"], Mapping):
             raise WmbsM05Error("answer_envelope adapter_metadata must be an object")
+        adapter_metadata = envelope["adapter_metadata"]
+        if set(adapter_metadata) - {"mode"}:
+            raise WmbsM05Error("answer_envelope adapter_metadata has unknown fields")
+        if "mode" in adapter_metadata:
+            mode = adapter_metadata["mode"]
+            if (
+                not isinstance(mode, str)
+                or not 1 <= len(mode) <= 256
+                or not any(character.strip() for character in mode)
+            ):
+                raise WmbsM05Error(
+                    "answer_envelope adapter_metadata mode violates short_string"
+                )
+        if "confidence" in envelope:
+            confidence = envelope["confidence"]
+            if confidence is not None and (
+                isinstance(confidence, bool)
+                or not isinstance(confidence, (int, float))
+                or not 0 <= confidence <= 1
+            ):
+                raise WmbsM05Error(
+                    "answer_envelope confidence must be null or between zero and one"
+                )
         explanation = trace.get("explanation")
         if not isinstance(explanation, Mapping):
             raise WmbsM05Error("trace explanation must be an object")
@@ -494,6 +538,7 @@ def score(
             explained = set(
                 trace.get("explanation", {}).get("source_evidence_cids", [])
             )
+            explained_stages = trace.get("explanation", {}).get("stages")
             gold = set(case["gold_source_cids"])
             actual = {
                 _evidence_cid(event["content"], event["event_id"])
@@ -502,7 +547,12 @@ def score(
             valid_gold = gold & actual
             if slice_id == PROTECTED_SLICE_ID:
                 provenance_ok += cited == gold and bool(valid_gold)
-                explanation_ok += explained == gold and bool(valid_gold)
+                explanation_ok += (
+                    explained == gold
+                    and bool(valid_gold)
+                    and explained_stages == case["retrieval_stages"]
+                    and all(stage in RETRIEVAL_STAGE_IDS for stage in explained_stages)
+                )
                 unsupported += not envelope["abstained"] and not bool(
                     cited & valid_gold
                 )
