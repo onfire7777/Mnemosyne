@@ -192,6 +192,8 @@ def generate_fixture(seed: int = SEEDS[0]) -> dict[str, Any]:
         "schema_id": FIXTURE_SCHEMA_ID,
         "generator_id": GENERATOR_ID,
         "generator_version": GENERATOR_VERSION,
+        "integration_dependencies": list(INTEGRATION_DEPENDENCIES),
+        "disclosure": FINITE_CORPUS_DISCLOSURE,
         "license": "CC0-1.0",
         "seeds": list(SEEDS),
         "sensitivity_binding": {
@@ -217,6 +219,10 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
         or fixture.get("schema_id") != FIXTURE_SCHEMA_ID
     ):
         raise WmbsM05Error("fixture identity mismatch")
+    if fixture.get("integration_dependencies") != list(INTEGRATION_DEPENDENCIES):
+        raise WmbsM05Error("fixture integration dependencies mismatch")
+    if fixture.get("disclosure") != FINITE_CORPUS_DISCLOSURE:
+        raise WmbsM05Error("fixture disclosure mismatch")
     slices = fixture.get("slices")
     if (
         not isinstance(slices, list)
@@ -250,6 +256,15 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
                 if set(event) != required:
                     raise WmbsM05Error(
                         "portable_event must carry exactly seven required keys"
+                    )
+            if slice_["slice_id"] != "tampered-lineage":
+                actual = {
+                    _evidence_cid(event["content"], event["event_id"])
+                    for event in case.get("source_events", [])
+                }
+                if not set(case.get("gold_source_cids", [])).issubset(actual):
+                    raise WmbsM05Error(
+                        "gold evidence handle must bind to this case's source content"
                     )
     check = dict(fixture)
     digest = check.pop("dataset_sha256", None)
@@ -308,6 +323,17 @@ def score(
 ) -> dict[str, Any]:
     validate_fixture(fixture)
     by_id = _trace_map(traces)
+    known_case_ids = {
+        case["case_id"]
+        for slice_ in fixture["slices"]
+        for case in slice_["cases"]
+        if case["scored"]
+    }
+    unknown_case_ids = set(by_id) - known_case_ids
+    if unknown_case_ids:
+        raise WmbsM05Error(
+            f"trace case_id is absent from fixture: {sorted(unknown_case_ids)}"
+        )
     provenance_ok = explanation_ok = protected_count = unsupported = (
         unsupported_total
     ) = 0
@@ -321,6 +347,7 @@ def score(
                 continue
             if slice_id == PROTECTED_SLICE_ID:
                 protected_count += 1
+                unsupported_total += 1
             elif slice_id == "distractor-sources":
                 gold_total += len(case["gold_source_cids"])
             elif slice_id == "tampered-lineage":
@@ -346,6 +373,9 @@ def score(
             if slice_id == PROTECTED_SLICE_ID:
                 provenance_ok += cited == gold and bool(valid_gold)
                 explanation_ok += explained == gold and bool(valid_gold)
+                unsupported += not envelope["abstained"] and not bool(
+                    cited & valid_gold
+                )
             elif slice_id == "distractor-sources":
                 true_positive += len(cited & gold)
                 cited_total += len(cited)
