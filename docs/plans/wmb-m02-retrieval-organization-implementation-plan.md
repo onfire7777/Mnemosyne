@@ -501,7 +501,7 @@ Metrics computed, per the spec's scorer list:
 | `recall_at_k` for k ∈ {1, 3, 5, 10} | Size of (top-k ∩ gold) divided by size of gold, over answerable questions | Undefined for unanswerable; excluded from the denominator |
 | `ndcg_at_k` for k ∈ {5, 10} | Binary-relevance DCG over top-k divided by ideal DCG | Computed inside `wmbs_m02.py`; **must not** import `eval/harness/metrics.py` or `src/mnemosyne/benchmarks.py` (Q1) |
 | `evidence_recall` | Fraction of gold evidence IDs surfaced when the SUT returns evidence IDs | Reported `unsupported` when no IDs exist, never synthesized |
-| `unanswerable_correct_rate` | Fraction of unanswerable questions for which the answer abstains, or both the ranked list and normalized answer are empty | The explicit unanswerable policy Q2 requires |
+| `unanswerable_correct_rate` | Fraction of unanswerable questions with explicit `abstained: true` and a null answer | The explicit unanswerable policy Q2 requires |
 | `unsupported_claim_rate` | Fraction of non-abstained, non-null answers that either fail normalized gold-answer equality or have no returned gold-document hit | Diagnostic; answer correctness and returned evidence are both required |
 | `exact_match`, `token_f1` | Uses a stdlib-only local normalizer kept behaviorally equal to `scoring.normalize_answer` (`scoring.py:459-463`) by direct parity tests | Answer-side only; Stage A scores the deterministic answer path without importing quarantined harness modules |
 
