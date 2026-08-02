@@ -411,7 +411,10 @@ score(fixture: Mapping, traces: Sequence[Mapping]) -> dict   # pure; no engine i
 `five_seed_canonical_replay == 1.0`. Citation precision/recall never contribute
 to `passed` — they are diagnostics per §8 M05. Before scoring, the trace set
 must contain exactly one trace for each of the 80 scored cases; the 20 deferred
-derived-claim cases remain outside that required trace matrix.
+derived-claim cases remain outside that required trace matrix. Each trace is a
+closed object with exactly `case_id`, `answer_envelope`, `explanation`, and
+`provenance_status`; the latter remains self-declared and ignored by scoring
+per Q3.
 
 **`eval/public/fixtures/wmbs-m05-provenance-development.json`** — see §7.
 
