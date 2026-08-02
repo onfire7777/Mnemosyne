@@ -311,6 +311,32 @@ def test_replay_is_bound_to_fixture_and_generation_seed() -> None:
     assert result["metrics"]["five_seed_canonical_replay"] == 0.0
 
 
+def test_clean_fixture_passes_five_seed_canonical_replay() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    result = m05.score(fixture, _traces(fixture))
+    assert result["metrics"]["five_seed_canonical_replay"] == 1.0
+
+
+def test_distractor_citations_degrade_diagnostic_without_failing_rails() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    cids = m05.recompute_source_cids(fixture)
+    distractors = {
+        case["case_id"]: cids[case["source_events"][1]["event_id"]]
+        for case in fixture["slices"][1]["cases"]
+    }
+    for trace in traces:
+        if trace["case_id"] in distractors:
+            trace["answer_envelope"]["evidence_handles"] = [
+                distractors[trace["case_id"]]
+            ]
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["citation_precision"] == 0.0
+    assert result["passed"] is True
+
+
 def test_fixture_rejects_fake_content_digest() -> None:
     m05 = _module()
     fixture = deepcopy(m05.generate_fixture(13))
