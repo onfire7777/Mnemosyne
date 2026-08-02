@@ -195,6 +195,24 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         f".planning/STATE.md stopped_at must name `main@{short}` exactly once, "
         f"got {claimed}"
     )
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            sha,
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
 
 
 def test_stale_alternate_canonical_baseline_claim_fails(
@@ -213,6 +231,60 @@ def test_stale_alternate_canonical_baseline_claim_fails(
     except AssertionError:
         return
     raise AssertionError("stale alternate canonical-baseline claim was accepted")
+
+
+def test_non_ancestral_baseline_commit_fails(tmp_path: Path, monkeypatch) -> None:
+    commit_env = os.environ | {
+        "GIT_AUTHOR_NAME": "planning-traceability-test",
+        "GIT_AUTHOR_EMAIL": "planning-traceability-test@example.invalid",
+        "GIT_AUTHOR_DATE": "2000-01-01T00:00:00+00:00",
+        "GIT_COMMITTER_NAME": "planning-traceability-test",
+        "GIT_COMMITTER_EMAIL": "planning-traceability-test@example.invalid",
+        "GIT_COMMITTER_DATE": "2000-01-01T00:00:00+00:00",
+    }
+    non_ancestor = subprocess.run(
+        ["git", "commit-tree", "HEAD^{tree}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        input="object-only non-ancestral baseline\n",
+        text=True,
+        env=commit_env,
+    ).stdout.strip()
+    ancestry = subprocess.run(
+        [
+            "git",
+            "merge-base",
+            "--is-ancestor",
+            non_ancestor,
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    assert ancestry.returncode == 1
+
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    baseline = LEASE_BASELINE.findall(lease_text)[0]
+    for global_name, source in (
+        ("GOAL", GOAL),
+        ("STATE", STATE),
+        ("DEPENDENCY_LEASE_MAP", DEPENDENCY_LEASE_MAP),
+    ):
+        substituted = tmp_path / global_name
+        substituted.write_text(
+            source.read_text(encoding="utf-8")
+            .replace(baseline, non_ancestor)
+            .replace(baseline[:8], non_ancestor[:8]),
+            encoding="utf-8",
+        )
+        monkeypatch.setitem(globals(), global_name, substituted)
+
+    try:
+        test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
+    except subprocess.CalledProcessError:
+        return
+    raise AssertionError("non-ancestral baseline commit was accepted")
 
 
 def test_lease_map_body_names_only_the_header_baseline() -> None:
