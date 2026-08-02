@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at main@effc5e03; PR #93 is merged and post-main CI is green. Candidate-readiness and runtime software gates are locally green, but exact external candidate/runtime custody, host admission, canonical mTLS inputs, development QA, and protected/held-out evidence remain open. No fresh source node is admitted; Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at main@effc5e03; PR #93 is merged and post-main CI is green. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No fresh source node is admitted; Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
 last_updated: "2026-08-01T22:07:00Z"
 last_activity: 2026-08-01
 progress:
@@ -81,7 +81,7 @@ documentation-only lease-map node `T4` at `main@39cfa67a` (exact-head CI
 `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
 `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
-which is the current canonical baseline. PR #92 is documentation only, admitted no source node, and moved no
+which supplies the merge anchor for the bounded T5 reconciliation below. PR #92 is documentation only, admitted no source node, and moved no
 package status or publication claim. PR #93's independent merge lapsed the
 branch-resident Authority carve-out. The lease map is recomputed from
 `main@effc5e03`, and exactly one bounded node, `T5`, is admitted to deliver the

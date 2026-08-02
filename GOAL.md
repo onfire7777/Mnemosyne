@@ -436,6 +436,11 @@ evidence must be explicit.
 
 ## Verification
 
+Canonical `main` may retain the accepted terminal one-block receipt residue
+after a merge because no commit can describe its own merge. That terminal
+canonical-state property does not weaken the executable controller-branch
+check below: every controller-branch baseline mismatch is treated as a lapse, and the check fails closed.
+
 ```bash
 set -euo pipefail
 test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"
@@ -455,14 +460,6 @@ git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
 # advanced past the recorded baseline and the carve-out must be recomputed from
 # the new `main` before any further admission.
-#
-# This block is written to be run on the controller branch, where the equality
-# holds. On canonical `main` it fails by exactly the accepted one-block receipt
-# lag — `main`'s copy names the baseline of the merge before its own, because no
-# commit can describe its own merge. That failure is discharged by the
-# branch-resident recomputation carried here, not by admitting a successor node;
-# see the lease map's `T4` residue. Only a failure on this branch, or a `main`
-# that has advanced by more than that one receipt block, is a real lapse.
 test "$(git rev-parse main)" = "effc5e039505c09e575ca5e4aeb2b96949676366"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
