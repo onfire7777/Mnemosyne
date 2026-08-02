@@ -349,6 +349,7 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
         for ordinal in range(4)
     }
     seen: set[tuple[int, str, int]] = set()
+    case_ids: set[str] = set()
     unresolved_states: list[bool] = []
     has_historical_gold = False
     for case in cases:
@@ -356,7 +357,12 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
         parts = str(case["case_id"]).rsplit("-", 1)
         if len(parts) != 2 or not parts[1].isdigit():
             raise WmbsM04Error("invalid case_id")
-        seen.add((case["seed"], case["source_class"], int(parts[1])))
+        ordinal = int(parts[1])
+        canonical_case_id = f"m04-{case['seed']}-{case['source_class']}-{ordinal}"
+        if case["case_id"] != canonical_case_id or case["case_id"] in case_ids:
+            raise WmbsM04Error("case_id must be canonical and unique")
+        case_ids.add(case["case_id"])
+        seen.add((case["seed"], case["source_class"], ordinal))
         event_sets = case["events_by_permutation"]
         if not isinstance(event_sets, Mapping) or set(event_sets) != set(PERMUTATIONS):
             raise WmbsM04Error("case permutation matrix mismatch")
@@ -539,8 +545,12 @@ def score_historical_preservation(
         row for row in rows if cases[row["case_id"]]["gold"]["historical_objects"]
     ]
     preserved = sum(
-        row["historical"]["objects"]
-        == cases[row["case_id"]]["gold"]["historical_objects"]
+        (
+            row["historical"]["objects"]
+            == cases[row["case_id"]]["gold"]["historical_objects"]
+            and row["historical"]["as_of"]
+            == cases[row["case_id"]]["gold"]["historical_as_of"]
+        )
         for row in eligible
     )
     rate = _rate(preserved, len(eligible), "historical-preservation metric")
