@@ -265,7 +265,7 @@ Seven source classes, exactly as spec §8 M04 names them:
 
 | Class | Construction | Expected observable outcome |
 |---|---|---|
-| `independent` | Two sources assert non-overlapping subject/predicate pairs. | Both current; no supersession. |
+| `independent` | Three sources assert non-overlapping subject/predicate pairs. | All three current; no supersession. |
 | `duplicated` | Two sources assert byte-identical content for one pair. | One current value; duplicate is `deduplicated`, never a conflict. |
 | `low_quality` | A source whose corroboration count is 1 and whose later events are self-contradictory. | Never supersedes a corroborated value. |
 | `high_quality` | A source corroborated by ≥ 3 independent `actor_label`s. | Current value, once its `valid_from` is latest. |
