@@ -91,23 +91,31 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
     if type(seed) is not int:
         raise WmbsM02Error("seed must be an int")
     rng = random.Random(seed)
-    values = [
-        f"value-{index:03d}-{rng.randrange(1_000_000):06d}" for index in range(240)
+    retrieval_keys = [
+        f"key-{index:03d}-{rng.randrange(1_000_000):06d}" for index in range(240)
+    ]
+    payloads = [
+        f"payload-{index:03d}-{rng.randrange(1_000_000):06d}" for index in range(240)
     ]
     corpus = [
         {
             "stable_item_id": f"m02-doc-{index:03d}",
-            "content": f"Record {index:03d} contains retrieval marker {value}.",
+            "content": (
+                f"Record {index:03d} contains retrieval key {retrieval_key} "
+                f"and answer payload {payload}."
+            ),
         }
-        for index, value in enumerate(values)
+        for index, (retrieval_key, payload) in enumerate(
+            zip(retrieval_keys, payloads, strict=True)
+        )
     ]
 
     prompts = {
-        "exact": "Which record contains the exact marker {value}?",
-        "paraphrase": "Find the document whose retrieval token means {value}.",
-        "entity": "Which document describes entity {value}?",
-        "relation": "Which records establish the relation ending at {value}?",
-        "multi-hop": "Which records connect the two-hop path to {value}?",
+        "exact": "Which record contains retrieval key {key}?",
+        "paraphrase": "Find the document associated with retrieval key {key}.",
+        "entity": "Which document describes entity retrieval key {key}?",
+        "relation": "Which records establish the relation for retrieval key {key}?",
+        "multi-hop": "Which records connect the path for retrieval key {key}?",
     }
     questions: list[dict[str, Any]] = []
     for family_index, family in enumerate(sorted(QUERY_FAMILIES - {"unanswerable"})):
@@ -116,16 +124,20 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
             gold = [f"m02-doc-{primary:03d}"]
             if family in {"relation", "multi-hop"}:
                 gold.append(f"m02-doc-{primary + 1:03d}")
-            value = values[primary]
+            retrieval_key = retrieval_keys[primary]
+            payload = payloads[primary]
             if len(gold) > 1:
-                corpus[primary + 1]["content"] += f" Linked retrieval marker {value}."
+                corpus[primary + 1]["content"] += (
+                    f" Linked retrieval key {retrieval_key} confirms answer payload "
+                    f"{payload}."
+                )
             questions.append(
                 {
                     "question_id": f"m02-{family}-{index:02d}",
                     "family": family,
-                    "text": prompts[family].format(value=value),
+                    "text": prompts[family].format(key=retrieval_key),
                     "gold_doc_ids": gold,
-                    "answers": [value],
+                    "answers": [payload],
                 }
             )
     for index in range(QUESTIONS_PER_FAMILY):
@@ -133,7 +145,7 @@ def generate_fixture(seed: int = DEFAULT_SEED) -> dict[str, Any]:
             {
                 "question_id": f"m02-unanswerable-{index:02d}",
                 "family": "unanswerable",
-                "text": f"Which record contains absent marker {seed}-{index}?",
+                "text": f"Which record contains absent retrieval key {seed}-{index}?",
                 "gold_doc_ids": [],
                 "answers": [],
             }
