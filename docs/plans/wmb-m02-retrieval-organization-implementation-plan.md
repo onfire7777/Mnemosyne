@@ -497,7 +497,7 @@ Metrics computed, per the spec's scorer list:
 | `evidence_recall` | Fraction of gold evidence IDs surfaced when the SUT returns evidence IDs | Reported `unsupported` when no IDs exist, never synthesized |
 | `unanswerable_correct_rate` | Fraction of unanswerable questions for which the ranked list is empty **or** the answer abstains | The explicit unanswerable policy Q2 requires |
 | `unsupported_claim_rate` | Fraction of answered questions whose answer is not grounded in a returned hit | Diagnostic |
-| `exact_match`, `token_f1` | Reuses `scoring.normalize_answer` (`scoring.py:459-463`) | Answer-side only; Stage A scores the deterministic answer path |
+| `exact_match`, `token_f1` | Uses a stdlib-only local normalizer kept behaviorally equal to `scoring.normalize_answer` (`scoring.py:459-463`) by direct parity tests | Answer-side only; Stage A scores the deterministic answer path without importing quarantined harness modules |
 
 Hard scorer boundaries, each with a RED test in §12:
 
@@ -779,7 +779,12 @@ are evidence at a stated base, not standing claims (§2.2).
 - No second roadmap, benchmark lifecycle, runner, registry, evidence store, or
   result ledger.
 
-## 16. Validation
+## 16. Historical plan-authoring validation
+
+This block records the pre-implementation lane check that proved the three
+Stage A paths were absent when this plan was frozen. It is not an executable
+acceptance check for a later integrated head, where those paths are expected to
+exist and are validated by the Stage A tests in §12.
 
 ```bash
 set -euo pipefail
