@@ -448,3 +448,12 @@ def test_trace_rejects_malformed_explanation_and_handles(field, value) -> None:
         traces[0]["answer_envelope"][field] = value
     with pytest.raises(m05.WmbsM05Error):
         m05.score(fixture, traces)
+
+
+def test_trace_rejects_nonempty_action_handles() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    traces[0]["answer_envelope"]["action_handles"] = ["forbidden-action"]
+    with pytest.raises(m05.WmbsM05Error, match="action_handles"):
+        m05.score(fixture, traces)
