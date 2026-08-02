@@ -30,6 +30,7 @@ DEPENDENCY_LEASE_MAP = (
 )
 GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
 LEASE_CURRENT_BASELINE_CLAIMS = (
     re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
@@ -131,6 +132,24 @@ def test_traceability_uses_only_canonical_requirement_ids() -> None:
     ids = set(ID_PATTERN.findall(text))
     assert {f"REQ-{index:03d}" for index in range(1, 19)} <= ids
     assert {f"NFR-{index:03d}" for index in range(1, 6)} <= ids
+
+
+def test_unit_drift_checkout_fetches_canonical_main_history() -> None:
+    lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+    job_start = lines.index("  test:")
+    job_end = next(
+        index
+        for index in range(job_start + 1, len(lines))
+        if lines[index].startswith("  ") and not lines[index].startswith("    ")
+    )
+    job = lines[job_start:job_end]
+    checkout = job.index(
+        "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+    )
+    assert job[checkout + 1 : checkout + 3] == [
+        "        with:",
+        "          fetch-depth: 0",
+    ]
 
 
 def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> None:
