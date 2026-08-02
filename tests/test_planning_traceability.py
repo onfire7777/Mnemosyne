@@ -170,14 +170,11 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         ("GOAL.md", goal_normalized),
         (".planning/STATE.md", state_normalized),
     ):
-        claimed = next(
-            (
-                pattern.findall(normalized)
-                for pattern in CANONICAL_CLAIMS
-                if pattern.search(normalized)
-            ),
-            [],
-        )
+        claimed = [
+            claim
+            for pattern in CANONICAL_CLAIMS
+            for claim in pattern.findall(normalized)
+        ]
         assert len(claimed) == 1, (
             f"{label} must make exactly one canonical-baseline claim, got {claimed}"
         )
@@ -187,9 +184,7 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         )
         # Guard the regexes against a reworded claim slipping past them: every
         # occurrence of the phrase must be one of the matched claims.
-        recognized_claim_count = sum(
-            len(pattern.findall(normalized)) for pattern in CANONICAL_CLAIMS
-        )
+        recognized_claim_count = len(claimed)
         assert normalized.count(CANONICAL_CLAIM_PHRASE) == recognized_claim_count, (
             f"{label} has a '{CANONICAL_CLAIM_PHRASE}' claim that names no SHA "
             f"in a recognized form"
@@ -202,16 +197,13 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
     )
 
 
-def test_duplicate_identical_canonical_baseline_claim_fails(
+def test_stale_alternate_canonical_baseline_claim_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
     goal_text = GOAL.read_text(encoding="utf-8")
-    normalized = " ".join(goal_text.split())
-    canonical_claim = CANONICAL_CLAIMS[0].search(normalized)
-    assert canonical_claim is not None
     duplicate_goal = tmp_path / "GOAL.md"
     duplicate_goal.write_text(
-        goal_text + f"\n{canonical_claim.group(0)}.\n",
+        goal_text + "\nThe current canonical baseline is `main@deadbeef`.\n",
         encoding="utf-8",
     )
     monkeypatch.setitem(globals(), "GOAL", duplicate_goal)
@@ -220,7 +212,7 @@ def test_duplicate_identical_canonical_baseline_claim_fails(
         test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
     except AssertionError:
         return
-    raise AssertionError("duplicate identical canonical-baseline claim was accepted")
+    raise AssertionError("stale alternate canonical-baseline claim was accepted")
 
 
 def test_lease_map_body_names_only_the_header_baseline() -> None:
@@ -230,14 +222,11 @@ def test_lease_map_body_names_only_the_header_baseline() -> None:
     short = baselines[0][:8]
     normalized = " ".join(lease_text.split())
 
-    claimed = next(
-        (
-            pattern.findall(normalized)
-            for pattern in LEASE_CURRENT_BASELINE_CLAIMS
-            if pattern.search(normalized)
-        ),
-        [],
-    )
+    claimed = [
+        claim
+        for pattern in LEASE_CURRENT_BASELINE_CLAIMS
+        for claim in pattern.findall(normalized)
+    ]
     assert len(claimed) == 1, (
         "lease map must make exactly one recognized in-body current-baseline claim, "
         f"got {claimed}"
