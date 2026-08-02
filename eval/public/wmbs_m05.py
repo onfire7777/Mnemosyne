@@ -428,7 +428,11 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
                 raise WmbsM05Error(
                     "answer_envelope answer_text must be null when abstained"
                 )
-        elif not isinstance(answer_text, str) or not answer_text:
+        elif (
+            not isinstance(answer_text, str)
+            or not 1 <= len(answer_text) <= 65536
+            or not answer_text.strip()
+        ):
             raise WmbsM05Error(
                 "answer_envelope answer_text must be a nonempty string when answering"
             )
@@ -485,6 +489,17 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
         ):
             raise WmbsM05Error(
                 "trace explanation source_evidence_cids must be a list of strings"
+            )
+        stages = explanation.get("stages")
+        if (
+            not isinstance(stages, list)
+            or not stages
+            or not all(isinstance(stage, str) for stage in stages)
+            or len(stages) != len(set(stages))
+            or any(stage not in RETRIEVAL_STAGE_IDS for stage in stages)
+        ):
+            raise WmbsM05Error(
+                "trace explanation stages must be unique frozen retrieval stage ids"
             )
         if envelope["abstained"] and envelope["evidence_handles"]:
             raise WmbsM05Error("abstained envelopes cannot carry evidence handles")
