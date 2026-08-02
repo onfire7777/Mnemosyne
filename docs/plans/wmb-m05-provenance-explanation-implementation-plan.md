@@ -375,7 +375,7 @@ PROTECTED_SLICE_ID  = "protected-grounding"
 FINITE_CORPUS_DISCLOSURE: str
 INTEGRATION_DEPENDENCIES: tuple[str, ...]           # carries Q1-Q4, Q7, Q9, Q10, Q12
 
-class WmbsM05Error(Exception)                       # base for every contract violation
+class WmbsM05Error(ValueError)                      # base for every contract violation
 canonical_json(value) -> bytes                      # module-local; wmbs_m01/m10 precedent
 canonical_sha256(value) -> str                      # module-local; no shared-owner import
 generate_fixture(seed: int) -> dict                 # deterministic, no I/O, no clock
@@ -429,6 +429,7 @@ deviation, and each deviation has a parametrized rejection test.
   "comparability": "proposed-non-comparable",
   "fixture_id": "wmbs-m05-provenance-development",
   "headline_eligible": false,
+  "pbpp_headline_eligible": false,
   "independent_reproduction": false,
   "module_id": "M05",
   "publishable": false,
