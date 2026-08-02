@@ -389,6 +389,7 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
             raise WmbsM05Error("trace answer_envelope must be an object")
         for key in (
             "abstained",
+            "answer_text",
             "evidence_handles",
             "action_handles",
             "adapter_metadata",
@@ -397,6 +398,16 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
                 raise WmbsM05Error(f"answer_envelope missing {key}")
         if not isinstance(envelope["abstained"], bool):
             raise WmbsM05Error("answer_envelope abstained must be boolean")
+        answer_text = envelope["answer_text"]
+        if envelope["abstained"]:
+            if answer_text is not None:
+                raise WmbsM05Error(
+                    "answer_envelope answer_text must be null when abstained"
+                )
+        elif not isinstance(answer_text, str) or not answer_text:
+            raise WmbsM05Error(
+                "answer_envelope answer_text must be a nonempty string when answering"
+            )
         for key in ("evidence_handles", "action_handles"):
             handles = envelope[key]
             if not isinstance(handles, list) or not all(
