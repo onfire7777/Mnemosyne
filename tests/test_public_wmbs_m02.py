@@ -105,6 +105,7 @@ def test_queries_hide_answers_and_corpus_supplies_reference_payload() -> None:
         if question["family"] == "unanswerable":
             continue
         answer = question["answers"][0]
+        assert "answer payload" in question["text"].lower()
         assert answer not in question["text"]
         key_match = re.search(r"retrieval key ([\w-]+)", question["text"])
         assert key_match is not None
