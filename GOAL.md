@@ -108,10 +108,12 @@ fail-closed round-cleanup and ignored-state custody contract at
 `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
 then PR #94 delivered `T5` at `main@2091d01c` (exact head `41b21305`,
 exact-head CI `30730185494`, post-merge CI `30730918452`). PR #95 then
-delivered `T6` at `main@42abaab7`, which is the current canonical baseline
+delivered `T6` at `main@42abaab7`
 (exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI
-`30738303497`). `T5` and `T6` are discharged. No lifecycle or source node is
-admitted.
+`30738303497`). PR #96 then independently delivered the development-only
+M02/M04/M05 evaluation oracles at `main@088e2f31` (exact head `1050749a`, CI
+`30744318093`), which is the current canonical baseline. `T5` and `T6` are
+discharged, and no GoalEx lifecycle or source node is currently admitted.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -470,12 +472,21 @@ git merge-base --is-ancestor 39cfa67aa7692bf47d5dde5842af3d8ec0736bb0 main
 git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main
 git merge-base --is-ancestor 42abaab7ba4fa83f9838c3d32ee96db4256bfcad main
+git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
 # advanced past the recorded baseline and the carve-out must be recomputed from
 # the new `main` before any further admission.
-test "$(git rev-parse main)" = "42abaab7ba4fa83f9838c3d32ee96db4256bfcad"
+#
+# This equality is deliberately scoped to this pre-admission controller-branch
+# check and must NOT be lifted into the always-on test suite: by the terminal
+# canonical-state property above, the commit that records a baseline lands after
+# it, so on `main` the equality is false the instant it merges and would hold CI
+# permanently red. The suite enforces the same invariant in the form that
+# survives its own merge — `tests/test_planning_traceability.py` fails if any PR
+# merged into `main` after the recorded baseline is absent from the lease map.
+test "$(git rev-parse main)" = "088e2f31003e3a7e96119bc8cdba162252226ac1"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
