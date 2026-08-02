@@ -563,6 +563,18 @@ def test_replay_equality_rejects_validation_legal_fixture_drift() -> None:
     assert replay["passed"] is False
 
 
+def test_replay_equality_rejects_alternate_generator_seed_full_run() -> None:
+    fixture = m04.generate_fixture(7)
+    observations, ablations = _perfect(fixture)
+
+    result = m04.score_conflict(fixture, observations, ablations)
+    replay = result["metrics"]["replay_equality"]
+    assert replay["equal_count"] == 0
+    assert replay["rate"] == 0.0
+    assert replay["passed"] is False
+    assert result["passed"] is False
+
+
 @pytest.mark.parametrize(
     "zero_denominator",
     ["unresolved", "non_unresolved", "historical", "ablations"],
