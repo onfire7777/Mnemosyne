@@ -297,7 +297,7 @@ discipline and excluding every volatile field named in §3.4.1.
 
 | Metric | Definition | Gate |
 |---|---|---|
-| `M04-CURRENT-ACC` | Fraction of cases whose current answer set and requested `as_of` equal gold exactly. | **`= 1.0`** for the deterministic Stage A matrix and included in aggregate `passed`. |
+| `M04-CURRENT-ACC` | Fraction of observations whose ordered current answer set and requested `as_of` equal gold exactly. | **`= 1.0`** for the deterministic Stage A matrix and included in aggregate `passed`. |
 | `M04-HIST-PRESERVE` | Fraction of superseded values still retrievable at their historical `as_of`. | **`= 1.0`.** Spec acceptance: 100% preservation of superseded history. |
 | `M04-FALSE-RESOLVE` | Fraction of `unresolved` observations returning a single non-abstained current value. | **`<= 0.01`.** Spec acceptance: at most 1% false high-confidence resolution. The `unresolved` class is 4 cases × 3 permutations = **12 observations per seed**, hence **60 across the five seeds**, inside the 420-observation total. The smallest non-zero rate expressible is 1/60 ≈ 0.0167, which is already above the 1% bound, so the bound is **not resolvable at this n**. It is reported as `unresolvable-at-this-n` and, at development scale, **any** non-zero count is a hard failure. Raising n to resolve 1% honestly is Stage C work behind a power plan, not a fixture-size tweak. |
 | `M04-MONOTONIC` | Count of outcomes where a strictly-weaker-evidence source supersedes a strictly-stronger one. | **`= 0`.** Spec acceptance: no monotonic-source-policy violation. |
