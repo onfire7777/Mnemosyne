@@ -385,6 +385,32 @@ def test_fixture_rejects_mutated_identity_and_custody_fields(field, value) -> No
         m05.validate_fixture(fixture)
 
 
+@pytest.mark.parametrize("mutation", ["duplicate", "substitute"])
+def test_fixture_rejects_incomplete_or_reused_case_identity_matrix(mutation) -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    cases = fixture["slices"][0]["cases"]
+    if mutation == "duplicate":
+        cases[1] = deepcopy(cases[0])
+    else:
+        cases[1]["case_id"] = "m05-substituted-case"
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match="case identity matrix"):
+        m05.validate_fixture(fixture)
+
+
+def test_replay_drift_is_a_hard_aggregate_failure() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    event = fixture["slices"][1]["cases"][0]["source_events"][1]
+    event["content"] += " replay drift"
+    event["content_sha256"] = hashlib.sha256(event["content"].encode()).hexdigest()
+    _rehash(m05, fixture)
+    result = m05.score(fixture, _traces(fixture))
+    assert result["metrics"]["five_seed_canonical_replay"] == 0.0
+    assert result["passed"] is False
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
