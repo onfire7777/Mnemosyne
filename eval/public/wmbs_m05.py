@@ -291,6 +291,7 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
     slices = fixture.get("slices")
     if (
         not isinstance(slices, list)
+        or not all(isinstance(slice_, Mapping) for slice_ in slices)
         or tuple(s.get("slice_id") for s in slices) != SLICE_IDS
     ):
         raise WmbsM05Error("fixture slice matrix mismatch")

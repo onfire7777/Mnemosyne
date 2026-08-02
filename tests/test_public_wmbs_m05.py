@@ -247,6 +247,15 @@ def test_fixture_rejects_matrix_mutation(mutation: str) -> None:
         m05.validate_fixture(fixture)
 
 
+@pytest.mark.parametrize("invalid_slice", [None, "not-a-slice"])
+def test_fixture_rejects_non_mapping_slice_items(invalid_slice) -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    fixture["slices"][0] = invalid_slice
+    with pytest.raises(m05.WmbsM05Error, match="slice matrix"):
+        m05.validate_fixture(fixture)
+
+
 def test_fixture_rejects_rehashed_protected_expected_outcome_drift() -> None:
     m05 = _module()
     fixture = deepcopy(m05.generate_fixture(13))
