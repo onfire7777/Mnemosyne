@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@2091d01c`; PR #94 is merged and post-merge CI `30730918452` is green. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No fresh source node is admitted; Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-02T00:00:00Z"
+last_updated: "2026-08-02T06:47:42Z"
 last_activity: 2026-08-02
 progress:
   total_phases: 7
@@ -39,7 +39,7 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-08-01 — PR #86 merged the two-file bounded scheduled
+Last activity: 2026-08-02 — PR #86 merged the two-file bounded scheduled
 development-regression workflow at `main@661343ce`; input-free manual run
 `30561430522` passed the fixed four-test contract job. PR #87 then merged the
 canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
@@ -332,7 +332,7 @@ Historical checkpoint (2026-06-28): T-SEC protected registry breadth is reconcil
 
 Current continuation: see **Latest checkpoint** below.
 
-Latest checkpoint (2026-08-01): see the **Decisions** entry under **Accumulated
+Latest checkpoint (2026-08-02): see the **Decisions** entry under **Accumulated
 Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
