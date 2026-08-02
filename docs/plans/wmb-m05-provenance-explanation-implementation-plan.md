@@ -328,7 +328,7 @@ All exact, all model-free, all present at base SHA. Nothing below is invented.
 | Evidence identity helper | `eval.public.custody.capture_cid(capture)` | Same, through the public-eval seam rather than the engine |
 | Capture | `eval.harness.cli_driver.MnemoCLI.capture` / `.capture_batch` | Materialize source events and obtain their CIDs |
 | Grounded write | `MnemoCLI.assert_fact(..., evidence_cids=Sequence[str], trust_tier=int, valid_from=...)` | Create claims bound to declared source CIDs |
-| Grounded proposal | `MnemoCLI.propose(..., evidence_cid=str|None)` | Distractor and low-support cases |
+| Grounded proposal | `MnemoCLI.propose(..., evidence_cid=str\|None)` | Distractor and low-support cases |
 | Claim readback | `MnemoCLI.export(tenant)` — returns an `evidence` row set — and `MnemoCLI.search(...)`, whose hit metadata carries `source_evidence_cids` (`mnemosyne/retrieval.py`) | Read back each claim's declared source CIDs. **There is no `MnemoCLI.get`**; these two are the actually existing stable readbacks |
 | Lineage read | `MnemoCLI.explain(tenant, query, branch=...)` → `MemoryTools.explain` → `engine.deep_search(...).to_dict()` | Retrieval-level lineage for the explanation-coverage metric |
 | Tenant projection | `MnemoCLI.export(tenant)` | Retained source manifest input |
