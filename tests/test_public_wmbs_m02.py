@@ -96,6 +96,16 @@ def test_scorer_scores_unanswerable_with_empty_gold_and_empty_hits() -> None:
             )
 
 
+@pytest.mark.parametrize("abstained", [1, "false", None])
+def test_scorer_rejects_non_boolean_abstained(abstained: object) -> None:
+    trace = _trace(hits=[], answer=None)
+    trace["abstained"] = abstained
+    with pytest.raises(m02.WmbsM02Error, match="abstained must be a bool"):
+        m02.score_retrieval(
+            _single_fixture(_question(family="unanswerable", gold=[])), [trace]
+        )
+
+
 @pytest.mark.parametrize(
     "hits",
     [
@@ -136,6 +146,30 @@ def test_metrics_shape_is_descriptive_and_finite_corpus_only() -> None:
     assert result["metrics"]["ndcg_at_5"] == 1.0
     assert result["metrics"]["exact_match"] == 1.0
     assert result["metrics"]["token_f1"] == 1.0
+
+
+def test_unsupported_claim_rate_uses_retrieved_gold_not_answer_correctness() -> None:
+    metrics = m02.score_retrieval(_single_fixture(), [_trace(answer="the wrong city")])[
+        "metrics"
+    ]
+    assert metrics["unsupported_claim_rate"] == 0.0
+    assert metrics["exact_match"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("gold", "prediction"),
+    [("The Portland", "portland!!!"), ("Ａ Café", "café")],
+)
+def test_em_and_f1_match_frozen_answer_normalization(
+    gold: str, prediction: str
+) -> None:
+    question = _question()
+    question["answers"] = [gold]
+    metrics = m02.score_retrieval(
+        _single_fixture(question), [_trace(answer=prediction)]
+    )["metrics"]
+    assert metrics["exact_match"] == 1.0
+    assert metrics["token_f1"] == 1.0
 
 
 def test_unmeasured_metrics_are_unsupported_not_estimated() -> None:

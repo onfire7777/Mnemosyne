@@ -11,10 +11,12 @@ import hashlib
 import json
 import math
 import random
-import re
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+from eval.public.scoring import normalize_answer
 
 MODULE_ID = "M02"
 ADMISSION_STATE = "PROPOSED"
@@ -52,7 +54,6 @@ _TOP_LEVEL_KEYS = frozenset(
 )
 _DOCUMENT_KEYS = frozenset({"stable_item_id", "content"})
 _QUESTION_KEYS = frozenset({"question_id", "family", "text", "gold_doc_ids", "answers"})
-_TOKEN_RE = re.compile(r"\w+")
 
 
 class WmbsM02Error(ValueError):
@@ -262,20 +263,18 @@ def normalize_fixture(fixture: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _normalized_answer(value: object) -> str:
-    return " ".join(_TOKEN_RE.findall(value.lower())) if isinstance(value, str) else ""
+    return normalize_answer(value) if isinstance(value, str) else ""
 
 
 def _token_f1(answer: object, gold_answers: Sequence[str]) -> float:
-    predicted = _TOKEN_RE.findall(answer.lower()) if isinstance(answer, str) else []
-    if not predicted:
-        return 0.0
+    predicted = _normalized_answer(answer).split()
     best = 0.0
     for gold in gold_answers:
-        expected = _TOKEN_RE.findall(gold.lower())
-        common = sum(
-            min(predicted.count(token), expected.count(token))
-            for token in set(predicted)
-        )
+        expected = normalize_answer(gold).split()
+        common = sum((Counter(predicted) & Counter(expected)).values())
+        if not predicted or not expected:
+            best = max(best, float(predicted == expected))
+            continue
         if common:
             precision = common / len(predicted)
             recall = common / len(expected)
@@ -323,6 +322,8 @@ def score_retrieval(
             raise WmbsM02Error("every trace must carry case_id == question_id")
         if question_id not in questions or question_id in bound:
             raise WmbsM02Error("traces must bind each question exactly once")
+        if "abstained" in raw_trace and type(raw_trace["abstained"]) is not bool:
+            raise WmbsM02Error("trace abstained must be a bool when present")
         hits = raw_trace.get("ranked_hits")
         if not isinstance(hits, list):
             raise WmbsM02Error("ranked_hits must be a list")
@@ -414,9 +415,7 @@ def score_retrieval(
         token_scores.append(_token_f1(answer, question["answers"]))
         if normalized:
             answered_count += 1
-            grounded = normalized in gold_answers and bool(
-                set(ranked_ids).intersection(question["gold_doc_ids"])
-            )
+            grounded = bool(set(ranked_ids).intersection(question["gold_doc_ids"]))
             unsupported_claims += not grounded
     metrics["unsupported_claim_rate"] = (
         unsupported_claims / answered_count if answered_count else 0.0
