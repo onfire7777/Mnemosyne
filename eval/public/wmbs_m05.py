@@ -180,6 +180,9 @@ def _case(
         expected = "deferred"
     case = {
         "case_id": f"m05-{seed}-{slice_id}-{index}",
+        "seed": seed,
+        "slice_id": slice_id,
+        "index": index,
         "claim": f"Claim {index} for seed {seed}, generation {generator_seed}.",
         "source_events": sources,
         "gold_source_cids": gold,
@@ -273,6 +276,23 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
     if binding != {"protected_slice_sensitivity": 2, "reason": "Q8"}:
         raise WmbsM05Error("protected source sensitivity binding is missing")
     for slice_ in slices:
+        slice_id = slice_["slice_id"]
+        expected_identities = tuple(
+            (f"m05-{seed}-{slice_id}-{index}", seed, slice_id, index)
+            for seed in SEEDS
+            for index in range(4)
+        )
+        identities = tuple(
+            (
+                case.get("case_id"),
+                case.get("seed"),
+                case.get("slice_id"),
+                case.get("index"),
+            )
+            for case in slice_["cases"]
+        )
+        if identities != expected_identities:
+            raise WmbsM05Error("fixture case identity matrix mismatch")
         for case in slice_["cases"]:
             if case.get("sensitivity") != 2:
                 raise WmbsM05Error("every case must retain sensitivity tier 2")
@@ -486,6 +506,7 @@ def score(
         and metrics["M-EXPLAIN-COV"] == 1.0
         and metrics["unsupported_claim_rate"] == 0.0
         and metrics["lineage_tamper_rejection"] == 1.0
+        and metrics["five_seed_canonical_replay"] == 1.0
     )
     return {
         "metrics": metrics,
