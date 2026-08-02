@@ -81,7 +81,7 @@ documentation-only lease-map node `T4` at `main@39cfa67a` (exact-head CI
 `30693874030`, post-merge CI `30694818231`). PR #93 then merged the
 fail-closed round-cleanup and ignored-state custody contract at
 `main@effc5e03` (exact-head CI `30718912376`, post-merge CI `30719645207`),
-which is the current canonical baseline. PR #92 is documentation only, admitted no source node, and moved no
+which supplies the merge anchor for the bounded T5 reconciliation below. PR #92 is documentation only, admitted no source node, and moved no
 package status or publication claim. PR #93's independent merge lapsed the
 branch-resident Authority carve-out. The lease map is recomputed from
 `main@effc5e03`, and exactly one bounded node, `T5`, is admitted to deliver the

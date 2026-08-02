@@ -173,7 +173,7 @@ Prior delivery wave (complete)
   and admitted no new implementation package.
   T4 receipt-level lifecycle update merged as PR #92 at main@39cfa67a
   and admitted no new implementation package.
-  PR #93 independently merged at main@effc5e03 (current baseline), lapsing the
+  PR #93 independently merged at main@effc5e03 (the merge that lapsed the branch-resident carve-out), lapsing the
   branch-resident carve-out.
 
 Current delivery wave
