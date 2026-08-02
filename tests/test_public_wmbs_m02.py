@@ -393,15 +393,7 @@ def test_em_and_f1_match_frozen_answer_normalization(
     assert m02._normalized_answer(gold) == canonical_normalize_answer(gold)
     assert m02._normalized_answer(prediction) == canonical_normalize_answer(prediction)
     assert canonical_normalize_answer(gold) == canonical_normalize_answer(prediction)
-    fixture = m02.generate_fixture()
-    index, question = _case(fixture, "exact")
-    question["answers"] = [gold]
-    _resign(fixture)
-    traces = _perfect_traces(fixture)
-    traces[index]["answer"] = prediction
-    metrics = m02.score_retrieval(fixture, traces)["metrics"]
-    assert metrics["exact_match"] == 1.0
-    assert metrics["token_f1"] == 1.0
+    assert m02._token_f1(prediction, [gold]) == 1.0
 
 
 def test_evidence_recall_requires_complete_answerable_disclosure() -> None:
@@ -493,6 +485,40 @@ def test_fixture_validation_rejects_mutation_and_normalizes_questions() -> None:
     normalized = m02.normalize_fixture(fixture)
     assert set(normalized) == {q["question_id"] for q in fixture["questions"]}
     assert normalized["m02-exact-00"]["family"] == "exact"
+
+
+@pytest.mark.parametrize("substitution", ["corpus", "query", "answer", "gold"])
+def test_fixture_validation_rejects_resigned_generator_substitutions(
+    substitution: str,
+) -> None:
+    fixture = m02.generate_fixture()
+    if substitution == "corpus":
+        fixture["corpus"][0]["content"] += " substituted"
+    elif substitution == "query":
+        fixture["questions"][0]["text"] += " substituted"
+    elif substitution == "answer":
+        fixture["questions"][0]["answers"] = ["substituted-answer"]
+    else:
+        fixture["questions"][0]["gold_doc_ids"] = ["m02-doc-239"]
+    _resign(fixture)
+
+    with pytest.raises(m02.WmbsM02Error, match="canonical generator"):
+        m02.validate_fixture(fixture)
+
+
+def test_alternate_seed_generation_is_not_a_certified_fixture(tmp_path: Path) -> None:
+    alternate = m02.generate_fixture(7)
+    assert m02.canonical_json(alternate) == m02.canonical_json(m02.generate_fixture(7))
+
+    with pytest.raises(m02.WmbsM02Error, match="DEFAULT_SEED"):
+        m02.validate_fixture(alternate)
+    with pytest.raises(m02.WmbsM02Error, match="DEFAULT_SEED"):
+        m02.score_retrieval(alternate, _perfect_traces(alternate))
+
+    path = tmp_path / "alternate-seed.json"
+    path.write_bytes(m02.canonical_json(alternate))
+    with pytest.raises(m02.WmbsM02Error, match="DEFAULT_SEED"):
+        m02.load_fixture(path)
 
 
 def test_whole_memory_abi_artifacts_are_present() -> None:
