@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from copy import deepcopy
 from pathlib import Path
 
@@ -85,12 +86,39 @@ def test_multi_document_gold_is_observable_from_query_and_corpus() -> None:
         for question in fixture["questions"]:
             if len(question["gold_doc_ids"]) < 2:
                 continue
-            marker = question["answers"][0]
-            assert marker in question["text"]
+            match = re.search(r"retrieval key ([\w-]+)", question["text"])
+            assert match is not None
+            marker = match.group(1)
             assert all(
                 marker in corpus[doc_id]["content"]
                 for doc_id in question["gold_doc_ids"]
             )
+            assert question["answers"][0] not in question["text"]
+
+
+def test_queries_hide_answers_and_corpus_supplies_reference_payload() -> None:
+    fixture = m02.generate_fixture()
+    corpus = {document["stable_item_id"]: document for document in fixture["corpus"]}
+    traces = _perfect_traces(fixture)
+    retrieval_keys = set()
+    for index, question in enumerate(fixture["questions"]):
+        if question["family"] == "unanswerable":
+            continue
+        answer = question["answers"][0]
+        assert answer not in question["text"]
+        key_match = re.search(r"retrieval key ([\w-]+)", question["text"])
+        assert key_match is not None
+        retrieval_keys.add(key_match.group(1))
+        payload_match = re.search(
+            r"answer payload ([\w-]+)",
+            corpus[question["gold_doc_ids"][0]]["content"],
+        )
+        assert payload_match is not None
+        traces[index]["answer"] = payload_match.group(1)
+    assert len(retrieval_keys) == 50
+    metrics = m02.score_retrieval(fixture, traces)["metrics"]
+    assert metrics["exact_match"] == 1.0
+    assert metrics["token_f1"] == 1.0
 
 
 def test_scorer_scores_the_committed_fixture() -> None:
