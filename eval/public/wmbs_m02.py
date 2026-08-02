@@ -253,10 +253,13 @@ def _validate_question(raw: object, *, label: str) -> Mapping[str, Any]:
 
 
 def load_fixture(path: Path = FIXTURE_PATH) -> dict[str, Any]:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    raw = Path(path).read_bytes()
+    payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):
         raise WmbsM02Error("fixture payload must be an object")
     validate_fixture(payload)
+    if raw != canonical_json(payload):
+        raise WmbsM02Error("fixture file must use canonical bytes")
     return payload
 
 
@@ -348,6 +351,8 @@ def score_retrieval(
             raise WmbsM02Error("trace answer must be a string or null")
         if raw_trace["abstained"] and raw_trace["answer"] is not None:
             raise WmbsM02Error("abstained trace answer must be null")
+        if not raw_trace["abstained"] and raw_trace["answer"] is None:
+            raise WmbsM02Error("non-abstained trace answer must be a string")
         hits = raw_trace.get("ranked_hits")
         if not isinstance(hits, list):
             raise WmbsM02Error("ranked_hits must be a list")
@@ -445,8 +450,10 @@ def score_retrieval(
         trace, ranked_ids = bound[question["question_id"]]
         if trace["answer"] is not None and not trace["abstained"]:
             answered_count += 1
-            unsupported_claims += not bool(
-                set(ranked_ids).intersection(question["gold_doc_ids"])
+            unsupported_claims += not (
+                bool(set(ranked_ids).intersection(question["gold_doc_ids"]))
+                and _normalized_answer(trace["answer"])
+                in {_normalized_answer(answer) for answer in question["answers"]}
             )
     metrics["unsupported_claim_rate"] = (
         unsupported_claims / answered_count if answered_count else 0.0

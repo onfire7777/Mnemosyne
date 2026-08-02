@@ -442,6 +442,12 @@ CLI it was handed.
 | Per question | `question_id`, `family`, `text`, `gold_doc_ids` (empty list permitted **only** for `family == "unanswerable"`), `answers` | `gold_doc_ids` is one of the four keys `_scoring_labels` accepts |
 | Licence | `CC0-1.0` | Wholly generated locally; no third-party text |
 
+**Observable multi-document binding.** Relation and multi-hop questions name a
+primary retrieval marker in their query text, and every document in that
+question's multi-document `gold_doc_ids` set contains the same marker. A
+retriever can therefore identify both gold documents from the supplied query
+and corpus alone; no generator index or document-position knowledge is needed.
+
 **Deferral — corpus scale.** The spec names a 2,000-event local corpus. Stage A
 commits 240 documents and defers the 2,000-event variant until a measured
 resource receipt admits a profile, exactly as the spec requires ("a measured
@@ -496,7 +502,7 @@ Metrics computed, per the spec's scorer list:
 | `ndcg_at_k` for k ∈ {5, 10} | Binary-relevance DCG over top-k divided by ideal DCG | Computed inside `wmbs_m02.py`; **must not** import `eval/harness/metrics.py` or `src/mnemosyne/benchmarks.py` (Q1) |
 | `evidence_recall` | Fraction of gold evidence IDs surfaced when the SUT returns evidence IDs | Reported `unsupported` when no IDs exist, never synthesized |
 | `unanswerable_correct_rate` | Fraction of unanswerable questions for which the answer abstains, or both the ranked list and normalized answer are empty | The explicit unanswerable policy Q2 requires |
-| `unsupported_claim_rate` | Fraction of answered questions whose answer is not grounded in a returned hit | Diagnostic |
+| `unsupported_claim_rate` | Fraction of non-abstained, non-null answers that either fail normalized gold-answer equality or have no returned gold-document hit | Diagnostic; answer correctness and returned evidence are both required |
 | `exact_match`, `token_f1` | Uses a stdlib-only local normalizer kept behaviorally equal to `scoring.normalize_answer` (`scoring.py:459-463`) by direct parity tests | Answer-side only; Stage A scores the deterministic answer path without importing quarantined harness modules |
 
 Hard scorer boundaries, each with a RED test in §12:

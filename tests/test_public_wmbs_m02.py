@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -100,6 +101,19 @@ def test_scorer_scores_the_committed_fixture() -> None:
     assert result["metrics"]["recall_at_10"] == 1.0
 
 
+def test_load_fixture_rejects_noncanonical_raw_bytes(tmp_path: Path) -> None:
+    fixture = m02.generate_fixture()
+    noncanonical_payloads = (
+        b" " + m02.canonical_json(fixture),
+        json.dumps(fixture, indent=2).encode("utf-8"),
+    )
+    for index, payload in enumerate(noncanonical_payloads):
+        path = tmp_path / f"noncanonical-{index}.json"
+        path.write_bytes(payload)
+        with pytest.raises(m02.WmbsM02Error, match="canonical bytes"):
+            m02.load_fixture(path)
+
+
 def test_scorer_rejects_gold_ids_outside_corpus() -> None:
     fixture = m02.generate_fixture()
     fixture["questions"][0]["gold_doc_ids"] = ["not-in-corpus"]
@@ -160,6 +174,17 @@ def test_abstained_trace_rejects_fabricated_answer() -> None:
     ]
     traces[index]["answer"] = "fabricated answer"
     with pytest.raises(m02.WmbsM02Error, match="abstained trace answer must be null"):
+        m02.score_retrieval(fixture, traces)
+
+
+def test_non_abstained_trace_rejects_null_answer() -> None:
+    fixture = m02.load_fixture()
+    traces = _perfect_traces(fixture)
+    index, _ = _case(fixture, "unanswerable")
+    traces[index]["abstained"] = False
+    with pytest.raises(
+        m02.WmbsM02Error, match="non-abstained trace answer must be a string"
+    ):
         m02.score_retrieval(fixture, traces)
 
 
@@ -239,13 +264,13 @@ def test_metrics_shape_is_descriptive_and_finite_corpus_only() -> None:
     assert result["metrics"]["token_f1"] == 1.0
 
 
-def test_unsupported_claim_rate_uses_retrieved_gold_not_answer_correctness() -> None:
+def test_unsupported_claim_rate_requires_retrieved_gold_and_correct_answer() -> None:
     fixture = m02.generate_fixture()
     traces = _perfect_traces(fixture)
     index, _ = _case(fixture, "exact")
     traces[index]["answer"] = "the wrong city"
     metrics = m02.score_retrieval(fixture, traces)["metrics"]
-    assert metrics["unsupported_claim_rate"] == 0.0
+    assert metrics["unsupported_claim_rate"] == 0.02
     assert metrics["exact_match"] == 0.98
 
 
