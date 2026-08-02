@@ -135,8 +135,9 @@ contract, but `wmbs-0.1-draft.schema.json` `$defs` contains no
 `query_with_evidence` request/response definition and no capability-hook
 declaration definition at all. An adapter therefore cannot declare the hook
 `native | emulated | unsupported` under the closed ABI, which §6.4 requires.
-*Consequence:* M05 Stage A binds **only** to `answer_envelope.evidence_handles`.
-Native `query_with_evidence` is `DEFERRED` (§14, D1).
+*Consequence:* M05 Stage A binds deterministic protected answers to the fixture
+claim and `answer_envelope.evidence_handles`. Native `query_with_evidence` is
+`DEFERRED` (§14, D1).
 *Smallest RED:* one test asserting that the schema exposes a hook-declaration
 definition covering `query_with_evidence` with the three declaration states. It
 fails today and must stay RED until the public-harness owner freezes the hook.
@@ -149,10 +150,12 @@ while citing evidence. Under `M-PROV-COMPLETE=1.0` and "zero unsupported claims
 for the protected slice", the ABI validates exactly the envelopes M05 must fail.
 *Consequence:* the rail lives entirely in the M05 scorer; ABI validity is never
 evidence of grounding.
-*Smallest RED:* two scorer tests — a non-abstained, schema-valid envelope with
+*Smallest RED:* scorer tests — a non-abstained, schema-valid envelope with
 `evidence_handles: []` on a protected-slice claim must score
 `unsupported_claim_rate > 0` and `passed == False`; an abstained envelope
-carrying evidence handles must be rejected as malformed by the M05 scorer.
+carrying evidence handles must be rejected as malformed by the M05 scorer; and
+an unrelated `answer_text` retaining the exact gold CID must receive neither
+provenance-completeness nor explanation-coverage credit.
 
 **Q3 — `retrieval_hit.provenance_status` is self-declared and unbound.**
 Nothing in the schema, runner, or bundle correlates `provenance_status:
@@ -592,7 +595,8 @@ not evidence.
 These four are the audit's explicit precondition for CODE-READY.
 
 1. **Claim→source completeness.** Every protected-slice claim resolves to ≥1
-   gold source whose recomputed `evidence_cid` matches the fixture binding.
+   gold source whose recomputed `evidence_cid` matches the fixture binding, and
+   its deterministic `answer_text` exactly matches the fixture claim.
    `M-PROV-COMPLETE == 1.0`; anything less fails.
 2. **Citation precision.** On non-protected material with distractors present,
    `citation_precision` and `citation_recall` are computed as set metrics,

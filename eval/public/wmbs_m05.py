@@ -583,10 +583,12 @@ def score(
             }
             valid_gold = gold & actual
             if slice_id == PROTECTED_SLICE_ID:
-                provenance_ok += cited == gold and bool(valid_gold)
+                answer_matches = envelope["answer_text"] == case["claim"]
+                provenance_ok += cited == gold and bool(valid_gold) and answer_matches
                 explanation_ok += (
                     explained == gold
                     and bool(valid_gold)
+                    and answer_matches
                     and explained_stages == case["retrieval_stages"]
                     and all(stage in RETRIEVAL_STAGE_IDS for stage in explained_stages)
                 )
