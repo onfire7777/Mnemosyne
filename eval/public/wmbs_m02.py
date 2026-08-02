@@ -11,12 +11,12 @@ import hashlib
 import json
 import math
 import random
+import string
+import unicodedata
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
-
-from eval.public.scoring import normalize_answer
 
 MODULE_ID = "M02"
 ADMISSION_STATE = "PROPOSED"
@@ -54,6 +54,9 @@ _TOP_LEVEL_KEYS = frozenset(
 )
 _DOCUMENT_KEYS = frozenset({"stable_item_id", "content"})
 _QUESTION_KEYS = frozenset({"question_id", "family", "text", "gold_doc_ids", "answers"})
+_TRACE_KEYS = frozenset(
+    {"case_id", "question_id", "ranked_hits", "answer", "abstained"}
+)
 
 
 class WmbsM02Error(ValueError):
@@ -263,14 +266,25 @@ def normalize_fixture(fixture: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _normalized_answer(value: object) -> str:
-    return normalize_answer(value) if isinstance(value, str) else ""
+    if not isinstance(value, str):
+        return ""
+    normalized = unicodedata.normalize("NFKC", value).lower()
+    normalized = "".join(
+        " "
+        if char in string.punctuation or unicodedata.category(char).startswith("P")
+        else char
+        for char in normalized
+    )
+    return " ".join(
+        token for token in normalized.split() if token not in {"a", "an", "the"}
+    )
 
 
 def _token_f1(answer: object, gold_answers: Sequence[str]) -> float:
     predicted = _normalized_answer(answer).split()
     best = 0.0
     for gold in gold_answers:
-        expected = normalize_answer(gold).split()
+        expected = _normalized_answer(gold).split()
         common = sum((Counter(predicted) & Counter(expected)).values())
         if not predicted or not expected:
             best = max(best, float(predicted == expected))
@@ -296,9 +310,8 @@ def score_retrieval(
     fixture: Mapping[str, Any], traces: Sequence[Mapping[str, Any]]
 ) -> dict[str, Any]:
     """Score caller-supplied traces over fixed labels; execute no retrieval."""
-    raw_questions = fixture.get("questions")
-    if not isinstance(raw_questions, list) or not raw_questions:
-        raise WmbsM02Error("fixture questions must be a non-empty list")
+    validate_fixture(fixture)
+    raw_questions = fixture["questions"]
     questions = {}
     for index, raw in enumerate(raw_questions):
         question = _validate_question(raw, label=f"questions[{index}]")
@@ -313,9 +326,14 @@ def score_retrieval(
 
     bound: dict[str, tuple[Mapping[str, Any], list[str]]] = {}
     evidence_scores: list[float] = []
+    evidence_id_count = 0
     for raw_trace in traces:
-        if not isinstance(raw_trace, Mapping):
-            raise WmbsM02Error("each trace must be an object")
+        trace_keys = _TRACE_KEYS | (
+            {"evidence_ids"}
+            if isinstance(raw_trace, Mapping) and "evidence_ids" in raw_trace
+            else set()
+        )
+        raw_trace = _closed_mapping(raw_trace, frozenset(trace_keys), "trace")
         case_id = raw_trace.get("case_id")
         question_id = raw_trace.get("question_id")
         if not isinstance(case_id, str) or case_id != question_id:
@@ -324,6 +342,8 @@ def score_retrieval(
             raise WmbsM02Error("traces must bind each question exactly once")
         if "abstained" in raw_trace and type(raw_trace["abstained"]) is not bool:
             raise WmbsM02Error("trace abstained must be a bool when present")
+        if raw_trace["answer"] is not None and not isinstance(raw_trace["answer"], str):
+            raise WmbsM02Error("trace answer must be a string or null")
         hits = raw_trace.get("ranked_hits")
         if not isinstance(hits, list):
             raise WmbsM02Error("ranked_hits must be a list")
@@ -360,6 +380,7 @@ def score_retrieval(
             )
             gold = set(question["gold_doc_ids"])
             if gold:
+                evidence_id_count += len(evidence)
                 evidence_scores.append(len(gold.intersection(evidence)) / len(gold))
         bound[question_id] = (raw_trace, ranked_ids)
 
@@ -389,13 +410,16 @@ def score_retrieval(
         )
     metrics["evidence_recall"] = (
         sum(evidence_scores) / len(evidence_scores)
-        if evidence_scores
+        if len(evidence_scores) == len(answerable) and evidence_id_count
         else "unsupported"
     )
     metrics["unanswerable_correct_rate"] = (
         sum(
-            not bound[q["question_id"]][1]
-            or bool(bound[q["question_id"]][0].get("abstained"))
+            bool(bound[q["question_id"]][0]["abstained"])
+            or (
+                not bound[q["question_id"]][1]
+                and not _normalized_answer(bound[q["question_id"]][0]["answer"])
+            )
             for q in unanswerable
         )
         / len(unanswerable)
@@ -404,8 +428,6 @@ def score_retrieval(
     )
     exact_scores: list[float] = []
     token_scores: list[float] = []
-    unsupported_claims = 0
-    answered_count = 0
     for question in answerable:
         trace, ranked_ids = bound[question["question_id"]]
         answer = trace.get("answer")
@@ -413,10 +435,15 @@ def score_retrieval(
         gold_answers = {_normalized_answer(value) for value in question["answers"]}
         exact_scores.append(float(normalized in gold_answers))
         token_scores.append(_token_f1(answer, question["answers"]))
-        if normalized:
+    unsupported_claims = 0
+    answered_count = 0
+    for question in questions.values():
+        trace, ranked_ids = bound[question["question_id"]]
+        if _normalized_answer(trace["answer"]):
             answered_count += 1
-            grounded = bool(set(ranked_ids).intersection(question["gold_doc_ids"]))
-            unsupported_claims += not grounded
+            unsupported_claims += not bool(
+                set(ranked_ids).intersection(question["gold_doc_ids"])
+            )
     metrics["unsupported_claim_rate"] = (
         unsupported_claims / answered_count if answered_count else 0.0
     )
