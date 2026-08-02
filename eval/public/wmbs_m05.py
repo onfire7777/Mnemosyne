@@ -110,13 +110,23 @@ def _evidence_cid(content: str, content_pointer: str) -> str:
 
 
 def _event(
-    seed: int, slice_id: str, index: int, *, distractor: bool = False
+    seed: int,
+    slice_id: str,
+    index: int,
+    *,
+    generator_seed: int,
+    distractor: bool = False,
 ) -> dict[str, Any]:
-    event_id = f"m05-{seed}-{slice_id}-{index}-{'d' if distractor else 's'}"
+    event_id = (
+        f"m05-g{generator_seed}-{seed}-{slice_id}-{index}-{'d' if distractor else 's'}"
+    )
     content = (
-        f"Distractor {index} for seed {seed}."
+        f"Distractor {index} for seed {seed}, generation {generator_seed}."
         if distractor
-        else f"Source {index} supports claim {index} for seed {seed}."
+        else (
+            f"Source {index} supports claim {index} for seed {seed}, "
+            f"generation {generator_seed}."
+        )
     )
     return {
         "event_id": event_id,
@@ -132,15 +142,26 @@ def _event(
     }
 
 
-def _case(seed: int, slice_id: str, index: int) -> dict[str, Any]:
-    source = _event(seed, slice_id, index)
+def _case(
+    seed: int, slice_id: str, index: int, *, generator_seed: int
+) -> dict[str, Any]:
+    source = _event(seed, slice_id, index, generator_seed=generator_seed)
+    original_content = source["content"]
     source_cid = _evidence_cid(source["content"], source["event_id"])
     sources = [source]
     gold = [source_cid]
     scored = slice_id != "derived-claims"
     expected = "grounded"
     if slice_id == "distractor-sources":
-        sources.append(_event(seed, slice_id, index, distractor=True))
+        sources.append(
+            _event(
+                seed,
+                slice_id,
+                index,
+                generator_seed=generator_seed,
+                distractor=True,
+            )
+        )
     elif slice_id == "tampered-lineage":
         source["content"] += " tampered"
         source["content_sha256"] = hashlib.sha256(
@@ -154,7 +175,7 @@ def _case(seed: int, slice_id: str, index: int) -> dict[str, Any]:
         expected = "deferred"
     case = {
         "case_id": f"m05-{seed}-{slice_id}-{index}",
-        "claim": f"Claim {index} for seed {seed}.",
+        "claim": f"Claim {index} for seed {seed}, generation {generator_seed}.",
         "source_events": sources,
         "gold_source_cids": gold,
         "expected": expected,
@@ -163,6 +184,8 @@ def _case(seed: int, slice_id: str, index: int) -> dict[str, Any]:
     }
     if not scored:
         case["deferral_reason"] = "howprovenance-unwired"
+    if slice_id == "tampered-lineage":
+        case["tamper_original_content"] = original_content
     return case
 
 
@@ -180,7 +203,7 @@ def generate_fixture(seed: int = SEEDS[0]) -> dict[str, Any]:
                     "howprovenance-unwired" if slice_id == "derived-claims" else None
                 ),
                 "cases": [
-                    _case(matrix_seed, slice_id, index)
+                    _case(matrix_seed, slice_id, index, generator_seed=seed)
                     for matrix_seed in SEEDS
                     for index in range(4)
                 ],
@@ -192,6 +215,7 @@ def generate_fixture(seed: int = SEEDS[0]) -> dict[str, Any]:
         "schema_id": FIXTURE_SCHEMA_ID,
         "generator_id": GENERATOR_ID,
         "generator_version": GENERATOR_VERSION,
+        "generator_seed": seed,
         "integration_dependencies": list(INTEGRATION_DEPENDENCIES),
         "disclosure": FINITE_CORPUS_DISCLOSURE,
         "license": "CC0-1.0",
@@ -223,6 +247,8 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
         raise WmbsM05Error("fixture integration dependencies mismatch")
     if fixture.get("disclosure") != FINITE_CORPUS_DISCLOSURE:
         raise WmbsM05Error("fixture disclosure mismatch")
+    if fixture.get("generator_seed") not in SEEDS:
+        raise WmbsM05Error(f"fixture generator_seed must be one of {SEEDS}")
     slices = fixture.get("slices")
     if (
         not isinstance(slices, list)
@@ -257,11 +283,30 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
                     raise WmbsM05Error(
                         "portable_event must carry exactly seven required keys"
                     )
-            if slice_["slice_id"] != "tampered-lineage":
-                actual = {
-                    _evidence_cid(event["content"], event["event_id"])
-                    for event in case.get("source_events", [])
-                }
+                expected_digest = hashlib.sha256(event["content"].encode()).hexdigest()
+                if event["content_sha256"] != expected_digest:
+                    raise WmbsM05Error("portable_event content_sha256 mismatch")
+                expected_metadata = {**_CAPTURE, "content_pointer": event["event_id"]}
+                if event["public_metadata"] != expected_metadata:
+                    raise WmbsM05Error("portable_event public_metadata mismatch")
+            actual = {
+                _evidence_cid(event["content"], event["event_id"])
+                for event in case.get("source_events", [])
+            }
+            if slice_["slice_id"] == "tampered-lineage":
+                original = case.get("tamper_original_content")
+                events = case.get("source_events", [])
+                if not isinstance(original, str) or len(events) != 1:
+                    raise WmbsM05Error(
+                        "tampered-lineage must retain one original source content"
+                    )
+                original_cids = {_evidence_cid(original, events[0]["event_id"])}
+                gold = set(case.get("gold_source_cids", []))
+                if not gold or gold != original_cids or not gold.isdisjoint(actual):
+                    raise WmbsM05Error(
+                        "tampered-lineage gold must bind only to original content"
+                    )
+            else:
                 if not set(case.get("gold_source_cids", [])).issubset(actual):
                     raise WmbsM05Error(
                         "gold evidence handle must bind to this case's source content"
@@ -312,6 +357,26 @@ def _trace_map(traces: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, An
         ):
             if key not in envelope:
                 raise WmbsM05Error(f"answer_envelope missing {key}")
+        if not isinstance(envelope["abstained"], bool):
+            raise WmbsM05Error("answer_envelope abstained must be boolean")
+        for key in ("evidence_handles", "action_handles"):
+            handles = envelope[key]
+            if not isinstance(handles, list) or not all(
+                isinstance(handle, str) for handle in handles
+            ):
+                raise WmbsM05Error(f"answer_envelope {key} must be a list of strings")
+        if not isinstance(envelope["adapter_metadata"], Mapping):
+            raise WmbsM05Error("answer_envelope adapter_metadata must be an object")
+        explanation = trace.get("explanation")
+        if not isinstance(explanation, Mapping):
+            raise WmbsM05Error("trace explanation must be an object")
+        explained = explanation.get("source_evidence_cids")
+        if not isinstance(explained, list) or not all(
+            isinstance(handle, str) for handle in explained
+        ):
+            raise WmbsM05Error(
+                "trace explanation source_evidence_cids must be a list of strings"
+            )
         if envelope["abstained"] and envelope["evidence_handles"]:
             raise WmbsM05Error("abstained envelopes cannot carry evidence handles")
         result[case_id] = trace
@@ -400,11 +465,8 @@ def score(
         "citation_precision": true_positive / cited_total if cited_total else 0.0,
         "citation_recall": true_positive / gold_total if gold_total else 0.0,
         "five_seed_canonical_replay": float(
-            all(
-                canonical_json(generate_fixture(seed))
-                == canonical_json(generate_fixture(seed))
-                for seed in SEEDS
-            )
+            canonical_json(fixture)
+            == canonical_json(generate_fixture(int(fixture["generator_seed"])))
         ),
     }
     passed = (
