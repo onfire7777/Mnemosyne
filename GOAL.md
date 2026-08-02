@@ -439,7 +439,7 @@ evidence must be explicit.
 Canonical `main` may retain the accepted terminal one-block receipt residue
 after a merge because no commit can describe its own merge. That terminal
 canonical-state property does not weaken the executable controller-branch
-check below: every baseline mismatch there is a lapse and fails closed.
+check below: every controller-branch baseline mismatch is treated as a lapse, and the check fails closed.
 
 ```bash
 set -euo pipefail
