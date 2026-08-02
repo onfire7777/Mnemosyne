@@ -652,11 +652,13 @@ that the **whole** episode set for one attempt fits inside these bounds:
 every `reset`/`observe`/`act`/`finish_episode` call counts against the 10,000
 request ceiling and the 64 MiB retention ceiling, and no single `Observation` or
 `ActionReceipt` may exceed 16 MiB or 64 levels of nesting. The complete request
-budget is `1 + (2 * max_turns) + 1 + declared_extra_requests` per episode: one
+budget is `1 + (2 * max_turns) + 1 + len(extra_requests)` per episode: one
 `reset`, at most `max_turns` each of `observe` and `act`, one `finish_episode`,
-plus the declared extras. `declared_extra_requests` must be an explicit,
-non-negative manifest value covering every additional protocol request; it may
-not hide retries or setup calls. Admission computes three attempt-level requests
+plus the declared extras. `max_turns` must be a non-negative integer.
+`extra_requests` must be an ordered manifest, not a scalar count; each entry
+identifies the operation, retry identity (or explicit null), canonical payload
+digest, and validated canonical-byte bound. It may not hide retries or setup
+calls. Admission computes three attempt-level requests
 (`negotiate`, `create_run`, and `finalize`) plus the concrete request budget of
 **every** `EpisodeManifest`; it sums each manifest's own maximum turns and
 declared extras rather than multiplying one representative budget. It rejects
@@ -669,7 +671,9 @@ bound exceeds 64 MiB. Each per-request bound must be a non-negative integer and
 must be independently recomputed from, or validated against, the canonical
 payload bytes; this applies to declared extras and retries as well. Omitted or
 underestimated classes fail validation rather than borrowing unbudgeted
-retention. Because the validator does no persistence,
+retention. The executed request ledger must match the admitted ordered expansion
+exactly, and runtime request and byte counts may never exceed their admitted
+bounds. Because the validator does no persistence,
 network, or model work,
 any M14 component needing those must live outside it and is gated by P4/P7.
 
