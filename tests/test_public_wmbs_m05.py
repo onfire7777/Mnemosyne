@@ -50,6 +50,12 @@ def _traces(fixture):
     return traces
 
 
+def _rehash(m05, fixture) -> None:
+    payload = dict(fixture)
+    payload.pop("dataset_sha256", None)
+    fixture["dataset_sha256"] = m05.canonical_sha256(payload)
+
+
 def test_claim_source_completeness_is_a_hard_rail() -> None:
     m05 = _module()
     fixture = m05.generate_fixture(13)
@@ -198,7 +204,7 @@ def test_manifest_changes_when_fixture_content_changes() -> None:
     fixture = m05.generate_fixture(13)
     before = m05.source_manifest(fixture)
     mutated = deepcopy(fixture)
-    mutated["slices"][0]["cases"][0]["source_events"][0]["content"] += "x"
+    mutated["slices"][1]["cases"][0]["source_events"][1]["content"] += "x"
     check = dict(mutated)
     check.pop("dataset_sha256")
     mutated["dataset_sha256"] = m05.canonical_sha256(check)
@@ -225,3 +231,60 @@ def test_missing_protected_trace_cannot_shrink_the_metric_denominator() -> None:
     assert result["metrics"]["M-PROV-COMPLETE"] < 1.0
     assert result["metrics"]["M-EXPLAIN-COV"] < 1.0
     assert result["passed"] is False
+
+
+def test_protected_non_abstained_claim_without_valid_source_is_unsupported() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    target = next(
+        trace for trace in traces if "protected-grounding" in trace["case_id"]
+    )
+    target["answer_envelope"]["evidence_handles"] = []
+    target["explanation"]["source_evidence_cids"] = []
+    result = m05.score(fixture, traces)
+    assert result["metrics"]["unsupported_claim_rate"] > 0
+    assert result["passed"] is False
+
+
+def test_fixture_carries_and_validates_disclosure_contracts() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    assert fixture["integration_dependencies"] == list(m05.INTEGRATION_DEPENDENCIES)
+    assert fixture["disclosure"] == m05.FINITE_CORPUS_DISCLOSURE
+    for field in ("integration_dependencies", "disclosure"):
+        for mutation in ("missing", "tampered"):
+            changed = deepcopy(fixture)
+            if mutation == "missing":
+                del changed[field]
+            else:
+                changed[field] = (
+                    [] if field == "integration_dependencies" else "tampered"
+                )
+            _rehash(m05, changed)
+            with pytest.raises(m05.WmbsM05Error):
+                m05.validate_fixture(changed)
+
+
+def test_distinct_source_contents_cannot_share_a_gold_evidence_handle() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    protected = fixture["slices"][0]["cases"]
+    assert (
+        protected[0]["source_events"][0]["content"]
+        != protected[1]["source_events"][0]["content"]
+    )
+    protected[1]["gold_source_cids"] = list(protected[0]["gold_source_cids"])
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match="evidence handle"):
+        m05.score(fixture, _traces(fixture))
+
+
+def test_trace_case_id_must_exist_in_fixture() -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    unknown = deepcopy(traces[0])
+    unknown["case_id"] = "m05-unknown-case"
+    with pytest.raises(m05.WmbsM05Error, match="case_id"):
+        m05.score(fixture, [*traces, unknown])
