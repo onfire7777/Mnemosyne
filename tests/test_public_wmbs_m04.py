@@ -120,6 +120,21 @@ def test_fixture_and_scorer_reject_invalid_resolved_gold_objects(
         m04.score_current_answer(fixture, observations)
 
 
+@pytest.mark.parametrize("object_count", [0, 1])
+def test_fixture_rejects_resigned_unresolved_gold_below_two_objects(
+    object_count: int,
+) -> None:
+    fixture = m04.generate_fixture()
+    unresolved = next(case for case in fixture["cases"] if case["gold"]["unresolved"])
+    unresolved["gold"]["current_objects"] = unresolved["gold"]["current_objects"][
+        :object_count
+    ]
+    _redigest(fixture)
+
+    with pytest.raises(m04.WmbsM04Error, match="at least two unique strings"):
+        m04.validate_fixture(fixture)
+
+
 @pytest.mark.parametrize(
     ("field", "drifted"),
     [
@@ -148,6 +163,33 @@ def test_every_case_has_three_pairwise_distinct_source_orders() -> None:
             for name in m04.PERMUTATIONS
         }
         assert len(orders) == len(m04.PERMUTATIONS), case["case_id"]
+
+
+def test_independent_events_are_distinct_resolved_assertions() -> None:
+    fixture = m04.generate_fixture()
+    observations, _ = _perfect(fixture)
+    independent = [
+        case for case in fixture["cases"] if case["source_class"] == "independent"
+    ]
+    for case in independent:
+        events = case["events_by_permutation"]["as_authored"]
+        fields = [
+            dict(part.split("=", 1) for part in event["content"].split() if "=" in part)
+            for event in events
+        ]
+        identities = {
+            (field.get("subject"), field.get("predicate")) for field in fields
+        }
+        assert len(identities) == len(events) == 3
+        assert case["gold"]["unresolved"] is False
+    independent_ids = {case["case_id"] for case in independent}
+    assert all(
+        not row["answer"]["abstained"]
+        for row in observations
+        if row["case_id"] in independent_ids
+    )
+    assert m04.score_current_answer(fixture, observations)["passed"] is True
+    assert m04.score_unresolved_calibration(fixture, observations)["passed"] is True
 
 
 def test_generate_fixture_is_byte_reproducible() -> None:
@@ -484,6 +526,10 @@ def test_zero_denominator_gold_fails_closed(zero_denominator: str) -> None:
             case["gold"]["unresolved"] = False
         elif zero_denominator == "non_unresolved":
             case["gold"]["unresolved"] = True
+            if len(case["gold"]["current_objects"]) == 1:
+                case["gold"]["current_objects"].append(
+                    f"{case['case_id']}-second-unresolved-object"
+                )
         elif zero_denominator == "historical":
             case["gold"]["historical_objects"] = []
         else:

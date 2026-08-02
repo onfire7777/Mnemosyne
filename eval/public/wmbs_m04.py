@@ -150,9 +150,20 @@ def _closed(value: object, keys: frozenset[str], label: str) -> Mapping[str, Any
 
 
 def _event(
-    case_id: str, index: int, source: str, actor: str, value: str, valid_from: str
+    case_id: str,
+    index: int,
+    source: str,
+    actor: str,
+    value: str,
+    valid_from: str,
+    subject: str | None = None,
+    predicate: str | None = None,
 ) -> dict[str, Any]:
-    content = f"{case_id}: value={value}"
+    content = (
+        f"{case_id}: subject={subject} predicate={predicate} value={value}"
+        if subject is not None and predicate is not None
+        else f"{case_id}: value={value}"
+    )
     return {
         "event_id": f"{case_id}-event-{index:02d}",
         "source_id": source,
@@ -180,9 +191,30 @@ def _case(
 
     if source_class == "independent":
         values = [
-            ("source-a", "actor-a", alpha, t1),
-            ("source-b", "actor-b", beta, t1),
-            ("source-c", "actor-c", gamma, t1),
+            (
+                "source-a",
+                "actor-a",
+                alpha,
+                t1,
+                f"{case_id}-subject-a",
+                "attribute-a",
+            ),
+            (
+                "source-b",
+                "actor-b",
+                beta,
+                t1,
+                f"{case_id}-subject-b",
+                "attribute-b",
+            ),
+            (
+                "source-c",
+                "actor-c",
+                gamma,
+                t1,
+                f"{case_id}-subject-c",
+                "attribute-c",
+            ),
         ]
         current_objects, historical_objects, unresolved = (
             [alpha, beta, gamma],
@@ -407,6 +439,10 @@ def validate_fixture(fixture: object) -> Mapping[str, Any]:
             raise WmbsM04Error("gold.current_objects must contain unique strings")
         if not gold["unresolved"] and not current_objects:
             raise WmbsM04Error("gold.current_objects must be nonempty when resolved")
+        if gold["unresolved"] and len(current_objects) < 2:
+            raise WmbsM04Error(
+                "gold.current_objects must contain at least two unique strings when unresolved"
+            )
         unresolved_states.append(gold["unresolved"])
         has_historical_gold = has_historical_gold or bool(gold["historical_objects"])
         if not gold["ablation_objects"]:
