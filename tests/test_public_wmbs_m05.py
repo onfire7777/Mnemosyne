@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import hashlib
 from copy import deepcopy
 from pathlib import Path
 
@@ -204,7 +205,9 @@ def test_manifest_changes_when_fixture_content_changes() -> None:
     fixture = m05.generate_fixture(13)
     before = m05.source_manifest(fixture)
     mutated = deepcopy(fixture)
-    mutated["slices"][1]["cases"][0]["source_events"][1]["content"] += "x"
+    event = mutated["slices"][1]["cases"][0]["source_events"][1]
+    event["content"] += "x"
+    event["content_sha256"] = hashlib.sha256(event["content"].encode()).hexdigest()
     check = dict(mutated)
     check.pop("dataset_sha256")
     mutated["dataset_sha256"] = m05.canonical_sha256(check)
@@ -288,3 +291,71 @@ def test_trace_case_id_must_exist_in_fixture() -> None:
     unknown["case_id"] = "m05-unknown-case"
     with pytest.raises(m05.WmbsM05Error, match="case_id"):
         m05.score(fixture, [*traces, unknown])
+
+
+def test_replay_is_bound_to_fixture_and_generation_seed() -> None:
+    m05 = _module()
+    generated_13 = m05.generate_fixture(13)
+    generated_29 = m05.generate_fixture(29)
+    assert m05.canonical_json(generated_13) != m05.canonical_json(generated_29)
+    assert (
+        generated_13["slices"][0]["cases"][0]["source_events"][0]["content"]
+        != generated_29["slices"][0]["cases"][0]["source_events"][0]["content"]
+    )
+    fixture = deepcopy(m05.generate_fixture(13))
+    event = fixture["slices"][1]["cases"][0]["source_events"][1]
+    event["content"] += " mutation"
+    event["content_sha256"] = hashlib.sha256(event["content"].encode()).hexdigest()
+    _rehash(m05, fixture)
+    result = m05.score(fixture, _traces(fixture))
+    assert result["metrics"]["five_seed_canonical_replay"] == 0.0
+
+
+def test_fixture_rejects_fake_content_digest() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    fixture["slices"][0]["cases"][0]["source_events"][0]["content_sha256"] = "0" * 64
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match="content_sha256"):
+        m05.validate_fixture(fixture)
+
+
+def test_tampered_lineage_gold_must_bind_to_original_content() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    tampered = fixture["slices"][2]["cases"][0]
+    tampered["gold_source_cids"] = ["f" * 64]
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match="tampered-lineage"):
+        m05.validate_fixture(fixture)
+
+
+def test_fixture_rejects_attacker_controlled_capture_metadata() -> None:
+    m05 = _module()
+    fixture = deepcopy(m05.generate_fixture(13))
+    event = fixture["slices"][0]["cases"][0]["source_events"][0]
+    event["public_metadata"]["tenant_id"] = "attacker-tenant"
+    _rehash(m05, fixture)
+    with pytest.raises(m05.WmbsM05Error, match="public_metadata"):
+        m05.validate_fixture(fixture)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("explanation", None),
+        ("evidence_handles", "not-a-list"),
+        ("evidence_handles", [7]),
+        ("action_handles", "not-a-list"),
+    ],
+)
+def test_trace_rejects_malformed_explanation_and_handles(field, value) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    if field == "explanation":
+        traces[0][field] = value
+    else:
+        traces[0]["answer_envelope"][field] = value
+    with pytest.raises(m05.WmbsM05Error):
+        m05.score(fixture, traces)
