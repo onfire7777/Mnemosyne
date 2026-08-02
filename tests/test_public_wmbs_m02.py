@@ -236,6 +236,27 @@ def test_unanswerable_hallucination_is_incorrect_and_unsupported() -> None:
     assert metrics["unsupported_claim_rate"] == pytest.approx(1 / 51)
 
 
+@pytest.mark.parametrize(
+    ("answer", "unsupported_claim_rate", "passed"),
+    [("", 0.0, True), ("the", 1 / 51, False)],
+)
+def test_unanswerable_claim_denominator_uses_raw_answer_presence(
+    answer: str, unsupported_claim_rate: float, passed: bool
+) -> None:
+    fixture = m02.load_fixture()
+    traces = _perfect_traces(fixture)
+    index, _ = _case(fixture, "unanswerable")
+    traces[index]["answer"] = answer
+    traces[index]["abstained"] = False
+
+    result = m02.score_retrieval(fixture, traces)
+    assert result["metrics"]["unanswerable_correct_rate"] == 1.0
+    assert result["metrics"]["unsupported_claim_rate"] == pytest.approx(
+        unsupported_claim_rate
+    )
+    assert result["passed"] is passed
+
+
 def test_abstained_trace_rejects_fabricated_answer() -> None:
     fixture = m02.load_fixture()
     traces = _perfect_traces(fixture)

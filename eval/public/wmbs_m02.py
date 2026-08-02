@@ -469,7 +469,7 @@ def score_retrieval(
     answered_count = 0
     for question in questions.values():
         trace, ranked_ids = bound[question["question_id"]]
-        if trace["answer"] is not None and not trace["abstained"]:
+        if trace["answer"] not in (None, "") and not trace["abstained"]:
             answered_count += 1
             unsupported_claims += not (
                 bool(set(ranked_ids).intersection(question["gold_doc_ids"]))
