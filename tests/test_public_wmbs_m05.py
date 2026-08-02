@@ -38,6 +38,7 @@ def _traces(fixture):
                     "case_id": case["case_id"],
                     "answer_envelope": {
                         "abstained": abstained,
+                        "answer_text": None if abstained else case["claim"],
                         "evidence_handles": []
                         if abstained
                         else list(reversed(handles)),
@@ -86,6 +87,7 @@ def test_non_abstained_claim_without_valid_source_is_unsupported() -> None:
     target = next(trace for trace in traces if "unsupported-claim" in trace["case_id"])
     target["answer_envelope"]["evidence_handles"] = []
     target["answer_envelope"]["abstained"] = False
+    target["answer_envelope"]["answer_text"] = "unsupported answer"
     target["explanation"]["source_evidence_cids"] = []
     result = m05.score(fixture, traces)
     assert result["metrics"]["unsupported_claim_rate"] > 0
@@ -111,6 +113,7 @@ def test_unsupported_cases_use_non_supporting_sources_that_cannot_become_gold() 
     ]
     assert supplied_cid not in target_case["gold_source_cids"]
     target_trace["answer_envelope"]["abstained"] = False
+    target_trace["answer_envelope"]["answer_text"] = target_case["claim"]
     target_trace["answer_envelope"]["evidence_handles"] = [supplied_cid]
     target_trace["explanation"]["source_evidence_cids"] = [supplied_cid]
 
@@ -483,4 +486,29 @@ def test_trace_rejects_nonempty_action_handles() -> None:
     traces = _traces(fixture)
     traces[0]["answer_envelope"]["action_handles"] = ["forbidden-action"]
     with pytest.raises(m05.WmbsM05Error, match="action_handles"):
+        m05.score(fixture, traces)
+
+
+@pytest.mark.parametrize(
+    ("abstained", "answer_text", "missing"),
+    [
+        (False, None, True),
+        (False, None, False),
+        (False, "", False),
+        (True, "contradictory answer", False),
+    ],
+)
+def test_trace_rejects_missing_or_contradictory_answer_text(
+    abstained, answer_text, missing
+) -> None:
+    m05 = _module()
+    fixture = m05.generate_fixture(13)
+    traces = _traces(fixture)
+    envelope = traces[0]["answer_envelope"]
+    envelope["abstained"] = abstained
+    if missing:
+        del envelope["answer_text"]
+    else:
+        envelope["answer_text"] = answer_text
+    with pytest.raises(m05.WmbsM05Error, match="answer_text"):
         m05.score(fixture, traces)
