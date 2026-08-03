@@ -68,9 +68,9 @@ def test_disclosure_section_exists_and_names_all_three_modules() -> None:
         assert module_file in section, f"{module_file} dropped from the disclosure"
     assert "Stage-A development oracles" in section
     assert "runs no system and observes no SUT" in section
-    assert (
-        "nothing whatsoever about any memory system" in section
-    ), "the no-evidence statement is the point of the disclosure"
+    assert "nothing whatsoever about any memory system" in section, (
+        "the no-evidence statement is the point of the disclosure"
+    )
 
 
 def test_disclosure_states_the_unregistered_status_and_the_registry_agrees() -> None:
@@ -82,7 +82,9 @@ def test_disclosure_states_the_unregistered_status_and_the_registry_agrees() -> 
     """
     section = _disclosure_section()
     assert "All three are **unregistered**." in section
-    assert "None has a `registry.json` entry, an adapter, a runner route, or a" in section
+    assert (
+        "None has a `registry.json` entry, an adapter, a runner route, or a" in section
+    )
     assert "scoring-profile registration" in section
     assert "none produces a bundle, and none produces a benchmark result" in section
 
@@ -103,9 +105,11 @@ def test_disclosure_states_the_unregistered_status_and_the_registry_agrees() -> 
 
 def test_disclosure_admission_labels_match_the_modules() -> None:
     section = _disclosure_section()
-    assert 'Every one of them is admission state `PROPOSED`' in section
+    assert "Every one of them is admission state `PROPOSED`" in section
     assert 'M02 and M04 declare `ADMISSION_STATE = "PROPOSED"` directly' in section
-    assert '`admission_state: "PROPOSED"` in both its labels and its committed' in section
+    assert (
+        '`admission_state: "PROPOSED"` in both its labels and its committed' in section
+    )
     assert "`publishable: false` and `pbpp_headline_eligible: false`" in section
     assert "M02 emits no publication or headline field at all" in section
 
@@ -116,8 +120,8 @@ def test_disclosure_admission_labels_match_the_modules() -> None:
     assert m05_fixture["admission_state"] == "PROPOSED"
     assert m05_fixture["publishable"] is False
     assert m05_fixture["pbpp_headline_eligible"] is False
-    assert m05.LABELS["publishable"] is False
-    assert m05.LABELS["pbpp_headline_eligible"] is False
+    assert m05._LABELS["publishable"] is False
+    assert m05._LABELS["pbpp_headline_eligible"] is False
 
     # M02 makes no publication claim anywhere in its module or fixture: pin the
     # absence, not just the prose asserting it.
@@ -168,8 +172,9 @@ def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
 
 def test_disclosure_m02_fixture_shape_matches_the_committed_bytes() -> None:
     section = _disclosure_section()
-    assert "generated from seed `20260801` and holds 240 documents and 60 questions" in (
-        section
+    assert (
+        "generated from seed `20260801` and holds 240 documents and 60 questions"
+        in (section)
     )
     assert "ten per query family" in section
     assert (
@@ -207,7 +212,9 @@ def test_disclosure_m04_fixture_shape_and_declared_gaps_match() -> None:
     assert "`transaction_time` as `unsupported`" in section
     assert "`update_hook` as `emulated`" in section
     assert "the `sqlite` and `postgresql` backends as `DEFERRED`" in section
-    assert "an additional load-bearing `source_id` that keys the ablation gold" in section
+    assert (
+        "an additional load-bearing `source_id` that keys the ablation gold" in section
+    )
     assert "never an ABI conformance claim" in section
 
     fixture = _fixture("wmbs-m04-development.json")
@@ -230,11 +237,10 @@ def test_disclosure_m04_fixture_shape_and_declared_gaps_match() -> None:
 
     # The `source_id` departure is the disclosure's most load-bearing admission:
     # pin that the key is really there rather than trusting the prose.
-    assert "source_id" in m04.EVENT_KEYS if hasattr(m04, "EVENT_KEYS") else True
     events = [
         event
         for case in fixture["cases"]
-        for bundle in case["event_sets"].values()
+        for bundle in case["events_by_permutation"].values()
         for event in bundle
     ]
     assert events, "the M04 fixture must carry events for this pin to mean anything"
@@ -251,8 +257,9 @@ def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
     )
     assert "It scores **one-hop** claim-to-source grounding only" in section
     assert "explicitly **unsigned** (`signed: false`" in section
-    assert "eight unresolved integration dependencies in `INTEGRATION_DEPENDENCIES`" in (
-        section
+    assert (
+        "eight unresolved integration dependencies in `INTEGRATION_DEPENDENCIES`"
+        in (section)
     )
 
     fixture = _fixture("wmbs-m05-provenance-development.json")
@@ -291,8 +298,9 @@ def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
 
 def test_disclosure_keeps_stage_b_undelivered_and_claims_nothing() -> None:
     section = _disclosure_section()
-    assert "Stage B — harness integration for all three modules — is **not delivered**." in (
-        section
+    assert (
+        "Stage B — harness integration for all three modules — is **not delivered**."
+        in (section)
     )
     assert "gated on the public-harness integration owner's lease" in section
     assert (
