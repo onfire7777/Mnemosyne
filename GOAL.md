@@ -29,31 +29,55 @@ Measured at `main@b8673031`:
 - per-module implementation plans: **M02, M04, M05, M14** — 4 of 20
 - no plan and no module: **M06, M07, M08, M09, M11, M16, M17, M18, M19, M20**
 
-**Round 0 of this directive: publish an accurate inventory.** Before choosing
-module work, produce and commit a module-by-module completeness table for
-M01-M20 — for each: does an approved exact plan exist, a fixture, a scorer, a
-test suite, a registry entry, and what is its admission state. Do not trust the
-counts above; recompute them from the tree and correct them. That inventory is
-the backlog and belongs in the repository, not just in a round record.
+**Execute the existing plans and specifications as written. Do not rewrite
+them.** The standard, the roadmap, the phase plans, and the approved
+implementation plans are the authority and are not to be revised, restructured,
+reworded, or "improved" by this loop. Where an approved plan looks wrong,
+incomplete, or contradicted by the tree, **surface it in the round record and
+stop — do not edit it.** The only documents this loop authors are the ones an
+approved plan itself calls for, plus the lifecycle receipts the lease map
+requires. Optimise for progressing through the existing plans fully and
+completely, not for producing new prose.
 
-**Then work the ladder, one module per lane, highest-value gap first.** The
+**Round 0 of this directive: take an inventory, in the round record.** Before
+choosing module work, determine for each of M01-M20 whether an approved exact
+plan, fixture, scorer, test suite, and registry entry exist, and its admission
+state. Recompute this from the tree rather than trusting the counts above, and
+correct them if they are wrong. Keep it in the round record; do not create a new
+tracked document for it unless an approved plan already calls for one.
+
+**Then work the ladder, one module at a time, cheapest genuine gap first.** The
 `U-MODULES` row authorizes no artifact until an approved exact plan exists, so
 for each module the order is fixed and must not be short-circuited:
 
-1. Author the exact implementation plan (protocol, scorer contract, fixture
-   design, license/custody, dependency placement) — this is the step that
-   lifts the module out of `SPEC UNSTABLE`, and it is always permitted.
-2. Freeze/approve that plan the way PR #85 froze the Phase 13-15 contracts.
+1. **If, and only if, the module has no approved exact plan**, author one
+   (protocol, scorer contract, fixture design, license/custody, dependency
+   placement). This is the missing artifact `U-MODULES` explicitly requires
+   before any code, so writing it is mandated — it is not a revision of an
+   existing plan. **If an approved plan already exists (M02, M04, M05, M14),
+   skip straight to step 3 and implement it as written.**
+2. Freeze/approve that new plan the way PR #85 froze the Phase 13-15 contracts.
 3. Implement the deterministic fixture and scorer against the frozen closed
    ABI, test-first, conforming to `$defs.portable_event` where the plan claims
    conformance.
 4. Land it through a reviewed PR with exact-head CI green, then record the
    receipts in the lease map row that authorized it.
 
-Prefer completing a module end to end over starting several. Modules whose
-fixtures already exist but whose scorer or plan does not (M03, M12, M13, M15
-are candidates — verify in the inventory) are cheaper than greenfield ones and
-should come first.
+**Efficiency rules — these are what "optimized" means here:**
+
+- Finish one module completely before starting another. A half-built module is
+  worth nothing and costs a future round to rediscover.
+- Never re-plan, re-derive, or re-litigate an already-approved plan. Read it
+  and execute it. Planning effort belongs only on modules that have no plan.
+- A round that produces only lifecycle bookkeeping is a wasted round. It is
+  never sufficient on its own.
+- Reuse established precedent instead of reinventing: M01 is the conforming
+  reference for fixture and `public_metadata` shape, M05 for provenance, M10
+  for abstention scoring. Copy the pattern; do not invent a second one.
+- Modules with an approved plan already written (M02, M04, M05, M14) and those
+  whose fixtures already exist but whose scorer does not (M03, M12, M13, M15
+  are candidates — verify in the inventory) are far cheaper than greenfield
+  modules and must come first.
 
 Also outstanding, and to be assessed rather than ignored: unlanded work on
 `codex/goalex-r26-sandbox` (9 commits, development sandbox + OCI isolation),
