@@ -58,6 +58,30 @@ def _disclosure_section() -> str:
     return " ".join(body.split())
 
 
+#: Every key M02's scorer emits.  The disclosure says M02 measures no cost or
+#: resource beyond the four it reports as ``unsupported``, so any addition here
+#: has to be disclosed in the same change.
+M02_METRIC_KEYS = frozenset(
+    {
+        "recall_at_1",
+        "recall_at_3",
+        "recall_at_5",
+        "recall_at_10",
+        "ndcg_at_5",
+        "ndcg_at_10",
+        "evidence_recall",
+        "unanswerable_correct_rate",
+        "unsupported_claim_rate",
+        "exact_match",
+        "token_f1",
+        "latency",
+        "tokens",
+        "calls",
+        "storage",
+    }
+)
+
+
 def _fixture(name: str) -> dict:
     return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
@@ -185,6 +209,14 @@ def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
             f"M02 no longer reports {metric!r} as 'unsupported'; the Stage-A "
             "disclosure says it does"
         )
+    # The whole metric surface, not just those four: a newly added `cost_usd`
+    # or `gpu_seconds` would make "none of the three measures cost or
+    # resources" false while the four named keys still read `unsupported`.
+    assert set(metrics) == M02_METRIC_KEYS, (
+        "M02's metric surface changed; the Stage-A disclosure describes the "
+        f"old one. Added: {sorted(set(metrics) - M02_METRIC_KEYS)}; removed: "
+        f"{sorted(M02_METRIC_KEYS - set(metrics))}"
+    )
 
     m04_source = (REPO_ROOT / "eval" / "public" / "wmbs_m04.py").read_text(
         encoding="utf-8"
