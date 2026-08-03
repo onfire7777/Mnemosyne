@@ -166,25 +166,81 @@ def test_fixture_cells_match_the_fixture_directory() -> None:
             )
 
 
-def _dispatched_profiles() -> set[str]:
-    """Every string literal inside ``scoring.py``'s ``score_profile`` body.
-
-    Membership in the module's text is not enough: a removed routing branch
-    leaves the profile name behind in scorer output and helper code, so the
-    positive check below reads the dispatcher itself.
-    """
+def _score_profile_body() -> ast.FunctionDef:
     tree = ast.parse(SCORING.read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == "score_profile":
-            return {
-                literal.value
-                for literal in ast.walk(node)
-                if isinstance(literal, ast.Constant) and isinstance(literal.value, str)
-            }
+            return node
     raise AssertionError("eval/public/scoring.py defines no score_profile function")
 
 
+def _dispatched_profiles() -> set[str]:
+    """Profile names that ``score_profile`` actually branches on.
+
+    Membership in the module's text is not enough: a removed routing branch
+    leaves the profile name behind in scorer output, error messages, and
+    helper code. So this reads the dispatcher's ``if`` tests and keeps only
+    operands of a comparison against the ``profile`` parameter — an
+    ``profile == "…"`` comparator or a member of an ``profile in {…}`` set —
+    rather than every string literal in the body.
+    """
+    dispatched: set[str] = set()
+    for node in ast.walk(_score_profile_body()):
+        if not isinstance(node, ast.If):
+            continue
+        for compare in ast.walk(node.test):
+            if not isinstance(compare, ast.Compare):
+                continue
+            if not (
+                isinstance(compare.left, ast.Name) and compare.left.id == "profile"
+            ):
+                continue
+            for operator, comparator in zip(compare.ops, compare.comparators):
+                if isinstance(operator, ast.Eq) and isinstance(
+                    comparator, ast.Constant
+                ):
+                    if isinstance(comparator.value, str):
+                        dispatched.add(comparator.value)
+                elif isinstance(operator, ast.In) and isinstance(
+                    comparator, (ast.Set, ast.List, ast.Tuple)
+                ):
+                    dispatched.update(
+                        element.value
+                        for element in comparator.elts
+                        if isinstance(element, ast.Constant)
+                        and isinstance(element.value, str)
+                    )
+    assert dispatched, "score_profile branches on no profile literal at all"
+    return dispatched
+
+
 DISPATCHED_PROFILES = _dispatched_profiles()
+
+# The scoring surface also serves benchmarks that are not WMBS modules, so the
+# inventory does not name them. Pinning them here is what gives the
+# "every scorer is accounted for" check below its teeth: a new scorer that
+# names no module ID at all cannot land silently — it must either appear in
+# the inventory or be added to this list in a reviewed edit.
+NON_WMBS_PROFILES = frozenset(
+    {
+        "pm-bench-action-v1",
+        "triggerbench-action-v1",
+        "working-memory-action-v1",
+        "longmemeval-retrieval-v1",
+        "hipporag-retrieval-v1",
+        "qa-em-f1-v1",
+    }
+)
+NON_WMBS_SCORERS = frozenset({"_score_pm_action", "_score_working_action"})
+
+
+def _module_marker(module: str) -> re.Pattern[str]:
+    """Match a module ID delimited by anything that is not alphanumeric.
+
+    `\\b` is wrong here: `_` is a word character, so `\\bm06\\b` misses
+    `_score_wmbs_m06` and `run_m06_development`.
+    """
+    return re.compile(rf"(?<![A-Za-z0-9]){module}(?![A-Za-z0-9])", re.IGNORECASE)
 
 
 def test_scorer_cells_match_the_scoring_surface() -> None:
@@ -205,13 +261,15 @@ def test_scorer_cells_match_the_scoring_surface() -> None:
             # too, so a "no" cell must hold across all three, not just the file
             # glob and the profile dispatch.
             #
-            # Known limit: this is a module-ID scan, so a scorer that names
-            # neither `mNN` nor `wmbs-mNN-` anywhere (say an M06 scorer routed
-            # as `wmbs-consolidation-v1`) would slip past it. Closing that gap
-            # needs a structured module-ID declaration inside the scorer
-            # surfaces themselves, which is the public-harness integration
-            # owner's lease and outside this documentation-and-tests node.
-            marker = re.compile(rf"\b{module.lower()}\b", re.IGNORECASE)
+            # The delimiter is non-alphanumeric, not `\b`: underscores are word
+            # characters, so `\bm06\b` would not fire on the conventional names
+            # `_score_wmbs_m06` or `run_m06_development`.
+            #
+            # A scorer that names no module ID at all (say an M06 scorer routed
+            # as `wmbs-consolidation-v1`) escapes this scan by construction; it
+            # is caught instead by
+            # `test_every_scorer_in_the_dispatcher_is_accounted_for`.
+            marker = _module_marker(module)
             for surface in (SCORING, *SCORER_SURFACES):
                 hit = marker.search(surface.read_text(encoding="utf-8"))
                 assert hit is None, (
@@ -230,6 +288,45 @@ def test_scorer_cells_match_the_scoring_surface() -> None:
             assert any(
                 f"def {symbol}(" in path.read_text(encoding="utf-8") for path in sources
             ), f"{module}: symbol {symbol!r} is defined in none of {sources}"
+
+
+def test_every_scorer_in_the_dispatcher_is_accounted_for() -> None:
+    """No scorer can reach ``score_profile`` without the inventory noticing.
+
+    The per-module "no" cells scan for module IDs, which a scorer named after
+    its capability rather than its module would evade. This check is
+    ID-independent: every dispatched profile and every ``_score_*`` helper in
+    ``scoring.py`` must either be named in the inventory or be pinned in the
+    non-WMBS lists above, so an unnamed new scorer fails until someone makes
+    that claim explicitly.
+    """
+    text = INVENTORY.read_text(encoding="utf-8")
+    for profile in sorted(DISPATCHED_PROFILES - NON_WMBS_PROFILES):
+        assert profile in text, (
+            f"score_profile dispatches {profile!r}, which is neither in the "
+            "inventory nor pinned as a non-WMBS profile"
+        )
+    tree = ast.parse(SCORING.read_text(encoding="utf-8"))
+    helpers = {
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("_score_")
+    }
+    for helper in sorted(helpers - NON_WMBS_SCORERS):
+        assert helper in text, (
+            f"eval/public/scoring.py defines scorer {helper!r}, which is neither "
+            "in the inventory nor pinned as a non-WMBS scorer"
+        )
+    for pinned in sorted(NON_WMBS_PROFILES):
+        assert pinned in DISPATCHED_PROFILES, (
+            f"{pinned!r} is pinned as non-WMBS but score_profile no longer "
+            "dispatches it; drop the stale pin"
+        )
+    for pinned in sorted(NON_WMBS_SCORERS):
+        assert pinned in helpers, (
+            f"{pinned!r} is pinned as non-WMBS but scoring.py no longer defines "
+            "it; drop the stale pin"
+        )
 
 
 def test_plan_cells_separate_plan_existence_from_plan_approval() -> None:
