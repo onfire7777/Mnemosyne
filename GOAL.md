@@ -93,6 +93,17 @@ CI `30737466988`, post-merge CI `30738303497`). It admitted no source node and
 no successor node; this branch-resident recomputation is its own accepted
 standing-condition residue.
 
+Three later merges then advanced canonical `main` past that point: PR #96
+(`main@088e2f31`, exact head `1050749a`, CI `30744318093`), which delivered the
+development-only M02/M04/M05 evaluation oracles outside the lifecycle-node
+sequence; PR #97 (`main@71e492b4`, exact head `13c05d65`, exact-head CI
+`30774834604`, post-merge CI `30775783472`); and PR #98 (`main@b8673031`, exact
+head `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`).
+Each recorded baseline they overtook is superseded, so the carve-out is
+recomputed here from `main@b8673031`. Exactly one node, `T7`, is admitted from
+that baseline: documentation and tests only, disclosing PR #96's oracles and
+pinning the disclosure. It admits no source node and no successor node.
+
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
 `605ecd3ddf7faf308f664f0869e5e2eb431afa7d`. The closed ABI and bounded
@@ -143,8 +154,20 @@ delivered `T6` at `main@42abaab7`
 (exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI
 `30738303497`). PR #96 then independently delivered the development-only
 M02/M04/M05 evaluation oracles at `main@088e2f31` (exact head `1050749a`, CI
-`30744318093`), which is the current canonical baseline. `T5` and `T6` are
-discharged, and no GoalEx lifecycle or source node is currently admitted.
+`30744318093`). PR #97 then merged the round-43 review adjudication and
+controller reconciliation at `main@71e492b4` (exact head `13c05d65`, exact-head
+CI `30774834604`, post-merge CI `30775783472`), and PR #98 merged the
+documentation-only correction of PR #97's "retired" claim back to "paused" at
+`main@b8673031` (exact head `b49b0b35`, exact-head CI `30787319275`, post-merge
+CI `30788531829`), which is the current canonical baseline. `T5` and `T6` are
+discharged. Through PR #96 the recorded position was that
+no GoalEx lifecycle or source node is currently admitted;
+this round supersedes that position in exactly one bounded respect by admitting
+lease-map node `T7`, a documentation-and-tests node that discloses PR #96's
+three development-only oracles in `eval/public/README.md` and pins the
+disclosure with tests. `T7` admits no source node, no Stage-B integration, and
+no successor node, and it moves no admission state, publication claim, or
+progress counter.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -200,7 +223,8 @@ lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
 under the standing controller Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
-That map admits no source node and no lifecycle writer at this baseline, so the next source
+That map admits no source node at this baseline — its one admitted writer is the
+bounded documentation-and-tests node `T7` — so the next source
 admission waits on an external gate opening, and the map must be recomputed
 from then-current `main` at that time.
 
@@ -504,6 +528,8 @@ git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main
 git merge-base --is-ancestor 42abaab7ba4fa83f9838c3d32ee96db4256bfcad main
 git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
+git merge-base --is-ancestor 71e492b4507d84e6631fef851cec820bcd80215b main
+git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -517,7 +543,7 @@ git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "088e2f31003e3a7e96119bc8cdba162252226ac1"
+test "$(git rev-parse main)" = "b8673031a80158c49d552a4b3647829d213243bd"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
