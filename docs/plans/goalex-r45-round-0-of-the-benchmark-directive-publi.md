@@ -98,10 +98,10 @@ controller branch as the final step.
 - [x] Explicitly note where the counts in `GOAL.md`'s Current Priority section are wrong (at minimum M03's inline scorer) — these corrections go into the inventory document, not into a rewrite of the operator's directive text.
 
 ### Task 2: Commit the inventory document
-- [ ] Create `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md` with a header stating it is recomputed from the tree at `main@b8673031` plus this branch, that it is documentation only, and that it authorizes no artifact.
-- [ ] Include one row per module M01–M20 with columns: module, capability/short name, approved exact plan, fixture, scorer, test suite, registry entry, admission state, and the cheapest next step per `GOAL.md`'s ladder (plan → freeze → implement → land).
-- [ ] Add a short "Corrections to the recorded counts" section listing each figure in `GOAL.md`'s Current Priority that the recomputation contradicts, with evidence.
-- [ ] Add a "Highest-value next gaps" section ranking modules that already have a fixture or partial scorer above greenfield ones, per the directive's preference.
+- [x] Create `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md` with a header stating it is recomputed from the tree at `main@b8673031` plus this branch, that it is documentation only, and that it authorizes no artifact.
+- [x] Include one row per module M01–M20 with columns: module, capability/short name, approved exact plan, fixture, scorer, test suite, registry entry, admission state, and the cheapest next step per `GOAL.md`'s ladder (plan → freeze → implement → land).
+- [x] Add a short "Corrections to the recorded counts" section listing each figure in `GOAL.md`'s Current Priority that the recomputation contradicts, with evidence.
+- [x] Add a "Highest-value next gaps" section ranking modules that already have a fixture or partial scorer above greenfield ones, per the directive's preference.
 
 ### Task 3: Pin the inventory with a test
 - [ ] Add `tests/test_wmbs_module_inventory.py` that parses the inventory table and asserts each claimed fixture path, scorer symbol/profile, test file, and registry key actually exists (and each "no" cell actually does not), so the inventory cannot silently drift from the tree.
