@@ -251,16 +251,26 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
     )
 
 
-MERGED_PR = re.compile(r"^Merge pull request #(\d+) from ", re.MULTILINE)
+# GitHub's default merge subject plus the shorter hand-written variants.
+# A trailing "(#N)" (squash-merge style) is deliberately NOT treated as a PR
+# merge: this repository merges every PR with a merge commit and uses that
+# suffix for *issue* references instead (e.g. "... Lease G wire ... (#17)"),
+# so accepting it would report issues as unrecorded PRs.
+MERGED_PR = re.compile(r"^Merge (?:pull request |PR )?#(\d+)\b", re.MULTILINE)
+# Only a structured lease-map entry counts as a record. Bare prose such as
+# "PR #91 was the deferred GoalEx-owner delivery" must not satisfy the gate:
+# an incidental mention would otherwise authorise an unrecorded merge without
+# a lifecycle entry or receipts.
+LEASE_PR_RECORD = re.compile(r"^\s*[-*] PR #(\d+)[:,]", re.MULTILINE)
 
 
 def _unrecorded_merged_prs(baseline_sha: str) -> list[str]:
     """PR numbers merged into origin/main since `baseline_sha` and not recorded.
 
     Returns the sorted PR numbers whose merge commits are reachable from
-    `origin/main` but not from the recorded baseline, and which the dependency
-    lease map does not mention. An empty list means the lease map accounts for
-    everything that has landed since the baseline.
+    `origin/main` but not from the recorded baseline, and for which the
+    dependency lease map holds no structured record. An empty list means the
+    lease map accounts for everything that has landed since the baseline.
     """
     subjects = subprocess.run(
         [
@@ -276,7 +286,7 @@ def _unrecorded_merged_prs(baseline_sha: str) -> list[str]:
         text=True,
     ).stdout
     lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
-    recorded = set(re.findall(r"PR #(\d+)", lease_text))
+    recorded = set(LEASE_PR_RECORD.findall(lease_text))
     landed = set(MERGED_PR.findall(subjects))
     return sorted(landed - recorded, key=int)
 
@@ -359,6 +369,74 @@ def test_unrecorded_post_baseline_merge_is_detected(
         f"PR #{pr_number} landed after {stale_baseline} and is absent from the "
         "lease map, so it must be reported as unrecorded"
     )
+
+
+def test_unstructured_pr_mention_does_not_count_as_a_record(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Prose naming a PR must not satisfy the gate — only a structured entry.
+
+    The lease map cites PR numbers constantly in narrative text. If any mention
+    counted, a merge could be authorised by an unrelated sentence rather than by
+    a lifecycle entry carrying receipts.
+    """
+    merged = subprocess.run(
+        [
+            "git",
+            "log",
+            "--merges",
+            "--grep=^Merge pull request #",
+            "-1",
+            "--format=%H %s",
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    merge_sha, subject = merged.split(" ", 1)
+    pr_number = MERGED_PR.match(subject).group(1)
+    stale_baseline = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    prose_only = tmp_path / "lease-map-prose-only.md"
+    prose_only.write_text(
+        f"PR #{pr_number} was discussed here, and PR #{pr_number} is pending.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", prose_only)
+    assert pr_number in _unrecorded_merged_prs(stale_baseline), (
+        "a prose mention must not be accepted as a lease-map record"
+    )
+
+    structured = tmp_path / "lease-map-structured.md"
+    structured.write_text(
+        f"- PR #{pr_number}: delivered, receipts recorded.\n", encoding="utf-8"
+    )
+    monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", structured)
+    assert pr_number not in _unrecorded_merged_prs(stale_baseline), (
+        "a structured entry must be accepted as a lease-map record"
+    )
+
+
+def test_merge_subject_variants_are_all_recognised() -> None:
+    """Receipt detection must not depend on GitHub's default subject alone."""
+    for subject, expected in (
+        ("Merge pull request #96 from onfire7777/codex/x", "96"),
+        ("Merge PR #96: land the thing", "96"),
+        ("Merge #96: land the thing", "96"),
+    ):
+        matched = MERGED_PR.match(subject)
+        assert matched and matched.group(1) == expected, subject
+    # Issue references in this repo use the trailing "(#N)" form, so that shape
+    # must not be read as a PR merge.
+    assert not MERGED_PR.match("feat(phase12): Lease G wire — corroboration (#17)")
 
 
 def test_stale_alternate_canonical_baseline_claim_fails(

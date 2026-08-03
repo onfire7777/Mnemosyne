@@ -33,18 +33,26 @@ def _runtime_lock_custody(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     (custody_dir / "locks").mkdir(mode=0o700)
     monkeypatch.setenv("MNEMO_CUSTODY_DIR", str(custody_dir))
     yield
+    # The lock is released only when the owner descriptor closes, which the lock
+    # script does *after* unlinking `owner.json` — so the file's absence is the
+    # terminal state, and its presence says nothing about availability. Probe the
+    # flock itself, and treat a vanishing file as the race it is rather than
+    # letting the exists()/open() gap raise FileNotFoundError.
     owner = custody_dir / "locks" / "runtime-exclusive" / "owner.json"
-    if owner.exists():
-        with owner.open("rb") as retained:
-            deadline = time.monotonic() + 30.0
-            while True:
-                try:
-                    fcntl.flock(retained, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        raise
-                    time.sleep(0.05)
+    deadline = time.monotonic() + 30.0
+    while True:
+        try:
+            handle = owner.open("rb")
+        except FileNotFoundError:
+            return
+        with handle as retained:
+            try:
+                fcntl.flock(retained, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise
+        time.sleep(0.05)
 
 
 def _preflight_rows_by_lane(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
