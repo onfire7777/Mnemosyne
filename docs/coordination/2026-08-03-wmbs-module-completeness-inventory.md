@@ -144,16 +144,21 @@ module end to end ranks above starting several.
    the public-harness integration owner's exclusive lease
    (`docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`,
    Shared-file owners table); it needs that lease, not a new plan.
-2. **M02, M04, M05 — Stage A complete, Stage B unregistered.** Each has an
-   approved per-module plan, a fixture, a pure scorer, and a test suite. Each
-   needs a scoring-profile branch, an adapter, and a registry entry, all on the
+2. **M02, M04, M05 — Stage A complete, Stage B unregistered.** Each has a
+   per-module plan that is still `PROPOSED` and **not approved** — the step-2
+   freeze gate is outstanding for all three — plus a fixture, a pure scorer,
+   and a test suite. Each needs that freeze gate to clear first, and then a
+   scoring-profile branch, an adapter, and a registry entry, all on the
    public-harness lease. M05 additionally carries the Q1/Q3/Q4 ABI quarantines
    named in its module docstring, so it is the most expensive of the three.
    Until Stage B lands, all three remain development-only oracles that
    authorize no module-implementation, protocol, or publication claim — the
    `U-MODULES` row and the `T7` disclosure both say so.
-3. **M14 — plan exists, no artifact.** The only module with an approved
-   per-module plan and nothing built. Steps 2–3 of the ladder (freeze, then
+3. **M14 — plan exists, no artifact.** The only module with a per-module plan
+   and nothing built. That plan is `PROPOSED` — its own line 3 reads
+   `PLANNING ARTIFACT ONLY — NOT CODE-READY` and its freeze gate is
+   outstanding, so it authorizes no implementation as it stands. Steps 2–3 of
+   the ladder (freeze, then
    implement fixture and scorer test-first against the frozen closed ABI) are
    ordinary ungated source work needing no operator authorization. This is the
    highest-value item that is *not* lease-blocked.

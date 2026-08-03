@@ -307,10 +307,13 @@ def test_every_scorer_in_the_dispatcher_is_accounted_for() -> None:
             "inventory nor pinned as a non-WMBS profile"
         )
     tree = ast.parse(SCORING.read_text(encoding="utf-8"))
+    # Walk, not ``tree.body``: an ``async def``, or a helper nested in a class
+    # or a closure, is a scorer too and must not slip past the accounting.
     helpers = {
         node.name
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name.startswith("_score_")
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("_score_")
     }
     for helper in sorted(helpers - NON_WMBS_SCORERS):
         assert helper in text, (
@@ -365,6 +368,40 @@ def test_plan_cells_separate_plan_existence_from_plan_approval() -> None:
             assert "not approved" not in cell, (
                 f"{module}: cell says 'not approved' but no cited plan is PROPOSED"
             )
+
+
+SUMMARY_ITEM = re.compile(r"^\d+\. \*\*", re.MULTILINE)
+APPROVED_WORD = re.compile(r"(?<!not )\bapproved\b")
+GATE_DISCLOSURES = ("not approved", "PROPOSED", "freeze gate", "freeze/approval")
+
+
+def test_prose_never_calls_an_unapproved_plan_approved() -> None:
+    """The narrative items may not promote a plan past the table's own gate.
+
+    A row can say a plan exists but is **not approved** while a numbered item
+    below calls the same plan approved; that reads as authorizing
+    implementation before the ladder's step-2 freeze gate. So any item that
+    names an unapproved module and speaks of approval must also disclose the
+    outstanding gate.
+    """
+    text = INVENTORY.read_text(encoding="utf-8")
+    unapproved = {
+        module for module, row in ROWS.items() if "not approved" in row["plan"]
+    }
+    assert unapproved, "no module claims an unapproved plan; this pin is stale"
+    starts = [match.start() for match in SUMMARY_ITEM.finditer(text)]
+    assert starts, "inventory has no numbered summary items to check"
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(text)
+        item = text[start:end]
+        named = {module for module in unapproved if _module_marker(module).search(item)}
+        if not named or not APPROVED_WORD.search(item):
+            continue
+        assert any(marker in item for marker in GATE_DISCLOSURES), (
+            f"item {item.splitlines()[0]!r} names {sorted(named)}, whose plan "
+            "cells say 'not approved', and speaks of approval without "
+            "disclosing the outstanding freeze gate"
+        )
 
 
 def test_test_suite_cells_match_the_tests_directory() -> None:
