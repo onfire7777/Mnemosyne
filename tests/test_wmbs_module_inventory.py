@@ -10,6 +10,7 @@ registry key, and each explicit "no" cell.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -22,6 +23,12 @@ INVENTORY = (
 REGISTRY = ROOT / "eval" / "public" / "registry.json"
 SCORING = ROOT / "eval" / "public" / "scoring.py"
 FIXTURE_DIR = ROOT / "eval" / "public" / "fixtures"
+# The inventory's own definition of "scorer": a dedicated ``wmbs_mNN.py``, an
+# inline dispatch in ``scoring.py``, or module logic in either of these two.
+SCORER_SURFACES = (
+    ROOT / "eval" / "public" / "adapters" / "whole_memory_reference.py",
+    ROOT / "eval" / "public" / "bundle.py",
+)
 
 MODULES = tuple(f"M{index:02d}" for index in range(1, 21))
 
@@ -114,19 +121,22 @@ def test_every_referenced_path_exists_with_the_claimed_line() -> None:
     text = INVENTORY.read_text(encoding="utf-8")
     seen_any = False
     for line in text.splitlines():
-        last: Path | None = None
+        # A bare `:N` ref continues the path that *precedes* it, so record
+        # where each path was cited rather than keeping only the last one.
+        anchors: list[tuple[int, Path]] = []
         for match in PATH_REF.finditer(line):
             path = _resolve(match.group(1))
             if path is None:
                 continue
             seen_any = True
             assert path.exists(), f"inventory cites missing path {match.group(1)}"
-            last = path
+            anchors.append((match.start(), path))
             if match.group(2) is not None:
                 _assert_has_line(path, int(match.group(2)))
-        if last is not None and last.is_file():
-            for match in LINE_REF.finditer(line):
-                _assert_has_line(last, int(match.group(1)))
+        for match in LINE_REF.finditer(line):
+            preceding = [path for start, path in anchors if start < match.start()]
+            if preceding and preceding[-1].is_file():
+                _assert_has_line(preceding[-1], int(match.group(1)))
     assert seen_any, "inventory cites no repository paths at all"
 
 
@@ -156,6 +166,27 @@ def test_fixture_cells_match_the_fixture_directory() -> None:
             )
 
 
+def _dispatched_profiles() -> set[str]:
+    """Every string literal inside ``scoring.py``'s ``score_profile`` body.
+
+    Membership in the module's text is not enough: a removed routing branch
+    leaves the profile name behind in scorer output and helper code, so the
+    positive check below reads the dispatcher itself.
+    """
+    tree = ast.parse(SCORING.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "score_profile":
+            return {
+                literal.value
+                for literal in ast.walk(node)
+                if isinstance(literal, ast.Constant) and isinstance(literal.value, str)
+            }
+    raise AssertionError("eval/public/scoring.py defines no score_profile function")
+
+
+DISPATCHED_PROFILES = _dispatched_profiles()
+
+
 def test_scorer_cells_match_the_scoring_surface() -> None:
     scoring_text = SCORING.read_text(encoding="utf-8")
     for module, row in ROWS.items():
@@ -170,11 +201,21 @@ def test_scorer_cells_match_the_scoring_surface() -> None:
                 f"{module}: scorer cell says no, but scoring.py dispatches a "
                 f"wmbs-{module.lower()} profile"
             )
+            # The inventory counts the adapter and the bundle as scorer surfaces
+            # too, so a "no" cell must hold across all three, not just the file
+            # glob and the profile dispatch.
+            marker = re.compile(rf"\b{module.lower()}\b", re.IGNORECASE)
+            for surface in (SCORING, *SCORER_SURFACES):
+                hit = marker.search(surface.read_text(encoding="utf-8"))
+                assert hit is None, (
+                    f"{module}: scorer cell says no, but "
+                    f"{surface.relative_to(ROOT)} mentions {hit.group(0)!r}"
+                )
             continue
         for profile in PROFILE_REF.findall(cell):
-            assert f'"{profile}"' in scoring_text, (
-                f"{module}: cited profile {profile!r} is not dispatched in "
-                "eval/public/scoring.py"
+            assert profile in DISPATCHED_PROFILES, (
+                f"{module}: cited profile {profile!r} is not dispatched inside "
+                "score_profile in eval/public/scoring.py"
             )
         for symbol in SYMBOL_REF.findall(cell):
             sources = [path for path in cited if path.suffix == ".py"]
@@ -182,6 +223,44 @@ def test_scorer_cells_match_the_scoring_surface() -> None:
             assert any(
                 f"def {symbol}(" in path.read_text(encoding="utf-8") for path in sources
             ), f"{module}: symbol {symbol!r} is defined in none of {sources}"
+
+
+def test_plan_cells_separate_plan_existence_from_plan_approval() -> None:
+    """A `PROPOSED` plan may never be recorded as an approved one.
+
+    The ladder's step 2 is freeze/approval; recording a `PROPOSED` planning
+    artifact as approved would let the inventory authorize implementation
+    before that gate.
+    """
+    for module, row in ROWS.items():
+        cell = row["plan"]
+        if _claims_absent(cell):
+            continue
+        if "pilot plan" in cell:
+            # The owner-landed pilot plan is the one approved exact plan.
+            assert "not approved" not in cell, (
+                f"{module}: cites the owner-landed pilot plan yet says 'not approved'"
+            )
+            continue
+        plans = [path for path in _paths_in(cell) if path.parts[-2] == "plans"]
+        assert plans, f"{module}: plan cell claims a plan but cites no plan file"
+        proposed = [
+            path
+            for path in plans
+            if any(
+                marker in "\n".join(path.read_text(encoding="utf-8").splitlines()[:8])
+                for marker in ("PROPOSED", "PLANNING ARTIFACT", "NOT CODE-READY")
+            )
+        ]
+        if proposed:
+            assert "not approved" in cell, (
+                f"{module}: cites {[p.name for p in proposed]}, whose status header "
+                "is PROPOSED, but the cell does not say 'not approved'"
+            )
+        else:
+            assert "not approved" not in cell, (
+                f"{module}: cell says 'not approved' but no cited plan is PROPOSED"
+            )
 
 
 def test_test_suite_cells_match_the_tests_directory() -> None:

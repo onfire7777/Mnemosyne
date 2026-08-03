@@ -361,13 +361,17 @@ PR #98 corrected PR #97's overstated "loop retired" claim back to paused.
 Node `T7` is admitted from this baseline for documentation and tests only —
 the M02/M04/M05 Stage-A gap disclosures and their pinning tests, both now
 delivered — and admits no source node and no successor node. Node `T8` is
-admitted alongside it, also documentation and tests only: the Round-0 M01-M20
+admitted alongside it, and the two are not lease-disjoint — they share
+`GOAL.md`, `.planning/STATE.md`, the lease map, and `docs/plans/`, so they land
+as one serialized GoalEx lifecycle writer in a single PR. `T8` is also
+documentation and tests only: the Round-0 M01-M20
 module completeness inventory, its line-level derivations, and the drift test
 that pins the inventory to the tree, all now delivered. Node `T9` is admitted
 as the public-harness Stage-B M03 registry-admission node: it registers the
 existing `wmbs-m03-valid-time-development` cell — already fixture-backed,
 scorer-backed, adapter-backed, and unit-tested, but unreachable from
-`run_public_suite` — and nothing else. It authorizes M03 only, changes no
+`run_public_suite` for want of a registry entry, two `runner.py` keys, and the
+matching `allowed_profile` label in `eval/public/bundle.py` — and nothing else. It authorizes M03 only, changes no
 fixture byte, scorer logic, or schema, leaves M03 at `PROPOSED` /
 `publishable:false` / `pbpp_headline_eligible:false` with full bitemporal
 transaction-time retained as a hard deferral, moves no progress counter, and

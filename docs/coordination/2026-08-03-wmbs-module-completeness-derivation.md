@@ -317,8 +317,11 @@ directive text is not rewritten.
    module is plan-complete in the sense `U-MODULES` requires.
 5. **"M03, M12, M13, M15 are candidates — verify in the inventory"** —
    verified, with the state differing per module: M03 has fixture + inline
-   scorer + routable profile but **no registry entry and no bundle profile
-   label** (`bundle.py:313-314`); M12 and M13 have fixture + scorer +
+   scorer + scoring-profile branch but **no registry entry, no `_ADAPTERS` or
+   `_PROFILE_CONTRACTS` key in `runner.py`, and no `allowed_profile` label in
+   `bundle.py`** (`bundle.py:313-314`) — `runner.py` and `bundle.py` carry two
+   independent profile-contract tables, so all three artifacts are required
+   before the cell is reachable; M12 and M13 have fixture + scorer +
    registry entry and are gated on evidence rather than on code; M15 has
    adapter and bundle logic and three test rails but **no fixture of its own**
    and no registry entry, since it composes M01/M03/M10.
@@ -328,9 +331,11 @@ directive text is not rewritten.
 Derived from §2 against the `GOAL.md:39-52` ladder (plan → freeze →
 implement → land):
 
-- **M03** — implement: fixture, scorer and profile already exist; the missing
-  artifacts are a `registry.json` entry and a `bundle.py` profile label. Blocked
-  on the public valid-time surface deferral (`…standard-design.md:694`).
+- **M03** — implement: fixture, scorer and scoring profile already exist; the
+  missing artifacts are a `registry.json` suite entry, the `_ADAPTERS` and
+  `_PROFILE_CONTRACTS` keys in `runner.py`, and the `allowed_profile` label in
+  `bundle.py`. Blocked on the public valid-time surface deferral
+  (`…standard-design.md:694`).
 - **M15** — land: adapter, projection, digest and rails exist; needs its own
   fixture and registry admission. Downstream of `P14-B`.
 - **M12 / M13** — land: fixture, scorer, registry entry and gap disclosures all
