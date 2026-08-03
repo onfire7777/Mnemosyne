@@ -206,3 +206,75 @@ work. Run its contract suite with:
 ```bash
 uv run --locked python -m pytest tests/test_public_whole_memory_reference.py -q
 ```
+
+### M02/M04/M05 Stage-A development oracles (unregistered)
+
+`wmbs_m02.py`, `wmbs_m04.py`, and `wmbs_m05.py` are Stage-A development oracles.
+Each runs no system and observes no SUT: the module generates a deterministic
+synthetic fixture and scores harness-supplied observations, so a green run
+evidences generator and scorer determinism over that exact finite fixture and
+nothing whatsoever about any memory system.
+
+All three are **unregistered**. None has a `registry.json` entry, an adapter, a
+runner route, or a scoring-profile registration, so none can be selected with
+`mneme eval-public --suite`, none produces a bundle, and none produces a
+benchmark result. Every one of them is admission state `PROPOSED`: M02 and M04
+declare `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
+`admission_state: "PROPOSED"` in both its labels and its committed fixture. M04's
+score envelope and M05's labels and fixture record `publishable: false` and
+`pbpp_headline_eligible: false`; M02 emits no publication or headline field at
+all and makes no publication claim. All three are licensed `CC0-1.0`.
+
+None of the three measures cost or resources. M02's scorer reports `latency`,
+`tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
+latency, token, call, or storage metric of any kind. Treat all four classes as
+unsupported for every one of these modules.
+
+**M02 (`wmbs-m02-retrieval-development`).** The committed fixture is generated
+from seed `20260801` and holds 240 documents and 60 questions — ten per query
+family across `exact`, `paraphrase`, `entity`, `relation`, `multi-hop`, and
+`unanswerable`. The specification names a 2,000-event local corpus; Stage A
+commits 240 documents and defers the 2,000-event variant behind a measured
+resource receipt, so the committed corpus scale is a disclosed deferral rather
+than a scaled-down result. Its metrics are descriptive over that finite corpus
+only.
+
+**M04 (`wmbs-m04-development`).** The committed fixture is generated from seed
+`20260801` and holds 140 cases over five per-case seeds (`11`, `23`, `37`, `53`,
+`71`), three orderings (`as_authored`, `reversed`, `interleaved`), and seven
+source classes (`independent`, `duplicated`, `low_quality`, `high_quality`,
+`malicious`, `unresolved`, `later_resolved`). Numeric confidence calibration is
+`unsupported`: the unresolved-calibration metric scores only abstention
+behavior. Its declared disclosures also record `branch_merge` as
+`UNSUPPORTED-BY-SYSTEM`, `transaction_time` as `unsupported`, `update_hook` as
+`emulated`, and the `sqlite` and `postgresql` backends as `DEFERRED`. M04's
+fixture events deliberately depart from the closed `portable_event` ABI: they
+reuse the portable-event key vocabulary but carry an additional load-bearing
+`source_id` that keys the ablation gold. That reuse is a shape-vocabulary
+borrowing for a Stage-A ablation task and is never an ABI conformance claim.
+
+**M05 (`wmbs-m05-provenance-development`).** The committed fixture is generated
+from seed `13`, declares the five seeds `13`, `29`, `41`, `59`, `73`, and holds
+five slices of twenty cases each (`protected-grounding`, `distractor-sources`,
+`tampered-lineage`, `unsupported-claim`, `derived-claims`) over the three
+retrieval stages `dense_hash`, `lexical`, and `graph_ppr`. It scores **one-hop**
+claim-to-source grounding only; derived-claim lineage, explanation
+faithfulness, promoted-item slices, and `query_with_evidence` are all recorded
+as deferred rather than measured. Its source manifest is content-addressed but
+explicitly **unsigned** (`signed: false`, signing deferred behind the protected
+lease), and it names eight unresolved integration dependencies in
+`INTEGRATION_DEPENDENCIES` — Q1 `query_with_evidence` absent from the frozen
+ABI, Q2 scorer-enforced rather than schema-proven grounding, Q3 self-declared
+and ignored `provenance_status`, Q4 evidence handles not digest-bound, Q7 replay
+hashes needing real artifact binding, Q9 model-backed grounded answering, Q10
+unwired `HowProvenance`, and Q12 missing artifacts failing rather than skipping.
+
+Stage B — harness integration for all three modules — is **not delivered**. It
+remains gated on the public-harness integration owner's lease and on the
+quarantines named in
+[`docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`](../../docs/plans/wmb-m02-retrieval-organization-implementation-plan.md),
+[`docs/plans/wmb-m04-conflict-correction-implementation-plan.md`](../../docs/plans/wmb-m04-conflict-correction-implementation-plan.md),
+and
+[`docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`](../../docs/plans/wmb-m05-provenance-explanation-implementation-plan.md).
+Nothing here is a publication, comparability, ranking, superiority, or
+upstream-equivalence claim.
