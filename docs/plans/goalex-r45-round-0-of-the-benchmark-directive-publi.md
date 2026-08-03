@@ -104,9 +104,9 @@ controller branch as the final step.
 - [x] Add a "Highest-value next gaps" section ranking modules that already have a fixture or partial scorer above greenfield ones, per the directive's preference.
 
 ### Task 3: Pin the inventory with a test
-- [ ] Add `tests/test_wmbs_module_inventory.py` that parses the inventory table and asserts each claimed fixture path, scorer symbol/profile, test file, and registry key actually exists (and each "no" cell actually does not), so the inventory cannot silently drift from the tree.
-- [ ] Assert the table covers exactly M01–M20 with no duplicates or gaps.
-- [ ] Run the test; make it fail first against a deliberately wrong cell to prove it has teeth, then correct the cell.
+- [x] Add `tests/test_wmbs_module_inventory.py` that parses the inventory table and asserts each claimed fixture path, scorer symbol/profile, test file, and registry key actually exists (and each "no" cell actually does not), so the inventory cannot silently drift from the tree.
+- [x] Assert the table covers exactly M01–M20 with no duplicates or gaps.
+- [x] Run the test; make it fail first against a deliberately wrong cell to prove it has teeth, then correct the cell. Six mutations were driven through the committed document and reverted byte-identically: a fabricated M03 registry entry, a fabricated M06 fixture, a dropped M07 row, an understated scorer-bearing count, an undefined `_score_wmbs_m03_bogus` symbol, and a non-existent M04 test file. Each failed at least one test; the restored document passes all eight.
 
 ### Task 4: Deliver the admitted T7 disclosure
 - [ ] Add a gap-disclosure section to `eval/public/README.md` for the PR #96 M02/M04/M05 development oracles, following the wording and structure of the existing M12/M13 gap disclosures in that file.
