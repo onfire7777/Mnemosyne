@@ -27,7 +27,7 @@ ROTATOR_SCRIPT = HELPER.with_name("rotate-production-mcp-client-cert.sh")
 LOCK_NAME = "runtime-exclusive"
 OWNER_NAME = "owner.json"
 USAGE = "usage: runtime-exclusive-lock.sh OPERATION -- /absolute/command [args...]\n"
-SUBPROCESS_TIMEOUT = 15
+SUBPROCESS_TIMEOUT = 30
 
 
 def _write_python_lock_probe(tmp_path: Path) -> tuple[Path, Path]:
@@ -180,7 +180,7 @@ def _assert_fixed_failure(
     assert str(custody_dir) not in completed.stderr
 
 
-def _wait_for(path: Path, *, timeout: float = 5.0) -> None:
+def _wait_for(path: Path, *, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if path.exists():

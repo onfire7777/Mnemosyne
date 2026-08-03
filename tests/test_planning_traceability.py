@@ -232,6 +232,211 @@ def test_canonical_baseline_is_identical_across_the_three_lifecycle_files() -> N
         check=True,
         capture_output=True,
     )
+    # Ancestry alone passes for *any* superseded baseline, so it can never
+    # detect the lapse GOAL.md's canonical-baseline gate exists to catch: a PR
+    # landing on `main` while the lifecycle files still name an older baseline.
+    #
+    # Tip equality (`recorded == origin/main`) cannot express that invariant
+    # either — the commit that records a baseline necessarily lands *after* it,
+    # so the claim is stale the instant it merges and `main` would never be
+    # green. The enforceable form is: every PR merged into `main` since the
+    # recorded baseline must be accounted for in the lease map.
+    unrecorded = _unrecorded_merged_prs(sha)
+    assert not unrecorded, (
+        "these PRs merged into origin/main after the recorded baseline "
+        f"`main@{short}` but appear nowhere in {DEPENDENCY_LEASE_MAP.name}: "
+        + ", ".join(f"PR #{pr}" for pr in unrecorded)
+        + " — recompute the canonical baseline and record their receipts "
+        "before admitting further work"
+    )
+
+
+# GitHub's default merge subject plus the shorter hand-written variants.
+# A trailing "(#N)" (squash-merge style) is deliberately NOT treated as a PR
+# merge: this repository merges every PR with a merge commit and uses that
+# suffix for *issue* references instead (e.g. "... Lease G wire ... (#17)"),
+# so accepting it would report issues as unrecorded PRs.
+MERGED_PR = re.compile(r"^Merge (?:pull request |PR )?#(\d+)\b", re.MULTILINE)
+# Only a structured lease-map entry counts as a record. Bare prose such as
+# "PR #91 was the deferred GoalEx-owner delivery" must not satisfy the gate:
+# an incidental mention would otherwise authorise an unrecorded merge without
+# a lifecycle entry or receipts.
+LEASE_PR_RECORD = re.compile(r"^\s*[-*] PR #(\d+)[:,]", re.MULTILINE)
+
+
+def _unrecorded_merged_prs(baseline_sha: str) -> list[str]:
+    """PR numbers merged into origin/main since `baseline_sha` and not recorded.
+
+    Returns the sorted PR numbers whose merge commits are reachable from
+    `origin/main` but not from the recorded baseline, and for which the
+    dependency lease map holds no structured record. An empty list means the
+    lease map accounts for everything that has landed since the baseline.
+    """
+    subjects = subprocess.run(
+        [
+            "git",
+            "log",
+            "--merges",
+            "--format=%s",
+            f"{baseline_sha}..refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    lease_text = DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8")
+    recorded = set(LEASE_PR_RECORD.findall(lease_text))
+    landed = set(MERGED_PR.findall(subjects))
+    return sorted(landed - recorded, key=int)
+
+
+def test_t6_terminal_receipts_are_consistent_across_lifecycle_files() -> None:
+    """T6 must remain closed with one shared PR #95 receipt tuple."""
+    lifecycle_texts = {
+        "GOAL.md": GOAL.read_text(encoding="utf-8"),
+        ".planning/STATE.md": STATE.read_text(encoding="utf-8"),
+        "lease map": DEPENDENCY_LEASE_MAP.read_text(encoding="utf-8"),
+    }
+    normalized = {
+        label: " ".join(text.split()) for label, text in lifecycle_texts.items()
+    }
+    receipt_pattern = re.compile(
+        r"PR #95 at `main@([0-9a-f]{8})`(?: \(|, )exact head `([0-9a-f]{8})`, "
+        r"exact-head CI `([0-9]+)`, (?:and )?post-merge CI `([0-9]+)`\)?"
+    )
+    expected = {("42abaab7", "d7c0938f", "30737466988", "30738303497")}
+    for label, text in normalized.items():
+        assert set(receipt_pattern.findall(text)) == expected, (
+            f"{label} has inconsistent T6 receipts"
+        )
+
+    assert "| T6 | MERGED |" in lifecycle_texts["lease map"]
+    assert "No GoalEx lifecycle or source node is admitted" in normalized["lease map"]
+    assert (
+        "no GoalEx lifecycle or source node is currently admitted"
+        in normalized["GOAL.md"]
+    )
+    assert "no lifecycle writer is now admitted" in normalized[".planning/STATE.md"]
+
+
+def test_unrecorded_post_baseline_merge_is_detected(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A PR landing on main after the baseline must not pass unrecorded.
+
+    Ancestry-only checking accepted any superseded baseline; this pins the
+    replacement so the detector cannot silently regress to that behaviour.
+    """
+    last_pr_merge = subprocess.run(
+        [
+            "git",
+            "log",
+            "--merges",
+            "--grep=^Merge pull request #",
+            "-1",
+            "--format=%H %s",
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert last_pr_merge, "expected at least one PR merge on origin/main"
+
+    merge_sha, subject = last_pr_merge.split(" ", 1)
+    matched = MERGED_PR.match(subject)
+    assert matched, f"unparsable merge subject: {subject}"
+    pr_number = matched.group(1)
+
+    # The commit main sat on immediately before that PR landed: a baseline
+    # recorded there is stale by exactly one merge.
+    stale_baseline = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    lease_without_receipt = tmp_path / "lease-map-missing-receipt.md"
+    lease_without_receipt.write_text(
+        "This lease map records no receipts.\n", encoding="utf-8"
+    )
+    monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", lease_without_receipt)
+    assert pr_number in _unrecorded_merged_prs(stale_baseline), (
+        f"PR #{pr_number} landed after {stale_baseline} and is absent from the "
+        "lease map, so it must be reported as unrecorded"
+    )
+
+
+def test_unstructured_pr_mention_does_not_count_as_a_record(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Prose naming a PR must not satisfy the gate — only a structured entry.
+
+    The lease map cites PR numbers constantly in narrative text. If any mention
+    counted, a merge could be authorised by an unrelated sentence rather than by
+    a lifecycle entry carrying receipts.
+    """
+    merged = subprocess.run(
+        [
+            "git",
+            "log",
+            "--merges",
+            "--grep=^Merge pull request #",
+            "-1",
+            "--format=%H %s",
+            "refs/remotes/origin/main",
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    merge_sha, subject = merged.split(" ", 1)
+    pr_number = MERGED_PR.match(subject).group(1)
+    stale_baseline = subprocess.run(
+        ["git", "rev-parse", f"{merge_sha}^1"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    prose_only = tmp_path / "lease-map-prose-only.md"
+    prose_only.write_text(
+        f"PR #{pr_number} was discussed here, and PR #{pr_number} is pending.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", prose_only)
+    assert pr_number in _unrecorded_merged_prs(stale_baseline), (
+        "a prose mention must not be accepted as a lease-map record"
+    )
+
+    structured = tmp_path / "lease-map-structured.md"
+    structured.write_text(
+        f"- PR #{pr_number}: delivered, receipts recorded.\n", encoding="utf-8"
+    )
+    monkeypatch.setitem(globals(), "DEPENDENCY_LEASE_MAP", structured)
+    assert pr_number not in _unrecorded_merged_prs(stale_baseline), (
+        "a structured entry must be accepted as a lease-map record"
+    )
+
+
+def test_merge_subject_variants_are_all_recognised() -> None:
+    """Receipt detection must not depend on GitHub's default subject alone."""
+    for subject, expected in (
+        ("Merge pull request #96 from onfire7777/codex/x", "96"),
+        ("Merge PR #96: land the thing", "96"),
+        ("Merge #96: land the thing", "96"),
+    ):
+        matched = MERGED_PR.match(subject)
+        assert matched and matched.group(1) == expected, subject
+    # Issue references in this repo use the trailing "(#N)" form, so that shape
+    # must not be read as a PR merge.
+    assert not MERGED_PR.match("feat(phase12): Lease G wire — corroboration (#17)")
 
 
 def test_stale_alternate_canonical_baseline_claim_fails(
@@ -301,7 +506,7 @@ def test_non_ancestral_baseline_commit_fails(tmp_path: Path, monkeypatch) -> Non
 
     try:
         test_canonical_baseline_is_identical_across_the_three_lifecycle_files()
-    except subprocess.CalledProcessError:
+    except (AssertionError, subprocess.CalledProcessError):
         return
     raise AssertionError("non-ancestral baseline commit was accepted")
 
