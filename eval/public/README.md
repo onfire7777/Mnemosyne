@@ -223,7 +223,9 @@ declare `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
 `admission_state: "PROPOSED"` in both its labels and its committed fixture. M04's
 score envelope and M05's labels and fixture record `publishable: false` and
 `pbpp_headline_eligible: false`; M02 emits no publication or headline field at
-all and makes no publication claim. All three are licensed `CC0-1.0`.
+all and makes no publication claim. M02 and M05 declare `license: "CC0-1.0"`;
+M04 declares no license field at all, which is itself a disclosed Stage-A gap
+rather than a permissive grant.
 
 None of the three measures cost or resources. M02's scorer reports `latency`,
 `tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
@@ -256,8 +258,10 @@ borrowing for a Stage-A ablation task and is never an ABI conformance claim.
 **M05 (`wmbs-m05-provenance-development`).** The committed fixture is generated
 from seed `13`, declares the five seeds `13`, `29`, `41`, `59`, `73`, and holds
 five slices of twenty cases each (`protected-grounding`, `distractor-sources`,
-`tampered-lineage`, `unsupported-claim`, `derived-claims`) over the three
-retrieval stages `dense_hash`, `lexical`, and `graph_ppr`. It scores **one-hop**
+`tampered-lineage`, `unsupported-claim`, `derived-claims`). The module declares
+three retrieval stage IDs (`dense_hash`, `lexical`, `graph_ppr`), but every
+committed case freezes `lexical` alone: the other two stages are declared
+vocabulary, not exercised evidence. It scores **one-hop**
 claim-to-source grounding only; derived-claim lineage, explanation
 faithfulness, promoted-item slices, and `query_with_evidence` are all recorded
 as deferred rather than measured. Its source manifest is content-addressed but
