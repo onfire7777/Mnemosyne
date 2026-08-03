@@ -14,18 +14,58 @@ under GoalEx, but RalphEx never selects the program direction.
 
 ## Current Priority (operator directive, 2026-08-03)
 
-**Drive `.planning/STATE.md` `progress.completed_plans` and `progress.percent`
-upward by actually completing the approved plans and their documentation.**
+**Build the benchmark itself. The Whole-Memory Benchmark Standard specifies
+modules M01-M20; only five are implemented.** Everything downstream — Phase 12
+measured closure, the official adapters, reproduction, and the leaderboard —
+presumes a benchmark that does not yet exist. Completing it is the single
+highest-value thing this loop can do, and unlike the evidence gates it is
+almost entirely *ungated*: exact plans, deterministic fixtures, scorers, and
+tests are ordinary source work needing no operator authorization.
 
-Round selection must prefer, in this order:
+Measured at `main@b8673031`:
 
-1. An approved plan with dependency-ready, lease-disjoint implementable work
-   remaining — carry it to done, with its tests and its documentation.
-2. Documentation that an already-merged plan requires but never received.
-3. Lifecycle/reconciliation bookkeeping — only when 1 and 2 are genuinely empty.
+- implemented (`eval/public/wmbs_*.py`): **M01, M02, M04, M05, M10** — 5 of 20
+- registry-admitted: **M01, M10** — 2 of 20
+- per-module implementation plans: **M02, M04, M05, M14** — 4 of 20
+- no plan and no module: **M06, M07, M08, M09, M11, M16, M17, M18, M19, M20**
 
-Rounds 36-43 were consumed almost entirely by category 3. That backlog is now
-discharged, so bookkeeping is no longer a valid reason to skip category 1.
+**Round 0 of this directive: publish an accurate inventory.** Before choosing
+module work, produce and commit a module-by-module completeness table for
+M01-M20 — for each: does an approved exact plan exist, a fixture, a scorer, a
+test suite, a registry entry, and what is its admission state. Do not trust the
+counts above; recompute them from the tree and correct them. That inventory is
+the backlog and belongs in the repository, not just in a round record.
+
+**Then work the ladder, one module per lane, highest-value gap first.** The
+`U-MODULES` row authorizes no artifact until an approved exact plan exists, so
+for each module the order is fixed and must not be short-circuited:
+
+1. Author the exact implementation plan (protocol, scorer contract, fixture
+   design, license/custody, dependency placement) — this is the step that
+   lifts the module out of `SPEC UNSTABLE`, and it is always permitted.
+2. Freeze/approve that plan the way PR #85 froze the Phase 13-15 contracts.
+3. Implement the deterministic fixture and scorer against the frozen closed
+   ABI, test-first, conforming to `$defs.portable_event` where the plan claims
+   conformance.
+4. Land it through a reviewed PR with exact-head CI green, then record the
+   receipts in the lease map row that authorized it.
+
+Prefer completing a module end to end over starting several. Modules whose
+fixtures already exist but whose scorer or plan does not (M03, M12, M13, M15
+are candidates — verify in the inventory) are cheaper than greenfield ones and
+should come first.
+
+Also outstanding, and to be assessed rather than ignored: unlanded work on
+`codex/goalex-r26-sandbox` (9 commits, development sandbox + OCI isolation),
+`codex/wmb-m04-stage-a` (M04 scorer review-gap fix),
+`codex/goalex-r23-m03-valid-time`, and `codex/whole-memory-benchmark-spec`
+(2 standard-hardening docs). These predate the current baseline and were never
+merged. Where the map requires an admission decision before landing them,
+**surface that decision rather than bypassing it.**
+
+Lifecycle/reconciliation bookkeeping is now the *lowest* priority and is never
+a sufficient round on its own. Rounds 36-43 were consumed almost entirely by
+it; that backlog is discharged.
 
 **The percentage is an output, never a target.** These are hard rules:
 
