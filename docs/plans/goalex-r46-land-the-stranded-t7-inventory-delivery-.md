@@ -111,6 +111,7 @@ commit the round's receipts and round record on the controller branch as the
 final step, and remove any extra worktree you created.
 
 ## Validation Commands
+
 - `test "$(git rev-parse main)" = "$(git rev-parse origin/main)"`
 - `uv run --locked python -m pytest tests/test_wmbs_module_inventory.py tests/test_public_wmbs_stage_a_disclosure.py tests/test_planning_traceability.py tests/test_public_wmbs_portable_event_abi.py -q`
 - `uv run --locked python -m pytest tests/test_public_eval.py tests/test_public_whole_memory_reference.py -q`
@@ -120,6 +121,7 @@ final step, and remove any extra worktree you created.
 - `git status --porcelain --untracked-files=all` (must be empty in the controller worktree at round end)
 
 ### Task 1: Complete and land the stranded lifecycle delivery as PR-1
+
 - [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, keep node `T7` and add its delivery statement: the `eval/public/README.md` disclosure and `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by this PR.
 - [ ] Add node `T8` to the same package DAG table: a bounded GoalEx lifecycle documentation-and-tests node whose exact lease is `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`, `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`, `tests/test_wmbs_module_inventory.py`, and the three lifecycle files. State that it admits no source node and no publication claim.
 - [ ] Add node `T9` to the same table, `ADMITTED`, as the **public-harness Stage-B M03 registry-admission node**: consumes verified canonical `main` at the PR-1 merge commit; produces the `wmbs-m03-valid-time-development` registry entry, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys, its README documentation, and its tests; exact lease `eval/public/registry.json`, `eval/public/runner.py`, `eval/public/README.md`, and the new/edited test files under `tests/`; owner: Public-harness integration owner, serialized as sole writer (no open PR, no competing lane). State explicitly that it authorizes **M03 only**, admits no other module, changes no fixture byte, no scorer logic, no schema, and no admission state — M03 stays `PROPOSED` with full bitemporal transaction-time retained as a hard deferral per pilot-plan line 68 — and that it admits no successor node.
@@ -129,11 +131,13 @@ final step, and remove any extra worktree you created.
 - [ ] Push the controller branch, open PR-1, wait for exact-head CI green, merge normally, then fast-forward local `main` and prove `git rev-parse main` equals `git rev-parse origin/main`.
 
 ### Task 2: Cut the M03 lane from the new canonical main
+
 - [ ] After PR-1 merges, refresh `origin`, confirm `main` equals clean `origin/main`, and confirm `gh pr list --state open` shows nothing touching `eval/public/`.
 - [ ] Create an isolated lane: `git worktree add /Users/admin/.codex/worktrees/9697/Mnemosyne-m03 -b codex/wmb-m03-registry-admission main`. Do all M03 work there; touch nothing in the controller worktree until Task 5.
 - [ ] Confirm in that lane that node `T9` is present and `ADMITTED` in the lease map on `main`, and that `eval/public/bundle.py:44` already declares the seeds `(11, 23, 37, 53, 71)` for suite name `wmbs-m03-valid-time-development`.
 
 ### Task 3: Register the M03 valid-time suite, test-first
+
 - [ ] Write the failing tests first, in the file that matches existing precedent (extend `tests/test_public_whole_memory_reference.py` and/or add a focused new test module): assert `load_registry()` returns a `wmbs-m03-valid-time-development` entry; assert its `dataset_sha256` equals the digest recomputed from the committed fixture using the same canonicalization the runner applies to fixture-based suites; assert `runner._ADAPTERS` resolves its adapter key to `whole_memory_reference.run_m03_valid_time_development`; assert `runner._PROFILE_CONTRACTS` carries its scoring profile bound to the same `(family, interval_method)` pair the entry declares; assert the honest labels (`admission_state: PROPOSED`, `publishable: false`, `pbpp_headline_eligible: false`, `headline_eligible: false`, `upstream_comparable: false`, `independent_external_reproduction: false`, `split_role: development`). Run them and confirm they fail for the right reason.
 - [ ] Add the `wmbs-m03-valid-time-development` entry to `eval/public/registry.json`, deriving the exact required key set from the validators in `eval/public/runner.py` (`load_registry` and the `_validate_*` helpers) and from the `wmbs-m01-development` / `pm-bench-development` precedent. Use `adapter: "wmbs-m03-valid-time-reference"`, `scoring_profile: "wmbs-m03-valid-time-v1"`, `family: "whole-memory-development"`, `interval_method: "descriptive"`, `fixture: "fixtures/wmbs-m03-valid-time-development.json"`. Do **not** set `system_seam` — this cell runs through the public CLI subprocess seam, unlike M01/M10's `harness-owned-reference-core`. Compute `dataset_sha256` rather than guessing it, and set `revision` to the 40-hex commit that last modified the fixture (`git log -1 --format=%H -- eval/public/fixtures/wmbs-m03-valid-time-development.json`).
 - [ ] Add `"wmbs-m03-valid-time-reference": whole_memory_reference.run_m03_valid_time_development` to `_ADAPTERS` and `"wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive")` to `_PROFILE_CONTRACTS` in `eval/public/runner.py`, matching the surrounding style.
@@ -141,11 +145,13 @@ final step, and remove any extra worktree you created.
 - [ ] Run the new tests plus `tests/test_public_eval.py`, `tests/test_public_whole_memory_reference.py`, then the full suite and Ruff. Fix only what this change breaks.
 
 ### Task 4: Land the M03 registration as PR-2
+
 - [ ] Commit in the lane with a message naming node `T9` as the authorizing lease. Push the lane branch and open PR-2 describing exactly what it registers, what it does not claim, and that M03's admission state is unchanged.
 - [ ] Clear review threads, get exact-head CI green, merge normally, then fast-forward local `main` and prove it equals clean `origin/main`.
 - [ ] If any genuine blocker prevents the registration from landing — a validator that rejects the entry, a digest that cannot be reconciled without editing fixture bytes, or a CI failure rooted outside this change — stop, revert the lane cleanly, and record the exact blocker and its evidence in the round record. Do not edit fixtures, scorers, or the schema to force it through, and do not substitute a different module.
 
 ### Task 5: Record receipts and end the controller worktree clean
+
 - [ ] Remove the M03 worktree (`git worktree remove /Users/admin/.codex/worktrees/9697/Mnemosyne-m03`) and confirm `git worktree list` shows only the expected entries.
 - [ ] On the controller branch, write the round record `docs/plans/goalex-r46-<slug>.md` containing: the three review-finding adjudications with their evidence; the PR-1 and PR-2 receipts (merge SHA, exact head, exact-head CI run id, post-merge CI run id for each); and a short note that the M14 plan's own verdict is **NOT CODE-READY** with irreducible blockers B1–B4, which contradicts the inventory's ranking of M14 as the cheapest plan-having module — surfaced, not edited, per `GOAL.md`.
 - [ ] Update the lease map, `.planning/STATE.md`, and `GOAL.md` with both PRs' receipts and mark `T7`, `T8`, and `T9` `MERGED`, recomputing the baseline to the new canonical `main`. Move no progress counter.

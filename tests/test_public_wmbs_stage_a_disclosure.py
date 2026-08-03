@@ -62,6 +62,25 @@ def _fixture(name: str) -> dict:
     return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
+def _m02_traces(fixture: dict) -> list[dict]:
+    """Gold-ranked traces over the committed M02 fixture; executes no system."""
+    return [
+        {
+            "case_id": question["question_id"],
+            "question_id": question["question_id"],
+            "ranked_hits": [
+                {"rank": rank, "stable_item_id": stable_item_id}
+                for rank, stable_item_id in enumerate(
+                    question["gold_doc_ids"], start=1
+                )
+            ],
+            "answer": question["answers"][0] if question["answers"] else None,
+            "abstained": not question["answers"],
+        }
+        for question in fixture["questions"]
+    ]
+
+
 def test_disclosure_section_exists_and_names_all_three_modules() -> None:
     section = _disclosure_section()
     for module_file in ("`wmbs_m02.py`", "`wmbs_m04.py`", "`wmbs_m05.py`"):
@@ -155,6 +174,17 @@ def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
         "literally as `unsupported`" in section
     )
     assert "M04 and M05 emit no latency, token, call, or storage metric" in section
+
+    # Pin M02's four cost keys to the scorer's own output, not to its source
+    # text: renaming any one of them must fail here, because the README names
+    # them as the metrics a reader will see reported `unsupported`.
+    fixture = _fixture("wmbs-m02-retrieval-development.json")
+    metrics = m02.score_retrieval(fixture, _m02_traces(fixture))["metrics"]
+    for metric in ("latency", "tokens", "calls", "storage"):
+        assert metrics[metric] == "unsupported", (
+            f"M02 no longer reports {metric!r} as 'unsupported'; the Stage-A "
+            "disclosure says it does"
+        )
 
     m04_source = (REPO_ROOT / "eval" / "public" / "wmbs_m04.py").read_text(
         encoding="utf-8"
@@ -292,7 +322,9 @@ def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
     dependencies = fixture["integration_dependencies"]
     assert len(dependencies) == 8 == len(m05.INTEGRATION_DEPENDENCIES)
     for tag in ("Q1", "Q2", "Q3", "Q4", "Q7", "Q9", "Q10", "Q12"):
-        assert any(dependency.startswith(tag) for dependency in dependencies)
+        # `f"{tag} "`, not the bare tag: `Q1` prefixes both `Q10` and `Q12`, so a
+        # raw-prefix check would stay green after `Q1`'s own entry was dropped.
+        assert any(dependency.startswith(f"{tag} ") for dependency in dependencies)
         assert f"{tag} " in section
 
 

@@ -238,11 +238,16 @@ documentation-and-tests node carrying the Round-0 M01-M20 module completeness
 inventory, its line-level derivations, and `tests/test_wmbs_module_inventory.py`,
 the drift test that pins the inventory to the tree; those are delivered too.
 Neither `T7` nor `T8` admits a source node, a Stage-B integration, or a
-successor node. `T9` is the public-harness Stage-B M03 registry-admission node:
+successor node. `T7` and `T8` are **not** lease-disjoint from each other: both
+write `GOAL.md`, `.planning/STATE.md`, the lease map, and `docs/plans/`, so they
+are one serialized GoalEx lifecycle writer landing as a single PR, which also
+holds the public-harness lease for `T7`'s `eval/public/README.md` write and
+therefore requires both owners. `T9` is the public-harness Stage-B M03 registry-admission node:
 it registers the `wmbs-m03-valid-time-development` cell — already fixture-,
 scorer-, and adapter-backed and unit-tested on `main`, yet unreachable from
-`run_public_suite` for want of a registry entry and two runner keys — and
-nothing else. `T9` authorizes M03 only, changes no fixture byte, no scorer
+`run_public_suite` for want of a registry entry, two `runner.py` keys, and the
+matching `allowed_profile` label in `eval/public/bundle.py`, whose independent
+profile-contract table would otherwise reject the bundle — and nothing else. `T9` authorizes M03 only, changes no fixture byte, no scorer
 logic, and no schema, keeps M03 at `PROPOSED` / `publishable:false` /
 `pbpp_headline_eligible:false` with full bitemporal transaction-time retained as
 a hard deferral, and admits no successor node. It is serialized as the sole
