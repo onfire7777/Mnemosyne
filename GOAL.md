@@ -164,9 +164,12 @@ sequence; PR #97 (`main@71e492b4`, exact head `13c05d65`, exact-head CI
 `30774834604`, post-merge CI `30775783472`); and PR #98 (`main@b8673031`, exact
 head `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`).
 Each recorded baseline they overtook is superseded, so the carve-out is
-recomputed here from `main@b8673031`. Exactly one node, `T7`, is admitted from
-that baseline: documentation and tests only, disclosing PR #96's oracles and
-pinning the disclosure. It admits no source node and no successor node.
+recomputed here from `main@b8673031`. Three nodes are admitted from that
+baseline: `T7` and `T8`, documentation and tests only — disclosing PR #96's
+oracles with its pinning suite, and landing the Round-0 M01-M20 completeness
+inventory with its drift test — and `T9`, the bounded public-harness node that
+makes the already-tested M03 valid-time development cell reachable from
+`run_public_suite`. None admits a source node or a successor node.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -226,12 +229,27 @@ documentation-only correction of PR #97's "retired" claim back to "paused" at
 CI `30788531829`), which is the current canonical baseline. `T5` and `T6` are
 discharged. Through PR #96 the recorded position was that
 no GoalEx lifecycle or source node is currently admitted;
-this round supersedes that position in exactly one bounded respect by admitting
-lease-map node `T7`, a documentation-and-tests node that discloses PR #96's
-three development-only oracles in `eval/public/README.md` and pins the
-disclosure with tests. `T7` admits no source node, no Stage-B integration, and
-no successor node, and it moves no admission state, publication claim, or
-progress counter.
+this round supersedes that position by admitting three bounded lease-map nodes.
+`T7` is a documentation-and-tests node that discloses PR #96's three
+development-only oracles in `eval/public/README.md` and pins the disclosure with
+tests; that disclosure and its pinning suite
+`tests/test_public_wmbs_stage_a_disclosure.py` are delivered. `T8` is a
+documentation-and-tests node carrying the Round-0 M01-M20 module completeness
+inventory, its line-level derivations, and `tests/test_wmbs_module_inventory.py`,
+the drift test that pins the inventory to the tree; those are delivered too.
+Neither `T7` nor `T8` admits a source node, a Stage-B integration, or a
+successor node. `T9` is the public-harness Stage-B M03 registry-admission node:
+it registers the `wmbs-m03-valid-time-development` cell — already fixture-,
+scorer-, and adapter-backed and unit-tested on `main`, yet unreachable from
+`run_public_suite` for want of a registry entry and two runner keys — and
+nothing else. `T9` authorizes M03 only, changes no fixture byte, no scorer
+logic, and no schema, keeps M03 at `PROPOSED` / `publishable:false` /
+`pbpp_headline_eligible:false` with full bitemporal transaction-time retained as
+a hard deferral, and admits no successor node. It is serialized as the sole
+writer on the `eval/public/*` lease and lands only after `T7`+`T8` merge, which
+is the explicit remedy for PR #96's defect of writing that lease with no
+admitted writer. None of the three moves an admission state, publication claim,
+or progress counter.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -287,10 +305,11 @@ lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
 under the standing controller Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
-That map admits no source node at this baseline — its one admitted writer is the
-bounded documentation-and-tests node `T7` — so the next source
-admission waits on an external gate opening, and the map must be recomputed
-from then-current `main` at that time.
+That map admits no source node at this baseline — its admitted writers are the
+bounded documentation-and-tests nodes `T7` and `T8` and the bounded
+public-harness reachability node `T9`, none of which implements a module — so
+the next source admission waits on an external gate opening, and the map must be
+recomputed from then-current `main` at that time.
 
 ## Scope
 

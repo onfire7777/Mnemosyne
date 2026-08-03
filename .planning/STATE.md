@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@b8673031`; PR #96 independently delivered the development-only M02/M04/M05 evaluation oracles (CI `30744318093`), PR #97 adjudicated the round-43 review (post-merge CI `30775783472`), and PR #98 corrected PR #97's retired-loop claim back to paused (post-merge CI `30788531829`). Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No source node is admitted; the one admitted writer is the bounded documentation-and-tests node T7 disclosing PR #96's oracles, which moves no admission state, publication claim, or progress counter. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@b8673031`; PR #96 independently delivered the development-only M02/M04/M05 evaluation oracles (CI `30744318093`), PR #97 adjudicated the round-43 review (post-merge CI `30775783472`), and PR #98 corrected PR #97's retired-loop claim back to paused (post-merge CI `30788531829`). Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No source node is admitted; the admitted writers are the bounded documentation-and-tests nodes T7 (disclosing PR #96's oracles) and T8 (the Round-0 M01-M20 completeness inventory and its drift test), plus T9, the bounded public-harness node registering the already-tested M03 valid-time development cell so it is reachable from run_public_suite. None of the three moves an admission state, publication claim, or progress counter. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
 last_updated: "2026-08-03T06:49:14Z"
 last_activity: 2026-08-03
 progress:
@@ -91,9 +91,15 @@ the r42/r43 records as PR #95 at `main@42abaab7` (exact head `d7c0938f`,
 exact-head CI `30737466988`, post-merge CI `30738303497`). It admitted no source
 node and no successor node, and through PR #96 the recorded position was that
 no lifecycle writer is now admitted. PR #97 and PR #98 then advanced canonical
-`main` to `main@b8673031`, and exactly one bounded documentation-and-tests
-writer, node `T7`, is admitted from that baseline; it admits no source node and
-no successor node. The plan-doc
+`main` to `main@b8673031`, and three writers are admitted from that baseline:
+the bounded documentation-and-tests nodes `T7` (the M02/M04/M05 Stage-A
+disclosure, now delivered together with its pinning suite) and `T8` (the
+Round-0 M01-M20 completeness inventory, its derivations, and its drift test,
+also delivered), neither of which admits a source node; and `T9`, the
+public-harness Stage-B node that registers the already-merged, already-tested
+M03 valid-time development cell so it is reachable from `run_public_suite`.
+`T9` authorizes M03 only, changes no fixture byte, scorer, or schema, advances
+no admission state, and admits no successor node. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
@@ -353,8 +359,19 @@ oracles; PR #97 adjudicated the round-43 review at `main@71e492b4` (exact head
 `13c05d65`, exact-head CI `30774834604`, post-merge CI `30775783472`); and
 PR #98 corrected PR #97's overstated "loop retired" claim back to paused.
 Node `T7` is admitted from this baseline for documentation and tests only —
-the M02/M04/M05 Stage-A gap disclosures and their pinning tests — and admits
-no source node and no successor node.
+the M02/M04/M05 Stage-A gap disclosures and their pinning tests, both now
+delivered — and admits no source node and no successor node. Node `T8` is
+admitted alongside it, also documentation and tests only: the Round-0 M01-M20
+module completeness inventory, its line-level derivations, and the drift test
+that pins the inventory to the tree, all now delivered. Node `T9` is admitted
+as the public-harness Stage-B M03 registry-admission node: it registers the
+existing `wmbs-m03-valid-time-development` cell — already fixture-backed,
+scorer-backed, adapter-backed, and unit-tested, but unreachable from
+`run_public_suite` — and nothing else. It authorizes M03 only, changes no
+fixture byte, scorer logic, or schema, leaves M03 at `PROPOSED` /
+`publishable:false` / `pbpp_headline_eligible:false` with full bitemporal
+transaction-time retained as a hard deferral, moves no progress counter, and
+admits no successor node.
 Evidence and publication boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.

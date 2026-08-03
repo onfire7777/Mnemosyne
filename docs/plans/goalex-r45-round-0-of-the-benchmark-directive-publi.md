@@ -109,9 +109,9 @@ controller branch as the final step.
 - [x] Run the test; make it fail first against a deliberately wrong cell to prove it has teeth, then correct the cell. Six mutations were driven through the committed document and reverted byte-identically: a fabricated M03 registry entry, a fabricated M06 fixture, a dropped M07 row, an understated scorer-bearing count, an undefined `_score_wmbs_m03_bogus` symbol, and a non-existent M04 test file. Each failed at least one test; the restored document passes all eight.
 
 ### Task 4: Deliver the admitted T7 disclosure
-- [ ] Add a gap-disclosure section to `eval/public/README.md` for the PR #96 M02/M04/M05 development oracles, following the wording and structure of the existing M12/M13 gap disclosures in that file.
-- [ ] State plainly: development-only; no `registry.json` entry, adapter, runner routing, or scoring-profile registration; `publishable:false`; `pbpp_headline_eligible:false`; Stage B blocked on the public-harness integration owner's lease; they authorize no module-implementation, protocol, or publication claim.
-- [ ] Add pinning tests (mirroring the existing M12/M13 pinning-test pattern under `tests/`) that fail if the disclosure text or those honest labels are removed or if a `wmbs-m02/m04/m05` registry entry appears without the disclosure being updated.
+- [x] Add a gap-disclosure section to `eval/public/README.md` for the PR #96 M02/M04/M05 development oracles, following the wording and structure of the existing M12/M13 gap disclosures in that file.
+- [x] State plainly: development-only; no `registry.json` entry, adapter, runner routing, or scoring-profile registration; `publishable:false`; `pbpp_headline_eligible:false`; Stage B blocked on the public-harness integration owner's lease; they authorize no module-implementation, protocol, or publication claim.
+- [x] Add pinning tests (mirroring the existing M12/M13 pinning-test pattern under `tests/`) that fail if the disclosure text or those honest labels are removed or if a `wmbs-m02/m04/m05` registry entry appears without the disclosure being updated.
 
 ### Task 5: Record, land, and end clean
 - [ ] Amend `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md` to mark `T7` delivered and to admit one new bounded documentation-and-tests node `T8` whose exact lease is the inventory document, `tests/test_wmbs_module_inventory.py`, and the lifecycle files; state that `T8` admits no source node, no Stage-B integration, and no successor node.
