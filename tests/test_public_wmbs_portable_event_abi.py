@@ -156,11 +156,30 @@ def test_m04_carries_the_portable_event_vocabulary() -> None:
 
 
 def test_public_metadata_is_a_closed_single_key_object() -> None:
-    """Pin the ABI the modules must not silently widen."""
+    """Pin the ABI the modules must not silently widen.
+
+    Note the schema declares no `required` for `public_metadata`: `source` is
+    the only *permitted* key, not a mandatory one. That is pinned here as the
+    schema's actual state so a future change either way is visible, and the
+    behavioural guarantee — that conforming modules do emit it — is covered by
+    `test_conforming_modules_emit_a_source_in_public_metadata`.
+    """
     schema = _schema()
     public_metadata = schema["$defs"]["public_metadata"]
     assert public_metadata["additionalProperties"] is False
     assert set(public_metadata["properties"]) == {"source"}
+    assert "required" not in public_metadata
+
+
+@pytest.mark.parametrize("module_name", CONFORMING_MODULES)
+def test_conforming_modules_emit_a_source_in_public_metadata(module_name: str) -> None:
+    """Closure alone would still pass if a module emitted `public_metadata: {}`."""
+    for event in _iter_portable_events(_fixture(module_name)):
+        metadata = event["public_metadata"]
+        assert metadata.get("source"), (
+            f"{module_name} event {event['event_id']} has no `source` in "
+            f"public_metadata: {metadata!r}"
+        )
 
 
 def test_validator_rejects_a_widened_public_metadata() -> None:
