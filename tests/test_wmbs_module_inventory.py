@@ -17,10 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = (
-    ROOT
-    / "docs"
-    / "coordination"
-    / "2026-08-03-wmbs-module-completeness-inventory.md"
+    ROOT / "docs" / "coordination" / "2026-08-03-wmbs-module-completeness-inventory.md"
 )
 REGISTRY = ROOT / "eval" / "public" / "registry.json"
 SCORING = ROOT / "eval" / "public" / "scoring.py"
@@ -183,8 +180,7 @@ def test_scorer_cells_match_the_scoring_surface() -> None:
             sources = [path for path in cited if path.suffix == ".py"]
             assert sources, f"{module}: cites symbol {symbol!r} with no source file"
             assert any(
-                f"def {symbol}(" in path.read_text(encoding="utf-8")
-                for path in sources
+                f"def {symbol}(" in path.read_text(encoding="utf-8") for path in sources
             ), f"{module}: symbol {symbol!r} is defined in none of {sources}"
 
 
@@ -193,9 +189,9 @@ def test_test_suite_cells_match_the_tests_directory() -> None:
         cell = row["tests"]
         cited = [path for path in _paths_in(cell) if path.parts[-2] == "tests"]
         if _claims_absent(cell):
-            assert not (ROOT / "tests" / f"test_public_wmbs_{module.lower()}.py").exists(), (
-                f"{module}: test cell says no, but a public suite exists"
-            )
+            assert not (
+                ROOT / "tests" / f"test_public_wmbs_{module.lower()}.py"
+            ).exists(), f"{module}: test cell says no, but a public suite exists"
             continue
         assert cited, f"{module}: test cell claims yes but cites no test file"
         for path in cited:
@@ -216,9 +212,7 @@ def test_registry_cells_match_registry_json() -> None:
             continue
         assert cited, f"{module}: registry cell claims yes but names no suite"
         for name in cited:
-            assert name in keys, (
-                f"{module}: registry.json has no suite {name!r}"
-            )
+            assert name in keys, f"{module}: registry.json has no suite {name!r}"
 
 
 def test_every_wmbs_artifact_in_the_tree_appears_in_the_table() -> None:
@@ -246,7 +240,10 @@ def test_correction_counts_match_the_table() -> None:
     greenfield = [
         m
         for m, row in ROWS.items()
-        if all(_claims_absent(row[column]) for column in ("plan", "fixture", "scorer", "tests", "registry"))
+        if all(
+            _claims_absent(row[column])
+            for column in ("plan", "fixture", "scorer", "tests", "registry")
+        )
     ]
     landed = [
         m
