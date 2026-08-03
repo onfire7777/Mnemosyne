@@ -92,10 +92,10 @@ controller branch as the final step.
 - `test "$(git rev-parse main)" = "b8673031a80158c49d552a4b3647829d213243bd"` before the merge; after merge, re-run `GOAL.md`'s Verification block against the new baseline.
 
 ### Task 1: Recompute the M01–M20 facts from the tree
-- [ ] For each module M01…M20, search the tree for: a fixture under `eval/public/fixtures/`, a scorer (either `eval/public/wmbs_mNN.py` **or** an inline `_score_wmbs_*` branch in `eval/public/scoring.py` **or** logic in `eval/public/adapters/whole_memory_reference.py` / `eval/public/bundle.py`), a test suite under `tests/`, a `registry.json` entry, and an approved exact implementation plan under `docs/plans/` or `docs/superpowers/plans/`.
-- [ ] For each module record its admission state from the lease map and registry (`publishable`, `pbpp_headline_eligible`, `PROPOSED` vs admitted), and the module's short name from the standard's capability table.
-- [ ] Write down the derivation for every non-obvious cell (file path + line) so the inventory is auditable and the test in Task 3 can check it.
-- [ ] Explicitly note where the counts in `GOAL.md`'s Current Priority section are wrong (at minimum M03's inline scorer) — these corrections go into the inventory document, not into a rewrite of the operator's directive text.
+- [x] For each module M01…M20, search the tree for: a fixture under `eval/public/fixtures/`, a scorer (either `eval/public/wmbs_mNN.py` **or** an inline `_score_wmbs_*` branch in `eval/public/scoring.py` **or** logic in `eval/public/adapters/whole_memory_reference.py` / `eval/public/bundle.py`), a test suite under `tests/`, a `registry.json` entry, and an approved exact implementation plan under `docs/plans/` or `docs/superpowers/plans/`.
+- [x] For each module record its admission state from the lease map and registry (`publishable`, `pbpp_headline_eligible`, `PROPOSED` vs admitted), and the module's short name from the standard's capability table.
+- [x] Write down the derivation for every non-obvious cell (file path + line) so the inventory is auditable and the test in Task 3 can check it.
+- [x] Explicitly note where the counts in `GOAL.md`'s Current Priority section are wrong (at minimum M03's inline scorer) — these corrections go into the inventory document, not into a rewrite of the operator's directive text.
 
 ### Task 2: Commit the inventory document
 - [ ] Create `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md` with a header stating it is recomputed from the tree at `main@b8673031` plus this branch, that it is documentation only, and that it authorizes no artifact.
