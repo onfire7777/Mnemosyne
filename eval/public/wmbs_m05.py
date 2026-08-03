@@ -157,10 +157,13 @@ def _event(
         "event_time": f"2026-07-20T00:{index:02d}:00Z",
         "ingestion_time": f"2026-07-20T00:{index:02d}:05Z",
         "content_sha256": hashlib.sha256(content.encode()).hexdigest(),
-        "public_metadata": {
-            **_CAPTURE,
-            "content_pointer": event_id,
-        },
+        # `public_metadata` is closed to `source` by `$defs.public_metadata`, and
+        # the M05 plan binds every source event to `portable_event` under
+        # `additionalProperties: false`. The capture/provenance fields live in
+        # `_CAPTURE` and are consumed by `_evidence_cid`, which builds its own
+        # metadata payload; `content_pointer` duplicated `event_id`, which
+        # `_evidence_cid` already reads directly.
+        "public_metadata": {"source": GENERATOR_ID},
     }
 
 
@@ -350,8 +353,7 @@ def validate_fixture(fixture: Mapping[str, Any]) -> Mapping[str, Any]:
                 expected_digest = hashlib.sha256(event["content"].encode()).hexdigest()
                 if event["content_sha256"] != expected_digest:
                     raise WmbsM05Error("portable_event content_sha256 mismatch")
-                expected_metadata = {**_CAPTURE, "content_pointer": event["event_id"]}
-                if event["public_metadata"] != expected_metadata:
+                if event["public_metadata"] != {"source": GENERATOR_ID}:
                     raise WmbsM05Error("portable_event public_metadata mismatch")
             actual = {
                 _evidence_cid(event["content"], event["event_id"])
