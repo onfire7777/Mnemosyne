@@ -204,6 +204,13 @@ def test_scorer_cells_match_the_scoring_surface() -> None:
             # The inventory counts the adapter and the bundle as scorer surfaces
             # too, so a "no" cell must hold across all three, not just the file
             # glob and the profile dispatch.
+            #
+            # Known limit: this is a module-ID scan, so a scorer that names
+            # neither `mNN` nor `wmbs-mNN-` anywhere (say an M06 scorer routed
+            # as `wmbs-consolidation-v1`) would slip past it. Closing that gap
+            # needs a structured module-ID declaration inside the scorer
+            # surfaces themselves, which is the public-harness integration
+            # owner's lease and outside this documentation-and-tests node.
             marker = re.compile(rf"\b{module.lower()}\b", re.IGNORECASE)
             for surface in (SCORING, *SCORER_SURFACES):
                 hit = marker.search(surface.read_text(encoding="utf-8"))
@@ -268,9 +275,15 @@ def test_test_suite_cells_match_the_tests_directory() -> None:
         cell = row["tests"]
         cited = [path for path in _paths_in(cell) if path.parts[-2] == "tests"]
         if _claims_absent(cell):
-            assert not (
-                ROOT / "tests" / f"test_public_wmbs_{module.lower()}.py"
-            ).exists(), f"{module}: test cell says no, but a public suite exists"
+            # Glob, not one exact filename: `test_public_wmbs_m06_extra.py`
+            # contradicts a "no" cell just as squarely as the bare name does.
+            stray = sorted(
+                path.name
+                for path in (ROOT / "tests").glob(f"test_*wmbs_{module.lower()}*.py")
+            )
+            assert not stray, (
+                f"{module}: test cell says no, but {stray} exist in tests/"
+            )
             continue
         assert cited, f"{module}: test cell claims yes but cites no test file"
         for path in cited:
