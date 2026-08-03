@@ -12,6 +12,37 @@ dependency-ready, lease-disjoint source task.
 GoalEx is the cross-task coordinator. RalphEx may execute one bounded round
 under GoalEx, but RalphEx never selects the program direction.
 
+## Current Priority (operator directive, 2026-08-03)
+
+**Drive `.planning/STATE.md` `progress.completed_plans` and `progress.percent`
+upward by actually completing the approved plans and their documentation.**
+
+Round selection must prefer, in this order:
+
+1. An approved plan with dependency-ready, lease-disjoint implementable work
+   remaining — carry it to done, with its tests and its documentation.
+2. Documentation that an already-merged plan requires but never received.
+3. Lifecycle/reconciliation bookkeeping — only when 1 and 2 are genuinely empty.
+
+Rounds 36-43 were consumed almost entirely by category 3. That backlog is now
+discharged, so bookkeeping is no longer a valid reason to skip category 1.
+
+**The percentage is an output, never a target.** These are hard rules:
+
+- Never edit `progress.completed_plans`, `progress.completed_phases`, or
+  `progress.percent` except as the arithmetic consequence of a plan whose work
+  is actually delivered and merged. Moving a counter without the underlying
+  delivery is a fabrication and violates the no-fabrication rule below.
+- Never mark a plan, phase, requirement, or capability complete on the strength
+  of a document alone. A plan is complete when its code, its tests, and its
+  documentation are merged and exact-head CI is green.
+- Items gated on operator or external evidence — P12-E operator measurement,
+  P13-C a real scheduled event, P13-O official upstream admission, production
+  Postgres/PPR parity, physical-hardware and held-out evidence — **stay gated**.
+  Do not synthesize their evidence, weaken their validators, or reclassify them
+  to reach a higher number. If every ungated plan is exhausted, say so and stop
+  rather than manufacturing progress.
+
 ## Authority
 
 This goal does not create a second roadmap. Task status and dependency order
