@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-08-02
-Baseline: `main@088e2f31003e3a7e96119bc8cdba162252226ac1`
+Updated: 2026-08-03
+Baseline: `main@b8673031a80158c49d552a4b3647829d213243bd`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -82,14 +82,18 @@ The following packages are complete source history, not runnable work:
   merge receipts, which is equally why no exact head is claimed for it here:
   the commit recording one would change it. **The GoalEx loop is paused at this
   PR, not retired**: it is stopped with its blocking condition cleared, and a
-  later round may resume and recompute this map.
+  later round may resume and recompute this map. Its receipts, verifiable only
+  from a later commit and recorded here now: merge `71e492b4`, exact head
+  `13c05d65`, exact-head CI `30774834604`, post-merge CI `30775783472`.
 - PR #98: documentation-only correction of PR #97's overstated claim that the
   loop was retired, restoring it to paused. It admits no source node and
   changes no benchmark, measurement, admission state, or publication claim.
   Recorded here before merge for the same reason as PR #97: the detector
-  requires every PR merged after the baseline to appear in this map.
+  requires every PR merged after the baseline to appear in this map. Its
+  receipts, likewise recorded only now: merge `b8673031`, exact head
+  `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`.
 
-This map is recomputed from the new baseline `main@088e2f31`, which the
+This map is recomputed from the new baseline `main@b8673031`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
@@ -176,6 +180,7 @@ exact lease, shared owner/integration edge, and external gate.
 | T4 | MERGED | Receipt-level lifecycle update discharging `T3`'s residue; consumed verified canonical `main@e157e035` and PR #91's post-merge receipts, delivered from a lane cut from `main@e157e035` | This map at `Baseline: main@e157e035` with `T3` as `MERGED`, the matching `GOAL.md` and `.planning/STATE.md` receipt text, the updated round-38 record (whose original text PR #91 already landed on `main`), and the round-39 record, delivered on `main`, plus the branch-resident receipt recomputation below | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #92 at `main@39cfa67a` with exact-head CI `30693874030` and post-merge CI `30694818231`. Documentation only; exact-lease-disjoint from every public-harness, CI, result-v2, and evidence lease, and it admitted no source node. This map is recomputed here from that `main`, and the receipt block PR #92 could not contain is recorded above. That recomputation is `T4`'s own receipt residue, generated for the same structural reason `T3`'s was: no commit describes its own merge, so `main`'s copy of this map always lags by exactly one receipt block. That residual lag is an accepted standing condition and admits **no successor node** and **no source node**; `T4` is the last node this carve-out admits |
 | T5 | MERGED | Bounded GoalEx lifecycle delivery after PR #93's independent merge lapsed the branch-resident carve-out; consumed verified canonical `main@effc5e03`, PR #93 exact-head CI `30718912376` and post-merge CI `30719645207`, and a lane cut from `main@effc5e03` | The three lifecycle files, both baseline-pinning tests, and the r39/r40/r41 round records delivered by PR #94 | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`; `tests/test_planning_traceability.py`; `.github/workflows/ci.yml`. GoalEx owner with CI integration shared-owner serialization | Complete: merged as PR #94 at `main@2091d01c`, exact head `41b21305`, exact-head CI `30730185494`, post-merge CI `30730918452`. Documentation, contract-test, and CI configuration only; it admitted no source node. Its delivery omitted the round-42 record from its own `docs/plans/` lease, the non-receipt residue discharged by `T6` |
 | T6 | MERGED | Verified canonical `main@2091d01c` plus PR #94 exact-head CI `30730185494` and post-merge CI `30730918452`; lane cut from `main@2091d01c` | The three lifecycle files at `Baseline: main@2091d01c` with `T5` as `MERGED`, plus the r42 and r43 round records | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #95 at `main@42abaab7`, exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI `30738303497`. Documentation only; it admitted no source node and no successor node. This branch-resident recomputation is `T6`'s own accepted standing-condition residue and admits no successor or source node |
+| T7 | ADMITTED | Bounded documentation-and-tests node disclosing PR #96's development-only M02/M04/M05 evaluation oracles; consumed verified canonical `main@b8673031` plus PR #97 (merge `71e492b4`, exact-head CI `30774834604`, post-merge CI `30775783472`) and PR #98 (merge `b8673031`, exact-head CI `30787319275`, post-merge CI `30788531829`) receipts | The M02/M04/M05 Stage-A development gap disclosures in `eval/public/README.md`, their pinning tests, and the three lifecycle files recomputed to `Baseline: main@b8673031` | `eval/public/README.md`; the new/edited pinning test file(s) under `tests/`; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Documentation and tests only. It admits **no source node**, **no Stage-B integration**, and **no successor node**: no `eval/public/registry.json` entry, adapter, runner routing, profile contract, or scoring-profile registration is authorized, no module behavior or fixture byte changes, M02/M04/M05 stay `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, and no progress counter moves. Stage B for all three remains blocked on the public-harness integration owner's lease |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
@@ -221,11 +226,18 @@ Prior delivery wave (complete)
   recomputation is T6's own accepted standing-condition residue.
 
 Current delivery wave
-  No GoalEx lifecycle or source node is admitted. PR #96 independently merged
+  Through PR #96 this wave's recorded status was: No GoalEx lifecycle or source
+  node is admitted. PR #96 independently merged
   development-only M02/M04/M05 evaluation oracles; no writer for them remains
-  active, and their publication eligibility is unchanged.
+  active, and their publication eligibility is unchanged. That status is now
+  superseded in exactly one bounded respect: node T7 is admitted to disclose
+  those three oracles in eval/public/README.md and pin the disclosure with
+  tests. T7 is a documentation-and-tests node. It admits no source node, no
+  Stage-B integration, and no successor node, and it leaves every module's
+  admission state, publication eligibility, and the registry untouched. Zero new
+  implementation writers remain admitted at this baseline.
 
-Independent external gates (do not block T0-T6)
+Independent external gates (do not block T0-T7)
   P12-E operator measurement
   P13-C real scheduled event
   P13-O official upstream admission
@@ -253,8 +265,11 @@ Quarantine
 
 - Current safe coding concurrency is **zero new implementation writers**:
   every remaining source package is dependency-, lease-, evidence-, or
-  spec-blocked. `T6` is merged and no GoalEx lifecycle writer is admitted;
-  only read-only reviews may run.
+  spec-blocked. That claim is scoped to *implementation* writers and is
+  unaffected by node `T7`, whose exact lease contains no module, adapter,
+  registry, protocol, scorer, or fixture path. `T6` is merged; the one admitted
+  writer at this baseline is `T7`, a documentation-and-tests writer, and
+  otherwise only read-only reviews may run.
 - **`GOAL.md` Authority carve-out status: standing controller condition from
   `T6` onward.** Both the one-block receipt lag and the current round's own plan
   record are accepted standing conditions of the controller branch. They are
