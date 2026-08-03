@@ -70,6 +70,18 @@ The following packages are complete source history, not runnable work:
   oracles (`main@088e2f31`, exact head `1050749a`, CI `30744318093`). This
   advanced canonical `main` outside the GoalEx lifecycle-node sequence without
   changing publication eligibility.
+- PR #97: the round-43 review adjudication and terminal controller
+  reconciliation. It records PR #96 above, recomputes
+  the canonical baseline to `main@088e2f31`, makes M05's source events conform
+  to the frozen `portable_event` ABI, and replaces the traceability test's
+  ancestry assertion with the unrecorded-merge detector this row satisfies.
+  It admits no source node and changes no benchmark, measurement, admission
+  state, or publication claim. It is recorded here before merge because the
+  detector requires every PR merged after the baseline to appear in this map,
+  and — by the terminal canonical-state property — no commit can carry its own
+  merge receipts, which is equally why no exact head is claimed for it here:
+  the commit recording one would change it. **The GoalEx loop is retired at
+  this PR; no further round will recompute this map.**
 
 This map is recomputed from the new baseline `main@088e2f31`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
