@@ -12,6 +12,101 @@ dependency-ready, lease-disjoint source task.
 GoalEx is the cross-task coordinator. RalphEx may execute one bounded round
 under GoalEx, but RalphEx never selects the program direction.
 
+## Current Priority (operator directive, 2026-08-03)
+
+**Build the benchmark itself. The Whole-Memory Benchmark Standard specifies
+modules M01-M20; only five are implemented.** Everything downstream — Phase 12
+measured closure, the official adapters, reproduction, and the leaderboard —
+presumes a benchmark that does not yet exist. Completing it is the single
+highest-value thing this loop can do, and unlike the evidence gates it is
+almost entirely *ungated*: exact plans, deterministic fixtures, scorers, and
+tests are ordinary source work needing no operator authorization.
+
+Measured at `main@b8673031`:
+
+- implemented (`eval/public/wmbs_*.py`): **M01, M02, M04, M05, M10** — 5 of 20
+- registry-admitted: **M01, M10** — 2 of 20
+- per-module implementation plans: **M02, M04, M05, M14** — 4 of 20
+- no plan and no module: **M06, M07, M08, M09, M11, M16, M17, M18, M19, M20**
+
+**Execute the existing plans and specifications as written. Do not rewrite
+them.** The standard, the roadmap, the phase plans, and the approved
+implementation plans are the authority and are not to be revised, restructured,
+reworded, or "improved" by this loop. Where an approved plan looks wrong,
+incomplete, or contradicted by the tree, **surface it in the round record and
+stop — do not edit it.** The only documents this loop authors are the ones an
+approved plan itself calls for, plus the lifecycle receipts the lease map
+requires. Optimise for progressing through the existing plans fully and
+completely, not for producing new prose.
+
+**Round 0 of this directive: take an inventory, in the round record.** Before
+choosing module work, determine for each of M01-M20 whether an approved exact
+plan, fixture, scorer, test suite, and registry entry exist, and its admission
+state. Recompute this from the tree rather than trusting the counts above, and
+correct them if they are wrong. Keep it in the round record; do not create a new
+tracked document for it unless an approved plan already calls for one.
+
+**Then work the ladder, one module at a time, cheapest genuine gap first.** The
+`U-MODULES` row authorizes no artifact until an approved exact plan exists, so
+for each module the order is fixed and must not be short-circuited:
+
+1. **If, and only if, the module has no approved exact plan**, author one
+   (protocol, scorer contract, fixture design, license/custody, dependency
+   placement). This is the missing artifact `U-MODULES` explicitly requires
+   before any code, so writing it is mandated — it is not a revision of an
+   existing plan. **If an approved plan already exists (M02, M04, M05, M14),
+   skip straight to step 3 and implement it as written.**
+2. Freeze/approve that new plan the way PR #85 froze the Phase 13-15 contracts.
+3. Implement the deterministic fixture and scorer against the frozen closed
+   ABI, test-first, conforming to `$defs.portable_event` where the plan claims
+   conformance.
+4. Land it through a reviewed PR with exact-head CI green, then record the
+   receipts in the lease map row that authorized it.
+
+**Efficiency rules — these are what "optimized" means here:**
+
+- Finish one module completely before starting another. A half-built module is
+  worth nothing and costs a future round to rediscover.
+- Never re-plan, re-derive, or re-litigate an already-approved plan. Read it
+  and execute it. Planning effort belongs only on modules that have no plan.
+- A round that produces only lifecycle bookkeeping is a wasted round. It is
+  never sufficient on its own.
+- Reuse established precedent instead of reinventing: M01 is the conforming
+  reference for fixture and `public_metadata` shape, M05 for provenance, M10
+  for abstention scoring. Copy the pattern; do not invent a second one.
+- Modules with an approved plan already written (M02, M04, M05, M14) and those
+  whose fixtures already exist but whose scorer does not (M03, M12, M13, M15
+  are candidates — verify in the inventory) are far cheaper than greenfield
+  modules and must come first.
+
+Also outstanding, and to be assessed rather than ignored: unlanded work on
+`codex/goalex-r26-sandbox` (9 commits, development sandbox + OCI isolation),
+`codex/wmb-m04-stage-a` (M04 scorer review-gap fix),
+`codex/goalex-r23-m03-valid-time`, and `codex/whole-memory-benchmark-spec`
+(2 standard-hardening docs). These predate the current baseline and were never
+merged. Where the map requires an admission decision before landing them,
+**surface that decision rather than bypassing it.**
+
+Lifecycle/reconciliation bookkeeping is now the *lowest* priority and is never
+a sufficient round on its own. Rounds 36-43 were consumed almost entirely by
+it; that backlog is discharged.
+
+**The percentage is an output, never a target.** These are hard rules:
+
+- Never edit `progress.completed_plans`, `progress.completed_phases`, or
+  `progress.percent` except as the arithmetic consequence of a plan whose work
+  is actually delivered and merged. Moving a counter without the underlying
+  delivery is a fabrication and violates the no-fabrication rule below.
+- Never mark a plan, phase, requirement, or capability complete on the strength
+  of a document alone. A plan is complete when its code, its tests, and its
+  documentation are merged and exact-head CI is green.
+- Items gated on operator or external evidence — P12-E operator measurement,
+  P13-C a real scheduled event, P13-O official upstream admission, production
+  Postgres/PPR parity, physical-hardware and held-out evidence — **stay gated**.
+  Do not synthesize their evidence, weaken their validators, or reclassify them
+  to reach a higher number. If every ungated plan is exhausted, say so and stop
+  rather than manufacturing progress.
+
 ## Authority
 
 This goal does not create a second roadmap. Task status and dependency order
@@ -61,6 +156,20 @@ r42/r43 records as PR #95 at `main@42abaab7` (exact head `d7c0938f`, exact-head
 CI `30737466988`, post-merge CI `30738303497`). It admitted no source node and
 no successor node; this branch-resident recomputation is its own accepted
 standing-condition residue.
+
+Three later merges then advanced canonical `main` past that point: PR #96
+(`main@088e2f31`, exact head `1050749a`, CI `30744318093`), which delivered the
+development-only M02/M04/M05 evaluation oracles outside the lifecycle-node
+sequence; PR #97 (`main@71e492b4`, exact head `13c05d65`, exact-head CI
+`30774834604`, post-merge CI `30775783472`); and PR #98 (`main@b8673031`, exact
+head `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`).
+Each recorded baseline they overtook is superseded, so the carve-out is
+recomputed here from `main@b8673031`. Three nodes are admitted from that
+baseline: `T7` and `T8`, documentation and tests only — disclosing PR #96's
+oracles with its pinning suite, and landing the Round-0 M01-M20 completeness
+inventory with its drift test — and `T9`, the bounded public-harness node that
+makes the already-tested M03 valid-time development cell reachable from
+`run_public_suite`. None admits a source node or a successor node.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -112,8 +221,40 @@ delivered `T6` at `main@42abaab7`
 (exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI
 `30738303497`). PR #96 then independently delivered the development-only
 M02/M04/M05 evaluation oracles at `main@088e2f31` (exact head `1050749a`, CI
-`30744318093`), which is the current canonical baseline. `T5` and `T6` are
-discharged, and no GoalEx lifecycle or source node is currently admitted.
+`30744318093`). PR #97 then merged the round-43 review adjudication and
+controller reconciliation at `main@71e492b4` (exact head `13c05d65`, exact-head
+CI `30774834604`, post-merge CI `30775783472`), and PR #98 merged the
+documentation-only correction of PR #97's "retired" claim back to "paused" at
+`main@b8673031` (exact head `b49b0b35`, exact-head CI `30787319275`, post-merge
+CI `30788531829`), which is the current canonical baseline. `T5` and `T6` are
+discharged. Through PR #96 the recorded position was that
+no GoalEx lifecycle or source node is currently admitted;
+this round supersedes that position by admitting three bounded lease-map nodes.
+`T7` is a documentation-and-tests node that discloses PR #96's three
+development-only oracles in `eval/public/README.md` and pins the disclosure with
+tests; that disclosure and its pinning suite
+`tests/test_public_wmbs_stage_a_disclosure.py` are delivered. `T8` is a
+documentation-and-tests node carrying the Round-0 M01-M20 module completeness
+inventory, its line-level derivations, and `tests/test_wmbs_module_inventory.py`,
+the drift test that pins the inventory to the tree; those are delivered too.
+Neither `T7` nor `T8` admits a source node, a Stage-B integration, or a
+successor node. `T7` and `T8` are **not** lease-disjoint from each other: both
+write `GOAL.md`, `.planning/STATE.md`, the lease map, and `docs/plans/`, so they
+are one serialized GoalEx lifecycle writer landing as a single PR, which also
+holds the public-harness lease for `T7`'s `eval/public/README.md` write and
+therefore requires both owners. `T9` is the public-harness Stage-B M03 registry-admission node:
+it registers the `wmbs-m03-valid-time-development` cell — already fixture-,
+scorer-, and adapter-backed and unit-tested on `main`, yet unreachable from
+`run_public_suite` for want of a registry entry, two `runner.py` keys, and the
+matching `allowed_profile` label in `eval/public/bundle.py`, whose independent
+profile-contract table would otherwise reject the bundle — and nothing else. `T9` authorizes M03 only, changes no fixture byte, no scorer
+logic, and no schema, keeps M03 at `PROPOSED` / `publishable:false` /
+`pbpp_headline_eligible:false` with full bitemporal transaction-time retained as
+a hard deferral, and admits no successor node. It is serialized as the sole
+writer on the `eval/public/*` lease and lands only after `T7`+`T8` merge, which
+is the explicit remedy for PR #96's defect of writing that lease with no
+admitted writer. None of the three moves an admission state, publication claim,
+or progress counter.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -169,9 +310,11 @@ lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
 under the standing controller Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
-That map admits no source node and no lifecycle writer at this baseline, so the next source
-admission waits on an external gate opening, and the map must be recomputed
-from then-current `main` at that time.
+That map admits no source node at this baseline — its admitted writers are the
+bounded documentation-and-tests nodes `T7` and `T8` and the bounded
+public-harness reachability node `T9`, none of which implements a module — so
+the next source admission waits on an external gate opening, and the map must be
+recomputed from then-current `main` at that time.
 
 ## Scope
 
@@ -473,6 +616,8 @@ git merge-base --is-ancestor effc5e039505c09e575ca5e4aeb2b96949676366 main
 git merge-base --is-ancestor 2091d01c8cea22da49a50bb1f0859d8108102f29 main
 git merge-base --is-ancestor 42abaab7ba4fa83f9838c3d32ee96db4256bfcad main
 git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
+git merge-base --is-ancestor 71e492b4507d84e6631fef851cec820bcd80215b main
+git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -486,7 +631,7 @@ git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "088e2f31003e3a7e96119bc8cdba162252226ac1"
+test "$(git rev-parse main)" = "b8673031a80158c49d552a4b3647829d213243bd"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
