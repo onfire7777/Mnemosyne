@@ -382,6 +382,58 @@ def test_rejects_duplicate_active_result_records(
     assert not (tmp_path / "site").exists()
 
 
+def test_rejects_an_unlinked_trace_source(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    destination = tmp_path / "site"
+
+    with pytest.raises(PublicationError, match="unlinked trace source: extra"):
+        publish_site(
+            ledger,
+            public_key,
+            {
+                "result-success": _trace(tmp_path / "trace.jsonl"),
+                "extra": tmp_path / "unused.jsonl",
+            },
+            destination,
+        )
+
+    assert not destination.exists()
+
+
+def test_rejects_a_missing_trace_source(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    destination = tmp_path / "site"
+
+    with pytest.raises(
+        PublicationError, match="missing trace source: result-success"
+    ):
+        publish_site(ledger, public_key, {}, destination)
+
+    assert not destination.exists()
+
+
 def test_cli_publishes_valid_input_and_reports_invalid_input_without_traceback(
     tmp_path: Path,
     key_paths: tuple[Path, Path],
