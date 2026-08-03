@@ -83,6 +83,11 @@ The following packages are complete source history, not runnable work:
   the commit recording one would change it. **The GoalEx loop is paused at this
   PR, not retired**: it is stopped with its blocking condition cleared, and a
   later round may resume and recompute this map.
+- PR #98: documentation-only correction of PR #97's overstated claim that the
+  loop was retired, restoring it to paused. It admits no source node and
+  changes no benchmark, measurement, admission state, or publication claim.
+  Recorded here before merge for the same reason as PR #97: the detector
+  requires every PR merged after the baseline to appear in this map.
 
 This map is recomputed from the new baseline `main@088e2f31`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
