@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-08-03
-Baseline: `main@b8673031a80158c49d552a4b3647829d213243bd`
+Updated: 2026-08-04
+Baseline: `main@d7eefb7c3595e786851a7d416ba54ea3997a8b6c`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
