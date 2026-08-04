@@ -226,8 +226,11 @@ controller reconciliation at `main@71e492b4` (exact head `13c05d65`, exact-head
 CI `30774834604`, post-merge CI `30775783472`), and PR #98 merged the
 documentation-only correction of PR #97's "retired" claim back to "paused" at
 `main@b8673031` (exact head `b49b0b35`, exact-head CI `30787319275`, post-merge
-CI `30788531829`), which is the current canonical baseline. `T5` and `T6` are
-discharged. Through PR #96 the recorded position was that
+CI `30788531829`). PR #99 then merged the `T7`/`T8` disclosure-and-admission
+work at `main@d7eefb7c` (exact head `2375aba5`, exact-head CI `30808291831`,
+post-merge CI `30810160121`, which failed the lapse detector because PR #99
+landed without pre-recording itself), which is the current canonical baseline.
+`T5` and `T6` are discharged. Through PR #96 the recorded position was that
 no GoalEx lifecycle or source node is currently admitted;
 this round supersedes that position by admitting three bounded lease-map nodes.
 `T7` is a documentation-and-tests node that discloses PR #96's three
@@ -618,6 +621,7 @@ git merge-base --is-ancestor 42abaab7ba4fa83f9838c3d32ee96db4256bfcad main
 git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
 git merge-base --is-ancestor 71e492b4507d84e6631fef851cec820bcd80215b main
 git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
+git merge-base --is-ancestor d7eefb7c3595e786851a7d416ba54ea3997a8b6c main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -631,7 +635,7 @@ git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "b8673031a80158c49d552a4b3647829d213243bd"
+test "$(git rev-parse main)" = "d7eefb7c3595e786851a7d416ba54ea3997a8b6c"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
