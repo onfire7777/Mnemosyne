@@ -56,6 +56,7 @@ _ADAPTERS = {
     "qa-smoke": qa_smoke.run,
     "smoke": smoke.run,
     "wmbs-m01-reference": whole_memory_reference.run_m01_development,
+    "wmbs-m03-valid-time-reference": whole_memory_reference.run_m03_valid_time_development,
     "wmbs-m10-reference": whole_memory_reference.run_m10_development,
     "pm-bench-triggerbench": pm_bench_triggerbench.run,
     "working-memory-action": working_memory_action_probe.run,
@@ -77,6 +78,7 @@ _PROFILE_CONTRACTS = {
     "triggerbench-action-v1": ("deterministic-action", "wilson"),
     "working-memory-action-v1": ("deterministic-action", "bootstrap"),
     "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
 }
 

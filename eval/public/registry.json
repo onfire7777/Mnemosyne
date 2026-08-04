@@ -231,6 +231,24 @@
     "track_kind": "ENHANCED-SUCCESSOR",
     "upstream_comparable": false
   },
+  "wmbs-m03-valid-time-development": {
+    "adapter": "wmbs-m03-valid-time-reference",
+    "admission_state": "PROPOSED",
+    "dataset_sha256": "04c8e8a89d25c281744d57c20654bd035d85cb2f2cf96fbbd631592e4488bb91",
+    "family": "whole-memory-development",
+    "fixture": "fixtures/wmbs-m03-valid-time-development.json",
+    "headline_eligible": false,
+    "independent_external_reproduction": false,
+    "interval_method": "descriptive",
+    "license": "CC0-1.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "fb1d814b8b1be5d030e3ea06aa2e0dd154edc540",
+    "scoring_profile": "wmbs-m03-valid-time-v1",
+    "split_role": "development",
+    "track_kind": "DEVELOPMENT",
+    "upstream_comparable": false
+  },
   "wmbs-m10-development": {
     "adapter": "wmbs-m10-reference",
     "admission_state": "PROPOSED",

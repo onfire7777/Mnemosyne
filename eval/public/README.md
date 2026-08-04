@@ -121,6 +121,30 @@ runs. They exercise harness-owned deterministic cores rather than a real SUT,
 remain non-publishable and non-comparable to upstream tracks, and support no
 benchmark superiority claim.
 
+The M03 valid-time cell runs through the same bundle custody path, but over the
+public CLI subprocess seam rather than a harness-owned core:
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m03-valid-time-development --out-dir /tmp/wmbs-m03
+uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m03
+```
+
+`wmbs-m03-valid-time-development` is `PROPOSED`, `DEVELOPMENT`,
+`split_role: development`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and
+`independent_external_reproduction: false`. Its registration is a reachability
+fix only — it advances no admission state and supports no publication,
+comparability, or superiority claim.
+
+The cell covers **valid-time only**. Full bitemporal transaction-time query
+semantics stay a hard deferral: the fixture itself declares
+`transaction_time.supported: false`, because transaction-time is system-owned
+and not exposed by this development cell. Scored coverage is the five canonical
+timelines (`ordered-events`, `late-event`, `retroactive-correction`,
+`exact-boundary`, `tied-valid-time`) across the five canonical seeds
+`[11, 23, 37, 53, 71]`.
+
 `finalize.reason` is closed to `completed` or `cancelled`. A successful
 `cancelled` finalization is terminal and uses identical idempotent request and
 response replay. Closed errors and negative finalize receipts leave the attempt
