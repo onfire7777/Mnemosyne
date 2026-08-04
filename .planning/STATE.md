@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@b8673031`; PR #96 independently delivered the development-only M02/M04/M05 evaluation oracles (CI `30744318093`), PR #97 adjudicated the round-43 review (post-merge CI `30775783472`), and PR #98 corrected PR #97's retired-loop claim back to paused (post-merge CI `30788531829`). Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No source node is admitted; the admitted writers are the bounded documentation-and-tests nodes T7 (disclosing PR #96's oracles) and T8 (the Round-0 M01-M20 completeness inventory and its drift test), plus T9, the bounded public-harness node registering the already-tested M03 valid-time development cell so it is reachable from run_public_suite. None of the three moves an admission state, publication claim, or progress counter. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@d7eefb7c`; PR #96 independently delivered the development-only M02/M04/M05 evaluation oracles (CI `30744318093`), PR #97 adjudicated the round-43 review (post-merge CI `30775783472`), PR #98 corrected PR #97's retired-loop claim back to paused (post-merge CI `30788531829`), and PR #99 merged the T7 and T8 documentation-and-tests nodes (exact head `2375aba5`, exact-head CI `30808291831`) without pre-recording itself, so its post-merge run `30810160121` failed the baseline lapse detector and left main red until this round's recomputation. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No source node is admitted; T7 (disclosing PR #96's oracles) and T8 (the Round-0 M01-M20 completeness inventory and its drift test) are now MERGED as PR #99, and the one remaining admitted writer is T9, the bounded public-harness node registering the already-tested M03 valid-time development cell so it is reachable from run_public_suite. None of the three moves an admission state, publication claim, or progress counter. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
 last_updated: "2026-08-03T06:49:14Z"
 last_activity: 2026-08-03
 progress:
@@ -349,8 +349,10 @@ receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
 the PR #87, PR #88, PR #89, PR #90, PR #91, PR #92, PR #93, PR #94, PR #95, PR #96,
 PR #97, and PR #98 merge receipts. The
-current canonical baseline is `main@b8673031` (PR #98, exact head `b49b0b35`,
-exact-head CI `30787319275`, post-merge CI `30788531829`). PR #90 is
+current canonical baseline is `main@d7eefb7c` (PR #99, exact head `2375aba5`,
+exact-head CI `30808291831`, post-merge CI `30810160121`, which failed because
+PR #99 merged after the then-recorded baseline `main@b8673031` without
+pre-recording itself). PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
