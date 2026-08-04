@@ -92,8 +92,36 @@ The following packages are complete source history, not runnable work:
   requires every PR merged after the baseline to appear in this map. Its
   receipts, likewise recorded only now: merge `b8673031`, exact head
   `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`.
+- PR #99: the Round-0 M01-M20 whole-memory module inventory and its derivations,
+  `tests/test_wmbs_module_inventory.py`, the `T7` M02/M04/M05 Stage-A disclosure
+  in `eval/public/README.md` with `tests/test_public_wmbs_stage_a_disclosure.py`,
+  and the admission of lease-map nodes `T8` and `T9`. It changed no benchmark,
+  measurement, admission state, or publication claim. Its receipts: merge
+  `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831` green. **It did
+  not pre-record itself here**, so its post-merge run `30810160121` failed on the
+  baseline-lapse detector and left `main` red; run `30894938975` reproduced the
+  same single failure. PR #101 below discharges that lapse — recorded honestly
+  rather than elided.
+- PR #101: this recomputation of the canonical baseline from `main@b8673031` to
+  `main@d7eefb7c`, updating this map's `Baseline:` line, `GOAL.md`, and
+  `.planning/STATE.md`, and recording PR #99's receipts above so the
+  baseline-lapse detector passes and `main` is green again. It admits no source
+  node and changes no benchmark, measurement, admission state, or publication
+  claim. Recorded here before merge for the same reason as PRs #97 and #98: the
+  detector requires every PR merged after the baseline to appear in this map.
+  Pending at the time of writing — no merge SHA, exact head, or CI run id is
+  claimed for it here, because none exists yet.
+- PR #100: the node `T9` M03 registry admission, registering
+  `wmbs-m03-valid-time-development` in `eval/public/registry.json` with its
+  runner adapter, profile contract, `allowed_profile` label, scored-denominator
+  handling in `eval/public/bundle.py`, `eval/public/README.md` disclosure, and
+  `tests/test_public_wmbs_m03_registry_admission.py`. Reachability only: M03
+  stays `PROPOSED` and full bitemporal transaction-time remains a hard deferral.
+  Reserved and recorded here before merge for the same reason as PR #101.
+  Pending at the time of writing — no merge SHA, exact head, or CI run id is
+  claimed for it here, because none exists yet.
 
-This map is recomputed from the new baseline `main@b8673031`, which the
+This map is recomputed from the new baseline `main@d7eefb7c`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
