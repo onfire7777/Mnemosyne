@@ -293,15 +293,18 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     trace_ids = [_trace_id(trace, family=config.get("family")) for trace in traces]
     if len(trace_ids) != len(set(trace_ids)):
         raise BundleError("duplicate trace IDs")
-    if measured.get("trace_count") != len(traces) or measured.get("total") != len(
-        traces
-    ):
-        raise BundleError("trace/metric count drift")
     family, method, profile = (
         config.get("family"),
         config.get("interval_method"),
         config.get("scoring_profile"),
     )
+    if measured.get("trace_count") != len(traces):
+        raise BundleError("trace/metric count drift")
+    # M03's scored population is its as-of history queries, not its traces, so
+    # `total` carries its own denominator and is pinned separately below, once
+    # the benchmark it is derived from has been digest-anchored to the registry.
+    if profile != "wmbs-m03-valid-time-v1" and measured.get("total") != len(traces):
+        raise BundleError("trace/metric count drift")
     allowed_profile = {
         "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
         "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
@@ -311,6 +314,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "triggerbench-action-v1": ("deterministic-action", "wilson"),
         "working-memory-action-v1": ("deterministic-action", "bootstrap"),
         "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
+        "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
         "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
     }.get(profile)
     if any(trace.get("scoring_family") != family for trace in traces):
@@ -339,6 +343,22 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if hashlib.sha256(dataset_bytes).hexdigest() != metadata.get("dataset_sha256"):
         raise BundleError("benchmark custody digest mismatch")
     _verify_registry_anchor(metadata)
+    if profile == "wmbs-m03-valid-time-v1":
+        # The fixture is now digest-anchored to the registry, so its own shape
+        # fixes the scored denominator exactly: one as-of history query per
+        # (timeline history entry, seed). `total` is pinned to that count, not
+        # merely exempted from the trace-count equality above.
+        data = benchmark.get("data")
+        timelines = data.get("timelines") if isinstance(data, dict) else None
+        seeds = data.get("seeds") if isinstance(data, dict) else None
+        if not isinstance(timelines, list) or not isinstance(seeds, list):
+            raise BundleError("trace/metric count drift")
+        expected_total = len(seeds) * sum(
+            len(timeline.get("history") or []) if isinstance(timeline, dict) else 0
+            for timeline in timelines
+        )
+        if measured.get("total") != expected_total:
+            raise BundleError("trace/metric count drift")
     if build.get("system_seam") != metadata.get(
         "system_seam", "public-cli-subprocess"
     ):
@@ -736,6 +756,8 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
         raise BundleError("unknown case-based benchmark schema")
     if benchmark.get("schema_id") == "wmbs-m01-fixture-v1":
         return [{"case_id": "M01", "fixture": benchmark}]
+    if benchmark.get("schema_id") == "wmbs-m03-valid-time-development/fixture/0.1":
+        return [{"case_id": "M03", "fixture": benchmark}]
     if not isinstance(benchmark.get("questions"), list):
         raise BundleError("scoring profile benchmark questions are missing")
     labels = []
