@@ -24,7 +24,7 @@ is not on PATH: always use `uv run --locked python …`.
 
 `gh run view 30894938975 --log-failed` shows one failure and nothing else:
 
-```
+```text
 FAILED tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files
 AssertionError: these PRs merged into origin/main after the recorded baseline
 `main@b8673031` but appear nowhere in 2026-07-28-remaining-dependency-write-lease-map.md:
@@ -37,7 +37,7 @@ by-design lapse the round-46 record predicted; nobody discharged it.
 
 **How the test works** (read `tests/test_planning_traceability.py:34-68` and
 `:155-292` before editing anything):
-- `LEASE_BASELINE = ^Baseline: `main@([0-9a-f]{40})`$` — the lease map must have
+- ``LEASE_BASELINE = ^Baseline: `main@([0-9a-f]{40})`$`` — the lease map must have
   exactly **one** such line; it defines the baseline SHA.
 - `GOAL.md` must literally contain both
   `test "$(git rev-parse main)" = "<40-hex>"` and
@@ -163,5 +163,5 @@ controller worktree must be clean when you yield.
 
 - [ ] Remove the M03 worktree (`git worktree remove /Users/admin/.codex/worktrees/9697/Mnemosyne-m03`) and confirm `git worktree list` shows only `/Users/admin/Mnemosyne` and the controller worktree.
 - [ ] Tick the now-satisfied Task 3/4 checkboxes in `docs/plans/goalex-r46-land-the-stranded-t7-inventory-delivery-.md` and write the round record `docs/plans/goalex-r47-<slug>.md` containing: the red-`main` diagnosis with run ids `30810160121` and `30894938975`; the three review adjudications above; both PRs' receipts (merge SHA, exact head, exact-head CI run id, post-merge CI run id); the `bundle.py` scope disclosure; and the standing note that `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` self-declares `PLANNING ARTIFACT ONLY — NOT CODE-READY`, which the inventory's ranking of M14 as the cheapest plan-having module does not reflect — surfaced, not edited.
-- [ ] On the controller branch, update the lease map, `.planning/STATE.md`, and `GOAL.md` with both PRs' real post-merge receipts and mark `T9` `MERGED`. Move no progress counter. Note explicitly that the recorded baseline `main@d7eefb7c` is now one merge behind by the accepted terminal-receipt property, so the next round recomputes it — and that both PRs pre-recorded themselves so `main` is green, not red, in the meantime.
+- [ ] On the controller branch, update the lease map, `.planning/STATE.md`, and `GOAL.md` with both PRs' real post-merge receipts and mark `T9` `MERGED`. Move no progress counter. Note explicitly that the recorded baseline `main@d7eefb7c` is now two merges behind — PR #101 and PR #100 — by the accepted terminal-receipt property, so the next round recomputes it — and that both PRs pre-recorded themselves so `main` is green, not red, in the meantime.
 - [ ] Commit all of the above on the controller branch as the round's final step and confirm `git status --porcelain --untracked-files=all --ignored` shows nothing beyond the permitted ignored baseline before yielding.
