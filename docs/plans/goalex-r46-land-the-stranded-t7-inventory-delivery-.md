@@ -122,19 +122,33 @@ final step, and remove any extra worktree you created.
 
 ### Task 1: Complete and land the stranded lifecycle delivery as PR-1
 
-- [ ] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, keep node `T7` and add its delivery statement: the `eval/public/README.md` disclosure and `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by this PR.
-- [ ] Add node `T8` to the same package DAG table: a bounded GoalEx lifecycle documentation-and-tests node whose exact lease is `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`, `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`, `tests/test_wmbs_module_inventory.py`, and the three lifecycle files. State that it admits no source node and no publication claim.
-- [ ] Add node `T9` to the same table, `ADMITTED`, as the **public-harness Stage-B M03 registry-admission node**: consumes verified canonical `main` at the PR-1 merge commit; produces the `wmbs-m03-valid-time-development` registry entry, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys, its README documentation, and its tests; exact lease `eval/public/registry.json`, `eval/public/runner.py`, `eval/public/README.md`, and the new/edited test files under `tests/`; owner: Public-harness integration owner, serialized as sole writer (no open PR, no competing lane). State explicitly that it authorizes **M03 only**, admits no other module, changes no fixture byte, no scorer logic, no schema, and no admission state — M03 stays `PROPOSED` with full bitemporal transaction-time retained as a hard deferral per pilot-plan line 68 — and that it admits no successor node.
-- [ ] Update the "Current delivery wave" and concurrency-ceiling paragraphs so they name `T7`, `T8`, and `T9` truthfully instead of asserting zero admitted writers, and update the "Independent external gates (do not block T0-T7)" line accordingly.
-- [ ] Update `.planning/STATE.md` and the `GOAL.md` Current Phase paragraph to record the delivered inventory, the delivered `T7` disclosure, and the admission of `T8` and `T9`. Move no progress counter.
-- [ ] Tick the now-satisfied checkboxes in `docs/plans/goalex-r45-round-0-of-the-benchmark-directive-publi.md` Task 4 (the README disclosure and its pinning tests exist).
-- [ ] Push the controller branch, open PR-1, wait for exact-head CI green, merge normally, then fast-forward local `main` and prove `git rev-parse main` equals `git rev-parse origin/main`.
+- [x] In `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, keep node `T7` and add its delivery statement: the `eval/public/README.md` disclosure and `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by this PR.
+- [x] Add node `T8` to the same package DAG table: a bounded GoalEx lifecycle documentation-and-tests node whose exact lease is `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`, `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`, `tests/test_wmbs_module_inventory.py`, and the three lifecycle files. State that it admits no source node and no publication claim.
+- [x] Add node `T9` to the same table, `ADMITTED`, as the **public-harness Stage-B M03 registry-admission node**: consumes verified canonical `main` at the PR-1 merge commit; produces the `wmbs-m03-valid-time-development` registry entry, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys, its README documentation, and its tests; exact lease `eval/public/registry.json`, `eval/public/runner.py`, `eval/public/README.md`, and the new/edited test files under `tests/`; owner: Public-harness integration owner, serialized as sole writer (no open PR, no competing lane). State explicitly that it authorizes **M03 only**, admits no other module, changes no fixture byte, no scorer logic, no schema, and no admission state — M03 stays `PROPOSED` with full bitemporal transaction-time retained as a hard deferral per pilot-plan line 68 — and that it admits no successor node.
+- [x] Update the "Current delivery wave" and concurrency-ceiling paragraphs so they name `T7`, `T8`, and `T9` truthfully instead of asserting zero admitted writers, and update the "Independent external gates (do not block T0-T7)" line accordingly.
+- [x] Update `.planning/STATE.md` and the `GOAL.md` Current Phase paragraph to record the delivered inventory, the delivered `T7` disclosure, and the admission of `T8` and `T9`. Move no progress counter.
+- [x] Tick the now-satisfied checkboxes in `docs/plans/goalex-r45-round-0-of-the-benchmark-directive-publi.md` Task 4 (the README disclosure and its pinning tests exist).
+- [x] Push the controller branch, open PR-1, wait for exact-head CI green, merge normally, then fast-forward local `main` and prove `git rev-parse main` equals `git rev-parse origin/main`.
 
 ### Task 2: Cut the M03 lane from the new canonical main
 
-- [ ] After PR-1 merges, refresh `origin`, confirm `main` equals clean `origin/main`, and confirm `gh pr list --state open` shows nothing touching `eval/public/`.
-- [ ] Create an isolated lane: `git worktree add /Users/admin/.codex/worktrees/9697/Mnemosyne-m03 -b codex/wmb-m03-registry-admission main`. Do all M03 work there; touch nothing in the controller worktree until Task 5.
-- [ ] Confirm in that lane that node `T9` is present and `ADMITTED` in the lease map on `main`, and that `eval/public/bundle.py:44` already declares the seeds `(11, 23, 37, 53, 71)` for suite name `wmbs-m03-valid-time-development`.
+- [x] After PR-1 merges, refresh `origin`, confirm `main` equals clean `origin/main`, and confirm `gh pr list --state open` shows nothing touching `eval/public/`. — PR-1 is PR #99; `main` = `origin/main` = `d7eefb7c3595e786851a7d416ba54ea3997a8b6c`; `gh pr list --state open` is empty.
+- [x] Create an isolated lane: `git worktree add /Users/admin/.codex/worktrees/9697/Mnemosyne-m03 -b codex/wmb-m03-registry-admission main`. Do all M03 work there; touch nothing in the controller worktree until Task 5. — lane created at `d7eefb7c` on branch `codex/wmb-m03-registry-admission`.
+- [x] Confirm in that lane that node `T9` is present and `ADMITTED` in the lease map on `main`, and that `eval/public/bundle.py:44` already declares the seeds `(11, 23, 37, 53, 71)` for suite name `wmbs-m03-valid-time-development`. — `T9 | ADMITTED` at lease-map line 213; `eval/public/bundle.py:44` reads `"wmbs-m03-valid-time-development": (11, 23, 37, 53, 71),`. Note for Task 3: the merged `T9` lease also covers `eval/public/bundle.py`'s `allowed_profile` label, which the plan body's Task 3 list does not mention.
+
+**Task 2 round note — canonical-baseline transient on `main`.**
+`tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+is **red on clean `main` at `d7eefb7c`**, independently of any Task 2 work:
+PR #99 (PR-1) merged after the recorded baseline `main@b8673031` and appears
+nowhere in the lease map, so `_unrecorded_merged_prs` flags it. Verified by
+running the file in the untouched `Mnemosyne-m03` lane at `d7eefb7c`. This is
+the by-design post-merge transient that Task 5's baseline recomputation closes.
+Consequence for Task 4: PR-2's CI will carry this same pre-existing failure
+unless the baseline is recomputed and PR #99's receipt recorded first — it is
+rooted outside the M03 registration, so do not treat it as an M03 blocker under
+Task 4's stop rule; recompute the baseline instead. Ruff note: `ruff check .`
+passes; `ruff format --check .` reports 317 pre-existing unformatted files
+repo-wide and is not a gate this round.
 
 ### Task 3: Register the M03 valid-time suite, test-first
 
