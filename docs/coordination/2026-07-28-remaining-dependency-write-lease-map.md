@@ -332,8 +332,10 @@ Quarantine
   public-harness lease and requires both owners. `T9` overlaps `T7` on
   `eval/public/README.md`, so it is serialized behind PR-1 rather than run
   beside it: it lands as PR-2, as the sole writer on `eval/public/*`, only
-  after PR-1 merges — which it has, as PR #99. At most one writer is active at any moment, and
-  no other PR is open and no other lane touches `eval/public/*`. This
+  after PR-1 merges — which it has, as PR #99. At most one writer on
+  `eval/public/*` is active at any moment: PR #100 (node `T9`) is the sole
+  competing writer on that lease, and PR #101 — the pending controller
+  lifecycle-record PR — touches no `eval/public/*` path. This
   serialization is the explicit remedy for PR #96's defect, where three modules
   merged onto that lease while this map admitted no writer for it. Otherwise
   only read-only reviews may run.
