@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Mnemosyne Contributors" }]
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=50.0.0"]
 keywords = ["agent-memory", "retrieval", "belief-revision", "mcp", "postgres"]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -29,7 +29,7 @@ native = ["mnemosyne-native"]
 # dense path is the packed-BLOB kernel exact scan (dense_scan_packed); sqlite-vec
 # only registers an optional vec0 approximate index behind the projection
 # registry (full wiring: Task 8). Never a runtime dependency — the default
-# install stays exactly ["cryptography>=42"].
+# install stays exactly ["cryptography>=50.0.0"].
 sqlitevec = ["sqlite-vec>=0.1.9"]
 
 [tool.uv.sources]
