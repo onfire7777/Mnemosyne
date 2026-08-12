@@ -360,7 +360,11 @@ def test_answer_envelope_matches_closed_schema_contract() -> None:
         m04.score_unresolved_calibration(fixture, invalid)
 
 
-@pytest.mark.parametrize("invalid_text", [" \n\t", "x" * 65_537])
+@pytest.mark.parametrize(
+    "invalid_text",
+    [" \n\t", "x" * 65_537],
+    ids=["whitespace", "too-long"],
+)
 def test_resolved_answer_text_enforces_frozen_nonempty_string(
     invalid_text: str,
 ) -> None:

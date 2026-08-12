@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import sys
 from pathlib import Path
@@ -100,19 +101,29 @@ def _write_stub_tool(tmp_path: Path, report: dict) -> str:
         "import json, sys\nprint(json.dumps(%r))\n" % report,
         encoding="utf-8",
     )
-    tool = tmp_path / "c2patool-stub.sh"
-    tool.write_text(
-        "#!/usr/bin/env bash\nexec %s %s\n" % (sys.executable, payload),
-        encoding="utf-8",
-    )
-    tool.chmod(tool.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    if os.name == "nt":
+        tool = tmp_path / "c2patool-stub.cmd"
+        tool.write_text(
+            '@echo off\r\n"%s" "%s" %%*\r\n' % (sys.executable, payload),
+            encoding="utf-8",
+        )
+    else:
+        tool = tmp_path / "c2patool-stub.sh"
+        tool.write_text(
+            "#!/usr/bin/env bash\nexec %s %s\n" % (sys.executable, payload),
+            encoding="utf-8",
+        )
+        tool.chmod(tool.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
     return str(tool)
 
 
 def _build_report(asset_path: str, sha: str, *, root_fpr: str = ROOT_FPR) -> dict:
     raw = _REPORT_TEMPLATE.read_text(encoding="utf-8")
     raw = (
-        raw.replace("__ASSET_PATH__", asset_path)
+        raw.replace(
+            "__ASSET_PATH__",
+            json.dumps(asset_path, ensure_ascii=False)[1:-1],
+        )
         .replace("__ASSET_SHA256__", sha)
         .replace("__ROOT_FPR__", root_fpr)
     )

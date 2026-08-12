@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -499,7 +500,8 @@ def test_new_site_has_deployable_directory_permissions(tmp_path: Path) -> None:
 
     render_site(results, {"result-001": traces}, output)
 
-    assert stat.S_IMODE(output.stat().st_mode) == 0o755
+    if os.name != "nt":
+        assert stat.S_IMODE(output.stat().st_mode) == 0o755
 
 
 def test_rejects_symlink_destination_without_touching_target(tmp_path: Path) -> None:
@@ -508,7 +510,10 @@ def test_rejects_symlink_destination_without_touching_target(tmp_path: Path) -> 
     (target / "index.html").write_bytes(b"unrelated data\n")
     before = _tree(target)
     output = tmp_path / "site"
-    output.symlink_to(target, target_is_directory=True)
+    try:
+        output.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
     results = _write_json(tmp_path / "results.json", _result())
     traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
 

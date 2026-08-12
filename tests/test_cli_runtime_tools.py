@@ -4,6 +4,7 @@ import argparse
 import base64
 import copy
 import json
+import os
 import shutil
 import shlex
 import socket
@@ -210,10 +211,11 @@ def oidc_payload(**overrides: object) -> dict[str, object]:
 def run_cli(store: Path, *args: str) -> dict:
     result = subprocess.run(
         [sys.executable, "-m", "mnemosyne.cli", "--store", str(store), *args],
-        check=True,
+        check=False,
         text=True,
         capture_output=True,
     )
+    assert result.returncode == 0, result.stderr or result.stdout
     return json.loads(result.stdout)
 
 
@@ -325,7 +327,7 @@ def seed_legacy_evidence(
 
 
 def run_packaged_cli(store: Path, *args: str) -> dict:
-    entrypoint = Path(sys.executable).with_name("mneme")
+    entrypoint = Path(sys.executable).with_name("mneme.exe" if os.name == "nt" else "mneme")
     assert entrypoint.exists(), (
         f"missing packaged entrypoint at {entrypoint}; run `python -m pip install -e .`"
     )
@@ -1709,11 +1711,11 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             "--reranker-api-key",
             "rank-secret",
             "--media-extractor-command",
-            str(extractor),
+            subprocess.list2cmdline([sys.executable, str(extractor)]),
             "--media-embedding-provider",
             "command",
             "--media-embedding-command",
-            str(embedder),
+            subprocess.list2cmdline([sys.executable, str(embedder)]),
             "--media-embedding-dims",
             "3",
             "provider-check",
@@ -3057,9 +3059,15 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                         "lexical_backend": "paradedb-bm25",
                         "graph_backend": "apache-age",
                     },
-                    "media": {
-                        "extractor": {"command": str(extractor)},
-                        "embedding": {"provider": "command", "command": str(embedder), "dims": 3},
+                        "media": {
+                            "extractor": {
+                                "command": subprocess.list2cmdline([sys.executable, str(extractor)])
+                            },
+                            "embedding": {
+                                "provider": "command",
+                                "command": subprocess.list2cmdline([sys.executable, str(embedder)]),
+                                "dims": 3,
+                            },
                     },
                     "object_key": {
                         "required": True,
@@ -4142,9 +4150,9 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     verifier_stub.chmod(0o755)
 
     ingested = run_cli(
-        store,
-        "--c2pa-tool",
-        str(verifier_stub),
+            store,
+            "--c2pa-tool",
+            subprocess.list2cmdline([sys.executable, str(verifier_stub)]),
         "--trusted-provenance-issuer",
         "issuer-a",
         "ingest",
@@ -4375,7 +4383,7 @@ def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Pat
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        subprocess.list2cmdline([sys.executable, str(verifier_stub)]),
         "--provenance-trust-policy",
         str(trust_policy),
         "ingest",
@@ -4441,7 +4449,7 @@ def test_cli_ingest_c2pa_without_trust_anchor_quarantines(tmp_path: Path) -> Non
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        subprocess.list2cmdline([sys.executable, str(verifier_stub)]),
         "ingest",
         "--tenant",
         TENANT,
@@ -4501,7 +4509,7 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        subprocess.list2cmdline([sys.executable, str(verifier_stub)]),
         "--trusted-provenance-issuer",
         "issuer-a",
         "--trusted-provenance-root",
@@ -4571,7 +4579,7 @@ def test_cli_provenance_trust_check_validates_c2pa_roots(tmp_path: Path) -> None
         json.dumps(
             {
                 "name": "production-c2pa",
-                "tool": str(verifier_stub),
+                "tool": subprocess.list2cmdline([sys.executable, str(verifier_stub)]),
                 "trusted_issuers": ["issuer-a"],
                 "trusted_roots": [trusted_root],
                 "trust_policy": {
@@ -4651,7 +4659,7 @@ def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> No
         json.dumps(
             {
                 "name": "production-c2pa",
-                "tool": str(verifier_stub),
+                "tool": subprocess.list2cmdline([sys.executable, str(verifier_stub)]),
                 "trusted_issuers": ["issuer-a"],
                 "trusted_roots": [trusted_root],
                 "trust_policy": {
@@ -5212,7 +5220,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "--object-store",
         str(objects),
         "--media-extractor-command",
-        str(extractor),
+        subprocess.list2cmdline([sys.executable, str(extractor)]),
         "ingest",
         "--tenant",
         TENANT,
@@ -5234,7 +5242,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "--object-store",
         str(objects),
         "--media-extractor-command",
-        str(extractor),
+        subprocess.list2cmdline([sys.executable, str(extractor)]),
         "queue-drain",
         "--limit",
         "1",
@@ -8567,7 +8575,8 @@ def test_cli_production_evidence_verify_writes_external_report_output(tmp_path: 
     written = json.loads(report_path.read_text(encoding="utf-8"))
 
     assert written == report
-    assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(report_path.stat().st_mode) == 0o600
 
 
 def test_cli_production_evidence_verify_rejects_report_output_inside_bundle(
@@ -9433,6 +9442,8 @@ def test_cli_production_evidence_verify_rejects_missing_referenced_executable_to
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     tool = Path(preflight["executable_tool_references"][0]["snapshot_path"])
+    if os.name == "nt":
+        tool.chmod(stat.S_IWRITE)
     tool.unlink()
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
@@ -10456,7 +10467,10 @@ def test_cli_release_audit_rejects_manifest_artifact_symlink_escape(tmp_path: Pa
         encoding="utf-8",
     )
     escaped = manifest_path.parent / "checks" / "escaped.json"
-    escaped.symlink_to(outside)
+    try:
+        escaped.symlink_to(outside)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
     manifest["checks"][0]["path"] = "checks/escaped.json"
     manifest["checks"][0]["sha256"] = "sha256:" + sha256(outside.read_bytes()).hexdigest()
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")

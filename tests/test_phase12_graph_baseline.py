@@ -97,7 +97,10 @@ def test_output_path_boundary_requires_new_external_non_symlink_path(tmp_path: P
         baseline._validate_output_path(Path.cwd() / ".phase12-baseline-test-output")
 
     link = tmp_path / "link"
-    link.symlink_to(tmp_path / "target", target_is_directory=True)
+    try:
+        link.symlink_to(tmp_path / "target", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
     with pytest.raises(ValueError, match="non-symlink"):
         baseline._validate_output_path(link)
 
@@ -129,7 +132,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
         },
     }
     artifacts = {
-        str(path.relative_to(output)): path.read_bytes()
+        path.relative_to(output).as_posix(): path.read_bytes()
         for path in output.rglob("*")
         if path.is_file()
     }
@@ -139,7 +142,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
     assert second.returncode != 0
     assert "baseline output must not already exist" in second.stderr
     assert {
-        str(path.relative_to(output)): path.read_bytes()
+        path.relative_to(output).as_posix(): path.read_bytes()
         for path in output.rglob("*")
         if path.is_file()
     } == artifacts

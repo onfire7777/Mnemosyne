@@ -112,6 +112,15 @@ class MnemoCLI:
 
     def _environ(self) -> dict[str, str]:
         environ = dict(os.environ)
+        if os.name == "nt":
+            for canonical in ("SystemRoot", "ComSpec", "TEMP", "TMP"):
+                if canonical not in environ:
+                    value = next(
+                        (value for key, value in environ.items() if key.casefold() == canonical.casefold()),
+                        None,
+                    )
+                    if value is not None:
+                        environ[canonical] = value
         # Ensure the in-repo package is importable without an install step.
         existing = environ.get("PYTHONPATH", "")
         environ["PYTHONPATH"] = os.pathsep.join(p for p in (str(_SRC), existing) if p)

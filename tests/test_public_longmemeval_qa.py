@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 from pathlib import Path
 from typing import Any
@@ -143,7 +144,8 @@ def test_external_candidate_manifest_freeze_is_immutable_and_schema_bound(
     monkeypatch.setattr(runner, "_current_clean_head", lambda _root: git_sha)
     external = tmp_path / "candidate-manifest.json"
     write_candidate_manifest(external, manifest)
-    assert stat.S_IMODE(external.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(external.stat().st_mode) == 0o600
     with pytest.raises(FileExistsError):
         write_candidate_manifest(external, manifest)
     forged = {**manifest, "git_sha": "b" * 40}

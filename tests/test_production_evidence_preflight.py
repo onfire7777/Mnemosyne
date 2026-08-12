@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import shutil
@@ -20,6 +19,11 @@ from mnemosyne.cli import (
 )
 from mnemosyne.evidence_redaction import scan_evidence_paths, scan_evidence_tree
 from mnemosyne.production_parity import build_parity_row_readiness
+
+fcntl = pytest.importorskip(
+    "fcntl",
+    reason="production evidence shell helpers require a POSIX host",
+)
 
 
 REPO = Path(__file__).resolve().parents[1]

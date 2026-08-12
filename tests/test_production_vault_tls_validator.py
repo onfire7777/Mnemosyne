@@ -7,10 +7,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="Vault TLS validator targets POSIX hosts")
 
 
 REPO = Path(__file__).resolve().parents[1]

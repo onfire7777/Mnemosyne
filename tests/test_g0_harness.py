@@ -368,7 +368,7 @@ def test_g0_unified_substrate_fixture_reports_cascade_contracts() -> None:
 def test_g0_resource_usage_fixture_computes_controller_watts_with_explicit_telemetry(tmp_path: Path) -> None:
     telemetry = tmp_path / "controller-telemetry.json"
     telemetry_text = '{"controller_avg_watts": 12.5, "controller_cost_usd_per_hour": 0.25}\n'
-    telemetry.write_text(telemetry_text, encoding="utf-8")
+    telemetry.write_bytes(telemetry_text.encode("utf-8"))
 
     report = run_resource_usage_eval(telemetry_path=telemetry)
 

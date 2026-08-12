@@ -10,6 +10,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from mnemosyne.command_line import split_command
+
 
 @dataclass(frozen=True, slots=True)
 class ProvenanceDecision:
@@ -279,9 +281,10 @@ class C2paToolVerifier:
         asset_path = str(manifest_data.get("asset_path") or manifest_data.get("c2pa_asset_path") or "")
         if not asset_path:
             return self.fallback.verify(payload, manifest)
+        tool_argv = [self.tool_path] if Path(self.tool_path).exists() else split_command(self.tool_path)
         try:
             completed = subprocess.run(
-                [self.tool_path, asset_path, "--json"],
+                [*tool_argv, asset_path, "--json"],
                 check=False,
                 text=True,
                 capture_output=True,

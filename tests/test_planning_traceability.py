@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANNING = ROOT / ".planning"
@@ -644,6 +646,7 @@ def test_engine_contract_documents_three_engine_memory_plane_parity() -> None:
         assert expected in normalized
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires POSIX permission and symlink semantics")
 def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
     goal = " ".join((ROOT / "GOAL.md").read_text(encoding="utf-8").split()).replace(
         "`", ""

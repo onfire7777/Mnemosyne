@@ -12,7 +12,10 @@ than fully parsing YAML.
 from __future__ import annotations
 
 import re
+import os
 import subprocess
+
+import pytest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -266,7 +269,8 @@ def test_build_services_reference_existing_docker_assets() -> None:
 
 def test_supply_chain_gate_is_wired_for_required_tools() -> None:
     body = SUPPLY_CHAIN_SCRIPT.read_text(encoding="utf-8")
-    assert SUPPLY_CHAIN_SCRIPT.stat().st_mode & 0o111, "supply-chain gate must be executable"
+    if os.name != "nt":
+        assert SUPPLY_CHAIN_SCRIPT.stat().st_mode & 0o111, "supply-chain gate must be executable"
     for tool in ("docker", "gitleaks", "trivy", "syft", "grype", "cosign"):
         assert f"require_tool {tool}" in body
     for command in (
@@ -288,6 +292,7 @@ def test_supply_chain_gate_is_wired_for_required_tools() -> None:
     assert ".artifacts" not in body
 
 
+@pytest.mark.skipif(os.name == "nt", reason="requires /bin/bash")
 def test_supply_chain_gate_shell_syntax_is_valid() -> None:
     result = subprocess.run(
         ["/bin/bash", "-n", str(SUPPLY_CHAIN_SCRIPT)],

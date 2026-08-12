@@ -61,7 +61,8 @@ def test_manifest_round_trip_is_canonical_and_private(tmp_path, manifest) -> Non
     create_manifest(path, manifest)
 
     assert load_manifest(path, expected=manifest) == manifest
-    assert path.stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
     assert path.read_text(encoding="utf-8") == (
         json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
     )

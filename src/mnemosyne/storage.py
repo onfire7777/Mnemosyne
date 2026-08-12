@@ -7,7 +7,6 @@ import hashlib
 import hmac
 import json
 import os
-import shlex
 import subprocess
 import tempfile
 import urllib.error
@@ -18,6 +17,7 @@ from pathlib import Path
 from typing import Any, Protocol, Sequence
 from urllib.parse import urlsplit
 
+from mnemosyne.command_line import split_command
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from mnemosyne.ids import bytes_cid
@@ -425,7 +425,7 @@ def _b64decode(data: str) -> bytes:
 
 def _command_argv(command: str | Sequence[str]) -> list[str]:
     if isinstance(command, str):
-        return shlex.split(command)
+        return split_command(command)
     return [str(item) for item in command]
 
 

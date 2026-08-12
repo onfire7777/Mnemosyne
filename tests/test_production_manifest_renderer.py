@@ -16,6 +16,8 @@ from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_PROVIDER_CHECKS,
 )
 
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="production manifest renderer targets POSIX hosts")
+
 
 REPO = Path(__file__).resolve().parents[1]
 RENDERER = REPO / "infra" / "scripts" / "render-production-soak-manifest.sh"

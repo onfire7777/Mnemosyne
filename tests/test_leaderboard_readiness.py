@@ -216,6 +216,7 @@ def test_module_cli_propagates_process_exit_and_output(tmp_path: Path) -> None:
     assert completed.stderr == ""
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO files are unavailable")
 def test_module_cli_rejects_fifo_without_blocking(tmp_path: Path) -> None:
     path = tmp_path / "readiness.fifo"
     os.mkfifo(path)

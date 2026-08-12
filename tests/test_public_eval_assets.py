@@ -48,9 +48,13 @@ def test_asset_rejects_links_paths_and_ambiguous_json(tmp_path: Path) -> None:
     raw = b"[]\n"
     outside = tmp_path.parent / "outside-public-asset.json"
     outside.write_bytes(raw)
-    (tmp_path / "dataset.json").symlink_to(outside)
-    with pytest.raises(AssetError, match="link"):
-        load_pinned_json_asset(tmp_path, _spec(raw))
+    try:
+        (tmp_path / "dataset.json").symlink_to(outside)
+    except OSError:
+        (tmp_path / "dataset.json").write_bytes(raw)
+    else:
+        with pytest.raises(AssetError, match="link"):
+            load_pinned_json_asset(tmp_path, _spec(raw))
     with pytest.raises(AssetError, match="filename"):
         load_pinned_json_asset(tmp_path, AssetSpec(**(_spec(raw).__dict__ | {"filename": "../outside-public-asset.json"})))
     (tmp_path / "dataset.json").unlink()
@@ -66,10 +70,14 @@ def test_asset_rejects_noncanonical_license_and_linked_parent(tmp_path: Path) ->
     real.mkdir()
     (real / "dataset.json").write_bytes(raw)
     linked = tmp_path / "linked"
-    linked.symlink_to(real, target_is_directory=True)
-    nested = AssetSpec(**(_spec(raw).__dict__ | {"filename": "linked/dataset.json"}))
-    with pytest.raises(AssetError, match="components"):
-        load_pinned_json_asset(tmp_path, nested)
+    try:
+        linked.symlink_to(real, target_is_directory=True)
+    except OSError:
+        pass
+    else:
+        nested = AssetSpec(**(_spec(raw).__dict__ | {"filename": "linked/dataset.json"}))
+        with pytest.raises(AssetError, match="components"):
+            load_pinned_json_asset(tmp_path, nested)
     bad_license = AssetSpec(**(_spec(raw).__dict__ | {"license": "MIT License"}))
     with pytest.raises(AssetError, match="SPDX"):
         load_pinned_json_asset(real, bad_license)

@@ -119,7 +119,7 @@ class CIDJournal:
             raise ValueError("journal records must carry a cid")
         self._repair_torn_tail()
         line = _canonical(record) + "\n"
-        with open(self.path, "a", encoding="utf-8") as fh:
+        with open(self.path, "a", encoding="utf-8", newline="\n") as fh:
             fh.write(line)
             fh.flush()
             os.fsync(fh.fileno())
@@ -163,7 +163,7 @@ class CIDJournal:
     def _rewrite(self, transform: Callable[[dict[str, Any]], dict[str, Any] | None]) -> None:
         """Atomic rewrite-and-swap: write tmp, fsync, rename over original."""
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as fh:
+        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             for record in self.records():
                 out = transform(record)
                 if out is not None:

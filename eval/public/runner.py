@@ -266,11 +266,12 @@ def write_candidate_manifest(path: Path | str, manifest: dict[str, Any], *, repo
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(destination, 0o600)
-        directory_fd = os.open(destination.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        if os.name != "nt":
+            directory_fd = os.open(destination.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except FileExistsError:
         raise FileExistsError(f"refusing to overwrite candidate manifest: {destination}") from None
     except BaseException:
@@ -376,9 +377,12 @@ def run_public_suite(
         raise ValueError(
             f"{suite_name}: normalized benchmark digest does not match registry"
         )
+    allowed_keys = ["LANG", "LC_ALL", "PATH", "TMPDIR"]
+    if os.name == "nt":
+        allowed_keys.extend(["SYSTEMROOT", "SystemRoot", "COMSPEC", "ComSpec", "TEMP", "TMP"])
     allowed_env = {
         key: os.environ[key]
-        for key in ("LANG", "LC_ALL", "PATH", "TMPDIR")
+        for key in allowed_keys
         if key in os.environ
     }
     allowed_env.update(runtime_env)

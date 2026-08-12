@@ -80,7 +80,7 @@ def _result(record_id: str) -> dict[str, object]:
 
 
 def _trace(path: Path) -> Path:
-    path.write_text(_TRACE_TEXT, encoding="utf-8")
+    path.write_bytes(_TRACE_TEXT.encode("utf-8"))
     return path
 
 
@@ -115,12 +115,11 @@ def _append(
 def _corrupt_signature(ledger: Path) -> None:
     entries = [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
     entries[0]["signature"] = base64.b64encode(b"\0" * 64).decode("ascii")
-    ledger.write_text(
+    ledger.write_bytes(
         "".join(
             json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
             for entry in entries
-        ),
-        encoding="utf-8",
+        ).encode("utf-8")
     )
 
 
@@ -277,7 +276,7 @@ def test_rejects_trace_evidence_not_bound_to_the_signed_result(
         result=_result("result-success"),
     )
     trace = _trace(tmp_path / "trace.jsonl")
-    trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8")
+    trace.write_bytes(_TRACE_TEXT.replace("doc-1", "unrelated").encode("utf-8"))
     destination = tmp_path / "site"
 
     with pytest.raises(PublicationError, match="trace digest mismatch"):
@@ -313,7 +312,7 @@ def test_renders_the_verified_trace_snapshot(
         traces: dict[str, str | Path],
         destination: str | Path,
     ) -> None:
-        trace.write_text(_TRACE_TEXT.replace("doc-1", "unrelated"), encoding="utf-8")
+        trace.write_bytes(_TRACE_TEXT.replace("doc-1", "unrelated").encode("utf-8"))
         render_site(results, traces, destination)
 
     monkeypatch.setattr(publication, "render_site", replace_source_then_render)

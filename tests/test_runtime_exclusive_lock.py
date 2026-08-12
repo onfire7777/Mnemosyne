@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,11 @@ import time
 from typing import Any
 
 import pytest
+
+fcntl = pytest.importorskip(
+    "fcntl",
+    reason="runtime-exclusive-lock.sh requires a POSIX host",
+)
 
 
 HELPER = (

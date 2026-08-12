@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import shlex
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
+from mnemosyne.command_line import split_command
 from mnemosyne.gate import GATING_CASE_ORIGINS, GateResult, RegressionCase
 from mnemosyne.ids import new_id
 from mnemosyne.learning import Lesson, Procedure
@@ -549,5 +549,5 @@ def _provider_metadata(provider: dict[str, Any]) -> dict[str, Any]:
 
 def _command_argv(command: str | Sequence[str]) -> list[str]:
     if isinstance(command, str):
-        return shlex.split(command)
+        return split_command(command)
     return [str(item) for item in command]

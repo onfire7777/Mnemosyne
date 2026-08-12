@@ -2524,6 +2524,7 @@ def test_runtime_state_alias_disambiguates_when_both_stores_registered() -> None
     }
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
 def test_ledger_artifacts_are_owner_only(tmp_path: Path) -> None:
     deletion = importlib.import_module("mnemosyne.deletion")
     db_path = tmp_path / "ledger" / "deletion.db"
@@ -2841,6 +2842,7 @@ def test_nested_metadata_keys_are_scrubbed_from_retained_history() -> None:
     _assert_absent(retained, nested_key, listed_key)
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
 def test_ledger_sidecars_are_owner_only_while_open(tmp_path: Path) -> None:
     deletion = importlib.import_module("mnemosyne.deletion")
     db_path = tmp_path / "deletion.db"

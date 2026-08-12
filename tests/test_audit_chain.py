@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -125,14 +126,13 @@ def test_canonical_entry_sha256_rejects_non_json_entries() -> None:
 
 
 def vault_style_command() -> str:
-    return shlex.join(
-        [
-            sys.executable,
-            "-c",
-            "import sys,hashlib,hmac;"
-            "print('vault:v1:'+hmac.new(b'transit-key', sys.stdin.buffer.read(), hashlib.sha256).hexdigest())",
-        ]
-    )
+    argv = [
+        sys.executable,
+        "-c",
+        "import sys,hashlib,hmac;"
+        "print('vault:v1:'+hmac.new(b'transit-key', sys.stdin.buffer.read(), hashlib.sha256).hexdigest())",
+    ]
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
 def test_command_hmac_provider_round_trip_and_failures() -> None:
