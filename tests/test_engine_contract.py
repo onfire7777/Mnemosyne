@@ -86,6 +86,7 @@ def test_local_engine_loads_export_json_branch_shape(tmp_path) -> None:
     assert any(item["name"] == "main" and item["tenant_id"] == TENANT for item in loaded.export_all()["branches"])
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
 def test_local_engine_persistent_store_is_private(tmp_path) -> None:
     previous_umask = os.umask(0o022)
     try:
@@ -109,6 +110,7 @@ def test_local_engine_persistent_store_is_private(tmp_path) -> None:
     assert stat.S_IMODE(store.stat().st_mode) == 0o600
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode bits are not meaningful on Windows")
 def test_local_engine_preserves_existing_store_parent_permissions(tmp_path) -> None:
     parent = tmp_path / "shared-state"
     parent.mkdir()

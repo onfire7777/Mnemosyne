@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import shlex
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
 
+from mnemosyne.command_line import split_command
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 
 
@@ -69,7 +69,7 @@ class CommandMediaTextExtractor:
         timeout_seconds: float = 30.0,
         max_media_bytes: int = DEFAULT_MAX_INGEST_BYTES,
     ):
-        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        self.command = split_command(command) if isinstance(command, str) else list(command)
         if not self.command:
             raise ValueError("media extractor command must not be empty")
         self.timeout_seconds = timeout_seconds

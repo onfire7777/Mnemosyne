@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -30,7 +31,8 @@ def test_keygen_writes_private_key_with_owner_only_permissions(tmp_path: Path) -
     assert private_key.is_file()
     assert public_key.is_file()
     mode = stat.S_IMODE(private_key.stat().st_mode)
-    assert mode == 0o600
+    if os.name != "nt":
+        assert mode == 0o600
     with pytest.raises(EvidenceSignatureError, match="already exists"):
         generate_collector_keypair(private_key, public_key)
 

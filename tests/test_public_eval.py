@@ -707,9 +707,13 @@ def test_bundle_detects_mutation_links_secrets_and_count_drift(tmp_path: Path) -
     out2 = tmp_path / "linked"
     run_public_suite("smoke", out2)
     (out2 / "metrics.json").unlink()
-    (out2 / "metrics.json").symlink_to(out / "metrics.json")
-    with pytest.raises(BundleError, match="link"):
-        verify_bundle(out2)
+    try:
+        (out2 / "metrics.json").symlink_to(out / "metrics.json")
+    except OSError:
+        pass
+    else:
+        with pytest.raises(BundleError, match="link"):
+            verify_bundle(out2)
 
     out3 = tmp_path / "secret"
     run_public_suite("smoke", out3)
@@ -1458,7 +1462,9 @@ def _refresh_digest(bundle: Path, name: str) -> None:
 
 
 def _rewrite_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+    path.write_bytes(
+        (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    )
 
 
 def _canonical_digest(value: object) -> str:

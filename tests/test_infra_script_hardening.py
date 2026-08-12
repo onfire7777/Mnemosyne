@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="infrastructure scripts target POSIX hosts")
+
 
 REPO = Path(__file__).resolve().parents[1]
 

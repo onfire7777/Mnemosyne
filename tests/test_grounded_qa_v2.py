@@ -213,7 +213,10 @@ def test_attempt_and_result_paths_are_external_exclusive_and_non_symlink(
     with pytest.raises(FileExistsError):
         runner._external_new_path(external, "result")
     linked = tmp_path / "linked"
-    linked.symlink_to(path)
+    try:
+        linked.symlink_to(path)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
     with pytest.raises(FileExistsError):
         runner._external_new_path(linked, "result")
     with pytest.raises(ValueError, match="external"):

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import sqlite3
 import threading
@@ -193,8 +194,32 @@ class SQLiteDeletionLedger:
     durable = True
 
     def __init__(self, path: str | Path) -> None:
-        # Fail at construction, not mid-saga, on platforms without POSIX flock.
-        import fcntl
+        try:
+            import fcntl
+        except ModuleNotFoundError:
+            import msvcrt
+
+            class WindowsFcntl:
+                LOCK_EX = 2
+                LOCK_UN = 8
+
+                @staticmethod
+                def flock(fd: int, operation: int) -> None:
+                    position = os.lseek(fd, 0, os.SEEK_CUR)
+                    try:
+                        if os.fstat(fd).st_size == 0:
+                            os.write(fd, b"\0")
+                        os.lseek(fd, 0, os.SEEK_SET)
+                        mode = (
+                            msvcrt.LK_UNLCK
+                            if operation & WindowsFcntl.LOCK_UN
+                            else msvcrt.LK_LOCK
+                        )
+                        msvcrt.locking(fd, mode, 1)
+                    finally:
+                        os.lseek(fd, position, os.SEEK_SET)
+
+            fcntl = WindowsFcntl()
 
         self._fcntl = fcntl
         self.path = Path(path)

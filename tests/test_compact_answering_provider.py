@@ -386,6 +386,8 @@ def test_raw_transport_supports_loopback_tcp_and_absolute_unix() -> None:
     assert tcp_provider.embed("tcp") == pytest.approx([0.6, 0.8])
     tcp_thread.join()
 
+    if not hasattr(socket, "AF_UNIX"):
+        return
     path = f"/tmp/mnemosyne-answering-{os.getpid()}.sock"
     unix = socket.socket(socket.AF_UNIX)
     unix.bind(path)

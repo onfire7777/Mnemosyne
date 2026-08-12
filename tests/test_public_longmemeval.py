@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -363,7 +364,8 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
     monkeypatch.setattr(runner, "_current_clean_head", lambda _root: "a" * 40)
     path = tmp_path / "candidate.json"
     write_candidate_manifest(path, manifest)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
     with pytest.raises(FileExistsError):
         write_candidate_manifest(path, manifest)
 
@@ -403,10 +405,14 @@ def test_candidate_manifest_o_excl_rejects_symlink_and_concurrent_writers(tmp_pa
     target = tmp_path / "target"
     target.write_text("unchanged")
     linked = tmp_path / "linked.json"
-    linked.symlink_to(target)
-    with pytest.raises(ValueError, match="symlinks"):
-        write_candidate_manifest(linked, manifest)
-    assert target.read_text() == "unchanged"
+    try:
+        linked.symlink_to(target)
+    except OSError:
+        pass
+    else:
+        with pytest.raises(ValueError, match="symlinks"):
+            write_candidate_manifest(linked, manifest)
+        assert target.read_text() == "unchanged"
 
     destination = tmp_path / "race.json"
     def attempt() -> str:

@@ -31,6 +31,31 @@ def run_bounded_command(
     max_stderr_bytes: int = 64 * 1024,
 ) -> BoundedCommandResult:
     """Run without a shell while never retaining more than the declared limits."""
+    if os.name == "nt":
+        with (
+            tempfile.TemporaryFile() as stdin,
+            tempfile.TemporaryFile() as stdout,
+            tempfile.TemporaryFile() as stderr,
+        ):
+            stdin.write(payload)
+            stdin.seek(0)
+            process = subprocess.Popen(  # noqa: S603 - argv is intentionally shell-free.
+                list(argv), stdin=stdin, stdout=stdout, stderr=stderr
+            )
+            try:
+                returncode = process.wait(timeout=timeout_seconds)
+            except BaseException:
+                process.kill()
+                process.wait()
+                raise
+            stdout_size = stdout.seek(0, os.SEEK_END)
+            stderr_size = stderr.seek(0, os.SEEK_END)
+            if stdout_size > max_stdout_bytes or stderr_size > max_stderr_bytes:
+                raise CommandOutputLimitError("provider output limit exceeded")
+            stdout.seek(0)
+            stderr.seek(0)
+            return BoundedCommandResult(returncode, stdout.read(), stderr.read())
+
     with tempfile.TemporaryFile() as stdin:
         stdin.write(payload)
         stdin.seek(0)

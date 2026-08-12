@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -160,8 +162,9 @@ def test_native_and_padded_spaces_have_cosine_and_ranking_parity() -> None:
         rank_by_cosine(query, [], limit=0)
 
 
+@pytest.mark.skipif(shutil.which("rustc") is None, reason="rustc is not installed")
 def test_rust_module_unit_tests_pass_without_model_artifacts(tmp_path: Path) -> None:
-    binary = tmp_path / "embed-tests"
+    binary = tmp_path / ("embed-tests.exe" if os.name == "nt" else "embed-tests")
     subprocess.run(
         ["rustc", "--edition=2021", "--test", str(RUST_MODULE), "-o", str(binary)],
         cwd=ROOT,

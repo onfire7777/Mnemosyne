@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import fcntl
 import json
 import os
 import re
@@ -16,6 +15,44 @@ from hashlib import sha256
 from pathlib import Path
 from collections.abc import Collection
 from typing import Any, Iterator
+
+try:
+    import fcntl
+except ModuleNotFoundError:  # pragma: win32 cover
+    import msvcrt
+
+    class _WindowsFcntl:
+        """Small ``flock`` compatibility layer backed by Windows byte locks."""
+
+        LOCK_EX = 2
+        LOCK_NB = 4
+        LOCK_UN = 8
+
+        @staticmethod
+        def flock(fd: int, operation: int) -> None:
+            position = os.lseek(fd, 0, os.SEEK_CUR)
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                    os.fsync(fd)
+                    os.lseek(fd, 0, os.SEEK_SET)
+                if operation & _WindowsFcntl.LOCK_UN:
+                    mode = msvcrt.LK_UNLCK
+                elif operation & _WindowsFcntl.LOCK_NB:
+                    mode = msvcrt.LK_NBLCK
+                else:
+                    mode = msvcrt.LK_LOCK
+                try:
+                    msvcrt.locking(fd, mode, 1)
+                except OSError as exc:
+                    if operation & _WindowsFcntl.LOCK_NB:
+                        raise BlockingIOError(exc.errno, str(exc)) from exc
+                    raise
+            finally:
+                os.lseek(fd, position, os.SEEK_SET)
+
+    fcntl = _WindowsFcntl()
 
 from cryptography.exceptions import InvalidSignature
 

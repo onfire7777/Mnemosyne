@@ -1,6 +1,5 @@
 import copy
 import base64
-import fcntl
 import json
 import multiprocessing
 import os
@@ -15,6 +14,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from leaderboard.ledger import LedgerError, append_entry, verify_ledger
+from leaderboard import ledger as ledger_module
+
+fcntl = ledger_module.fcntl
 
 
 _DEFAULT_RUN_ID = object()
@@ -136,9 +138,8 @@ def test_verify_rejects_noncanonical_json_bytes(
 ) -> None:
     private_key, public_key = key_paths
     entry = _append(ledger_path, private_key, entry_id="entry-noncanonical")
-    ledger_path.write_text(
-        json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n",
-        encoding="utf-8",
+    ledger_path.write_bytes(
+        (json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n").encode()
     )
 
     with pytest.raises(LedgerError, match="non-canonical"):
@@ -503,7 +504,7 @@ def test_verification_requires_active_disposition_for_every_roster_entrant(
 
 
 def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> None:
-    ledger_path.write_text(
+    ledger_path.write_bytes(
         "".join(
             json.dumps(
                 entry,
@@ -513,8 +514,7 @@ def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> Non
             )
             + "\n"
             for entry in entries
-        ),
-        encoding="utf-8",
+        ).encode("utf-8")
     )
 
 
@@ -564,7 +564,7 @@ def test_append_rejects_boolean_pending_prior_count(
     private_key, _ = key_paths
     _append(ledger_path, private_key, entry_id="entry-complete")
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":true}\n', encoding="utf-8")
+    pending_path.write_bytes(b'{"prior_count":true}\n')
 
     with pytest.raises(LedgerError, match="append intent is invalid"):
         _append(ledger_path, private_key, entry_id="entry-rejected")
@@ -691,7 +691,7 @@ def test_append_repairs_only_a_torn_final_fragment(
     first = _append(ledger_path, private_key, entry_id="entry-complete")
     acknowledged = ledger_path.read_bytes()
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":1}\n', encoding="utf-8")
+    pending_path.write_bytes(b'{"prior_count":1}\n')
     ledger_path.write_bytes(acknowledged + b'{"entry_id":"unacknowledged')
 
     second = _append(ledger_path, private_key, entry_id="entry-after-repair")

@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-08-04
-Baseline: `main@d7eefb7c3595e786851a7d416ba54ea3997a8b6c`
+Baseline: `main@5b0d99bcd7ddb0b6841a1a59d4a01ed2ddab954e`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -111,6 +111,11 @@ The following packages are complete source history, not runnable work:
   detector requires every PR merged after the baseline to appear in this map.
   Pending at the time of writing — no merge SHA, exact head, or CI run id is
   claimed for it here, because none exists yet.
+- PR #103: restored the canonical memory sources and required the patched
+  cryptography release. It merged as `main@5b0d99bc` from exact head
+  `9b95fce5`; CI run `31329404265` passed lint, unit/drift, provider,
+  Postgres, and native-wheel checks. This receipt records the merge without
+  changing any benchmark, measurement, admission state, or publication claim.
 - PR #100: the node `T9` M03 registry admission, registering
   `wmbs-m03-valid-time-development` in `eval/public/registry.json` with its
   runner adapter, profile contract, `allowed_profile` label, scored-denominator
@@ -121,7 +126,7 @@ The following packages are complete source history, not runnable work:
   Pending at the time of writing — no merge SHA, exact head, or CI run id is
   claimed for it here, because none exists yet.
 
-This map is recomputed from the new baseline `main@d7eefb7c`, which the
+This map is recomputed from the new baseline `main@5b0d99bc`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
