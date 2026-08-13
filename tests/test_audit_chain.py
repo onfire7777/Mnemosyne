@@ -125,14 +125,17 @@ def test_canonical_entry_sha256_rejects_non_json_entries() -> None:
         canonical_entry_sha256({"bad": object()})
 
 
+def external_command(argv: list[str]) -> str:
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+
+
 def vault_style_command() -> str:
-    argv = [
+    return external_command([
         sys.executable,
         "-c",
         "import sys,hashlib,hmac;"
         "print('vault:v1:'+hmac.new(b'transit-key', sys.stdin.buffer.read(), hashlib.sha256).hexdigest())",
-    ]
-    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    ])
 
 
 def test_command_hmac_provider_round_trip_and_failures() -> None:
@@ -150,10 +153,10 @@ def test_command_hmac_provider_round_trip_and_failures() -> None:
     result = verify_audit_chain(document, ENTRIES, tenant_id=TENANT, hmac_provider=provider)
     assert result["verified"] is True
 
-    failing = command_hmac_provider(shlex.join([sys.executable, "-c", "raise SystemExit(3)"]))
+    failing = command_hmac_provider(external_command([sys.executable, "-c", "raise SystemExit(3)"]))
     with pytest.raises(AuditChainError, match="exited 3"):
         failing("deadbeef")
-    silent = command_hmac_provider(shlex.join([sys.executable, "-c", "pass"]))
+    silent = command_hmac_provider(external_command([sys.executable, "-c", "pass"]))
     with pytest.raises(AuditChainError, match="produced no output"):
         silent("deadbeef")
 

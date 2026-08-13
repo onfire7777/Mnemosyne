@@ -5,6 +5,7 @@ import io
 import hashlib
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -516,13 +517,19 @@ def test_grounded_reader_sends_preregistered_role_specific_ollama_schema(monkeyp
 
 
 def test_bounded_command_rejects_output_before_unbounded_capture() -> None:
+    started = time.monotonic()
     with pytest.raises(CommandOutputLimitError, match="limit"):
         run_bounded_command(
-            [sys.executable, "-c", "print('x' * 10000)"],
+            [
+                sys.executable,
+                "-c",
+                "import sys,time; print('x' * 10000); sys.stdout.flush(); time.sleep(10)",
+            ],
             b"",
-            timeout_seconds=5,
+            timeout_seconds=10,
             max_stdout_bytes=128,
         )
+    assert time.monotonic() - started < 3
 
 
 def test_grounding_roles_are_local_only_and_have_no_deterministic_fallback(monkeypatch) -> None:
