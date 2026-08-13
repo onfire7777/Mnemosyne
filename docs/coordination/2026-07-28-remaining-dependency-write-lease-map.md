@@ -116,6 +116,13 @@ The following packages are complete source history, not runnable work:
   `9b95fce5`; CI run `31329404265` passed lint, unit/drift, provider,
   Postgres, and native-wheel checks. This receipt records the merge without
   changing any benchmark, measurement, admission state, or publication claim.
+- PR #104: makes the developer checkout and validation suite Windows-ready,
+  including native command-line parsing, bounded provider capture, portable
+  locking and filesystem behavior, and cross-platform test normalization. It
+  changes no benchmark, measurement, admission state, or publication claim.
+  Reserved and recorded here before merge so the post-baseline detector can
+  account for the delivery without leaving `main` red. Pending at the time of
+  writing — no merge SHA or post-merge CI run id is claimed before it exists.
 - PR #100: the node `T9` M03 registry admission, registering
   `wmbs-m03-valid-time-development` in `eval/public/registry.json` with its
   runner adapter, profile contract, `allowed_profile` label, scored-denominator
