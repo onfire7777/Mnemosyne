@@ -125,13 +125,14 @@ them").
    entry by design. No module in the table is now fixture-and-scorer-without-registry.
 
 6. **Consequent framing correction.** "only five are implemented" understates
-   the built surface. Counting a module as *end-to-end landed* when it has a
-   plan, a fixture (or a by-design exemption), a scorer, tests, and a registry
-   entry (or a by-design exemption), the landed set is **M01, M03, M10, M12,
-   M13, M15 — 6 of 20** — one above the original headline number because the
-   M03 registry key is now in the tree, and a different membership besides:
-   M02, M04, and M05 are *not* landed (Stage A only, no registration), while
-   M12, M13, and M15 are.
+   the built surface. T8 re-derives a keys-in-tree column-complete count
+   (plan + fixture-or-exemption + scorer + tests + registry-or-exemption).
+   That count is **M01, M03, M10, M12, M13, M15 — 6 of 20**. M03 is in that
+   count because its registry cell is now yes; that is not an admission or publication upgrade. M03 stays
+   registry-reachable only (`PROPOSED`; publication flags false; residue =
+   transaction-time deferral). M02, M04, and M05 are not column-complete
+   (Stage A only, no registration). M12, M13, and M15 remain in the count
+   as on main.
 
 ## Highest-value next gaps
 
