@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="grounded runtime installer targets POSIX hosts")
-
 from eval.public.runtime_custody import grounded_runtime_environment
 from mnemosyne.providers.grounded_protocol import MODEL_CONTENT_SHA256
 from mnemosyne.providers.extractive_decomposer import SELECTOR
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="grounded runtime installer targets POSIX hosts")
 
 
 INSTALLER = Path(__file__).parents[1] / "infra/providers/install-grounded-runtime.py"
