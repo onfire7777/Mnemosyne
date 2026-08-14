@@ -120,6 +120,7 @@ The following packages are complete source history, not runnable work:
   Reserved and recorded here before merge for the same reason as PR #101.
   Pending at the time of writing — no merge SHA, exact head, or CI run id is
   claimed for it here, because none exists yet.
+- PR #103: Restore canonical memory sources and patch cryptography (merge 5b0d99bcd7).
 
 This map is recomputed from the new baseline `main@d7eefb7c`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
