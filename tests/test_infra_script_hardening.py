@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="infrastructure scripts target POSIX hosts")
+_posix_only = pytest.mark.skipif(os.name == "nt", reason="requires POSIX execution, mode bits, or symlink semantics")
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -59,6 +59,7 @@ def test_production_and_local_evidence_capture_reject_repo_local_outputs() -> No
     assert "scripts/load-env.py" in c2pa_validate
 
 
+@_posix_only
 def test_strict_env_loader_rejects_unexpected_keys_and_executable_values(
     tmp_path: Path,
 ) -> None:
@@ -85,6 +86,7 @@ def test_strict_env_loader_rejects_unexpected_keys_and_executable_values(
     assert "unsafe dotenv value for EVIL" in proc.stderr
 
 
+@_posix_only
 def test_strict_env_loader_rejects_unexpected_keys(tmp_path: Path) -> None:
     env_file = tmp_path / "unexpected.env"
     env_file.write_text('export SAFE_KEY="ok"\nexport EXTRA="nope"\n', encoding="utf-8")
@@ -106,6 +108,7 @@ def test_strict_env_loader_rejects_unexpected_keys(tmp_path: Path) -> None:
     assert "unexpected dotenv key 'EXTRA'" in proc.stderr
 
 
+@_posix_only
 def test_strict_env_loader_rejects_group_accessible_files(tmp_path: Path) -> None:
     env_file = tmp_path / "group-readable.env"
     env_file.write_text('export SAFE_KEY="ok"\n', encoding="utf-8")
@@ -127,6 +130,7 @@ def test_strict_env_loader_rejects_group_accessible_files(tmp_path: Path) -> Non
     assert "must not be group/world accessible" in proc.stderr
 
 
+@_posix_only
 def test_strict_env_loader_emits_allowlisted_assignments(tmp_path: Path) -> None:
     env_file = tmp_path / "safe.env"
     env_file.write_text('export SAFE_KEY="ok value"\nexport SECOND="two"\n', encoding="utf-8")
@@ -148,6 +152,7 @@ def test_strict_env_loader_emits_allowlisted_assignments(tmp_path: Path) -> None
     assert proc.stdout.splitlines() == ["SAFE_KEY=ok value", "SECOND=two"]
 
 
+@_posix_only
 def test_strict_env_loader_allow_missing_emits_present_allowed_keys(
     tmp_path: Path,
 ) -> None:
@@ -172,6 +177,7 @@ def test_strict_env_loader_allow_missing_emits_present_allowed_keys(
     assert proc.stdout.splitlines() == ["SAFE_KEY=ok value"]
 
 
+@_posix_only
 def test_capture_local_evidence_rejects_existing_output_root(tmp_path: Path) -> None:
     out_root = tmp_path / "existing-local-capture"
     out_root.mkdir()
@@ -192,6 +198,7 @@ def test_capture_local_evidence_rejects_existing_output_root(tmp_path: Path) -> 
     assert not (out_root / "manifest.json").exists()
 
 
+@_posix_only
 def test_capture_local_evidence_rejects_symlinked_output_root(tmp_path: Path) -> None:
     target_root = tmp_path / "real-local-capture"
     out_root = tmp_path / "linked-local-capture"
@@ -1122,6 +1129,7 @@ def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
     assert provider_manifest.read_bytes() == provider_before
 
 
+@_posix_only
 def test_prepare_production_evidence_custody_refresh_rejects_unsafe_packet_paths(
     tmp_path: Path,
 ) -> None:
@@ -1228,6 +1236,7 @@ def test_prepare_production_evidence_custody_refresh_reports_no_values(
     assert provider_sentinel not in combined
 
 
+@_posix_only
 def test_prepare_production_evidence_custody_runtime_env_file_satisfies_refs_without_retention(
     tmp_path: Path,
 ) -> None:
