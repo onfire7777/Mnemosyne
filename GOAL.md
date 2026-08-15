@@ -224,7 +224,10 @@ compliant. PRs #110-#112 remain open drafts. No later edge may merge until PR
 #109's post-main CI is green; this amendment must still land before the next
 edge. Their lifecycle blobs
 already satisfy the stronger parent-equality invariant: #110 equals current
-`main`, #111 equals #110, and #112 equals #111.
+`main`, #111 equals #110, and #112 equals #111. Controller amendment PR #114
+is **OPEN/DRAFT** and changes only `GOAL.md`, `.planning/STATE.md`, and the
+lease map. Its self-record changes its head, so no exact PR #114 head, merge
+SHA/time, or post-main CI is claimed. PR #114 must pass and merge before #110.
 Topology-only merges of current `main` or the immediately
 preceding stack PR are therefore permitted without another controller PR only
 when all three lifecycle blobs exactly equal that parent, every non-lifecycle
