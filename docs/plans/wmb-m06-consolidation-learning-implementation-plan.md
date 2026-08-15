@@ -141,6 +141,8 @@ add a **new** stdlib-only oracle:
   claim the spec's CI-LCB acceptance (that is R1+R3).
 - Latency/tokens/calls stay `unsupported` unless a later lease says otherwise.
 - No baseline-improvement or non-inferiority field until preregistration.
+- Anti-gaming (spec L1291): no private no-consolidation control and no
+  privileged internal signal.
 
 This paragraph does not create those files.
 
@@ -192,7 +194,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Official MAB/EvoMemBench | `DEFERRED` | `DEFERRED` | `DEFERRED` |
 | Spec CI-LCB acceptance | `DEFERRED` (R1/R3) | `DEFERRED` | `DEFERRED` until receipt |
 | Publishable / headline | `false` | `false` | `false` |
-| Learn without leaking (spec L1253) | required later: no tenant leakage, no unsafe retrieved-instruction promotion | same | same |
+| Learn without leaking (spec L1253–1259) | `DEFERRED` until M06+M11+M14 are all admitted | `DEFERRED` | `DEFERRED` |
 | Code lease | none | only if freeze + G1 admit it | G3 |
 
 ## 9. Non-goals
