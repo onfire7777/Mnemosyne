@@ -238,7 +238,14 @@ or non-lifecycle blob change voids the reservation. The controller remains the
 sole CI integration owner. Merge commits for the remaining stack only in the
 order #110 -> #111 -> #112 are permitted, with
 successful post-merge `main` CI required before refreshing and merging each
-next edge.
+next edge. Before merging, run:
+
+```sh
+python3 infra/scripts/verify-topology-refresh.py <candidate-40-sha> <permitted-parent-40-sha> <immutable-anchor-40-sha>
+```
+
+It exits 0 only for a valid topology, 1 for contract deviations, and 2 for
+invocation, reference-read, or tree-parse errors.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
