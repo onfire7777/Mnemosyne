@@ -22,6 +22,7 @@ TREE_ENTRY_KINDS = {
     b"120000": b"blob",
     b"160000": b"commit",
 }
+GIT = ("git", "--no-replace-objects")
 
 
 def _path(path: bytes) -> str:
@@ -31,7 +32,7 @@ def _path(path: bytes) -> str:
 def _tree(ref: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
     try:
         result = subprocess.run(
-            ["git", "ls-tree", "-r", "-z", "--full-tree", ref],
+            [*GIT, "ls-tree", "-r", "-z", "--full-tree", ref],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             check=False,
@@ -63,6 +64,21 @@ def _tree(ref: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
     return entries
 
 
+def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
+    try:
+        result = subprocess.run(
+            [*GIT, "merge-base", "--is-ancestor", parent_ref, candidate_ref],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError("cannot run git") from error
+    if result.returncode not in (0, 1):
+        raise ValueError("cannot verify permitted parent ancestry")
+    return result.returncode == 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 4:
         print("usage: verify-topology-refresh.py <candidate-40-sha> <permitted-parent-40-sha> <immutable-anchor-40-sha>")
@@ -72,6 +88,9 @@ def main(argv: list[str]) -> int:
         print("error: candidate, permitted parent, and immutable anchor must be full 40-hex SHAs")
         return 2
     try:
+        if not _is_ancestor(parent_ref, candidate_ref):
+            print("candidate does not descend from permitted parent")
+            return 1
         candidate = _tree(candidate_ref)
         parent = _tree(parent_ref)
         anchor = _tree(anchor_ref)
