@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+from mnemosyne.command_line import split_command
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,8 +283,15 @@ class C2paToolVerifier:
         if not asset_path:
             return self.fallback.verify(payload, manifest)
         try:
+            tool_argv = [self.tool_path] if Path(self.tool_path).exists() else split_command(self.tool_path)
+            if not tool_argv:
+                raise OSError("c2pa verifier command must not be empty")
+            # Direct batch files may be shell-dispatched by Windows even with shell=False.
+            tool_suffix = Path(tool_argv[0].rstrip(" .")).suffix.casefold()
+            if os.name == "nt" and tool_suffix in {".bat", ".cmd"}:
+                raise OSError("direct .bat/.cmd tool execution is disabled on Windows")
             completed = subprocess.run(
-                [self.tool_path, asset_path, "--json"],
+                [*tool_argv, asset_path, "--json"],
                 check=False,
                 text=True,
                 capture_output=True,

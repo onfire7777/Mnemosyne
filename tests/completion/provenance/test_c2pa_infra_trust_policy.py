@@ -39,6 +39,8 @@ import json
 import stat
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -112,7 +114,7 @@ def _write_stub_tool(tmp_path: Path, report: dict) -> str:
 def _build_report(asset_path: str, sha: str, *, root_fpr: str = ROOT_FPR) -> dict:
     raw = _REPORT_TEMPLATE.read_text(encoding="utf-8")
     raw = (
-        raw.replace("__ASSET_PATH__", asset_path)
+        raw.replace("__ASSET_PATH__", json.dumps(asset_path)[1:-1])
         .replace("__ASSET_SHA256__", sha)
         .replace("__ROOT_FPR__", root_fpr)
     )
@@ -147,6 +149,11 @@ def test_surfaced_signer_is_claim_generator():
         {"issuer", "signer", "claim_generator", "claimGenerator", "common_name", "commonName"},
     )
     assert signer == SURFACED_SIGNER
+
+
+def test_build_report_handles_windows_asset_path():
+    asset_path = r"C:\signed assets\asset.jpg"
+    assert _build_report(asset_path, "0" * 64)["asset"]["path"] == asset_path
 
 
 def test_old_policy_quarantines_positive_path(tmp_path):
@@ -207,6 +214,97 @@ def test_fixed_policy_quarantines_untrusted_root(tmp_path):
     assert decision.quarantine is True
     assert "certificate root" in decision.reason
 
+
+def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path, monkeypatch):
+    """An existing executable path is not split as a configured command string."""
+    asset = tmp_path / "asset.signed.jpg"
+    asset.write_bytes(PAYLOAD)
+    sha = hashlib.sha256(PAYLOAD).hexdigest()
+    report = _build_report(str(asset), sha)
+    tool_dir = tmp_path / "tool directory"
+    tool_dir.mkdir()
+    tool = tool_dir / "c2pa verifier"
+    tool.touch()
+
+    def fake_run(argv, **kwargs):
+        assert argv == [str(tool), str(asset), "--json"]
+        assert kwargs == {
+            "check": False,
+            "text": True,
+            "capture_output": True,
+            "timeout": 30.0,
+        }
+        return prov.subprocess.CompletedProcess(argv, 0, stdout=json.dumps(report), stderr="")
+
+    monkeypatch.setattr(prov.subprocess, "run", fake_run)
+
+    verifier = prov.C2paToolVerifier(
+        tool_path=str(tool),
+        trust_policy=prov.ProvenanceTrustPolicy.from_dict(_emitted_policy_dict(fixed=True)),
+    )
+    decision = verifier.verify(
+        PAYLOAD,
+        {
+            "asset_path": str(asset),
+            "sha256": sha,
+            "_ingest_context": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"},
+        },
+    )
+
+    assert decision.valid is True
+    assert decision.trusted is True
+    assert decision.quarantine is False
+
+
+@pytest.mark.parametrize(
+    "ending", [".cmd", ".CMD", ".cmd ", ".cmd.", ".bat", ".bat  ."]
+)
+def test_c2pa_direct_windows_batch_tool_fails_closed(tmp_path, monkeypatch, ending):
+    asset = tmp_path / "asset & echo injected.jpg"
+    asset.write_bytes(PAYLOAD)
+    sha = hashlib.sha256(PAYLOAD).hexdigest()
+    tool = tmp_path / f"c2pa verifier{ending}"
+    tool.touch()
+    run = Mock(side_effect=AssertionError("subprocess.run must not be called"))
+    monkeypatch.setattr(prov, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(prov.subprocess, "run", run)
+
+    decision = prov.C2paToolVerifier(tool_path=str(tool)).verify(
+        PAYLOAD,
+        {"asset_path": str(asset), "sha256": sha},
+    )
+
+    run.assert_not_called()
+    assert decision == prov.ProvenanceDecision(
+        valid=False,
+        trusted=False,
+        quarantine=True,
+        trust_delta=5,
+        reason="c2pa verifier execution failed",
+        manifest={"asset_path": str(asset), "sha256": sha},
+        diagnostics={
+            "error": "direct .bat/.cmd tool execution is disabled on Windows",
+            "tool": str(tool),
+        },
+    )
+
+
+def test_c2pa_empty_tool_command_fails_closed(monkeypatch):
+    run = Mock(side_effect=AssertionError("subprocess.run must not be called"))
+    monkeypatch.setattr(prov.subprocess, "run", run)
+
+    decision = prov.C2paToolVerifier(tool_path=" \t").verify(
+        PAYLOAD,
+        {"asset_path": r"C:\\tenant\\attacker-controlled.exe"},
+    )
+
+    run.assert_not_called()
+    assert decision.quarantine is True
+    assert decision.reason == "c2pa verifier execution failed"
+    assert decision.diagnostics == {
+        "error": "c2pa verifier command must not be empty",
+        "tool": " \t",
+    }
 
 if __name__ == "__main__":  # pragma: no cover - manual run convenience
     sys.exit(pytest.main([__file__, "-v"]))
