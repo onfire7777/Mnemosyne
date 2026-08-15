@@ -446,8 +446,9 @@ Quarantine
   concurrency allowance. Controller PR #113 is merged; this amendment replaces
   its self-invalidating full-head freeze with immutable non-lifecycle content
   anchors compatible with ruleset `19157561`. PR #109 merged before the
-  amendment and is held at its post-main gate. The remaining implementation PRs
-  merge by merge commit only in order #110 -> #111 -> #112. The
+  amendment and has cleared its post-main gate; the remaining implementation
+  PRs are held for this amendment and then merge by merge commit only in order
+  #110 -> #111 -> #112. The
   controller/CI integration owner alone serializes every
   `.github/workflows/ci.yml` edge. Current-main ancestry, exact lifecycle-parent
   equality, clean non-lifecycle anchor equality, required/native exact-head CI,
