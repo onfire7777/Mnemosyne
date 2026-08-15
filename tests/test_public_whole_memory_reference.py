@@ -3510,11 +3510,12 @@ def test_m02_adapter_issues_real_cli_calls() -> None:
         run_m02_retrieval_development(tiny, None)
 
 
-def test_m02_bundle_metadata_names_the_backend_actually_exercised() -> None:
+def test_m02_bundle_declares_backend_explicitly(tmp_path: Path) -> None:
     from eval.public.adapters.whole_memory_reference import run_m02_retrieval_development
+    from eval.public.runner import _m02_bundle_metadata
     from eval.public import wmbs_m02 as m02
 
-    class NamedCLI:
+    class LocalCLI:
         backend = "local"
 
         def capture(self, *args: object, **kwargs: object) -> dict[str, object]:
@@ -3526,12 +3527,55 @@ def test_m02_bundle_metadata_names_the_backend_actually_exercised() -> None:
         def answer(self, *args: object, **kwargs: object) -> dict[str, object]:
             return {"answer": None, "abstained": False}
 
+    class OtherCLI(LocalCLI):
+        backend = "sqlite"
+
     fixture = m02.load_fixture()
     tiny = dict(fixture)
     tiny["questions"] = fixture["questions"][:1]
     tiny["corpus"] = fixture["corpus"][:1]
-    _traces, evidence = run_m02_retrieval_development(tiny, NamedCLI())
-    assert evidence["backend"] == "local"
+    traces, evidence = run_m02_retrieval_development(tiny, LocalCLI())
+    exercised = evidence["backend"]
+    assert exercised == "local"
+
+    suite = _m02_suite()
+    suite_name = "wmbs-m02-retrieval-development"
+    with pytest.raises(ValueError, match="exercised backend"):
+        _m02_bundle_metadata(suite, suite_name, backend=None)
+    with pytest.raises(ValueError, match="exercised backend"):
+        _m02_bundle_metadata(suite, suite_name, backend="")
+    with pytest.raises(ValueError, match="fabricated backend"):
+        _m02_bundle_metadata(
+            suite, suite_name, backend="postgres", exercised=exercised
+        )
+
+    _other_traces, other_evidence = run_m02_retrieval_development(tiny, OtherCLI())
+    assert other_evidence["backend"] == "sqlite"
+    other_metadata = _m02_bundle_metadata(
+        suite, suite_name, backend=other_evidence["backend"], exercised=other_evidence["backend"]
+    )
+    assert other_metadata["backend"] == "sqlite"
+    assert other_metadata["backend"] != "local"
+
+    metadata = _m02_bundle_metadata(
+        suite, suite_name, backend=exercised, exercised=exercised
+    )
+    assert metadata["backend"] == exercised
+    public_bundle.write_bundle(
+        tmp_path / "bundle",
+        benchmark=tiny,
+        metadata=metadata,
+        metrics={
+            "family": suite["family"],
+            "profile": suite["scoring_profile"],
+        },
+        traces=traces,
+    )
+    written = json.loads((tmp_path / "bundle" / "benchmark.json").read_text())
+    declared = written["metadata"].get("backend")
+    assert declared, "bundle metadata omitted the exercised backend"
+    assert declared == exercised
+    assert declared != "postgres"
 
 
 def test_m02_runner_rejects_fixture_digest_drift(tmp_path: Path) -> None:
