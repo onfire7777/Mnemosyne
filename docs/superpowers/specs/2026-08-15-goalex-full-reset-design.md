@@ -33,13 +33,13 @@ Use a recoverable full reset:
    - a Git bundle and patch for the stale GoalEx branch-only commit;
    - the RFX dirty patch, installed preset set, and snapshot inventory;
    - Mnemosyne-specific Hermes profiles, kanban board, requeue script, and kanban backups;
-   - a manifest with SHA-256 hashes and the live pre-reset receipt.
+   - a top-level manifest with SHA-256 hashes for the bundle, patch, compressed state, and live receipts.
 2. Bootstrap-out every Mnemosyne GoalEx LaunchAgent, then verify their complete process trees exit.
 3. Remove the four plists from `~/Library/LaunchAgents` after the archive is verified so login cannot recreate the loop.
 4. Remove the stale GoalEx worktree and delete only its local stale branch after confirming the bundle and patch are readable. Do not touch `origin/main`, canonical dirty files, the active topology-verifier worktree, or gbrain custody.
 5. Normalize RFX:
    - keep `solo-sol-low-goal` as the single reviewed Codex-only solo preset;
-   - archive and remove `solo-sol-low-clean` and `solo-sol-low-workspace` because they overlap and disable external review;
+   - archive and remove the four installed-only presets (`solo-fable-medium`, `solo-opus-medium`, `solo-sol-low-clean`, and `solo-sol-low-workspace`) because canonical RFX source is the installation authority and none of these projections exists there;
    - reconcile the existing one-line `bin/rfx` wait-duration fix through a clean branch, tests, PR, merge, and synchronized source checkout rather than discarding it;
    - resynchronize installed presets from the canonical RFX source so comment/config drift does not persist;
    - compact snapshot history only after preserving the reset snapshot and the newest valid rollback point;
@@ -68,11 +68,11 @@ The new worktree must:
 
 - start from the latest fetched `origin/main`;
 - have a clean Git status and a new `codex/goalex-*` branch;
-- contain the repository-owned `GOAL.md` from that exact base;
+- contain a repository-owned `GOAL.md` whose runtime contract names the new worktree and branch;
 - contain no copied `.goalex` or `.ralphex` runtime history;
 - have no persistent launchd entry;
 - have no Hermes kanban/fleet binding;
-- remain stopped until an explicit launch request and successful provider preflight.
+- remain stopped until an explicit launch request, successful provider preflight, and successful execution of the `GOAL.md` verification block.
 
 ## Verification
 
@@ -84,11 +84,11 @@ The reset is complete only when all of the following pass:
 4. The archive manifest exists, hashes verify, the Git bundle verifies, and the branch patch is non-empty.
 5. The old worktree is absent from `git worktree list`; its stale local branch is absent.
 6. `rfx current`, `rfx pause --status`, and `rfx doctor` report the reviewed Codex-only preset, paused state, no drift, and healthy configuration.
-7. The two redundant warning presets are absent; the canonical preset remains valid.
+7. The four installed-only presets are absent; the canonical source-backed presets remain valid.
 8. `/Users/admin/rfx` is clean and synchronized; its one-line wait-duration fix has a passing test/PR receipt, and installed presets match canonical source.
 9. The Hermes gateway remains unloaded, gateway dispatch remains `0`, and no Mnemosyne-specific Hermes profile, board, requeue script, or backup remains live outside the reset archive.
 10. Unrelated Hermes desktop, Siri bridge, reports dashboard, credentials, databases, profiles, and project state remain unchanged.
-11. The new GoalEx worktree is clean and exactly based on the latest `origin/main`.
+11. The new GoalEx worktree is clean and exactly based on the latest `origin/main`; its reconciled `GOAL.md` runtime contract and executable verification pass before launch readiness is claimed.
 12. `bash -n ~/.local/bin/goalex` passes and all required executables resolve to one authoritative path.
 13. Canonical `/Users/admin/Mnemosyne` remains on the same branch with the same pre-existing dirty files; the topology-verifier worktree remains untouched.
 

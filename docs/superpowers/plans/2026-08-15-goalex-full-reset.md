@@ -27,6 +27,7 @@
 - Create: `/Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goalex-branch.bundle`
 - Create: `/Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goalex-branch.patch`
 - Create: `/Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/RECEIPT.md`
+- Create: `/Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/SHA256SUMS`
 
 **Interfaces:**
 - Consumes: the four LaunchAgent plists, old GoalEx worktree, RFX dirty/config state, Mnemosyne-specific Hermes state, and relevant `/tmp` logs.
@@ -63,9 +64,9 @@ tar -tzf /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goale
 shasum -a 256 /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goalex-reset-state.tar.gz /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goalex-branch.bundle /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goalex-branch.patch
 ```
 
-- [ ] **Step 6: Write the receipt**
+- [ ] **Step 6: Write and verify the receipt manifest**
 
-Record exact hashes, pre-reset SHAs, statuses, process IDs, loaded jobs, preserved paths, and rollback commands in `RECEIPT.md` using `apply_patch`.
+Record exact hashes, pre-reset SHAs, statuses, process IDs, loaded jobs, preserved paths, and rollback commands in `RECEIPT.md` using `apply_patch`. Create a mode-`0600` top-level `SHA256SUMS` with relative entries for the bundle, patch, compressed state, and live receipts, then run `shasum -a 256 -c SHA256SUMS` from the reset archive directory before cleanup. The manifest lives beside the compressed state so it can cover the tarball without a circular self-hash.
 
 ### Task 2: Quiesce and Remove Bespoke GoalEx Background Machinery
 
@@ -238,9 +239,13 @@ git -C /Users/admin/Mnemosyne fetch --no-prune origin
 git -C /Users/admin/Mnemosyne worktree add -b codex/goalex-reset-20260815 /Users/admin/.codex/worktrees/goalex-reset/Mnemosyne origin/main
 ```
 
-- [ ] **Step 4: Verify inert GoalEx readiness**
+- [ ] **Step 4: Verify inert GoalEx staging**
 
-Confirm the new worktree is clean, exactly at the fetched `origin/main`, contains `GOAL.md`, has no `.goalex` or `.ralphex` history, has no LaunchAgent/Hermes binding, and `bash -n /Users/admin/.local/bin/goalex` passes. Do not launch GoalEx while Claude/Fable access remains unavailable.
+Confirm the new worktree is clean, exactly at the fetched `origin/main`, contains `GOAL.md`, has no `.goalex` or `.ralphex` history, has no LaunchAgent/Hermes binding, and `bash -n /Users/admin/.local/bin/goalex` passes. This proves only inert staging, not launch readiness.
+
+- [ ] **Step 5: Reconcile and execute the repository-owned runtime contract**
+
+Update `GOAL.md` through the normal Mnemosyne PR path so its runtime contract names `/Users/admin/.codex/worktrees/goalex-reset/Mnemosyne` and `codex/goalex-reset-20260815`, requires the intentional RFX pause and no copied runtime history, and keeps the existing lifecycle-baseline lapse detector fail-closed. After that PR lands, fast-forward the fresh controller branch to the reviewed `origin/main` and execute the complete fenced `GOAL.md` verification block from the fresh worktree. If the independently owned lifecycle baseline or canonical `main` has not yet been reconciled, record that exact failed assertion and keep GoalEx stopped; do not call the worktree launch-ready.
 
 ### Task 6: Final Requirement-by-Requirement Closure Audit
 
