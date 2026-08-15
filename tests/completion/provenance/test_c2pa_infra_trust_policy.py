@@ -251,11 +251,14 @@ def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path, monkeypat
     assert decision.quarantine is False
 
 
-def test_c2pa_direct_windows_batch_tool_fails_closed(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "ending", [".cmd", ".CMD", ".cmd ", ".cmd.", ".bat", ".bat  ."]
+)
+def test_c2pa_direct_windows_batch_tool_fails_closed(tmp_path, monkeypatch, ending):
     asset = tmp_path / "asset & echo injected.jpg"
     asset.write_bytes(PAYLOAD)
     sha = hashlib.sha256(PAYLOAD).hexdigest()
-    tool = tmp_path / "c2pa verifier.cmd"
+    tool = tmp_path / f"c2pa verifier{ending}"
     tool.touch()
     run = Mock(side_effect=AssertionError("subprocess.run must not be called"))
     monkeypatch.setattr(prov, "os", SimpleNamespace(name="nt"))
@@ -280,6 +283,23 @@ def test_c2pa_direct_windows_batch_tool_fails_closed(tmp_path, monkeypatch):
         },
     )
 
+
+def test_c2pa_empty_tool_command_fails_closed(monkeypatch):
+    run = Mock(side_effect=AssertionError("subprocess.run must not be called"))
+    monkeypatch.setattr(prov.subprocess, "run", run)
+
+    decision = prov.C2paToolVerifier(tool_path=" \t").verify(
+        PAYLOAD,
+        {"asset_path": r"C:\\tenant\\attacker-controlled.exe"},
+    )
+
+    run.assert_not_called()
+    assert decision.quarantine is True
+    assert decision.reason == "c2pa verifier execution failed"
+    assert decision.diagnostics == {
+        "error": "c2pa verifier command must not be empty",
+        "tool": " \t",
+    }
 
 if __name__ == "__main__":  # pragma: no cover - manual run convenience
     sys.exit(pytest.main([__file__, "-v"]))
