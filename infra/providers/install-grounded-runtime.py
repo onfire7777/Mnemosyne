@@ -67,7 +67,7 @@ def install(root: Path, base: Path) -> Path:
             relative = source.relative_to(root)
             implementation.write_bytes(
                 subprocess.run(
-                    ["git", "show", f"{commit}:{relative}"],
+                    ["git", "show", f"{commit}:{relative.as_posix()}"],
                     cwd=root,
                     capture_output=True,
                     check=True,
