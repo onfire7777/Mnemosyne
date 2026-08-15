@@ -3439,3 +3439,274 @@ def test_m03_valid_time_scorer_fails_replay_mismatch(tmp_path: Path) -> None:
     assert measured["metrics"]["deterministic_tied_time_replay"] == 0.0
     assert measured["metrics"]["five_seed_canonical_replay"] == 0.8
     assert measured["passed"] is False
+
+
+def _m02_suite() -> dict[str, object]:
+    from eval.public.runner import load_registry
+
+    registry = load_registry()
+    assert "wmbs-m02-retrieval-development" in registry
+    return registry["wmbs-m02-retrieval-development"]
+
+
+def test_m02_registry_revision_matches_fixture_bytes() -> None:
+    import subprocess
+
+    suite = _m02_suite()
+    fixture = REPO_ROOT / "eval/public/fixtures/wmbs-m02-retrieval-development.json"
+    revision = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", str(fixture.relative_to(REPO_ROOT))],
+        capture_output=True,
+        check=True,
+        cwd=REPO_ROOT,
+        text=True,
+    ).stdout.strip()
+    assert suite["revision"] == revision
+    shown = subprocess.run(
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        capture_output=True,
+        check=True,
+        cwd=REPO_ROOT,
+    ).stdout
+    assert shown == fixture.read_bytes()
+
+
+def test_m02_adapter_issues_real_cli_calls() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m02_retrieval_development
+    from eval.public import wmbs_m02 as m02
+
+    calls: list[str] = []
+
+    class RecordingCLI:
+        backend = "local"
+
+        def capture(self, *args: object, **kwargs: object) -> dict[str, object]:
+            calls.append("capture")
+            return {"ok": True}
+
+        def search(self, *args: object, **kwargs: object) -> dict[str, object]:
+            calls.append("search")
+            return {"hits": []}
+
+        def answer(self, question: object, context: object, **kwargs: object) -> dict[str, object]:
+            calls.append("answer")
+            contexts.append(context)
+            return {"answer": None}
+
+    contexts: list[object] = []
+    fixture = m02.load_fixture()
+    tiny = dict(fixture)
+    tiny["questions"] = [q for q in fixture["questions"] if q["family"] == "unanswerable"][:1]
+    tiny["corpus"] = fixture["corpus"][:1]
+    tiny.pop("fixture_sha256", None)
+    traces, evidence = run_m02_retrieval_development(tiny, RecordingCLI())
+    assert "capture" in calls and "search" in calls and "answer" in calls
+    assert traces and traces[0]["case_id"] == traces[0]["question_id"]
+    assert contexts == [{"tenant_id": "wmbs-m02-development"}]
+    assert traces[0]["ranked_hits"] == []
+    assert traces[0]["answer"] is None
+    assert traces[0]["abstained"] is False
+    assert evidence["backend"] == "local"
+    with pytest.raises(ValueError, match="live MnemoCLI"):
+        run_m02_retrieval_development(tiny, None)
+
+
+def test_m02_bundle_declares_backend_explicitly(tmp_path: Path) -> None:
+    from eval.public.adapters.whole_memory_reference import run_m02_retrieval_development
+    from eval.public.runner import _m02_bundle_metadata
+    from eval.public import wmbs_m02 as m02
+
+    class LocalCLI:
+        backend = "local"
+
+        def capture(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"ok": True}
+
+        def search(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"hits": []}
+
+        def answer(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"answer": None, "abstained": False}
+
+    class OtherCLI(LocalCLI):
+        backend = "sqlite"
+
+    fixture = m02.load_fixture()
+    tiny = dict(fixture)
+    tiny["questions"] = fixture["questions"][:1]
+    tiny["corpus"] = fixture["corpus"][:1]
+    tiny.pop("fixture_sha256", None)
+    traces, evidence = run_m02_retrieval_development(tiny, LocalCLI())
+    exercised = evidence["backend"]
+    assert exercised == "local"
+
+    suite = _m02_suite()
+    suite_name = "wmbs-m02-retrieval-development"
+    with pytest.raises(ValueError, match="exercised backend"):
+        _m02_bundle_metadata(suite, suite_name, backend=None)
+    with pytest.raises(ValueError, match="exercised backend"):
+        _m02_bundle_metadata(suite, suite_name, backend="")
+    with pytest.raises(ValueError, match="fabricated backend"):
+        _m02_bundle_metadata(
+            suite, suite_name, backend="postgres", exercised=exercised
+        )
+
+    _other_traces, other_evidence = run_m02_retrieval_development(tiny, OtherCLI())
+    assert other_evidence["backend"] == "sqlite"
+    other_metadata = _m02_bundle_metadata(
+        suite, suite_name, backend=other_evidence["backend"], exercised=other_evidence["backend"]
+    )
+    assert other_metadata["backend"] == "sqlite"
+    assert other_metadata["backend"] != "local"
+
+    metadata = _m02_bundle_metadata(
+        suite, suite_name, backend=exercised, exercised=exercised
+    )
+    assert metadata["backend"] == exercised
+    public_bundle.write_bundle(
+        tmp_path / "bundle",
+        benchmark=tiny,
+        metadata=metadata,
+        metrics={
+            "family": suite["family"],
+            "profile": suite["scoring_profile"],
+        },
+        traces=traces,
+    )
+    written = json.loads((tmp_path / "bundle" / "benchmark.json").read_text())
+    declared = written["metadata"].get("backend")
+    assert declared, "bundle metadata omitted the exercised backend"
+    assert declared == exercised
+    assert declared != "postgres"
+
+
+def test_m02_runner_rejects_fixture_digest_drift(tmp_path: Path) -> None:
+    from eval.public.runner import run_public_suite
+    from eval.public import wmbs_m02 as m02
+
+    mutated = dict(m02.load_fixture())
+    mutated["seed"] = int(mutated["seed"]) + 1
+    with pytest.raises(ValueError, match="digest"):
+        run_public_suite(
+            "wmbs-m02-retrieval-development",
+            out_dir=tmp_path / "bundle",
+            benchmark_override=mutated,
+        )
+
+
+def test_m02_metrics_recompute_from_anchored_profile() -> None:
+    from eval.public import wmbs_m02 as m02
+    from eval.public.scoring import score_profile
+
+    fixture = m02.load_fixture()
+    traces = []
+    for question in fixture["questions"]:
+        qid = question["question_id"]
+        if question["family"] == "unanswerable":
+            traces.append(
+                {
+                    "answer": None,
+                    "abstained": True,
+                    "case_id": qid,
+                    "question_id": qid,
+                    "ranked_hits": [],
+                }
+            )
+        else:
+            traces.append(
+                {
+                    "answer": question["answers"][0],
+                    "abstained": False,
+                    "case_id": qid,
+                    "question_id": qid,
+                    "ranked_hits": [
+                        {"rank": rank, "stable_item_id": item_id}
+                        for rank, item_id in enumerate(question["gold_doc_ids"], 1)
+                    ],
+                }
+            )
+    expected = m02.score_retrieval(fixture, traces)
+    measured = score_profile("wmbs-m02-retrieval-v1", [{"fixture": fixture}], traces)
+    assert measured == expected
+    drifted = list(traces)
+    first = dict(drifted[0])
+    if first["abstained"]:
+        first["abstained"] = False
+        first["answer"] = "no"
+        first["ranked_hits"] = [
+            {"rank": 1, "stable_item_id": fixture["corpus"][0]["stable_item_id"]}
+        ]
+    else:
+        first["answer"] = "wrong-answer"
+    drifted[0] = first
+    assert score_profile("wmbs-m02-retrieval-v1", [{"fixture": fixture}], drifted) != expected
+
+
+def test_m02_publication_flags_are_false() -> None:
+    suite = _m02_suite()
+    assert suite["admission_state"] == "PROPOSED"
+    assert suite["publishable"] is False
+    assert suite["pbpp_headline_eligible"] is False
+    assert suite["headline_eligible"] is False
+    assert suite["upstream_comparable"] is False
+    assert suite["independent_external_reproduction"] is False
+    assert "system_seam" not in suite
+    assert suite["track_kind"] == "ENHANCED-SUCCESSOR"
+    assert suite["split_role"] == "development"
+
+
+def test_m02_adapter_and_profile_resolve() -> None:
+    from eval.public.adapters import whole_memory_reference
+    from eval.public.runner import _ADAPTERS, _PROFILE_CONTRACTS
+
+    suite = _m02_suite()
+    assert suite["adapter"] == "wmbs-m02-retrieval-reference"
+    assert _ADAPTERS[str(suite["adapter"])] is whole_memory_reference.run_m02_retrieval_development
+    assert _PROFILE_CONTRACTS[str(suite["scoring_profile"])] == (
+        suite["family"],
+        suite["interval_method"],
+    )
+
+
+def test_m02_custody_rejects_wellformed_fake_hashes() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m02_retrieval_development
+    from eval.public import wmbs_m02 as m02
+    from eval.public.runner import load_registry
+
+    class LocalCLI:
+        backend = "local"
+
+        def capture(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"ok": True}
+
+        def search(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"hits": []}
+
+        def answer(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"answer": None, "abstained": False}
+
+    fixture = m02.load_fixture()
+    tiny = dict(fixture)
+    tiny["questions"] = fixture["questions"][:1]
+    tiny["corpus"] = fixture["corpus"][:1]
+    tiny.pop("fixture_sha256", None)
+    fake = "a" * 64
+    suite = _m02_suite()
+    assert suite["dataset_sha256"] != fake
+    assert suite["corpus_documents"] == 240
+    assert suite["specified_corpus_events"] == 2000
+    registry = load_registry()
+    assert registry["wmbs-m02-retrieval-development"]["dataset_sha256"] == suite["dataset_sha256"]
+    assert registry["wmbs-m02-retrieval-development"]["corpus_documents"] == 240
+    assert registry["wmbs-m02-retrieval-development"]["specified_corpus_events"] == 2000
+
+    forged_digest = dict(tiny)
+    forged_digest["fixture_sha256"] = fake
+    with pytest.raises(ValueError, match="fixture_sha256"):
+        run_m02_retrieval_development(forged_digest, LocalCLI())
+    forged_schema = dict(tiny)
+    forged_schema["schema_id"] = fake
+    with pytest.raises(ValueError, match="schema_id"):
+        run_m02_retrieval_development(forged_schema, LocalCLI())
+    traces, evidence = run_m02_retrieval_development(tiny, LocalCLI())
+    assert traces and evidence["backend"] == "local"
