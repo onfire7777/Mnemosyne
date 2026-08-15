@@ -39,6 +39,8 @@ import json
 import stat
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -247,6 +249,36 @@ def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path, monkeypat
     assert decision.valid is True
     assert decision.trusted is True
     assert decision.quarantine is False
+
+
+def test_c2pa_direct_windows_batch_tool_fails_closed(tmp_path, monkeypatch):
+    asset = tmp_path / "asset & echo injected.jpg"
+    asset.write_bytes(PAYLOAD)
+    sha = hashlib.sha256(PAYLOAD).hexdigest()
+    tool = tmp_path / "c2pa verifier.cmd"
+    tool.touch()
+    run = Mock(side_effect=AssertionError("subprocess.run must not be called"))
+    monkeypatch.setattr(prov, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(prov.subprocess, "run", run)
+
+    decision = prov.C2paToolVerifier(tool_path=str(tool)).verify(
+        PAYLOAD,
+        {"asset_path": str(asset), "sha256": sha},
+    )
+
+    run.assert_not_called()
+    assert decision == prov.ProvenanceDecision(
+        valid=False,
+        trusted=False,
+        quarantine=True,
+        trust_delta=5,
+        reason="c2pa verifier execution failed",
+        manifest={"asset_path": str(asset), "sha256": sha},
+        diagnostics={
+            "error": "direct .bat/.cmd tool execution is disabled on Windows",
+            "tool": str(tool),
+        },
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover - manual run convenience

@@ -98,6 +98,7 @@ jobs:
           tests/test_command_line.py
           tests/test_cli_runtime_tools.py::test_production_evidence_manifest_path_rewrite_preserves_windows_backslashes
           tests/completion/provenance/test_c2pa_infra_trust_policy.py::test_c2pa_existing_tool_path_with_spaces_is_literal_argv
+          tests/completion/provenance/test_c2pa_infra_trust_policy.py::test_c2pa_direct_windows_batch_tool_fails_closed
           -q
 
   provider-conformance:
