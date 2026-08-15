@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import venv
 from pathlib import Path
 
 
@@ -1410,6 +1411,54 @@ def test_goal_topology_bootstrap_normalizes_status_under_errexit(
             **os.environ,
             "PATH": f"{tool_dir}{os.pathsep}{os.environ['PATH']}",
             "CANDIDATE_SHA": head,
+            "PERMITTED_PARENT_SHA": head,
+            "IMMUTABLE_ANCHOR_SHA": head,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+
+
+def test_goal_topology_bootstrap_disables_sitecustomize(tmp_path: Path) -> None:
+    if os.name == "nt":
+        return
+    environment = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    python = environment / "bin" / "python3"
+    site_packages = subprocess.run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "import site; print(site.getsitepackages()[0])",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (Path(site_packages) / "sitecustomize.py").write_text(
+        "import os; os._exit(0)\n", encoding="utf-8"
+    )
+    control = subprocess.run([str(python), "-I", "-c", "raise SystemExit(2)"])
+    assert control.returncode == 0
+
+    goal = GOAL.read_text(encoding="utf-8")
+    command = goal.split("```sh\n", 1)[1].split("\n```", 1)[0]
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = subprocess.run(
+        ["sh", "-c", command],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{environment / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "CANDIDATE_SHA": "f" * 40,
             "PERMITTED_PARENT_SHA": head,
             "IMMUTABLE_ANCHOR_SHA": head,
         },
