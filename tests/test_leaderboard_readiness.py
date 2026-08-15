@@ -111,6 +111,20 @@ def test_cli_emits_deterministic_sorted_json(
     assert first_output.err == second_output.err == ""
 
 
+def test_cli_opens_regular_file_without_o_nonblock_when_unavailable(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write(tmp_path / "ready.json", _record())
+    monkeypatch.delattr(readiness.os, "O_NONBLOCK", raising=False)
+
+    assert main([str(path)]) == 0
+    output = capsys.readouterr()
+    assert output.out == '{"blocked_gates":[],"ready":true}\n'
+    assert output.err == ""
+
+
 def test_cli_returns_one_for_valid_but_blocked_input(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

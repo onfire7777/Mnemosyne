@@ -329,6 +329,38 @@ def test_smoke_run_writes_verifiable_cli_only_bundle(tmp_path: Path) -> None:
     assert metrics["trace_count"] == len(traces)
 
 
+def test_public_runner_inherits_only_required_windows_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import eval.public.runner as runner
+
+    class EnvironmentCaptured(Exception):
+        pass
+
+    captured: dict[str, str] = {}
+
+    def capture_environment(_benchmark: object, cli: MnemoCLI) -> None:
+        captured.update(cli.env)
+        raise EnvironmentCaptured
+
+    required = {
+        "SYSTEMROOT": str(tmp_path / "Windows"),
+        "COMSPEC": str(tmp_path / "cmd.exe"),
+        "TEMP": str(tmp_path / "temp"),
+        "TMP": str(tmp_path / "tmp"),
+    }
+    for key, value in required.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "must-not-leak")
+    monkeypatch.setitem(runner._ADAPTERS, "smoke", capture_environment)
+
+    with pytest.raises(EnvironmentCaptured):
+        run_public_suite("smoke", tmp_path / "unused")
+
+    assert {key: captured[key] for key in required} == required
+    assert "AWS_SECRET_ACCESS_KEY" not in captured
+
+
 @pytest.mark.parametrize(
     "suite",
     [

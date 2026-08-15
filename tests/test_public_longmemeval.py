@@ -368,6 +368,20 @@ def test_external_candidate_manifest_is_schema_bound_and_no_overwrite(tmp_path: 
         write_candidate_manifest(path, manifest)
 
 
+def test_candidate_manifest_directory_fsync_is_a_noop_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import eval.public.runner as runner
+
+    def fail_open(*_args: object, **_kwargs: object) -> int:
+        pytest.fail("Windows must not open directories for fsync")
+
+    monkeypatch.setattr(runner.os, "name", "nt")
+    monkeypatch.setattr(runner.os, "open", fail_open)
+
+    runner._fsync_directory(tmp_path)
+
+
 def test_candidate_manifest_builder_binds_budgets_abstention_and_v19_custody() -> None:
     manifest = build_candidate_manifest(
         model_content_sha256="500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41",
