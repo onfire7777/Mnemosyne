@@ -222,20 +222,18 @@ def _posix_process(
 
 def _windows_process(
     argv: Sequence[str], payload: bytes
-) -> tuple[subprocess.Popen[bytes], BinaryIO, Callable[[], None], _WindowsJob, str]:
+) -> tuple[subprocess.Popen[bytes], BinaryIO, Callable[[], None], _WindowsJob]:
     header = json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-    temporary = tempfile.NamedTemporaryFile(delete=False)
-    stdin: BinaryIO | None = None
+    stdin = tempfile.TemporaryFile()
     process: subprocess.Popen[bytes] | None = None
     job: _WindowsJob | None = None
     gate_read = -1
     gate_write = -1
     try:
-        temporary.write(struct.pack("!I", len(header)))
-        temporary.write(header)
-        temporary.write(payload)
-        temporary.close()
-        stdin = open(temporary.name, "rb")
+        stdin.write(struct.pack("!I", len(header)))
+        stdin.write(header)
+        stdin.write(payload)
+        stdin.seek(0)
         gate_read, gate_write = os.pipe()
         os.set_inheritable(gate_read, True)
         os.set_inheritable(gate_write, False)
@@ -271,7 +269,7 @@ def _windows_process(
         def terminate_tree() -> None:
             job.terminate()
 
-        return process, stdin, terminate_tree, job, temporary.name
+        return process, stdin, terminate_tree, job
     except BaseException:
         if gate_read >= 0:
             os.close(gate_read)
@@ -285,13 +283,7 @@ def _windows_process(
                 process.wait(timeout=_CLEANUP_SECONDS)
             except (OSError, subprocess.TimeoutExpired):
                 pass
-        if stdin is not None:
-            stdin.close()
-        temporary.close()
-        try:
-            os.unlink(temporary.name)
-        except FileNotFoundError:
-            pass
+        stdin.close()
         raise
 
 
@@ -312,38 +304,34 @@ def run_bounded_command(
 ) -> BoundedCommandResult:
     """Run without a shell while never retaining more than the declared limits."""
     if os.name == "nt":
-        process, stdin, terminate_tree, job, temporary_path = _windows_process(argv, payload)
+        process, stdin, terminate_tree, job = _windows_process(argv, payload)
     else:
         process, stdin, terminate_tree = _posix_process(argv, payload)
         job = None
-        temporary_path = None
     assert process.stdout is not None and process.stderr is not None
     streams = (process.stdout, process.stderr)
     events: queue.Queue[tuple[str, object]] = queue.Queue()
     stopping = threading.Event()
-    readers = (
-        threading.Thread(
-            target=_reader,
-            args=(process.stdout, 0, max_stdout_bytes, events, stopping),
-            name="bounded-command-stdout",
-            daemon=True,
-        ),
-        threading.Thread(
-            target=_reader,
-            args=(process.stderr, 1, max_stderr_bytes, events, stopping),
-            name="bounded-command-stderr",
-            daemon=True,
-        ),
-    )
-    for reader in readers:
-        reader.start()
-
-    deadline = time.monotonic() + timeout_seconds
-    outputs: list[bytes | None] = [None, None]
-    done = 0
-    returncode: int | None = None
-    terminated_after_exit = False
+    readers: list[threading.Thread] = []
     try:
+        for stream, output_index, limit, name in (
+            (process.stdout, 0, max_stdout_bytes, "bounded-command-stdout"),
+            (process.stderr, 1, max_stderr_bytes, "bounded-command-stderr"),
+        ):
+            reader = threading.Thread(
+                target=_reader,
+                args=(stream, output_index, limit, events, stopping),
+                name=name,
+                daemon=True,
+            )
+            reader.start()
+            readers.append(reader)
+
+        deadline = time.monotonic() + timeout_seconds
+        outputs: list[bytes | None] = [None, None]
+        done = 0
+        returncode: int | None = None
+        terminated_after_exit = False
         while done < len(readers):
             remaining = _remaining(deadline)
             if remaining <= 0:
@@ -377,6 +365,8 @@ def run_bounded_command(
                 returncode = process.wait(timeout=min(remaining, 0.05))
             except subprocess.TimeoutExpired:
                 continue
+        if not terminated_after_exit:
+            terminate_tree()
         _join_readers(readers, time.monotonic() + _CLEANUP_SECONDS)
         return BoundedCommandResult(returncode, outputs[0] or b"", outputs[1] or b"")
     except BaseException:
@@ -386,8 +376,3 @@ def run_bounded_command(
         stdin.close()
         if job is not None:
             job.close()
-        if temporary_path is not None:
-            try:
-                os.unlink(temporary_path)
-            except FileNotFoundError:
-                pass
