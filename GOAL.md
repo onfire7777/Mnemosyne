@@ -217,17 +217,12 @@ required and native-Windows job. Fresh exact refreshed-stack security scan
 `e95df6b0-da9d-4688-a2a0-4378be4973d1` covers all 32 changed files with zero
 findings; its binary diff hash exactly matches the approved cumulative stack at
 `f538e11916f0621cb951f8393debb66e032abaa69c9053fb4562c9d245fc778d`.
-PR #109 is **MERGED** at `main@6801fbd0`; its implementation content and
-pre-merge gates matched this receipt, but its merge preceded the amendment and
-is recorded as a sequencing deviation rather than silently reclassified as
-compliant. PRs #110-#112 remain open drafts. No later edge may merge until PR
-#109's post-main CI is green; this amendment must still land before the next
-edge. Their lifecycle blobs
-already satisfy the stronger parent-equality invariant: #110 equals current
-`main`, #111 equals #110, and #112 equals #111. Controller amendment PR #114
-is **OPEN/DRAFT** and changes only `GOAL.md`, `.planning/STATE.md`, and the
-lease map. Its self-record changes its head, so no exact PR #114 head, merge
-SHA/time, or post-main CI is claimed. PR #114 must pass and merge before #110.
+PR #109's sequencing deviation is preserved in the lease-map receipt rather
+than silently reclassified. PR #114 then delivered the topology amendment, and
+PRs #110, #111, and #112 merged in the required serialized order with exact-
+head and post-main CI green at every edge, ending at `main@61f55b94`. Their
+immutable-anchor and lifecycle-parent proofs remain the audit basis; no Windows
+stack writer remains open.
 Topology-only merges of current `main` or the immediately
 preceding stack PR are therefore permitted without another controller PR only
 when all three lifecycle blobs exactly equal that parent, every non-lifecycle
@@ -240,10 +235,7 @@ permitted parent; the candidate must be the only commit outside their combined
 histories. If `main` moves again, build a fresh candidate from that anchor and
 new parent rather than chaining topology commits. This prevents transient
 forbidden changes from remaining reachable. The controller remains the sole CI
-integration owner. Merge commits for the remaining stack only in the
-order #110 -> #111 -> #112 are permitted, with
-successful post-merge `main` CI required before refreshing and merging each
-next edge. Those already-merged T10 edges predate this executable gate and
+integration owner. The already-merged T10 edges predate this executable gate and
 were discharged by their recorded exact recursive-tree proofs; their legacy
 anchors are not inputs to this new command. For every future topology-only
 refresh whose parent and anchor descend from the commit introducing this
@@ -396,7 +388,11 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 after all required/native checks passed in run `31865413163`, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@6801fbd0`. `T5` and `T6` are discharged.
+current canonical baseline is `main@f688c747`. `T5` and `T6` are discharged.
+PR #115 is merged at that baseline, but its reproduced M02 Stage-B review
+defects are not waived; a serialized corrective successor remains mandatory
+before M02 can be treated as clean or publishable. PR #117 owns the coupled
+lifecycle reconciliation and topology-verifier remediation.
 Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
 admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
@@ -795,6 +791,11 @@ git merge-base --is-ancestor 7b6c5a121107ee80533a5b4ec794e602e1e1ab33 main
 git merge-base --is-ancestor 7c5264d815d44c375173dcd1e8ab57783a397a7e main
 git merge-base --is-ancestor 6929fd3703ff262d3264b58a5af90d506a804da2 main
 git merge-base --is-ancestor 6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4 main
+git merge-base --is-ancestor c4337f6315833b930cba2d31c7e95778c4f6ddd5 main
+git merge-base --is-ancestor 6241984b15e85171bc036100fa5e20e05588bd81 main
+git merge-base --is-ancestor f95aabaca85ed6cbfbda66c0ceea12df22bfdd00 main
+git merge-base --is-ancestor 61f55b94a6f878973437d075adfcecf2cb684ae6 main
+git merge-base --is-ancestor f688c74757365a9d946100687a04288cde12a7fc main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -808,7 +809,7 @@ git merge-base --is-ancestor 6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4 main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4"
+test "$(git rev-parse main)" = "f688c74757365a9d946100687a04288cde12a7fc"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
