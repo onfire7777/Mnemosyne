@@ -6,7 +6,6 @@ import json
 import os
 import re
 import secrets
-import shlex
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -15,6 +14,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
 from mnemosyne.access_policy import merge_access_policies, validate_access_policy
+from mnemosyne.command_line import split_command
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import (
     Candidate,
@@ -3495,7 +3495,7 @@ def _normalize_entity(row: Any) -> dict[str, Any]:
 
 def _command_argv(command: str | Sequence[str]) -> list[str]:
     if isinstance(command, str):
-        argv = shlex.split(command)
+        argv = split_command(command)
     else:
         argv = [str(item) for item in command]
     if not argv:

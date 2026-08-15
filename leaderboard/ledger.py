@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
-import fcntl
 import json
 import os
 import re
@@ -20,6 +19,7 @@ from typing import Any, Iterator
 from cryptography.exceptions import InvalidSignature
 
 from leaderboard.validate import validate_record
+from mnemosyne._file_lock import exclusive_file_lock
 from mnemosyne.evidence_signing import (
     EvidenceSignatureError,
     _public_key_sha256,
@@ -255,12 +255,8 @@ def _write_head(
 def _ledger_lock(path: Path) -> Iterator[None]:
     lock_path = path.with_suffix(path.suffix + ".lock")
     try:
-        with lock_path.open("a+b") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        with exclusive_file_lock(lock_path):
+            yield
     except OSError as exc:
         raise LedgerError("ledger lock could not be acquired") from exc
 

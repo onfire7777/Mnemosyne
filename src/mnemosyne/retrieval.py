@@ -8,7 +8,6 @@ import json
 import math
 import os
 import re
-import shlex
 import sqlite3
 import subprocess
 import tempfile
@@ -22,6 +21,7 @@ from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from mnemosyne.access_policy import apply_text_redactions, may_read_item
+from mnemosyne.command_line import split_command
 from mnemosyne.evidence_redaction import redaction_findings
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
 from mnemosyne.models import Hit, parse_dt, utc_now
@@ -1672,7 +1672,7 @@ class CommandMediaEmbeddingProvider:
         timeout_seconds: float = 30.0,
         max_media_bytes: int = DEFAULT_MAX_INGEST_BYTES,
     ):
-        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        self.command = split_command(command) if isinstance(command, str) else list(command)
         if not self.command:
             raise ValueError("media embedding command must not be empty")
         if dims <= 0:
@@ -1746,7 +1746,7 @@ class CommandLexicalRetriever:
         backend: str = "command-lexical",
         timeout_seconds: float = 30.0,
     ):
-        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        self.command = split_command(command) if isinstance(command, str) else list(command)
         if not self.command:
             raise ValueError("lexical retrieval command must not be empty")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -1799,7 +1799,7 @@ class CommandGraphRetriever:
         backend: str = "command-graph",
         timeout_seconds: float = 30.0,
     ):
-        self.command = shlex.split(command) if isinstance(command, str) else list(command)
+        self.command = split_command(command) if isinstance(command, str) else list(command)
         if not self.command:
             raise ValueError("graph retrieval command must not be empty")
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
