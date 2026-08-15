@@ -233,7 +233,6 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
 
     proc = subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
