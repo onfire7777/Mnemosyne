@@ -8324,6 +8324,16 @@ def test_cli_release_audit_requires_manifest_bound_production_evidence(tmp_path:
     }
 
 
+def test_production_evidence_manifest_path_rewrite_preserves_windows_backslashes() -> None:
+    source_path = "/opt/mnemosyne/tool.exe"
+    snapshot_path = r"C:\Users\agent\capture\tool.exe"
+
+    assert cli._production_evidence_normalize_manifest_value(
+        f"--tool={source_path}",
+        path_rewrites={source_path: snapshot_path},
+    ) == f"--tool={snapshot_path}"
+
+
 def test_cli_production_evidence_verify_accepts_captured_bundle(tmp_path: Path) -> None:
     bundle_dir, bundle_fingerprint = write_production_evidence_bundle(tmp_path)
     preflight = json.loads((bundle_dir / "preflight.json").read_text(encoding="utf-8"))

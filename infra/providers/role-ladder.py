@@ -13,11 +13,12 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import subprocess
 import sys
 import time
 from typing import Any
+
+from mnemosyne.command_line import split_command
 
 from mnemosyne.providers.bounded_command import (
     CommandOutputLimitError,
@@ -70,7 +71,7 @@ def _command_for(role: str, rung: str) -> list[str] | None:
         raw = None
     if not raw:
         return None
-    argv = shlex.split(raw)
+    argv = split_command(raw)
     return argv or None
 
 
