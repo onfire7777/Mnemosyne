@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6801fbd0`; PR #109 merged from audited topology head `cb44f21296fc22cf92f847b8201a6881e915400c` after exact-head CI `31865413163` passed, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at `2026-08-15T05:24:36Z`. It raced the lifecycle amendment, so it is recorded as a sequencing deviation; post-main CI `31866875258` remains in progress and no later stack edge is open. Ruleset `19157561` requires strict up-to-date status checks; T10 therefore reserves immutable non-lifecycle content anchors with topology-only refreshes. PRs #110-#112 remain drafts, byte-identical to their approved content anchors outside the three lifecycle files, and strictly ordered. Current-main ancestry, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI remain mandatory at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T05:28:47Z"
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6801fbd0`; PR #109 merged from audited topology head `cb44f21296fc22cf92f847b8201a6881e915400c` after exact-head CI `31865413163` passed, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at `2026-08-15T05:24:36Z`. It raced the lifecycle amendment and is recorded as a sequencing deviation; post-main CI `31866875258` succeeded at `2026-08-15T05:51:12Z`, and no later edge opened before that gate closed. Ruleset `19157561` requires strict up-to-date status checks; T10 therefore reserves immutable non-lifecycle content anchors with topology-only refreshes. PRs #110-#112 remain drafts, byte-identical to their approved content anchors outside the three lifecycle files, and strictly ordered. This amendment must land before #110. Current-main ancestry, exact lifecycle-parent equality, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI remain mandatory at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-15T05:51:12Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 7
@@ -144,9 +144,9 @@ PR #109 is **MERGED** from exact head
 `cb44f21296fc22cf92f847b8201a6881e915400c`, with exact-head CI
 `31865413163` green, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4`
 at `2026-08-15T05:24:36Z`. It raced this amendment and is recorded as a
-sequencing deviation; post-main run `31866875258` is still in progress. PRs
-#110-#112 remain drafts and no later edge is open until that run succeeds and
-this amendment lands. Their lifecycle blobs are parent-exact: #110 equals
+sequencing deviation; post-main run `31866875258` succeeded. PRs #110-#112
+remain drafts and no later edge is open until this amendment lands. Their
+lifecycle blobs are parent-exact: #110 equals
 current `main`, #111 equals #110, and #112 equals #111.
 One controller owns every serialized `.github/workflows/ci.yml` integration
 edge. Exact-head required/native CI, fresh security review, local/remote/hosted
@@ -429,7 +429,7 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 #109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
 after exact-head CI `31865413163` passed, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
-`2026-08-15T05:24:36Z`; post-main run `31866875258` remains in progress. The
+`2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
 current canonical baseline is `main@6801fbd0`. Node `T10` now reserves only the
 remaining content-anchored stack #110 -> #111 -> #112 under the rolling strict-
 check contract recorded in the lease map; successful post-main CI must separate
