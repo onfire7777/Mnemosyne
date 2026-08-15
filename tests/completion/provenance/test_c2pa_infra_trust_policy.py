@@ -208,5 +208,38 @@ def test_fixed_policy_quarantines_untrusted_root(tmp_path):
     assert "certificate root" in decision.reason
 
 
+def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path):
+    """An existing executable path is not split as a configured command string."""
+    asset = tmp_path / "asset.signed.jpg"
+    asset.write_bytes(PAYLOAD)
+    sha = hashlib.sha256(PAYLOAD).hexdigest()
+    report = _build_report(str(asset), sha)
+    tool_dir = tmp_path / "tool directory"
+    tool_dir.mkdir()
+    tool = tool_dir / "c2pa verifier"
+    tool.write_text(
+        "#!%s\nimport json\nprint(json.dumps(%r))\n" % (sys.executable, report),
+        encoding="utf-8",
+    )
+    tool.chmod(tool.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    verifier = prov.C2paToolVerifier(
+        tool_path=str(tool),
+        trust_policy=prov.ProvenanceTrustPolicy.from_dict(_emitted_policy_dict(fixed=True)),
+    )
+    decision = verifier.verify(
+        PAYLOAD,
+        {
+            "asset_path": str(asset),
+            "sha256": sha,
+            "_ingest_context": {"tenant_id": "tenant-a", "source_type": "camera", "modality": "binary"},
+        },
+    )
+
+    assert decision.valid is True
+    assert decision.trusted is True
+    assert decision.quarantine is False
+
+
 if __name__ == "__main__":  # pragma: no cover - manual run convenience
     sys.exit(pytest.main([__file__, "-v"]))
