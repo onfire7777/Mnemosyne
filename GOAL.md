@@ -238,15 +238,19 @@ or non-lifecycle blob change voids the reservation. The controller remains the
 sole CI integration owner. Merge commits for the remaining stack only in the
 order #110 -> #111 -> #112 are permitted, with
 successful post-merge `main` CI required before refreshing and merging each
-next edge. Before merging, authenticate the permitted-parent and immutable-anchor
-commit IDs independently, then obtain and run this block from the
+next edge. Those already-merged T10 edges predate this executable gate and
+were discharged by their recorded exact recursive-tree proofs; their legacy
+anchors are not inputs to this new command. For every future topology-only
+refresh whose parent and anchor descend from the commit introducing this
+verifier, authenticate the permitted-parent and immutable-anchor commit IDs
+independently, then obtain and run this block from the
 permitted-parent `GOAL.md` blob (for example, inspect it with
 `git --no-replace-objects show "$PERMITTED_PARENT_SHA:GOAL.md"`). Never use the
 candidate checkout's copy as the launcher:
 
 ```sh
 (
-  expected_verifier_oid=3949edc528d380441b7de747290f12a4e61ccf3c
+  expected_verifier_oid=7c40b18bd0097968157708d04988e59d2e2d1ca7
   resolved_parent="$(
     git --no-replace-objects rev-parse --verify \
       "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null
@@ -275,7 +279,7 @@ candidate checkout's copy as the launcher:
     printf '%s\n' 'error: cannot authenticate trusted topology verifier'
     exit 2
   }
-  if python3 -I -c '
+  if python3 -I -S -c '
 import sys
 
 source = sys.argv.pop(1)

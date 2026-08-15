@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 
-SHA = re.compile(r"[0-9a-fA-F]{40}")
+SHA = re.compile(r"[0-9a-f]{40}")
 OID = re.compile(rb"[0-9a-f]{40}")
 LIFECYCLE_PATHS = (
     b".planning/STATE.md",
@@ -67,6 +67,21 @@ def _tree(ref: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
     return entries
 
 
+def _require_exact_commit(ref: str) -> None:
+    try:
+        result = subprocess.run(
+            [*GIT, "rev-parse", "--verify", f"{ref}^{{commit}}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=GIT_ENV,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError("cannot run git") from error
+    if result.returncode or result.stdout.strip() != ref.encode("ascii"):
+        raise ValueError(f"not an exact commit SHA: {ref}")
+
+
 def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
     try:
         result = subprocess.run(
@@ -96,6 +111,8 @@ def main(argv: list[str]) -> int:
         )
         return 2
     try:
+        for ref in (candidate_ref, parent_ref, anchor_ref):
+            _require_exact_commit(ref)
         if not _is_ancestor(parent_ref, candidate_ref):
             print("candidate does not descend from permitted parent")
             return 1
