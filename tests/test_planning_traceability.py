@@ -952,6 +952,54 @@ def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     assert not trusted.stdout
 
 
+def test_topology_refresh_verifier_accepts_one_commit_divergent_anchor(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, base_anchor = _topology_fixture(tmp_path)
+    anchor_tree = subprocess.run(
+        ["git", "rev-parse", f"{base_anchor}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    anchor = subprocess.run(
+        ["git", "commit-tree", anchor_tree, "-p", base_anchor, "-m", "anchor"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate_tree = subprocess.run(
+        ["git", "rev-parse", f"{parent}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        [
+            "git",
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            parent,
+            "-p",
+            anchor,
+            "-m",
+            "candidate",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 0, result.stdout
+    assert not result.stdout
+
+
 def test_topology_refresh_verifier_rejects_tag_object_ids(tmp_path: Path) -> None:
     repo, candidate, parent, anchor = _topology_fixture(tmp_path)
     refs = [candidate, parent, anchor]
