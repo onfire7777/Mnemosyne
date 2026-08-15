@@ -189,7 +189,8 @@ merged from audited topology head
 Windows checks passed in exact-head run `31865413163`, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
 `2026-08-15T05:24:36Z`. That merge raced this lifecycle amendment; post-merge
-run `31866875258` remains in progress and no later stack edge is open. The
+run `31866875258` completed successfully at `2026-08-15T05:51:12Z`; no later
+stack edge opened before that gate closed. The
 carve-out is therefore recomputed from `main@6801fbd0`. `T7`, `T8`, and `T9` are all
 **MERGED**, and no writer remains admitted from that wave. None is a source
 node or admits a successor node. `T9` changed reachability only: M03 remains
@@ -220,7 +221,8 @@ PR #109 is **MERGED** at `main@6801fbd0`; its implementation content and
 pre-merge gates matched this receipt, but its merge preceded the amendment and
 is recorded as a sequencing deviation rather than silently reclassified as
 compliant. PRs #110-#112 remain open drafts. No later edge may merge until PR
-#109's post-main CI succeeds and this amendment lands. Their lifecycle blobs
+#109's post-main CI is green; this amendment must still land before the next
+edge. Their lifecycle blobs
 already satisfy the stronger parent-equality invariant: #110 equals current
 `main`, #111 equals #110, and #112 equals #111.
 Topology-only merges of current `main` or the immediately
@@ -318,7 +320,7 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 #109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
 after all required/native checks passed in run `31865413163`, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
-`2026-08-15T05:24:36Z`; post-main run `31866875258` remains in progress. The
+`2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
 current canonical baseline is `main@6801fbd0`. `T5` and `T6` are discharged.
 Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
