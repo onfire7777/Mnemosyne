@@ -36,6 +36,8 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
         return _score_wmbs_m01(labels, traces)
     if profile == "wmbs-m03-valid-time-v1":
         return _score_wmbs_m03_valid_time(labels, traces)
+    if profile == "wmbs-m02-retrieval-v1":
+        return _score_wmbs_m02_retrieval(labels, traces)
     if profile == "wmbs-m10-v1":
         return _score_wmbs_m10(labels, traces)
     if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
@@ -151,6 +153,20 @@ def _score_wmbs_m01(
             allow_nan=False,
         )
     )
+
+
+
+def _score_wmbs_m02_retrieval(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m02 as m02
+
+    fixture = None
+    if labels and isinstance(labels[0], dict) and isinstance(labels[0].get("fixture"), dict):
+        fixture = labels[0]["fixture"]
+    else:
+        fixture = m02.load_fixture()
+    return m02.score_retrieval(fixture, traces)
 
 
 def _score_wmbs_m03_valid_time(

@@ -57,6 +57,7 @@ _ADAPTERS = {
     "smoke": smoke.run,
     "wmbs-m01-reference": whole_memory_reference.run_m01_development,
     "wmbs-m03-valid-time-reference": whole_memory_reference.run_m03_valid_time_development,
+    "wmbs-m02-retrieval-reference": whole_memory_reference.run_m02_retrieval_development,
     "wmbs-m10-reference": whole_memory_reference.run_m10_development,
     "pm-bench-triggerbench": pm_bench_triggerbench.run,
     "working-memory-action": working_memory_action_probe.run,
@@ -79,6 +80,7 @@ _PROFILE_CONTRACTS = {
     "working-memory-action-v1": ("deterministic-action", "bootstrap"),
     "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m02-retrieval-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
 }
 
@@ -94,6 +96,26 @@ _FROZEN_PHASE11_CUSTODY = {
     "hipporag-musique": {"report_sha256": "85e063aa81fed06e2f1c8e36b8311207fc18912357f3fdbf73e1e6243e6eda76", "manifest_sha256": "6167926faad5fd95f3d8d340fead4c5d17495abd6faa5f88c361e3e91c508277"},
     "longmemeval-retrieval": {"report_sha256": "432cf16a755ca70bb5bc764a7e7cde30cde362675b395247e9c5f8b332689676", "manifest_sha256": "01e621fc245a951c5761ccc08be96e688d83b7a080d13499f5f9ef8426e48208"},
 }
+
+
+
+def _m02_bundle_metadata(
+    suite: Mapping[str, Any],
+    suite_name: str,
+    *,
+    backend: str | None,
+    exercised: str | None = None,
+) -> dict[str, Any]:
+    metadata = {**dict(suite), "suite": suite_name}
+    declared = str(backend or "").strip()
+    if not declared:
+        raise ValueError(f"{suite_name}: bundle metadata must name the exercised backend")
+    if exercised is not None and declared != exercised:
+        raise ValueError(
+            f"{suite_name}: bundle metadata fabricated backend {declared!r}"
+        )
+    metadata["backend"] = declared
+    return metadata
 
 
 def load_registry() -> dict[str, dict[str, Any]]:
@@ -399,11 +421,13 @@ def run_public_suite(
         if key in os.environ
     }
     allowed_env.update(runtime_env)
+    exercised_backend: str | None = None
     if suite.get("system_seam") == "harness-owned-reference-core":
         result = adapter(adapter_input, None)
     else:
         with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
             mnemo = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
+            exercised_backend = getattr(mnemo, "backend", None)
             cli: Any = (
                 ActionCLI(mnemo)
                 if suite["adapter"] == "pm-bench-triggerbench"
@@ -461,7 +485,12 @@ def run_public_suite(
         or interval_method != suite["interval_method"]
     ):
         raise ValueError("scoring profile, family, or interval metadata mismatch")
-    metadata = {**suite, "suite": suite_name}
+    if suite_name == "wmbs-m02-retrieval-development":
+        metadata = _m02_bundle_metadata(
+            suite, suite_name, backend=exercised_backend
+        )
+    else:
+        metadata = {**suite, "suite": suite_name}
     if suite["family"] == "qa":
         assert candidate is not None
         protocol, digests = load_qa_protocol(), qa_protocol_digests()

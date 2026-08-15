@@ -39,7 +39,7 @@ mapping is its C01–C24 table (same file, lines 502–525).
 - **Registry entry** — a key in `eval/public/registry.json`. Registry keys are
   suite names, not module IDs; three admitted suites (`pm-bench-development`,
   `triggerbench-development`, `working-memory-action-development`) carry no
-  `wmbs-` prefix but are M12/M13 suites, as `eval/public/README.md:48` and
+  `wmbs-` prefix but are M12/M13 suites, as `eval/public/README.md:235` and
   `eval/public/README.md:57` state in their own words.
 
 ## M01–M20
@@ -47,7 +47,7 @@ mapping is its C01–C24 table (same file, lines 502–525).
 | Module | Capability / short name | Exact plan (approved?) | Fixture | Scorer | Test suite | Registry entry | Admission state | Cheapest next step (GOAL.md ladder) |
 |---|---|---|---|---|---|---|---|---|
 | M01 | C01/C02 — Capture and durability | yes — pilot plan `…harness-pilots.md:67` | yes — `eval/public/fixtures/wmbs-m01-development.json` | yes — `eval/public/wmbs_m01.py`; profile `wmbs-m01-v1` at `eval/public/scoring.py:35`, `_score_wmbs_m01` at `scoring.py:94`; adapter at `adapters/whole_memory_reference.py:95` | yes — `tests/test_public_wmbs_m01.py` | yes — `wmbs-m01-development` at `eval/public/registry.json:215` | `PROPOSED`; `PILOT-READY-DEV` for Local only; `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end. Step 4 residue only: widen beyond Local/SQLite when an approved plan admits it |
-| M02 | C01/C03/C07 — Retrieval and organization | exists, **not approved** — `docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m02-retrieval-development.json` | yes (Stage A only) — `eval/public/wmbs_m02.py`; **no** profile branch in `scoring.py` | yes — `tests/test_public_wmbs_m02.py` | **no** | `PROPOSED`; development-only PR #96 oracle; `publishable:false`, `pbpp_headline_eligible:false` | Step 2 first — the freeze gate on the `PROPOSED` plan is outstanding and must clear before any Stage-B work. Then step 4 (Stage B): scoring-profile + registry + adapter registration. Also blocked on the public-harness integration owner's lease; disclosed as a gap in `eval/public/README.md` under lease-map node `T7` |
+| M02 | C01/C03/C07 — Retrieval and organization | exists, **not approved** — `docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m02-retrieval-development.json` | yes — `eval/public/wmbs_m02.py`; profile `wmbs-m02-retrieval-v1` at `eval/public/scoring.py:39`, `_score_wmbs_m02_retrieval` at `scoring.py:159`; adapter `run_m02_retrieval_development` at `adapters/whole_memory_reference.py:173` | yes — `tests/test_public_wmbs_m02.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:3452` | yes — `wmbs-m02-retrieval-development` at `eval/public/registry.json:234` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Residue: official LoCoMo/LongMemEval/HippoRAG adapters, 2,000-event corpus, baselines/CIs, unmeasured cost metrics, deferred `bundle.py` `allowed_profile` / `_CANONICAL_REPLAY_SEEDS`. Plan freeze gate still outstanding. README cell at `eval/public/README.md:235` |
 | M03 | C04 — Temporal evolution | yes — pilot plan `…harness-pilots.md:68` | yes — `eval/public/fixtures/wmbs-m03-valid-time-development.json` | yes, **inline, with no `wmbs_m03.py` file** — profile `wmbs-m03-valid-time-v1` at `eval/public/scoring.py:37`, `_score_wmbs_m03_valid_time` at `scoring.py:156`; adapter `run_m03_valid_time_development` at `adapters/whole_memory_reference.py:138`; seeds at `eval/public/bundle.py:44` | yes — `tests/test_public_whole_memory_reference.py:3119`, `:3176`, `:3213`, `:3232`; admission conformance in `tests/test_public_wmbs_m03_registry_admission.py` | yes — `wmbs-m03-valid-time-development` at `eval/public/registry.json:234` | `PROPOSED` for full M03; valid-time slice `INTERNALLY_MEASURED` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED` for full M03; valid-time slice `INTERNALLY_MEASURED`); publication unchanged (`publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`). Residue: full transaction-time bitemporality, out of scope for the valid-time slice |
 | M04 | C05 — Conflict and correction | exists, **not approved** — `docs/plans/wmb-m04-conflict-correction-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m04-development.json` | yes (Stage A only) — `eval/public/wmbs_m04.py`; **no** profile branch in `scoring.py`; no adapter | yes — `tests/test_public_wmbs_m04.py`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | **no** | `PROPOSED`; development-only PR #96 oracle; `publishable:false`, `pbpp_headline_eligible:false` | Step 2 first — the freeze gate on the `PROPOSED` plan is outstanding and must clear before any Stage-B work. Then step 4 (Stage B): profile + registry + adapter. Also blocked on the public-harness lease; disclosed under `T7` |
 | M05 | C06 — Provenance and explanation | exists, **not approved** — `docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`, `Status: PROPOSED` at its line 5; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m05-provenance-development.json` | yes (Stage A only) — `eval/public/wmbs_m05.py`; **no** profile branch in `scoring.py`; no adapter | yes — `tests/test_public_wmbs_m05.py`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | **no** | `PROPOSED`; development-only PR #96 oracle; quarantines Q1–Q12 recorded in the module docstring; `publishable:false` | Step 2 first — the freeze gate on the `PROPOSED` plan is outstanding and must clear before any Stage-B work. Then step 4 (Stage B): profile + registry + adapter, and discharge of the Q1/Q3/Q4 ABI quarantines. Also blocked on the public-harness lease; disclosed under `T7` |
@@ -92,8 +92,8 @@ them").
    (`:166`), which is an M13 suite — `eval/public/README.md:48` and `:57` name
    them as M12 and M13 fixtures in the repository's own words. The tree now
    also has `wmbs-m03-valid-time-development`
-   (`eval/public/registry.json:234`), so M03 is in this set.
-   **Registry-admitted modules are M01, M03, M10, M12, M13 — 5 of 20.** All six
+   (`eval/public/registry.json:234`) and `wmbs-m02-retrieval-development` (`eval/public/registry.json:234`), so M02 and M03 are in this set.
+   **Registry-admitted modules are M01, M02, M03, M10, M12, M13 — 6 of 20.** All six
    suites remain `publishable:false` and `pbpp_headline_eligible:false`.
 
 3. **"per-module implementation plans: M02, M04, M05, M14 — 4 of 20" is
@@ -128,10 +128,11 @@ them").
 6. **Consequent framing correction.** "only five are implemented" understates
    the built surface. T8 re-derives a keys-in-tree column-complete count
    (plan + fixture-or-exemption + scorer + tests + registry-or-exemption).
-   That count is **M01, M03, M10, M12, M13, M15 — 6 of 20**. M03 is in that
-   count because its registry cell is now yes; that is not an admission or publication upgrade. M03 stays
+   That count is **M01, M02, M03, M10, M12, M13, M15 — 7 of 20**. M02 is in that
+   count because its registry cell is now yes; that is not an admission or publication upgrade. M02 stays
+   `PROPOSED`; publication flags false; do not call M02 landed. M03 stays
    registry-reachable only (`PROPOSED`; publication flags false; residue =
-   transaction-time deferral). M02, M04, and M05 are not column-complete
+   transaction-time deferral). M04 and M05 are not column-complete
    (Stage A only, no registration). M12, M13, and M15 remain in the count
    as on main.
 
@@ -147,16 +148,16 @@ Admission stays `PROPOSED`; publication flags stay false; residue is the
 transaction-time deferral. The ranking below starts at what was previously
 second.
 
-1. **M02, M04, M05 — Stage A complete, Stage B unregistered.** Each has a
+1. **M04, M05 — Stage A complete, Stage B unregistered.** Each has a
    per-module plan that is still `PROPOSED` and **not approved** — the step-2
-   freeze gate is outstanding for all three — plus a fixture, a pure scorer,
-   and a test suite. Each needs that freeze gate to clear first, and then a
-   scoring-profile branch, an adapter, and a registry entry, all on the
-   public-harness lease. M05 additionally carries the Q1/Q3/Q4 ABI quarantines
-   named in its module docstring, so it is the most expensive of the three.
-   Until Stage B lands, all three remain development-only oracles that
-   authorize no module-implementation, protocol, or publication claim — the
-   `U-MODULES` row and the `T7` disclosure both say so.
+   freeze gate is outstanding — plus a fixture, a pure scorer,
+   and a test suite. Each still needs that freeze gate, then a
+   scoring-profile branch, an adapter, and a registry entry. M02 Stage B is
+   now registry-reachable and is not in this unregistered set; its plan remains
+   `PROPOSED` and **not approved**. M05 additionally carries the Q1/Q3/Q4 ABI quarantines
+   named in its module docstring, so it is the more expensive of the two.
+   Until their Stage B lands, M04 and M05 remain development-only oracles that
+   authorize no module-implementation, protocol, or publication claim.
 2. **M14 — plan exists, no artifact.** The only module with a per-module plan
    and nothing built. That plan is `PROPOSED` — its own line 3 reads
    `PLANNING ARTIFACT ONLY — NOT CODE-READY` and its freeze gate is
