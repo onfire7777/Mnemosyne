@@ -35,7 +35,7 @@ GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
-EXPECTED_TOPOLOGY_VERIFIER_OID = "7c40b18bd0097968157708d04988e59d2e2d1ca7"
+EXPECTED_TOPOLOGY_VERIFIER_OID = "699a373077b8a25d6a36cdb6c43d38434ae6b5fa"
 TOPOLOGY_BOOTSTRAP = """import sys
 
 source = sys.argv.pop(1)
@@ -1203,6 +1203,98 @@ def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
         result = _verify_topology(repo, candidate, parent, anchor)
         assert result.returncode == 1, (change, result.stdout)
         assert f"immutable path differs from anchor: {path}" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_empty_tree_addition(tmp_path: Path) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    empty_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input="",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    root_entries = subprocess.run(
+        ["git", "ls-tree", candidate],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    root_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input=root_entries + f"040000 tree {empty_tree}\temptydir\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        ["git", "commit-tree", root_tree, "-p", candidate, "-m", "empty tree"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert "immutable path differs from anchor: emptydir" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_lifecycle_tree(tmp_path: Path) -> None:
+    repo, candidate, _, anchor = _topology_fixture(tmp_path)
+    empty_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input="",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    root_entries = subprocess.run(
+        ["git", "ls-tree", candidate],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    root_entries = "".join(
+        line
+        for line in root_entries.splitlines(keepends=True)
+        if not line.endswith("\tGOAL.md\n")
+    )
+    root_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input=root_entries + f"040000 tree {empty_tree}\tGOAL.md\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    parent = subprocess.run(
+        ["git", "commit-tree", root_tree, "-p", candidate, "-m", "bad parent"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        ["git", "commit-tree", root_tree, "-p", parent, "-m", "bad candidate"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert "lifecycle path is not a regular file in candidate: GOAL.md" in result.stdout
+    assert (
+        "lifecycle path is not a regular file in permitted parent: GOAL.md"
+        in result.stdout
+    )
 
 
 def test_topology_refresh_verifier_rejects_lifecycle_missing_or_different(
