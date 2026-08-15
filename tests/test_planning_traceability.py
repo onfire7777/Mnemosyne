@@ -5,6 +5,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -31,6 +32,7 @@ DEPENDENCY_LEASE_MAP = (
 GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
 LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
 LEASE_CURRENT_BASELINE_CLAIMS = (
     re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
@@ -773,3 +775,122 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         ).stdout == (
             b"!! ignored/binary.dat\n!! ignored/nested/child.dat\n!! ignored/object\n"
         )
+
+
+def _topology_fixture(tmp_path: Path) -> tuple[Path, str, str, str]:
+    repo = tmp_path / "topology"
+    repo.mkdir(parents=True)
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    for path, text in (
+        (".planning/STATE.md", "anchor state\n"),
+        ("GOAL.md", "anchor goal\n"),
+        (
+            "docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md",
+            "anchor lease\n",
+        ),
+        ("immutable.txt", "anchor content\n"),
+    ):
+        file = repo / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(text, encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "anchor")
+    anchor = git("rev-parse", "HEAD")
+
+    (repo / ".planning/STATE.md").write_text("parent state\n", encoding="utf-8")
+    git("add", ".planning/STATE.md")
+    git("commit", "-qm", "permitted parent")
+    parent = git("rev-parse", "HEAD")
+    git("commit", "--allow-empty", "-qm", "candidate")
+    return repo, git("rev-parse", "HEAD"), parent, anchor
+
+
+def _verify_topology(repo: Path, *refs: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(TOPOLOGY_VERIFIER), *refs],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
+    tmp_path: Path,
+) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 0, result.stdout
+    assert not result.stdout
+
+
+def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
+    tmp_path: Path,
+) -> None:
+    for change, path, content in (
+        ("content", "immutable.txt", "changed\n"),
+        ("addition", "added.txt", "added\n"),
+        ("deletion", "immutable.txt", None),
+        ("rename", "renamed.txt", "anchor content\n"),
+        ("mode", "immutable.txt", None),
+    ):
+        repo, _, parent, anchor = _topology_fixture(tmp_path / change)
+        if change == "deletion":
+            (repo / path).unlink()
+        elif change == "rename":
+            (repo / "immutable.txt").rename(repo / path)
+        elif change == "mode":
+            (repo / path).chmod(0o755)
+        else:
+            (repo / path).write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-qm", change], cwd=repo, check=True)
+        candidate = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        result = _verify_topology(repo, candidate, parent, anchor)
+        assert result.returncode == 1, (change, result.stdout)
+        assert f"immutable path differs from anchor: {path}" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_lifecycle_missing_or_different(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "GOAL.md").unlink()
+    (repo / ".planning/STATE.md").write_text("different\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "bad lifecycle"], cwd=repo, check=True)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1, result.stdout
+    assert "lifecycle path missing from candidate: GOAL.md" in result.stdout
+    assert "lifecycle path differs from permitted parent: .planning/STATE.md" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_unresolvable_full_sha(tmp_path: Path) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    result = _verify_topology(repo, "f" * 40, parent, anchor)
+    assert result.returncode == 2
+    assert result.stdout == "error: cannot read tree for " + "f" * 40 + "\n"
+
+
+def test_goal_documents_topology_refresh_verifier_invocation() -> None:
+    goal = GOAL.read_text(encoding="utf-8")
+    assert (
+        "python3 infra/scripts/verify-topology-refresh.py <candidate-40-sha> "
+        "<permitted-parent-40-sha> <immutable-anchor-40-sha>"
+    ) in goal
