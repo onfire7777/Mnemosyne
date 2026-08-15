@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6929fd37`; PR #113 delivered the controller receipt from exact head `c1bf6a10335e30fe797c54a42285922552647a9e`, exact-head CI `31863057094`, merge `6929fd3703ff262d3264b58a5af90d506a804da2` at `2026-08-15T04:22:14Z`, and successful post-merge CI `31864254074`. Ruleset `19157561` requires strict up-to-date status checks, so T10 now reserves immutable non-lifecycle content anchors rather than self-invalidating full heads. The first topology-only refresh is PR #109 `cb44f21296fc22cf92f847b8201a6881e915400c` -> PR #110 `26f95a09827d3e56ffe86e65b7db7493ecf79c73` -> PR #111 `02a724e9333a47a1cb7096d59b558ab80c1e5300` -> PR #112 `c8d95dafe5131f965591b84aeabb095fac34f1b6`; every refreshed tree is identical to its approved content anchor outside the three lifecycle files. Merge commits remain strictly ordered #109 -> #110 -> #111 -> #112, with current-main ancestry, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI required at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T05:21:00Z"
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6801fbd0`; PR #109 merged from audited topology head `cb44f21296fc22cf92f847b8201a6881e915400c` after exact-head CI `31865413163` passed, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at `2026-08-15T05:24:36Z`. It raced the lifecycle amendment, so it is recorded as a sequencing deviation; post-main CI `31866875258` remains in progress and no later stack edge is open. Ruleset `19157561` requires strict up-to-date status checks; T10 therefore reserves immutable non-lifecycle content anchors with topology-only refreshes. PRs #110-#112 remain drafts, byte-identical to their approved content anchors outside the three lifecycle files, and strictly ordered. Current-main ancestry, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI remain mandatory at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-15T05:28:47Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 7
@@ -127,9 +127,9 @@ non-lifecycle content anchors are PR #109
 `226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112
 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. Ruleset `19157561` requires
 strict status-check freshness, so topology-only merges of current `main` or the
-immediately preceding stack PR are permitted when no path outside `GOAL.md`,
-`.planning/STATE.md`, and the lease map differs from the matching content
-anchor. The first such refresh produced PR #109
+immediately preceding stack PR are permitted when those three lifecycle blobs
+exactly equal that parent and every non-lifecycle blob equals the matching
+content anchor. The first such refresh produced PR #109
 `cb44f21296fc22cf92f847b8201a6881e915400c` -> PR #110
 `26f95a09827d3e56ffe86e65b7db7493ecf79c73` -> PR #111
 `02a724e9333a47a1cb7096d59b558ab80c1e5300` -> PR #112
@@ -140,11 +140,19 @@ Windows job.
 Fresh cumulative security scan `e95df6b0-da9d-4688-a2a0-4378be4973d1`
 covers all 32 refreshed-stack files with zero findings and proves the binary
 diff hash matches the approved cumulative stack.
+PR #109 is **MERGED** from exact head
+`cb44f21296fc22cf92f847b8201a6881e915400c`, with exact-head CI
+`31865413163` green, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4`
+at `2026-08-15T05:24:36Z`. It raced this amendment and is recorded as a
+sequencing deviation; post-main run `31866875258` is still in progress. PRs
+#110-#112 remain drafts and no later edge is open until that run succeeds and
+this amendment lands. Their lifecycle blobs are parent-exact: #110 equals
+current `main`, #111 equals #110, and #112 equals #111.
 One controller owns every serialized `.github/workflows/ci.yml` integration
 edge. Exact-head required/native CI, fresh security review, local/remote/hosted
 head equality, cleared review threads, current-main ancestry, and successful
-post-main CI gate every merge. Any non-lifecycle blob change voids the
-reservation.
+post-main CI gate every merge. Any lifecycle divergence or non-lifecycle blob
+change voids the reservation.
 `T9` authorizes M03 only, changes no fixture byte, scorer, schema, or admission
 state, and admits no successor node or source node. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
@@ -417,11 +425,15 @@ at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
 controller receipt delivered as PR #113 from exact head
 `c1bf6a10335e30fe797c54a42285922552647a9e`, exact-head CI run
 `31863057094`, merge `6929fd3703ff262d3264b58a5af90d506a804da2`
-at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. The
-current canonical baseline is `main@6929fd37`. Node `T10` reserves only the
-content-anchored Windows stack #109 -> #110 -> #111 -> #112 under the rolling
-strict-check contract recorded in the lease map; successful post-main CI must
-separate their merge commits. PR #90 is
+at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
+#109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
+after exact-head CI `31865413163` passed, as
+`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`2026-08-15T05:24:36Z`; post-main run `31866875258` remains in progress. The
+current canonical baseline is `main@6801fbd0`. Node `T10` now reserves only the
+remaining content-anchored stack #110 -> #111 -> #112 under the rolling strict-
+check contract recorded in the lease map; successful post-main CI must separate
+their merge commits. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
