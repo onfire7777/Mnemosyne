@@ -250,7 +250,7 @@ candidate checkout's copy as the launcher:
 
 ```sh
 (
-  expected_verifier_oid=7c40b18bd0097968157708d04988e59d2e2d1ca7
+  expected_verifier_oid=699a373077b8a25d6a36cdb6c43d38434ae6b5fa
   resolved_parent="$(
     git --no-replace-objects rev-parse --verify \
       "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null

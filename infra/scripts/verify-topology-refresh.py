@@ -16,8 +16,9 @@ LIFECYCLE_PATHS = (
     b"GOAL.md",
     b"docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md",
 )
+LIFECYCLE_ENTRY = (b"100644", b"blob")
 TREE_ENTRY_KINDS = {
-    # `git ls-tree -r` emits leaf entries, not directory tree entries.
+    b"040000": b"tree",
     b"100644": b"blob",
     b"100755": b"blob",
     b"120000": b"blob",
@@ -34,7 +35,7 @@ def _path(path: bytes) -> str:
 def _tree(ref: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
     try:
         result = subprocess.run(
-            [*GIT, "ls-tree", "-r", "-z", "--full-tree", ref],
+            [*GIT, "ls-tree", "-r", "-t", "-z", "--full-tree", ref],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env=GIT_ENV,
@@ -98,6 +99,17 @@ def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
     return result.returncode == 0
 
 
+def _same_entry(
+    left: tuple[bytes, bytes, bytes] | None,
+    right: tuple[bytes, bytes, bytes] | None,
+) -> bool:
+    if left is None or right is None:
+        return left == right
+    if left[:2] == right[:2] == (b"040000", b"tree"):
+        return True
+    return left == right
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 4:
         print(
@@ -134,9 +146,18 @@ def main(argv: list[str]) -> int:
             errors.append(
                 f"lifecycle path missing from permitted parent: {_path(path)}"
             )
+        if candidate_entry is not None and candidate_entry[:2] != LIFECYCLE_ENTRY:
+            errors.append(
+                f"lifecycle path is not a regular file in candidate: {_path(path)}"
+            )
+        if parent_entry is not None and parent_entry[:2] != LIFECYCLE_ENTRY:
+            errors.append(
+                f"lifecycle path is not a regular file in permitted parent: {_path(path)}"
+            )
         if (
             candidate_entry is not None
             and parent_entry is not None
+            and candidate_entry[:2] == parent_entry[:2] == LIFECYCLE_ENTRY
             and candidate_entry != parent_entry
         ):
             errors.append(
@@ -144,7 +165,7 @@ def main(argv: list[str]) -> int:
             )
 
     for path in sorted((set(candidate) | set(anchor)) - lifecycle):
-        if candidate.get(path) != anchor.get(path):
+        if not _same_entry(candidate.get(path), anchor.get(path)):
             errors.append(f"immutable path differs from anchor: {_path(path)}")
     if errors:
         print("\n".join(sorted(errors)))
