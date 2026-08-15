@@ -110,16 +110,14 @@ def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
     except OSError as error:
         raise RuntimeError("cannot run git") from error
     if result.returncode not in (0, 1):
-        raise ValueError("cannot verify permitted parent ancestry")
+        raise ValueError("cannot verify ancestry")
     return result.returncode == 0
 
 
-def _has_only_candidate_commit(
-    candidate_ref: str, parent_ref: str, anchor_ref: str
-) -> bool:
+def _exclusive_commits(ref: str, *excluded_refs: str) -> tuple[str, ...]:
     try:
         result = subprocess.run(
-            [*GIT, "rev-list", candidate_ref, "--not", parent_ref, anchor_ref],
+            [*GIT, "rev-list", ref, "--not", *excluded_refs],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             env=GIT_ENV,
@@ -128,8 +126,18 @@ def _has_only_candidate_commit(
     except OSError as error:
         raise RuntimeError("cannot run git") from error
     if result.returncode:
-        raise ValueError("cannot verify candidate history")
-    return result.stdout == f"{candidate_ref}\n".encode("ascii")
+        raise ValueError("cannot verify commit history")
+    if result.stdout and not result.stdout.endswith(b"\n"):
+        raise ValueError("cannot parse commit history")
+    try:
+        commits = tuple(result.stdout.decode("ascii").splitlines())
+    except UnicodeDecodeError as error:
+        raise ValueError("cannot parse commit history") from error
+    if any(not SHA.fullmatch(commit) for commit in commits) or len(commits) != len(
+        set(commits)
+    ):
+        raise ValueError("cannot parse commit history")
+    return commits
 
 
 def _same_entry(
@@ -162,9 +170,11 @@ def main(argv: list[str]) -> int:
         if not _is_ancestor(parent_ref, candidate_ref):
             print("candidate does not descend from permitted parent")
             return 1
-        history_valid = _has_only_candidate_commit(
-            candidate_ref, parent_ref, anchor_ref
-        )
+        if not _is_ancestor(anchor_ref, candidate_ref):
+            print("candidate does not descend from immutable anchor")
+            return 1
+        candidate_history = _exclusive_commits(candidate_ref, parent_ref, anchor_ref)
+        anchor_history = _exclusive_commits(anchor_ref, parent_ref)
         candidate = _tree(candidate_ref)
         parent = _tree(parent_ref)
         anchor = _tree(anchor_ref)
@@ -173,9 +183,13 @@ def main(argv: list[str]) -> int:
         return 2
 
     errors: list[str] = []
-    if not history_valid:
+    if candidate_history != (candidate_ref,):
         errors.append(
             "candidate history contains commits outside permitted parent and immutable anchor"
+        )
+    if anchor_history not in ((), (anchor_ref,)):
+        errors.append(
+            "immutable anchor history contains more than one commit outside permitted parent"
         )
     lifecycle = set(LIFECYCLE_PATHS)
     for path in LIFECYCLE_PATHS:
