@@ -83,6 +83,21 @@ def _require_exact_commit(ref: str) -> None:
         raise ValueError(f"not an exact commit SHA: {ref}")
 
 
+def _require_complete_history() -> None:
+    try:
+        result = subprocess.run(
+            [*GIT, "rev-parse", "--is-shallow-repository"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=GIT_ENV,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError("cannot run git") from error
+    if result.returncode or result.stdout != b"false\n":
+        raise ValueError("repository history is shallow or unreadable")
+
+
 def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
     try:
         result = subprocess.run(
@@ -97,6 +112,24 @@ def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
     if result.returncode not in (0, 1):
         raise ValueError("cannot verify permitted parent ancestry")
     return result.returncode == 0
+
+
+def _has_only_candidate_commit(
+    candidate_ref: str, parent_ref: str, anchor_ref: str
+) -> bool:
+    try:
+        result = subprocess.run(
+            [*GIT, "rev-list", candidate_ref, "--not", parent_ref, anchor_ref],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=GIT_ENV,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError("cannot run git") from error
+    if result.returncode:
+        raise ValueError("cannot verify candidate history")
+    return result.stdout == f"{candidate_ref}\n".encode("ascii")
 
 
 def _same_entry(
@@ -123,11 +156,15 @@ def main(argv: list[str]) -> int:
         )
         return 2
     try:
+        _require_complete_history()
         for ref in (candidate_ref, parent_ref, anchor_ref):
             _require_exact_commit(ref)
         if not _is_ancestor(parent_ref, candidate_ref):
             print("candidate does not descend from permitted parent")
             return 1
+        history_valid = _has_only_candidate_commit(
+            candidate_ref, parent_ref, anchor_ref
+        )
         candidate = _tree(candidate_ref)
         parent = _tree(parent_ref)
         anchor = _tree(anchor_ref)
@@ -136,6 +173,10 @@ def main(argv: list[str]) -> int:
         return 2
 
     errors: list[str] = []
+    if not history_valid:
+        errors.append(
+            "candidate history contains commits outside permitted parent and immutable anchor"
+        )
     lifecycle = set(LIFECYCLE_PATHS)
     for path in LIFECYCLE_PATHS:
         candidate_entry = candidate.get(path)

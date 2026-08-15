@@ -35,7 +35,7 @@ GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
-EXPECTED_TOPOLOGY_VERIFIER_OID = "699a373077b8a25d6a36cdb6c43d38434ae6b5fa"
+EXPECTED_TOPOLOGY_VERIFIER_OID = "c264c02c72d07fbc7340dae837d0efaf5b1f786f"
 TOPOLOGY_BOOTSTRAP = """import sys
 
 source = sys.argv.pop(1)
@@ -1205,6 +1205,34 @@ def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
         assert f"immutable path differs from anchor: {path}" in result.stdout
 
 
+def test_topology_refresh_verifier_rejects_reverted_intermediate_drift(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "secret.txt").write_text(
+        "reachable but absent from tip\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "secret.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "transient drift"], cwd=repo, check=True)
+    (repo / "secret.txt").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "revert drift"], cwd=repo, check=True)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert (
+        result.stdout
+        == "candidate history contains commits outside permitted parent and immutable anchor\n"
+    )
+
+
 def test_topology_refresh_verifier_rejects_empty_tree_addition(tmp_path: Path) -> None:
     repo, candidate, parent, anchor = _topology_fixture(tmp_path)
     empty_tree = subprocess.run(
@@ -1361,6 +1389,22 @@ def test_topology_refresh_verifier_rejects_unresolvable_full_sha(
     assert result.stdout == "error: not an exact commit SHA: " + "f" * 40 + "\n"
 
 
+def test_topology_refresh_verifier_rejects_shallow_history(monkeypatch, capsys) -> None:
+    module = _topology_module()
+
+    def shallow_repo(
+        command: list[str], *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 0, stdout=b"true\n")
+
+    monkeypatch.setattr(module.subprocess, "run", shallow_repo)
+    assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
+    assert (
+        capsys.readouterr().out
+        == "error: repository history is shallow or unreadable\n"
+    )
+
+
 def test_topology_refresh_verifier_rejects_malformed_tree_output(
     monkeypatch, capsys
 ) -> None:
@@ -1380,11 +1424,17 @@ def test_topology_refresh_verifier_rejects_malformed_tree_output(
         def fake_run(
             command: list[str], *args: object, output: bytes = output, **kwargs: object
         ) -> subprocess.CompletedProcess[bytes]:
+            if "--is-shallow-repository" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=b"false\n")
             if "rev-parse" in command:
                 exact = command[-1].removesuffix("^{commit}").encode("ascii") + b"\n"
                 return subprocess.CompletedProcess(command, 0, stdout=exact)
             if "merge-base" in command:
                 return subprocess.CompletedProcess(command, 0, stdout=b"")
+            if "rev-list" in command:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=command[3].encode("ascii") + b"\n"
+                )
             return subprocess.CompletedProcess(command, 0, stdout=output)
 
         monkeypatch.setattr(
