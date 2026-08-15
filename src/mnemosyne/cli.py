@@ -15648,7 +15648,7 @@ def _production_evidence_normalize_manifest_value(value: Any, *, path_rewrites: 
         normalized = value
         for source_path, snapshot_path in sorted(path_rewrites.items(), key=lambda item: len(item[0]), reverse=True):
             pattern = re.compile(rf"(?<![\w.-]){re.escape(source_path)}(?=$|[\s\"',;:\]\)]|[/\\])")
-            normalized = pattern.sub(snapshot_path, normalized)
+            normalized = pattern.sub(lambda _match: snapshot_path, normalized)
         return normalized
     if isinstance(value, list):
         return [_production_evidence_normalize_manifest_value(item, path_rewrites=path_rewrites) for item in value]
