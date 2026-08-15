@@ -29,10 +29,10 @@ FIXTURES_DIR = REPO_ROOT / "eval" / "public" / "fixtures"
 
 SECTION_HEADING = "### M04/M05 Stage-A development oracles (unregistered)"
 M02_SECTION_HEADING = "### M02 retrieval development"
+M04_SECTION_HEADING = "### M04 conflict development"
 
 #: Registry keys the M04/M05 disclosure asserts do not exist.
 UNREGISTERED_SUITE_KEYS = (
-    "wmbs-m04-development",
     "wmbs-m05-provenance-development",
 )
 
@@ -59,6 +59,10 @@ def _disclosure_section() -> str:
 
 def _m02_section() -> str:
     return _section_after(M02_SECTION_HEADING)
+
+
+def _m04_section() -> str:
+    return _section_after(M04_SECTION_HEADING)
 
 
 #: Every key M02's scorer emits.  The disclosure says M02 measures no cost or
@@ -128,28 +132,27 @@ def test_disclosure_states_the_unregistered_status_and_the_registry_agrees() -> 
     """
     section = _disclosure_section()
     m02_section = _m02_section()
-    assert "M04 and M05 remain **unregistered**." in section
-    assert (
-        "Neither has a `registry.json` entry, an adapter, a runner route, or a" in section
-    )
-    assert "scoring-profile registration" in section
-    assert "neither produces a bundle, and neither produces a benchmark result" in section
+    m04_section = _m04_section()
+    assert "M05 remains **unregistered**." in section
+    assert "M04 and M05 remain **unregistered**." not in section
     assert "wmbs-m02-retrieval-development" in m02_section
+    assert "wmbs-m04-development" in m04_section
     assert "unregistered" not in m02_section.lower() or "not an unregistered" in section
+    assert "not an unregistered Stage-A oracle" in section
 
     registry = load_registry()
     assert "wmbs-m02-retrieval-development" in registry
+    assert "wmbs-m04-development" in registry
     for key in UNREGISTERED_SUITE_KEYS:
         assert key not in registry, (
             f"{key} is now registered; the README Stage-A disclosure claims it is "
             "unregistered and must be rewritten in the same change"
         )
     registry_blob = json.dumps(registry)
-    for module_id in ("wmbs-m04", "wmbs-m05"):
-        assert module_id not in registry_blob, (
-            f"a registry entry now mentions {module_id}; update the Stage-A "
-            "disclosure before registering these modules"
-        )
+    assert "wmbs-m05" not in registry_blob, (
+        "a registry entry now mentions wmbs-m05; update the Stage-A "
+        "disclosure before registering these modules"
+    )
 
 
 def test_disclosure_admission_labels_match_the_modules() -> None:
@@ -273,7 +276,7 @@ def test_disclosure_m02_fixture_shape_matches_the_committed_bytes() -> None:
 
 
 def test_disclosure_m04_fixture_shape_and_declared_gaps_match() -> None:
-    section = _disclosure_section()
+    section = _m04_section()
     assert "generated from seed `20260801` and holds 140 cases over five per-case" in (
         section
     )
@@ -371,9 +374,10 @@ def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
 def test_disclosure_keeps_stage_b_undelivered_and_claims_nothing() -> None:
     section = _disclosure_section()
     assert (
-        "Stage B — harness integration for M04 and M05 — is **not delivered**."
+        "Stage B — harness integration for M05 — is **not delivered**."
         in (section)
     )
+    assert "Stage B — harness integration for M04 and M05 — is **not delivered**." not in section
     assert "gated on the public-harness integration owner's lease" in section
     assert (
         "Nothing here is a publication, comparability, ranking, superiority, or "
@@ -389,12 +393,12 @@ def test_disclosure_keeps_stage_b_undelivered_and_claims_nothing() -> None:
         assert (REPO_ROOT / plan).is_file(), f"{plan} is linked but missing"
 
 
-@pytest.mark.parametrize("module_id", ["wmbs-m04", "wmbs-m05"])
-def test_disclosure_section_precedes_no_registration_elsewhere(module_id: str) -> None:
+def test_disclosure_section_precedes_no_registration_elsewhere() -> None:
     """Unregistered modules must not gain a --suite command."""
     readme = _readme()
-    assert f"--suite {module_id}" not in readme, (
-        f"the README now documents selecting {module_id} with `--suite`, which "
+    assert "--suite wmbs-m05" not in readme, (
+        "the README now documents selecting wmbs-m05 with `--suite`, which "
         "contradicts the Stage-A unregistered disclosure"
     )
+    assert "--suite wmbs-m04-development" in readme
     assert "--suite wmbs-m02-retrieval-development" in readme

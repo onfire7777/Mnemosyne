@@ -38,6 +38,8 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
         return _score_wmbs_m03_valid_time(labels, traces)
     if profile == "wmbs-m02-retrieval-v1":
         return _score_wmbs_m02_retrieval(labels, traces)
+    if profile == "wmbs-m04-v1":
+        return _score_wmbs_m04(labels, traces)
     if profile == "wmbs-m10-v1":
         return _score_wmbs_m10(labels, traces)
     if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
@@ -167,6 +169,24 @@ def _score_wmbs_m02_retrieval(
     else:
         fixture = m02.load_fixture()
     return m02.score_retrieval(fixture, traces)
+
+
+def _score_wmbs_m04(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m04 as m04
+
+    fixture = None
+    if labels and isinstance(labels[0], dict) and isinstance(labels[0].get("fixture"), dict):
+        fixture = labels[0]["fixture"]
+    else:
+        fixture = m04.load_fixture()
+    observations = [row for row in traces if "source_id" not in row]
+    ablations = [row for row in traces if "source_id" in row]
+    measured = m04.score_conflict(fixture, observations, ablations)
+    measured["family"] = "whole-memory-development"
+    measured["profile"] = "wmbs-m04-v1"
+    return measured
 
 
 def _score_wmbs_m03_valid_time(

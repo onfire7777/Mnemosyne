@@ -267,6 +267,148 @@ def _m02_ranked_ids(
     return ordered
 
 
+def _m04_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 140 is the published case count, not a test floor."""
+    from eval.public import wmbs_m04 as m04
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M04 conflict development requires a fixture mapping")
+    cases = benchmark.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("M04 conflict development requires a non-empty case list")
+    identities = {
+        "fixture_id": m04.FIXTURE_ID,
+        "schema_id": m04.FIXTURE_SCHEMA_ID,
+        "generator_id": m04.GENERATOR_ID,
+        "generator_version": m04.GENERATOR_VERSION,
+    }
+    for field, expected in identities.items():
+        if field in benchmark and benchmark[field] != expected:
+            raise ValueError(f"M04 fixture {field} does not match {expected!r}")
+    declared = benchmark.get("fixture_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m04.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "fixture_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M04 fixture_sha256 does not bind the fixture bytes")
+    if len(cases) == 140:
+        return dict(m04.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def _m04_ingest(cli: MnemoCLI, tenant: str, user: str, subject: str, events: list[dict[str, Any]]) -> None:
+    for event in events:
+        cli.assert_fact(
+            tenant,
+            subject,
+            "value",
+            event["content"],
+            user=user,
+            valid_from=event["valid_from"],
+        )
+
+
+def _m04_as_of(cli: MnemoCLI, tenant: str, subject: str, as_of: str) -> list[str]:
+    payload = cli.graph_as_of(tenant, subject, "value", as_of) or {}
+    assertions = payload.get("assertions") if isinstance(payload, Mapping) else None
+    if not isinstance(assertions, list):
+        return []
+    objects: list[str] = []
+    seen: set[str] = set()
+    for item in assertions:
+        if not isinstance(item, Mapping):
+            continue
+        obj = item.get("object")
+        if isinstance(obj, str) and obj not in seen:
+            seen.add(obj)
+            objects.append(obj)
+    return objects
+
+
+def _m04_answer_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Record the CLI payload. Never invent gold answers or forced abstention."""
+    text = payload.get("answer")
+    if not isinstance(text, str) or not any(not ch.isspace() for ch in text):
+        text = payload.get("answer_text")
+    if not isinstance(text, str) or not any(not ch.isspace() for ch in text):
+        text = None
+    abstained = payload.get("abstained")
+    if type(abstained) is not bool:
+        abstained = text is None
+    if abstained:
+        text = None
+    elif text is None:
+        abstained = True
+    return {
+        "answer_text": text,
+        "abstained": abstained,
+        "evidence_handles": [],
+        "action_handles": [],
+        "adapter_metadata": {},
+    }
+
+
+def run_m04_conflict_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M04 conflict cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M04 conflict development requires a live MnemoCLI")
+    fixture = _m04_bind_fixture(benchmark)
+    traces: list[dict[str, Any]] = []
+    user = "reference-harness"
+    for case in fixture["cases"]:
+        gold = case["gold"]
+        case_id = case["case_id"]
+        for perm, events in case["events_by_permutation"].items():
+            tenant = f"wmbs-m04-{case_id}-{perm}"
+            _m04_ingest(cli, tenant, user, case_id, events)
+            current_objects = _m04_as_of(cli, tenant, case_id, gold["current_as_of"])
+            historical_objects = _m04_as_of(
+                cli, tenant, case_id, gold["historical_as_of"]
+            )
+            payload = cli.answer(
+                f"current as of {gold['current_as_of']}",
+                {"tenant_id": tenant},
+            ) or {}
+            traces.append(
+                {
+                    "case_id": case_id,
+                    "permutation": perm,
+                    "current": {
+                        "objects": current_objects,
+                        "as_of": gold["current_as_of"],
+                    },
+                    "historical": {
+                        "objects": historical_objects,
+                        "as_of": gold["historical_as_of"],
+                    },
+                    "answer": _m04_answer_envelope(payload),
+                    "monotonic_violation": False,
+                }
+            )
+            for source_id in gold["ablation_objects"]:
+                ab_tenant = f"{tenant}-ab-{source_id}"
+                kept = [event for event in events if event["source_id"] != source_id]
+                if kept:
+                    _m04_ingest(cli, ab_tenant, user, case_id, kept)
+                traces.append(
+                    {
+                        "case_id": case_id,
+                        "permutation": perm,
+                        "source_id": source_id,
+                        "current": {
+                            "objects": _m04_as_of(
+                                cli, ab_tenant, case_id, gold["current_as_of"]
+                            ),
+                            "as_of": gold["current_as_of"],
+                        },
+                    }
+                )
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
 def run_m03_valid_time_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
