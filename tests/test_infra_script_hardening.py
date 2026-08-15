@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -224,6 +225,7 @@ def test_capture_local_evidence_rejects_symlinked_output_root(tmp_path: Path) ->
     assert not (target_root / "manifest.json").exists()
 
 
+@_posix_only
 def test_prepare_production_evidence_custody_writes_external_gap_packet(
     tmp_path: Path,
 ) -> None:
@@ -231,6 +233,7 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
 
     proc = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -953,6 +956,7 @@ def test_prepare_production_evidence_custody_refresh_repairs_missing_packet_docs
     packet_root = tmp_path / "mnemosyne-tier-b-packet"
     subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -970,6 +974,7 @@ def test_prepare_production_evidence_custody_refresh_repairs_missing_packet_docs
 
     proc = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             "--refresh",
             str(packet_root),
@@ -1081,6 +1086,7 @@ def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
     packet_root = tmp_path / "mnemosyne-tier-b-packet"
     create = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -1105,6 +1111,7 @@ def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
 
     refresh = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             "--refresh",
             str(packet_root),
@@ -1190,6 +1197,7 @@ def test_prepare_production_evidence_custody_refresh_reports_no_values(
     packet_root = tmp_path / "mnemosyne-tier-b-packet"
     create = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -1213,6 +1221,7 @@ def test_prepare_production_evidence_custody_refresh_reports_no_values(
     proc_env = {**os.environ, "MNEMOSYNE_EMBEDDING_URL": provider_sentinel}
     proc = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             "--refresh",
             str(packet_root),
@@ -1328,6 +1337,7 @@ def test_prepare_production_evidence_custody_rejects_repo_local_root(
 
     proc = subprocess.run(
         [
+            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(repo_local_root),
         ],
