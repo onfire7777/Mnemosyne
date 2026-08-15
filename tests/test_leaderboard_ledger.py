@@ -140,6 +140,7 @@ def test_verify_rejects_noncanonical_json_bytes(
     ledger_path.write_text(
         json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     with pytest.raises(LedgerError, match="non-canonical"):
@@ -516,6 +517,7 @@ def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> Non
             for entry in entries
         ),
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -565,7 +567,7 @@ def test_append_rejects_boolean_pending_prior_count(
     private_key, _ = key_paths
     _append(ledger_path, private_key, entry_id="entry-complete")
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":true}\n', encoding="utf-8")
+    pending_path.write_text('{"prior_count":true}\n', encoding="utf-8", newline="\n")
 
     with pytest.raises(LedgerError, match="append intent is invalid"):
         _append(ledger_path, private_key, entry_id="entry-rejected")
@@ -692,7 +694,7 @@ def test_append_repairs_only_a_torn_final_fragment(
     first = _append(ledger_path, private_key, entry_id="entry-complete")
     acknowledged = ledger_path.read_bytes()
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":1}\n', encoding="utf-8")
+    pending_path.write_text('{"prior_count":1}\n', encoding="utf-8", newline="\n")
     ledger_path.write_bytes(acknowledged + b'{"entry_id":"unacknowledged')
 
     second = _append(ledger_path, private_key, entry_id="entry-after-repair")
