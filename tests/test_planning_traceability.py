@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import re
 import stat
@@ -822,6 +823,14 @@ def _verify_topology(repo: Path, *refs: str) -> subprocess.CompletedProcess[str]
     )
 
 
+def _topology_module() -> object:
+    spec = importlib.util.spec_from_file_location("topology_verifier", TOPOLOGY_VERIFIER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     tmp_path: Path,
 ) -> None:
@@ -846,11 +855,15 @@ def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
             (repo / path).unlink()
         elif change == "rename":
             (repo / "immutable.txt").rename(repo / path)
-        elif change == "mode":
-            (repo / path).chmod(0o755)
-        else:
+        elif change != "mode":
             (repo / path).write_text(content, encoding="utf-8")
         subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        if change == "mode":
+            subprocess.run(
+                ["git", "update-index", "--chmod=+x", path],
+                cwd=repo,
+                check=True,
+            )
         subprocess.run(["git", "commit", "-qm", change], cwd=repo, check=True)
         candidate = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -881,11 +894,71 @@ def test_topology_refresh_verifier_rejects_lifecycle_missing_or_different(
     assert "lifecycle path differs from permitted parent: .planning/STATE.md" in result.stdout
 
 
+def test_topology_refresh_verifier_rejects_missing_parent_lifecycle_path(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, anchor = _topology_fixture(tmp_path)
+    (repo / "GOAL.md").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "parent missing lifecycle"], cwd=repo, check=True)
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1, result.stdout
+    assert "lifecycle path missing from permitted parent: GOAL.md" in result.stdout
+
+
 def test_topology_refresh_verifier_rejects_unresolvable_full_sha(tmp_path: Path) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     result = _verify_topology(repo, "f" * 40, parent, anchor)
     assert result.returncode == 2
     assert result.stdout == "error: cannot read tree for " + "f" * 40 + "\n"
+
+
+def test_topology_refresh_verifier_rejects_malformed_tree_output(
+    monkeypatch, capsys
+) -> None:
+    module = _topology_module()
+    valid = b"100644 blob " + b"0" * 40 + b"\tvalid"
+    for output in (
+        valid,
+        valid + b"\0\0",
+        b"100600 blob " + b"0" * 40 + b"\tvalid\0",
+        b"100644 blob " + b"F" * 40 + b"\tvalid\0",
+        b"100644 blob " + b"0" * 40 + b"\t\0",
+        valid + b"\0" + valid + b"\0",
+    ):
+        monkeypatch.setattr(
+            module.subprocess,
+            "run",
+            lambda *args, output=output, **kwargs: subprocess.CompletedProcess(
+                args, 0, stdout=output
+            ),
+        )
+        assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
+        assert capsys.readouterr().out == "error: cannot parse tree for " + "a" * 40 + "\n"
+
+
+def test_topology_refresh_verifier_escapes_unusual_path_bytes() -> None:
+    assert _topology_module()._path(b"line\n\xff\tname") == r"line\n\xff\tname"
+
+
+def test_topology_refresh_verifier_normalizes_git_launch_error(monkeypatch, capsys) -> None:
+    module = _topology_module()
+
+    def cannot_run_git(*args: object, **kwargs: object) -> None:
+        raise OSError("locale-dependent launch detail")
+
+    monkeypatch.setattr(module.subprocess, "run", cannot_run_git)
+    assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
+    assert capsys.readouterr().out == "error: cannot run git\n"
 
 
 def test_goal_documents_topology_refresh_verifier_invocation() -> None:
