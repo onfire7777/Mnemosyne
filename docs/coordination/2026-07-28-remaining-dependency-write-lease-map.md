@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-08-04
-Baseline: `main@d7eefb7c3595e786851a7d416ba54ea3997a8b6c`
+Updated: 2026-08-15
+Baseline: `main@b3570937918c7de40cd89ea543fab9e7b16f7471`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -109,28 +109,37 @@ The following packages are complete source history, not runnable work:
   node and changes no benchmark, measurement, admission state, or publication
   claim. Recorded here before merge for the same reason as PRs #97 and #98: the
   detector requires every PR merged after the baseline to appear in this map.
-  Pending at the time of writing — no merge SHA, exact head, or CI run id is
-  claimed for it here, because none exists yet.
+  Delivered from exact head `0d3e3069b9ca061d9f894f1396239fe2c2f817cb`
+  with all required exact-head CI green in run `30957633560`; merge
+  `58ae5bbafeffab3388c6539a419e56fcd85112da` at
+  `2026-08-04T23:13:57Z`.
 - PR #100: the node `T9` M03 registry admission, registering
   `wmbs-m03-valid-time-development` in `eval/public/registry.json` with its
   runner adapter, profile contract, `allowed_profile` label, scored-denominator
   handling in `eval/public/bundle.py`, `eval/public/README.md` disclosure, and
   `tests/test_public_wmbs_m03_registry_admission.py`. Reachability only: M03
   stays `PROPOSED` and full bitemporal transaction-time remains a hard deferral.
-  Reserved and recorded here before merge for the same reason as PR #101.
-  Pending at the time of writing — no merge SHA, exact head, or CI run id is
-  claimed for it here, because none exists yet.
+  Delivered from exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`
+  after all required exact-head CI and Greptile passed in run `31854371658`;
+  merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at
+  `2026-08-15T01:12:26Z`; successful post-merge CI `31855873247`. It changed no
+  fixture byte, scorer, schema, admission state, publication claim, or progress
+  counter and admitted no source node or successor node.
 - PR #103: Restore canonical memory sources and patch cryptography (merge 5b0d99bcd7).
 - PR #105: preserve hash-bound text as LF and make installer/custody tests
   explicit about their native-Windows and POSIX execution contracts. Reserved
   and recorded here before merge; no merge SHA or CI run id is claimed.
 - PR #106: record merged PR #103 in the write-lease map (merge 18e7e2f6c0cf92af399bc66385b0cbf335d1e8f7).
-- PR #107: record merged PR #106 in the write-lease map. Pending at the time of writing — no merge SHA, exact head, or CI run id is claimed for it here, because none exists yet.
+- PR #107: record merged PR #106 in the write-lease map; delivered from exact
+  head `9e1df8966fbbf7d0b4c21f1e4aae01fcf3a9adc8` with all required exact-head
+  CI green in run `31852940363`; merge
+  `7f305090bb026db7aa4d73a3e127808b8ee4089c` at
+  `2026-08-15T00:40:44Z`.
 - PR #108: reconcile PR #100's exact T9 lease and inventory wording, and
   reserve PR #105's lifecycle receipt. Recorded here before merge; no merge
   SHA or CI run id is claimed.
 
-This map is recomputed from the new baseline `main@d7eefb7c`, which the
+This map is recomputed from the new baseline `main@b3570937`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
@@ -219,7 +228,7 @@ exact lease, shared owner/integration edge, and external gate.
 | T6 | MERGED | Verified canonical `main@2091d01c` plus PR #94 exact-head CI `30730185494` and post-merge CI `30730918452`; lane cut from `main@2091d01c` | The three lifecycle files at `Baseline: main@2091d01c` with `T5` as `MERGED`, plus the r42 and r43 round records | `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Complete: merged as PR #95 at `main@42abaab7`, exact head `d7c0938f`, exact-head CI `30737466988`, post-merge CI `30738303497`. Documentation only; it admitted no source node and no successor node. This branch-resident recomputation is `T6`'s own accepted standing-condition residue and admits no successor or source node |
 | T7 | MERGED | Bounded documentation-and-tests node disclosing PR #96's development-only M02/M04/M05 evaluation oracles; consumed verified canonical `main@b8673031` plus PR #97 (merge `71e492b4`, exact-head CI `30774834604`, post-merge CI `30775783472`) and PR #98 (merge `b8673031`, exact-head CI `30787319275`, post-merge CI `30788531829`) receipts | The M02/M04/M05 Stage-A development gap disclosures in `eval/public/README.md`, their pinning tests, and the three lifecycle files recomputed to `Baseline: main@b8673031` | `eval/public/README.md` and `tests/test_public_wmbs_stage_a_disclosure.py` under the **Public-harness integration owner**, serialized as sole writer on `eval/public/*` for this documentation-only edit; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/` under the **GoalEx lifecycle owner**. Both owners are required and they land together in one serialized PR (PR-1 of round 46); no other lane touches `eval/public/*` at this baseline | Documentation and tests only. It admits **no source node**, **no Stage-B integration**, and **no successor node**: no `eval/public/registry.json` entry, adapter, runner routing, profile contract, or scoring-profile registration is authorized, no module behavior or fixture byte changes, M02/M04/M05 stay `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, and no progress counter moves. Stage B for all three remains blocked on the public-harness integration owner's lease. **Delivery statement:** the `eval/public/README.md` M02/M04/M05 Stage-A development-oracle gap disclosure and its pinning suite `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by PR-1 of GoalEx round 46 **Merged receipts:** delivered as PR #99, merge `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@b8673031` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@d7eefb7c` |
 | T8 | MERGED | Bounded GoalEx lifecycle documentation-and-tests node landing the stranded Round-0 M01-M20 completeness inventory; consumes verified canonical `main@b8673031` and the same PR #97/#98 receipts `T7` consumes | The M01-M20 module completeness inventory, its line-level derivations, the drift test that pins the inventory to the tree, and the three lifecycle files recomputed to `Baseline: main@b8673031` | Exactly `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`; `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`; `tests/test_wmbs_module_inventory.py`; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Documentation and tests only. It admits **no source node** and **no publication claim**: no module implementation, protocol, scorer, adapter, registry entry, fixture byte, schema, or admission state changes, and no progress counter moves. Its lease contains no public-harness source path. It **overlaps `T7`** on `GOAL.md`, `.planning/STATE.md`, this map, and `docs/plans/`, so `T7` and `T8` are not concurrent writers: they are one serialized GoalEx lifecycle writer landing as a single PR (PR-1 of round 46) **Merged receipts:** delivered as PR #99, merge `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@b8673031` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@d7eefb7c` |
-| T9 | ADMITTED | Public-harness Stage-B M03 registry-admission node; consumes verified canonical `main` at the PR-1 merge commit | The `wmbs-m03-valid-time-development` entry in `eval/public/registry.json`, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys in `eval/public/runner.py`, its matching `allowed_profile` label in `eval/public/bundle.py` (a second, independent profile-contract table that rejects an unlabelled profile with `wrong interval-family metadata`), its `eval/public/README.md` documentation, its tests, and the derived-fact inventory update already present in this PR | Exactly `eval/public/registry.json`; `eval/public/runner.py`; `eval/public/bundle.py`; `eval/public/README.md`; `tests/test_public_whole_memory_reference.py` and any new focused M03 registration test module under `tests/`; `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`. Public-harness integration owner, serialized as **sole writer** (no open PR and no competing lane at this baseline). It does not overlap `T8`'s `tests/test_wmbs_module_inventory.py`, and it follows `T7`'s `eval/public/README.md` write strictly in sequence, after PR-1 merges | Authorizes **M03 only**. It admits no other module, changes no fixture byte, no scorer logic, and no schema, and it advances **no admission state**: M03 stays `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with full bitemporal transaction-time query semantics retained as a hard deferral per `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md` line 68. Reachability fix only; it admits **no successor node** |
+| T9 | MERGED | Public-harness Stage-B M03 registry-admission node; consumed canonical `main` through PR #107 at `main@7f305090` | The `wmbs-m03-valid-time-development` entry in `eval/public/registry.json`, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys in `eval/public/runner.py`, its matching `allowed_profile` label in `eval/public/bundle.py` (a second, independent profile-contract table that rejects an unlabelled profile with `wrong interval-family metadata`), its `eval/public/README.md` documentation, its tests, and the derived-fact inventory update already present in this PR | Exactly `eval/public/registry.json`; `eval/public/runner.py`; `eval/public/bundle.py`; `eval/public/README.md`; `tests/test_public_whole_memory_reference.py`; `tests/test_public_wmbs_m03_registry_admission.py`; `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`. Delivered under the public-harness integration owner's exclusive serialized lease after `T7`'s `eval/public/README.md` write; that serialization is discharged and no active writer remains on the lease | Authorizes **M03 only**. It admits no other module, changes no fixture byte, no scorer logic, and no schema, and it advances **no admission state**: M03 stays `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with full bitemporal transaction-time query semantics retained as a hard deferral per `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md` line 68. Reachability fix only; it admits **no successor node** or source node. **Merged receipts:** PR #100 exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`; all required exact-head CI and Greptile green in run `31854371658`; merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at `2026-08-15T01:12:26Z`; post-merge CI `31855873247` successful |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
@@ -268,11 +277,8 @@ Current delivery wave
   Through PR #96 this wave's recorded status was: No GoalEx lifecycle or source
   node is admitted. PR #96 independently merged
   development-only M02/M04/M05 evaluation oracles; no writer for them remains
-  active, and their publication eligibility is unchanged. That status is now
-  superseded by three nodes, and the "no admitted writer" wording no
-  longer holds. T7 and T8 are now MERGED as PR #99 (merge d7eefb7c, exact head
-  2375aba5, exact-head CI 30808291831); T9 remains the single ADMITTED writer,
-  in flight as draft PR #100:
+  active, and their publication eligibility is unchanged. PR #99 then delivered
+  T7 and T8 (merge d7eefb7c, exact head 2375aba5, exact-head CI 30808291831):
     T7 documentation-and-tests (MERGED as PR #99): discloses those three oracles in
     eval/public/README.md and pins the disclosure with tests. It admits no
     source node, no Stage-B integration, and no successor node, and it leaves
@@ -282,22 +288,22 @@ Current delivery wave
     M01-M20 completeness
     inventory, its derivations, and its drift test. It admits no source node and
     no publication claim.
-    T9 public-harness Stage-B integration (ADMITTED, in flight as draft PR
-    #100): registers the existing, already
+    T9 public-harness Stage-B integration (MERGED as PR #100): registers the existing, already
     scorer-backed and unit-tested M03 valid-time development cell so it is
     reachable from run_public_suite. It is a reachability fix for M03 only. It
     changes no fixture byte, no scorer, no schema, and no admission state, and
-    it admits no successor node.
+    it admits no successor node or source node. Exact head
+    e072dda5a9e7ef078d317156c49c54bbee7a5124 passed all required exact-head CI
+    and Greptile in run 31854371658; merge
+    b3570937918c7de40cd89ea543fab9e7b16f7471 at 2026-08-15T01:12:26Z;
+    post-merge CI 31855873247 successful.
   T7 and T8 are NOT lease-disjoint: both write GOAL.md, .planning/STATE.md,
   this map, and docs/plans/. They are one serialized GoalEx lifecycle writer
-  landing as a single PR (PR-1). T7 additionally writes eval/public/README.md
-  and its pinning test under the public-harness owner, so PR-1 also holds that
-  lease and requires both owners. T9 overlaps T7 on eval/public/README.md and
-  is therefore not concurrent with it either: T9 runs strictly after PR-1
-  merges, as the sole writer on the eval/public/* lease, landing as PR-2.
-  No two writers are ever active at once in this wave. PR-1 is PR #99, now
-  merged at d7eefb7c, so that ordering condition is discharged and T9's turn
-  as sole writer has begun.
+  delivered as PR #99. T7 additionally wrote eval/public/README.md and its
+  pinning test under the public-harness owner. T9 overlapped T7 on
+  eval/public/README.md, so it followed PR #99 strictly in sequence and was
+  delivered as PR #100. That ordering and both write leases are now discharged:
+  T7, T8, and T9 are all MERGED, and no writer remains admitted from this wave.
 
 Independent external gates (do not block T0-T9)
   P12-E operator measurement
@@ -327,36 +333,22 @@ Quarantine
 
 - Current safe coding concurrency is **zero new module-implementation
   writers**: every remaining source package is dependency-, lease-, evidence-,
-  or spec-blocked. That claim is scoped to *module-implementation* writers. It
-  is unaffected by `T7` and `T8`, whose exact leases contain no module, adapter,
-  protocol, scorer, or fixture path, and it is unaffected by `T9`,
-  which registers an already-merged, already-tested cell and implements no
-  module. `T6` is merged; `T7` and `T8` are now merged too, as PR #99 (merge
-  `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`), leaving
-  exactly one admitted writer, `T9`. Even before those merges the three nodes
-  were **not** three concurrent writers. `T7` and `T8` overlap on `GOAL.md`,
-  `.planning/STATE.md`, this map, and `docs/plans/`, so they are one serialized
-  GoalEx lifecycle writer landing together as PR-1; because `T7` also writes
-  `eval/public/README.md` and its pinning test, PR-1 additionally holds the
-  public-harness lease and requires both owners. `T9` overlaps `T7` on
-  `eval/public/README.md`, so it is serialized behind PR-1 rather than run
-  beside it: it lands as PR-2, as the sole writer on `eval/public/*`, only
-  after PR-1 merges — which it has, as PR #99. At most one writer on
-  `eval/public/*` is active at any moment: PR #100 (node `T9`) is the sole
-  competing writer on that lease, and PR #101 — the pending controller
-  lifecycle-record PR — touches no `eval/public/*` path. This
-  serialization is the explicit remedy for PR #96's defect, where three modules
-  merged onto that lease while this map admitted no writer for it. Otherwise
-  only read-only reviews may run.
+  or spec-blocked. `T7` and `T8` were delivered by PR #99; `T9` was delivered
+  by PR #100 at `main@b3570937`. Their required order is discharged, and no
+  writer remains admitted from that wave or active on `eval/public/*`. `T7` and
+  `T8` shared the lifecycle files and landed together; `T9` shared
+  `eval/public/README.md` with `T7` and therefore landed strictly afterward.
+  This completed serialization is the explicit remedy for PR #96's defect,
+  where three modules merged onto that lease while this map admitted no writer
+  for it. Otherwise only read-only reviews may run.
 - **`GOAL.md` Authority carve-out status: standing controller condition from
   `T6` onward.** Both the one-block receipt lag and the current round's own plan
   record are accepted standing conditions of the controller branch. They are
   discharged only by branch-resident recomputation, never by admitting a
   successor node. `T6` admits no successor node and no source node.
-- **Next dependency-ready candidates: `T9`, then external gate `P13-C`, and no
-  new source node.** `T9` is dependency-ready the moment PR-1 merges, and it is
-  a bounded reachability fix, not a source node: it admits no module
-  implementation. Beyond it, `P13-C` is first eligible 2026-08-03. The Phase 12
+- **Next dependency-ready item: external gate `P13-C`; no new source node is
+  admitted.** `T9` is already delivered, and `P13-C` was first eligible
+  2026-08-03. The Phase 12
   evidence path remains `P12-E`: exact candidate/runtime manifest and resolved model digest, repeated
   synthetic plus 24-case `qa_scale_dev_v1`, then one protected `qa_hard_v2`
   attempt, and only after that held-out LongMemEval/Hippo evidence. Host,
