@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@7b6c5a12`; T7 and T8 were delivered by PR #99, and T9 was delivered by PR #100 at exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`, all-required-green exact-head CI plus Greptile run `31854371658`, merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at `2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. PR #105 then merged from exact head `d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI passed in run `31856191898`, as merge `7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at `2026-08-15T01:46:23Z`; post-merge run `31857410462` failed solely at the canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent from the lifecycle authorities, which PR #108 repairs here. No source node or writer remains admitted from the T7-T9 wave. T9 changed M03 reachability only: M03 remains `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with no fixture, scorer, schema, admission-state, successor-node, or progress-counter change. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T01:46:23Z"
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@7c5264d8`; PR #108 repaired PR #105's lifecycle lapse from exact head `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, exact-head CI `31859014653`, merge `7c5264d815d44c375173dcd1e8ab57783a397a7e` at `2026-08-15T02:45:01Z`, and successful post-merge CI `31859997325`. Controller node T10 reserves the frozen Windows stack at PR #109 `08397dab1220c87a3e8e3a92bf353cc65b68dba3` -> PR #110 `7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111 `226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. Exact-head CI runs `31862259173`, `31862270296`, `31862275890`, and `31862282981` remain in progress because Unit + drift checks are pending; completed required/native jobs are green, but no full run is claimed green. Cumulative exact-stack security scan `8f92e955-a68a-4bec-817a-810a76fce21b` is sealed with complete coverage and zero findings. No implementation PR may merge until the controller receipt lands; afterward merge commits only in strict order #109 -> #110 -> #111 -> #112 with successful post-main CI after each. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-15T03:46:31Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 7
@@ -110,8 +110,24 @@ passed in run `31856191898`, as merge
 `2026-08-15T01:46:23Z`. Its post-merge run `31857410462` failed solely at
 `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
 (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent
-from the lifecycle authorities; PR #108 repairs that traceability lapse. No
-writer remains admitted from the T7-T9 wave.
+from the lifecycle authorities. PR #108 repaired that traceability lapse from
+exact head `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, with all required
+exact-head CI green in run `31859014653`, and merged as
+`7c5264d815d44c375173dcd1e8ab57783a397a7e` at
+`2026-08-15T02:45:01Z`; post-merge run `31859997325` succeeded. No writer
+remains admitted from the T7-T9 wave. `T10` is the separately serialized,
+controller-owned Windows portability stack. It freezes exact ancestry PR #109
+`08397dab1220c87a3e8e3a92bf353cc65b68dba3` -> PR #110
+`7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111
+`226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112
+`259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`, with one controller owning every
+serialized `.github/workflows/ci.yml` integration edge. The four exact-head CI
+runs remain pending only their `Unit + drift checks` jobs at the recorded
+capture. Cumulative exact-stack security scan
+`8f92e955-a68a-4bec-817a-810a76fce21b` is sealed with complete coverage and
+zero findings; its targeted suite passed 128 tests with five native-Windows
+skips. No implementation merge is authorized before the controller receipt
+lands.
 `T9` authorizes M03 only, changes no fixture byte, scorer, schema, or admission
 state, and admits no successor node or source node. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
@@ -369,15 +385,22 @@ history through `main@7f305090`. PR #100 delivered `T9` from exact head
 `e072dda5a9e7ef078d317156c49c54bbee7a5124` after all required exact-head CI and
 Greptile passed in run `31854371658`, merged as
 `b3570937918c7de40cd89ea543fab9e7b16f7471` at
-`2026-08-15T01:12:26Z`, and passed post-merge CI `31855873247`. The current
-canonical baseline is `main@7b6c5a12`: PR #105 merged from exact head
+`2026-08-15T01:12:26Z`, and passed post-merge CI `31855873247`. PR #105 merged
+from exact head
 `d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI
 passed in run `31856191898`, as merge
 `7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
 `2026-08-15T01:46:23Z`; post-merge run `31857410462` failed solely at the
 canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191
 deselected) because PR #105 was absent from the lifecycle authorities. PR #108
-repairs that lapse. PR #90 is
+repaired that lapse from exact head
+`bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, exact-head CI run
+`31859014653`, merge `7c5264d815d44c375173dcd1e8ab57783a397a7e`
+at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
+current canonical baseline is `main@7c5264d8`. Node `T10` reserves only the
+frozen Windows stack #109 -> #110 -> #111 -> #112 at the exact heads recorded
+in the lease map; its controller receipt must merge before those implementation
+PRs, and successful post-main CI must separate their merge commits. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
