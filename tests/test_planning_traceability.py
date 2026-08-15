@@ -34,7 +34,7 @@ GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
-EXPECTED_TOPOLOGY_VERIFIER_OID = "3949edc528d380441b7de747290f12a4e61ccf3c"
+EXPECTED_TOPOLOGY_VERIFIER_OID = "7c40b18bd0097968157708d04988e59d2e2d1ca7"
 TOPOLOGY_BOOTSTRAP = """import sys
 
 source = sys.argv.pop(1)
@@ -910,6 +910,7 @@ def _verify_topology_from_parent(
         [
             sys.executable,
             "-I",
+            "-S",
             "-c",
             TOPOLOGY_BOOTSTRAP,
             source.stdout,
@@ -950,6 +951,32 @@ def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     assert not trusted.stdout
 
 
+def test_topology_refresh_verifier_rejects_tag_object_ids(tmp_path: Path) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    refs = [candidate, parent, anchor]
+    for index, (label, target) in enumerate(
+        (("candidate", candidate), ("parent", parent), ("anchor", anchor))
+    ):
+        subprocess.run(
+            ["git", "tag", "-a", f"{label}-tag", "-m", label, target],
+            cwd=repo,
+            check=True,
+        )
+        tag_oid = subprocess.run(
+            ["git", "rev-parse", f"refs/tags/{label}-tag"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        tagged = [*refs]
+        tagged[index] = tag_oid
+        direct = _verify_topology(repo, *tagged)
+        assert direct.returncode == 2, label
+        trusted = _verify_topology_from_parent(repo, *tagged)
+        assert trusted.returncode == 2, label
+
+
 def test_topology_refresh_verifier_executes_trusted_parent_bytes(
     tmp_path: Path,
 ) -> None:
@@ -974,7 +1001,15 @@ def test_topology_refresh_verifier_executes_trusted_parent_bytes(
     ).stdout.strip()
 
     untrusted = subprocess.run(
-        [sys.executable, "-I", str(candidate_verifier), candidate, parent, anchor],
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            str(candidate_verifier),
+            candidate,
+            parent,
+            anchor,
+        ],
         cwd=repo,
     )
     assert untrusted.returncode == 0
@@ -1060,6 +1095,7 @@ def test_topology_refresh_verifier_normalizes_malformed_parent_source() -> None:
             [
                 sys.executable,
                 "-I",
+                "-S",
                 "-c",
                 TOPOLOGY_BOOTSTRAP,
                 source,
@@ -1229,7 +1265,7 @@ def test_topology_refresh_verifier_rejects_unresolvable_full_sha(
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     result = _verify_topology(repo, "f" * 40, parent, anchor)
     assert result.returncode == 2
-    assert result.stdout == "error: cannot verify permitted parent ancestry\n"
+    assert result.stdout == "error: not an exact commit SHA: " + "f" * 40 + "\n"
 
 
 def test_topology_refresh_verifier_rejects_malformed_tree_output(
@@ -1247,12 +1283,21 @@ def test_topology_refresh_verifier_rejects_malformed_tree_output(
         b"100644 blob " + b"0" * 40 + b"\t\0",
         valid + b"\0" + valid + b"\0",
     ):
+
+        def fake_run(
+            command: list[str], *args: object, output: bytes = output, **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes]:
+            if "rev-parse" in command:
+                exact = command[-1].removesuffix("^{commit}").encode("ascii") + b"\n"
+                return subprocess.CompletedProcess(command, 0, stdout=exact)
+            if "merge-base" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=b"")
+            return subprocess.CompletedProcess(command, 0, stdout=output)
+
         monkeypatch.setattr(
             module.subprocess,
             "run",
-            lambda *args, output=output, **kwargs: subprocess.CompletedProcess(
-                args, 0, stdout=output
-            ),
+            fake_run,
         )
         assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
         assert (
@@ -1322,7 +1367,9 @@ def test_goal_documents_topology_refresh_verifier_invocation() -> None:
         "    printf '%s\\n' 'error: cannot authenticate trusted topology verifier'\n"
         "    exit 2\n"
         "  }\n"
-        "  if python3 -I -c '\n" + TOPOLOGY_BOOTSTRAP + '\' "$topology_verifier" \\\n'
+        "  if python3 -I -S -c '\n"
+        + TOPOLOGY_BOOTSTRAP
+        + '\' "$topology_verifier" \\\n'
         '    "$CANDIDATE_SHA" \\\n'
         '    "$PERMITTED_PARENT_SHA" \\\n'
         '    "$IMMUTABLE_ANCHOR_SHA"; then\n'
