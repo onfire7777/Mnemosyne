@@ -284,8 +284,11 @@ class C2paToolVerifier:
             return self.fallback.verify(payload, manifest)
         try:
             tool_argv = [self.tool_path] if Path(self.tool_path).exists() else split_command(self.tool_path)
+            if not tool_argv:
+                raise OSError("c2pa verifier command must not be empty")
             # Direct batch files may be shell-dispatched by Windows even with shell=False.
-            if os.name == "nt" and tool_argv and Path(tool_argv[0]).suffix.lower() in {".bat", ".cmd"}:
+            tool_suffix = Path(tool_argv[0].rstrip(" .")).suffix.casefold()
+            if os.name == "nt" and tool_suffix in {".bat", ".cmd"}:
                 raise OSError("direct .bat/.cmd tool execution is disabled on Windows")
             completed = subprocess.run(
                 [*tool_argv, asset_path, "--json"],
