@@ -190,7 +190,8 @@ stack at exact heads PR #109 `08397dab1220c87a3e8e3a92bf353cc65b68dba3`
 -> PR #110 `7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111
 `226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112
 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. The controller is the sole CI
-integration owner. At the `2026-08-15T03:46:31Z` capture, exact-head runs
+integration owner. At the refreshed `2026-08-15T03:52:26Z` capture, exact-head
+runs
 `31862259173`, `31862270296`, `31862275890`, and `31862282981` remained in
 progress because `Unit + drift checks` had not completed; their completed
 required and native-Windows jobs were green, but none of the four runs is
@@ -201,8 +202,12 @@ sealed at zero findings. Cumulative exact-stack scan
 `8f92e955-a68a-4bec-817a-810a76fce21b` is also sealed with complete coverage
 and zero findings at PR #112's exact head. The exact chain has a conflict-free
 integration receipt with exactly three unique Windows jobs and 128 targeted
-tests passed with five native-Windows skips. No implementation PR may merge
-until this controller receipt merges.
+tests passed with five native-Windows skips. Controller PR #113 is
+**OPEN/DRAFT** and changes only `GOAL.md`, `.planning/STATE.md`, and the lease
+map. Its self-record changes its head, so no exact PR #113 head, merge SHA,
+merge time, or post-merge `main` CI is claimed. PR #113 grants no implementation
+authority. No implementation PR may merge until PR #113 passes all required
+exact-head checks and merges.
 Afterward, only merge commits in the order #109 -> #110 -> #111 -> #112 are
 permitted, with successful post-merge `main` CI required before each next edge.
 
