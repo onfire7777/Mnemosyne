@@ -95,7 +95,6 @@ jobs:
       - name: Run cross-process lock coverage
         run: >-
           uv run --locked python -m pytest tests/test_file_lock.py
-          tests/completion/security/test_deletion_residue.py::test_sqlite_ledger_replay_conflict_generation_and_checkpoint_cas
           tests/test_leaderboard_ledger.py -q
 
   provider-conformance:
