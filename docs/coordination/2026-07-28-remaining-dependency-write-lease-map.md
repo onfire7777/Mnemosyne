@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-08-15
-Baseline: `main@b3570937918c7de40cd89ea543fab9e7b16f7471`
+Baseline: `main@7b6c5a121107ee80533a5b4ec794e602e1e1ab33`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -127,19 +127,26 @@ The following packages are complete source history, not runnable work:
   counter and admitted no source node or successor node.
 - PR #103: Restore canonical memory sources and patch cryptography (merge 5b0d99bcd7).
 - PR #105: preserve hash-bound text as LF and make installer/custody tests
-  explicit about their native-Windows and POSIX execution contracts. Reserved
-  and recorded here before merge; no merge SHA or CI run id is claimed.
+  explicit about their native-Windows and POSIX execution contracts. Delivered
+  from exact head `d60857fdf61122106eeede789432dd5bac955137` after all
+  required exact-head CI passed in run `31856191898`; merge
+  `7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+  `2026-08-15T01:46:23Z`. Post-merge run `31857410462` failed solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was
+  absent from the lifecycle authorities; PR #108 repairs that traceability
+  lapse here.
 - PR #106: record merged PR #103 in the write-lease map (merge 18e7e2f6c0cf92af399bc66385b0cbf335d1e8f7).
 - PR #107: record merged PR #106 in the write-lease map; delivered from exact
   head `9e1df8966fbbf7d0b4c21f1e4aae01fcf3a9adc8` with all required exact-head
   CI green in run `31852940363`; merge
   `7f305090bb026db7aa4d73a3e127808b8ee4089c` at
   `2026-08-15T00:40:44Z`.
-- PR #108: reconcile PR #100's exact T9 lease and inventory wording, and
-  reserve PR #105's lifecycle receipt. Recorded here before merge; no merge
-  SHA or CI run id is claimed.
+- PR #108: reconcile PR #100's exact T9 lease and inventory wording and repair
+  PR #105's baseline-lapse receipt. Recorded here before merge; no PR #108
+  merge SHA or CI run id is claimed.
 
-This map is recomputed from the new baseline `main@b3570937`, which the
+This map is recomputed from the new baseline `main@7b6c5a12`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
