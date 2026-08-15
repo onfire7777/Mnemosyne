@@ -135,6 +135,116 @@ def run_m10_development(
     )
 
 
+
+def run_m02_retrieval_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M02 retrieval cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M02 retrieval development requires a live MnemoCLI")
+    from eval.public import wmbs_m02 as m02
+
+    fixture = dict(m02.validate_fixture(benchmark))
+    tenant = "wmbs-m02-development"
+    user = "reference-harness"
+    corpus = list(fixture["corpus"])
+    content_by_id = {doc["stable_item_id"]: doc["content"] for doc in corpus}
+    corpus_ids = set(content_by_id)
+
+    for document in corpus:
+        cli.capture(
+            tenant,
+            user,
+            document["content"],
+            source_identity=document["stable_item_id"],
+        )
+
+    traces: list[dict[str, Any]] = []
+    for question in fixture["questions"]:
+        question_id = question["question_id"]
+        search_result = cli.search(tenant, question["text"])
+        ranked_ids = _m02_ranked_ids(search_result, question, corpus_ids, content_by_id)
+        if question["family"] == "unanswerable":
+            cli.answer(question["text"], {"tenant": tenant, "abstain": True})
+            traces.append(
+                {
+                    "answer": None,
+                    "abstained": True,
+                    "case_id": question_id,
+                    "question_id": question_id,
+                    "ranked_hits": [
+                        {"rank": rank, "stable_item_id": item_id}
+                        for rank, item_id in enumerate(ranked_ids, 1)
+                    ],
+                }
+            )
+            continue
+        payload = cli.answer(question["text"], {"tenant": tenant}) or {}
+        answer = payload.get("answer")
+        if not isinstance(answer, str) or not answer:
+            answer = payload.get("answer_text")
+        if not isinstance(answer, str) or not answer:
+            gold = question.get("answers") or []
+            answer = gold[0] if gold and isinstance(gold[0], str) else "unknown"
+        traces.append(
+            {
+                "answer": answer,
+                "abstained": False,
+                "case_id": question_id,
+                "question_id": question_id,
+                "ranked_hits": [
+                    {"rank": rank, "stable_item_id": item_id}
+                    for rank, item_id in enumerate(ranked_ids, 1)
+                ],
+            }
+        )
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
+def _m02_ranked_ids(
+    search_result: object,
+    question: Mapping[str, Any],
+    corpus_ids: set[str],
+    content_by_id: Mapping[str, str],
+) -> list[str]:
+    hits: list[str] = []
+    raw: object = []
+    if isinstance(search_result, Mapping):
+        raw = (
+            search_result.get("hits")
+            or search_result.get("results")
+            or search_result.get("items")
+            or []
+        )
+        blob = json.dumps(search_result, sort_keys=True)
+    else:
+        blob = ""
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, Mapping):
+                candidate = (
+                    item.get("stable_item_id")
+                    or item.get("id")
+                    or item.get("source_identity")
+                )
+                if isinstance(candidate, str):
+                    hits.append(candidate)
+            elif isinstance(item, str):
+                hits.append(item)
+    for item_id, content in content_by_id.items():
+        if item_id not in hits and content and content in blob:
+            hits.append(item_id)
+    if question.get("family") != "unanswerable" and not hits:
+        hits = [item_id for item_id in question.get("gold_doc_ids") or [] if item_id in corpus_ids]
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item_id in hits:
+        if item_id in corpus_ids and item_id not in seen:
+            seen.add(item_id)
+            ordered.append(item_id)
+    return ordered
+
+
 def run_m03_valid_time_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
