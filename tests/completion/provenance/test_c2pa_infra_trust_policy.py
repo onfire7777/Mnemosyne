@@ -114,7 +114,7 @@ def _write_stub_tool(tmp_path: Path, report: dict) -> str:
 def _build_report(asset_path: str, sha: str, *, root_fpr: str = ROOT_FPR) -> dict:
     raw = _REPORT_TEMPLATE.read_text(encoding="utf-8")
     raw = (
-        raw.replace("__ASSET_PATH__", asset_path)
+        raw.replace("__ASSET_PATH__", json.dumps(asset_path)[1:-1])
         .replace("__ASSET_SHA256__", sha)
         .replace("__ROOT_FPR__", root_fpr)
     )
@@ -149,6 +149,11 @@ def test_surfaced_signer_is_claim_generator():
         {"issuer", "signer", "claim_generator", "claimGenerator", "common_name", "commonName"},
     )
     assert signer == SURFACED_SIGNER
+
+
+def test_build_report_handles_windows_asset_path():
+    asset_path = r"C:\signed assets\asset.jpg"
+    assert _build_report(asset_path, "0" * 64)["asset"]["path"] == asset_path
 
 
 def test_old_policy_quarantines_positive_path(tmp_path):
