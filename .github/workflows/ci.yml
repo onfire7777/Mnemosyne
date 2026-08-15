@@ -119,6 +119,11 @@ jobs:
           tests/completion/provenance/test_c2pa_infra_trust_policy.py::test_c2pa_existing_tool_path_with_spaces_is_literal_argv
           tests/completion/provenance/test_c2pa_infra_trust_policy.py::test_c2pa_direct_windows_batch_tool_fails_closed
           tests/completion/provenance/test_c2pa_infra_trust_policy.py::test_c2pa_empty_tool_command_fails_closed
+          tests/test_compact_answering_parity.py::test_manifest_directory_fsync_is_a_noop_on_windows
+          tests/test_journal.py::test_append_and_rewrite_force_raw_lf_bytes
+          tests/test_leaderboard_readiness.py::test_cli_opens_regular_file_without_o_nonblock_when_unavailable
+          tests/test_public_eval.py::test_public_runner_inherits_only_required_windows_environment
+          tests/test_public_longmemeval.py::test_candidate_manifest_directory_fsync_is_a_noop_on_windows
           -q
 
   provider-conformance:
