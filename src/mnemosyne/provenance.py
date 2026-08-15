@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from dataclasses import asdict, dataclass, field
@@ -283,6 +284,9 @@ class C2paToolVerifier:
             return self.fallback.verify(payload, manifest)
         try:
             tool_argv = [self.tool_path] if Path(self.tool_path).exists() else split_command(self.tool_path)
+            # Direct batch files may be shell-dispatched by Windows even with shell=False.
+            if os.name == "nt" and tool_argv and Path(tool_argv[0]).suffix.lower() in {".bat", ".cmd"}:
+                raise OSError("direct .bat/.cmd tool execution is disabled on Windows")
             completed = subprocess.run(
                 [*tool_argv, asset_path, "--json"],
                 check=False,
