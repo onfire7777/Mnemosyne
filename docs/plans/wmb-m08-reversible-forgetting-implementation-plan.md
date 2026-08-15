@@ -202,3 +202,26 @@ This step is done when this file exists on GitHub as a one-file PR with
 `PROPOSED` / `NOT CODE-READY` and a reviewer can re-check §1 against spec
 L801–820 without trusting this prose. It is **not** done by flipping Status
 or writing any other path.
+
+## 11. Locked public-harness cell (do not write README from this PR)
+
+The block below is the only allowed future `eval/public/README.md` cell for
+this module. Place it as a peer of the M02, M03, and M07 cells, not under the
+M02/M04/M05 Stage-A oracles heading. This PR does not write
+`eval/public/README.md`.
+
+Do not add a `uv run --suite` line until a registry row exists.
+
+```markdown
+### M08 reversible forgetting
+
+PROPOSED if the adapter exposes reversible delete, else UNSUPPORTED-BY-SYSTEM
+(not scored zero). All publication flags false.
+
+`delete(selector, mode=reversible)`. `restore` only if claimed. Zero
+exact-canary leakage. Semantic leakage at most 1%. Unrelated utility loss at
+most 0.5 percentage points. At least five seeds. Two delete/re-ingest cycles.
+
+No registry row exists, so this cell is not runnable. A missing hook is
+`unsupported`, never a zero.
+```
