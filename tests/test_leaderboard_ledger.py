@@ -1,12 +1,12 @@
 import copy
 import base64
-import fcntl
 import json
 import multiprocessing
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from leaderboard.ledger import LedgerError, append_entry, verify_ledger
+from mnemosyne._file_lock import exclusive_file_lock
 
 
 _DEFAULT_RUN_ID = object()
@@ -139,6 +140,7 @@ def test_verify_rejects_noncanonical_json_bytes(
     ledger_path.write_text(
         json.dumps(entry, sort_keys=False, separators=(", ", ": ")) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
     with pytest.raises(LedgerError, match="non-canonical"):
@@ -515,6 +517,7 @@ def _rewrite_entries(ledger_path: Path, entries: list[dict[str, object]]) -> Non
             for entry in entries
         ),
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -564,7 +567,7 @@ def test_append_rejects_boolean_pending_prior_count(
     private_key, _ = key_paths
     _append(ledger_path, private_key, entry_id="entry-complete")
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":true}\n', encoding="utf-8")
+    pending_path.write_text('{"prior_count":true}\n', encoding="utf-8", newline="\n")
 
     with pytest.raises(LedgerError, match="append intent is invalid"):
         _append(ledger_path, private_key, entry_id="entry-rejected")
@@ -691,7 +694,7 @@ def test_append_repairs_only_a_torn_final_fragment(
     first = _append(ledger_path, private_key, entry_id="entry-complete")
     acknowledged = ledger_path.read_bytes()
     pending_path = ledger_path.with_suffix(ledger_path.suffix + ".pending.json")
-    pending_path.write_text('{"prior_count":1}\n', encoding="utf-8")
+    pending_path.write_text('{"prior_count":1}\n', encoding="utf-8", newline="\n")
     ledger_path.write_bytes(acknowledged + b'{"entry_id":"unacknowledged')
 
     second = _append(ledger_path, private_key, entry_id="entry-after-repair")
@@ -728,50 +731,56 @@ def test_append_rejects_complete_final_entry_missing_only_newline(
     assert ledger_path.read_bytes() == without_newline
 
 
-def _append_after_start(
-    ledger_path: str,
-    private_key: str,
-    started: Any,
-    start: Any,
-    attempted: Any,
-) -> None:
-    started.set()
-    start.wait()
-    _signal_lock_attempt(attempted)
-    append_entry(
-        Path(ledger_path),
-        Path(private_key),
-        entry_id="entry-concurrent",
-        timestamp="2026-07-25T12:00:00Z",
-        entrant_id="synthetic-entrant",
-        status="failed",
-        run_id="run-concurrent",
-        reason="synthetic failure",
-        roster={"synthetic-entrant"},
-    )
-
-
-def _verify_after_start(
-    ledger_path: str,
-    public_key: str,
-    attempted: Any,
-    result: Any,
-) -> None:
-    _signal_lock_attempt(attempted)
-    result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
-
-
-def _signal_lock_attempt(attempted: Any) -> None:
+@contextmanager
+def _signal_production_lock_attempt(attempting: Any) -> Iterator[None]:
     from leaderboard import ledger
 
-    real_flock = ledger.fcntl.flock
+    real_exclusive_file_lock = ledger.exclusive_file_lock
 
-    def signal_then_flock(fd: int, operation: int) -> None:
-        if operation & fcntl.LOCK_EX:
-            attempted.set()
-        real_flock(fd, operation)
+    @contextmanager
+    def signal_then_lock(path: Path) -> Iterator[None]:
+        attempting.set()
+        with real_exclusive_file_lock(path):
+            yield
 
-    ledger.fcntl.flock = signal_then_flock
+    ledger.exclusive_file_lock = signal_then_lock
+    try:
+        yield
+    finally:
+        ledger.exclusive_file_lock = real_exclusive_file_lock
+
+
+def _append_and_signal_completion(
+    ledger_path: str,
+    private_key: str,
+    attempting: Any,
+    completed: Any,
+) -> None:
+    with _signal_production_lock_attempt(attempting):
+        append_entry(
+            Path(ledger_path),
+            Path(private_key),
+            entry_id="entry-concurrent",
+            timestamp="2026-07-25T12:00:00Z",
+            entrant_id="synthetic-entrant",
+            status="failed",
+            run_id="run-concurrent",
+            reason="synthetic failure",
+            roster={"synthetic-entrant"},
+        )
+    completed.set()
+
+
+def _verify_and_signal_completion(
+    ledger_path: str,
+    public_key: str,
+    attempting: Any,
+    completed: Any,
+    result: Any,
+) -> None:
+    with _signal_production_lock_attempt(attempting):
+        result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
+    completed.set()
 
 
 def test_append_serializes_on_sibling_process_lock(
@@ -779,25 +788,20 @@ def test_append_serializes_on_sibling_process_lock(
 ) -> None:
     private_key, public_key = key_paths
     context = multiprocessing.get_context("spawn")
-    started = context.Event()
-    start = context.Event()
-    attempted = context.Event()
+    attempting = context.Event()
+    completed = context.Event()
     process = context.Process(
-        target=_append_after_start,
-        args=(str(ledger_path), str(private_key), started, start, attempted),
+        target=_append_and_signal_completion,
+        args=(str(ledger_path), str(private_key), attempting, completed),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
-    lock_path.touch()
-
-    with lock_path.open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with exclusive_file_lock(lock_path):
         process.start()
-        assert started.wait(timeout=5)
-        start.set()
-        assert attempted.wait(timeout=5)
+        assert attempting.wait(timeout=5)
+        assert not completed.wait(timeout=0.5)
         assert process.is_alive()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
+    assert completed.wait(timeout=5)
     process.join(timeout=5)
     assert process.exitcode == 0
     assert len(verify_ledger(ledger_path, public_key)) == 1
@@ -809,21 +813,22 @@ def test_verify_serializes_on_sibling_process_lock(
     private_key, public_key = key_paths
     _append(ledger_path, private_key, entry_id="entry-existing")
     context = multiprocessing.get_context("spawn")
-    attempted = context.Event()
+    attempting = context.Event()
+    completed = context.Event()
     result = context.Queue()
     process = context.Process(
-        target=_verify_after_start,
-        args=(str(ledger_path), str(public_key), attempted, result),
+        target=_verify_and_signal_completion,
+        args=(str(ledger_path), str(public_key), attempting, completed, result),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
-    with lock_path.open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with exclusive_file_lock(lock_path):
         process.start()
-        assert attempted.wait(timeout=5)
+        assert attempting.wait(timeout=5)
+        assert not completed.wait(timeout=0.5)
         assert process.is_alive()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
+    assert completed.wait(timeout=5)
     process.join(timeout=5)
     assert process.exitcode == 0
     assert result.get(timeout=1) == 1
