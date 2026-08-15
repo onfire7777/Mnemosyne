@@ -24,7 +24,6 @@ from typing import Any, Protocol, Sequence
 from uuid import UUID
 from weakref import WeakKeyDictionary
 
-from ._file_lock import exclusive_file_lock
 from .deletion_manifest import is_safe_surface_label
 from .models import Evidence
 from .security import SecurityPolicy, SessionIdentity
@@ -194,6 +193,10 @@ class SQLiteDeletionLedger:
     durable = True
 
     def __init__(self, path: str | Path) -> None:
+        # Fail at construction, not mid-saga, on platforms without POSIX flock.
+        import fcntl
+
+        self._fcntl = fcntl
         self.path = Path(path)
         parent_created = not self.path.parent.exists()
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,8 +262,12 @@ class SQLiteDeletionLedger:
     def operation_lock(self) -> Any:
         """Serialize coordinators sharing this ledger, including other processes."""
         lock_path = self.path.with_suffix(self.path.suffix + ".lock")
-        with exclusive_file_lock(lock_path):
-            yield
+        with lock_path.open("a+b") as lock_file:
+            self._fcntl.flock(lock_file.fileno(), self._fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                self._fcntl.flock(lock_file.fileno(), self._fcntl.LOCK_UN)
 
     @staticmethod
     def _receipts(record: LedgerRecord) -> str:

@@ -728,16 +728,11 @@ def test_append_rejects_complete_final_entry_missing_only_newline(
     assert ledger_path.read_bytes() == without_newline
 
 
-def _append_after_start(
+def _append_and_signal_completion(
     ledger_path: str,
     private_key: str,
-    started: Any,
-    start: Any,
-    attempted: Any,
+    completed: Any,
 ) -> None:
-    started.set()
-    start.wait()
-    attempted.set()
     append_entry(
         Path(ledger_path),
         Path(private_key),
@@ -749,16 +744,17 @@ def _append_after_start(
         reason="synthetic failure",
         roster={"synthetic-entrant"},
     )
+    completed.set()
 
 
-def _verify_after_start(
+def _verify_and_signal_completion(
     ledger_path: str,
     public_key: str,
-    attempted: Any,
+    completed: Any,
     result: Any,
 ) -> None:
-    attempted.set()
     result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
+    completed.set()
 
 
 def test_append_serializes_on_sibling_process_lock(
@@ -766,21 +762,18 @@ def test_append_serializes_on_sibling_process_lock(
 ) -> None:
     private_key, public_key = key_paths
     context = multiprocessing.get_context("spawn")
-    started = context.Event()
-    start = context.Event()
-    attempted = context.Event()
+    completed = context.Event()
     process = context.Process(
-        target=_append_after_start,
-        args=(str(ledger_path), str(private_key), started, start, attempted),
+        target=_append_and_signal_completion,
+        args=(str(ledger_path), str(private_key), completed),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
     with exclusive_file_lock(lock_path):
         process.start()
-        assert started.wait(timeout=5)
-        start.set()
-        assert attempted.wait(timeout=5)
+        assert not completed.wait(timeout=1)
         assert process.is_alive()
 
+    assert completed.wait(timeout=5)
     process.join(timeout=5)
     assert process.exitcode == 0
     assert len(verify_ledger(ledger_path, public_key)) == 1
@@ -792,19 +785,20 @@ def test_verify_serializes_on_sibling_process_lock(
     private_key, public_key = key_paths
     _append(ledger_path, private_key, entry_id="entry-existing")
     context = multiprocessing.get_context("spawn")
-    attempted = context.Event()
+    completed = context.Event()
     result = context.Queue()
     process = context.Process(
-        target=_verify_after_start,
-        args=(str(ledger_path), str(public_key), attempted, result),
+        target=_verify_and_signal_completion,
+        args=(str(ledger_path), str(public_key), completed, result),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
     with exclusive_file_lock(lock_path):
         process.start()
-        assert attempted.wait(timeout=5)
+        assert not completed.wait(timeout=1)
         assert process.is_alive()
 
+    assert completed.wait(timeout=5)
     process.join(timeout=5)
     assert process.exitcode == 0
     assert result.get(timeout=1) == 1
