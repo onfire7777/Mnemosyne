@@ -966,6 +966,8 @@ def test_topology_refresh_verifier_normalizes_git_launch_error(monkeypatch, caps
 def test_goal_documents_topology_refresh_verifier_invocation() -> None:
     goal = GOAL.read_text(encoding="utf-8")
     assert (
-        "python3 infra/scripts/verify-topology-refresh.py <candidate-40-sha> "
-        "<permitted-parent-40-sha> <immutable-anchor-40-sha>"
+        'python3 infra/scripts/verify-topology-refresh.py \\\n'
+        '  "$CANDIDATE_SHA" \\\n'
+        '  "$PERMITTED_PARENT_SHA" \\\n'
+        '  "$IMMUTABLE_ANCHOR_SHA"'
     ) in goal

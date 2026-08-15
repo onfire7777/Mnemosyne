@@ -241,7 +241,10 @@ successful post-merge `main` CI required before refreshing and merging each
 next edge. Before merging, run:
 
 ```sh
-python3 infra/scripts/verify-topology-refresh.py <candidate-40-sha> <permitted-parent-40-sha> <immutable-anchor-40-sha>
+python3 infra/scripts/verify-topology-refresh.py \
+  "$CANDIDATE_SHA" \
+  "$PERMITTED_PARENT_SHA" \
+  "$IMMUTABLE_ANCHOR_SHA"
 ```
 
 It exits 0 only for a valid topology, 1 for contract deviations, and 2 for
