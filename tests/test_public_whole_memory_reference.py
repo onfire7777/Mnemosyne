@@ -3498,6 +3498,7 @@ def test_m02_adapter_issues_real_cli_calls() -> None:
     tiny = dict(fixture)
     tiny["questions"] = [q for q in fixture["questions"] if q["family"] == "unanswerable"][:1]
     tiny["corpus"] = fixture["corpus"][:1]
+    tiny.pop("fixture_sha256", None)
     traces, evidence = run_m02_retrieval_development(tiny, RecordingCLI())
     assert "capture" in calls and "search" in calls and "answer" in calls
     assert traces and traces[0]["case_id"] == traces[0]["question_id"]
@@ -3534,6 +3535,7 @@ def test_m02_bundle_declares_backend_explicitly(tmp_path: Path) -> None:
     tiny = dict(fixture)
     tiny["questions"] = fixture["questions"][:1]
     tiny["corpus"] = fixture["corpus"][:1]
+    tiny.pop("fixture_sha256", None)
     traces, evidence = run_m02_retrieval_development(tiny, LocalCLI())
     exercised = evidence["backend"]
     assert exercised == "local"
@@ -3667,10 +3669,44 @@ def test_m02_adapter_and_profile_resolve() -> None:
 
 
 def test_m02_custody_rejects_wellformed_fake_hashes() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m02_retrieval_development
+    from eval.public import wmbs_m02 as m02
     from eval.public.runner import load_registry
 
-    suite = dict(_m02_suite())
+    class LocalCLI:
+        backend = "local"
+
+        def capture(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"ok": True}
+
+        def search(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"hits": []}
+
+        def answer(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"answer": None, "abstained": False}
+
+    fixture = m02.load_fixture()
+    tiny = dict(fixture)
+    tiny["questions"] = fixture["questions"][:1]
+    tiny["corpus"] = fixture["corpus"][:1]
+    tiny.pop("fixture_sha256", None)
     fake = "a" * 64
+    suite = _m02_suite()
     assert suite["dataset_sha256"] != fake
+    assert suite["corpus_documents"] == 240
+    assert suite["specified_corpus_events"] == 2000
     registry = load_registry()
     assert registry["wmbs-m02-retrieval-development"]["dataset_sha256"] == suite["dataset_sha256"]
+    assert registry["wmbs-m02-retrieval-development"]["corpus_documents"] == 240
+    assert registry["wmbs-m02-retrieval-development"]["specified_corpus_events"] == 2000
+
+    forged_digest = dict(tiny)
+    forged_digest["fixture_sha256"] = fake
+    with pytest.raises(ValueError, match="fixture_sha256"):
+        run_m02_retrieval_development(forged_digest, LocalCLI())
+    forged_schema = dict(tiny)
+    forged_schema["schema_id"] = fake
+    with pytest.raises(ValueError, match="schema_id"):
+        run_m02_retrieval_development(forged_schema, LocalCLI())
+    traces, evidence = run_m02_retrieval_development(tiny, LocalCLI())
+    assert traces and evidence["backend"] == "local"

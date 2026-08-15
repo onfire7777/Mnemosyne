@@ -247,7 +247,9 @@
     "scoring_profile": "wmbs-m02-retrieval-v1",
     "split_role": "development",
     "track_kind": "ENHANCED-SUCCESSOR",
-    "upstream_comparable": false
+    "upstream_comparable": false,
+    "corpus_documents": 240,
+    "specified_corpus_events": 2000
   },
   "wmbs-m03-valid-time-development": {
     "adapter": "wmbs-m03-valid-time-reference",
