@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@d7eefb7c`; PR #96 independently delivered the development-only M02/M04/M05 evaluation oracles (CI `30744318093`), PR #97 adjudicated the round-43 review (post-merge CI `30775783472`), PR #98 corrected PR #97's retired-loop claim back to paused (post-merge CI `30788531829`), and PR #99 merged the T7 and T8 documentation-and-tests nodes (exact head `2375aba5`, exact-head CI `30808291831`) without pre-recording itself, so its post-merge run `30810160121` failed the baseline lapse detector and left main red until this round's recomputation. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. No source node is admitted; T7 (disclosing PR #96's oracles) and T8 (the Round-0 M01-M20 completeness inventory and its drift test) are now MERGED as PR #99, and the one remaining admitted writer is T9, the bounded public-harness node registering the already-tested M03 valid-time development cell so it is reachable from run_public_suite. None of the three moves an admission state, publication claim, or progress counter. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-03T06:49:14Z"
-last_activity: 2026-08-03
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@7b6c5a12`; T7 and T8 were delivered by PR #99, and T9 was delivered by PR #100 at exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`, all-required-green exact-head CI plus Greptile run `31854371658`, merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at `2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. PR #105 then merged from exact head `d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI passed in run `31856191898`, as merge `7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at `2026-08-15T01:46:23Z`; post-merge run `31857410462` failed solely at the canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent from the lifecycle authorities, which PR #108 repairs here. No source node or writer remains admitted from the T7-T9 wave. T9 changed M03 reachability only: M03 remains `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with no fixture, scorer, schema, admission-state, successor-node, or progress-counter change. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-15T01:46:23Z"
+last_activity: 2026-08-15
 progress:
   total_phases: 7
   completed_phases: 2
@@ -90,16 +90,30 @@ its own `docs/plans/` lease. `T6` delivered the three-file recomputation plus
 the r42/r43 records as PR #95 at `main@42abaab7` (exact head `d7c0938f`,
 exact-head CI `30737466988`, post-merge CI `30738303497`). It admitted no source
 node and no successor node, and through PR #96 the recorded position was that
-no lifecycle writer is now admitted. PR #97 and PR #98 then advanced canonical
-`main` to `main@b8673031`, and three writers are admitted from that baseline:
-the bounded documentation-and-tests nodes `T7` (the M02/M04/M05 Stage-A
-disclosure, now delivered together with its pinning suite) and `T8` (the
-Round-0 M01-M20 completeness inventory, its derivations, and its drift test,
-also delivered), neither of which admits a source node; and `T9`, the
-public-harness Stage-B node that registers the already-merged, already-tested
-M03 valid-time development cell so it is reachable from `run_public_suite`.
-`T9` authorizes M03 only, changes no fixture byte, scorer, or schema, advances
-no admission state, and admits no successor node. The plan-doc
+no lifecycle writer is now admitted. PRs #97 and #98 then advanced canonical
+`main` to `main@b8673031`; PR #99 delivered the bounded
+documentation-and-tests nodes `T7` (the M02/M04/M05 Stage-A disclosure and its
+pinning suite) and `T8` (the Round-0 M01-M20 completeness inventory, its
+derivations, and its drift test) at `main@d7eefb7c`. PR #101 discharged that
+merge's baseline lapse, and PRs #103, #106, and #107 advanced canonical history
+through `main@7f305090`. PR #100 then delivered `T9`, the public-harness Stage-B
+node that makes the already-merged, already-tested M03 valid-time development
+cell reachable from `run_public_suite`, at `main@b3570937` (exact head
+`e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
+Greptile green in run `31854371658`, merge
+`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`2026-08-15T01:12:26Z`, successful post-merge CI `31855873247`). `T7`, `T8`,
+and `T9` are now all delivered. PR #105 then merged from exact head
+`d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI
+passed in run `31856191898`, as merge
+`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`2026-08-15T01:46:23Z`. Its post-merge run `31857410462` failed solely at
+`tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+(1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent
+from the lifecycle authorities; PR #108 repairs that traceability lapse. No
+writer remains admitted from the T7-T9 wave.
+`T9` authorizes M03 only, changes no fixture byte, scorer, schema, or admission
+state, and admits no successor node or source node. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
 pilots-plan checkpoint is a correction plus PR #90's receipt block — it
 rewrites one stale paragraph and adds a new twelve-line `Gap-disclosure
@@ -348,11 +362,22 @@ Context** above for the PR #81, #82, #83, and #84 whole-memory delivery
 receipts, **Phase 13-15 Planning and Source Status** for the Phase 13 source
 contracts merged through PR #86, and **Current Position → Last activity** for
 the PR #87, PR #88, PR #89, PR #90, PR #91, PR #92, PR #93, PR #94, PR #95, PR #96,
-PR #97, and PR #98 merge receipts. The
-current canonical baseline is `main@d7eefb7c` (PR #99, exact head `2375aba5`,
-exact-head CI `30808291831`, post-merge CI `30810160121`, which failed because
-PR #99 merged after the then-recorded baseline `main@b8673031` without
-pre-recording itself). PR #90 is
+PR #97, and PR #98 merge receipts. PR #99 delivered `T7` and `T8` at
+`main@d7eefb7c` (exact head `2375aba5`, exact-head CI `30808291831`); PR #101
+discharged its baseline lapse, and PRs #103, #106, and #107 advanced the merged
+history through `main@7f305090`. PR #100 delivered `T9` from exact head
+`e072dda5a9e7ef078d317156c49c54bbee7a5124` after all required exact-head CI and
+Greptile passed in run `31854371658`, merged as
+`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`2026-08-15T01:12:26Z`, and passed post-merge CI `31855873247`. The current
+canonical baseline is `main@7b6c5a12`: PR #105 merged from exact head
+`d60857fdf61122106eeede789432dd5bac955137` after all required exact-head CI
+passed in run `31856191898`, as merge
+`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`2026-08-15T01:46:23Z`; post-merge run `31857410462` failed solely at the
+canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191
+deselected) because PR #105 was absent from the lifecycle authorities. PR #108
+repairs that lapse. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
@@ -360,16 +385,10 @@ PR #96 independently delivered development-only M02/M04/M05 evaluation
 oracles; PR #97 adjudicated the round-43 review at `main@71e492b4` (exact head
 `13c05d65`, exact-head CI `30774834604`, post-merge CI `30775783472`); and
 PR #98 corrected PR #97's overstated "loop retired" claim back to paused.
-Node `T7` is admitted from this baseline for documentation and tests only —
-the M02/M04/M05 Stage-A gap disclosures and their pinning tests, both now
-delivered — and admits no source node and no successor node. Node `T8` is
-admitted alongside it, and the two are not lease-disjoint — they share
-`GOAL.md`, `.planning/STATE.md`, the lease map, and `docs/plans/`, so they land
-as one serialized GoalEx lifecycle writer in a single PR. `T8` is also
-documentation and tests only: the Round-0 M01-M20
-module completeness inventory, its line-level derivations, and the drift test
-that pins the inventory to the tree, all now delivered. Node `T9` is admitted
-as the public-harness Stage-B M03 registry-admission node: it registers the
+Nodes `T7` and `T8` were delivered together by PR #99; they remain
+documentation and tests only and admit no source or successor node. Node `T9`
+was delivered by PR #100 as the public-harness Stage-B M03 registry-admission
+node: it registers the
 existing `wmbs-m03-valid-time-development` cell — already fixture-backed,
 scorer-backed, adapter-backed, and unit-tested, but unreachable from
 `run_public_suite` for want of a registry entry, two `runner.py` keys, and the
@@ -377,7 +396,8 @@ matching `allowed_profile` label in `eval/public/bundle.py` — and nothing else
 fixture byte, scorer logic, or schema, leaves M03 at `PROPOSED` /
 `publishable:false` / `pbpp_headline_eligible:false` with full bitemporal
 transaction-time retained as a hard deferral, moves no progress counter, and
-admits no successor node.
+admits no successor node or source node. No writer remains admitted from the
+`T7`-`T9` wave.
 Evidence and publication boundaries are unchanged.
 
 Latest checkpoint (2026-07-23): the answering-ort custody protocol landed on `main` — PR #42 as `main@074c101` (`feat: add answering ort custody protocol`, merged `059bb82`) and PR #43 as `main@bd48b3e` (`fix(answering-ort): load custody identity from env`). `services/answering-ort/` is a bounded, local-only Rust ONNX (`ort`) compact-answering sidecar skeleton (W5): it loads its custody identity from the environment and fails closed with `runtime_unavailable`; it does not load an ONNX model, produce model outputs, or claim runtime parity with another runtime. No public benchmark, headline SLO, or Tier-B production-evidence claim changed. W1 production parity, grounded-reader development QA, the single protected attempt, R3/R4 live rotation, and the W4/W5 external-adapter GATEs remain operator-gated and were neither run nor claimed here.
