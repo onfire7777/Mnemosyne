@@ -16,8 +16,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from eval.public import wmbs_m02 as m02
 from eval.public import wmbs_m04 as m04
 from eval.public import wmbs_m05 as m05
