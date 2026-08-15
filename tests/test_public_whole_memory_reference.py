@@ -574,16 +574,16 @@ def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]
         NESTED_ARTIFACT_REFS[identifier]: artifact
         for identifier, artifact in NESTED_ARTIFACTS.items()
     }
-    for field, definition in [
+    for field_name, definition in [
         ("adapter_contract_ref", "AdapterContract"),
         ("data_source_ref", "DataSourceContract"),
         ("scorer_ref", "ScorerContract"),
     ]:
         artifact = EVIDENCE_FIXTURES[definition]
         reference = f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
-        record[field] = reference
+        record[field_name] = reference
         artifacts[reference] = artifact
-    for field, definition in [
+    for field_name, definition in [
         ("baseline_manifest_ref", "BaselineManifest"),
         ("power_plan_ref", "PowerPlan"),
         ("sandbox_receipt_ref", "SandboxReceipt"),
@@ -595,7 +595,7 @@ def _resolved_feasibility_bundle() -> tuple[dict[str, object], dict[str, object]
         reference = (
             f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
         )
-        record[field] = reference
+        record[field_name] = reference
         artifacts[reference] = artifact
     smoke_result_ref = EVIDENCE_FIXTURES["SmokeReceipt"]["result_ref"]
     assert isinstance(smoke_result_ref, str)
@@ -743,9 +743,9 @@ def test_every_reachable_object_rejects_missing_and_unknown_fields(
 
     for path, object_schema in instances:
         assert object_schema.get("additionalProperties") is False
-        for field in object_schema.get("required", []):
+        for field_name in object_schema.get("required", []):
             missing = deepcopy(payload)
-            _at_path(missing, path).pop(field)  # type: ignore[union-attr]
+            _at_path(missing, path).pop(field_name)  # type: ignore[union-attr]
             with pytest.raises(abi.WholeMemoryValidationError):
                 abi.validate_definition(definition, missing)
 
@@ -1539,15 +1539,15 @@ def test_pilot_readiness_rejects_unbound_sandbox_profile_digest() -> None:
             "profile_sha256": DIGEST_C,
         }
     )
-    for field, artifact in (
+    for field_name, artifact in (
         ("sandbox_receipt_ref", sandbox),
         ("resource_receipt_ref", resource),
     ):
-        old_ref = record[field]
+        old_ref = record[field_name]
         assert isinstance(old_ref, str)
         artifacts.pop(old_ref)
         new_ref = f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
-        record[field] = new_ref
+        record[field_name] = new_ref
         artifacts[new_ref] = artifact
     record = _rebind_artifact(record)
 
@@ -1668,15 +1668,15 @@ def test_pilot_readiness_requires_enforced_offline_l16_controls(
             **resource_changes,
         }
     )
-    for field, artifact in (
+    for field_name, artifact in (
         ("sandbox_receipt_ref", sandbox),
         ("resource_receipt_ref", resource),
     ):
-        old_ref = record[field]
+        old_ref = record[field_name]
         assert isinstance(old_ref, str)
         artifacts.pop(old_ref)
         new_ref = f"{artifact['schema_id']}@sha256:{artifact['artifact_sha256']}"
-        record[field] = new_ref
+        record[field_name] = new_ref
         artifacts[new_ref] = artifact
     record = _rebind_artifact(record)
 
