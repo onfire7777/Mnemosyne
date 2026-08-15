@@ -297,16 +297,75 @@ def _m04_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
     return dict(benchmark)
 
 
-def _m04_ingest(cli: MnemoCLI, tenant: str, user: str, subject: str, events: list[dict[str, Any]]) -> None:
+def _m04_asserted_value(event: Mapping[str, Any]) -> str:
+    """Extract the scorer-compared value. Never assert the content sentence."""
+    content = event.get("content")
+    if not isinstance(content, str) or "value=" not in content:
+        raise ValueError("M04 event content does not declare a value")
+    value = content.rsplit("value=", 1)[1].strip().split()[0]
+    if not value:
+        raise ValueError("M04 event content does not declare a value")
+    return value
+
+
+def _m04_ingest(cli: MnemoCLI, tenant: str, subject: str, events: list[dict[str, Any]]) -> None:
     for event in events:
+        actor = event.get("actor_label")
+        if not isinstance(actor, str) or not actor.strip():
+            raise ValueError("M04 event is missing actor_label")
         cli.assert_fact(
             tenant,
             subject,
             "value",
-            event["content"],
-            user=user,
+            _m04_asserted_value(event),
+            user=actor,
             valid_from=event["valid_from"],
         )
+
+
+def _m04_values_as_of(events: list[dict[str, Any]], as_of: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        start = event.get("valid_from")
+        end = event.get("valid_to")
+        if not isinstance(start, str) or start > as_of:
+            continue
+        if isinstance(end, str) and end <= as_of:
+            continue
+        value = _m04_asserted_value(event)
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+    return values
+
+
+def _m04_monotonic_violation(
+    events: list[dict[str, Any]],
+    current_objects: list[str],
+    historical_objects: list[str],
+    current_as_of: str,
+    historical_as_of: str,
+) -> bool:
+    """True when the observed projection dropped in-force fixture evidence."""
+    expected_current = set(_m04_values_as_of(events, current_as_of))
+    expected_historical = set(_m04_values_as_of(events, historical_as_of))
+    return not (
+        expected_current <= set(current_objects)
+        and expected_historical <= set(historical_objects)
+    )
+
+
+def _m04_answer(cli: MnemoCLI, question: str, context: Mapping[str, Any]) -> Mapping[str, Any]:
+    """cmd_answer aborts unless --evaluation-read-only is on the parent CLI."""
+    flags = list(getattr(cli, "global_flags", []) or [])
+    if "--evaluation-read-only" not in flags:
+        flags.append("--evaluation-read-only")
+    try:
+        answer_cli = replace(cli, global_flags=flags)
+    except TypeError:
+        answer_cli = cli
+    return answer_cli.answer(question, context) or {}
 
 
 def _m04_as_of(cli: MnemoCLI, tenant: str, subject: str, as_of: str) -> list[str]:
@@ -357,21 +416,21 @@ def run_m04_conflict_development(
         raise ValueError("M04 conflict development requires a live MnemoCLI")
     fixture = _m04_bind_fixture(benchmark)
     traces: list[dict[str, Any]] = []
-    user = "reference-harness"
     for case in fixture["cases"]:
         gold = case["gold"]
         case_id = case["case_id"]
         for perm, events in case["events_by_permutation"].items():
             tenant = f"wmbs-m04-{case_id}-{perm}"
-            _m04_ingest(cli, tenant, user, case_id, events)
+            _m04_ingest(cli, tenant, case_id, events)
             current_objects = _m04_as_of(cli, tenant, case_id, gold["current_as_of"])
             historical_objects = _m04_as_of(
                 cli, tenant, case_id, gold["historical_as_of"]
             )
-            payload = cli.answer(
+            payload = _m04_answer(
+                cli,
                 f"current as of {gold['current_as_of']}",
                 {"tenant_id": tenant},
-            ) or {}
+            )
             traces.append(
                 {
                     "case_id": case_id,
@@ -385,14 +444,20 @@ def run_m04_conflict_development(
                         "as_of": gold["historical_as_of"],
                     },
                     "answer": _m04_answer_envelope(payload),
-                    "monotonic_violation": False,
+                    "monotonic_violation": _m04_monotonic_violation(
+                        events,
+                        current_objects,
+                        historical_objects,
+                        gold["current_as_of"],
+                        gold["historical_as_of"],
+                    ),
                 }
             )
             for source_id in gold["ablation_objects"]:
                 ab_tenant = f"{tenant}-ab-{source_id}"
                 kept = [event for event in events if event["source_id"] != source_id]
                 if kept:
-                    _m04_ingest(cli, ab_tenant, user, case_id, kept)
+                    _m04_ingest(cli, ab_tenant, case_id, kept)
                 traces.append(
                     {
                         "case_id": case_id,
