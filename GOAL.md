@@ -234,10 +234,13 @@ when all three lifecycle blobs exactly equal that parent, every non-lifecycle
 blob remains equal to the corresponding content anchor, the required/native
 exact-head CI is green, a fresh security review finds no issue, local/remote/
 hosted heads agree, and all review threads are clear. Any lifecycle divergence
-or non-lifecycle blob change voids the reservation. The candidate must be the
-only commit reachable beyond the permitted parent and immutable anchor, so
-transient forbidden changes cannot remain reachable in its history. The
-controller remains the sole CI integration owner. Merge commits for the remaining stack only in the
+or non-lifecycle blob change voids the reservation. The immutable anchor must
+be an ancestor of the candidate and have at most one commit outside the
+permitted parent; the candidate must be the only commit outside their combined
+histories. If `main` moves again, build a fresh candidate from that anchor and
+new parent rather than chaining topology commits. This prevents transient
+forbidden changes from remaining reachable. The controller remains the sole CI
+integration owner. Merge commits for the remaining stack only in the
 order #110 -> #111 -> #112 are permitted, with
 successful post-merge `main` CI required before refreshing and merging each
 next edge. Those already-merged T10 edges predate this executable gate and
@@ -252,7 +255,7 @@ candidate checkout's copy as the launcher:
 
 ```sh
 (
-  expected_verifier_oid=c264c02c72d07fbc7340dae837d0efaf5b1f786f
+  expected_verifier_oid=3af5fbb6aec0122e3c078a61832c254d1348d575
   resolved_parent="$(
     git --no-replace-objects rev-parse --verify \
       "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null

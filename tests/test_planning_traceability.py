@@ -35,7 +35,7 @@ GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
-EXPECTED_TOPOLOGY_VERIFIER_OID = "c264c02c72d07fbc7340dae837d0efaf5b1f786f"
+EXPECTED_TOPOLOGY_VERIFIER_OID = "3af5fbb6aec0122e3c078a61832c254d1348d575"
 TOPOLOGY_BOOTSTRAP = """import sys
 
 source = sys.argv.pop(1)
@@ -1147,6 +1147,28 @@ def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
     assert result.stdout == "candidate does not descend from permitted parent\n"
 
 
+def test_topology_refresh_verifier_requires_anchor_ancestry(tmp_path: Path) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    anchor_tree = subprocess.run(
+        ["git", "rev-parse", f"{anchor}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    unrelated_anchor = subprocess.run(
+        ["git", "commit-tree", anchor_tree, "-m", "unrelated anchor"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, unrelated_anchor)
+    assert result.returncode == 1
+    assert result.stdout == "candidate does not descend from immutable anchor\n"
+
+
 def test_topology_refresh_verifier_ignores_git_replacement_refs(tmp_path: Path) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
@@ -1230,6 +1252,87 @@ def test_topology_refresh_verifier_rejects_reverted_intermediate_drift(
     assert (
         result.stdout
         == "candidate history contains commits outside permitted parent and immutable anchor\n"
+    )
+
+
+def test_topology_refresh_verifier_rejects_reverted_anchor_drift(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, base_anchor = _topology_fixture(tmp_path)
+    base_tree = subprocess.run(
+        ["git", "rev-parse", f"{base_anchor}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    secret_blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=repo,
+        input="reachable but absent from anchor tip\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    root_entries = subprocess.run(
+        ["git", "ls-tree", base_anchor],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    secret_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input=root_entries + f"100644 blob {secret_blob}\tsecret.txt\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    transient = subprocess.run(
+        ["git", "commit-tree", secret_tree, "-p", base_anchor, "-m", "transient"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    anchor = subprocess.run(
+        ["git", "commit-tree", base_tree, "-p", transient, "-m", "revert"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate_tree = subprocess.run(
+        ["git", "rev-parse", f"{parent}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        [
+            "git",
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            parent,
+            "-p",
+            anchor,
+            "-m",
+            "candidate",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert (
+        result.stdout
+        == "immutable anchor history contains more than one commit outside permitted parent\n"
     )
 
 
