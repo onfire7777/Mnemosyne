@@ -241,10 +241,24 @@ successful post-merge `main` CI required before refreshing and merging each
 next edge. Before merging, run:
 
 ```sh
-python3 infra/scripts/verify-topology-refresh.py \
-  "$CANDIDATE_SHA" \
-  "$PERMITTED_PARENT_SHA" \
-  "$IMMUTABLE_ANCHOR_SHA"
+(
+  resolved_parent="$(
+    git --no-replace-objects rev-parse --verify \
+      "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null
+  )" &&
+  [ "$resolved_parent" = "$PERMITTED_PARENT_SHA" ] &&
+  topology_verifier="$(
+    git --no-replace-objects show \
+      "$resolved_parent:infra/scripts/verify-topology-refresh.py" 2>/dev/null
+  )" || {
+    printf '%s\n' 'error: cannot read permitted-parent topology verifier'
+    exit 2
+  }
+  python3 -I -c "$topology_verifier" \
+    "$CANDIDATE_SHA" \
+    "$PERMITTED_PARENT_SHA" \
+    "$IMMUTABLE_ANCHOR_SHA"
+)
 ```
 
 It exits 0 only for a valid topology, 1 for contract deviations, and 2 for

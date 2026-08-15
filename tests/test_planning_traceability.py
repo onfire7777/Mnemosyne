@@ -797,6 +797,10 @@ def _topology_fixture(tmp_path: Path) -> tuple[Path, str, str, str]:
             "docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md",
             "anchor lease\n",
         ),
+        (
+            "infra/scripts/verify-topology-refresh.py",
+            TOPOLOGY_VERIFIER.read_text(encoding="utf-8"),
+        ),
         ("immutable.txt", "anchor content\n"),
     ):
         file = repo / path
@@ -823,6 +827,48 @@ def _verify_topology(repo: Path, *refs: str) -> subprocess.CompletedProcess[str]
     )
 
 
+def _verify_topology_from_parent(
+    repo: Path, candidate: str, parent: str, anchor: str
+) -> subprocess.CompletedProcess[str]:
+    resolved = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "--verify", f"{parent}^{{commit}}"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if resolved.returncode or resolved.stdout.strip() != parent:
+        return subprocess.CompletedProcess(
+            resolved.args,
+            2,
+            stdout="error: cannot read permitted-parent topology verifier\n",
+            stderr="",
+        )
+    source = subprocess.run(
+        [
+            "git",
+            "--no-replace-objects",
+            "show",
+            f"{resolved.stdout.strip()}:infra/scripts/verify-topology-refresh.py",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if source.returncode:
+        return subprocess.CompletedProcess(
+            source.args,
+            2,
+            stdout="error: cannot read permitted-parent topology verifier\n",
+            stderr="",
+        )
+    return subprocess.run(
+        [sys.executable, "-I", "-c", source.stdout, candidate, parent, anchor],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _topology_module() -> object:
     spec = importlib.util.spec_from_file_location("topology_verifier", TOPOLOGY_VERIFIER)
     assert spec and spec.loader
@@ -838,6 +884,66 @@ def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     result = _verify_topology(repo, candidate, parent, anchor)
     assert result.returncode == 0, result.stdout
     assert not result.stdout
+
+
+def test_topology_refresh_verifier_executes_trusted_parent_bytes(tmp_path: Path) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
+    candidate_verifier = repo / "infra" / "scripts" / "verify-topology-refresh.py"
+    candidate_verifier.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "immutable.txt", str(candidate_verifier.relative_to(repo))],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "commit", "-qm", "tamper with verifier"], cwd=repo, check=True)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    untrusted = subprocess.run(
+        [sys.executable, "-I", str(candidate_verifier), candidate, parent, anchor],
+        cwd=repo,
+    )
+    assert untrusted.returncode == 0
+    trusted = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert trusted.returncode == 1
+    assert "immutable path differs from anchor: immutable.txt" in trusted.stdout
+
+
+def test_topology_refresh_verifier_requires_trusted_parent_bytes(tmp_path: Path) -> None:
+    repo, _, _, anchor = _topology_fixture(tmp_path)
+    (repo / "infra" / "scripts" / "verify-topology-refresh.py").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "remove verifier"], cwd=repo, check=True)
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert result.returncode == 2
+    assert result.stdout == "error: cannot read permitted-parent topology verifier\n"
+    abbreviated = _verify_topology_from_parent(repo, candidate, parent[:12], anchor)
+    assert abbreviated.returncode == 2
+    assert abbreviated.stdout == result.stdout
 
 
 def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
@@ -1020,8 +1126,21 @@ def test_topology_refresh_verifier_normalizes_git_launch_error(monkeypatch, caps
 def test_goal_documents_topology_refresh_verifier_invocation() -> None:
     goal = GOAL.read_text(encoding="utf-8")
     assert (
-        'python3 infra/scripts/verify-topology-refresh.py \\\n'
-        '  "$CANDIDATE_SHA" \\\n'
-        '  "$PERMITTED_PARENT_SHA" \\\n'
-        '  "$IMMUTABLE_ANCHOR_SHA"'
+        '  resolved_parent="$(\n'
+        '    git --no-replace-objects rev-parse --verify \\\n'
+        '      "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null\n'
+        '  )" &&\n'
+        '  [ "$resolved_parent" = "$PERMITTED_PARENT_SHA" ] &&\n'
+        '  topology_verifier="$(\n'
+        '    git --no-replace-objects show \\\n'
+        '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
+        '2>/dev/null\n'
+        '  )" || {\n'
+        "    printf '%s\\n' 'error: cannot read permitted-parent topology verifier'\n"
+        '    exit 2\n'
+        '  }\n'
+        '  python3 -I -c "$topology_verifier" \\\n'
+        '    "$CANDIDATE_SHA" \\\n'
+        '    "$PERMITTED_PARENT_SHA" \\\n'
+        '    "$IMMUTABLE_ANCHOR_SHA"'
     ) in goal
