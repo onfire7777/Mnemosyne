@@ -7,6 +7,7 @@ import math
 import re
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -3772,17 +3773,22 @@ def _m04_gold_traces(fixture: dict[str, object]) -> list[dict[str, object]]:
     return traces
 
 
+@dataclass
 class _M04RecordingCLI:
-    backend = "local"
+    backend: str = "local"
+    global_flags: list[str] = field(default_factory=list)
+    calls: list[str] = field(default_factory=list)
+    contexts: list[object] = field(default_factory=list)
+    assert_kwargs: list[dict[str, object]] = field(default_factory=list)
+    assert_users: list[object] = field(default_factory=list)
+    assert_objects: list[object] = field(default_factory=list)
+    answer_flags: list[list[str]] = field(default_factory=list)
 
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-        self.contexts: list[object] = []
-        self.assert_kwargs: list[dict[str, object]] = []
-
-    def assert_fact(self, *args: object, **kwargs: object) -> object:
+    def assert_fact(self, tenant: object, subject: object, predicate: object, obj: object, **kwargs: object) -> object:
         self.calls.append("assert_fact")
         self.assert_kwargs.append(dict(kwargs))
+        self.assert_users.append(kwargs.get("user"))
+        self.assert_objects.append(obj)
         return {"ok": True}
 
     def graph_as_of(self, *args: object, **kwargs: object) -> dict[str, object]:
@@ -3792,6 +3798,7 @@ class _M04RecordingCLI:
     def answer(self, question: object, context: object, **kwargs: object) -> dict[str, object]:
         self.calls.append("answer")
         self.contexts.append(context)
+        self.answer_flags.append(list(self.global_flags))
         return {"answer": None}
 
 
@@ -3831,10 +3838,16 @@ def test_m04_adapter_issues_real_cli_calls() -> None:
     assert all("trust_tier" not in kwargs for kwargs in cli.assert_kwargs)
     assert all("source_trust_tier" not in kwargs for kwargs in cli.assert_kwargs)
     assert all("confidence" not in kwargs for kwargs in cli.assert_kwargs)
+    assert "reference-harness" not in cli.assert_users
+    assert set(cli.assert_users) == {"actor-a", "actor-b", "actor-c"}
+    assert cli.assert_objects
+    assert all(isinstance(obj, str) and "value=" not in obj and " " not in obj for obj in cli.assert_objects)
+    assert all("--evaluation-read-only" in flags for flags in cli.answer_flags)
     observations = [row for row in traces if "source_id" not in row]
     assert observations[0]["current"]["objects"] == []
     assert observations[0]["answer"]["answer_text"] is None
     assert observations[0]["answer"]["abstained"] is True
+    assert observations[0]["monotonic_violation"] is True
     assert evidence["backend"] == "local"
     with pytest.raises(ValueError, match="live MnemoCLI"):
         run_m04_conflict_development(tiny, None)
@@ -3843,9 +3856,6 @@ def test_m04_adapter_issues_real_cli_calls() -> None:
 def test_m04_bundle_declares_backend_explicitly(tmp_path: Path) -> None:
     from eval.public.adapters.whole_memory_reference import run_m04_conflict_development
     from eval.public.runner import _m02_bundle_metadata
-
-    class OtherCLI(_M04RecordingCLI):
-        backend = "sqlite"
 
     tiny = _m04_tiny_fixture()
     traces, evidence = run_m04_conflict_development(tiny, _M04RecordingCLI())
@@ -3861,7 +3871,7 @@ def test_m04_bundle_declares_backend_explicitly(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="fabricated backend"):
         _m02_bundle_metadata(suite, suite_name, backend="postgres", exercised=exercised)
 
-    _other_traces, other_evidence = run_m04_conflict_development(tiny, OtherCLI())
+    _other_traces, other_evidence = run_m04_conflict_development(tiny, _M04RecordingCLI(backend="sqlite"))
     assert other_evidence["backend"] == "sqlite"
     other_metadata = _m02_bundle_metadata(
         suite, suite_name, backend=other_evidence["backend"], exercised=other_evidence["backend"]
@@ -3980,3 +3990,4 @@ def test_m04_adapter_does_not_substitute_gold() -> None:
         assert row["current"]["objects"] == []
         assert row["answer"]["answer_text"] not in set(gold["current_objects"])
         assert row["answer"]["answer_text"] is None
+        assert row["monotonic_violation"] is True
