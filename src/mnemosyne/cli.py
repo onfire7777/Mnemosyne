@@ -27,6 +27,8 @@ from urllib import error as urlerror, request as urlrequest
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
+from mnemosyne.command_line import split_command
+
 if TYPE_CHECKING:
     from cryptography import x509
     from mnemosyne.consolidation import (
@@ -9444,7 +9446,7 @@ def _probe_worm_copy_evidence(args: argparse.Namespace, document: "dict[str, Any
         return worm_copy_evidence(enabled=False, external=False, retained=False, error="no verified chain document")
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            split_command(command),
             input=json.dumps(document).encode("utf-8"),
             capture_output=True,
             timeout=float(getattr(args, "audit_worm_timeout", 120.0)),
@@ -14081,7 +14083,7 @@ def _verify_provider_manifest_command_arguments(
                     )
                     continue
                 try:
-                    command_parts = shlex.split(item)
+                    command_parts = split_command(item)
                 except ValueError as exc:
                     _production_evidence_finding(
                         findings,
@@ -15646,7 +15648,7 @@ def _production_evidence_normalize_manifest_value(value: Any, *, path_rewrites: 
         normalized = value
         for source_path, snapshot_path in sorted(path_rewrites.items(), key=lambda item: len(item[0]), reverse=True):
             pattern = re.compile(rf"(?<![\w.-]){re.escape(source_path)}(?=$|[\s\"',;:\]\)]|[/\\])")
-            normalized = pattern.sub(snapshot_path, normalized)
+            normalized = pattern.sub(lambda _match: snapshot_path, normalized)
         return normalized
     if isinstance(value, list):
         return [_production_evidence_normalize_manifest_value(item, path_rewrites=path_rewrites) for item in value]

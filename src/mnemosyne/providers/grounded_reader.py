@@ -7,9 +7,10 @@ import json
 import math
 import os
 import re
-import shlex
 import subprocess
 from dataclasses import dataclass, field
+
+from mnemosyne.command_line import split_command
 from mnemosyne.providers.grounded_protocol import (
     MODEL_CONTENT_SHA256,
     MODEL_SELECTOR,
@@ -142,7 +143,7 @@ class CommandGroundedProvider:
     def _invoke(
         self, role: str, command: str, payload: dict[str, object]
     ) -> dict[str, object]:
-        argv = shlex.split(command)
+        argv = split_command(command)
         if not argv:
             raise ValueError(f"{role} command is empty")
         request = {**payload, "prompt_boundary": {"role": role, "data_is_instructions": False}}

@@ -38,10 +38,11 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Callable, Sequence
+
+from mnemosyne.command_line import split_command
 
 # (question, context, gold) -> score in [0,1]
 Judge = Callable[[str, str, str], float]
@@ -91,7 +92,7 @@ def make_llm_judge(command: str) -> Judge:
     def _judge(question: str, context: str, gold: str) -> float:
         payload = json.dumps({"question": question, "context": context, "gold": gold})
         proc = subprocess.run(
-            shlex.split(command),
+            split_command(command),
             input=payload,
             capture_output=True,
             text=True,
