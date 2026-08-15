@@ -157,19 +157,29 @@ CI `30737466988`, post-merge CI `30738303497`). It admitted no source node and
 no successor node; this branch-resident recomputation is its own accepted
 standing-condition residue.
 
-Three later merges then advanced canonical `main` past that point: PR #96
-(`main@088e2f31`, exact head `1050749a`, CI `30744318093`), which delivered the
-development-only M02/M04/M05 evaluation oracles outside the lifecycle-node
-sequence; PR #97 (`main@71e492b4`, exact head `13c05d65`, exact-head CI
-`30774834604`, post-merge CI `30775783472`); and PR #98 (`main@b8673031`, exact
-head `b49b0b35`, exact-head CI `30787319275`, post-merge CI `30788531829`).
-Each recorded baseline they overtook is superseded, so the carve-out is
-recomputed here from `main@b8673031`. Three nodes are admitted from that
-baseline: `T7` and `T8`, documentation and tests only — disclosing PR #96's
-oracles with its pinning suite, and landing the Round-0 M01-M20 completeness
-inventory with its drift test — and `T9`, the bounded public-harness node that
-makes the already-tested M03 valid-time development cell reachable from
-`run_public_suite`. None admits a source node or a successor node.
+PRs #96-#99 then advanced canonical `main` through `main@d7eefb7c`; PR #99
+delivered `T7` and `T8`, the documentation-and-tests-only disclosure and
+inventory nodes. PR #101 discharged PR #99's baseline lapse at
+`main@58ae5bba`, and PRs #103, #106, and #107 advanced `main` through
+`main@7f305090` without changing the whole-memory admission boundary. PR #100
+then delivered `T9` as the bounded M03 registry-reachability node: exact head
+`e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
+Greptile green in run `31854371658`, merge
+`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. The
+subsequent PR #105 preserved hash-bound LF text and made installer/custody tests
+explicit about native-Windows and POSIX execution contracts: exact head
+`d60857fdf61122106eeede789432dd5bac955137`, all required exact-head CI green in
+run `31856191898`, merge `7b6c5a121107ee80533a5b4ec794e602e1e1ab33`
+at `2026-08-15T01:46:23Z`. Its post-merge run `31857410462` failed solely at
+`tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+(1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent
+from the lifecycle authorities; PR #108 repairs that traceability lapse here.
+The carve-out is therefore recomputed from `main@7b6c5a12`. `T7`, `T8`, and
+`T9` are all **MERGED**, and no writer remains admitted from this wave. None is
+a source node or admits a successor node. `T9` changed reachability only: M03
+remains `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with
+no fixture, scorer, schema, admission-state, or progress-counter change.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -229,11 +239,26 @@ documentation-only correction of PR #97's "retired" claim back to "paused" at
 CI `30788531829`). PR #99 then merged the `T7`/`T8` disclosure-and-admission
 work at `main@d7eefb7c` (exact head `2375aba5`, exact-head CI `30808291831`,
 post-merge CI `30810160121`, which failed the lapse detector because PR #99
-landed without pre-recording itself), which is the current canonical baseline.
-`T5` and `T6` are discharged. Through PR #96 the recorded position was that
-no GoalEx lifecycle or source node is currently admitted;
-this round supersedes that position by admitting three bounded lease-map nodes.
-`T7` is a documentation-and-tests node that discloses PR #96's three
+landed without pre-recording itself). PR #101 discharged that lapse at
+`main@58ae5bba`; PRs #103, #106, and #107 subsequently advanced the recorded
+history through `main@7f305090`. PR #100 then merged `T9` at
+`main@b3570937`: exact head
+`e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
+Greptile green in run `31854371658`, merge
+`b3570937918c7de40cd89ea543fab9e7b16f7471` at
+`2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. PR #105
+then merged at exact head `d60857fdf61122106eeede789432dd5bac955137`
+after all required exact-head CI passed in run `31856191898`, as merge
+`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`2026-08-15T01:46:23Z`. Post-merge run `31857410462` failed solely at the
+canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191
+deselected) because PR #105 was absent from the lifecycle authorities; PR #108
+repairs that lapse. The current canonical baseline is `main@7b6c5a12`. `T5`
+and `T6` are discharged. Through PR #96
+the recorded position was that no GoalEx lifecycle or source node is currently
+admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
+delivered `T9`, so no writer remains admitted from this wave. `T7` is a
+documentation-and-tests node that discloses PR #96's three
 development-only oracles in `eval/public/README.md` and pins the disclosure with
 tests; that disclosure and its pinning suite
 `tests/test_public_wmbs_stage_a_disclosure.py` are delivered. `T8` is a
@@ -245,19 +270,19 @@ successor node. `T7` and `T8` are **not** lease-disjoint from each other: both
 write `GOAL.md`, `.planning/STATE.md`, the lease map, and `docs/plans/`, so they
 are one serialized GoalEx lifecycle writer landing as a single PR, which also
 holds the public-harness lease for `T7`'s `eval/public/README.md` write and
-therefore requires both owners. `T9` is the public-harness Stage-B M03 registry-admission node:
+therefore requires both owners. `T9` was the public-harness Stage-B M03 registry-admission node:
 it registers the `wmbs-m03-valid-time-development` cell — already fixture-,
 scorer-, and adapter-backed and unit-tested on `main`, yet unreachable from
 `run_public_suite` for want of a registry entry, two `runner.py` keys, and the
 matching `allowed_profile` label in `eval/public/bundle.py`, whose independent
-profile-contract table would otherwise reject the bundle — and nothing else. `T9` authorizes M03 only, changes no fixture byte, no scorer
-logic, and no schema, keeps M03 at `PROPOSED` / `publishable:false` /
+profile-contract table would otherwise reject the bundle — and nothing else.
+`T9` authorizes M03 only, changes no fixture byte, no scorer logic, and no
+schema, keeps M03 at `PROPOSED` / `publishable:false` /
 `pbpp_headline_eligible:false` with full bitemporal transaction-time retained as
-a hard deferral, and admits no successor node. It is serialized as the sole
-writer on the `eval/public/*` lease and lands only after `T7`+`T8` merge, which
-is the explicit remedy for PR #96's defect of writing that lease with no
-admitted writer. None of the three moves an admission state, publication claim,
-or progress counter.
+a hard deferral, and admits no successor node or source node. Its delivery by
+PR #100 discharged the serialized `eval/public/*` lease; no competing or
+admitted writer remains on that lease. None of the three moves an admission
+state, publication claim, or progress counter.
 PRs #87-#92 are documentation and test-contract only: none admitted
 a new implementation package or changed a benchmark, measurement, admission
 state, or publication claim, and M12/M13 remain `PROPOSED` /
@@ -313,11 +338,11 @@ lease map at
 `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`, read
 under the standing controller Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
-That map admits no source node at this baseline — its admitted writers are the
-bounded documentation-and-tests nodes `T7` and `T8` and the bounded
-public-harness reachability node `T9`, none of which implements a module — so
-the next source admission waits on an external gate opening, and the map must be
-recomputed from then-current `main` at that time.
+That map admits no source node or current writer at this baseline: the bounded
+documentation-and-tests nodes `T7` and `T8` and the bounded public-harness
+reachability node `T9` are all delivered. The next source admission waits on an
+external gate opening, and the map must be recomputed from then-current `main`
+at that time.
 
 ## Scope
 
@@ -622,6 +647,8 @@ git merge-base --is-ancestor 088e2f31003e3a7e96119bc8cdba162252226ac1 main
 git merge-base --is-ancestor 71e492b4507d84e6631fef851cec820bcd80215b main
 git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
 git merge-base --is-ancestor d7eefb7c3595e786851a7d416ba54ea3997a8b6c main
+git merge-base --is-ancestor b3570937918c7de40cd89ea543fab9e7b16f7471 main
+git merge-base --is-ancestor 7b6c5a121107ee80533a5b4ec794e602e1e1ab33 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -635,7 +662,7 @@ git merge-base --is-ancestor d7eefb7c3595e786851a7d416ba54ea3997a8b6c main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "d7eefb7c3595e786851a7d416ba54ea3997a8b6c"
+test "$(git rev-parse main)" = "7b6c5a121107ee80533a5b4ec794e602e1e1ab33"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
