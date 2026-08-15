@@ -135,6 +135,138 @@ def run_m10_development(
     )
 
 
+
+
+def _m02_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 240 is the published corpus scale, not a test floor."""
+    from eval.public import wmbs_m02 as m02
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M02 retrieval development requires a fixture mapping")
+    corpus = benchmark.get("corpus")
+    questions = benchmark.get("questions")
+    if not isinstance(corpus, list) or not corpus:
+        raise ValueError("M02 retrieval development requires a non-empty corpus")
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("M02 retrieval development requires a non-empty question list")
+    identities = {
+        "fixture_id": m02.FIXTURE_ID,
+        "schema_id": m02.FIXTURE_SCHEMA_ID,
+        "generator_id": m02.GENERATOR_ID,
+        "generator_version": m02.GENERATOR_VERSION,
+    }
+    for field, expected in identities.items():
+        if field in benchmark and benchmark[field] != expected:
+            raise ValueError(f"M02 fixture {field} does not match {expected!r}")
+    declared = benchmark.get("fixture_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m02.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "fixture_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M02 fixture_sha256 does not bind the fixture bytes")
+    if len(corpus) == m02.CORPUS_SIZE:
+        return dict(m02.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def run_m02_retrieval_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M02 retrieval cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M02 retrieval development requires a live MnemoCLI")
+    fixture = _m02_bind_fixture(benchmark)
+    tenant = "wmbs-m02-development"
+    user = "reference-harness"
+    corpus = list(fixture["corpus"])
+    content_by_id = {doc["stable_item_id"]: doc["content"] for doc in corpus}
+    corpus_ids = set(content_by_id)
+
+    for document in corpus:
+        cli.capture(
+            tenant,
+            user,
+            document["content"],
+            source_identity=document["stable_item_id"],
+        )
+
+    traces: list[dict[str, Any]] = []
+    context = {"tenant_id": tenant}
+    for question in fixture["questions"]:
+        question_id = question["question_id"]
+        search_result = cli.search(tenant, question["text"])
+        ranked_ids = _m02_ranked_ids(search_result, corpus_ids, content_by_id)
+        payload = cli.answer(question["text"], context) or {}
+        traces.append(_m02_trace_from_cli(question_id, ranked_ids, payload))
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
+def _m02_trace_from_cli(
+    question_id: str, ranked_ids: list[str], payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Record the CLI payload. Never invent gold answers or forced abstention."""
+    answer = payload.get("answer")
+    if not isinstance(answer, str) or not answer:
+        answer = payload.get("answer_text")
+    if not isinstance(answer, str) or not answer:
+        answer = None
+    abstained = payload.get("abstained")
+    if type(abstained) is not bool:
+        abstained = False
+    return {
+        "answer": answer,
+        "abstained": abstained,
+        "case_id": question_id,
+        "question_id": question_id,
+        "ranked_hits": [
+            {"rank": rank, "stable_item_id": item_id}
+            for rank, item_id in enumerate(ranked_ids, 1)
+        ],
+    }
+
+
+def _m02_ranked_ids(
+    search_result: object,
+    corpus_ids: set[str],
+    content_by_id: Mapping[str, str],
+) -> list[str]:
+    hits: list[str] = []
+    raw: object = []
+    if isinstance(search_result, Mapping):
+        raw = (
+            search_result.get("hits")
+            or search_result.get("results")
+            or search_result.get("items")
+            or []
+        )
+        blob = json.dumps(search_result, sort_keys=True)
+    else:
+        blob = ""
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, Mapping):
+                candidate = (
+                    item.get("stable_item_id")
+                    or item.get("id")
+                    or item.get("source_identity")
+                )
+                if isinstance(candidate, str):
+                    hits.append(candidate)
+            elif isinstance(item, str):
+                hits.append(item)
+    for item_id, content in content_by_id.items():
+        if item_id not in hits and content and content in blob:
+            hits.append(item_id)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item_id in hits:
+        if item_id in corpus_ids and item_id not in seen:
+            seen.add(item_id)
+            ordered.append(item_id)
+    return ordered
+
+
 def run_m03_valid_time_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
