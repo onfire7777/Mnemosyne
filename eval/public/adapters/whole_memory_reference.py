@@ -297,33 +297,67 @@ def _m04_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
     return dict(benchmark)
 
 
-def _m04_asserted_value(event: Mapping[str, Any]) -> str:
-    """Extract the scorer-compared value. Never assert the content sentence."""
+def _m04_fact(event: Mapping[str, Any], case_id: str) -> tuple[str, str, str]:
+    """Parse subject/predicate/value. Keep the full gold string after value=."""
     content = event.get("content")
     if not isinstance(content, str) or "value=" not in content:
         raise ValueError("M04 event content does not declare a value")
-    value = content.rsplit("value=", 1)[1].strip().split()[0]
+    prefix, value = content.split("value=", 1)
+    value = value.strip()
     if not value:
         raise ValueError("M04 event content does not declare a value")
-    return value
+    subject = case_id
+    predicate = "value"
+    match = re.search(r"subject=(\S+)", prefix)
+    if match:
+        subject = match.group(1)
+    match = re.search(r"predicate=(\S+)", prefix)
+    if match:
+        predicate = match.group(1)
+    return subject, predicate, value
 
 
-def _m04_ingest(cli: MnemoCLI, tenant: str, subject: str, events: list[dict[str, Any]]) -> None:
+def _m04_asserted_value(event: Mapping[str, Any], case_id: str = "") -> str:
+    """Extract the scorer-compared value. Never truncate a multi-word gold string."""
+    return _m04_fact(event, case_id or str(event.get("event_id") or ""))[2]
+
+
+def _m04_evidence_cids(
+    cli: MnemoCLI, tenant: str, actor: str, event: Mapping[str, Any]
+) -> tuple[str, ...]:
+    captured = cli.capture(
+        tenant,
+        actor,
+        event["content"],
+        source_identity=str(event.get("event_id") or actor),
+    ) or {}
+    cid = captured.get("cid") if isinstance(captured, Mapping) else None
+    if isinstance(cid, str) and cid.strip():
+        return (cid,)
+    digest = event.get("content_sha256")
+    if isinstance(digest, str) and digest:
+        return (digest,)
+    return ()
+
+
+def _m04_ingest(cli: MnemoCLI, tenant: str, case_id: str, events: list[dict[str, Any]]) -> None:
     for event in events:
         actor = event.get("actor_label")
         if not isinstance(actor, str) or not actor.strip():
             raise ValueError("M04 event is missing actor_label")
+        subject, predicate, value = _m04_fact(event, case_id)
         cli.assert_fact(
             tenant,
             subject,
-            "value",
-            _m04_asserted_value(event),
+            predicate,
+            value,
             user=actor,
             valid_from=event["valid_from"],
+            evidence_cids=_m04_evidence_cids(cli, tenant, actor, event),
         )
 
 
-def _m04_values_as_of(events: list[dict[str, Any]], as_of: str) -> list[str]:
+def _m04_values_as_of(events: list[dict[str, Any]], as_of: str, case_id: str = "") -> list[str]:
     values: list[str] = []
     seen: set[str] = set()
     for event in events:
@@ -333,7 +367,7 @@ def _m04_values_as_of(events: list[dict[str, Any]], as_of: str) -> list[str]:
             continue
         if isinstance(end, str) and end <= as_of:
             continue
-        value = _m04_asserted_value(event)
+        value = _m04_asserted_value(event, case_id)
         if value not in seen:
             seen.add(value)
             values.append(value)
@@ -344,15 +378,19 @@ def _m04_monotonic_violation(
     events: list[dict[str, Any]],
     current_objects: list[str],
     historical_objects: list[str],
-    current_as_of: str,
-    historical_as_of: str,
+    gold: Mapping[str, Any],
+    case_id: str,
 ) -> bool:
-    """True when the observed projection dropped in-force fixture evidence."""
-    expected_current = set(_m04_values_as_of(events, current_as_of))
-    expected_historical = set(_m04_values_as_of(events, historical_as_of))
+    """Gold-kept in-force values must appear. Gold-perfect conflict drops do not."""
+    required_current = set(_m04_values_as_of(events, gold["current_as_of"], case_id)) & set(
+        gold["current_objects"]
+    )
+    required_historical = set(
+        _m04_values_as_of(events, gold["historical_as_of"], case_id)
+    ) & set(gold["historical_objects"])
     return not (
-        expected_current <= set(current_objects)
-        and expected_historical <= set(historical_objects)
+        required_current <= set(current_objects)
+        and required_historical <= set(historical_objects)
     )
 
 
@@ -368,20 +406,28 @@ def _m04_answer(cli: MnemoCLI, question: str, context: Mapping[str, Any]) -> Map
     return answer_cli.answer(question, context) or {}
 
 
-def _m04_as_of(cli: MnemoCLI, tenant: str, subject: str, as_of: str) -> list[str]:
-    payload = cli.graph_as_of(tenant, subject, "value", as_of) or {}
-    assertions = payload.get("assertions") if isinstance(payload, Mapping) else None
-    if not isinstance(assertions, list):
-        return []
+def _m04_as_of(
+    cli: MnemoCLI, tenant: str, facts: list[tuple[str, str, str]], as_of: str
+) -> list[str]:
     objects: list[str] = []
     seen: set[str] = set()
-    for item in assertions:
-        if not isinstance(item, Mapping):
+    queried: set[tuple[str, str]] = set()
+    for subject, predicate, _value in facts:
+        key = (subject, predicate)
+        if key in queried:
             continue
-        obj = item.get("object")
-        if isinstance(obj, str) and obj not in seen:
-            seen.add(obj)
-            objects.append(obj)
+        queried.add(key)
+        payload = cli.graph_as_of(tenant, subject, predicate, as_of) or {}
+        assertions = payload.get("assertions") if isinstance(payload, Mapping) else None
+        if not isinstance(assertions, list):
+            continue
+        for item in assertions:
+            if not isinstance(item, Mapping):
+                continue
+            obj = item.get("object")
+            if isinstance(obj, str) and obj not in seen:
+                seen.add(obj)
+                objects.append(obj)
     return objects
 
 
@@ -408,6 +454,24 @@ def _m04_answer_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _m04_question(case_id: str, as_of: str, facts: list[tuple[str, str, str]]) -> str:
+    subjects: list[str] = []
+    objects: list[str] = []
+    seen_s: set[str] = set()
+    seen_o: set[str] = set()
+    for subject, _predicate, value in facts:
+        if subject not in seen_s:
+            seen_s.add(subject)
+            subjects.append(subject)
+        if value not in seen_o:
+            seen_o.add(value)
+            objects.append(value)
+    return (
+        f"current as of {as_of} case {case_id} "
+        f"subjects={' '.join(subjects)} objects={' '.join(objects)}"
+    )
+
+
 def run_m04_conflict_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -421,14 +485,15 @@ def run_m04_conflict_development(
         case_id = case["case_id"]
         for perm, events in case["events_by_permutation"].items():
             tenant = f"wmbs-m04-{case_id}-{perm}"
+            facts = [_m04_fact(event, case_id) for event in events]
             _m04_ingest(cli, tenant, case_id, events)
-            current_objects = _m04_as_of(cli, tenant, case_id, gold["current_as_of"])
+            current_objects = _m04_as_of(cli, tenant, facts, gold["current_as_of"])
             historical_objects = _m04_as_of(
-                cli, tenant, case_id, gold["historical_as_of"]
+                cli, tenant, facts, gold["historical_as_of"]
             )
             payload = _m04_answer(
                 cli,
-                f"current as of {gold['current_as_of']}",
+                _m04_question(case_id, gold["current_as_of"], facts),
                 {"tenant_id": tenant},
             )
             traces.append(
@@ -448,8 +513,8 @@ def run_m04_conflict_development(
                         events,
                         current_objects,
                         historical_objects,
-                        gold["current_as_of"],
-                        gold["historical_as_of"],
+                        gold,
+                        case_id,
                     ),
                 }
             )
@@ -465,7 +530,10 @@ def run_m04_conflict_development(
                         "source_id": source_id,
                         "current": {
                             "objects": _m04_as_of(
-                                cli, ab_tenant, case_id, gold["current_as_of"]
+                                cli,
+                                ab_tenant,
+                                [_m04_fact(event, case_id) for event in kept],
+                                gold["current_as_of"],
                             ),
                             "as_of": gold["current_as_of"],
                         },
