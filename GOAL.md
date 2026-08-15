@@ -178,38 +178,67 @@ from the lifecycle authorities. PR #108 repaired that lapse from exact head
 `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, with all required exact-head CI
 green in run `31859014653`, and merged as
 `7c5264d815d44c375173dcd1e8ab57783a397a7e` at
-`2026-08-15T02:45:01Z`; post-merge run `31859997325` succeeded. The carve-out
-is therefore recomputed from `main@7c5264d8`. `T7`, `T8`, and `T9` are all
+`2026-08-15T02:45:01Z`; post-merge run `31859997325` succeeded. Controller PR
+#113 then delivered the three-file `T10` reservation from exact head
+`c1bf6a10335e30fe797c54a42285922552647a9e`, with all required exact-head CI
+green in run `31863057094`, as merge
+`6929fd3703ff262d3264b58a5af90d506a804da2` at
+`2026-08-15T04:22:14Z`; post-merge run `31864254074` succeeded. PR #109 then
+merged from audited topology head
+`cb44f21296fc22cf92f847b8201a6881e915400c`, after all required and native-
+Windows checks passed in exact-head run `31865413163`, as
+`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`2026-08-15T05:24:36Z`. That merge raced this lifecycle amendment; post-merge
+run `31866875258` completed successfully at `2026-08-15T05:51:12Z`; no later
+stack edge opened before that gate closed. The
+carve-out is therefore recomputed from `main@6801fbd0`. `T7`, `T8`, and `T9` are all
 **MERGED**, and no writer remains admitted from that wave. None is a source
 node or admits a successor node. `T9` changed reachability only: M03 remains
 `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with no
 fixture, scorer, schema, admission-state, or progress-counter change.
 
-One controller-only node, `T10`, now reserves the frozen Windows portability
-stack at exact heads PR #109 `08397dab1220c87a3e8e3a92bf353cc65b68dba3`
--> PR #110 `7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111
+Controller node `T10` reserves the Windows portability stack by immutable
+non-lifecycle content anchors: PR #109
+`08397dab1220c87a3e8e3a92bf353cc65b68dba3` -> PR #110
+`7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111
 `226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112
-`259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. The controller is the sole CI
-integration owner. At the refreshed `2026-08-15T03:52:26Z` capture, exact-head
-runs
-`31862259173`, `31862270296`, `31862275890`, and `31862282981` remained in
-progress because `Unit + drift checks` had not completed; their completed
-required and native-Windows jobs were green, but none of the four runs is
-claimed green. PR #109's exact-head security scan is sealed at zero findings;
-PRs #110 and #111 have sealed zero-finding component-head scans and ancestry-
-only integration commits; PR #112's isolated filesystem component scan is
-sealed at zero findings. Cumulative exact-stack scan
-`8f92e955-a68a-4bec-817a-810a76fce21b` is also sealed with complete coverage
-and zero findings at PR #112's exact head. The exact chain has a conflict-free
-integration receipt with exactly three unique Windows jobs and 128 targeted
-tests passed with five native-Windows skips. Controller PR #113 is
-**OPEN/DRAFT** and changes only `GOAL.md`, `.planning/STATE.md`, and the lease
-map. Its self-record changes its head, so no exact PR #113 head, merge SHA,
-merge time, or post-merge `main` CI is claimed. PR #113 grants no implementation
-authority. No implementation PR may merge until PR #113 passes all required
-exact-head checks and merges.
-Afterward, only merge commits in the order #109 -> #110 -> #111 -> #112 are
-permitted, with successful post-merge `main` CI required before each next edge.
+`259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. Repository ruleset `19157561`
+enforces strict required-check freshness, so PR #113 correctly made those
+pre-controller full heads behind `main`. Their first topology-only refresh onto
+`main@6929fd37` produced PR #109
+`cb44f21296fc22cf92f847b8201a6881e915400c` -> PR #110
+`26f95a09827d3e56ffe86e65b7db7493ecf79c73` -> PR #111
+`02a724e9333a47a1cb7096d59b558ab80c1e5300` -> PR #112
+`c8d95dafe5131f965591b84aeabb095fac34f1b6`. Each refreshed tree is byte-for-
+byte identical to its content anchor outside `GOAL.md`, `.planning/STATE.md`,
+and the lease map. Exact-head CI runs `31865413163`, `31865422216`,
+`31865430468`, and `31865438529` all completed successfully, including every
+required and native-Windows job. Fresh exact refreshed-stack security scan
+`e95df6b0-da9d-4688-a2a0-4378be4973d1` covers all 32 changed files with zero
+findings; its binary diff hash exactly matches the approved cumulative stack at
+`f538e11916f0621cb951f8393debb66e032abaa69c9053fb4562c9d245fc778d`.
+PR #109 is **MERGED** at `main@6801fbd0`; its implementation content and
+pre-merge gates matched this receipt, but its merge preceded the amendment and
+is recorded as a sequencing deviation rather than silently reclassified as
+compliant. PRs #110-#112 remain open drafts. No later edge may merge until PR
+#109's post-main CI is green; this amendment must still land before the next
+edge. Their lifecycle blobs
+already satisfy the stronger parent-equality invariant: #110 equals current
+`main`, #111 equals #110, and #112 equals #111. Controller amendment PR #114
+is **OPEN/DRAFT** and changes only `GOAL.md`, `.planning/STATE.md`, and the
+lease map. Its self-record changes its head, so no exact PR #114 head, merge
+SHA/time, or post-main CI is claimed. PR #114 must pass and merge before #110.
+Topology-only merges of current `main` or the immediately
+preceding stack PR are therefore permitted without another controller PR only
+when all three lifecycle blobs exactly equal that parent, every non-lifecycle
+blob remains equal to the corresponding content anchor, the required/native
+exact-head CI is green, a fresh security review finds no issue, local/remote/
+hosted heads agree, and all review threads are clear. Any lifecycle divergence
+or non-lifecycle blob change voids the reservation. The controller remains the
+sole CI integration owner. Merge commits for the remaining stack only in the
+order #110 -> #111 -> #112 are permitted, with
+successful post-merge `main` CI required before refreshing and merging each
+next edge.
 
 The whole-memory standard and pilot plan are executable authority on canonical
 `main`. They were imported from verified clean handoff
@@ -287,7 +316,15 @@ repaired that lapse from exact head
 `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, all-required-green exact-head CI
 run `31859014653`, merge `7c5264d815d44c375173dcd1e8ab57783a397a7e`
 at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
-current canonical baseline is `main@7c5264d8`. `T5` and `T6` are discharged.
+controller receipt then delivered as PR #113 from exact head
+`c1bf6a10335e30fe797c54a42285922552647a9e`, all-required-green exact-head CI
+run `31863057094`, merge `6929fd3703ff262d3264b58a5af90d506a804da2`
+at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
+#109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
+after all required/native checks passed in run `31865413163`, as
+`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
+current canonical baseline is `main@6801fbd0`. `T5` and `T6` are discharged.
 Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
 admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
@@ -684,6 +721,8 @@ git merge-base --is-ancestor d7eefb7c3595e786851a7d416ba54ea3997a8b6c main
 git merge-base --is-ancestor b3570937918c7de40cd89ea543fab9e7b16f7471 main
 git merge-base --is-ancestor 7b6c5a121107ee80533a5b4ec794e602e1e1ab33 main
 git merge-base --is-ancestor 7c5264d815d44c375173dcd1e8ab57783a397a7e main
+git merge-base --is-ancestor 6929fd3703ff262d3264b58a5af90d506a804da2 main
+git merge-base --is-ancestor 6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -697,7 +736,7 @@ git merge-base --is-ancestor 7c5264d815d44c375173dcd1e8ab57783a397a7e main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "7c5264d815d44c375173dcd1e8ab57783a397a7e"
+test "$(git rev-parse main)" = "6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
