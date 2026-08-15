@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@7c5264d8`; PR #108 repaired PR #105's lifecycle lapse from exact head `bda5588abc2a181c1bd7b5ae17ca31deeae7d85e`, exact-head CI `31859014653`, merge `7c5264d815d44c375173dcd1e8ab57783a397a7e` at `2026-08-15T02:45:01Z`, and successful post-merge CI `31859997325`. Controller node T10 reserves the frozen Windows stack at PR #109 `08397dab1220c87a3e8e3a92bf353cc65b68dba3` -> PR #110 `7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111 `226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`. Exact-head CI runs `31862259173`, `31862270296`, `31862275890`, and `31862282981` remain in progress because Unit + drift checks are pending; completed required/native jobs are green, but no full run is claimed green. Cumulative exact-stack security scan `8f92e955-a68a-4bec-817a-810a76fce21b` is sealed with complete coverage and zero findings. No implementation PR may merge until the controller receipt lands; afterward merge commits only in strict order #109 -> #110 -> #111 -> #112 with successful post-main CI after each. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T03:46:31Z"
+last_updated: "2026-08-15T03:52:26Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 7
@@ -126,8 +126,11 @@ runs remain pending only their `Unit + drift checks` jobs at the recorded
 capture. Cumulative exact-stack security scan
 `8f92e955-a68a-4bec-817a-810a76fce21b` is sealed with complete coverage and
 zero findings; its targeted suite passed 128 tests with five native-Windows
-skips. No implementation merge is authorized before the controller receipt
-lands.
+skips. Controller PR #113 is **OPEN/DRAFT**, changes only the three lifecycle
+authorities, and grants no implementation authority. Its self-record changes
+its head, so no exact PR #113 head, merge SHA, merge time, or post-merge `main`
+CI is claimed. No implementation merge is authorized before PR #113 passes all
+required exact-head checks and lands.
 `T9` authorizes M03 only, changes no fixture byte, scorer, schema, or admission
 state, and admits no successor node or source node. The plan-doc
 backlog is disclosed here rather than left to accumulate silently. That
@@ -399,8 +402,9 @@ repaired that lapse from exact head
 at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
 current canonical baseline is `main@7c5264d8`. Node `T10` reserves only the
 frozen Windows stack #109 -> #110 -> #111 -> #112 at the exact heads recorded
-in the lease map; its controller receipt must merge before those implementation
-PRs, and successful post-main CI must separate their merge commits. PR #90 is
+in the lease map; controller PR #113 is OPEN/DRAFT and must merge before those
+implementation PRs, and successful post-main CI must separate their merge
+commits. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
