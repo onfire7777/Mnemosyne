@@ -66,7 +66,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        with os.fdopen(os.open(args[0], os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
+        with os.fdopen(
+            os.open(args[0], os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)), "rb"
+        ) as source:
             if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
                 raise ReadinessError("readiness record is not a regular file")
             encoded = source.read(MAX_INPUT_BYTES + 1)
