@@ -39,7 +39,7 @@ mapping is its C01–C24 table (same file, lines 502–525).
 - **Registry entry** — a key in `eval/public/registry.json`. Registry keys are
   suite names, not module IDs; three admitted suites (`pm-bench-development`,
   `triggerbench-development`, `working-memory-action-development`) carry no
-  `wmbs-` prefix but are M12/M13 suites, as `eval/public/README.md:48` and
+  `wmbs-` prefix but are M12/M13 suites, as `eval/public/README.md:149` and
   `eval/public/README.md:57` state in their own words.
 
 ## M01–M20

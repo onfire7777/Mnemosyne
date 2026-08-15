@@ -146,17 +146,20 @@ timelines (`ordered-events`, `late-event`, `retroactive-correction`,
 `[11, 23, 37, 53, 71]`.
 
 
+### M02 retrieval development
+
 The M02 retrieval cell is registry-reachable through the same public CLI
 subprocess seam. `wmbs-m02-retrieval-development` is `PROPOSED`,
 `ENHANCED-SUCCESSOR`, `split_role: development`, and carries `publishable: false`,
 `pbpp_headline_eligible: false`, `headline_eligible: false`,
 `upstream_comparable: false`, and `independent_external_reproduction: false`.
 Registration is a reachability fix only. It advances no admission state and
-supports no publication, comparability, or superiority claim. The development
-corpus is 240 documents and 60 queries. Official LoCoMo / LongMemEval /
-HippoRAG adapters, the 2,000-event corpus, baselines, paired intervals, and
-measured latency / tokens / calls / storage stay deferred. Bundle replay-seed
-and `allowed_profile` rows are not in this lease.
+supports no publication, comparability, or superiority claim.
+
+The committed development corpus is 240 documents and 60 queries. The
+specification names a 2,000-event local corpus; the 2,000-event variant stays
+deferred behind a measured resource receipt, so 240 is a disclosed scale gap
+rather than a scaled-down result.
 
 `finalize.reason` is closed to `completed` or `cancelled`. A successful
 `cancelled` finalization is terminal and uses identical idempotent request and

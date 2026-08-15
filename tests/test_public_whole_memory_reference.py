@@ -3488,21 +3488,50 @@ def test_m02_adapter_issues_real_cli_calls() -> None:
             calls.append("search")
             return {"hits": []}
 
-        def answer(self, *args: object, **kwargs: object) -> dict[str, object]:
+        def answer(self, question: object, context: object, **kwargs: object) -> dict[str, object]:
             calls.append("answer")
+            contexts.append(context)
             return {"answer": None}
 
+    contexts: list[object] = []
     fixture = m02.load_fixture()
     tiny = dict(fixture)
     tiny["questions"] = [q for q in fixture["questions"] if q["family"] == "unanswerable"][:1]
-    gold = set(tiny["questions"][0].get("gold_doc_ids") or [])
-    tiny["corpus"] = [doc for doc in fixture["corpus"] if doc["stable_item_id"] in gold] or fixture["corpus"][:1]
+    tiny["corpus"] = fixture["corpus"][:1]
     traces, evidence = run_m02_retrieval_development(tiny, RecordingCLI())
     assert "capture" in calls and "search" in calls and "answer" in calls
     assert traces and traces[0]["case_id"] == traces[0]["question_id"]
+    assert contexts == [{"tenant_id": "wmbs-m02-development"}]
+    assert traces[0]["ranked_hits"] == []
+    assert traces[0]["answer"] is None
+    assert traces[0]["abstained"] is False
     assert evidence["backend"] == "local"
     with pytest.raises(ValueError, match="live MnemoCLI"):
         run_m02_retrieval_development(tiny, None)
+
+
+def test_m02_bundle_metadata_names_the_backend_actually_exercised() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m02_retrieval_development
+    from eval.public import wmbs_m02 as m02
+
+    class NamedCLI:
+        backend = "local"
+
+        def capture(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"ok": True}
+
+        def search(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"hits": []}
+
+        def answer(self, *args: object, **kwargs: object) -> dict[str, object]:
+            return {"answer": None, "abstained": False}
+
+    fixture = m02.load_fixture()
+    tiny = dict(fixture)
+    tiny["questions"] = fixture["questions"][:1]
+    tiny["corpus"] = fixture["corpus"][:1]
+    _traces, evidence = run_m02_retrieval_development(tiny, NamedCLI())
+    assert evidence["backend"] == "local"
 
 
 def test_m02_runner_rejects_fixture_digest_drift(tmp_path: Path) -> None:

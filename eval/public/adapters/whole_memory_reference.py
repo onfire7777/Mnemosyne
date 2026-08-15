@@ -160,50 +160,42 @@ def run_m02_retrieval_development(
         )
 
     traces: list[dict[str, Any]] = []
+    context = {"tenant_id": tenant}
     for question in fixture["questions"]:
         question_id = question["question_id"]
         search_result = cli.search(tenant, question["text"])
-        ranked_ids = _m02_ranked_ids(search_result, question, corpus_ids, content_by_id)
-        if question["family"] == "unanswerable":
-            cli.answer(question["text"], {"tenant": tenant, "abstain": True})
-            traces.append(
-                {
-                    "answer": None,
-                    "abstained": True,
-                    "case_id": question_id,
-                    "question_id": question_id,
-                    "ranked_hits": [
-                        {"rank": rank, "stable_item_id": item_id}
-                        for rank, item_id in enumerate(ranked_ids, 1)
-                    ],
-                }
-            )
-            continue
-        payload = cli.answer(question["text"], {"tenant": tenant}) or {}
-        answer = payload.get("answer")
-        if not isinstance(answer, str) or not answer:
-            answer = payload.get("answer_text")
-        if not isinstance(answer, str) or not answer:
-            gold = question.get("answers") or []
-            answer = gold[0] if gold and isinstance(gold[0], str) else "unknown"
-        traces.append(
-            {
-                "answer": answer,
-                "abstained": False,
-                "case_id": question_id,
-                "question_id": question_id,
-                "ranked_hits": [
-                    {"rank": rank, "stable_item_id": item_id}
-                    for rank, item_id in enumerate(ranked_ids, 1)
-                ],
-            }
-        )
+        ranked_ids = _m02_ranked_ids(search_result, corpus_ids, content_by_id)
+        payload = cli.answer(question["text"], context) or {}
+        traces.append(_m02_trace_from_cli(question_id, ranked_ids, payload))
     return traces, {"backend": getattr(cli, "backend", "local")}
+
+
+def _m02_trace_from_cli(
+    question_id: str, ranked_ids: list[str], payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Record the CLI payload. Never invent gold answers or forced abstention."""
+    answer = payload.get("answer")
+    if not isinstance(answer, str) or not answer:
+        answer = payload.get("answer_text")
+    if not isinstance(answer, str) or not answer:
+        answer = None
+    abstained = payload.get("abstained")
+    if type(abstained) is not bool:
+        abstained = False
+    return {
+        "answer": answer,
+        "abstained": abstained,
+        "case_id": question_id,
+        "question_id": question_id,
+        "ranked_hits": [
+            {"rank": rank, "stable_item_id": item_id}
+            for rank, item_id in enumerate(ranked_ids, 1)
+        ],
+    }
 
 
 def _m02_ranked_ids(
     search_result: object,
-    question: Mapping[str, Any],
     corpus_ids: set[str],
     content_by_id: Mapping[str, str],
 ) -> list[str]:
@@ -234,8 +226,6 @@ def _m02_ranked_ids(
     for item_id, content in content_by_id.items():
         if item_id not in hits and content and content in blob:
             hits.append(item_id)
-    if question.get("family") != "unanswerable" and not hits:
-        hits = [item_id for item_id in question.get("gold_doc_ids") or [] if item_id in corpus_ids]
     ordered: list[str] = []
     seen: set[str] = set()
     for item_id in hits:
