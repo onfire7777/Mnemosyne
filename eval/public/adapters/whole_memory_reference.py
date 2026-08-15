@@ -136,15 +136,47 @@ def run_m10_development(
 
 
 
+
+def _m02_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 240 is the published corpus scale, not a test floor."""
+    from eval.public import wmbs_m02 as m02
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M02 retrieval development requires a fixture mapping")
+    corpus = benchmark.get("corpus")
+    questions = benchmark.get("questions")
+    if not isinstance(corpus, list) or not corpus:
+        raise ValueError("M02 retrieval development requires a non-empty corpus")
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("M02 retrieval development requires a non-empty question list")
+    identities = {
+        "fixture_id": m02.FIXTURE_ID,
+        "schema_id": m02.FIXTURE_SCHEMA_ID,
+        "generator_id": m02.GENERATOR_ID,
+        "generator_version": m02.GENERATOR_VERSION,
+    }
+    for field, expected in identities.items():
+        if field in benchmark and benchmark[field] != expected:
+            raise ValueError(f"M02 fixture {field} does not match {expected!r}")
+    declared = benchmark.get("fixture_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m02.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "fixture_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M02 fixture_sha256 does not bind the fixture bytes")
+    if len(corpus) == m02.CORPUS_SIZE:
+        return dict(m02.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
 def run_m02_retrieval_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Exercise the proposed M02 retrieval cell through the public CLI only."""
     if cli is None:
         raise ValueError("M02 retrieval development requires a live MnemoCLI")
-    from eval.public import wmbs_m02 as m02
-
-    fixture = dict(m02.validate_fixture(benchmark))
+    fixture = _m02_bind_fixture(benchmark)
     tenant = "wmbs-m02-development"
     user = "reference-harness"
     corpus = list(fixture["corpus"])
