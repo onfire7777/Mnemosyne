@@ -1,6 +1,5 @@
 import copy
 import base64
-import fcntl
 import json
 import multiprocessing
 import os
@@ -15,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from leaderboard.ledger import LedgerError, append_entry, verify_ledger
+from mnemosyne._file_lock import exclusive_file_lock
 
 
 _DEFAULT_RUN_ID = object()
@@ -737,7 +737,7 @@ def _append_after_start(
 ) -> None:
     started.set()
     start.wait()
-    _signal_lock_attempt(attempted)
+    attempted.set()
     append_entry(
         Path(ledger_path),
         Path(private_key),
@@ -757,21 +757,8 @@ def _verify_after_start(
     attempted: Any,
     result: Any,
 ) -> None:
-    _signal_lock_attempt(attempted)
+    attempted.set()
     result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
-
-
-def _signal_lock_attempt(attempted: Any) -> None:
-    from leaderboard import ledger
-
-    real_flock = ledger.fcntl.flock
-
-    def signal_then_flock(fd: int, operation: int) -> None:
-        if operation & fcntl.LOCK_EX:
-            attempted.set()
-        real_flock(fd, operation)
-
-    ledger.fcntl.flock = signal_then_flock
 
 
 def test_append_serializes_on_sibling_process_lock(
@@ -787,16 +774,12 @@ def test_append_serializes_on_sibling_process_lock(
         args=(str(ledger_path), str(private_key), started, start, attempted),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
-    lock_path.touch()
-
-    with lock_path.open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with exclusive_file_lock(lock_path):
         process.start()
         assert started.wait(timeout=5)
         start.set()
         assert attempted.wait(timeout=5)
         assert process.is_alive()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     process.join(timeout=5)
     assert process.exitcode == 0
@@ -817,12 +800,10 @@ def test_verify_serializes_on_sibling_process_lock(
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
-    with lock_path.open("a+b") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+    with exclusive_file_lock(lock_path):
         process.start()
         assert attempted.wait(timeout=5)
         assert process.is_alive()
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     process.join(timeout=5)
     assert process.exitcode == 0
