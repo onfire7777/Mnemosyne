@@ -85,11 +85,15 @@ def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 4:
-        print("usage: verify-topology-refresh.py <candidate-40-sha> <permitted-parent-40-sha> <immutable-anchor-40-sha>")
+        print(
+            "usage: verify-topology-refresh.py <candidate-40-sha> <permitted-parent-40-sha> <immutable-anchor-40-sha>"
+        )
         return 2
     candidate_ref, parent_ref, anchor_ref = argv[1:]
     if not all(SHA.fullmatch(ref) for ref in (candidate_ref, parent_ref, anchor_ref)):
-        print("error: candidate, permitted parent, and immutable anchor must be full 40-hex SHAs")
+        print(
+            "error: candidate, permitted parent, and immutable anchor must be full 40-hex SHAs"
+        )
         return 2
     try:
         if not _is_ancestor(parent_ref, candidate_ref):
@@ -110,9 +114,17 @@ def main(argv: list[str]) -> int:
         if candidate_entry is None:
             errors.append(f"lifecycle path missing from candidate: {_path(path)}")
         if parent_entry is None:
-            errors.append(f"lifecycle path missing from permitted parent: {_path(path)}")
-        if candidate_entry is not None and parent_entry is not None and candidate_entry != parent_entry:
-            errors.append(f"lifecycle path differs from permitted parent: {_path(path)}")
+            errors.append(
+                f"lifecycle path missing from permitted parent: {_path(path)}"
+            )
+        if (
+            candidate_entry is not None
+            and parent_entry is not None
+            and candidate_entry != parent_entry
+        ):
+            errors.append(
+                f"lifecycle path differs from permitted parent: {_path(path)}"
+            )
 
     for path in sorted((set(candidate) | set(anchor)) - lifecycle):
         if candidate.get(path) != anchor.get(path):
