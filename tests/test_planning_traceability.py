@@ -831,7 +831,13 @@ def _verify_topology_from_parent(
     repo: Path, candidate: str, parent: str, anchor: str
 ) -> subprocess.CompletedProcess[str]:
     resolved = subprocess.run(
-        ["git", "--no-replace-objects", "rev-parse", "--verify", f"{parent}^{{commit}}"],
+        [
+            "git",
+            "--no-replace-objects",
+            "rev-parse",
+            "--verify",
+            f"{parent}^{{commit}}",
+        ],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -870,7 +876,9 @@ def _verify_topology_from_parent(
 
 
 def _topology_module() -> object:
-    spec = importlib.util.spec_from_file_location("topology_verifier", TOPOLOGY_VERIFIER)
+    spec = importlib.util.spec_from_file_location(
+        "topology_verifier", TOPOLOGY_VERIFIER
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -886,7 +894,9 @@ def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     assert not result.stdout
 
 
-def test_topology_refresh_verifier_executes_trusted_parent_bytes(tmp_path: Path) -> None:
+def test_topology_refresh_verifier_executes_trusted_parent_bytes(
+    tmp_path: Path,
+) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
     candidate_verifier = repo / "infra" / "scripts" / "verify-topology-refresh.py"
@@ -896,7 +906,9 @@ def test_topology_refresh_verifier_executes_trusted_parent_bytes(tmp_path: Path)
         cwd=repo,
         check=True,
     )
-    subprocess.run(["git", "commit", "-qm", "tamper with verifier"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "tamper with verifier"], cwd=repo, check=True
+    )
     candidate = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=repo,
@@ -915,7 +927,9 @@ def test_topology_refresh_verifier_executes_trusted_parent_bytes(tmp_path: Path)
     assert "immutable path differs from anchor: immutable.txt" in trusted.stdout
 
 
-def test_topology_refresh_verifier_requires_trusted_parent_bytes(tmp_path: Path) -> None:
+def test_topology_refresh_verifier_requires_trusted_parent_bytes(
+    tmp_path: Path,
+) -> None:
     repo, _, _, anchor = _topology_fixture(tmp_path)
     (repo / "infra" / "scripts" / "verify-topology-refresh.py").unlink()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
@@ -1012,7 +1026,9 @@ def test_topology_refresh_verifier_ignores_git_replacement_refs(tmp_path: Path) 
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
     subprocess.run(["git", "add", "immutable.txt"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "unauthorized change"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "unauthorized change"], cwd=repo, check=True
+    )
     candidate = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=repo,
@@ -1073,12 +1089,19 @@ def test_topology_refresh_verifier_rejects_lifecycle_missing_or_different(
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-qm", "bad lifecycle"], cwd=repo, check=True)
     candidate = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     result = _verify_topology(repo, candidate, parent, anchor)
     assert result.returncode == 1, result.stdout
     assert "lifecycle path missing from candidate: GOAL.md" in result.stdout
-    assert "lifecycle path differs from permitted parent: .planning/STATE.md" in result.stdout
+    assert (
+        "lifecycle path differs from permitted parent: .planning/STATE.md"
+        in result.stdout
+    )
 
 
 def test_topology_refresh_verifier_rejects_missing_parent_lifecycle_path(
@@ -1087,22 +1110,34 @@ def test_topology_refresh_verifier_rejects_missing_parent_lifecycle_path(
     repo, _, _, anchor = _topology_fixture(tmp_path)
     (repo / "GOAL.md").unlink()
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "parent missing lifecycle"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "parent missing lifecycle"], cwd=repo, check=True
+    )
     parent = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     subprocess.run(
         ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
     )
     candidate = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
     result = _verify_topology(repo, candidate, parent, anchor)
     assert result.returncode == 1, result.stdout
     assert "lifecycle path missing from permitted parent: GOAL.md" in result.stdout
 
 
-def test_topology_refresh_verifier_rejects_unresolvable_full_sha(tmp_path: Path) -> None:
+def test_topology_refresh_verifier_rejects_unresolvable_full_sha(
+    tmp_path: Path,
+) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     result = _verify_topology(repo, "f" * 40, parent, anchor)
     assert result.returncode == 2
@@ -1132,14 +1167,18 @@ def test_topology_refresh_verifier_rejects_malformed_tree_output(
             ),
         )
         assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
-        assert capsys.readouterr().out == "error: cannot parse tree for " + "a" * 40 + "\n"
+        assert (
+            capsys.readouterr().out == "error: cannot parse tree for " + "a" * 40 + "\n"
+        )
 
 
 def test_topology_refresh_verifier_escapes_unusual_path_bytes() -> None:
     assert _topology_module()._path(b"line\n\xff\tname") == r"line\n\xff\tname"
 
 
-def test_topology_refresh_verifier_normalizes_git_launch_error(monkeypatch, capsys) -> None:
+def test_topology_refresh_verifier_normalizes_git_launch_error(
+    monkeypatch, capsys
+) -> None:
     module = _topology_module()
 
     def cannot_run_git(*args: object, **kwargs: object) -> None:
@@ -1154,19 +1193,19 @@ def test_goal_documents_topology_refresh_verifier_invocation() -> None:
     goal = GOAL.read_text(encoding="utf-8")
     assert (
         '  resolved_parent="$(\n'
-        '    git --no-replace-objects rev-parse --verify \\\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
         '      "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null\n'
         '  )" &&\n'
         '  [ "$resolved_parent" = "$PERMITTED_PARENT_SHA" ] &&\n'
         '  topology_verifier="$(\n'
-        '    git --no-replace-objects show \\\n'
+        "    git --no-replace-objects show \\\n"
         '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
-        '2>/dev/null\n'
+        "2>/dev/null\n"
         '  )" &&\n'
         '  [ -n "$topology_verifier" ] || {\n'
         "    printf '%s\\n' 'error: cannot read permitted-parent topology verifier'\n"
-        '    exit 2\n'
-        '  }\n'
+        "    exit 2\n"
+        "  }\n"
         '  python3 -I -c "$topology_verifier" \\\n'
         '    "$CANDIDATE_SHA" \\\n'
         '    "$PERMITTED_PARENT_SHA" \\\n'
