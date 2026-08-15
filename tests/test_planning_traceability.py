@@ -34,6 +34,16 @@ GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
+TOPOLOGY_BOOTSTRAP = """import sys
+
+source = sys.argv.pop(1)
+try:
+    exec(compile(source, "permitted-parent topology verifier", "exec"))
+except SystemExit:
+    raise
+except Exception:
+    raise SystemExit(2)
+"""
 LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
 LEASE_CURRENT_BASELINE_CLAIMS = (
     re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
@@ -868,7 +878,16 @@ def _verify_topology_from_parent(
             stderr="",
         )
     return subprocess.run(
-        [sys.executable, "-I", "-c", source.stdout, candidate, parent, anchor],
+        [
+            sys.executable,
+            "-I",
+            "-c",
+            TOPOLOGY_BOOTSTRAP,
+            source.stdout,
+            candidate,
+            parent,
+            anchor,
+        ],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -892,6 +911,9 @@ def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     result = _verify_topology(repo, candidate, parent, anchor)
     assert result.returncode == 0, result.stdout
     assert not result.stdout
+    trusted = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert trusted.returncode == 0, trusted.stdout
+    assert not trusted.stdout
 
 
 def test_topology_refresh_verifier_executes_trusted_parent_bytes(
@@ -985,6 +1007,38 @@ def test_topology_refresh_verifier_requires_trusted_parent_bytes(
     empty = _verify_topology_from_parent(repo, candidate, parent, anchor)
     assert empty.returncode == 2
     assert empty.stdout == result.stdout
+
+
+def test_topology_refresh_verifier_normalizes_malformed_parent_source(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, anchor = _topology_fixture(tmp_path)
+    (repo / "infra" / "scripts" / "verify-topology-refresh.py").write_text(
+        "this is not valid python !!!\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "malformed verifier"], cwd=repo, check=True)
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert result.returncode == 2
+    assert not result.stdout
 
 
 def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
@@ -1206,7 +1260,7 @@ def test_goal_documents_topology_refresh_verifier_invocation() -> None:
         "    printf '%s\\n' 'error: cannot read permitted-parent topology verifier'\n"
         "    exit 2\n"
         "  }\n"
-        '  python3 -I -c "$topology_verifier" \\\n'
+        "  python3 -I -c '\n" + TOPOLOGY_BOOTSTRAP + '\' "$topology_verifier" \\\n'
         '    "$CANDIDATE_SHA" \\\n'
         '    "$PERMITTED_PARENT_SHA" \\\n'
         '    "$IMMUTABLE_ANCHOR_SHA"'
