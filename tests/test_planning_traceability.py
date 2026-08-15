@@ -34,6 +34,7 @@ GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
+EXPECTED_TOPOLOGY_VERIFIER_OID = "3949edc528d380441b7de747290f12a4e61ccf3c"
 TOPOLOGY_BOOTSTRAP = """import sys
 
 source = sys.argv.pop(1)
@@ -788,7 +789,9 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         )
 
 
-def _topology_fixture(tmp_path: Path) -> tuple[Path, str, str, str]:
+def _topology_fixture(
+    tmp_path: Path, verifier_source: str | None = None
+) -> tuple[Path, str, str, str]:
     repo = tmp_path / "topology"
     repo.mkdir(parents=True)
 
@@ -809,7 +812,9 @@ def _topology_fixture(tmp_path: Path) -> tuple[Path, str, str, str]:
         ),
         (
             "infra/scripts/verify-topology-refresh.py",
-            TOPOLOGY_VERIFIER.read_text(encoding="utf-8"),
+            TOPOLOGY_VERIFIER.read_text(encoding="utf-8")
+            if verifier_source is None
+            else verifier_source,
         ),
         ("immutable.txt", "anchor content\n"),
     ):
@@ -840,31 +845,55 @@ def _verify_topology(repo: Path, *refs: str) -> subprocess.CompletedProcess[str]
 def _verify_topology_from_parent(
     repo: Path, candidate: str, parent: str, anchor: str
 ) -> subprocess.CompletedProcess[str]:
-    resolved = subprocess.run(
-        [
-            "git",
-            "--no-replace-objects",
-            "rev-parse",
-            "--verify",
-            f"{parent}^{{commit}}",
-        ],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    if resolved.returncode or resolved.stdout.strip() != parent:
-        return subprocess.CompletedProcess(
-            resolved.args,
-            2,
-            stdout="error: cannot read permitted-parent topology verifier\n",
-            stderr="",
+    resolved: dict[str, str] = {}
+    for label, ref in (("parent", parent), ("anchor", anchor)):
+        result = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "rev-parse",
+                "--verify",
+                f"{ref}^{{commit}}",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
         )
+        if result.returncode or result.stdout.strip() != ref:
+            return subprocess.CompletedProcess(
+                result.args,
+                2,
+                stdout="error: cannot authenticate trusted topology verifier\n",
+                stderr="",
+            )
+        resolved[label] = result.stdout.strip()
+
+    for ref in resolved.values():
+        oid = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "rev-parse",
+                "--verify",
+                f"{ref}:infra/scripts/verify-topology-refresh.py",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if oid.returncode or oid.stdout.strip() != EXPECTED_TOPOLOGY_VERIFIER_OID:
+            return subprocess.CompletedProcess(
+                oid.args,
+                2,
+                stdout="error: cannot authenticate trusted topology verifier\n",
+                stderr="",
+            )
     source = subprocess.run(
         [
             "git",
             "--no-replace-objects",
             "show",
-            f"{resolved.stdout.strip()}:infra/scripts/verify-topology-refresh.py",
+            f"{resolved['parent']}:infra/scripts/verify-topology-refresh.py",
         ],
         cwd=repo,
         capture_output=True,
@@ -874,10 +903,10 @@ def _verify_topology_from_parent(
         return subprocess.CompletedProcess(
             source.args,
             2,
-            stdout="error: cannot read permitted-parent topology verifier\n",
+            stdout="error: cannot authenticate trusted topology verifier\n",
             stderr="",
         )
-    return subprocess.run(
+    result = subprocess.run(
         [
             sys.executable,
             "-I",
@@ -891,6 +920,11 @@ def _verify_topology_from_parent(
         cwd=repo,
         capture_output=True,
         text=True,
+    )
+    if result.returncode in (0, 1, 2):
+        return result
+    return subprocess.CompletedProcess(
+        result.args, 2, stdout=result.stdout, stderr=result.stderr
     )
 
 
@@ -976,7 +1010,7 @@ def test_topology_refresh_verifier_requires_trusted_parent_bytes(
 
     result = _verify_topology_from_parent(repo, candidate, parent, anchor)
     assert result.returncode == 2
-    assert result.stdout == "error: cannot read permitted-parent topology verifier\n"
+    assert result.stdout == "error: cannot authenticate trusted topology verifier\n"
     abbreviated = _verify_topology_from_parent(repo, candidate, parent[:12], anchor)
     assert abbreviated.returncode == 2
     assert abbreviated.stdout == result.stdout
@@ -1008,37 +1042,37 @@ def test_topology_refresh_verifier_requires_trusted_parent_bytes(
     assert empty.returncode == 2
     assert empty.stdout == result.stdout
 
-
-def test_topology_refresh_verifier_normalizes_malformed_parent_source(
-    tmp_path: Path,
-) -> None:
-    repo, _, _, anchor = _topology_fixture(tmp_path)
-    (repo / "infra" / "scripts" / "verify-topology-refresh.py").write_text(
-        "this is not valid python !!!\n", encoding="utf-8"
+    repo, candidate, parent, anchor = _topology_fixture(
+        tmp_path / "noop", "# disabled\n"
     )
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-    subprocess.run(["git", "commit", "-qm", "malformed verifier"], cwd=repo, check=True)
-    parent = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    subprocess.run(
-        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
-    )
-    candidate = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    noop = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert noop.returncode == 2
+    assert noop.stdout == result.stdout
 
-    result = _verify_topology_from_parent(repo, candidate, parent, anchor)
-    assert result.returncode == 2
-    assert not result.stdout
+
+def test_topology_refresh_verifier_normalizes_malformed_parent_source() -> None:
+    for label, source in (
+        ("syntax", "this is not valid python !!!\n"),
+        ("runtime", "raise RuntimeError\n"),
+        ("unexpected-exit", "raise SystemExit(3)\n"),
+    ):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-c",
+                TOPOLOGY_BOOTSTRAP,
+                source,
+                "a" * 40,
+                "b" * 40,
+                "c" * 40,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        expected = 3 if label == "unexpected-exit" else 2
+        assert result.returncode == expected, label
+        assert not result.stdout
 
 
 def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
@@ -1245,23 +1279,94 @@ def test_topology_refresh_verifier_normalizes_git_launch_error(
 
 def test_goal_documents_topology_refresh_verifier_invocation() -> None:
     goal = GOAL.read_text(encoding="utf-8")
+    assert "obtain and run this block from the\npermitted-parent `GOAL.md` blob" in goal
+    assert "Never use the\ncandidate checkout's copy as the launcher" in goal
+    actual_oid = subprocess.run(
+        ["git", "hash-object", str(TOPOLOGY_VERIFIER)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert actual_oid == EXPECTED_TOPOLOGY_VERIFIER_OID
     assert (
+        f"  expected_verifier_oid={EXPECTED_TOPOLOGY_VERIFIER_OID}\n"
         '  resolved_parent="$(\n'
         "    git --no-replace-objects rev-parse --verify \\\n"
         '      "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null\n'
         '  )" &&\n'
         '  [ "$resolved_parent" = "$PERMITTED_PARENT_SHA" ] &&\n'
+        '  resolved_anchor="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$IMMUTABLE_ANCHOR_SHA^{commit}" 2>/dev/null\n'
+        '  )" &&\n'
+        '  [ "$resolved_anchor" = "$IMMUTABLE_ANCHOR_SHA" ] &&\n'
+        '  parent_verifier_oid="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
+        "2>/dev/null\n"
+        '  )" &&\n'
+        '  anchor_verifier_oid="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$resolved_anchor:infra/scripts/verify-topology-refresh.py" '
+        "2>/dev/null\n"
+        '  )" &&\n'
+        '  [ "$parent_verifier_oid" = "$expected_verifier_oid" ] &&\n'
+        '  [ "$anchor_verifier_oid" = "$expected_verifier_oid" ] &&\n'
         '  topology_verifier="$(\n'
         "    git --no-replace-objects show \\\n"
         '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
         "2>/dev/null\n"
         '  )" &&\n'
         '  [ -n "$topology_verifier" ] || {\n'
-        "    printf '%s\\n' 'error: cannot read permitted-parent topology verifier'\n"
+        "    printf '%s\\n' 'error: cannot authenticate trusted topology verifier'\n"
         "    exit 2\n"
         "  }\n"
-        "  python3 -I -c '\n" + TOPOLOGY_BOOTSTRAP + '\' "$topology_verifier" \\\n'
+        "  if python3 -I -c '\n" + TOPOLOGY_BOOTSTRAP + '\' "$topology_verifier" \\\n'
         '    "$CANDIDATE_SHA" \\\n'
         '    "$PERMITTED_PARENT_SHA" \\\n'
-        '    "$IMMUTABLE_ANCHOR_SHA"'
+        '    "$IMMUTABLE_ANCHOR_SHA"; then\n'
+        "    topology_status=0\n"
+        "  else\n"
+        "    topology_status=$?\n"
+        "  fi\n"
+        '  case "$topology_status" in\n'
+        '    0 | 1 | 2) exit "$topology_status" ;;\n'
+        "    *) exit 2 ;;\n"
+        "  esac"
     ) in goal
+
+
+def test_goal_topology_bootstrap_normalizes_status_under_errexit(
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt":
+        return
+    tool_dir = tmp_path / "bin"
+    tool_dir.mkdir()
+    python = tool_dir / "python3"
+    python.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
+    python.chmod(0o755)
+    goal = GOAL.read_text(encoding="utf-8")
+    command = goal.split("```sh\n", 1)[1].split("\n```", 1)[0]
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = subprocess.run(
+        ["sh", "-e", "-c", command],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tool_dir}{os.pathsep}{os.environ['PATH']}",
+            "CANDIDATE_SHA": head,
+            "PERMITTED_PARENT_SHA": head,
+            "IMMUTABLE_ANCHOR_SHA": head,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
