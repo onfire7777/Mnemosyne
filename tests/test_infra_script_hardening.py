@@ -949,13 +949,13 @@ def test_prepare_production_evidence_custody_writes_external_gap_packet(
     }
 
 
+@_posix_only
 def test_prepare_production_evidence_custody_refresh_repairs_missing_packet_docs(
     tmp_path: Path,
 ) -> None:
     packet_root = tmp_path / "mnemosyne-tier-b-packet"
     subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -973,7 +973,6 @@ def test_prepare_production_evidence_custody_refresh_repairs_missing_packet_docs
 
     proc = subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             "--refresh",
             str(packet_root),
@@ -1079,13 +1078,13 @@ def test_prepare_production_evidence_custody_phase_plan_scopes_provider_stack() 
     assert phase_plan[2]["status"] == "blocked"
 
 
+@_posix_only
 def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
     tmp_path: Path,
 ) -> None:
     packet_root = tmp_path / "mnemosyne-tier-b-packet"
     create = subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -1110,7 +1109,6 @@ def test_prepare_production_evidence_custody_refresh_preserves_operator_inputs(
 
     refresh = subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             "--refresh",
             str(packet_root),
@@ -1190,13 +1188,13 @@ def test_prepare_production_evidence_custody_refresh_rejects_unsafe_packet_paths
     assert "input-artifacts must not be a symlink" in proc.stderr
 
 
+@_posix_only
 def test_prepare_production_evidence_custody_refresh_reports_no_values(
     tmp_path: Path,
 ) -> None:
     packet_root = tmp_path / "mnemosyne-tier-b-packet"
     create = subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             str(packet_root),
         ],
@@ -1220,7 +1218,6 @@ def test_prepare_production_evidence_custody_refresh_reports_no_values(
     proc_env = {**os.environ, "MNEMOSYNE_EMBEDDING_URL": provider_sentinel}
     proc = subprocess.run(
         [
-            sys.executable,
             str(REPO / "infra" / "scripts" / "prepare-production-evidence-custody.py"),
             "--refresh",
             str(packet_root),
