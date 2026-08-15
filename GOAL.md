@@ -167,7 +167,15 @@ then delivered `T9` as the bounded M03 registry-reachability node: exact head
 Greptile green in run `31854371658`, merge
 `b3570937918c7de40cd89ea543fab9e7b16f7471` at
 `2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. The
-carve-out is therefore recomputed here from `main@b3570937`. `T7`, `T8`, and
+subsequent PR #105 preserved hash-bound LF text and made installer/custody tests
+explicit about native-Windows and POSIX execution contracts: exact head
+`d60857fdf61122106eeede789432dd5bac955137`, all required exact-head CI green in
+run `31856191898`, merge `7b6c5a121107ee80533a5b4ec794e602e1e1ab33`
+at `2026-08-15T01:46:23Z`. Its post-merge run `31857410462` failed solely at
+`tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+(1 failed, 4709 passed, 151 skipped, 191 deselected) because PR #105 was absent
+from the lifecycle authorities; PR #108 repairs that traceability lapse here.
+The carve-out is therefore recomputed from `main@7b6c5a12`. `T7`, `T8`, and
 `T9` are all **MERGED**, and no writer remains admitted from this wave. None is
 a source node or admits a successor node. `T9` changed reachability only: M03
 remains `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with
@@ -238,8 +246,15 @@ history through `main@7f305090`. PR #100 then merged `T9` at
 `e072dda5a9e7ef078d317156c49c54bbee7a5124`, all required exact-head CI and
 Greptile green in run `31854371658`, merge
 `b3570937918c7de40cd89ea543fab9e7b16f7471` at
-`2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. The current
-canonical baseline is `main@b3570937`. `T5` and `T6` are discharged. Through PR #96
+`2026-08-15T01:12:26Z`, and successful post-merge CI `31855873247`. PR #105
+then merged at exact head `d60857fdf61122106eeede789432dd5bac955137`
+after all required exact-head CI passed in run `31856191898`, as merge
+`7b6c5a121107ee80533a5b4ec794e602e1e1ab33` at
+`2026-08-15T01:46:23Z`. Post-merge run `31857410462` failed solely at the
+canonical-baseline traceability test (1 failed, 4709 passed, 151 skipped, 191
+deselected) because PR #105 was absent from the lifecycle authorities; PR #108
+repairs that lapse. The current canonical baseline is `main@7b6c5a12`. `T5`
+and `T6` are discharged. Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
 admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
 delivered `T9`, so no writer remains admitted from this wave. `T7` is a
@@ -633,6 +648,7 @@ git merge-base --is-ancestor 71e492b4507d84e6631fef851cec820bcd80215b main
 git merge-base --is-ancestor b8673031a80158c49d552a4b3647829d213243bd main
 git merge-base --is-ancestor d7eefb7c3595e786851a7d416ba54ea3997a8b6c main
 git merge-base --is-ancestor b3570937918c7de40cd89ea543fab9e7b16f7471 main
+git merge-base --is-ancestor 7b6c5a121107ee80533a5b4ec794e602e1e1ab33 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -646,7 +662,7 @@ git merge-base --is-ancestor b3570937918c7de40cd89ea543fab9e7b16f7471 main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "b3570937918c7de40cd89ea543fab9e7b16f7471"
+test "$(git rev-parse main)" = "7b6c5a121107ee80533a5b4ec794e602e1e1ab33"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
