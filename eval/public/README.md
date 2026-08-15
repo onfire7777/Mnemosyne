@@ -145,6 +145,19 @@ timelines (`ordered-events`, `late-event`, `retroactive-correction`,
 `exact-boundary`, `tied-valid-time`) across the five canonical seeds
 `[11, 23, 37, 53, 71]`.
 
+
+The M02 retrieval cell is registry-reachable through the same public CLI
+subprocess seam. `wmbs-m02-retrieval-development` is `PROPOSED`,
+`ENHANCED-SUCCESSOR`, `split_role: development`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+Registration is a reachability fix only. It advances no admission state and
+supports no publication, comparability, or superiority claim. The development
+corpus is 240 documents and 60 queries. Official LoCoMo / LongMemEval /
+HippoRAG adapters, the 2,000-event corpus, baselines, paired intervals, and
+measured latency / tokens / calls / storage stay deferred. Bundle replay-seed
+and `allowed_profile` rows are not in this lease.
+
 `finalize.reason` is closed to `completed` or `cancelled`. A successful
 `cancelled` finalization is terminal and uses identical idempotent request and
 response replay. Closed errors and negative finalize receipts leave the attempt
@@ -231,19 +244,19 @@ work. Run its contract suite with:
 uv run --locked python -m pytest tests/test_public_whole_memory_reference.py -q
 ```
 
-### M02/M04/M05 Stage-A development oracles (unregistered)
+### M04/M05 Stage-A development oracles (unregistered)
 
-`wmbs_m02.py`, `wmbs_m04.py`, and `wmbs_m05.py` are Stage-A development oracles.
+`wmbs_m04.py` and `wmbs_m05.py` are Stage-A development oracles.
 Each runs no system and observes no SUT: the module generates a deterministic
 synthetic fixture and scores harness-supplied observations, so a green run
 evidences generator and scorer determinism over that exact finite fixture and
 nothing whatsoever about any memory system.
 
-All three are **unregistered**. None has a `registry.json` entry, an adapter, a
-runner route, or a scoring-profile registration, so none can be selected with
-`mneme eval-public --suite`, none produces a bundle, and none produces a
-benchmark result. Every one of them is admission state `PROPOSED`: M02 and M04
-declare `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
+M04 and M05 remain **unregistered**. Neither has a `registry.json` entry, an adapter, a
+runner route, or a scoring-profile registration, so neither can be selected with
+`mneme eval-public --suite`, neither produces a bundle, and neither produces a
+benchmark result. Every one of them is admission state `PROPOSED`: M04
+declares `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
 `admission_state: "PROPOSED"` in both its labels and its committed fixture. M04's
 score envelope and M05's labels and fixture record `publishable: false` and
 `pbpp_headline_eligible: false`; M02 emits no publication or headline field at
@@ -256,7 +269,7 @@ None of the three measures cost or resources. M02's scorer reports `latency`,
 latency, token, call, or storage metric of any kind. Treat all four classes as
 unsupported for every one of these modules.
 
-**M02 (`wmbs-m02-retrieval-development`).** The committed fixture is generated
+**M02 corpus (registered, still `PROPOSED`).** The committed fixture is generated
 from seed `20260801` and holds 240 documents and 60 questions — ten per query
 family across `exact`, `paraphrase`, `entity`, `relation`, `multi-hop`, and
 `unanswerable`. The specification names a 2,000-event local corpus; Stage A
@@ -297,7 +310,7 @@ and ignored `provenance_status`, Q4 evidence handles not digest-bound, Q7 replay
 hashes needing real artifact binding, Q9 model-backed grounded answering, Q10
 unwired `HowProvenance`, and Q12 missing artifacts failing rather than skipping.
 
-Stage B — harness integration for all three modules — is **not delivered**. It
+Stage B — harness integration for M04 and M05 — is **not delivered**. It
 remains gated on the public-harness integration owner's lease and on the
 quarantines named in
 [`docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`](../../docs/plans/wmb-m02-retrieval-organization-implementation-plan.md),
