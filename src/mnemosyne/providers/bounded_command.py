@@ -6,7 +6,7 @@ import ctypes
 import json
 import os
 import queue
-import signal
+import selectors
 import struct
 import subprocess
 import sys
@@ -29,10 +29,17 @@ _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 
 
 class _IoCounters(ctypes.Structure):
-    _fields_ = [(name, ctypes.c_ulonglong) for name in (
-        "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
-        "ReadTransferCount", "WriteTransferCount", "OtherTransferCount",
-    )]
+    _fields_ = [
+        (name, ctypes.c_ulonglong)
+        for name in (
+            "ReadOperationCount",
+            "WriteOperationCount",
+            "OtherOperationCount",
+            "ReadTransferCount",
+            "WriteTransferCount",
+            "OtherTransferCount",
+        )
+    ]
 
 
 class _BasicLimitInformation(ctypes.Structure):
@@ -73,7 +80,10 @@ class _WindowsJob:
         create.restype = wintypes.HANDLE
         set_information = kernel32.SetInformationJobObject
         set_information.argtypes = [
-            wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD
+            wintypes.HANDLE,
+            ctypes.c_int,
+            ctypes.c_void_p,
+            wintypes.DWORD,
         ]
         set_information.restype = wintypes.BOOL
         self._assign = kernel32.AssignProcessToJobObject
@@ -197,33 +207,12 @@ def _cleanup(
     _join_readers(readers, deadline)
 
 
-def _posix_process(
-    argv: Sequence[str], payload: bytes
-) -> tuple[subprocess.Popen[bytes], BinaryIO, Callable[[], None]]:
-    stdin = tempfile.TemporaryFile()
-    stdin.write(payload)
-    stdin.seek(0)
-    process = subprocess.Popen(  # noqa: S603 - argv is intentionally shell-free.
-        list(argv),
-        stdin=stdin,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-    )
-
-    def terminate_tree() -> None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-
-    return process, stdin, terminate_tree
-
-
 def _windows_process(
     argv: Sequence[str], payload: bytes
 ) -> tuple[subprocess.Popen[bytes], BinaryIO, Callable[[], None], _WindowsJob]:
-    header = json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    header = json.dumps(list(argv), ensure_ascii=False, separators=(",", ":")).encode(
+        "utf-8"
+    )
     stdin = tempfile.TemporaryFile()
     process: subprocess.Popen[bytes] | None = None
     job: _WindowsJob | None = None
@@ -246,7 +235,11 @@ def _windows_process(
             }
             process = subprocess.Popen(  # noqa: S603 - helper argv is shell-free.
                 [
-                    sys.executable, "-I", "-S", "-c", _WINDOWS_HELPER,
+                    sys.executable,
+                    "-I",
+                    "-S",
+                    "-c",
+                    _WINDOWS_HELPER,
                     str(msvcrt.get_osfhandle(gate_read)),
                 ],
                 stdin=stdin,
@@ -294,7 +287,7 @@ class BoundedCommandResult:
     stderr: bytes
 
 
-def run_bounded_command(
+def _run_posix_bounded_command(
     argv: Sequence[str],
     payload: bytes,
     *,
@@ -302,12 +295,63 @@ def run_bounded_command(
     max_stdout_bytes: int,
     max_stderr_bytes: int = 64 * 1024,
 ) -> BoundedCommandResult:
-    """Run without a shell while never retaining more than the declared limits."""
-    if os.name == "nt":
-        process, stdin, terminate_tree, job = _windows_process(argv, payload)
-    else:
-        process, stdin, terminate_tree = _posix_process(argv, payload)
-        job = None
+    """Preserve the selector-based POSIX behavior shipped on main."""
+    with tempfile.TemporaryFile() as stdin:
+        stdin.write(payload)
+        stdin.seek(0)
+        process = subprocess.Popen(  # noqa: S603 - argv is intentionally shell-free.
+            list(argv), stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        assert process.stdout is not None and process.stderr is not None
+        selector = selectors.DefaultSelector()
+        streams = {process.stdout: bytearray(), process.stderr: bytearray()}
+        limits = {process.stdout: max_stdout_bytes, process.stderr: max_stderr_bytes}
+        for stream in streams:
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ)
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(list(argv), timeout_seconds)
+                for key, _ in selector.select(min(remaining, 0.1)):
+                    stream = key.fileobj
+                    available = limits[stream] - len(streams[stream])
+                    chunk = os.read(stream.fileno(), min(64 * 1024, available + 1))
+                    if not chunk:
+                        selector.unregister(stream)
+                        continue
+                    if len(chunk) > available:
+                        raise CommandOutputLimitError("provider output limit exceeded")
+                    streams[stream].extend(chunk)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(list(argv), timeout_seconds)
+            returncode = process.wait(timeout=remaining)
+            return BoundedCommandResult(
+                returncode,
+                bytes(streams[process.stdout]),
+                bytes(streams[process.stderr]),
+            )
+        except BaseException:
+            process.kill()
+            process.wait()
+            raise
+        finally:
+            selector.close()
+
+
+def _run_windows_bounded_command(
+    argv: Sequence[str],
+    payload: bytes,
+    *,
+    timeout_seconds: float,
+    max_stdout_bytes: int,
+    max_stderr_bytes: int = 64 * 1024,
+) -> BoundedCommandResult:
+    """Run on Windows with bounded readers and Job Object containment."""
+    process, stdin, terminate_tree, job = _windows_process(argv, payload)
     assert process.stdout is not None and process.stderr is not None
     streams = (process.stdout, process.stderr)
     events: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -374,5 +418,9 @@ def run_bounded_command(
         raise
     finally:
         stdin.close()
-        if job is not None:
-            job.close()
+        job.close()
+
+
+run_bounded_command = (
+    _run_windows_bounded_command if os.name == "nt" else _run_posix_bounded_command
+)
