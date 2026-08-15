@@ -9,37 +9,55 @@ import sys
 
 
 SHA = re.compile(r"[0-9a-fA-F]{40}")
+OID = re.compile(rb"[0-9a-f]{40}")
 LIFECYCLE_PATHS = (
     b".planning/STATE.md",
     b"GOAL.md",
     b"docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md",
 )
+TREE_ENTRY_KINDS = {
+    # `git ls-tree -r` emits leaf entries, not directory tree entries.
+    b"100644": b"blob",
+    b"100755": b"blob",
+    b"120000": b"blob",
+    b"160000": b"commit",
+}
 
 
 def _path(path: bytes) -> str:
-    return path.decode("utf-8", "backslashreplace")
+    return ascii(path)[2:-1]
 
 
 def _tree(ref: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
-    result = subprocess.run(
-        ["git", "ls-tree", "-r", "-z", "--full-tree", ref],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "ls-tree", "-r", "-z", "--full-tree", ref],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    except OSError as error:
+        raise RuntimeError("cannot run git") from error
     if result.returncode:
         raise ValueError(f"cannot read tree for {ref}")
+    if result.stdout and not result.stdout.endswith(b"\0"):
+        raise ValueError(f"cannot parse tree for {ref}")
 
     entries: dict[bytes, tuple[bytes, bytes, bytes]] = {}
-    for record in result.stdout.split(b"\0"):
+    for record in result.stdout[:-1].split(b"\0") if result.stdout else ():
         if not record:
-            continue
+            raise ValueError(f"cannot parse tree for {ref}")
         try:
             metadata, path = record.split(b"\t", 1)
             mode, kind, oid = metadata.split(b" ")
         except ValueError as error:
             raise ValueError(f"cannot parse tree for {ref}") from error
-        if path in entries:
+        if (
+            not path
+            or TREE_ENTRY_KINDS.get(mode) != kind
+            or not OID.fullmatch(oid)
+            or path in entries
+        ):
             raise ValueError(f"cannot parse tree for {ref}")
         entries[path] = (mode, kind, oid)
     return entries
@@ -57,7 +75,7 @@ def main(argv: list[str]) -> int:
         candidate = _tree(candidate_ref)
         parent = _tree(parent_ref)
         anchor = _tree(anchor_ref)
-    except (OSError, ValueError) as error:
+    except (RuntimeError, ValueError) as error:
         print(f"error: {error}")
         return 2
 
