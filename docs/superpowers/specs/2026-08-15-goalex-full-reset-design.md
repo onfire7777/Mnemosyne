@@ -25,7 +25,7 @@ Hermes fleet dispatch is already disabled (`HERMES_KANBAN_DISPATCH_IN_GATEWAY=0`
 
 Use a recoverable full reset:
 
-1. Capture a timestamped private archive containing:
+1. Capture the immutable job definitions, quiesce their verified writers, then capture a timestamped private archive containing:
    - all four LaunchAgent plists;
    - the old worktree's `.goalex` and `.ralphex` state;
    - the bespoke supervisor, watchdog, and monitor scripts;
@@ -34,7 +34,7 @@ Use a recoverable full reset:
    - the RFX dirty patch, installed preset set, and snapshot inventory;
    - Mnemosyne-specific Hermes profiles, kanban board, requeue script, and kanban backups;
    - a top-level manifest with SHA-256 hashes for the bundle, patch, compressed state, and live receipts.
-2. Bootstrap-out every Mnemosyne GoalEx LaunchAgent, then verify their complete process trees exit.
+2. Reconfirm every Mnemosyne GoalEx LaunchAgent and complete process tree remains absent before removing its archived plist.
 3. Remove the four plists from `~/Library/LaunchAgents` after the archive is verified so login cannot recreate the loop.
 4. Remove the stale GoalEx worktree and delete only its local stale branch after confirming the bundle and patch are readable. Do not touch `origin/main`, canonical dirty files, the active topology-verifier worktree, or gbrain custody.
 5. Normalize RFX:
