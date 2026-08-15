@@ -5,7 +5,8 @@ import multiprocessing
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -728,32 +729,55 @@ def test_append_rejects_complete_final_entry_missing_only_newline(
     assert ledger_path.read_bytes() == without_newline
 
 
+@contextmanager
+def _signal_production_lock_attempt(attempting: Any) -> Iterator[None]:
+    from leaderboard import ledger
+
+    real_exclusive_file_lock = ledger.exclusive_file_lock
+
+    @contextmanager
+    def signal_then_lock(path: Path) -> Iterator[None]:
+        attempting.set()
+        with real_exclusive_file_lock(path):
+            yield
+
+    ledger.exclusive_file_lock = signal_then_lock
+    try:
+        yield
+    finally:
+        ledger.exclusive_file_lock = real_exclusive_file_lock
+
+
 def _append_and_signal_completion(
     ledger_path: str,
     private_key: str,
+    attempting: Any,
     completed: Any,
 ) -> None:
-    append_entry(
-        Path(ledger_path),
-        Path(private_key),
-        entry_id="entry-concurrent",
-        timestamp="2026-07-25T12:00:00Z",
-        entrant_id="synthetic-entrant",
-        status="failed",
-        run_id="run-concurrent",
-        reason="synthetic failure",
-        roster={"synthetic-entrant"},
-    )
+    with _signal_production_lock_attempt(attempting):
+        append_entry(
+            Path(ledger_path),
+            Path(private_key),
+            entry_id="entry-concurrent",
+            timestamp="2026-07-25T12:00:00Z",
+            entrant_id="synthetic-entrant",
+            status="failed",
+            run_id="run-concurrent",
+            reason="synthetic failure",
+            roster={"synthetic-entrant"},
+        )
     completed.set()
 
 
 def _verify_and_signal_completion(
     ledger_path: str,
     public_key: str,
+    attempting: Any,
     completed: Any,
     result: Any,
 ) -> None:
-    result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
+    with _signal_production_lock_attempt(attempting):
+        result.put(len(verify_ledger(Path(ledger_path), Path(public_key))))
     completed.set()
 
 
@@ -762,15 +786,17 @@ def test_append_serializes_on_sibling_process_lock(
 ) -> None:
     private_key, public_key = key_paths
     context = multiprocessing.get_context("spawn")
+    attempting = context.Event()
     completed = context.Event()
     process = context.Process(
         target=_append_and_signal_completion,
-        args=(str(ledger_path), str(private_key), completed),
+        args=(str(ledger_path), str(private_key), attempting, completed),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
     with exclusive_file_lock(lock_path):
         process.start()
-        assert not completed.wait(timeout=1)
+        assert attempting.wait(timeout=5)
+        assert not completed.wait(timeout=0.5)
         assert process.is_alive()
 
     assert completed.wait(timeout=5)
@@ -785,17 +811,19 @@ def test_verify_serializes_on_sibling_process_lock(
     private_key, public_key = key_paths
     _append(ledger_path, private_key, entry_id="entry-existing")
     context = multiprocessing.get_context("spawn")
+    attempting = context.Event()
     completed = context.Event()
     result = context.Queue()
     process = context.Process(
         target=_verify_and_signal_completion,
-        args=(str(ledger_path), str(public_key), completed, result),
+        args=(str(ledger_path), str(public_key), attempting, completed, result),
     )
     lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
 
     with exclusive_file_lock(lock_path):
         process.start()
-        assert not completed.wait(timeout=1)
+        assert attempting.wait(timeout=5)
+        assert not completed.wait(timeout=0.5)
         assert process.is_alive()
 
     assert completed.wait(timeout=5)
