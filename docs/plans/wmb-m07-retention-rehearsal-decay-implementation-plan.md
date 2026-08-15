@@ -209,3 +209,28 @@ This step is done when this file exists on GitHub as a one-file PR with
 `PROPOSED` / `NOT CODE-READY` and a reviewer can re-check §1 against spec
 L776–799 without trusting this prose. It is **not** done by flipping Status
 or writing any other path.
+
+## 11. Locked public-harness cell (do not write README from this PR)
+
+The block below is the only allowed future `eval/public/README.md` cell for
+this module. Place it as a peer of the M03 valid-time cell and the M02
+retrieval cell, not under the M02/M04/M05 Stage-A oracles heading. This PR
+does not write `eval/public/README.md`.
+
+Do not add a `uv run --suite` line until a registry row exists.
+
+```markdown
+### M07 retention, rehearsal, and decay
+
+PROPOSED · not in first pilot · all publication flags false
+
+Harness-owned virtual clock. Timestamped events alone do not prove time
+progression. No wall-clock sleeps. Bounded events. At least five
+virtual-calendar seeds.
+
+Storage and cost are a Pareto frontier, not a quality score. Protected-item
+survival 1.0. Measured admission receipt required; no asserted L16 budget.
+
+Corpus scale and official-track coverage stay disclosed deferrals. No
+registry row exists, so this cell is not runnable.
+```
