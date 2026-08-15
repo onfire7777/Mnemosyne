@@ -930,7 +930,9 @@ def test_topology_refresh_verifier_rejects_malformed_tree_output(
     for output in (
         valid,
         valid + b"\0\0",
+        b"100644 blob\tvalid\0",
         b"100600 blob " + b"0" * 40 + b"\tvalid\0",
+        b"100644 commit " + b"0" * 40 + b"\tvalid\0",
         b"100644 blob " + b"F" * 40 + b"\tvalid\0",
         b"100644 blob " + b"0" * 40 + b"\t\0",
         valid + b"\0" + valid + b"\0",
