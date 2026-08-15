@@ -863,6 +863,17 @@ def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
     assert result.returncode == 1
     assert result.stdout == "candidate does not descend from permitted parent\n"
 
+    grafts = repo / ".git" / "info" / "grafts"
+    grafts.write_text(f"{unrelated} {parent}\n", encoding="ascii")
+    forged = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", parent, unrelated],
+        cwd=repo,
+    )
+    assert forged.returncode == 0
+    result = _verify_topology(repo, unrelated, parent, anchor)
+    assert result.returncode == 1
+    assert result.stdout == "candidate does not descend from permitted parent\n"
+
 
 def test_topology_refresh_verifier_ignores_git_replacement_refs(tmp_path: Path) -> None:
     repo, _, parent, anchor = _topology_fixture(tmp_path)

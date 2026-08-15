@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -23,6 +24,7 @@ TREE_ENTRY_KINDS = {
     b"160000": b"commit",
 }
 GIT = ("git", "--no-replace-objects")
+GIT_ENV = {**os.environ, "GIT_GRAFT_FILE": os.devnull, "GIT_NO_REPLACE_OBJECTS": "1"}
 
 
 def _path(path: bytes) -> str:
@@ -35,6 +37,7 @@ def _tree(ref: str) -> dict[bytes, tuple[bytes, bytes, bytes]]:
             [*GIT, "ls-tree", "-r", "-z", "--full-tree", ref],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            env=GIT_ENV,
             check=False,
         )
     except OSError as error:
@@ -70,6 +73,7 @@ def _is_ancestor(parent_ref: str, candidate_ref: str) -> bool:
             [*GIT, "merge-base", "--is-ancestor", parent_ref, candidate_ref],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=GIT_ENV,
             check=False,
         )
     except OSError as error:
