@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6801fbd0`; PR #109 merged from audited topology head `cb44f21296fc22cf92f847b8201a6881e915400c` after exact-head CI `31865413163` passed, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at `2026-08-15T05:24:36Z`. It raced the lifecycle amendment and is recorded as a sequencing deviation; post-main CI `31866875258` succeeded at `2026-08-15T05:51:12Z`, and no later edge opened before that gate closed. Ruleset `19157561` requires strict up-to-date status checks; T10 therefore reserves immutable non-lifecycle content anchors with topology-only refreshes. PRs #110-#112 remain drafts, byte-identical to their approved content anchors outside the three lifecycle files, and strictly ordered. This amendment must land before #110. Current-main ancestry, exact lifecycle-parent equality, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI remain mandatory at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T05:54:05Z"
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@f688c747`; PRs #114 and #110-#112 are merged with exact-head and post-main CI receipts recorded in the lease map. PR #115 merged M02 Stage-B at `f688c74757365a9d946100687a04288cde12a7fc` after exact-head CI `31899050596`; post-main run `31900402252` then failed solely because PR #115 was absent from the lifecycle authorities (1 failed, 4752 passed, 156 skipped, 191 deselected), which PR #117 repairs. PR #115's reproduced M02 defects still require a serialized corrective successor before M02 can be treated as clean or publishable. PR #117 exclusively owns the coupled lifecycle reconciliation and topology-verifier remediation. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
+last_updated: "2026-08-15T18:38:41Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 7
@@ -140,18 +140,12 @@ Windows job.
 Fresh cumulative security scan `e95df6b0-da9d-4688-a2a0-4378be4973d1`
 covers all 32 refreshed-stack files with zero findings and proves the binary
 diff hash matches the approved cumulative stack.
-PR #109 is **MERGED** from exact head
-`cb44f21296fc22cf92f847b8201a6881e915400c`, with exact-head CI
-`31865413163` green, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4`
-at `2026-08-15T05:24:36Z`. It raced this amendment and is recorded as a
-sequencing deviation; post-main run `31866875258` succeeded. PRs #110-#112
-remain drafts and no later edge is open until this amendment lands. Their
-lifecycle blobs are parent-exact: #110 equals
-current `main`, #111 equals #110, and #112 equals #111.
-Controller amendment PR #114 is **OPEN/DRAFT**, changes only the three
-lifecycle authorities, and grants no implementation scope. Its self-record
-changes its head, so no exact PR #114 head, merge SHA/time, or post-main CI is
-claimed. PR #114 must pass and merge before #110.
+PR #109's sequencing deviation remains recorded in the lease map. PR #114 then
+delivered the topology amendment, and PRs #110, #111, and #112 merged in the
+required serialized order with exact-head and post-main CI green at every edge,
+ending at `main@61f55b94`. Their lifecycle blobs were parent-exact and their
+non-lifecycle bytes matched the immutable anchors; no Windows stack writer
+remains open.
 One controller owns every serialized `.github/workflows/ci.yml` integration
 edge. Exact-head required/native CI, fresh security review, local/remote/hosted
 head equality, cleared review threads, current-main ancestry, and successful
@@ -434,10 +428,10 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 after exact-head CI `31865413163` passed, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@6801fbd0`. Node `T10` now reserves only the
-remaining content-anchored stack #110 -> #111 -> #112 under the rolling strict-
-check contract recorded in the lease map; successful post-main CI must separate
-their merge commits. PR #90 is
+current canonical baseline is `main@f688c747`. Node `T10` is delivered through
+PR #112. PR #115 merged M02 Stage-B at this baseline, but its reproduced review
+defects remain open and require a serialized corrective successor; PR #117 owns
+the coupled lifecycle reconciliation and topology-verifier remediation. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;

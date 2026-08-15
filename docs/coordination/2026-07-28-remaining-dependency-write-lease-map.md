@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
 Updated: 2026-08-15
-Baseline: `main@6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4`
+Baseline: `main@f688c74757365a9d946100687a04288cde12a7fc`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -160,24 +160,40 @@ The following packages are complete source history, not runnable work:
   authority.
 - PR #114: controller-only `T10` amendment recording PR #109 delivery and
   replacing the ruleset-incompatible full-head freeze with immutable content
-  anchors plus exact lifecycle-parent equality. It is **OPEN/DRAFT** at the
-  `2026-08-15T05:54:05Z` capture. This self-record changes its head, so no exact
-  PR #114 head, merge SHA/time, or post-main CI is claimed. It changes only
-  `GOAL.md`, `.planning/STATE.md`, and this map, grants no implementation or
-  benchmark authority, and must pass and merge before PR #110.
+  anchors plus exact lifecycle-parent equality. Delivered from exact head
+  `7a2777663115554d7683dcb9f59301dd9d83fbf7` after all required exact-head
+  checks passed in run `31868231552`; merge
+  `c4337f6315833b930cba2d31c7e95778c4f6ddd5` at
+  `2026-08-15T06:26:57Z`; successful post-main CI `31869469070`. It changed
+  only `GOAL.md`, `.planning/STATE.md`, and this map and granted no benchmark
+  authority.
+- PR #115: M02 Stage-B public-harness delivery from exact head
+  `c14c7a590aa12707e324d57d4dc15afc7fc9c0b7`; all required exact-head checks
+  passed in run `31899050596`; merge
+  `f688c74757365a9d946100687a04288cde12a7fc` at
+  `2026-08-15T18:10:28Z`. Post-main run `31900402252` failed solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #115 was absent from the lifecycle authorities (1 failed, 4752
+  passed, 156 skipped, 191 deselected); all eight faster jobs were green. PR
+  #117 repairs that traceability lapse. The merge is recorded without waiving
+  its reproduced review defects: a serialized successor must repair the missing
+  bundle profile, explicit grounded read-only answer custody, empty-hit scoring,
+  ranked-result order, `scoring_family`, and the weakened fixture-validation
+  path before M02 can be treated as clean or publishable.
 - PR #117: ordinary code-and-documentation remediation for the valid
-  post-merge PR #114 topology-contract review finding. It is **OPEN/DRAFT** at
-  the `2026-08-15T17:24:56Z` capture and adds the stdlib verifier, its focused
-  planning-traceability tests, the trusted invocation in `GOAL.md`, and this
-  structured self-record. Because this record changes the branch head, no
-  exact final head, merge SHA/time, or post-main CI is claimed here. PR #117 is
-  not a topology-only refresh, changes no benchmark result or admission state,
-  and must pass fresh exact-head review, security, and CI before merge.
+  post-merge PR #114 topology-contract review finding and the coupled PR #115
+  lifecycle reconciliation. It is **OPEN/READY** at the
+  `2026-08-15T18:29:54Z` capture and adds the stdlib verifier, its focused
+  planning-traceability tests, the trusted invocation in `GOAL.md`, the
+  baseline/receipt update in `.planning/STATE.md`, and this structured
+  self-record. Because this record changes the branch head, no exact final
+  head, merge SHA/time, or post-main CI is claimed here. PR #117 is not a
+  topology-only refresh, changes no benchmark result or admission state, and
+  must pass fresh exact-head review, security, and CI before merge.
 
-The remaining implementation PRs are **reserved, not merged**. This is the
-amended `T10` controller receipt, refreshed at `2026-08-15T05:54:05Z` after
-repository ruleset `19157561` correctly enforced strict required-check
-freshness against the post-PR-#113 `main`:
+The following is the historical `T10` reservation snapshot from
+`2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
+Current delivery receipts are appended to the affected rows:
 
 - PR #109: Windows configured-command portability and the first native Windows
   workflow gate. Immutable non-lifecycle content anchor
@@ -200,7 +216,10 @@ freshness against the post-PR-#113 `main`:
   every required/native job.
   Component head
   `1aacf2a8244dda853e1385707072a9e391f7271c` has sealed zero-finding security
-  scan `90861fd0-f76f-4207-b1df-36e4cdec69e4`. No merge is claimed.
+  scan `90861fd0-f76f-4207-b1df-36e4cdec69e4`. Delivered from exact refreshed
+  head `9655ef411399fed9d72fddb6f660d0fae39e8449`, exact-head CI
+  `31870720134`, merge `6241984b15e85171bc036100fa5e20e05588bd81`
+  at `2026-08-15T07:19:40Z`, and successful post-main CI `31871667827`.
 - PR #111: bounded native-Windows process-tree containment while preserving the
   existing POSIX runner. Immutable cumulative non-lifecycle content anchor
   `226e4416a4e76671d7ca079fe97664b8617f5bfa`; first refreshed topology head
@@ -208,8 +227,11 @@ freshness against the post-PR-#113 `main`:
   Refreshed exact-head CI run `31865430468` completed successfully, including
   every required/native job.
   Component head `0382f13132dd69bf93d123009c4bee2ba972a82d` has sealed
-  zero-finding security scan `a2660fdb-115a-4f0e-80a8-10266d48403b`. No merge
-  is claimed.
+  zero-finding security scan `a2660fdb-115a-4f0e-80a8-10266d48403b`.
+  Delivered from exact refreshed head
+  `7754980eb2b5fdc227763e34c7b2af394fb1ea2c`, exact-head CI
+  `31872923876`, merge `f95aabaca85ed6cbfbda66c0ceea12df22bfdd00`
+  at `2026-08-15T08:18:20Z`, and successful post-main CI `31874150626`.
 - PR #112: Windows filesystem/environment/LF portability. Immutable cumulative
   non-lifecycle content anchor `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`;
   first refreshed topology head `c8d95dafe5131f965591b84aeabb095fac34f1b6`;
@@ -224,32 +246,22 @@ freshness against the post-PR-#113 `main`:
   findings. Fresh refreshed-stack scan
   `e95df6b0-da9d-4688-a2a0-4378be4973d1` covers all 32 changed files at exact
   head `c8d95dafe5131f965591b84aeabb095fac34f1b6`, validates the contract, and
-  reports zero findings. No merge is claimed.
+  reports zero findings. Delivered from exact refreshed head
+  `afc00bae1af9e9db7016ef3adffaca9bdc226bcf`, exact-head CI
+  `31875248786`, merge `61f55b94a6f878973437d075adfcecf2cb684ae6`
+  at `2026-08-15T14:48:25Z`, and successful post-main CI `31890934043`.
 
-The refreshed integration receipt verifies clean hosted/local ancestry
-`main@6929fd37` -> `cb44f212` -> `26f95a09` -> `02a724e9` -> `c8d95daf`, with
-PR #109 now merged as `main@6801fbd0`,
-conflict-free merge trees, four clean non-lifecycle exclusion checks, exactly
-three unique Windows jobs, and the same five PR #112 filesystem test nodes.
-The three lifecycle blobs are also parent-exact: #110 equals
-`main@6801fbd0`, #111 equals #110, and #112 equals #111.
-The previous and refreshed 32-file diffs are byte-identical and share binary
-diff hash `f538e11916f0621cb951f8393debb66e032abaa69c9053fb4562c9d245fc778d`.
-The **CI integration owner is the sole writer** across the stack's serialized
-`.github/workflows/ci.yml` edges; satellites may not duplicate or rename those
-jobs. A topology-only refresh is admissible without another controller PR only
-when it merges current `main` or the immediately preceding stack PR, its three
-lifecycle blobs exactly equal that parent, every non-lifecycle blob remains
-equal to the matching immutable content anchor, all required/native exact-head
-CI and fresh security review pass, local/remote/hosted heads match, and no
-review thread is unresolved. Any lifecycle divergence or non-lifecycle blob
-change voids the reservation. No remaining implementation PR may merge until
-this lifecycle amendment lands. Then use
-merge commits only in the strict order PR #110 -> PR #111 -> PR #112,
-requiring successful post-merge `main` CI before refreshing and opening each
-next integration edge.
+The completed integration receipt verifies the serialized merge chain
+`main@6801fbd0` -> PR #114 `c4337f63` -> PR #110 `6241984b` -> PR #111
+`f95aabac` -> PR #112 `61f55b94`. Every edge preserved its immutable
+non-lifecycle anchor, inherited the immediately preceding lifecycle blobs,
+passed exact-head required/native CI and fresh security review, and waited for
+successful post-main CI. The cumulative diff retained binary hash
+`f538e11916f0621cb951f8393debb66e032abaa69c9053fb4562c9d245fc778d`;
+exactly three unique Windows jobs and the five PR #112 filesystem nodes landed.
+The Windows stack is delivered and no implementation writer remains open.
 
-This map is recomputed from the new baseline `main@6801fbd0`, which the
+This map is recomputed from the new baseline `main@f688c747`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
@@ -339,7 +351,7 @@ exact lease, shared owner/integration edge, and external gate.
 | T7 | MERGED | Bounded documentation-and-tests node disclosing PR #96's development-only M02/M04/M05 evaluation oracles; consumed verified canonical `main@b8673031` plus PR #97 (merge `71e492b4`, exact-head CI `30774834604`, post-merge CI `30775783472`) and PR #98 (merge `b8673031`, exact-head CI `30787319275`, post-merge CI `30788531829`) receipts | The M02/M04/M05 Stage-A development gap disclosures in `eval/public/README.md`, their pinning tests, and the three lifecycle files recomputed to `Baseline: main@b8673031` | `eval/public/README.md` and `tests/test_public_wmbs_stage_a_disclosure.py` under the **Public-harness integration owner**, serialized as sole writer on `eval/public/*` for this documentation-only edit; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/` under the **GoalEx lifecycle owner**. Both owners are required and they land together in one serialized PR (PR-1 of round 46); no other lane touches `eval/public/*` at this baseline | Documentation and tests only. It admits **no source node**, **no Stage-B integration**, and **no successor node**: no `eval/public/registry.json` entry, adapter, runner routing, profile contract, or scoring-profile registration is authorized, no module behavior or fixture byte changes, M02/M04/M05 stay `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, and no progress counter moves. Stage B for all three remains blocked on the public-harness integration owner's lease. **Delivery statement:** the `eval/public/README.md` M02/M04/M05 Stage-A development-oracle gap disclosure and its pinning suite `tests/test_public_wmbs_stage_a_disclosure.py` are delivered by PR-1 of GoalEx round 46 **Merged receipts:** delivered as PR #99, merge `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@b8673031` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@d7eefb7c` |
 | T8 | MERGED | Bounded GoalEx lifecycle documentation-and-tests node landing the stranded Round-0 M01-M20 completeness inventory; consumes verified canonical `main@b8673031` and the same PR #97/#98 receipts `T7` consumes | The M01-M20 module completeness inventory, its line-level derivations, the drift test that pins the inventory to the tree, and the three lifecycle files recomputed to `Baseline: main@b8673031` | Exactly `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`; `docs/coordination/2026-08-03-wmbs-module-completeness-derivation.md`; `tests/test_wmbs_module_inventory.py`; `GOAL.md`; `.planning/STATE.md`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/plans/`. GoalEx owner only | Documentation and tests only. It admits **no source node** and **no publication claim**: no module implementation, protocol, scorer, adapter, registry entry, fixture byte, schema, or admission state changes, and no progress counter moves. Its lease contains no public-harness source path. It **overlaps `T7`** on `GOAL.md`, `.planning/STATE.md`, this map, and `docs/plans/`, so `T7` and `T8` are not concurrent writers: they are one serialized GoalEx lifecycle writer landing as a single PR (PR-1 of round 46) **Merged receipts:** delivered as PR #99, merge `d7eefb7c`, exact head `2375aba5`, exact-head CI `30808291831`; its post-merge run `30810160121` failed the baseline lapse detector because PR #99 landed after the then-recorded baseline `main@b8673031` without pre-recording itself, which PR #101 discharges by recomputing this map to `main@d7eefb7c` |
 | T9 | MERGED | Public-harness Stage-B M03 registry-admission node; consumed canonical `main` through PR #107 at `main@7f305090` | The `wmbs-m03-valid-time-development` entry in `eval/public/registry.json`, its `_ADAPTERS` and `_PROFILE_CONTRACTS` keys in `eval/public/runner.py`, its matching `allowed_profile` label in `eval/public/bundle.py` (a second, independent profile-contract table that rejects an unlabelled profile with `wrong interval-family metadata`), its `eval/public/README.md` documentation, its tests, and the derived-fact inventory update already present in this PR | Exactly `eval/public/registry.json`; `eval/public/runner.py`; `eval/public/bundle.py`; `eval/public/README.md`; `tests/test_public_whole_memory_reference.py`; `tests/test_public_wmbs_m03_registry_admission.py`; `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`. Delivered under the public-harness integration owner's exclusive serialized lease after `T7`'s `eval/public/README.md` write; that serialization is discharged and no active writer remains on the lease | Authorizes **M03 only**. It admits no other module, changes no fixture byte, no scorer logic, and no schema, and it advances **no admission state**: M03 stays `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with full bitemporal transaction-time query semantics retained as a hard deferral per `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md` line 68. Reachability fix only; it admits **no successor node** or source node. **Merged receipts:** PR #100 exact head `e072dda5a9e7ef078d317156c49c54bbee7a5124`; all required exact-head CI and Greptile green in run `31854371658`; merge `b3570937918c7de40cd89ea543fab9e7b16f7471` at `2026-08-15T01:12:26Z`; post-merge CI `31855873247` successful |
-| T10 | PARTIAL / SERIAL | Windows portability stack; consumes verified canonical `main@6801fbd0`, successful post-PR-#113 main CI `31864254074`, PR #109 exact-head CI `31865413163`, merge `6801fbd0`, and successful post-main CI `31866875258`, immutable non-lifecycle content anchors PR #110 `7e282b7c95f51a6446e25d92f8284de261551703` -> PR #111 `226e4416a4e76671d7ca079fe97664b8617f5bfa` -> PR #112 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`, successful refreshed CI runs `31865422216` / `31865430468` / `31865438529`, and refreshed zero-finding cumulative scan `e95df6b0-da9d-4688-a2a0-4378be4973d1` | PR #109 command parsing is merged; remaining work is signed-ledger file locking; bounded native-Windows process-tree containment; filesystem/environment/LF portability; exactly three unique native-Windows CI jobs | Lifecycle authority: exactly `GOAL.md`; `.planning/STATE.md`; this map. Remaining implementation leases are the non-lifecycle deltas at the #110-#112 immutable content anchors. Ruleset `19157561` requires topology refreshes to include current `main`; refreshed lifecycle blobs must exactly equal current `main` or the immediately preceding stack PR, and every non-lifecycle blob must remain equal to the matching anchor. `.github/workflows/ci.yml` remains under one controller/CI integration owner | **PR #109 merged with a recorded sequencing deviation and post-main green; #110-#112 remain reserved:** wait for this amendment. Then merge commits only in order #110 -> #111 -> #112; require current-main ancestry, exact lifecycle-parent equality, unchanged non-lifecycle bytes, all-required/native exact-head green, fresh security review, local/remote/hosted head equality, review/thread clearance, and successful post-merge `main` CI before each next merge. Any lifecycle divergence or non-lifecycle change voids this reservation |
+| T10 | MERGED | Windows portability stack from PR #109 through PR #112, with controller amendment PR #114, immutable non-lifecycle content anchors, exact lifecycle-parent equality, and three native-Windows CI jobs | Delivered configured-command portability, shared stdlib file locking, bounded native-Windows process-tree containment, and filesystem/environment/LF portability | Historical lifecycle authority: `GOAL.md`; `.planning/STATE.md`; this map. Historical implementation anchors: PR #110 `7e282b7c95f51a6446e25d92f8284de261551703`, PR #111 `226e4416a4e76671d7ca079fe97664b8617f5bfa`, PR #112 `259a6361355ab80cbbfa75ca1a6de6ec4b1f9a96`; `.github/workflows/ci.yml` remained under one integration owner | Complete: PR #114 merge `c4337f63` and post-main CI `31869469070`; PR #110 merge `6241984b` and post-main CI `31871667827`; PR #111 merge `f95aabac` and post-main CI `31874150626`; PR #112 merge `61f55b94` and post-main CI `31890934043`. Exact-head required/native CI and fresh security review passed at every edge; no Windows stack writer remains open |
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
@@ -416,13 +428,11 @@ Current delivery wave
   delivered as PR #100. That ordering and both write leases are now discharged:
   T7, T8, and T9 are all MERGED, and no writer remains admitted from this wave.
 
-Reserved Windows portability wave (strictly serial; content-anchored)
-  PR #113 controller receipt@6929fd37 -> PR #109 MERGED@6801fbd0
-    -> amendment + post-main green -> PR #110[content@7e282b7c]
-    -> PR #111[content@226e4416]
-    -> PR #112[content@259a6361]
-  ruleset-required topology refreshes add current-main/preceding-PR ancestry;
-  lifecycle blobs equal that parent exactly and post-merge CI closes each edge.
+Delivered Windows portability wave (serialized; content-anchored)
+  PR #113 receipt@6929fd37 -> PR #109@6801fbd0 -> PR #114@c4337f63
+    -> PR #110@6241984b -> PR #111@f95aabac -> PR #112@61f55b94
+  Every edge preserved its immutable non-lifecycle anchor, inherited the
+  immediately preceding lifecycle blobs, and closed on successful post-main CI.
 
 Independent external gates (do not block T0-T10)
   P12-E operator measurement
@@ -450,19 +460,12 @@ Quarantine
 
 ## Concurrency and integration rules
 
-- `T10` is the only admitted source wave and is **strictly serial**, not a
-  concurrency allowance. Controller PR #113 is merged; this amendment replaces
-  its self-invalidating full-head freeze with immutable non-lifecycle content
-  anchors compatible with ruleset `19157561`. PR #109 merged before the
-  amendment and has cleared its post-main gate; the remaining implementation
-  PRs are held for this amendment and then merge by merge commit only in order
-  #110 -> #111 -> #112. The
-  controller/CI integration owner alone serializes every
-  `.github/workflows/ci.yml` edge. Current-main ancestry, exact lifecycle-parent
-  equality, clean non-lifecycle anchor equality, required/native exact-head CI,
-  review/thread clearance, fresh security receipts, hosted/local/remote head
-  equality, and successful post-merge `main` CI close each edge before the next
-  opens.
+- `T10` is delivered through PR #112; it is no longer an admitted source wave
+  or concurrency allowance. Controller PRs #113/#114 and implementation PRs
+  #109-#112 are merged, and every edge closed with the recorded topology,
+  exact-head, security, and post-main receipts. The controller/CI integration
+  owner remains the sole writer for any future serialized
+  `.github/workflows/ci.yml` edge.
 - Current safe coding concurrency is **zero new module-implementation
   writers**: every remaining source package is dependency-, lease-, evidence-,
   or spec-blocked. `T7` and `T8` were delivered by PR #99; `T9` was delivered
