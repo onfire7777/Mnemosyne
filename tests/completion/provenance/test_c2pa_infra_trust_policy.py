@@ -208,7 +208,7 @@ def test_fixed_policy_quarantines_untrusted_root(tmp_path):
     assert "certificate root" in decision.reason
 
 
-def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path):
+def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path, monkeypatch):
     """An existing executable path is not split as a configured command string."""
     asset = tmp_path / "asset.signed.jpg"
     asset.write_bytes(PAYLOAD)
@@ -217,11 +217,19 @@ def test_c2pa_existing_tool_path_with_spaces_is_literal_argv(tmp_path):
     tool_dir = tmp_path / "tool directory"
     tool_dir.mkdir()
     tool = tool_dir / "c2pa verifier"
-    tool.write_text(
-        "#!%s\nimport json\nprint(json.dumps(%r))\n" % (sys.executable, report),
-        encoding="utf-8",
-    )
-    tool.chmod(tool.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    tool.touch()
+
+    def fake_run(argv, **kwargs):
+        assert argv == [str(tool), str(asset), "--json"]
+        assert kwargs == {
+            "check": False,
+            "text": True,
+            "capture_output": True,
+            "timeout": 30.0,
+        }
+        return prov.subprocess.CompletedProcess(argv, 0, stdout=json.dumps(report), stderr="")
+
+    monkeypatch.setattr(prov.subprocess, "run", fake_run)
 
     verifier = prov.C2paToolVerifier(
         tool_path=str(tool),

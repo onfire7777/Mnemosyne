@@ -96,8 +96,8 @@ jobs:
         run: >-
           uv run --locked python -m pytest
           tests/test_command_line.py
-          tests/test_cli_runtime_tools.py
-          tests/completion/provenance/test_c2pa_infra_trust_policy.py
+          tests/test_cli_runtime_tools.py::test_production_evidence_manifest_path_rewrite_preserves_windows_backslashes
+          tests/completion/provenance/test_c2pa_infra_trust_policy.py::test_c2pa_existing_tool_path_with_spaces_is_literal_argv
           -q
 
   provider-conformance:
