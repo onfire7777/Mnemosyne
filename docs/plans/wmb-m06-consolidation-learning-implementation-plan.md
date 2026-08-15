@@ -49,10 +49,11 @@ All of the following are blocking. None is discharged by writing this file.
    unrelated-task thresholds. No preregistration exists. Stage A cannot claim
    those bounds.
 4. G0 / G1 / G2: path not lease-clean; lease map not recomputed; pilot plan
-   excludes M06 (`…standard-design.md:771–773`, inventory L54). Freeze is a
-   later step. This file does not freeze itself.
-5. No Stage A artifact exists on this base (inventory L54: plan/fixture/scorer/
-   tests/registry all **no**).
+   excludes M06 (`…standard-design.md:771–773`). Freeze is a later step. This
+   file does not freeze itself.
+
+Missing Stage A artifacts are tree state (inventory L54), not a gate. WMBS-D
+is an implement sequencing gate, not a reason to refuse this plan file.
 
 **Verdict: NOT CODE-READY.** Do not implement from this file.
 
@@ -92,8 +93,9 @@ development cell and does not reopen the first reference-harness pilot.
 
 C24 (`…standard-design.md:525`) is a mandatory report dimension (storage/cost
 already in the M06 scorer), not a second module and not a score. This plan
-does not absorb M07/C09 (retention, rehearsal, decay), M14/C23 (procedural
-task utility), or M02 retrieval/organization.
+does not absorb M07/C09 (retention, rehearsal, decay — spec D7 L71, C09 L510),
+M14/C23 (procedural task utility), or M02 retrieval/organization.
+Consolidation must not absorb decay.
 
 ## 2. Prerequisites (not discharged)
 
@@ -144,7 +146,9 @@ This paragraph does not create those files.
 
 ## 5. Custody, licence, and claim constraints
 
-- Deterministic local roles: no external dataset, no network, no provider.
+- Deterministic local roles: no external dataset, no network, no provider
+  (spec L766; U-MODULES license/custody). Pin any later dataset at freeze;
+  do not invent one here.
 - Official MemoryAgentBench/EvoMemBench: `DEFERRED` until pinned upstream
   data/models/scoring can be reproduced.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
@@ -188,6 +192,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Official MAB/EvoMemBench | `DEFERRED` | `DEFERRED` | `DEFERRED` |
 | Spec CI-LCB acceptance | `DEFERRED` (R1/R3) | `DEFERRED` | `DEFERRED` until receipt |
 | Publishable / headline | `false` | `false` | `false` |
+| Learn without leaking (spec L1253) | required later: no tenant leakage, no unsafe retrieved-instruction promotion | same | same |
 | Code lease | none | only if freeze + G1 admit it | G3 |
 
 ## 9. Non-goals
