@@ -183,8 +183,14 @@ green in run `31859014653`, and merged as
 `c1bf6a10335e30fe797c54a42285922552647a9e`, with all required exact-head CI
 green in run `31863057094`, as merge
 `6929fd3703ff262d3264b58a5af90d506a804da2` at
-`2026-08-15T04:22:14Z`; post-merge run `31864254074` succeeded. The carve-out
-is therefore recomputed from `main@6929fd37`. `T7`, `T8`, and `T9` are all
+`2026-08-15T04:22:14Z`; post-merge run `31864254074` succeeded. PR #109 then
+merged from audited topology head
+`cb44f21296fc22cf92f847b8201a6881e915400c`, after all required and native-
+Windows checks passed in exact-head run `31865413163`, as
+`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`2026-08-15T05:24:36Z`. That merge raced this lifecycle amendment; post-merge
+run `31866875258` remains in progress and no later stack edge is open. The
+carve-out is therefore recomputed from `main@6801fbd0`. `T7`, `T8`, and `T9` are all
 **MERGED**, and no writer remains admitted from that wave. None is a source
 node or admits a successor node. `T9` changed reachability only: M03 remains
 `PROPOSED` / `publishable:false` / `pbpp_headline_eligible:false`, with no
@@ -210,14 +216,22 @@ required and native-Windows job. Fresh exact refreshed-stack security scan
 `e95df6b0-da9d-4688-a2a0-4378be4973d1` covers all 32 changed files with zero
 findings; its binary diff hash exactly matches the approved cumulative stack at
 `f538e11916f0621cb951f8393debb66e032abaa69c9053fb4562c9d245fc778d`.
+PR #109 is **MERGED** at `main@6801fbd0`; its implementation content and
+pre-merge gates matched this receipt, but its merge preceded the amendment and
+is recorded as a sequencing deviation rather than silently reclassified as
+compliant. PRs #110-#112 remain open drafts. No later edge may merge until PR
+#109's post-main CI succeeds and this amendment lands. Their lifecycle blobs
+already satisfy the stronger parent-equality invariant: #110 equals current
+`main`, #111 equals #110, and #112 equals #111.
 Topology-only merges of current `main` or the immediately
 preceding stack PR are therefore permitted without another controller PR only
-when that three-path exclusion remains the entire diff, the required/native
+when all three lifecycle blobs exactly equal that parent, every non-lifecycle
+blob remains equal to the corresponding content anchor, the required/native
 exact-head CI is green, a fresh security review finds no issue, local/remote/
-hosted heads agree, and all review threads are clear. Any source, workflow, or
-test blob change relative to the corresponding content anchor voids the
-reservation. The controller remains the sole CI integration owner. Merge
-commits only in the order #109 -> #110 -> #111 -> #112 are permitted, with
+hosted heads agree, and all review threads are clear. Any lifecycle divergence
+or non-lifecycle blob change voids the reservation. The controller remains the
+sole CI integration owner. Merge commits for the remaining stack only in the
+order #110 -> #111 -> #112 are permitted, with
 successful post-merge `main` CI required before refreshing and merging each
 next edge.
 
@@ -300,8 +314,12 @@ at `2026-08-15T02:45:01Z`, and successful post-merge run `31859997325`. The
 controller receipt then delivered as PR #113 from exact head
 `c1bf6a10335e30fe797c54a42285922552647a9e`, all-required-green exact-head CI
 run `31863057094`, merge `6929fd3703ff262d3264b58a5af90d506a804da2`
-at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. The
-current canonical baseline is `main@6929fd37`. `T5` and `T6` are discharged.
+at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
+#109 then merged from exact head `cb44f21296fc22cf92f847b8201a6881e915400c`
+after all required/native checks passed in run `31865413163`, as
+`6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
+`2026-08-15T05:24:36Z`; post-main run `31866875258` remains in progress. The
+current canonical baseline is `main@6801fbd0`. `T5` and `T6` are discharged.
 Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
 admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
@@ -699,6 +717,7 @@ git merge-base --is-ancestor b3570937918c7de40cd89ea543fab9e7b16f7471 main
 git merge-base --is-ancestor 7b6c5a121107ee80533a5b4ec794e602e1e1ab33 main
 git merge-base --is-ancestor 7c5264d815d44c375173dcd1e8ab57783a397a7e main
 git merge-base --is-ancestor 6929fd3703ff262d3264b58a5af90d506a804da2 main
+git merge-base --is-ancestor 6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -712,7 +731,7 @@ git merge-base --is-ancestor 6929fd3703ff262d3264b58a5af90d506a804da2 main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "6929fd3703ff262d3264b58a5af90d506a804da2"
+test "$(git rev-parse main)" = "6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
