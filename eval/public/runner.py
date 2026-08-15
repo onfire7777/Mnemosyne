@@ -98,6 +98,26 @@ _FROZEN_PHASE11_CUSTODY = {
 }
 
 
+
+def _m02_bundle_metadata(
+    suite: Mapping[str, Any],
+    suite_name: str,
+    *,
+    backend: str | None,
+    exercised: str | None = None,
+) -> dict[str, Any]:
+    metadata = {**dict(suite), "suite": suite_name}
+    declared = str(backend or "").strip()
+    if not declared:
+        raise ValueError(f"{suite_name}: bundle metadata must name the exercised backend")
+    if exercised is not None and declared != exercised:
+        raise ValueError(
+            f"{suite_name}: bundle metadata fabricated backend {declared!r}"
+        )
+    metadata["backend"] = declared
+    return metadata
+
+
 def load_registry() -> dict[str, dict[str, Any]]:
     registry = json.loads((ROOT / "registry.json").read_text(encoding="utf-8"))
     protocol = registry.pop("_qa_protocol", None)
@@ -401,11 +421,13 @@ def run_public_suite(
         if key in os.environ
     }
     allowed_env.update(runtime_env)
+    exercised_backend: str | None = None
     if suite.get("system_seam") == "harness-owned-reference-core":
         result = adapter(adapter_input, None)
     else:
         with tempfile.TemporaryDirectory(prefix="mneme-public-") as temp:
             mnemo = MnemoCLI(store=str(Path(temp) / "store.json"), env=allowed_env)
+            exercised_backend = getattr(mnemo, "backend", None)
             cli: Any = (
                 ActionCLI(mnemo)
                 if suite["adapter"] == "pm-bench-triggerbench"
@@ -463,7 +485,12 @@ def run_public_suite(
         or interval_method != suite["interval_method"]
     ):
         raise ValueError("scoring profile, family, or interval metadata mismatch")
-    metadata = {**suite, "suite": suite_name}
+    if suite_name == "wmbs-m02-retrieval-development":
+        metadata = _m02_bundle_metadata(
+            suite, suite_name, backend=exercised_backend
+        )
+    else:
+        metadata = {**suite, "suite": suite_name}
     if suite["family"] == "qa":
         assert candidate is not None
         protocol, digests = load_qa_protocol(), qa_protocol_digests()

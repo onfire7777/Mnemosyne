@@ -161,6 +161,15 @@ specification names a 2,000-event local corpus; the 2,000-event variant stays
 deferred behind a measured resource receipt, so 240 is a disclosed scale gap
 rather than a scaled-down result.
 
+Bundle metadata names the backend the public CLI actually exercised
+(`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
+backend fails `test_m02_bundle_declares_backend_explicitly`. That is a
+store disclosure, including an omitted PostgreSQL path, not a
+portability claim. `verify_bundle` still has no `allowed_profile` or
+canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
+`bundle.py` is outside this lease; Stage B scores through
+`score_profile` instead.
+
 `finalize.reason` is closed to `completed` or `cancelled`. A successful
 `cancelled` finalization is terminal and uses identical idempotent request and
 response replay. Closed errors and negative finalize receipts leave the attempt
