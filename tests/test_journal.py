@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import builtins
 import hashlib
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings, strategies as st
 
+import mnemosyne.journal as journal_module
 from mnemosyne.journal import CIDJournal, journal_filename
 
 
@@ -35,6 +37,41 @@ def test_append_writes_canonical_json_lines(tmp_path: Path):
     lines = (tmp_path / "t-a.journal").read_text().splitlines()
     assert [json.loads(line)["cid"] for line in lines] == ["cid-1", "cid-2"]
     assert lines[0] == json.dumps(_rec("cid-1"), sort_keys=True, separators=(",", ":"))
+
+
+def test_append_and_rewrite_force_raw_lf_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_open = builtins.open
+    write_newlines: list[str | None] = []
+
+    def tracking_open(*args: object, **kwargs: object):
+        if len(args) > 1 and args[1] in {"a", "w"}:
+            newline = kwargs.get("newline")
+            assert newline is None or isinstance(newline, str)
+            write_newlines.append(newline)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(journal_module, "open", tracking_open, raising=False)
+    path = tmp_path / "t.journal"
+    journal = CIDJournal(path)
+    journal.append(_rec("cid-1"))
+    journal.tombstone(
+        "cid-1", salted_hash="abc123", erased_at="2026-07-01T00:00:00Z"
+    )
+
+    expected = {
+        "cid": "cid-1",
+        "erased": True,
+        "erased_at": "2026-07-01T00:00:00Z",
+        "kind": "evidence",
+        "salted_hash": "abc123",
+        "tenant_id": "t-a",
+    }
+    assert write_newlines == ["\n", "\n"]
+    assert path.read_bytes() == (
+        json.dumps(expected, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
 
 
 def test_tombstone_preserves_line_with_marker_not_content(tmp_path: Path):

@@ -229,6 +229,18 @@ def test_manifest_removes_publication_when_directory_fsync_fails(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_manifest_directory_fsync_is_a_noop_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_open(*_args: object, **_kwargs: object) -> int:
+        pytest.fail("Windows must not open directories for fsync")
+
+    monkeypatch.setattr(manifest_module.os, "name", "nt")
+    monkeypatch.setattr(manifest_module.os, "open", fail_open)
+
+    manifest_module._fsync_directory(tmp_path)
+
+
 def test_manifest_removes_temporary_file_when_link_fails(
     tmp_path, manifest, monkeypatch
 ) -> None:

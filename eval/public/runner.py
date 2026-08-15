@@ -268,16 +268,22 @@ def write_candidate_manifest(path: Path | str, manifest: dict[str, Any], *, repo
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(destination, 0o600)
-        directory_fd = os.open(destination.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+        _fsync_directory(destination.parent)
     except FileExistsError:
         raise FileExistsError(f"refusing to overwrite candidate manifest: {destination}") from None
     except BaseException:
         destination.unlink(missing_ok=True)
         raise
+
+
+def _fsync_directory(path: Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _current_clean_head(repo_root: Path) -> str:
@@ -380,7 +386,16 @@ def run_public_suite(
         )
     allowed_env = {
         key: os.environ[key]
-        for key in ("LANG", "LC_ALL", "PATH", "TMPDIR")
+        for key in (
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "TMPDIR",
+            "SYSTEMROOT",
+            "COMSPEC",
+            "TEMP",
+            "TMP",
+        )
         if key in os.environ
     }
     allowed_env.update(runtime_env)
