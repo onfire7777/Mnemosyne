@@ -165,6 +165,14 @@ The following packages are complete source history, not runnable work:
   PR #114 head, merge SHA/time, or post-main CI is claimed. It changes only
   `GOAL.md`, `.planning/STATE.md`, and this map, grants no implementation or
   benchmark authority, and must pass and merge before PR #110.
+- PR #117: ordinary code-and-documentation remediation for the valid
+  post-merge PR #114 topology-contract review finding. It is **OPEN/DRAFT** at
+  the `2026-08-15T17:24:56Z` capture and adds the stdlib verifier, its focused
+  planning-traceability tests, the trusted invocation in `GOAL.md`, and this
+  structured self-record. Because this record changes the branch head, no
+  exact final head, merge SHA/time, or post-main CI is claimed here. PR #117 is
+  not a topology-only refresh, changes no benchmark result or admission state,
+  and must pass fresh exact-head review, security, and CI before merge.
 
 The remaining implementation PRs are **reserved, not merged**. This is the
 amended `T10` controller receipt, refreshed at `2026-08-15T05:54:05Z` after
