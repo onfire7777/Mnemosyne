@@ -238,24 +238,44 @@ or non-lifecycle blob change voids the reservation. The controller remains the
 sole CI integration owner. Merge commits for the remaining stack only in the
 order #110 -> #111 -> #112 are permitted, with
 successful post-merge `main` CI required before refreshing and merging each
-next edge. Before merging, run:
+next edge. Before merging, authenticate the permitted-parent and immutable-anchor
+commit IDs independently, then obtain and run this block from the
+permitted-parent `GOAL.md` blob (for example, inspect it with
+`git --no-replace-objects show "$PERMITTED_PARENT_SHA:GOAL.md"`). Never use the
+candidate checkout's copy as the launcher:
 
 ```sh
 (
+  expected_verifier_oid=3949edc528d380441b7de747290f12a4e61ccf3c
   resolved_parent="$(
     git --no-replace-objects rev-parse --verify \
       "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null
   )" &&
   [ "$resolved_parent" = "$PERMITTED_PARENT_SHA" ] &&
+  resolved_anchor="$(
+    git --no-replace-objects rev-parse --verify \
+      "$IMMUTABLE_ANCHOR_SHA^{commit}" 2>/dev/null
+  )" &&
+  [ "$resolved_anchor" = "$IMMUTABLE_ANCHOR_SHA" ] &&
+  parent_verifier_oid="$(
+    git --no-replace-objects rev-parse --verify \
+      "$resolved_parent:infra/scripts/verify-topology-refresh.py" 2>/dev/null
+  )" &&
+  anchor_verifier_oid="$(
+    git --no-replace-objects rev-parse --verify \
+      "$resolved_anchor:infra/scripts/verify-topology-refresh.py" 2>/dev/null
+  )" &&
+  [ "$parent_verifier_oid" = "$expected_verifier_oid" ] &&
+  [ "$anchor_verifier_oid" = "$expected_verifier_oid" ] &&
   topology_verifier="$(
     git --no-replace-objects show \
       "$resolved_parent:infra/scripts/verify-topology-refresh.py" 2>/dev/null
   )" &&
   [ -n "$topology_verifier" ] || {
-    printf '%s\n' 'error: cannot read permitted-parent topology verifier'
+    printf '%s\n' 'error: cannot authenticate trusted topology verifier'
     exit 2
   }
-  python3 -I -c '
+  if python3 -I -c '
 import sys
 
 source = sys.argv.pop(1)
@@ -268,7 +288,15 @@ except Exception:
 ' "$topology_verifier" \
     "$CANDIDATE_SHA" \
     "$PERMITTED_PARENT_SHA" \
-    "$IMMUTABLE_ANCHOR_SHA"
+    "$IMMUTABLE_ANCHOR_SHA"; then
+    topology_status=0
+  else
+    topology_status=$?
+  fi
+  case "$topology_status" in
+    0 | 1 | 2) exit "$topology_status" ;;
+    *) exit 2 ;;
+  esac
 )
 ```
 
