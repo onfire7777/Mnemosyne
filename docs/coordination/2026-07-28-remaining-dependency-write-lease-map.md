@@ -126,6 +126,9 @@ The following packages are complete source history, not runnable work:
   and recorded here before merge; no merge SHA or CI run id is claimed.
 - PR #106: record merged PR #103 in the write-lease map (merge 18e7e2f6c0cf92af399bc66385b0cbf335d1e8f7).
 - PR #107: record merged PR #106 in the write-lease map. Pending at the time of writing — no merge SHA, exact head, or CI run id is claimed for it here, because none exists yet.
+- PR #108: reconcile PR #100's exact T9 lease and inventory wording, and
+  reserve PR #105's lifecycle receipt. Recorded here before merge; no merge
+  SHA or CI run id is claimed.
 
 This map is recomputed from the new baseline `main@d7eefb7c`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
