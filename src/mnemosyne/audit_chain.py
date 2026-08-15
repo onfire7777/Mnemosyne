@@ -13,10 +13,11 @@ from __future__ import annotations
 import hashlib
 import hmac as hmac_module
 import json
-import shlex
 import subprocess
 from collections.abc import Callable, Sequence
 from typing import Any
+
+from mnemosyne.command_line import split_command
 
 AUDIT_CHAIN_SCHEMA = "mnemosyne.audit_hash_chain.v1"
 AUDIT_CHAIN_GENESIS = "0" * 64
@@ -48,7 +49,7 @@ def command_hmac_provider(command: str, *, timeout: float = 30.0) -> HmacProvide
     The adapter receives the chain-head sha256 hex digest on stdin and must
     print the HMAC token (e.g. Vault's ``vault:v1:...``) on stdout. The HMAC
     key itself never enters this process."""
-    argv = shlex.split(command)
+    argv = split_command(command)
     if not argv:
         raise AuditChainError("audit HMAC command must be non-empty")
 

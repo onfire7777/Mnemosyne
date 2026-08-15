@@ -27,6 +27,9 @@ from urllib import error as urlerror, request as urlrequest
 from urllib.parse import urljoin, urlsplit, urlunsplit
 from uuid import UUID
 
+from mnemosyne.audit_retention import worm_copy_evidence
+from mnemosyne.command_line import split_command
+
 if TYPE_CHECKING:
     from cryptography import x509
     from mnemosyne.consolidation import (
@@ -9435,8 +9438,6 @@ def _probe_worm_copy_evidence(args: argparse.Namespace, document: "dict[str, Any
     store via an adapter command that reads the document on stdin and prints
     retention evidence JSON. ``enabled``/``external``/``retained`` come straight
     from the adapter's proven object-lock read-back; nothing is inferred."""
-    from mnemosyne.audit_retention import worm_copy_evidence
-
     command = getattr(args, "audit_worm_command", None)
     if not command:
         return worm_copy_evidence(enabled=False, external=False, retained=False, error="no worm adapter command")
@@ -9444,7 +9445,7 @@ def _probe_worm_copy_evidence(args: argparse.Namespace, document: "dict[str, Any
         return worm_copy_evidence(enabled=False, external=False, retained=False, error="no verified chain document")
     try:
         completed = subprocess.run(
-            shlex.split(command),
+            split_command(command),
             input=json.dumps(document).encode("utf-8"),
             capture_output=True,
             timeout=float(getattr(args, "audit_worm_timeout", 120.0)),
@@ -14081,7 +14082,7 @@ def _verify_provider_manifest_command_arguments(
                     )
                     continue
                 try:
-                    command_parts = shlex.split(item)
+                    command_parts = split_command(item)
                 except ValueError as exc:
                     _production_evidence_finding(
                         findings,
