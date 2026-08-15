@@ -122,7 +122,8 @@ them").
    M13 each already have a scorer (inline) *and* an approved plan; all three
    are additionally registry-admitted (M03 via `wmbs-m03-valid-time-development`).
    M15 has an adapter and a bundle projection and needs no fixture or registry
-   entry by design. No module in the table is now fixture-and-scorer-without-registry.
+   entry by design. For the four candidates discussed here — M03, M12, M13,
+   and M15 — none is fixture-and-scorer-without-registry.
 
 6. **Consequent framing correction.** "only five are implemented" understates
    the built surface. T8 re-derives a keys-in-tree column-complete count
