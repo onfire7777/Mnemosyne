@@ -640,17 +640,21 @@ For every GoalEx round:
 ## Runtime Contract
 
 - Dedicated worktree:
-  `/Users/admin/.codex/worktrees/9697/Mnemosyne`
-- Branch: `codex/goalex-whole-memory-pilot`
-- GoalEx planner/verifier: Opus 5 High through the canonical GoalEx planner.
+  `/Users/admin/.codex/worktrees/goalex-reset/Mnemosyne`
+- Branch: `codex/goalex-reset-20260815`
+- GoalEx planner/verifier: Opus 5 High through the canonical GoalEx planner,
+  gated on a successful provider preflight.
 - Bounded RalphEx plan, task, and review stages: `gpt-5.6-sol:low`.
 - Independent post-round GoalEx review/adjudication: Opus 5 High via
   `GOALEX_DUAL_REVIEW_MODEL=opus:high`.
-- Dual planning, Fable, mixed-provider native RalphEx, and Hermes are disabled.
+- Persistent launchd supervision, watchdog/monitor jobs, mixed-provider native
+  RalphEx, and Hermes are disabled.
 - Bounded guards: at most 20 rounds per process, three consecutive execution
   failures, three consecutive no-commit stalls, 15-minute idle timeout, and
   two-hour per-session timeout.
 - Hermes fleet remains off.
+- RFX preset `solo-sol-low-goal` is active and intentionally paused. The loop
+  remains stopped until this verification block and provider preflight pass.
 
 ## Success Evidence
 
@@ -700,11 +704,16 @@ check below: every controller-branch baseline mismatch is treated as a lapse, an
 
 ```bash
 set -euo pipefail
-test "$(pwd -P)" = "/Users/admin/.codex/worktrees/9697/Mnemosyne"
-test "$(git branch --show-current)" = "codex/goalex-whole-memory-pilot"
+test "$(pwd -P)" = "/Users/admin/.codex/worktrees/goalex-reset/Mnemosyne"
+test "$(git branch --show-current)" = "codex/goalex-reset-20260815"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
-test "$(git rev-parse main)" = "$(git rev-parse origin/main)"
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+test ! -e .goalex
+test ! -e .ralphex
+test -f "$HOME/.config/rfx/PAUSE"
+grep -q '^export RFX_PRESET=solo-sol-low-goal$' "$HOME/.config/rfx/active.env"
+bash -n "$HOME/.local/bin/goalex"
 git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main
