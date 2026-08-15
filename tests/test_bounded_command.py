@@ -48,6 +48,21 @@ def _python(code: str, *args: str) -> list[str]:
 
 
 def _alive(pid: int) -> bool:
+    if os.name == "nt":
+        import _winapi
+
+        try:
+            handle = _winapi.OpenProcess(_winapi.SYNCHRONIZE, False, pid)
+        except OSError as exc:
+            if exc.winerror == 87:  # ERROR_INVALID_PARAMETER: no such PID
+                return False
+            if exc.winerror == 5:  # ERROR_ACCESS_DENIED: PID exists
+                return True
+            raise
+        try:
+            return _winapi.WaitForSingleObject(handle, 0) == _winapi.WAIT_TIMEOUT
+        finally:
+            _winapi.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -235,7 +250,7 @@ def test_mocked_windows_runs_leave_no_bounded_reader_threads(
             bounded_command._run_windows_bounded_command(
                 _python("print('ok')"), b"", timeout_seconds=2, max_stdout_bytes=16
             ).stdout
-            == b"ok\n"
+            == f"ok{os.linesep}".encode()
         )
         with pytest.raises(CommandOutputLimitError):
             bounded_command._run_windows_bounded_command(
