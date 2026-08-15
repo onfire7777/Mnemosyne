@@ -4,7 +4,7 @@
 
 **Goal:** Replace the overlapping Mnemosyne GoalEx/RFX/Hermes machinery with one stopped, explicit, recoverable GoalEx path based on current `origin/main`.
 
-**Architecture:** Preserve all removed state in one private reset archive, quiesce every bespoke launchd/process surface, reconcile the RFX source and installed projection, remove only Mnemosyne-owned Hermes fleet state, then create one fresh inert GoalEx worktree. Each repository and runtime surface is verified independently before the final closure audit.
+**Architecture:** Preserve immutable job definitions, quiesce every bespoke launchd/process writer, then capture mutable removed state in one private reset archive. Reconcile the RFX source and installed projection, remove only Mnemosyne-owned Hermes fleet state, and create one fresh inert GoalEx worktree. Each repository and runtime surface is verified independently before the final closure audit.
 
 **Tech Stack:** macOS `launchctl`, Git/GitHub CLI, Bash, Python standard library, RFX CLI, GoalEx, RalphEx, Hermes.
 
@@ -53,7 +53,7 @@ chmod 600 /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goal
 
 - [ ] **Step 4: Archive exact runtime/config paths**
 
-Stage explicit approved paths in a `mktemp -d` directory, preserve modes with `ditto`, create `goalex-reset-state.tar.gz`, then delete only the temporary staging directory. Include plists, `.goalex`, `.ralphex`, RFX dirty diff and installed presets/snapshot inventory, Mnemosyne Hermes profiles/board/script/backups, and matching `/tmp` logs.
+Create a `mktemp -d` staging directory and copy the four immutable plist definitions into it first. Then `launchctl bootout` the four exact labels, wait until their complete process trees are absent, and only after that quiescence copy the mutable `.goalex`, `.ralphex`, RFX, Hermes, and matching `/tmp` state with `ditto`. Create `goalex-reset-state.tar.gz`, verify it, then remove only the temporary staging directory. If any writer survives, do not archive or remove its mutable source.
 
 - [ ] **Step 5: Verify recovery artifacts before cleanup**
 
@@ -80,9 +80,9 @@ Record exact hashes, pre-reset SHAs, statuses, process IDs, loaded jobs, preserv
 - Consumes: verified archive from Task 1.
 - Produces: no loaded or loadable Mnemosyne GoalEx job and no associated process.
 
-- [ ] **Step 1: Bootstrap-out every exact label**
+- [ ] **Step 1: Reconfirm or bootstrap-out every exact label**
 
-Use `launchctl bootout gui/$(id -u) <exact-plist>` for each of the four explicit plist paths. Treat an already-unloaded job as success only after `launchctl print` confirms absence.
+Reconfirm the Task 1 quiescence with `launchctl print`. If any exact label is present, use `launchctl bootout gui/$(id -u) <exact-plist>` and recheck. Treat an already-unloaded job as success only after `launchctl print` confirms absence.
 
 - [ ] **Step 2: Wait for graceful termination and terminate only verified descendants if needed**
 
@@ -270,4 +270,4 @@ Compare canonical Mnemosyne dirty files, topology-verifier branch/worktree, unre
 
 - [ ] **Step 4: Write the final receipt and close only on complete evidence**
 
-Write `FINAL-RECEIPT.md` with the final process/job counts, active preset/pause state, worktree SHAs, archive hashes, RFX PR/run IDs, preserved services, and any external provider limitation. Do not call the reset complete if any required gate is missing or indirect.
+Write `FINAL-RECEIPT.md` with the final process/job counts, active preset/pause state, worktree SHAs, archive hashes, RFX PR/run IDs, preserved services, and any external provider limitation. Add or refresh its relative entry in `SHA256SUMS`, then rerun `shasum -a 256 -c SHA256SUMS` from the reset archive directory. Do not call the reset complete if any required gate is missing, indirect, or outside terminal manifest coverage.
