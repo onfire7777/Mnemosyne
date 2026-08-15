@@ -7,7 +7,6 @@ import binascii
 import hashlib
 import hmac
 import json
-import shlex
 import subprocess
 import threading
 import time
@@ -17,6 +16,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Literal
 
 from cryptography.exceptions import InvalidSignature
+from mnemosyne.command_line import split_command
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
@@ -312,7 +312,7 @@ def load_session_secret_command(
 ) -> tuple[str | dict[str, str], str | None]:
     """Load session signing material from a shell-free command provider."""
 
-    argv = shlex.split(command) if isinstance(command, str) else [str(item) for item in command]
+    argv = split_command(command) if isinstance(command, str) else [str(item) for item in command]
     if not argv:
         raise SessionAuthError("session secret command must not be empty")
     if timeout_seconds <= 0:
