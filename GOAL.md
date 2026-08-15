@@ -250,7 +250,8 @@ next edge. Before merging, run:
   topology_verifier="$(
     git --no-replace-objects show \
       "$resolved_parent:infra/scripts/verify-topology-refresh.py" 2>/dev/null
-  )" || {
+  )" &&
+  [ -n "$topology_verifier" ] || {
     printf '%s\n' 'error: cannot read permitted-parent topology verifier'
     exit 2
   }

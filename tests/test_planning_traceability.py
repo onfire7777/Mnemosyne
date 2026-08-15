@@ -854,7 +854,7 @@ def _verify_topology_from_parent(
         capture_output=True,
         text=True,
     )
-    if source.returncode:
+    if source.returncode or not source.stdout:
         return subprocess.CompletedProcess(
             source.args,
             2,
@@ -944,6 +944,33 @@ def test_topology_refresh_verifier_requires_trusted_parent_bytes(tmp_path: Path)
     abbreviated = _verify_topology_from_parent(repo, candidate, parent[:12], anchor)
     assert abbreviated.returncode == 2
     assert abbreviated.stdout == result.stdout
+
+    repo, _, _, anchor = _topology_fixture(tmp_path / "empty")
+    (repo / "infra" / "scripts" / "verify-topology-refresh.py").write_text(
+        "", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "empty verifier"], cwd=repo, check=True)
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    empty = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert empty.returncode == 2
+    assert empty.stdout == result.stdout
 
 
 def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
@@ -1135,7 +1162,8 @@ def test_goal_documents_topology_refresh_verifier_invocation() -> None:
         '    git --no-replace-objects show \\\n'
         '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
         '2>/dev/null\n'
-        '  )" || {\n'
+        '  )" &&\n'
+        '  [ -n "$topology_verifier" ] || {\n'
         "    printf '%s\\n' 'error: cannot read permitted-parent topology verifier'\n"
         '    exit 2\n'
         '  }\n'
