@@ -840,6 +840,49 @@ def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
     assert not result.stdout
 
 
+def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
+    tmp_path: Path,
+) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    tree = subprocess.run(
+        ["git", "rev-parse", f"{candidate}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    unrelated = subprocess.run(
+        ["git", "commit-tree", tree, "-m", "unrelated candidate"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, unrelated, parent, anchor)
+    assert result.returncode == 1
+    assert result.stdout == "candidate does not descend from permitted parent\n"
+
+
+def test_topology_refresh_verifier_ignores_git_replacement_refs(tmp_path: Path) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
+    subprocess.run(["git", "add", "immutable.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "unauthorized change"], cwd=repo, check=True)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "replace", anchor, candidate], cwd=repo, check=True)
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert "immutable path differs from anchor: immutable.txt" in result.stdout
+
+
 def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
     tmp_path: Path,
 ) -> None:
@@ -919,7 +962,7 @@ def test_topology_refresh_verifier_rejects_unresolvable_full_sha(tmp_path: Path)
     repo, _, parent, anchor = _topology_fixture(tmp_path)
     result = _verify_topology(repo, "f" * 40, parent, anchor)
     assert result.returncode == 2
-    assert result.stdout == "error: cannot read tree for " + "f" * 40 + "\n"
+    assert result.stdout == "error: cannot verify permitted parent ancestry\n"
 
 
 def test_topology_refresh_verifier_rejects_malformed_tree_output(
