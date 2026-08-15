@@ -255,7 +255,17 @@ next edge. Before merging, run:
     printf '%s\n' 'error: cannot read permitted-parent topology verifier'
     exit 2
   }
-  python3 -I -c "$topology_verifier" \
+  python3 -I -c '
+import sys
+
+source = sys.argv.pop(1)
+try:
+    exec(compile(source, "permitted-parent topology verifier", "exec"))
+except SystemExit:
+    raise
+except Exception:
+    raise SystemExit(2)
+' "$topology_verifier" \
     "$CANDIDATE_SHA" \
     "$PERMITTED_PARENT_SHA" \
     "$IMMUTABLE_ANCHOR_SHA"
