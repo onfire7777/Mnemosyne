@@ -122,6 +122,7 @@ The following packages are complete source history, not runnable work:
   claimed for it here, because none exists yet.
 - PR #103: Restore canonical memory sources and patch cryptography (merge 5b0d99bcd7).
 - PR #106: record merged PR #103 in the write-lease map (merge 18e7e2f6c0cf92af399bc66385b0cbf335d1e8f7).
+- PR #107: this lease-map receipt recording PR #106. Reserved and recorded here before merge.
 
 This map is recomputed from the new baseline `main@d7eefb7c`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
