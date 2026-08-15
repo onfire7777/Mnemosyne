@@ -138,10 +138,11 @@ def test_leader_exit_with_descendant_on_devnull_still_kills_descendant(
     pid_file = tmp_path / "silent-holder.pid"
     child = "import time; time.sleep(30)"
     code = (
-        "import os, pathlib, subprocess, sys; "
+        "import os, pathlib, subprocess, sys, time; "
         f"child=subprocess.Popen([sys.executable, '-c', {child!r}], "
         "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL); "
-        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid)); "
+        "os.close(1); os.close(2); time.sleep(0.5)"
     )
 
     result = run_bounded_command(
