@@ -4,7 +4,7 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6801fbd0`; PR #109 merged from audited topology head `cb44f21296fc22cf92f847b8201a6881e915400c` after exact-head CI `31865413163` passed, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at `2026-08-15T05:24:36Z`. It raced the lifecycle amendment and is recorded as a sequencing deviation; post-main CI `31866875258` succeeded at `2026-08-15T05:51:12Z`, and no later edge opened before that gate closed. Ruleset `19157561` requires strict up-to-date status checks; T10 therefore reserves immutable non-lifecycle content anchors with topology-only refreshes. PRs #110-#112 remain drafts, byte-identical to their approved content anchors outside the three lifecycle files, and strictly ordered. This amendment must land before #110. Current-main ancestry, exact lifecycle-parent equality, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI remain mandatory at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T05:51:12Z"
+last_updated: "2026-08-15T05:54:05Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 7
@@ -148,6 +148,10 @@ sequencing deviation; post-main run `31866875258` succeeded. PRs #110-#112
 remain drafts and no later edge is open until this amendment lands. Their
 lifecycle blobs are parent-exact: #110 equals
 current `main`, #111 equals #110, and #112 equals #111.
+Controller amendment PR #114 is **OPEN/DRAFT**, changes only the three
+lifecycle authorities, and grants no implementation scope. Its self-record
+changes its head, so no exact PR #114 head, merge SHA/time, or post-main CI is
+claimed. PR #114 must pass and merge before #110.
 One controller owns every serialized `.github/workflows/ci.yml` integration
 edge. Exact-head required/native CI, fresh security review, local/remote/hosted
 head equality, cleared review threads, current-main ancestry, and successful

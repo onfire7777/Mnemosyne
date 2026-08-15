@@ -158,9 +158,16 @@ The following packages are complete source history, not runnable work:
   `2026-08-15T04:22:14Z`; successful post-merge CI `31864254074`. It changed
   only `GOAL.md`, `.planning/STATE.md`, and this map and admitted no benchmark
   authority.
+- PR #114: controller-only `T10` amendment recording PR #109 delivery and
+  replacing the ruleset-incompatible full-head freeze with immutable content
+  anchors plus exact lifecycle-parent equality. It is **OPEN/DRAFT** at the
+  `2026-08-15T05:54:05Z` capture. This self-record changes its head, so no exact
+  PR #114 head, merge SHA/time, or post-main CI is claimed. It changes only
+  `GOAL.md`, `.planning/STATE.md`, and this map, grants no implementation or
+  benchmark authority, and must pass and merge before PR #110.
 
 The remaining implementation PRs are **reserved, not merged**. This is the
-amended `T10` controller receipt, refreshed at `2026-08-15T05:28:47Z` after
+amended `T10` controller receipt, refreshed at `2026-08-15T05:54:05Z` after
 repository ruleset `19157561` correctly enforced strict required-check
 freshness against the post-PR-#113 `main`:
 
