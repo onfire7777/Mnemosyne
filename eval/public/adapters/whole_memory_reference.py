@@ -542,6 +542,229 @@ def run_m04_conflict_development(
     return traces, {"backend": getattr(cli, "backend", "local")}
 
 
+def _m05_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 100 is the published case count, not a test floor."""
+    from eval.public import wmbs_m05 as m05
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M05 provenance development requires a fixture mapping")
+    slices = benchmark.get("slices")
+    if not isinstance(slices, list) or not slices:
+        raise ValueError("M05 provenance development requires a non-empty slice list")
+    identities = {
+        "fixture_id": m05.FIXTURE_ID,
+        "schema_id": m05.FIXTURE_SCHEMA_ID,
+        "generator_id": m05.GENERATOR_ID,
+        "generator_version": m05.GENERATOR_VERSION,
+    }
+    for field_name, expected in identities.items():
+        if field_name in benchmark and benchmark[field_name] != expected:
+            raise ValueError(f"M05 fixture {field_name} does not match {expected!r}")
+    declared = benchmark.get("dataset_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m05.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "dataset_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M05 dataset_sha256 does not bind the fixture bytes")
+    full_matrix = (
+        tuple(slice_.get("slice_id") for slice_ in slices) == m05.SLICE_IDS
+        and all(
+            isinstance(slice_, Mapping) and len(slice_.get("cases") or []) == 20
+            for slice_ in slices
+        )
+    )
+    if full_matrix:
+        return dict(m05.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def _m05_scored_cases(fixture: Mapping[str, Any]) -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for slice_ in fixture.get("slices") or []:
+        if not isinstance(slice_, Mapping):
+            continue
+        for case in slice_.get("cases") or []:
+            if isinstance(case, Mapping) and case.get("scored") is not False:
+                cases.append(dict(case))
+    if not cases:
+        raise ValueError("M05 provenance development requires a scored case list")
+    return cases
+
+
+def _m05_evidence_cids(
+    cli: MnemoCLI, tenant: str, actor: str, event: Mapping[str, Any]
+) -> tuple[str, ...]:
+    captured = cli.capture(
+        tenant,
+        actor,
+        event["content"],
+        source_identity=str(event.get("event_id") or actor),
+    ) or {}
+    cid = captured.get("cid") if isinstance(captured, Mapping) else None
+    if isinstance(cid, str) and cid.strip():
+        return (cid,)
+    digest = event.get("content_sha256")
+    if isinstance(digest, str) and digest:
+        return (digest,)
+    return ()
+
+
+def _m05_identifier_handles(payload: object) -> list[str]:
+    handles: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        if (
+            isinstance(value, str)
+            and value not in seen
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", value)
+        ):
+            seen.add(value)
+            handles.append(value)
+
+    if isinstance(payload, Mapping):
+        for key in ("cid", "evidence_cid", "id", "source_identity"):
+            add(payload.get(key))
+        for key in (
+            "cids",
+            "evidence_handles",
+            "source_evidence_cids",
+            "hits",
+            "items",
+            "results",
+            "events",
+            "rows",
+        ):
+            raw = payload.get(key)
+            if isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, Mapping):
+                        for nested in (
+                            "cid",
+                            "evidence_cid",
+                            "id",
+                            "stable_item_id",
+                            "source_identity",
+                        ):
+                            add(item.get(nested))
+                    else:
+                        add(item)
+    elif isinstance(payload, list):
+        for item in payload:
+            handles.extend(_m05_identifier_handles(item))
+    return handles
+
+
+def _m05_stages(payload: object) -> list[str]:
+    from eval.public import wmbs_m05 as m05
+
+    raw: object = []
+    if isinstance(payload, Mapping):
+        raw = payload.get("stages") or payload.get("retrieval_stages") or []
+    stages: list[str] = []
+    if isinstance(raw, list):
+        for stage in raw:
+            if stage in m05.RETRIEVAL_STAGE_IDS and stage not in stages:
+                stages.append(stage)
+    if not stages:
+        stages = ["lexical"]
+    return stages
+
+
+def _m05_provenance_status(*payloads: object) -> str:
+    for payload in payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        status = payload.get("provenance_status")
+        if status in {"verified", "unverified", "unavailable"}:
+            return status
+    return "unavailable"
+
+
+def _m05_trace_from_cli(
+    case_id: str,
+    *payloads: object,
+) -> dict[str, Any]:
+    """Record CLI payloads. Never invent gold answers or gold evidence CIDs."""
+    explained: list[str] = []
+    seen: set[str] = set()
+    for payload in payloads:
+        for handle in _m05_identifier_handles(payload):
+            if handle not in seen:
+                seen.add(handle)
+                explained.append(handle)
+    stages: list[str] = []
+    for payload in payloads:
+        for stage in _m05_stages(payload):
+            if stage not in stages:
+                stages.append(stage)
+    if not stages:
+        stages = ["lexical"]
+    return {
+        "case_id": case_id,
+        "answer_envelope": {
+            "answer_text": None,
+            "abstained": True,
+            "evidence_handles": [],
+            "action_handles": [],
+            "adapter_metadata": {},
+        },
+        "explanation": {
+            "source_evidence_cids": explained,
+            "stages": stages,
+        },
+        "provenance_status": _m05_provenance_status(*payloads),
+        "scoring_family": "whole-memory-development",
+    }
+
+
+def run_m05_provenance_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M05 provenance cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M05 provenance development requires a live MnemoCLI")
+    fixture = _m05_bind_fixture(benchmark)
+    traces: list[dict[str, Any]] = []
+    for case in _m05_scored_cases(fixture):
+        case_id = str(case["case_id"])
+        tenant = f"wmbs-m05-{case_id}"
+        captured: list[object] = []
+        for event in case.get("source_events") or []:
+            if not isinstance(event, Mapping):
+                raise ValueError("M05 source event must be a mapping")
+            actor = event.get("actor_label")
+            if not isinstance(actor, str) or not actor.strip():
+                raise ValueError("M05 event is missing actor_label")
+            subject = str(event["event_id"])
+            evidence = _m05_evidence_cids(cli, tenant, actor, event)
+            captured.append({"cid": evidence[0]} if evidence else {})
+            cli.assert_fact(
+                tenant,
+                subject,
+                "source",
+                str(event["content"]),
+                user=actor,
+                evidence_cids=evidence,
+            )
+        claim = case.get("claim")
+        query = claim if isinstance(claim, str) and claim.strip() else case_id
+        search_payload = cli.search(tenant, query) or {}
+        explain_payload = cli.explain(tenant, query) or {}
+        export_payload = cli.export(tenant) or {}
+        traces.append(
+            _m05_trace_from_cli(
+                case_id,
+                *captured,
+                search_payload,
+                explain_payload,
+                export_payload,
+            )
+        )
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
 def run_m03_valid_time_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:

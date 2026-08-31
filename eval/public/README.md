@@ -312,38 +312,28 @@ canonical-replay-seed row for `wmbs-m04-v1` because
 because `bundle._scoring_labels` rejects this case-based schema.
 
 
-### M04/M05 Stage-A development oracles (unregistered)
+### M05 provenance development
 
-`wmbs_m04.py` and `wmbs_m05.py` are Stage-A development oracles.
-Each runs no system and observes no SUT: the module generates a deterministic
-synthetic fixture and scores harness-supplied observations, so a green run
-evidences generator and scorer determinism over that exact finite fixture and
-nothing whatsoever about any memory system.
-`wmbs_m02.py` is registered as `wmbs-m02-retrieval-development` under
-`### M02 retrieval development` and is not an unregistered Stage-A oracle.
-`wmbs_m04.py` is registered as `wmbs-m04-development` under
-`### M04 conflict development` and is not an unregistered Stage-A oracle.
+**PROPOSED.**
 
-M05 remains **unregistered**. It has no `registry.json` entry, an adapter, a
-runner route, or a scoring-profile registration, so it cannot be selected with
-`mneme eval-public --suite`, it produces no bundle, and it produces no
-benchmark result. Every one of them is admission state `PROPOSED`: M04
-declares `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
-`admission_state: "PROPOSED"` in both its labels and its committed fixture. M04's
-score envelope and M05's labels and fixture record `publishable: false` and
-`pbpp_headline_eligible: false`. M02's registry row carries the same false
-publication flags; it does not omit them. M04's registry row carries the same
-false publication flags. M02 and M04 declare `ADMISSION_STATE = "PROPOSED"`
-directly. M02 and M05 declare `license: "CC0-1.0"`;
-M04 declares no license field at all, which is itself a disclosed Stage-A gap
-rather than a permissive grant.
+The M05 provenance/explanation cell is registry-reachable through the same public CLI
+subprocess seam. Stage B — harness integration for M05 — is delivered. The
+quarantines named below remain open.
 
-None of the three measures cost or resources. M02's scorer reports `latency`,
-`tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
-latency, token, call, or storage metric of any kind. Treat all four classes as
-unsupported for every one of these modules.
+```bash
+uv run --locked mneme eval-public --suite wmbs-m05-development --out-dir /tmp/wmbs-m05-development
+```
 
-**M05 (`wmbs-m05-provenance-development`).** The committed fixture is generated
+`wmbs-m05-development` is `PROPOSED`, `ENHANCED-SUCCESSOR`,
+`split_role: development`, adapter `wmbs-m05-reference`, scoring profile
+`wmbs-m05-v1`, fixture `fixtures/wmbs-m05-provenance-development.json`,
+`system_seam: public-cli-subprocess`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+Registration is a reachability fix only. It advances no admission state and
+supports no publication, comparability, or superiority claim.
+
+**M05 corpus (registered, still `PROPOSED`).** The committed fixture is generated
 from seed `13`, declares the five seeds `13`, `29`, `41`, `59`, `73`, and holds
 five slices of twenty cases each (`protected-grounding`, `distractor-sources`,
 `tampered-lineage`, `unsupported-claim`, `derived-claims`). The module declares
@@ -361,9 +351,44 @@ and ignored `provenance_status`, Q4 evidence handles not digest-bound, Q7 replay
 hashes needing real artifact binding, Q9 model-backed grounded answering, Q10
 unwired `HowProvenance`, and Q12 missing artifacts failing rather than skipping.
 
-Stage B — harness integration for M05 — is **not delivered**. It
-remains gated on the public-harness integration owner's lease and on the
-quarantines named in
+The adapter `run_m05_provenance_development` drives the supplied `MnemoCLI`
+(`capture`, `assert_fact`, `search`, `explain`, `export`). It raises if
+`cli is None`. It does not call `query_with_evidence` (Q1: that hook is
+absent from the frozen ABI). It does not treat `mnemo answer` as a
+model-free grounded-answer path (Q9). Traces record CLI payloads only; they
+do not substitute fixture gold.
+
+`wmbs_m05.py` remains the Stage-A development oracle for generator and scorer
+determinism over that exact finite fixture. A green local oracle run
+evidences that determinism and nothing whatsoever about any memory system.
+`wmbs_m02.py` is registered as `wmbs-m02-retrieval-development` under
+`### M02 retrieval development`.
+`wmbs_m04.py` is registered as `wmbs-m04-development` under
+`### M04 conflict development`.
+
+Every one of them is admission state `PROPOSED`: M02 and M04 declare
+`ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
+`admission_state: "PROPOSED"` in both its labels and its committed
+fixture. M04's score envelope and M05's labels and fixture record
+`publishable: false` and `pbpp_headline_eligible: false`. M02's registry
+row carries the same false publication flags; it does not omit them.
+M04's registry row carries the same false publication flags.
+
+M02 and M05 declare `license: "CC0-1.0"`;
+M04 declares no license field at all, which is itself a disclosed Stage-A gap
+rather than a permissive grant. M05's registry cell carries `license: CC0-1.0`.
+
+None of the three measures cost or resources. M02's scorer reports `latency`,
+`tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
+latency, token, call, or storage metric of any kind. Treat all four classes as
+unsupported for every one of these modules.
+
+Bundle metadata names the backend the public CLI actually exercised
+(`backend`; `MnemoCLI` defaults to `local`). Canonical replay seeds for
+`wmbs-m05-provenance-development` are `13`, `29`, `41`, `59`, `73`.
+
+Stage B does not close Q1, Q2, Q3, Q4, Q7, Q9, Q10, or Q12. Those
+quarantines remain recorded in
 [`docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`](../../docs/plans/wmb-m02-retrieval-organization-implementation-plan.md),
 [`docs/plans/wmb-m04-conflict-correction-implementation-plan.md`](../../docs/plans/wmb-m04-conflict-correction-implementation-plan.md),
 and

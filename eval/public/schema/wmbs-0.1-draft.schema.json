@@ -1272,6 +1272,175 @@
         "deferral_condition": {"$ref": "#/$defs/nonempty_string"},
         "feasibility_disposition": {"$ref": "#/$defs/feasibility_disposition"}
       }
+    },
+    "wmbs_m05_source_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signed", "reason"],
+      "properties": {
+        "signed": {"type": "boolean"},
+        "reason": {"$ref": "#/$defs/nonempty_string"}
+      }
+    },
+    "wmbs_m05_sensitivity_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protected_slice_sensitivity", "reason"],
+      "properties": {
+        "protected_slice_sensitivity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "reason": {"$ref": "#/$defs/short_string"}
+      }
+    },
+    "wmbs_m05_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "claim",
+        "expected",
+        "gold_source_cids",
+        "index",
+        "retrieval_stages",
+        "scored",
+        "seed",
+        "sensitivity",
+        "slice_id",
+        "source_events"
+      ],
+      "properties": {
+        "case_id": {"$ref": "#/$defs/identifier"},
+        "claim": {"$ref": "#/$defs/nonempty_string"},
+        "expected": {"enum": ["grounded", "tamper-rejected", "abstain", "deferred"]},
+        "gold_source_cids": {
+          "type": "array",
+          "maxItems": 1000,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sha256"}
+        },
+        "index": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "retrieval_stages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {"enum": ["dense_hash", "lexical", "graph_ppr"]}
+        },
+        "scored": {"type": "boolean"},
+        "seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "sensitivity": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "slice_id": {
+          "enum": [
+            "protected-grounding",
+            "distractor-sources",
+            "tampered-lineage",
+            "unsupported-claim",
+            "derived-claims"
+          ]
+        },
+        "source_events": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {"$ref": "#/$defs/portable_event"}
+        },
+        "deferral_reason": {"$ref": "#/$defs/short_string"},
+        "tamper_original_content": {"$ref": "#/$defs/nonempty_string"}
+      }
+    },
+    "wmbs_m05_slice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slice_id", "scored", "deferral_reason", "cases"],
+      "properties": {
+        "slice_id": {
+          "enum": [
+            "protected-grounding",
+            "distractor-sources",
+            "tampered-lineage",
+            "unsupported-claim",
+            "derived-claims"
+          ]
+        },
+        "scored": {"type": "boolean"},
+        "deferral_reason": {
+          "anyOf": [{"$ref": "#/$defs/short_string"}, {"type": "null"}]
+        },
+        "cases": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1000,
+          "items": {"$ref": "#/$defs/wmbs_m05_case"}
+        }
+      }
+    },
+    "wmbs_m05_provenance_development_fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "admission_state",
+        "comparability",
+        "dataset_sha256",
+        "disclosure",
+        "fixture_id",
+        "generator_id",
+        "generator_seed",
+        "generator_version",
+        "headline_eligible",
+        "independent_reproduction",
+        "integration_dependencies",
+        "license",
+        "module_id",
+        "pbpp_headline_eligible",
+        "publishable",
+        "schema_id",
+        "seeds",
+        "sensitivity_binding",
+        "slices",
+        "source_manifest",
+        "track",
+        "upstream_comparable"
+      ],
+      "properties": {
+        "admission_state": {"const": "PROPOSED"},
+        "comparability": {"const": "proposed-non-comparable"},
+        "dataset_sha256": {"$ref": "#/$defs/sha256"},
+        "disclosure": {"$ref": "#/$defs/nonempty_string"},
+        "fixture_id": {"const": "wmbs-m05-provenance-development"},
+        "generator_id": {"const": "wmbs-m05-deterministic-generator"},
+        "generator_seed": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "generator_version": {"const": "1.0.0"},
+        "headline_eligible": {"const": false},
+        "independent_reproduction": {"const": false},
+        "integration_dependencies": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonempty_string"}
+        },
+        "license": {"const": "CC0-1.0"},
+        "module_id": {"const": "M05"},
+        "pbpp_headline_eligible": {"const": false},
+        "publishable": {"const": false},
+        "schema_id": {"const": "wmbs-m05-provenance-development/fixture/0.1"},
+        "seeds": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        },
+        "sensitivity_binding": {"$ref": "#/$defs/wmbs_m05_sensitivity_binding"},
+        "slices": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/wmbs_m05_slice"}
+        },
+        "source_manifest": {"$ref": "#/$defs/wmbs_m05_source_manifest"},
+        "track": {"const": "DEVELOPMENT"},
+        "upstream_comparable": {"const": false}
+      }
     }
   }
 }
