@@ -59,6 +59,7 @@ _ADAPTERS = {
     "wmbs-m03-valid-time-reference": whole_memory_reference.run_m03_valid_time_development,
     "wmbs-m02-retrieval-reference": whole_memory_reference.run_m02_retrieval_development,
     "wmbs-m04-conflict-reference": whole_memory_reference.run_m04_conflict_development,
+    "wmbs-m05-reference": whole_memory_reference.run_m05_provenance_development,
     "wmbs-m10-reference": whole_memory_reference.run_m10_development,
     "pm-bench-triggerbench": pm_bench_triggerbench.run,
     "working-memory-action": working_memory_action_probe.run,
@@ -83,6 +84,7 @@ _PROFILE_CONTRACTS = {
     "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m02-retrieval-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m04-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
 }
 
@@ -489,7 +491,11 @@ def run_public_suite(
         or interval_method != suite["interval_method"]
     ):
         raise ValueError("scoring profile, family, or interval metadata mismatch")
-    if suite_name in {"wmbs-m02-retrieval-development", "wmbs-m04-development"}:
+    if suite_name in {
+        "wmbs-m02-retrieval-development",
+        "wmbs-m04-development",
+        "wmbs-m05-development",
+    }:
         metadata = _m02_bundle_metadata(
             suite, suite_name, backend=exercised_backend
         )

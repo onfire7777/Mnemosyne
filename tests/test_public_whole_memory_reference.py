@@ -4046,3 +4046,328 @@ def test_m04_monotonic_allows_gold_perfect_conflict_drops() -> None:
     }
     assert _m04_monotonic_violation(events, ["current"], ["alpha", "beta"], gold, "c") is False
     assert _m04_monotonic_violation(events, [], ["alpha", "beta"], gold, "c") is True
+
+
+def _m05_suite() -> dict[str, object]:
+    from eval.public.runner import load_registry
+
+    registry = load_registry()
+    assert "wmbs-m05-development" in registry
+    return registry["wmbs-m05-development"]
+
+
+def _m05_tiny_fixture() -> dict[str, object]:
+    from eval.public import wmbs_m05 as m05
+
+    fixture = m05.generate_fixture(13)
+    tiny = dict(fixture)
+    first = dict(fixture["slices"][0])
+    first["cases"] = [dict(first["cases"][0])]
+    tiny["slices"] = [first]
+    tiny.pop("dataset_sha256", None)
+    return tiny
+
+
+def _m05_gold_traces(fixture: dict[str, object]) -> list[dict[str, object]]:
+    traces: list[dict[str, object]] = []
+    for slice_ in fixture["slices"]:
+        for case in slice_["cases"]:
+            if not case["scored"]:
+                continue
+            handles = list(case["gold_source_cids"])
+            abstained = slice_["slice_id"] in {
+                "tampered-lineage",
+                "unsupported-claim",
+            }
+            traces.append(
+                {
+                    "case_id": case["case_id"],
+                    "answer_envelope": {
+                        "abstained": abstained,
+                        "answer_text": None if abstained else case["claim"],
+                        "evidence_handles": [] if abstained else list(reversed(handles)),
+                        "action_handles": [],
+                        "adapter_metadata": {"mode": "deterministic"},
+                    },
+                    "explanation": {
+                        "source_evidence_cids": handles,
+                        "stages": list(case.get("retrieval_stages", ["lexical"])),
+                    },
+                    "provenance_status": "verified",
+                    "scoring_family": "whole-memory-development",
+                }
+            )
+    return traces
+
+
+@dataclass
+class _M05RecordingCLI:
+    backend: str = "local"
+    global_flags: list[str] = field(default_factory=list)
+    calls: list[str] = field(default_factory=list)
+    contexts: list[object] = field(default_factory=list)
+    assert_kwargs: list[dict[str, object]] = field(default_factory=list)
+    assert_users: list[object] = field(default_factory=list)
+    assert_objects: list[object] = field(default_factory=list)
+    assert_subjects: list[object] = field(default_factory=list)
+    assert_predicates: list[object] = field(default_factory=list)
+
+    def capture(self, tenant: object, user: object, content: object, **kwargs: object) -> dict[str, object]:
+        self.calls.append("capture")
+        return {"cid": f"cid-{kwargs.get('source_identity') or user}"}
+
+    def assert_fact(self, tenant: object, subject: object, predicate: object, obj: object, **kwargs: object) -> object:
+        self.calls.append("assert_fact")
+        self.assert_kwargs.append(dict(kwargs))
+        self.assert_users.append(kwargs.get("user"))
+        self.assert_objects.append(obj)
+        self.assert_subjects.append(subject)
+        self.assert_predicates.append(predicate)
+        return {"ok": True}
+
+    def search(self, tenant: object, query: object, **kwargs: object) -> dict[str, object]:
+        self.calls.append("search")
+        return {"hits": []}
+
+    def explain(self, tenant: object, query: object, **kwargs: object) -> dict[str, object]:
+        self.calls.append("explain")
+        return {"source_evidence_cids": [], "stages": ["lexical"]}
+
+    def export(self, tenant: object, **kwargs: object) -> dict[str, object]:
+        self.calls.append("export")
+        return {"events": []}
+
+    def answer(self, question: object, context: object, **kwargs: object) -> dict[str, object]:
+        self.calls.append("answer")
+        self.contexts.append(context)
+        return {"answer": None}
+
+
+def test_m05_registry_revision_matches_fixture_bytes() -> None:
+    import subprocess
+
+    suite = _m05_suite()
+    fixture = REPO_ROOT / "eval/public/fixtures/wmbs-m05-provenance-development.json"
+    revision = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", str(fixture.relative_to(REPO_ROOT))],
+        capture_output=True,
+        check=True,
+        cwd=REPO_ROOT,
+        text=True,
+    ).stdout.strip()
+    assert suite["revision"] == revision
+    shown = subprocess.run(
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        capture_output=True,
+        check=True,
+        cwd=REPO_ROOT,
+    ).stdout
+    assert shown == fixture.read_bytes()
+    assert suite["dataset_sha256"] == hashlib.sha256(
+        public_bundle._canonical(json.loads(fixture.read_bytes()))
+    ).hexdigest()
+
+
+def test_m05_adapter_issues_real_cli_calls() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m05_provenance_development
+
+    cli = _M05RecordingCLI()
+    tiny = _m05_tiny_fixture()
+    traces, evidence = run_m05_provenance_development(tiny, cli)
+    assert "capture" in cli.calls
+    assert "assert_fact" in cli.calls
+    assert "search" in cli.calls
+    assert "explain" in cli.calls
+    assert "export" in cli.calls
+    assert "query_with_evidence" not in cli.calls
+    assert traces
+    assert all("trust_tier" not in kwargs for kwargs in cli.assert_kwargs)
+    assert all("source_trust_tier" not in kwargs for kwargs in cli.assert_kwargs)
+    assert all("confidence" not in kwargs for kwargs in cli.assert_kwargs)
+    assert all(kwargs.get("evidence_cids") for kwargs in cli.assert_kwargs)
+    assert "reference-harness" not in cli.assert_users
+    assert set(cli.assert_users) == {"synthetic-generator"}
+    event = tiny["slices"][0]["cases"][0]["source_events"][0]
+    pairs = set(zip(cli.assert_subjects, cli.assert_predicates))
+    assert (event["event_id"], "source") in pairs
+    assert all(subject != tiny["slices"][0]["cases"][0]["case_id"] for subject in cli.assert_subjects)
+    assert traces[0]["answer_envelope"]["answer_text"] is None
+    assert traces[0]["answer_envelope"]["abstained"] is True
+    assert traces[0]["scoring_family"] == "whole-memory-development"
+    assert evidence["backend"] == "local"
+    with pytest.raises(ValueError, match="live MnemoCLI"):
+        run_m05_provenance_development(tiny, None)
+
+
+def test_m05_bundle_declares_backend_explicitly(tmp_path: Path) -> None:
+    from eval.public.adapters.whole_memory_reference import run_m05_provenance_development
+    from eval.public.runner import _m02_bundle_metadata
+
+    tiny = _m05_tiny_fixture()
+    traces, evidence = run_m05_provenance_development(tiny, _M05RecordingCLI())
+    exercised = evidence["backend"]
+    assert exercised == "local"
+
+    suite = _m05_suite()
+    suite_name = "wmbs-m05-development"
+    with pytest.raises(ValueError, match="exercised backend"):
+        _m02_bundle_metadata(suite, suite_name, backend=None)
+    with pytest.raises(ValueError, match="exercised backend"):
+        _m02_bundle_metadata(suite, suite_name, backend="")
+    with pytest.raises(ValueError, match="fabricated backend"):
+        _m02_bundle_metadata(suite, suite_name, backend="postgres", exercised=exercised)
+
+    _other_traces, other_evidence = run_m05_provenance_development(
+        tiny, _M05RecordingCLI(backend="sqlite")
+    )
+    assert other_evidence["backend"] == "sqlite"
+    other_metadata = _m02_bundle_metadata(
+        suite, suite_name, backend=other_evidence["backend"], exercised=other_evidence["backend"]
+    )
+    assert other_metadata["backend"] == "sqlite"
+
+    metadata = _m02_bundle_metadata(suite, suite_name, backend=exercised, exercised=exercised)
+    assert metadata["backend"] == exercised
+    public_bundle.write_bundle(
+        tmp_path / "bundle",
+        benchmark=tiny,
+        metadata=metadata,
+        metrics={"family": suite["family"], "profile": suite["scoring_profile"]},
+        traces=traces,
+    )
+    written = json.loads((tmp_path / "bundle" / "benchmark.json").read_text())
+    declared = written["metadata"].get("backend")
+    assert declared, "bundle metadata omitted the exercised backend"
+    assert declared == exercised
+    assert declared != "postgres"
+
+
+def test_m05_runner_rejects_fixture_digest_drift(tmp_path: Path) -> None:
+    from eval.public.runner import run_public_suite
+    from eval.public import wmbs_m05 as m05
+
+    mutated = dict(m05.generate_fixture(13))
+    mutated["generator_seed"] = 29
+    with pytest.raises(ValueError, match="digest"):
+        run_public_suite(
+            "wmbs-m05-development",
+            out_dir=tmp_path / "bundle",
+            benchmark_override=mutated,
+        )
+
+
+def test_m05_metrics_recompute_from_anchored_profile() -> None:
+    from eval.public import wmbs_m05 as m05
+    from eval.public.scoring import score_profile
+
+    fixture = m05.generate_fixture(13)
+    traces = _m05_gold_traces(fixture)
+    expected = m05.score(fixture, [
+        {key: row[key] for key in ("case_id", "answer_envelope", "explanation", "provenance_status")}
+        for row in traces
+    ])
+    expected["family"] = "whole-memory-development"
+    expected["profile"] = "wmbs-m05-v1"
+    expected["interval"] = {"method": "descriptive"}
+    measured = score_profile("wmbs-m05-v1", [{"fixture": fixture}], traces)
+    assert measured == expected
+    assert measured["family"] == "whole-memory-development"
+    drifted = list(traces)
+    first = dict(drifted[0])
+    envelope = dict(first["answer_envelope"])
+    envelope["answer_text"] = "drifted-claim"
+    first["answer_envelope"] = envelope
+    drifted[0] = first
+    assert score_profile("wmbs-m05-v1", [{"fixture": fixture}], drifted) != expected
+
+
+def test_m05_publication_flags_are_false() -> None:
+    suite = _m05_suite()
+    assert suite["admission_state"] == "PROPOSED"
+    assert suite["publishable"] is False
+    assert suite["pbpp_headline_eligible"] is False
+    assert suite["headline_eligible"] is False
+    assert suite["upstream_comparable"] is False
+    assert suite["independent_external_reproduction"] is False
+    assert suite["system_seam"] == "public-cli-subprocess"
+    assert suite["license"] == "CC0-1.0"
+    assert suite["track_kind"] == "ENHANCED-SUCCESSOR"
+    assert suite["split_role"] == "development"
+    assert suite["family"] == "whole-memory-development"
+
+
+def test_m05_adapter_and_profile_resolve() -> None:
+    from eval.public.adapters import whole_memory_reference
+    from eval.public.runner import _ADAPTERS, _PROFILE_CONTRACTS
+
+    suite = _m05_suite()
+    assert suite["adapter"] == "wmbs-m05-reference"
+    assert _ADAPTERS[str(suite["adapter"])] is whole_memory_reference.run_m05_provenance_development
+    assert _PROFILE_CONTRACTS[str(suite["scoring_profile"])] == (
+        suite["family"],
+        suite["interval_method"],
+    )
+
+
+def test_m05_custody_rejects_wellformed_fake_hashes() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m05_provenance_development
+    from eval.public.runner import load_registry
+
+    tiny = _m05_tiny_fixture()
+    fake = "a" * 64
+    suite = _m05_suite()
+    assert suite["dataset_sha256"] != fake
+    registry = load_registry()
+    assert registry["wmbs-m05-development"]["dataset_sha256"] == suite["dataset_sha256"]
+
+    forged_digest = dict(tiny)
+    forged_digest["dataset_sha256"] = fake
+    with pytest.raises(ValueError, match="dataset_sha256"):
+        run_m05_provenance_development(forged_digest, _M05RecordingCLI())
+    forged_schema = dict(tiny)
+    forged_schema["schema_id"] = fake
+    with pytest.raises(ValueError, match="schema_id"):
+        run_m05_provenance_development(forged_schema, _M05RecordingCLI())
+    traces, evidence = run_m05_provenance_development(tiny, _M05RecordingCLI())
+    assert traces and evidence["backend"] == "local"
+
+
+def test_m05_adapter_does_not_substitute_gold() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m05_provenance_development
+
+    tiny = _m05_tiny_fixture()
+    case = tiny["slices"][0]["cases"][0]
+    traces, _ = run_m05_provenance_development(tiny, _M05RecordingCLI())
+    row = traces[0]
+    assert row["answer_envelope"]["answer_text"] != case["claim"]
+    assert row["answer_envelope"]["answer_text"] is None
+    assert row["answer_envelope"]["evidence_handles"] != list(case["gold_source_cids"])
+    assert row["answer_envelope"]["evidence_handles"] == []
+    assert set(row["explanation"]["source_evidence_cids"]) != set(case["gold_source_cids"])
+    assert row["provenance_status"] != "verified"
+
+
+def test_m05_fixture_validates_against_closed_schema() -> None:
+    from eval.public import wmbs_m05 as m05
+
+    fixture = m05.generate_fixture(13)
+    validator = Draft202012Validator(
+        {
+            "$schema": SCHEMA["$schema"],
+            "$defs": SCHEMA["$defs"],
+            "$ref": "#/$defs/wmbs_m05_provenance_development_fixture",
+        }
+    )
+    validator.validate(fixture)
+
+
+def test_m05_bundle_declares_canonical_replay_seed() -> None:
+    from eval.public.bundle import _CANONICAL_REPLAY_SEEDS
+
+    assert _CANONICAL_REPLAY_SEEDS["wmbs-m05-provenance-development"] == (
+        13,
+        29,
+        41,
+        59,
+        73,
+    )
