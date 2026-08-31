@@ -4347,6 +4347,25 @@ def test_m05_adapter_does_not_substitute_gold() -> None:
     assert row["provenance_status"] != "verified"
 
 
+def test_m05_evidence_cids_omit_fixture_digest_when_capture_has_no_cid() -> None:
+    from eval.public.adapters.whole_memory_reference import run_m05_provenance_development
+
+    class NoCidCLI(_M05RecordingCLI):
+        def capture(self, tenant: object, user: object, content: object, **kwargs: object) -> dict[str, object]:
+            self.calls.append("capture")
+            return {}
+
+    tiny = _m05_tiny_fixture()
+    case = tiny["slices"][0]["cases"][0]
+    event = case["source_events"][0]
+    digest = event["content_sha256"]
+    assert isinstance(digest, str) and len(digest) == 64
+    cli = NoCidCLI()
+    traces, _ = run_m05_provenance_development(tiny, cli)
+    assert all(digest not in kwargs.get("evidence_cids", ()) for kwargs in cli.assert_kwargs)
+    assert digest not in traces[0]["explanation"]["source_evidence_cids"]
+
+
 def test_m05_fixture_validates_against_closed_schema() -> None:
     from eval.public import wmbs_m05 as m05
 
