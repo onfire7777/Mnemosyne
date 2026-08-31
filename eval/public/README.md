@@ -269,6 +269,49 @@ canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
 `bundle.py` is outside this lease; Stage B scores through
 `score_profile` instead.
 
+### M04 conflict development
+
+**PROPOSED.**
+
+The M04 conflict/correction cell is registry-reachable through the same public CLI
+subprocess seam.
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m04-development --out-dir /tmp/wmbs-m04
+```
+
+`wmbs-m04-development` is `PROPOSED`, `DEVELOPMENT`,
+`split_role: development`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+Registration is a reachability fix only. It advances no admission state and
+supports no publication, comparability, or superiority claim.
+
+**M04 corpus (registered, still `PROPOSED`).** The committed fixture is generated
+from seed `20260801` and holds 140 cases over five per-case seeds (`11`, `23`,
+`37`, `53`, `71`), three orderings (`as_authored`, `reversed`, `interleaved`),
+and seven source classes (`independent`, `duplicated`, `low_quality`,
+`high_quality`, `malicious`, `unresolved`, `later_resolved`). Numeric confidence
+calibration is `unsupported`: the unresolved-calibration metric scores only
+abstention behavior. Its declared disclosures also record `branch_merge` as
+`UNSUPPORTED-BY-SYSTEM`, `transaction_time` as `unsupported`, `update_hook` as
+`emulated`, and the `sqlite` and `postgresql` backends as `DEFERRED`. M04's
+fixture events deliberately depart from the closed `portable_event` ABI: they
+reuse the portable-event key vocabulary but carry an additional load-bearing
+`source_id` that keys the ablation gold. That reuse is a shape-vocabulary
+borrowing for a Stage-A ablation task and is never an ABI conformance claim.
+
+Bundle metadata names the backend the public CLI actually exercised
+(`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
+backend fails `test_m04_bundle_declares_backend_explicitly`. That is a
+store disclosure, including an omitted PostgreSQL path, not a
+portability claim. `verify_bundle` still has no `allowed_profile` or
+canonical-replay-seed row for `wmbs-m04-v1` because
+`bundle.py` is outside this lease; Stage B scores through
+`score_profile` instead. The runner passes the fixture as scoring labels
+because `bundle._scoring_labels` rejects this case-based schema.
+
+
 ### M04/M05 Stage-A development oracles (unregistered)
 
 `wmbs_m04.py` and `wmbs_m05.py` are Stage-A development oracles.
@@ -278,16 +321,19 @@ evidences generator and scorer determinism over that exact finite fixture and
 nothing whatsoever about any memory system.
 `wmbs_m02.py` is registered as `wmbs-m02-retrieval-development` under
 `### M02 retrieval development` and is not an unregistered Stage-A oracle.
+`wmbs_m04.py` is registered as `wmbs-m04-development` under
+`### M04 conflict development` and is not an unregistered Stage-A oracle.
 
-M04 and M05 remain **unregistered**. Neither has a `registry.json` entry, an adapter, a
-runner route, or a scoring-profile registration, so neither can be selected with
-`mneme eval-public --suite`, neither produces a bundle, and neither produces a
+M05 remains **unregistered**. It has no `registry.json` entry, an adapter, a
+runner route, or a scoring-profile registration, so it cannot be selected with
+`mneme eval-public --suite`, it produces no bundle, and it produces no
 benchmark result. Every one of them is admission state `PROPOSED`: M04
 declares `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
 `admission_state: "PROPOSED"` in both its labels and its committed fixture. M04's
 score envelope and M05's labels and fixture record `publishable: false` and
 `pbpp_headline_eligible: false`. M02's registry row carries the same false
-publication flags; it does not omit them. M02 and M04 declare `ADMISSION_STATE = "PROPOSED"`
+publication flags; it does not omit them. M04's registry row carries the same
+false publication flags. M02 and M04 declare `ADMISSION_STATE = "PROPOSED"`
 directly. M02 and M05 declare `license: "CC0-1.0"`;
 M04 declares no license field at all, which is itself a disclosed Stage-A gap
 rather than a permissive grant.
@@ -296,20 +342,6 @@ None of the three measures cost or resources. M02's scorer reports `latency`,
 `tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
 latency, token, call, or storage metric of any kind. Treat all four classes as
 unsupported for every one of these modules.
-
-**M04 (`wmbs-m04-development`).** The committed fixture is generated from seed
-`20260801` and holds 140 cases over five per-case seeds (`11`, `23`, `37`, `53`,
-`71`), three orderings (`as_authored`, `reversed`, `interleaved`), and seven
-source classes (`independent`, `duplicated`, `low_quality`, `high_quality`,
-`malicious`, `unresolved`, `later_resolved`). Numeric confidence calibration is
-`unsupported`: the unresolved-calibration metric scores only abstention
-behavior. Its declared disclosures also record `branch_merge` as
-`UNSUPPORTED-BY-SYSTEM`, `transaction_time` as `unsupported`, `update_hook` as
-`emulated`, and the `sqlite` and `postgresql` backends as `DEFERRED`. M04's
-fixture events deliberately depart from the closed `portable_event` ABI: they
-reuse the portable-event key vocabulary but carry an additional load-bearing
-`source_id` that keys the ablation gold. That reuse is a shape-vocabulary
-borrowing for a Stage-A ablation task and is never an ABI conformance claim.
 
 **M05 (`wmbs-m05-provenance-development`).** The committed fixture is generated
 from seed `13`, declares the five seeds `13`, `29`, `41`, `59`, `73`, and holds
@@ -329,7 +361,7 @@ and ignored `provenance_status`, Q4 evidence handles not digest-bound, Q7 replay
 hashes needing real artifact binding, Q9 model-backed grounded answering, Q10
 unwired `HowProvenance`, and Q12 missing artifacts failing rather than skipping.
 
-Stage B — harness integration for M04 and M05 — is **not delivered**. It
+Stage B — harness integration for M05 — is **not delivered**. It
 remains gated on the public-harness integration owner's lease and on the
 quarantines named in
 [`docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`](../../docs/plans/wmb-m02-retrieval-organization-implementation-plan.md),
