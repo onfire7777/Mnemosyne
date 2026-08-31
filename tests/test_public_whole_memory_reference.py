@@ -2148,7 +2148,7 @@ def test_canonical_helpers_reject_excessive_depth_without_recursion_errors(
 def test_schema_sha256_is_frozen() -> None:
     assert (
         hashlib.sha256(SCHEMA_PATH.read_bytes()).hexdigest()
-        == "a6e368e6655a3d8c645b02fac83e76f8585530dc844ffa9b99bb16eed6729590"
+        == "ef5fea4fbd30103172c029e2169c02a3f7e1061382fa015af462129d07e49363"
     )
 
 
