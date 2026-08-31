@@ -604,9 +604,6 @@ def _m05_evidence_cids(
     cid = captured.get("cid") if isinstance(captured, Mapping) else None
     if isinstance(cid, str) and cid.strip():
         return (cid,)
-    digest = event.get("content_sha256")
-    if isinstance(digest, str) and digest:
-        return (digest,)
     return ()
 
 
