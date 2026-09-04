@@ -211,6 +211,20 @@ The following packages are complete source history, not runnable work:
   claimed here. PR #129 changes no benchmark result or admission state,
   does not recompute the canonical baseline, and must pass fresh
   exact-head review, security, and CI before merge.
+- PR #128: WMBS M05-B public-harness registration of `wmbs-m05-development`
+  (title: WMBS M05-B: register wmbs-m05-development (provenance adapter))
+  from exact head `7d4803e46463197e0cb9659cc22ecf02aa2c6b92`; all
+  required exact-head checks passed in run `33910693005`; merge
+  `ad9d5f809bb2a26df506c3958aef6a149a173f4a` at `2026-09-04T19:46:04Z`.
+  Prior tip was `b7f351cdeeb989d7b84e7e2a0ad736efd5a6f5a1` (PR #129 /
+  #121 receipt). Post-main run `33912845409` failed solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #128 was absent from this lease-map (1 failed, 4798
+  passed); this receipt repairs that bookkeeping. M05-B remains
+  `PROPOSED` with publication flags false (`publishable:false`,
+  `pbpp_headline_eligible:false`, `headline_eligible:false`). This
+  receipt changes no benchmark result or admission state and does
+  not recompute the canonical baseline.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
