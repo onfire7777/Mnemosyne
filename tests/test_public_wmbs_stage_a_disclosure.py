@@ -96,9 +96,7 @@ def _m02_traces(fixture: dict) -> list[dict]:
             "question_id": question["question_id"],
             "ranked_hits": [
                 {"rank": rank, "stable_item_id": stable_item_id}
-                for rank, stable_item_id in enumerate(
-                    question["gold_doc_ids"], start=1
-                )
+                for rank, stable_item_id in enumerate(question["gold_doc_ids"], start=1)
             ],
             "answer": question["answers"][0] if question["answers"] else None,
             "abstained": not question["answers"],
@@ -366,7 +364,9 @@ def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
 def test_disclosure_keeps_stage_b_delivered_and_claims_nothing() -> None:
     section = _m05_section()
     assert "Stage B — harness integration for M05 — is delivered." in section
-    assert "Stage B — harness integration for M05 — is **not delivered**." not in section
+    assert (
+        "Stage B — harness integration for M05 — is **not delivered**." not in section
+    )
     assert (
         "Nothing here is a publication, comparability, ranking, superiority, or "
         "upstream-equivalence claim." in section
