@@ -27,6 +27,31 @@ uv run --locked mneme eval-public --verify-bundle /tmp/mneme-pm-bench
 uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-pm-bench --out-dir /tmp/mneme-pm-bench-reproduced
 ```
 
+Every profile produces a deterministic development bundle with its exact
+operating point, action traces, null reader/judge fields, registry revision and
+dataset digest, and false publication/headline flags. None is an official
+PM-Bench, TriggerBench, or Working Memory reproduction.
+
+This is deterministic synthetic/development eval only: no official
+dataset/model download, no benchmark run against protected/upstream data, and no
+publication or headline claim. The authenticated action lane descends from A1
+`t_5163502e` → P5 `t_8c72180a` → I0R `t_63a207ee`; downstream R1/R2/F0 remain
+future work.
+
+### M12 prospective action
+
+**PROPOSED.**
+
+`pm-bench-development` and `triggerbench-development` remain
+`split_role: development` and carry `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+
+```
+uv run --locked mneme eval-public --suite pm-bench-development --out-dir /tmp/mneme-pm-bench
+uv run --locked mneme eval-public --suite triggerbench-development --out-dir /tmp/mneme-triggerbench
+```
+
 `pm-bench-development` and `triggerbench-development` translate their
 repository-authored fixtures into authenticated `intention-schedule`,
 `intention-update`, `intention-cancel`, and `intention-evaluate` subprocess
@@ -36,14 +61,6 @@ the evaluator-side intersection of the production evaluator's fired data-only
 action IDs with the available opaque IDs; the harness never executes or exposes
 an action payload or fixture gold, and it fails closed on missing auth, scope
 mismatch, gold leakage, payload execution, or unsupported semantics.
-`working-memory-action-development` drives the authenticated
-`capture`/`working-seed`/`working-query`/`working-expire` commands under the
-same signed-session seam.
-
-Every profile produces a deterministic development bundle with its exact
-operating point, action traces, null reader/judge fields, registry revision and
-dataset digest, and false publication/headline flags. None is an official
-PM-Bench, TriggerBench, or Working Memory reproduction.
 
 The M12 fixtures are deliberately small: `pm-bench-development` has one seed
 (`7`), one case, five tasks, and seven steps; `triggerbench-development` has
@@ -54,17 +71,28 @@ which is zero on both committed fixtures because they are easy rather than
 because the counter is inert; neither suite measures lateness magnitude or
 cost.
 
+### M13 working memory
+
+**PROPOSED.**
+
+`working-memory-action-development` remains `split_role: development`
+and carries `publishable: false`, `pbpp_headline_eligible: false`,
+`headline_eligible: false`, `upstream_comparable: false`, and
+`independent_external_reproduction: false`.
+
+```
+uv run --locked mneme eval-public --suite working-memory-action-development --out-dir /tmp/mneme-working-action
+```
+
+`working-memory-action-development` drives the authenticated
+`capture`/`working-seed`/`working-query`/`working-expire` commands under the
+same signed-session seam.
+
 The M13 working-memory fixture has one seed (`94125`) and six cases, one for
 each declared item category. Its operating point has no capacity parameter,
 and the fixture contains no promotion-versus-no-promotion control. These are
 development gap disclosures, not evidence of capacity scaling or promotion
 utility.
-
-This is deterministic synthetic/development eval only: no official
-dataset/model download, no benchmark run against protected/upstream data, and no
-publication or headline claim. The authenticated action lane descends from A1
-`t_5163502e` → P5 `t_8c72180a` → I0R `t_63a207ee`; downstream R1/R2/F0 remain
-future work.
 
 ## Frozen Phase 12 QA protocol
 
@@ -236,6 +264,10 @@ timelines (`ordered-events`, `late-event`, `retroactive-correction`,
 
 **PROPOSED.**
 
+`wmbs_m02.py` declares `ADMISSION_STATE = "PROPOSED"` and
+`license: "CC0-1.0"`. M02's scorer reports `latency`, `tokens`,
+`calls`, and `storage` literally as `unsupported`.
+
 The M02 retrieval cell is registry-reachable through the same public CLI
 subprocess seam.
 
@@ -272,6 +304,11 @@ canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
 ### M04 conflict development
 
 **PROPOSED.**
+
+`wmbs_m04.py` declares `ADMISSION_STATE = "PROPOSED"`. M04 declares no
+license field at all, which is itself a disclosed Stage-A gap rather than
+a permissive grant. M04 emits no latency, token, call, or storage metric;
+treat those as unsupported for this module.
 
 The M04 conflict/correction cell is registry-reachable through the same public CLI
 subprocess seam.
@@ -361,27 +398,12 @@ do not substitute fixture gold.
 `wmbs_m05.py` remains the Stage-A development oracle for generator and scorer
 determinism over that exact finite fixture. A green local oracle run
 evidences that determinism and nothing whatsoever about any memory system.
-`wmbs_m02.py` is registered as `wmbs-m02-retrieval-development` under
-`### M02 retrieval development`.
-`wmbs_m04.py` is registered as `wmbs-m04-development` under
-`### M04 conflict development`.
 
-Every one of them is admission state `PROPOSED`: M02 and M04 declare
-`ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
-`admission_state: "PROPOSED"` in both its labels and its committed
-fixture. M04's score envelope and M05's labels and fixture record
-`publishable: false` and `pbpp_headline_eligible: false`. M02's registry
-row carries the same false publication flags; it does not omit them.
-M04's registry row carries the same false publication flags.
-
-M02 and M05 declare `license: "CC0-1.0"`;
-M04 declares no license field at all, which is itself a disclosed Stage-A gap
-rather than a permissive grant. M05's registry cell carries `license: CC0-1.0`.
-
-None of the three measures cost or resources. M02's scorer reports `latency`,
-`tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
-latency, token, call, or storage metric of any kind. Treat all four classes as
-unsupported for every one of these modules.
+M05 carries `admission_state: "PROPOSED"` in both its labels and its committed
+fixture, and its labels, fixture, and registry cell record `publishable: false`
+and `pbpp_headline_eligible: false`. The module `LICENSE`, committed fixture,
+and registry cell carry `license: CC0-1.0`. M05 emits no latency,
+token, call, or storage metric; treat those as unsupported for this module.
 
 Bundle metadata names the backend the public CLI actually exercised
 (`backend`; `MnemoCLI` defaults to `local`). Canonical replay seeds for
@@ -389,9 +411,6 @@ Bundle metadata names the backend the public CLI actually exercised
 
 Stage B does not close Q1, Q2, Q3, Q4, Q7, Q9, Q10, or Q12. Those
 quarantines remain recorded in
-[`docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`](../../docs/plans/wmb-m02-retrieval-organization-implementation-plan.md),
-[`docs/plans/wmb-m04-conflict-correction-implementation-plan.md`](../../docs/plans/wmb-m04-conflict-correction-implementation-plan.md),
-and
 [`docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`](../../docs/plans/wmb-m05-provenance-explanation-implementation-plan.md).
 Nothing here is a publication, comparability, ranking, superiority, or
 upstream-equivalence claim.
