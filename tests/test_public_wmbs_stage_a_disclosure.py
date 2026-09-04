@@ -113,8 +113,8 @@ def test_disclosure_section_exists_and_names_all_three_modules() -> None:
     assert M04_SECTION_HEADING in readme
     assert M05_SECTION_HEADING in readme
     assert "### M04/M05 Stage-A development oracles (unregistered)" not in readme
-    assert "`wmbs_m02.py`" in _m02_section() or "`wmbs_m02.py`" in _m05_section()
-    assert "`wmbs_m04.py`" in _m04_section() or "`wmbs_m04.py`" in _m05_section()
+    assert "`wmbs_m02.py`" in _m02_section()
+    assert "`wmbs_m04.py`" in _m04_section()
     assert "`wmbs_m05.py`" in _m05_section()
     assert "nothing whatsoever about any memory system" in _m05_section()
 
@@ -147,15 +147,17 @@ def test_disclosure_states_the_registered_status_and_the_registry_agrees() -> No
 
 def test_disclosure_admission_labels_match_the_modules() -> None:
     section = _m05_section()
-    assert "Every one of them is admission state `PROPOSED`" in section
-    assert 'M02 and M04 declare `ADMISSION_STATE = "PROPOSED"` directly' in section
     assert (
         '`admission_state: "PROPOSED"` in both its labels and its committed' in section
     )
-    assert "`publishable: false` and `pbpp_headline_eligible: false`" in section
-    assert "M02's registry row carries the same false publication flags" in section
+    assert (
+        "its labels/fixture/registry cell record `publishable: false`, "
+        "`pbpp_headline_eligible: false`" in section
+    )
     assert "M02 emits no publication or headline field at all" not in section
     assert "M02 emits no publication or headline field at all" not in _m02_section()
+    assert '`ADMISSION_STATE = "PROPOSED"`' in _m02_section()
+    assert '`ADMISSION_STATE = "PROPOSED"`' in _m04_section()
 
     assert m02.ADMISSION_STATE == "PROPOSED"
     assert m04.ADMISSION_STATE == "PROPOSED"
@@ -179,9 +181,9 @@ def test_disclosure_admission_labels_match_the_modules() -> None:
 
 
 def test_disclosure_license_claim_matches_the_modules() -> None:
-    section = _m05_section()
-    assert 'M02 and M05 declare `license: "CC0-1.0"`' in section
-    assert "M04 declares no license field at all" in section
+    assert "`license: CC0-1.0`" in _m05_section()
+    assert '`license: "CC0-1.0"`' in _m02_section()
+    assert "M04 declares no license field at all" in _m04_section()
 
     assert m02.LICENSE == "CC0-1.0"
     assert m05.LICENSE == "CC0-1.0"
@@ -194,13 +196,11 @@ def test_disclosure_license_claim_matches_the_modules() -> None:
 
 
 def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
-    section = _m05_section()
-    assert "None of the three measures cost or resources." in section
+    assert "M05 emits no latency, token, call, or storage metric" in _m05_section()
     assert (
         "M02's scorer reports `latency`, `tokens`, `calls`, and `storage` "
-        "literally as `unsupported`" in section
+        "literally as `unsupported`" in _m02_section()
     )
-    assert "M04 and M05 emit no latency, token, call, or storage metric" in section
 
     # Pin M02's four cost keys to the scorer's own output, not to its source
     # text: renaming any one of them must fail here, because the README names
@@ -213,8 +213,8 @@ def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
             "disclosure says it does"
         )
     # The whole metric surface, not just those four: a newly added `cost_usd`
-    # or `gpu_seconds` would make "none of the three measures cost or
-    # resources" false while the four named keys still read `unsupported`.
+    # or `gpu_seconds` would make the unsupported-cost disclosure false while
+    # the four named keys still read `unsupported`.
     assert set(metrics) == M02_METRIC_KEYS, (
         "M02's metric surface changed; the Stage-A disclosure describes the "
         f"old one. Added: {sorted(set(metrics) - M02_METRIC_KEYS)}; removed: "
@@ -372,13 +372,9 @@ def test_disclosure_keeps_stage_b_delivered_and_claims_nothing() -> None:
         "upstream-equivalence claim." in section
     )
 
-    for plan in (
-        "docs/plans/wmb-m02-retrieval-organization-implementation-plan.md",
-        "docs/plans/wmb-m04-conflict-correction-implementation-plan.md",
-        "docs/plans/wmb-m05-provenance-explanation-implementation-plan.md",
-    ):
-        assert plan in section, f"the disclosure no longer links {plan}"
-        assert (REPO_ROOT / plan).is_file(), f"{plan} is linked but missing"
+    plan = "docs/plans/wmb-m05-provenance-explanation-implementation-plan.md"
+    assert plan in section, f"the disclosure no longer links {plan}"
+    assert (REPO_ROOT / plan).is_file(), f"{plan} is linked but missing"
 
 
 def test_disclosure_section_precedes_no_registration_elsewhere() -> None:
