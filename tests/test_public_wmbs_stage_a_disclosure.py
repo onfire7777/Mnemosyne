@@ -149,7 +149,7 @@ def test_disclosure_admission_labels_match_the_modules() -> None:
         '`admission_state: "PROPOSED"` in both its labels and its committed' in section
     )
     assert (
-        "its labels/fixture/registry cell record `publishable: false`, "
+        "labels, fixture, and registry cell record `publishable: false` and "
         "`pbpp_headline_eligible: false`" in section
     )
     assert "M02 emits no publication or headline field at all" not in section
@@ -180,6 +180,14 @@ def test_disclosure_admission_labels_match_the_modules() -> None:
 
 def test_disclosure_license_claim_matches_the_modules() -> None:
     assert "`license: CC0-1.0`" in _m05_section()
+    assert (
+        "The module `LICENSE`, committed fixture, and registry cell carry "
+        "`license: CC0-1.0`" in _m05_section()
+    )
+    assert (
+        "labels/fixture/registry cell record `publishable: false`, "
+        "`pbpp_headline_eligible: false`, and `license: CC0-1.0`" not in _m05_section()
+    )
     assert '`license: "CC0-1.0"`' in _m02_section()
     assert "M04 declares no license field at all" in _m04_section()
 
@@ -195,6 +203,7 @@ def test_disclosure_license_claim_matches_the_modules() -> None:
 
 def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
     assert "M05 emits no latency, token, call, or storage metric" in _m05_section()
+    assert "M04 emits no latency, token, call, or storage metric" in _m04_section()
     assert (
         "M02's scorer reports `latency`, `tokens`, `calls`, and `storage` "
         "literally as `unsupported`" in _m02_section()
