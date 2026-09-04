@@ -190,6 +190,27 @@ The following packages are complete source history, not runnable work:
   head, merge SHA/time, or post-main CI is claimed here. PR #117 is not a
   topology-only refresh, changes no benchmark result or admission state, and
   must pass fresh exact-head review, security, and CI before merge.
+- PR #121: M04-B public-harness registration of `wmbs-m04-development`
+  (title: M04-B: register wmbs-m04-development (PROPOSED)) from exact head
+  `5c629a67f7466e9a4d75b82681bac53612abb076`; all required exact-head
+  checks passed in run `33425340224`; merge
+  `eea12f798c22e281100a62552589225321b6c424` at `2026-08-31T19:05:18Z`
+  (GitHub mergedAt `2026-08-31T19:05:19Z`). Post-main run `33428621397`
+  (and later scheduled run `33867306126`) failed solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #121 was absent from this lease-map; this receipt repairs
+  that bookkeeping. The merge remains `PROPOSED` with publication flags
+  false (`publishable:false`, `pbpp_headline_eligible:false`,
+  `headline_eligible:false`). It does not waive any open M02 defects from
+  PR #115 and does not admit M05-B (PR #128 remains open).
+- PR #129: ordinary documentation receipt recording the merged PR #121
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-04T17:53:16Z`
+  capture and adds only the PR #121 merged-baseline bullet and this
+  structured self-record in this map. Because this record changes the
+  branch head, no exact final head, merge SHA/time, or post-main CI is
+  claimed here. PR #129 changes no benchmark result or admission state,
+  does not recompute the canonical baseline, and must pass fresh
+  exact-head review, security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
