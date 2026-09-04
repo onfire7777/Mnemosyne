@@ -307,7 +307,8 @@ canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
 
 `wmbs_m04.py` declares `ADMISSION_STATE = "PROPOSED"`. M04 declares no
 license field at all, which is itself a disclosed Stage-A gap rather than
-a permissive grant.
+a permissive grant. M04 emits no latency, token, call, or storage metric;
+treat those as unsupported for this module.
 
 The M04 conflict/correction cell is registry-reachable through the same public CLI
 subprocess seam.
@@ -399,8 +400,9 @@ determinism over that exact finite fixture. A green local oracle run
 evidences that determinism and nothing whatsoever about any memory system.
 
 M05 carries `admission_state: "PROPOSED"` in both its labels and its committed
-fixture, and its labels/fixture/registry cell record `publishable: false`,
-`pbpp_headline_eligible: false`, and `license: CC0-1.0`. M05 emits no latency,
+fixture, and its labels, fixture, and registry cell record `publishable: false`
+and `pbpp_headline_eligible: false`. The module `LICENSE`, committed fixture,
+and registry cell carry `license: CC0-1.0`. M05 emits no latency,
 token, call, or storage metric; treat those as unsupported for this module.
 
 Bundle metadata names the backend the public CLI actually exercised
