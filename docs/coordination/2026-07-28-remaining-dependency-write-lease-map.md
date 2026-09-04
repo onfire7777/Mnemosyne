@@ -246,6 +246,14 @@ The following packages are complete source history, not runnable work:
   `tests/test_public_wmbs_stage_a_disclosure.py`. This receipt
   changes no benchmark result or admission state and does
   not recompute the canonical baseline.
+- PR #133: ordinary documentation receipt recording the merged PR #130
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-04T21:23:16Z`
+  capture and adds only the PR #130 merged-baseline bullet and this
+  structured self-record in this map. Because this record changes the
+  branch head, no exact final head, merge SHA/time, or post-main CI is
+  claimed here. PR #133 changes no benchmark result or admission state,
+  does not recompute the canonical baseline, and must pass fresh
+  exact-head review, security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
