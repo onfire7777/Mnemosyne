@@ -111,13 +111,15 @@ them").
    M18 (#125), M19 (#126, DEFERRED), and the M20 v2 delta (#127).
    **Modules with an exact plan of any kind (on-main or open ACCEPT PR) are
    M01–M15, M17–M20 — 19 of 20.** That figure counts *existence*, not
-   approval, and must not be read as authorization. Only the seven pilot-plan
-   modules (M01, M03, M10, M12, M13, M15, M20) carry an **approved** plan; the
-   M02, M04, M05, and M14 on-main plans and the open ACCEPT plan PRs are
-   `PROPOSED` planning artifacts whose freeze/approval gate is still
-   outstanding, as the derivation records at its §2 plan-status table and
-   line 191. M16 remains the only module with neither an on-main plan nor an
-   open plan PR.
+   approval, and must not be read as authorization.    Only the seven pilot-plan
+   modules (M01, M03, M10, M12, M13, M15, M20) carry an **approved** plan.
+   The M02, M04, M05, and M14 on-main plans are `PROPOSED` planning artifacts
+   whose freeze/approval gate is still outstanding, as the derivation records
+   at its §2 plan-status table and line 191 (those four only; that table does
+   not list #116–#127). The open ACCEPT plan PRs (#116, #118, #119, #122,
+   #123, #124, #125, #126, #127) are separately `PROPOSED` / NOT CODE-READY
+   per each PR's own Status header, not per that derivation table. M16
+   remains the only module with neither an on-main plan nor an open plan PR.
 
 4. **"no plan and no module: M06, M07, M08, M09, M11, M16, M17, M18, M19,
    M20 — 10" wrongly includes M20 and now also wrongly includes every module
