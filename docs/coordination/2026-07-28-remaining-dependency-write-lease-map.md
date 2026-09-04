@@ -203,6 +203,14 @@ The following packages are complete source history, not runnable work:
   false (`publishable:false`, `pbpp_headline_eligible:false`,
   `headline_eligible:false`). It does not waive any open M02 defects from
   PR #115 and does not admit M05-B (PR #128 remains open).
+- PR #129: ordinary documentation receipt recording the merged PR #121
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-04T17:53:16Z`
+  capture and adds only the PR #121 merged-baseline bullet and this
+  structured self-record in this map. Because this record changes the
+  branch head, no exact final head, merge SHA/time, or post-main CI is
+  claimed here. PR #129 changes no benchmark result or admission state,
+  does not recompute the canonical baseline, and must pass fresh
+  exact-head review, security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
