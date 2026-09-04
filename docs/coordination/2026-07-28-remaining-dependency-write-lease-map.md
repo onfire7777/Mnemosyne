@@ -254,6 +254,34 @@ The following packages are complete source history, not runnable work:
   claimed here. PR #133 changes no benchmark result or admission state,
   does not recompute the canonical baseline, and must pass fresh
   exact-head review, security, and CI before merge.
+- PR #132: inventory ACCEPT plan-PR receipts for M06–M09/M11/M17–M19
+  (title: docs: inventory — record ACCEPT plan PRs for M06–M09/M11/M17–M19)
+  from exact head `681bddd535dde6e8712d6be61bedb48bce50f8ce`; all
+  required exact-head checks passed in run `33923271250`; merge
+  `83804715d19c90c77161924f6acc79e62e567998` at `2026-09-04T22:26:38Z`.
+  Prior tip was `661e3f3f3b8fc8714094e6e84c186871c842f756` (PR #133 /
+  #130 receipt). Post-main may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #132 is absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set:
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+  Owner: Docs / CoS (inventory ACCEPT). Purpose: Accept plan-PR
+  receipts for M06–M09/M11/M17–M19 inventory; docs-only privacy.
+  Gate: MERGED (merge commit
+  `83804715d19c90c77161924f6acc79e62e567998`). The merge touched only
+  that inventory file. This receipt changes no benchmark result or
+  admission state and does not recompute the canonical baseline.
+- PR #134: ordinary documentation receipt recording the merged PR #132
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-04T22:28:27Z`
+  capture and adds only the PR #132 merged-baseline bullet and this
+  structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Owner: CoS. Purpose: lease-map receipt for #132 (inventory ACCEPT).
+  Gate: OPEN then MERGED when shipped. Because this record changes the
+  branch head, no exact final head, merge SHA/time, or post-main CI is
+  claimed here. PR #134 changes no benchmark result or admission state,
+  does not recompute the canonical baseline, and must pass fresh
+  exact-head review, security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
