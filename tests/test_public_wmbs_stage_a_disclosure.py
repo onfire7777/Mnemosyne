@@ -1,14 +1,13 @@
-"""Pin the M02/M04/M05 Stage-A development gap disclosure in the public README.
+"""Pin the M02/M04/M05 public-harness disclosures in the public README.
 
-The README section ``M04/M05 Stage-A development oracles (unregistered)`` pins
-M04 and M05 as unregistered Stage-A oracles. M02 is registered under
-``### M02 retrieval development`` and must not be described as unregistered.  This mirrors the M12 and M13 pinning tests in
-``tests/test_public_pm_bench_triggerbench.py`` and
+M02 is registered under ``### M02 retrieval development``. M04 is registered
+under ``### M04 conflict development``. M05 Stage B is registered under
+``### M05 provenance development``. This mirrors the M12 and M13 pinning tests
+in ``tests/test_public_pm_bench_triggerbench.py`` and
 ``tests/test_public_working_memory_action_probe.py``.
 
-Nothing here changes module behavior, fixture bytes, the registry, the adapter,
-runner routing, or a scoring profile; it only refuses to let the honest labels
-rot.
+Nothing here changes module behavior, fixture bytes, or Stage-A oracles; it
+refuses to let the honest labels rot after the M05 cell is registered.
 """
 
 from __future__ import annotations
@@ -25,14 +24,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 README_PATH = REPO_ROOT / "eval" / "public" / "README.md"
 FIXTURES_DIR = REPO_ROOT / "eval" / "public" / "fixtures"
 
-SECTION_HEADING = "### M04/M05 Stage-A development oracles (unregistered)"
 M02_SECTION_HEADING = "### M02 retrieval development"
 M04_SECTION_HEADING = "### M04 conflict development"
+M05_SECTION_HEADING = "### M05 provenance development"
 
-#: Registry keys the M04/M05 disclosure asserts do not exist.
-UNREGISTERED_SUITE_KEYS = (
-    "wmbs-m05-provenance-development",
-)
+#: No suite remains under the leftover unregistered Stage-A heading.
+UNREGISTERED_SUITE_KEYS: tuple[str, ...] = ()
 
 
 def _readme() -> str:
@@ -51,16 +48,16 @@ def _section_after(heading: str) -> str:
     return " ".join(body.split())
 
 
-def _disclosure_section() -> str:
-    return _section_after(SECTION_HEADING)
-
-
 def _m02_section() -> str:
     return _section_after(M02_SECTION_HEADING)
 
 
 def _m04_section() -> str:
     return _section_after(M04_SECTION_HEADING)
+
+
+def _m05_section() -> str:
+    return _section_after(M05_SECTION_HEADING)
 
 
 #: Every key M02's scorer emits.  The disclosure says M02 measures no cost or
@@ -111,50 +108,45 @@ def _m02_traces(fixture: dict) -> list[dict]:
 
 
 def test_disclosure_section_exists_and_names_all_three_modules() -> None:
-    section = _disclosure_section()
-    for module_file in ("`wmbs_m02.py`", "`wmbs_m04.py`", "`wmbs_m05.py`"):
-        assert module_file in section, f"{module_file} dropped from the disclosure"
-    assert "Stage-A development oracles" in section
-    assert "runs no system and observes no SUT" in section
-    assert "nothing whatsoever about any memory system" in section, (
-        "the no-evidence statement is the point of the disclosure"
-    )
+    readme = README_PATH.read_text(encoding="utf-8")
+    assert M02_SECTION_HEADING in readme
+    assert M04_SECTION_HEADING in readme
+    assert M05_SECTION_HEADING in readme
+    assert "### M04/M05 Stage-A development oracles (unregistered)" not in readme
+    assert "`wmbs_m02.py`" in _m02_section() or "`wmbs_m02.py`" in _m05_section()
+    assert "`wmbs_m04.py`" in _m04_section() or "`wmbs_m04.py`" in _m05_section()
+    assert "`wmbs_m05.py`" in _m05_section()
+    assert "nothing whatsoever about any memory system" in _m05_section()
 
 
-def test_disclosure_states_the_unregistered_status_and_the_registry_agrees() -> None:
-    """The 'unregistered' claim must stay true of the live registry.
-
-    Asserting both halves is what makes this a pin rather than a spell check: a
-    future ``wmbs-m02``/``m04``/``m05`` registry entry fails here and forces the
-    disclosure to be rewritten alongside it.
-    """
-    section = _disclosure_section()
+def test_disclosure_states_the_registered_status_and_the_registry_agrees() -> None:
+    """The registered-cell claim must stay true of the live registry."""
     m02_section = _m02_section()
     m04_section = _m04_section()
-    assert "M05 remains **unregistered**." in section
-    assert "M04 and M05 remain **unregistered**." not in section
+    m05_section = _m05_section()
+    assert "M05 remains **unregistered**." not in m05_section
     assert "wmbs-m02-retrieval-development" in m02_section
     assert "wmbs-m04-development" in m04_section
-    assert "unregistered" not in m02_section.lower() or "not an unregistered" in section
-    assert "not an unregistered Stage-A oracle" in section
+    assert "wmbs-m05-development" in m05_section
 
     registry = load_registry()
     assert "wmbs-m02-retrieval-development" in registry
     assert "wmbs-m04-development" in registry
+    assert "wmbs-m05-development" in registry
     for key in UNREGISTERED_SUITE_KEYS:
         assert key not in registry, (
             f"{key} is now registered; the README Stage-A disclosure claims it is "
             "unregistered and must be rewritten in the same change"
         )
-    registry_blob = json.dumps(registry)
-    assert "wmbs-m05" not in registry_blob, (
-        "a registry entry now mentions wmbs-m05; update the Stage-A "
-        "disclosure before registering these modules"
-    )
+    cell = registry["wmbs-m05-development"]
+    assert cell["adapter"] == "wmbs-m05-reference"
+    assert cell["fixture"] == "fixtures/wmbs-m05-provenance-development.json"
+    assert cell["scoring_profile"] == "wmbs-m05-v1"
+    assert cell["system_seam"] == "public-cli-subprocess"
 
 
 def test_disclosure_admission_labels_match_the_modules() -> None:
-    section = _disclosure_section()
+    section = _m05_section()
     assert "Every one of them is admission state `PROPOSED`" in section
     assert 'M02 and M04 declare `ADMISSION_STATE = "PROPOSED"` directly' in section
     assert (
@@ -187,7 +179,7 @@ def test_disclosure_admission_labels_match_the_modules() -> None:
 
 
 def test_disclosure_license_claim_matches_the_modules() -> None:
-    section = _disclosure_section()
+    section = _m05_section()
     assert 'M02 and M05 declare `license: "CC0-1.0"`' in section
     assert "M04 declares no license field at all" in section
 
@@ -197,10 +189,12 @@ def test_disclosure_license_claim_matches_the_modules() -> None:
     assert _fixture("wmbs-m05-provenance-development.json")["license"] == "CC0-1.0"
     assert "license" not in _fixture("wmbs-m04-development.json")
     assert not hasattr(m04, "LICENSE")
+    assert load_registry()["wmbs-m05-development"]["license"] == "CC0-1.0"
+    assert "license" not in load_registry()["wmbs-m04-development"]
 
 
 def test_disclosure_cost_and_resource_gaps_match_the_scorers() -> None:
-    section = _disclosure_section()
+    section = _m05_section()
     assert "None of the three measures cost or resources." in section
     assert (
         "M02's scorer reports `latency`, `tokens`, `calls`, and `storage` "
@@ -319,7 +313,7 @@ def test_disclosure_m04_fixture_shape_and_declared_gaps_match() -> None:
 
 
 def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
-    section = _disclosure_section()
+    section = _m05_section()
     assert "generated from seed `13`, declares the five seeds" in section
     assert "five slices of twenty cases each" in section
     assert (
@@ -369,14 +363,10 @@ def test_disclosure_m05_fixture_shape_and_deferrals_match() -> None:
         assert f"{tag} " in section
 
 
-def test_disclosure_keeps_stage_b_undelivered_and_claims_nothing() -> None:
-    section = _disclosure_section()
-    assert (
-        "Stage B — harness integration for M05 — is **not delivered**."
-        in (section)
-    )
-    assert "Stage B — harness integration for M04 and M05 — is **not delivered**." not in section
-    assert "gated on the public-harness integration owner's lease" in section
+def test_disclosure_keeps_stage_b_delivered_and_claims_nothing() -> None:
+    section = _m05_section()
+    assert "Stage B — harness integration for M05 — is delivered." in section
+    assert "Stage B — harness integration for M05 — is **not delivered**." not in section
     assert (
         "Nothing here is a publication, comparability, ranking, superiority, or "
         "upstream-equivalence claim." in section
@@ -392,11 +382,8 @@ def test_disclosure_keeps_stage_b_undelivered_and_claims_nothing() -> None:
 
 
 def test_disclosure_section_precedes_no_registration_elsewhere() -> None:
-    """Unregistered modules must not gain a --suite command."""
+    """Registered M05 must document the full suite id, not a bare prefix."""
     readme = _readme()
-    assert "--suite wmbs-m05" not in readme, (
-        "the README now documents selecting wmbs-m05 with `--suite`, which "
-        "contradicts the Stage-A unregistered disclosure"
-    )
+    assert "--suite wmbs-m05-development" in readme
     assert "--suite wmbs-m04-development" in readme
     assert "--suite wmbs-m02-retrieval-development" in readme

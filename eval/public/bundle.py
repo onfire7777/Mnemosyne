@@ -42,6 +42,7 @@ CANONICAL_REPLAY_VOLATILE_FIELDS = frozenset(
 _CANONICAL_REPLAY_SEEDS = {
     "wmbs-m01-development": (20260728,),
     "wmbs-m03-valid-time-development": (11, 23, 37, 53, 71),
+    "wmbs-m05-provenance-development": (13, 29, 41, 59, 73),
     "wmbs-m10-development": (0, 1, 2, 3, 4),
 }
 _CANONICAL_REPLAY_MANIFESTS = {
@@ -315,6 +316,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "working-memory-action-v1": ("deterministic-action", "bootstrap"),
         "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
         "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
+        "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
         "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
     }.get(profile)
     if any(trace.get("scoring_family") != family for trace in traces):
@@ -758,6 +760,8 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
         return [{"case_id": "M01", "fixture": benchmark}]
     if benchmark.get("schema_id") == "wmbs-m03-valid-time-development/fixture/0.1":
         return [{"case_id": "M03", "fixture": benchmark}]
+    if benchmark.get("schema_id") == "wmbs-m05-provenance-development/fixture/0.1":
+        return [{"case_id": "M05", "fixture": benchmark}]
     if not isinstance(benchmark.get("questions"), list):
         raise BundleError("scoring profile benchmark questions are missing")
     labels = []

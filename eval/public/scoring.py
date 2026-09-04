@@ -40,6 +40,8 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
         return _score_wmbs_m02_retrieval(labels, traces)
     if profile == "wmbs-m04-v1":
         return _score_wmbs_m04(labels, traces)
+    if profile == "wmbs-m05-v1":
+        return _score_wmbs_m05(labels, traces)
     if profile == "wmbs-m10-v1":
         return _score_wmbs_m10(labels, traces)
     if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
@@ -186,6 +188,39 @@ def _score_wmbs_m04(
     measured = m04.score_conflict(fixture, observations, ablations)
     measured["family"] = "whole-memory-development"
     measured["profile"] = "wmbs-m04-v1"
+    return measured
+
+
+def _score_wmbs_m05(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m05 as m05
+
+    fixture = None
+    if labels and isinstance(labels[0], dict) and isinstance(labels[0].get("fixture"), dict):
+        fixture = labels[0]["fixture"]
+    else:
+        fixture = m05.generate_fixture(m05.SEEDS[0])
+    cleaned = []
+    for row in traces:
+        if not isinstance(row, dict):
+            continue
+        cleaned.append(
+            {
+                key: row[key]
+                for key in (
+                    "case_id",
+                    "answer_envelope",
+                    "explanation",
+                    "provenance_status",
+                )
+                if key in row
+            }
+        )
+    measured = m05.score(fixture, cleaned)
+    measured["family"] = "whole-memory-development"
+    measured["profile"] = "wmbs-m05-v1"
+    measured["interval"] = {"method": "descriptive"}
     return measured
 
 
