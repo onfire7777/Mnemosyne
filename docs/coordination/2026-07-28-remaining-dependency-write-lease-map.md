@@ -233,6 +233,27 @@ The following packages are complete source history, not runnable work:
   claimed here. PR #131 changes no benchmark result or admission state,
   does not recompute the canonical baseline, and must pass fresh
   exact-head review, security, and CI before merge.
+- PR #130: docs M05 README hierarchy residual + M12/M13 peer cells
+  (title: docs: M05 README hierarchy residual + M12/M13 peer cells)
+  from exact head `a75ec87431b9ee1c0caf9be49a12350afd88efba`; all
+  required exact-head checks passed in run `33918171983`; merge
+  `0679cdc762d6ac7be610b6be11f62a474fa74240` at `2026-09-04T21:20:51Z`.
+  Prior tip was `ec8aa1f28822ac7e992cf110cd9be18643c12e46` (PR #131 /
+  #128 receipt). Post-main may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #130 is absent from this lease-map; this receipt repairs
+  that bookkeeping. The merge touched only `eval/public/README.md` and
+  `tests/test_public_wmbs_stage_a_disclosure.py`. This receipt
+  changes no benchmark result or admission state and does
+  not recompute the canonical baseline.
+- PR #133: ordinary documentation receipt recording the merged PR #130
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-04T21:23:16Z`
+  capture and adds only the PR #130 merged-baseline bullet and this
+  structured self-record in this map. Because this record changes the
+  branch head, no exact final head, merge SHA/time, or post-main CI is
+  claimed here. PR #133 changes no benchmark result or admission state,
+  does not recompute the canonical baseline, and must pass fresh
+  exact-head review, security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
