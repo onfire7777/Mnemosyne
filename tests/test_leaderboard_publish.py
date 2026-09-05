@@ -14,6 +14,7 @@ from leaderboard.render import render_site
 from leaderboard.validate import DIGEST_PAYLOAD_NAMES
 from tests.test_leaderboard_result_contract import (
     _v2_development_record,
+    _v2_official_record,
     _v2_successor_record,
 )
 
@@ -534,7 +535,7 @@ def _v2_bound_result(tmp_path: Path, record: dict[str, object]) -> dict[str, Pat
     return paths
 
 
-def test_publishes_v2_after_verifying_four_digest_payloads(
+def test_rejects_not_ready_v2_even_when_four_digests_match(
     tmp_path: Path, key_paths: tuple[Path, Path]
 ) -> None:
     private_key, public_key = key_paths
@@ -551,23 +552,21 @@ def test_publishes_v2_after_verifying_four_digest_payloads(
     )
     destination = tmp_path / "site"
 
-    publish_site(
-        ledger,
-        public_key,
-        {str(record["record_id"]): artifacts["traces.jsonl"]},
-        destination,
-        artifacts={
-            str(record["record_id"]): {
-                "build": artifacts["build.json"],
-                "config": artifacts["config.json"],
-                "bundle": artifacts["bundle-manifest.json"],
-            }
-        },
-    )
-
-    index = (destination / "index.html").read_text(encoding="utf-8")
-    assert str(record["record_id"]) in index
-    assert "DEVELOPMENT" in index
+    with pytest.raises(PublicationError, match="not ready"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            destination,
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not destination.exists()
 
 
 def test_rejects_v2_publish_on_digest_mismatch(
@@ -686,21 +685,53 @@ def test_publishes_only_active_v2_after_v1_supersession(
     )
     destination = tmp_path / "site"
 
-    publish_site(
-        ledger,
-        public_key,
-        {str(successor["record_id"]): artifacts["traces.jsonl"]},
-        destination,
-        artifacts={
-            str(successor["record_id"]): {
-                "build": artifacts["build.json"],
-                "config": artifacts["config.json"],
-                "bundle": artifacts["bundle-manifest.json"],
-            }
-        },
-    )
+    with pytest.raises(PublicationError, match="not ready|admission"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(successor["record_id"]): artifacts["traces.jsonl"]},
+            destination,
+            artifacts={
+                str(successor["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
 
     assert ledger.read_bytes().startswith(original_bytes_path.read_bytes())
-    index = (destination / "index.html").read_text(encoding="utf-8")
-    assert str(successor["record_id"]) in index
-    assert "result-v1" not in index
+    assert not destination.exists()
+
+
+def test_rejects_v2_publish_when_admission_is_proposed(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_official_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-official",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+
+    with pytest.raises(PublicationError, match="admission|not ready"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            tmp_path / "site",
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()

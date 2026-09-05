@@ -22,6 +22,9 @@ from leaderboard.validate import (
     verify_result_digests,
 )
 
+NETWORK_IO = False
+TELEMETRY = False
+
 
 class RenderError(ValueError):
     """Raised when renderer input or publication fails closed."""
@@ -351,6 +354,11 @@ def _verify_v2_artifacts(
         files = bound.get(record_id)
         if not isinstance(files, dict):
             raise RenderError(f"missing artifact source: {record_id}")
+        for name in ("build", "config", "bundle"):
+            if name in files and "://" in str(files[name]):
+                raise RenderError(f"local artifact required: {name}")
+        if "://" in str(traces[record_id]):
+            raise RenderError("local artifact required: traces")
         try:
             payloads = {
                 "build.json": Path(files["build"]).read_bytes(),

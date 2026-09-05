@@ -1057,3 +1057,48 @@ def test_rejects_invalid_v2_success_result(
             entry_id="entry-invalid-v2",
             result=invalid,
         )
+
+
+def test_sealed_v1_custody_row_is_not_rewritten_by_v2_append(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    original = _append(ledger_path, private_key, entry_id="entry-sealed")
+    sealed = ledger_path.read_bytes()
+    siblings = {path.name for path in ledger_path.parent.iterdir()}
+    v2_result = _v2_development_record()
+    v2_result["custody"] = "development-public"
+    appended = _append(
+        ledger_path,
+        private_key,
+        entry_id="entry-v2-custody",
+        result=v2_result,
+    )
+
+    assert ledger_path.read_bytes().startswith(sealed)
+    assert json.loads(sealed.splitlines()[0]) == original
+    assert appended["result"]["custody"] == "development-public"
+    created = {path.name for path in ledger_path.parent.iterdir()} - siblings
+    assert "runs-v2.jsonl" not in created
+    assert verify_ledger(ledger_path, public_key)[0] == original
+
+
+def test_refuses_in_place_rewrite_of_a_sealed_v1_row(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    _append(ledger_path, private_key, entry_id="entry-sealed")
+    sealed = ledger_path.read_bytes()
+    mutated = json.loads(sealed.splitlines()[0])
+    mutated["result"]["publication"]["publishable"] = True
+    ledger_path.write_text(
+        json.dumps(mutated, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    with pytest.raises(LedgerError, match="digest|result"):
+        verify_ledger(ledger_path, public_key)
+    with pytest.raises(LedgerError):
+        _append(ledger_path, private_key, entry_id="entry-after-rewrite")
+    assert not ledger_path.with_name("runs-v2.jsonl").exists()

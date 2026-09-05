@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from leaderboard.ledger import LedgerError, verify_ledger
+from leaderboard.readiness import ReadinessError, evaluate_result_v2
 from leaderboard.render import RenderError, render_site
 from leaderboard.validate import SCHEMA_VERSION, SCHEMA_VERSION_V2, verify_result_digests
 
@@ -114,6 +115,16 @@ def publish_site(
                 copied["config"].write_bytes(config_bytes)
                 copied["bundle"].write_bytes(bundle_bytes)
                 verified_artifacts[record_id] = copied
+                try:
+                    readiness = evaluate_result_v2(result)
+                except ReadinessError as exc:
+                    raise PublicationError("result is not ready") from exc
+                if readiness["ready"] is not True:
+                    blocked = readiness["blocked_gates"]
+                    raise PublicationError(
+                        "result is not ready: "
+                        + ", ".join(str(gate) for gate in blocked)
+                    )
 
             result_path = temporary_path / "results.json"
             result_path.write_text(
