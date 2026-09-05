@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from pathlib import Path
 
@@ -8,6 +9,8 @@ import pytest
 
 from eval.public import bundle as public_bundle
 from eval.public.bundle import BundleError
+from tests.test_leaderboard_result_contract import _v2_development_record
+from tests.test_public_eval import _canonical_replay_payload
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -35,6 +38,87 @@ def _validate(manifest: object) -> dict[str, object]:
     validator = getattr(public_bundle, "validate_reproducibility_manifest", None)
     assert callable(validator), "missing reproducibility manifest version dispatch"
     return validator(manifest)
+
+
+def _canonical(value: object) -> bytes:
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _digest(payload: bytes) -> str:
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
+    root.mkdir()
+    payloads = {
+        "build.json": _canonical({"candidate_git_sha": "b" * 40}),
+        "config.json": _canonical({"locale": "C", "timezone": "UTC"}),
+        "bundle-manifest.json": _canonical({"files": {}, "version": 1}),
+        "traces.jsonl": _canonical({"question_id": "q1", "score": 1.0}),
+        "environment.json": _canonical({"dependencies": ["mnemosyne==0.1.0"]}),
+        "uv.lock": b"version = 1\n",
+    }
+    record = _v2_development_record()
+    record["build_fingerprint"] = _digest(payloads["build.json"])
+    record["config_digest"] = _digest(payloads["config.json"])
+    record["bundle_digest"] = _digest(payloads["bundle-manifest.json"])
+    record["trace_index_digest"] = _digest(payloads["traces.jsonl"])
+    payloads["result.json"] = _canonical(record)
+    replay = _canonical_replay_payload("wmbs-m01-development")
+    payloads["canonical-replay.json"] = _canonical(replay)
+    ledger_entry = {
+        "entry_digest": DIGEST,
+        "result": record,
+        "status": "succeeded",
+    }
+    payloads["ledger-entry.json"] = _canonical(ledger_entry)
+    for name, payload in payloads.items():
+        (root / name).write_bytes(payload)
+
+    manifest = _manifest()
+    manifest["result_ref"] = {
+        "record_id": record["record_id"],
+        "result_digest": _digest(payloads["result.json"]),
+        "ledger_entry_digest": DIGEST,
+        "track_kind": record["track_kind"],
+        "lineage": record["lineage"],
+    }
+    artifacts = manifest["artifacts"]  # type: ignore[assignment]
+    artifacts.update(  # type: ignore[union-attr]
+        {
+            "build_fingerprint": _digest(payloads["build.json"]),
+            "config_digest": _digest(payloads["config.json"]),
+            "bundle_digest": _digest(payloads["bundle-manifest.json"]),
+            "trace_index_digest": _digest(payloads["traces.jsonl"]),
+            "canonical_replay_digest": "sha256:"
+            + public_bundle.canonical_replay_digest(replay),
+            "environment_digest": _digest(payloads["environment.json"]),
+            "lockfile_digest": _digest(payloads["uv.lock"]),
+            "files": [
+                {
+                    "path": name,
+                    "size": len(payload),
+                    "media_type": "application/json"
+                    if name.endswith(".json")
+                    else "text/plain",
+                    "canonicalization": "exact-bytes",
+                    "digest": _digest(payload),
+                }
+                for name, payload in sorted(payloads.items())
+            ],
+        }
+    )
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+    return manifest
 
 
 def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
@@ -235,3 +319,40 @@ def test_inventory_paths_are_normalized_relative_posix_paths(path: str) -> None:
     manifest["artifacts"]["files"][0]["path"] = path  # type: ignore[index]
     with pytest.raises(BundleError, match="relative path"):
         _validate(manifest)
+
+
+def test_verifies_manifest_owned_bytes_and_existing_result_and_replay_contracts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+
+    assert public_bundle.verify_reproducibility_bundle(root) == {
+        "schema_version": "mnemosyne.reproducibility-bundle/v1",
+        "track_kind": "DEVELOPMENT",
+        "valid": True,
+    }
+    assert public_bundle.verify_bundle(root)["schema_version"] == (
+        "mnemosyne.reproducibility-bundle/v1"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["build.json", "config.json", "traces.jsonl", "result.json", "uv.lock"]
+)
+def test_one_byte_tampering_fails_closed(tmp_path: Path, name: str) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    with (root / name).open("ab") as handle:
+        handle.write(b"x")
+
+    with pytest.raises(BundleError, match="digest mismatch"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
+def test_inventory_drift_and_symlinks_fail_before_validation(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    (root / "unowned.txt").write_text("drift", encoding="utf-8")
+    with pytest.raises(BundleError, match="inventory mismatch"):
+        public_bundle.verify_reproducibility_bundle(root)
