@@ -411,8 +411,9 @@ These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
 
 - PR #135: receipt-only correction discharging P13-C from verified scheduled
-  run `30807305055`, with the matching `GOAL.md` and `.planning/STATE.md`
-  corrections and N12 blocker clarification. Open at the 2026-09-05 capture;
+  run `30807305055`, with matching `GOAL.md`, `.planning/STATE.md`,
+  `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and Phase 13 summary
+  corrections closing BENCH-007 and clarifying the N12 blocker. Open at the 2026-09-05 capture;
   no final-head CI, merge, or post-main result is claimed in this self-record.
   It preserves the canonical baseline, progress counters, and source leases;
   N12 still requires external-worktree disposition and lease release.
@@ -420,7 +421,10 @@ profile, publishable result, leaderboard activation, or launch.
 ## P13-C discharge and N12 admission check (2026-09-05)
 
 The owner requested resolution of the stale gate checklist. This bounded
-receipt changes only this map, `GOAL.md`, and `.planning/STATE.md`. The gate
+receipt changes this map, `GOAL.md`, `.planning/STATE.md`,
+`.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and
+`.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`
+to reconcile BENCH-007's sole remaining cadence gate. The gate
 check used clean `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, whose
 post-main CI run `33927734374` succeeded. The standing canonical baseline
 above is preserved; this receipt admits no source writer.
@@ -438,7 +442,9 @@ above is preserved; this receipt admits no source writer.
   No workflow artifacts exist (`total_count=0`), as expected for this fixed
   contract-test workflow. This durable metadata receipt closes cadence only;
   it supplies no official benchmark result, BENCH-006 closure, publication
-  eligibility, requirement-status change, or progress-counter increment.
+  eligibility, or progress-counter increment. BENCH-007 is Complete because
+  its merged source and this retained scheduled run satisfy its contract;
+  Phase 13 remains open for BENCH-006, and the source plan was already complete.
 - **Signed-publication source: MERGED.** PR #69 merged at
   `2026-07-26T12:42:20Z` as `a4e80b5a67b0437d3a864af0fe347febfe32e58b`.
   PR #70 delivered its completion receipt at `2026-07-26T12:59:59Z` as

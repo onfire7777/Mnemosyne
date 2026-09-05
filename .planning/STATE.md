@@ -198,9 +198,10 @@ Exact post-merge main CI run `30561266140` passed on `main@661343ce`.
 BENCH-006 remains Partial behind official/upstream rights, disclosure,
 operator, and execution evidence. The P13-C scheduled-cadence subgate is
 discharged by retained run `30807305055`; the passing manual run proves only
-development operability. This receipt-only correction does not change the
-BENCH-007 requirement status or progress counters, and does not establish
-official benchmark evidence.
+development operability. BENCH-007 is Complete in the requirement, roadmap,
+and Phase 13 summary records. Phase/plan progress counters do not change:
+the source plan was already complete, while Phase 13 remains open for
+BENCH-006. This does not establish official benchmark evidence.
 
 Phase 14 has one frozen plan. REPRO-001 implementation is blocked on additive
 result-v2 dispatch and release of the protected signed-publication lease.

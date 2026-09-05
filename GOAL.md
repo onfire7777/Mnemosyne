@@ -469,7 +469,10 @@ scheduled-cadence receipt is discharged by successful `schedule` run
 `30807305055` on `b8673031a80158c49d552a4b3647829d213243bd`, started
 `2026-08-03T10:52:57Z`; job `91665545558` and its fixed public-contract test
 step succeeded. The GitHub run/job metadata was verified on 2026-09-05 and is
-retained in the lease map. Every official/upstream benchmark run remains open.
+retained in the lease map. BENCH-007 is Complete, with the requirement,
+roadmap, and Phase 13 summary reconciled to that receipt; the already-complete
+source plan and still-open Phase 13 do not change any progress counter.
+Every official/upstream benchmark run remains open.
 
 Result-v2 remains blocked pending the Mac worktree's residual-work disposition
 and explicit lease release. PR #69 merged the signed-publication source as
