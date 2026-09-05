@@ -160,6 +160,14 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
     record["signer_role"] = "operator"
     payloads["result.json"] = _canonical(record)
     replay = _canonical_replay_payload("wmbs-m01-development")
+    replay["manifests"] = {  # type: ignore[index]
+        "bundle_manifest_sha256": _digest(payloads["bundle-manifest.json"])[7:],
+        "fixture_manifest_sha256": _digest(payloads["fixture-manifest.json"])[7:],
+        "generator_manifest_sha256": _digest(payloads["generator-manifest.json"])[7:],
+    }
+    replay["fixture"] = (  # type: ignore[index]
+        "wmbs-m01-development@" + _digest(payloads["fixture-manifest.json"])
+    )
     payloads["canonical-replay.json"] = _canonical(replay)
     for name, payload in payloads.items():
         (root / name).write_bytes(payload)
@@ -878,6 +886,37 @@ def test_canonical_replay_seed_records_must_match_run_custody(tmp_path: Path) ->
     manifest_path.write_bytes(_canonical(manifest))
 
     with pytest.raises(BundleError, match="replay seed records do not match run"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "bundle_manifest_sha256",
+        "fixture_manifest_sha256",
+        "generator_manifest_sha256",
+    ],
+)
+def test_canonical_replay_manifests_must_match_retained_artifacts(
+    tmp_path: Path, field: str
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    replay_path = root / "canonical-replay.json"
+    replay = json.loads(replay_path.read_text(encoding="utf-8"))
+    replay["manifests"][field] = "d" * 64
+    if field == "fixture_manifest_sha256":
+        replay["fixture"] = "wmbs-m01-development@sha256:" + "d" * 64
+    replay_path.write_bytes(_canonical(replay))
+    _refresh_owned_file(root, "canonical-replay.json")
+    manifest_path = root / "reproducibility-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["canonical_replay_digest"] = (  # type: ignore[index]
+        "sha256:" + public_bundle.canonical_replay_digest(replay)
+    )
+    manifest_path.write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="replay manifest custody"):
         public_bundle.verify_reproducibility_bundle(root)
 
 

@@ -96,7 +96,8 @@ before those hashes. The existing result-v1 and legacy version-1 bundle formats
 remain unchanged.
 
 The canonical M15 replay keeps list order digest-bound, and its seed inventory
-must exactly match the ordered result/run seed custody in REPRO-001.
+must exactly match the ordered result/run seed custody in REPRO-001. Its bundle,
+fixture, and generator manifest hashes must likewise match the retained artifacts.
 
 Official-upstream, enhanced-successor, and development tracks have distinct
 lineage shapes and cannot be blended. Development and private-suite artifacts

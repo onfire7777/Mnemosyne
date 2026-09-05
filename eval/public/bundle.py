@@ -1205,6 +1205,18 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         or replay.get("seed_records") != manifest["run"]["seed_records"]
     ):
         raise BundleError("canonical replay seed records do not match run custody")
+    replay_manifests = replay.get("manifests")
+    expected_replay_manifests = {
+        "bundle_manifest_sha256": artifacts["bundle_digest"].removeprefix("sha256:"),
+        "fixture_manifest_sha256": inputs["fixture_manifest_digest"].removeprefix(
+            "sha256:"
+        ),
+        "generator_manifest_sha256": inputs["generator_manifest_digest"].removeprefix(
+            "sha256:"
+        ),
+    }
+    if replay_manifests != expected_replay_manifests:
+        raise BundleError("canonical replay manifest custody does not match artifacts")
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
