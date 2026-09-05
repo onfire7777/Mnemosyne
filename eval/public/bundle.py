@@ -48,6 +48,8 @@ _SECRET_SCAN_CHUNK_SIZE = 1024 * 1024
 # split across adjacent streaming scan windows.
 _SECRET_SCAN_OVERLAP = 1024
 _REPRODUCIBILITY_MANIFEST_MAX_BYTES = 4 * 2**20
+_REPRODUCIBILITY_ARTIFACT_MAX_BYTES = 64 * 2**20
+_REPRODUCIBILITY_BUNDLE_MAX_BYTES = 1024 * 2**20
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
@@ -395,6 +397,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     paths: set[str] = set()
     portable_paths: set[str] = set()
     ordered_paths: list[str] = []
+    total_size = 0
     for index, item in enumerate(files):
         entry = _closed_object(
             item,
@@ -412,8 +415,14 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         paths.add(path)
         portable_paths.add(portable_path)
         ordered_paths.append(path)
-        if type(entry["size"]) is not int or not 0 <= entry["size"] <= 64 * 2**20:
+        if (
+            type(entry["size"]) is not int
+            or not 0 <= entry["size"] <= _REPRODUCIBILITY_ARTIFACT_MAX_BYTES
+        ):
             raise BundleError("file inventory size is invalid")
+        total_size += entry["size"]
+        if total_size > _REPRODUCIBILITY_BUNDLE_MAX_BYTES:
+            raise BundleError("file inventory aggregate size exceeds bundle limit")
         media_type = entry["media_type"]
         _repro_nonempty(media_type, "file media type", maximum=128)
         if _MEDIA_TYPE.fullmatch(media_type) is None:
