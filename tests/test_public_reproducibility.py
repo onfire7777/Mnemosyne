@@ -61,6 +61,18 @@ REPRODUCTION_ARGV = [
     "--out-dir",
     "DEST",
 ]
+
+
+def _path_with_invoking_uv() -> str:
+    path = os.environ["PATH"]
+    invoking_uv = os.environ.get("UV")
+    if invoking_uv:
+        return str(Path(invoking_uv).resolve().parent) + os.pathsep + path
+    return path
+
+
+def _invoking_uv_command() -> str:
+    return os.environ.get("UV") or shutil.which("uv") or "uv"
 RESULT_V1_SCHEMA_SHA256 = (
     "22544dbcfbad5f09cc4bccbbfd6b79f4bda1b70d2a903f6908cd89cfd3e51817"
 )
@@ -815,7 +827,12 @@ def test_one_byte_tamper_and_digest_mismatch_fail_closed(tmp_path: Path) -> None
 def test_symlink_absolute_and_escaping_paths_fail_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "paths")
     linked = bundle["root"] / "linked-traces.jsonl"
-    linked.symlink_to(bundle["root"] / "traces.jsonl")
+    try:
+        linked.symlink_to(bundle["root"] / "traces.jsonl")
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
     manifest = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
     manifest["hashes"].append(
         {
@@ -1511,14 +1528,18 @@ def test_clean_checkout_runs_exact_documented_argv(tmp_path: Path) -> None:
         "HOME": str(tmp_path / "home"),
         "LANG": "C",
         "LC_ALL": "C",
-        "PATH": os.environ["PATH"],
+        "PATH": _path_with_invoking_uv(),
+        "TEMP": str(tmp_path),
+        "TMP": str(tmp_path),
         "TZ": "UTC",
-        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+        "UV_OFFLINE": "1",
         "UV_PROJECT_ENVIRONMENT": str(REPO_ROOT / ".venv"),
+        **({"SystemRoot": os.environ["SystemRoot"]} if "SystemRoot" in os.environ else {}),
+        **({"WINDIR": os.environ["WINDIR"]} if "WINDIR" in os.environ else {}),
     }
     (tmp_path / "home").mkdir()
     command = [
-        "uv",
+        _invoking_uv_command(),
         "run",
         "--locked",
         "mneme",
@@ -1614,7 +1635,7 @@ def test_clean_checkout_denials_emit_no_partial_destination(
         destination.mkdir()
         (destination / "partial.json").write_text("{}\n", encoding="utf-8")
     command = [
-        "uv",
+        _invoking_uv_command(),
         "run",
         "--locked",
         "mneme",
@@ -1631,10 +1652,14 @@ def test_clean_checkout_denials_emit_no_partial_destination(
         "HOME": str(tmp_path / "home"),
         "LANG": "C",
         "LC_ALL": "C",
-        "PATH": os.environ["PATH"],
+        "PATH": _path_with_invoking_uv(),
+        "TEMP": str(tmp_path),
+        "TMP": str(tmp_path),
         "TZ": "UTC",
-        "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+        "UV_OFFLINE": "1",
         "UV_PROJECT_ENVIRONMENT": str(REPO_ROOT / ".venv"),
+        **({"SystemRoot": os.environ["SystemRoot"]} if "SystemRoot" in os.environ else {}),
+        **({"WINDIR": os.environ["WINDIR"]} if "WINDIR" in os.environ else {}),
     }
     (tmp_path / "home").mkdir()
     completed = subprocess.run(
