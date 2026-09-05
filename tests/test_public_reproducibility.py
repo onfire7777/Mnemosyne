@@ -1337,6 +1337,15 @@ def test_reproduction_rejects_linked_source_path(tmp_path: Path) -> None:
         )
 
 
+def test_verifier_rejects_hard_linked_artifact(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    os.link(root / "README.md", tmp_path / "external-readme.md")
+
+    with pytest.raises(BundleError, match="hard-linked files are forbidden"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_signed_ledger_is_cryptographically_verified_after_inventory_check(
     tmp_path: Path,
 ) -> None:
