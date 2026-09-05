@@ -853,6 +853,32 @@ def _copy_inventory_artifact(
     os.chmod(target, stat.S_IMODE(opened_stat.st_mode))
 
 
+def _verify_bound_ledger(
+    root: Path,
+    entries: dict[str, dict[str, Any]],
+    ledger_name: str,
+    public_key_name: str,
+) -> tuple[list[dict[str, object]], str]:
+    """Verify one mutually consistent, inventory-bound ledger snapshot."""
+    from leaderboard.ledger import verify_ledger
+    from mnemosyne.evidence_signing import _public_key_sha256, load_public_key
+
+    owned_names = (
+        ledger_name,
+        ledger_name + ".head.json",
+        ledger_name + ".lock",
+        public_key_name,
+    )
+    with tempfile.TemporaryDirectory() as temporary:
+        snapshot = Path(temporary)
+        for name in owned_names:
+            _copy_inventory_artifact(root / name, snapshot / name, entries[name])
+        public_key = load_public_key(snapshot / public_key_name)
+        fingerprint = _public_key_sha256(public_key)
+        verified = verify_ledger(snapshot / ledger_name, snapshot / public_key_name)
+    return verified, fingerprint
+
+
 def _reject_decoded_secrets(value: object) -> None:
     stack = [value]
     while stack:
@@ -1307,18 +1333,16 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         declared_metrics,
     )
 
-    from leaderboard.ledger import LedgerError, verify_ledger
+    from leaderboard.ledger import LedgerError
     from mnemosyne.evidence_signing import (
         EvidenceSignatureError,
-        _public_key_sha256,
-        load_public_key,
     )
 
     try:
-        ledger_entries = verify_ledger(
-            root / "ledger.jsonl", root / "ledger-public.pem"
+        ledger_entries, operator_key_fingerprint = _verify_bound_ledger(
+            root, entries, "ledger.jsonl", "ledger-public.pem"
         )
-    except LedgerError as exc:
+    except (LedgerError, EvidenceSignatureError) as exc:
         raise BundleError("signed-ledger verification failed") from exc
     matching_entries = [
         entry
@@ -1332,27 +1356,21 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     ):
         raise BundleError("signed-ledger inclusion reference mismatch")
     if independent is not None:
-        independent_key = root / "independent-public.pem"
         try:
-            operator_key_fingerprint = _public_key_sha256(
-                load_public_key(root / "ledger-public.pem")
+            independent_entries, independent_key_fingerprint = _verify_bound_ledger(
+                root,
+                entries,
+                "independent-ledger.jsonl",
+                "independent-public.pem",
             )
-            independent_key_fingerprint = _public_key_sha256(
-                load_public_key(independent_key)
-            )
-        except EvidenceSignatureError as exc:
-            raise BundleError("independent reproduction public key is invalid") from exc
+        except (LedgerError, EvidenceSignatureError) as exc:
+            raise BundleError("independent signed-ledger verification failed") from exc
         if (
-            _sha256_reference(independent_key) != independent["public_key_digest"]
+            entries["independent-public.pem"]["digest"]
+            != independent["public_key_digest"]
             or independent_key_fingerprint == operator_key_fingerprint
         ):
             raise BundleError("independent reproduction key is not distinct and bound")
-        try:
-            independent_entries = verify_ledger(
-                root / "independent-ledger.jsonl", independent_key
-            )
-        except LedgerError as exc:
-            raise BundleError("independent signed-ledger verification failed") from exc
         receipt_entries = [
             entry
             for entry in independent_entries
