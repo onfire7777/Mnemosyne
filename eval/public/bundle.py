@@ -109,6 +109,7 @@ _CREDENTIAL_ENV_MARKERS = (
     "AUTHORIZATION",
 )
 _FIXED_REPRODUCTION_ENV = {"UV_OFFLINE", "LC_ALL", "TZ"}
+_SAFE_DECLARED_PYTHON_ENV = {"PYTHONHASHSEED", "PYTHONUTF8", "PYTHONIOENCODING"}
 _INFLUENTIAL_ENV_PREFIXES = ("PYTHON", "PIP_", "UV_", "DYLD_")
 _INFLUENTIAL_ENV_NAMES = {
     "HTTP_PROXY",
@@ -195,6 +196,15 @@ def _undeclared_influential_environment_name(
     return normalized in _INFLUENTIAL_ENV_NAMES or normalized.startswith(
         _INFLUENTIAL_ENV_PREFIXES
     )
+
+
+def _forbidden_declared_environment_name(name: str) -> bool:
+    normalized = name.upper()
+    if normalized in _FIXED_REPRODUCTION_ENV or normalized in _INFLUENTIAL_ENV_NAMES:
+        return True
+    if normalized.startswith(("PIP_", "UV_", "DYLD_")):
+        return True
+    return normalized.startswith("PYTHON") and normalized not in _SAFE_DECLARED_PYTHON_ENV
 
 
 def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
@@ -372,6 +382,8 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             raise BundleError("secret-like material detected in environment")
         if any(marker in name for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE", "KEY")):
             raise BundleError("credential-like environment names are forbidden")
+        if _forbidden_declared_environment_name(name):
+            raise BundleError("execution-influencing environment names are forbidden")
 
     metrics = manifest["metrics"]
     if not isinstance(metrics, list) or not metrics or len(metrics) > 1024:

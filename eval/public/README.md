@@ -51,7 +51,9 @@ secret-like values, inherited token/secret/password/private-key/API-key/
 access-key/credential/authorization variables, and any digest, metric, interval,
 result, ledger, or replay mismatch. Undeclared Python, uv, package-index, proxy,
 certificate, and dynamic-loader environment influences are also rejected.
-Failures remove incomplete output.
+Those influence classes cannot be admitted through the manifest allowlist;
+only `PYTHONHASHSEED`, `PYTHONUTF8`, and `PYTHONIOENCODING` are accepted from the
+Python control family. Failures remove incomplete output.
 
 The four result-v2 lineage digests have exact byte meanings:
 

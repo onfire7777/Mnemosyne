@@ -476,6 +476,15 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
         _validate(secret)
 
 
+@pytest.mark.parametrize("name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY"])
+def test_manifest_cannot_allowlist_execution_influences(name: str) -> None:
+    manifest = _manifest()
+    manifest["run"]["environment"][name] = "attacker-controlled"  # type: ignore[index]
+
+    with pytest.raises(BundleError, match="execution-influencing"):
+        _validate(manifest)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
