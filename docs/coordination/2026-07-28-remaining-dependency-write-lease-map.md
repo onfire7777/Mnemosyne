@@ -303,12 +303,123 @@ The following packages are complete source history, not runnable work:
   benchmark result or admission state and does not recompute the
   canonical baseline (baseline stays `main@f688c747`).
 - PR #141: ordinary documentation receipt recording the merged PR #138
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-05T11:24:20Z`
-  capture and adds only the PR #138 merged-baseline bullet and this
-  structured self-record in this map. Exclusive File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `1df2416ad89afbc11b12943a6984bbcbc17ee5a2`. It was **OPEN/READY** at the
+  `2026-09-05T11:24:20Z` capture and adds only the PR #138 merged-baseline
+  bullet and this structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #141 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. The OPEN/READY pre-merge instruction
+  is historical; delivery is MERGED at tip
+  `1df2416ad89afbc11b12943a6984bbcbc17ee5a2`.
+- PR #139: N12 result-v2 Exact 12 leaderboard files
+  (title: feat(leaderboard): additive result-v2 integration (N12))
+  from exact head `eef9c57316ca28a3ef3959f024bd0d132bb0ecb7`; all
+  required exact-head checks passed in run `33966741689`; merge
+  `4af5b20ca871c9768965f808a7482839bc92d26a` at `2026-09-05T13:11:54Z`.
+  Prior tip was `1df2416ad89afbc11b12943a6984bbcbc17ee5a2` (PR #141).
+  Post-main tip CI may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #139 was absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set (Exact 12):
+  `eval/provider_bakeoff/README.md`, `leaderboard/ledger.py`,
+  `leaderboard/publish.py`, `leaderboard/readiness.py`,
+  `leaderboard/render.py`, `leaderboard/schema/result-v2.schema.json`,
+  `leaderboard/validate.py`, `tests/test_leaderboard_ledger.py`,
+  `tests/test_leaderboard_publish.py`,
+  `tests/test_leaderboard_readiness.py`,
+  `tests/test_leaderboard_render.py`,
+  `tests/test_leaderboard_result_contract.py`.
+  Purpose: additive result-v2 integration (N12); docs-only privacy
+  for THIS receipt PR (the recorded #139 was code). This receipt
+  changes no benchmark result or admission state and does not
+  recompute the canonical baseline (baseline stays `main@f688c747`).
+- PR #142: ordinary documentation receipt recording the merged PR #139
+  lease-map lapse. It is **MERGED** at tip
+  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`. It adds only the PR #139
+  merged-baseline bullet, the #141 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #142 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`.
+- PR #140: Exact 1 smoke `tests/test_leaderboard_render_output_smoke.py`
+  (title: test(leaderboard): Frontend render-output smoke (CLEAR of N12))
+  from exact head `65f39d6bab91a4e6e29b1c89bd02f543cec2cde1`; all
+  required exact-head checks passed in run `33973084704`; merge
+  `bfdff701892aa4419a7eda5e3bf2c52e935608cc` at `2026-09-05T18:33:19Z`.
+  Prior tip was `687884dbd14b32d3245fba2e6bc9797fc705e1f2` (PR #142).
+  Post-main tip CI may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #140 was absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set (Exact 1):
+  `tests/test_leaderboard_render_output_smoke.py`.
+  Purpose: Frontend render-output smoke (CLEAR of N12); docs-only privacy
+  for THIS receipt PR (the recorded #140 was test). This receipt
+  changes no benchmark result or admission state and does not
+  recompute the canonical baseline (baseline stays `main@f688c747`).
+- PR #143: ordinary documentation receipt recording the merged PR #140
+  lease-map lapse. It is **MERGED** at tip
+  `012f791347369f9adb0ae065b7fe016af3060201`. It adds only the PR #140
+  merged-baseline bullet, the #142 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #143 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `012f791347369f9adb0ae065b7fe016af3060201`.
+- PR #137: Exact 1 ship-day receipt
+  `docs/coordination/2026-09-04-ship-day-receipt.md`
+  (title: docs(coordination): 2026-09-04 ship-day receipt)
+  from exact head `41db83ad976521440df30230a84e75a252c92cbc`; all
+  required exact-head checks passed in run `33988815458`; merge
+  `59e9378603b6cbbf36821f01f00e6a706a2bfd24` at `2026-09-05T20:30:00Z`.
+  Prior tip was `012f791347369f9adb0ae065b7fe016af3060201` (PR #143).
+  Post-main tip CI may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #137 was absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set (Exact 1):
+  `docs/coordination/2026-09-04-ship-day-receipt.md`.
+  Purpose: 2026-09-04 ship-day receipt; docs-only privacy for THIS
+  receipt PR (the recorded #137 was documentation). This receipt
+  changes no benchmark result or admission state and does not
+  recompute the canonical baseline (baseline stays `main@f688c747`).
+- PR #145: ordinary documentation receipt recording the merged PR #137
+  lease-map lapse. It is **MERGED** at tip
+  `a74e31ef213d87cf75fc1c1f6c3dbe998de30918`. It adds only the PR #137
+  merged-baseline bullet, the #143 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #145 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `a74e31ef213d87cf75fc1c1f6c3dbe998de30918`.
+- PR #144: Exact 4 REPRO-001 files
+  `eval/public/README.md`, `eval/public/bundle.py`,
+  `eval/public/schema/reproducibility-bundle-v1.schema.json`,
+  `tests/test_public_reproducibility.py`
+  (title: feat(eval): REPRO-001 closed reproducibility-bundle/v1 standard)
+  from exact head `1387da5549fa23e9bbb036827871b03a43c0419f`; all
+  required exact-head checks passed in run `33995734474`; merge
+  `54dea434b447f1ef96c11e4fec690ca4c63d67d9` at `2026-09-05T22:53:04Z`.
+  Prior tip was `a74e31ef213d87cf75fc1c1f6c3dbe998de30918` (PR #145).
+  Post-main tip CI may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #144 was absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set (Exact 4):
+  `eval/public/README.md`, `eval/public/bundle.py`,
+  `eval/public/schema/reproducibility-bundle-v1.schema.json`,
+  `tests/test_public_reproducibility.py`.
+  Purpose: REPRO-001 closed reproducibility-bundle/v1 standard; docs-only
+  privacy for THIS receipt PR (the recorded #144 was code). This receipt
+  changes no benchmark result or admission state and does not
+  recompute the canonical baseline (baseline stays `main@f688c747`).
+- PR #146: ordinary documentation receipt recording the merged PR #144
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-05T22:55:00Z`
+  capture and adds only the PR #144 merged-baseline bullet, the #145
+  MERGED mark, and this structured self-record in this map. Exclusive
+  File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #141 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #146 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
