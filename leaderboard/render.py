@@ -96,13 +96,17 @@ def _load_results(path: Path) -> list[dict[str, Any]]:
     return sorted(validated, key=lambda record: record["record_id"])
 
 
-def _load_traces(path: Path) -> list[dict[str, Any]]:
+def _load_traces_from_bytes(raw: bytes, source: Path) -> list[dict[str, Any]]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise RenderError(f"cannot read input: {source}") from exc
     traces: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for line_number, raw in enumerate(_read(path).split("\n"), 1):
-        if not raw.strip():
+    for line_number, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
             continue
-        trace = _load_json(raw, path)
+        trace = _load_json(line, source)
         if not isinstance(trace, dict):
             raise RenderError(f"invalid JSON trace row at line {line_number}")
         question_id = trace.get("question_id")
@@ -113,6 +117,10 @@ def _load_traces(path: Path) -> list[dict[str, Any]]:
         seen.add(question_id)
         traces.append(trace)
     return sorted(traces, key=lambda trace: trace["question_id"])
+
+
+def _load_traces(path: Path) -> list[dict[str, Any]]:
+    return _load_traces_from_bytes(_read(path).encode("utf-8"), path)
 
 
 def _digest(value: str) -> str:
@@ -345,8 +353,9 @@ def _verify_v2_artifacts(
     records: list[dict[str, Any]],
     traces: dict[str, str | Path],
     artifacts: dict[str, dict[str, str | Path]] | None,
-) -> None:
+) -> dict[str, bytes]:
     bound = artifacts or {}
+    snapshots: dict[str, bytes] = {}
     for record in records:
         if record.get("schema_version") != SCHEMA_VERSION_V2:
             continue
@@ -371,6 +380,8 @@ def _verify_v2_artifacts(
         errors = verify_result_digests(record, payloads)
         if errors:
             raise RenderError("digest mismatch: " + ", ".join(errors))
+        snapshots[record_id] = payloads["traces.jsonl"]
+    return snapshots
 
 
 def render_site(
@@ -389,9 +400,13 @@ def render_site(
     unlinked = sorted(trace_ids - record_ids)
     if unlinked:
         raise RenderError("unlinked trace source: " + ", ".join(unlinked))
-    _verify_v2_artifacts(records, traces, artifacts)
+    verified_traces = _verify_v2_artifacts(records, traces, artifacts)
     loaded_traces = {
-        record_id: _load_traces(Path(traces[record_id]))
+        record_id: (
+            _load_traces_from_bytes(verified_traces[record_id], Path(traces[record_id]))
+            if record_id in verified_traces
+            else _load_traces(Path(traces[record_id]))
+        )
         for record_id in sorted(record_ids)
     }
     _publish(_render_pages(records, loaded_traces), Path(destination))

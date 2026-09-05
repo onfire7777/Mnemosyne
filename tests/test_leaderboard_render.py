@@ -747,6 +747,42 @@ def test_v2_render_is_deterministic_from_local_artifacts_only(
     assert renderer.TELEMETRY is False
 
 
+def test_v2_render_uses_verified_trace_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _v2_development_record()
+    artifacts = _bind_v2_artifacts(tmp_path, record)
+    results = _write_json(tmp_path / "results.json", record)
+    output = tmp_path / "site"
+    original_read_bytes = Path.read_bytes
+
+    def mutate_after_first_read(self: Path) -> bytes:
+        payload = original_read_bytes(self)
+        if self.name == "traces.jsonl":
+            self.write_text('{"question_id":"MUTATED"}\n', encoding="utf-8")
+        return payload
+
+    monkeypatch.setattr(Path, "read_bytes", mutate_after_first_read)
+    render_site(
+        results,
+        {str(record["record_id"]): artifacts["traces.jsonl"]},
+        output,
+        artifacts={
+            str(record["record_id"]): {
+                "build": artifacts["build.json"],
+                "config": artifacts["config.json"],
+                "bundle": artifacts["bundle-manifest.json"],
+            }
+        },
+    )
+
+    pages = "\n".join(
+        path.read_text(encoding="utf-8") for path in output.rglob("*.html")
+    )
+    assert "question-001" in pages
+    assert "MUTATED" not in pages
+
+
 def test_rejects_remote_artifact_uri_without_network(tmp_path: Path) -> None:
     record = _v2_development_record()
     artifacts = _bind_v2_artifacts(tmp_path, record)
