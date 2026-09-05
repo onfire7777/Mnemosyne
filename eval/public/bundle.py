@@ -858,12 +858,12 @@ def _reproducibility_tree(
                 if child.is_symlink() or is_junction:
                     raise BundleError("links and junctions are forbidden")
                 try:
-                    mode = child.stat(follow_symlinks=False).st_mode
+                    path_stat = child.stat(follow_symlinks=False)
                 except OSError as exc:
                     raise BundleError(
                         "reproducibility bundle path cannot be inspected"
                     ) from exc
-                if mode & _UNSAFE_MODE_BITS:
+                if path_stat.st_mode & _UNSAFE_MODE_BITS:
                     raise BundleError("special permission bits are forbidden")
                 try:
                     resolved = child.resolve(strict=True)
@@ -881,6 +881,8 @@ def _reproducibility_tree(
                 elif child.is_file():
                     if relative not in expected_files:
                         raise BundleError("reproducibility bundle inventory mismatch")
+                    if path_stat.st_nlink != 1:
+                        raise BundleError("hard-linked files are forbidden")
                     files.add(relative)
                 else:
                     raise BundleError("non-files are forbidden")
