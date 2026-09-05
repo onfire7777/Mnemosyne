@@ -468,10 +468,57 @@ def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
         return verify_bundle(legacy)
 
 
+def _reproducibility_tree(root: Path) -> tuple[set[str], set[str]]:
+    """Return real files/directories below root without following links."""
+    root_resolved = root.resolve()
+    files: set[str] = set()
+    directories: set[str] = set()
+    pending = [root]
+    while pending:
+        parent = pending.pop()
+        try:
+            children = list(parent.iterdir())
+        except OSError as exc:
+            raise BundleError("reproducibility bundle tree cannot be read") from exc
+        for child in children:
+            relative = child.relative_to(root).as_posix()
+            is_junction = getattr(child, "is_junction", lambda: False)()
+            if child.is_symlink() or is_junction:
+                raise BundleError("links and junctions are forbidden")
+            try:
+                resolved = child.resolve(strict=True)
+            except OSError as exc:
+                raise BundleError("reproducibility bundle path cannot be resolved") from exc
+            if root_resolved not in resolved.parents:
+                raise BundleError("reproducibility bundle path escapes root")
+            if child.is_dir():
+                directories.add(relative)
+                pending.append(child)
+            elif child.is_file():
+                files.add(relative)
+            else:
+                raise BundleError("non-files are forbidden")
+    return files, directories
+
+
+def _reject_reproducibility_link_path(path: Path) -> None:
+    current = Path(path.anchor) if path.is_absolute() else Path.cwd()
+    parts = path.parts[1:] if path.is_absolute() else path.parts
+    for part in parts:
+        current /= part
+        if current.is_symlink() or getattr(current, "is_junction", lambda: False)():
+            raise BundleError("reproducibility paths must not contain links or junctions")
+
+
 def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     """Verify a REPRO-001 bundle without executing bundle-controlled content."""
     root = Path(bundle)
-    if not root.is_dir() or root.is_symlink():
+    _reject_reproducibility_link_path(root)
+    if (
+        not root.is_dir()
+        or root.is_symlink()
+        or getattr(root, "is_junction", lambda: False)()
+    ):
         raise BundleError("reproducibility bundle must be a real directory")
     manifest_path = root / "reproducibility-manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
@@ -494,14 +541,18 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     artifacts = manifest["artifacts"]
     inventory = artifacts["files"]
     names = {entry["path"] for entry in inventory}
-    actual = {entry.name for entry in root.iterdir()}
-    if actual != names | {manifest_path.name}:
+    expected_directories = {
+        parent.as_posix()
+        for name in names
+        for parent in Path(name).parents
+        if parent != Path(".")
+    }
+    actual_files, actual_directories = _reproducibility_tree(root)
+    if (
+        actual_files != names | {manifest_path.name}
+        or actual_directories != expected_directories
+    ):
         raise BundleError("reproducibility bundle inventory mismatch")
-    for entry in root.iterdir():
-        if entry.is_symlink() or not entry.is_file():
-            raise BundleError("links and non-files are forbidden")
-        if entry.resolve().parent != root.resolve():
-            raise BundleError("reproducibility bundle path escapes root")
     for entry in inventory:
         path = root / entry["path"]
         try:
@@ -741,8 +792,12 @@ def reproduce_reproducibility_bundle(
     source: Path | str, destination: Path | str
 ) -> dict[str, Any]:
     """Recompute the embedded run and atomically reproduce a REPRO-001 bundle."""
-    source_root = Path(source).resolve()
-    destination_root = Path(destination).resolve()
+    source_path = Path(source)
+    destination_path = Path(destination)
+    _reject_reproducibility_link_path(source_path)
+    _reject_reproducibility_link_path(destination_path)
+    source_root = source_path.resolve()
+    destination_root = destination_path.resolve()
     if destination_root.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination_root}")
     if source_root == destination_root or source_root in destination_root.parents:
@@ -827,6 +882,7 @@ def reproduce_reproducibility_bundle(
         for entry in inventory:
             name = entry["path"]
             target = final / name
+            target.parent.mkdir(parents=True, exist_ok=True)
             if name == "metrics.json":
                 target.write_bytes(expected_metric_bytes)
             elif name in canonical_json:

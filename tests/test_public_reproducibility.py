@@ -513,6 +513,53 @@ def test_inventory_drift_and_symlinks_fail_before_validation(tmp_path: Path) -> 
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    manifest = _write_reproducibility_bundle(source)
+    nested = source / "evidence" / "raw.bin"
+    nested.parent.mkdir()
+    payload = b"opaque retained evidence\x00\xff\n"
+    nested.write_bytes(payload)
+    manifest["artifacts"]["files"].append(  # type: ignore[index]
+        {
+            "path": "evidence/raw.bin",
+            "size": len(payload),
+            "media_type": "application/octet-stream",
+            "canonicalization": "exact-bytes",
+            "digest": _digest(payload),
+        }
+    )
+    (source / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+
+    assert public_bundle.verify_reproducibility_bundle(source)["valid"] is True
+    public_bundle.reproduce_reproducibility_bundle(source, destination)
+
+    assert (destination / "evidence" / "raw.bin").read_bytes() == payload
+    assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
+
+
+def test_reproduction_rejects_linked_source_path(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    linked = tmp_path / "linked-source"
+    _write_reproducibility_bundle(source)
+    try:
+        linked.symlink_to(source, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks require additional host privileges")
+
+    with pytest.raises(BundleError, match="links or junctions"):
+        public_bundle.reproduce_reproducibility_bundle(
+            linked, tmp_path / "reproduced"
+        )
+
+
 def test_signed_ledger_is_cryptographically_verified_after_inventory_check(
     tmp_path: Path,
 ) -> None:
