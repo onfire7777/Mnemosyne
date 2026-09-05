@@ -114,7 +114,9 @@ Plans:
 - [ ] 14-01-PLAN.md — Neutral reproducibility bundle standard.
 
 **Boundary:** REPRO-001 is implementation-ready only after additive result-v2
-dispatch lands and the protected signed-publication lease is released.
+dispatch lands. The obsolete signed-publication reservation is released by
+the 2026-09-05 owner-confirmed unavailability disposition in the lease map; N12 is ready for
+single-owner admission after that receipt lands, but is not implemented.
 REPRO-002 additionally waits for a headline-eligible pinned official result
 with complete custody/operator evidence. No development fixture closes either
 evidence gate.
