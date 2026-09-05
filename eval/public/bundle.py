@@ -1153,6 +1153,11 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     )
 
     from leaderboard.ledger import LedgerError, verify_ledger
+    from mnemosyne.evidence_signing import (
+        EvidenceSignatureError,
+        _public_key_sha256,
+        load_public_key,
+    )
 
     try:
         ledger_entries = verify_ledger(
@@ -1173,9 +1178,18 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         raise BundleError("signed-ledger inclusion reference mismatch")
     if independent is not None:
         independent_key = root / "independent-public.pem"
+        try:
+            operator_key_fingerprint = _public_key_sha256(
+                load_public_key(root / "ledger-public.pem")
+            )
+            independent_key_fingerprint = _public_key_sha256(
+                load_public_key(independent_key)
+            )
+        except EvidenceSignatureError as exc:
+            raise BundleError("independent reproduction public key is invalid") from exc
         if (
             _sha256_reference(independent_key) != independent["public_key_digest"]
-            or independent_key.read_bytes() == (root / "ledger-public.pem").read_bytes()
+            or independent_key_fingerprint == operator_key_fingerprint
         ):
             raise BundleError("independent reproduction key is not distinct and bound")
         try:

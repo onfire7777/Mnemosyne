@@ -110,7 +110,8 @@ Those remain operator/human evidence gates. An independent reproduction receipt,
 when present, must identify a different entrant through a succeeded entry in a
 separate cryptographically verified ledger, bind the same atomic result, and use
 a digest-bound public key distinct from the operator ledger key. This proves key
-separation and artifact integrity, not that the disclosed identity is a genuine
+separation by decoded Ed25519 key material—not merely different PEM bytes—and
+artifact integrity, not that the disclosed identity is a genuine
 third party; external identity/custody verification remains part of REPRO-002.
 The receipt neither relabels the original operator nor grants a neutral or
 certified claim.
