@@ -1504,9 +1504,11 @@ def assemble_reproducibility_bundle(
     validate_reproducibility_manifest(manifest)
     try:
         manifest_raw = _canonical(manifest)
-        manifest = _parse_json(manifest_raw.decode("utf-8"), "reproducibility manifest")
     except (TypeError, UnicodeError, ValueError, RecursionError) as exc:
         raise BundleError("reproducibility manifest cannot be snapshotted") from exc
+    if len(manifest_raw) > _REPRODUCIBILITY_MANIFEST_MAX_BYTES:
+        raise BundleError("reproducibility manifest exceeds size bound")
+    manifest = _parse_json(manifest_raw.decode("utf-8"), "reproducibility manifest")
     validate_reproducibility_manifest(manifest)
     if not isinstance(manifest, dict):  # narrowed by the second validator
         raise BundleError("manifest must be an object")

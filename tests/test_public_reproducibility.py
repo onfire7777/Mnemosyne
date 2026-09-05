@@ -1497,6 +1497,28 @@ def test_assembler_uses_canonical_manifest_object_snapshot(
     assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
 
 
+def test_assembler_rejects_manifest_above_verifier_size_bound(tmp_path: Path) -> None:
+    manifest = _manifest()
+    manifest["artifacts"]["files"] = [  # type: ignore[index]
+        {
+            "path": f"evidence/{index:04}-{'x' * 220}/{'y' * 230}.bin",
+            "size": 0,
+            "media_type": "application/octet-stream",
+            "canonicalization": "exact-bytes",
+            "digest": DIGEST,
+        }
+        for index in range(4096)
+    ]
+    manifest["run"]["dependencies"] = [  # type: ignore[index]
+        f"package-{index:04}-{'y' * 480}" for index in range(4096)
+    ]
+
+    with pytest.raises(BundleError, match="manifest exceeds size bound"):
+        public_bundle.assemble_reproducibility_bundle(
+            tmp_path / "missing-source", tmp_path / "destination", manifest
+        )
+
+
 def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
