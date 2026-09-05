@@ -821,6 +821,15 @@ def test_v2_schema_is_additive_closed_contract() -> None:
     }
 
 
+def _confidence_interval_covers(splits: list[object], low: float, high: float) -> bool:
+    return any(
+        isinstance(branch, dict)
+        and low <= branch["properties"]["low"]["maximum"]
+        and high >= branch["properties"]["high"]["minimum"]
+        for branch in splits
+    )
+
+
 def test_v2_schema_aligns_metric_contract_with_runtime() -> None:
     schema = json.loads(
         Path("leaderboard/schema/result-v2.schema.json").read_text(encoding="utf-8")
@@ -858,16 +867,18 @@ def test_v2_schema_aligns_metric_contract_with_runtime() -> None:
     splits = interval["anyOf"]
     assert splits
 
-    def _covers(low: float, high: float) -> bool:
-        return any(
-            low <= branch["properties"]["low"]["maximum"]
-            and high >= branch["properties"]["high"]["minimum"]
-            for branch in splits
-        )
+    unit_maxima = [
+        branch["properties"]["low"]["maximum"]
+        for branch in splits
+        if 0.0 <= branch["properties"]["low"]["maximum"] <= 1.0
+    ]
+    assert 0.995 in unit_maxima
+    assert len(unit_maxima) >= 1001
 
-    assert _covers(0.60, 0.85)
-    assert _covers(0.70, 0.90)
-    assert not _covers(0.9, 0.1)
+    assert _confidence_interval_covers(splits, 0.60, 0.85)
+    assert _confidence_interval_covers(splits, 0.70, 0.90)
+    assert _confidence_interval_covers(splits, 0.995, 0.995)
+    assert not _confidence_interval_covers(splits, 0.9, 0.1)
 
 
 def test_v2_runtime_rejects_metric_contract_violations() -> None:
@@ -907,6 +918,12 @@ def test_v2_runtime_rejects_metric_contract_violations() -> None:
     assert isinstance(inverted_metrics, list)
     inverted_metrics[0]["confidence_interval"] = {"low": 0.9, "high": 0.1}
     assert "/metrics/0/confidence_interval" in validate_record(inverted)
+
+    equal_milli = _v2_development_record()
+    equal_metrics = equal_milli["metrics"]
+    assert isinstance(equal_metrics, list)
+    equal_metrics[0]["confidence_interval"] = {"low": 0.995, "high": 0.995}
+    assert validate_record(equal_milli) == []
 
 
 def test_v2_projection_schema_declares_closed_properties() -> None:
