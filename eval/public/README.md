@@ -71,7 +71,7 @@ and `name @ source-kind:source-value` for unversioned source packages. The comma
 must have no network access, inherited credentials, production secrets,
 protected data, or untracked repository inputs. It refuses an existing or
 source-nested destination, a wrong/dirty/non-root checkout, altered lock or
-environment, symlinks, junctions, hard links, path escapes, inventory or in-flight manifest drift, duplicate JSON keys,
+environment, symlinks, junctions, hard links, path escapes, inventory or in-flight artifact/manifest drift, duplicate JSON keys,
 secret-like values, inherited token/secret/password/private-key/API-key/
 access-key/credential/authorization variables, credential-bearing URLs and HTTP
 authentication values, common credential-profile/socket/config variables, and any digest, metric, interval,
