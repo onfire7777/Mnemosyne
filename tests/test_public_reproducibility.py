@@ -78,6 +78,31 @@ def _digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+def test_inventory_copy_rejects_size_mismatch_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"unexpected")
+    target = tmp_path / "target.bin"
+    original_open = Path.open
+
+    def guarded_open(path: Path, *args: object, **kwargs: object):
+        if path == source:
+            raise AssertionError("size-mismatched source must not be opened")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", guarded_open)
+    entry = {
+        "path": "source.bin",
+        "size": 0,
+        "digest": _digest(b""),
+    }
+
+    with pytest.raises(BundleError, match="changed before copy"):
+        public_bundle._copy_inventory_artifact(source, target, entry)
+    assert not target.exists()
+
+
 def _media_type(name: str) -> str:
     if name.endswith(".json"):
         return "application/json"

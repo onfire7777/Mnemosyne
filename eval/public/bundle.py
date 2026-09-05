@@ -833,6 +833,7 @@ def _copy_inventory_artifact(
             not stat.S_ISREG(path_stat.st_mode)
             or path_stat.st_nlink != 1
             or path_stat.st_mode & _UNSAFE_MODE_BITS
+            or path_stat.st_size != entry["size"]
         ):
             raise BundleError("reproducibility artifact changed before copy")
         with source.open("rb") as source_handle:
@@ -840,6 +841,7 @@ def _copy_inventory_artifact(
             if (
                 not stat.S_ISREG(opened_stat.st_mode)
                 or opened_stat.st_nlink != 1
+                or opened_stat.st_size != entry["size"]
                 or (opened_stat.st_dev, opened_stat.st_ino)
                 != (path_stat.st_dev, path_stat.st_ino)
             ):
