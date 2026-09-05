@@ -700,6 +700,35 @@ def test_verifies_manifest_owned_bytes_and_existing_result_and_replay_contracts(
     )
 
 
+def test_atomic_assembler_packages_and_verifies_owned_artifacts(tmp_path: Path) -> None:
+    source = tmp_path / "artifacts"
+    destination = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(source)
+    (source / "reproducibility-manifest.json").unlink()
+
+    result = public_bundle.assemble_reproducibility_bundle(
+        source, destination, manifest
+    )
+
+    assert result["valid"] is True
+    assert not source.joinpath("reproducibility-manifest.json").exists()
+    assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
+
+
+def test_atomic_assembler_rejects_source_inventory_drift(tmp_path: Path) -> None:
+    source = tmp_path / "artifacts"
+    destination = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(source)
+    (source / "reproducibility-manifest.json").unlink()
+    (source / "unowned.txt").write_text("drift", encoding="utf-8")
+
+    with pytest.raises(BundleError, match="inventory mismatch"):
+        public_bundle.assemble_reproducibility_bundle(
+            source, destination, manifest
+        )
+    assert not destination.exists()
+
+
 @pytest.mark.parametrize(
     ("section", "field", "value"),
     [
