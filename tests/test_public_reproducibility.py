@@ -1470,6 +1470,37 @@ def test_reproduction_recomputes_metrics_and_byte_compares_everything(
         assert (destination / "reproduce.sh").stat().st_mode & 0o777 == source_mode
 
 
+def test_reproduction_retains_validated_manifest_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    _write_reproducibility_bundle(source)
+    original_verify = public_bundle.verify_reproducibility_bundle
+
+    def replace_manifest_after_verification(bundle: Path | str) -> dict[str, object]:
+        result = original_verify(bundle)
+        if Path(bundle) == source:
+            (source / "reproducibility-manifest.json").write_bytes(
+                _canonical({"artifacts": {"files": [{"path": "../../escape"}]}})
+            )
+        return result
+
+    monkeypatch.setattr(
+        public_bundle,
+        "verify_reproducibility_bundle",
+        replace_manifest_after_verification,
+    )
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+
+    assert public_bundle.reproduce_bundle(source, destination)["valid"] is True
+    assert not tmp_path.joinpath("escape").exists()
+    assert original_verify(destination)["valid"] is True
+
+
 def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
