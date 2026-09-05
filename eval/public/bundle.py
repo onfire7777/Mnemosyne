@@ -499,6 +499,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         "outcomes",
     }
     metric_identities: set[tuple[str, str]] = set()
+    ordered_metric_identities: list[tuple[str, str]] = []
     for index, item in enumerate(metrics):
         metric = _closed_object(item, metric_fields, f"metric {index}")
         for field, maximum in (
@@ -512,6 +513,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         if identity in metric_identities:
             raise BundleError("metric inventory contains a duplicate identity")
         metric_identities.add(identity)
+        ordered_metric_identities.append(identity)
         if not isinstance(metric["value"], (int, float)) or isinstance(
             metric["value"], bool
         ):
@@ -555,8 +557,15 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         ):
             raise BundleError("metric interval parameters are invalid")
         exclusions = metric["exclusions"]
-        if not isinstance(exclusions, list) or len(exclusions) > 1024 or any(
-            not isinstance(item, str) or len(item) > 512 for item in exclusions
+        if (
+            not isinstance(exclusions, list)
+            or len(exclusions) > 1024
+            or any(
+                not isinstance(item, str) or not item or len(item) > 512
+                for item in exclusions
+            )
+            or len(exclusions) != len(set(exclusions))
+            or exclusions != sorted(exclusions)
         ):
             raise BundleError("metric exclusions are invalid")
         outcomes = _closed_object(
@@ -566,6 +575,8 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         )
         if any(type(value) is not int or value < 0 for value in outcomes.values()):
             raise BundleError("metric outcome counts are invalid")
+    if ordered_metric_identities != sorted(ordered_metric_identities):
+        raise BundleError("metric inventory must be sorted by family and name")
 
     disclosure_fields = {
         "software_license",

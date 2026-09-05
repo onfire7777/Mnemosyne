@@ -145,7 +145,7 @@
               "parameters": {"type": "object", "maxProperties": 32, "patternProperties": {"^.{1,64}$": {"type": ["string", "number", "boolean", "null"]}}, "additionalProperties": false}
             }
           },
-          "exclusions": {"type": "array", "maxItems": 1024, "items": {"type": "string", "maxLength": 512}},
+          "exclusions": {"type": "array", "maxItems": 1024, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
           "outcomes": {
             "type": "object", "additionalProperties": false,
             "required": ["missing", "unsupported", "failed", "aborted", "not_measured"],
