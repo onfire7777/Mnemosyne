@@ -867,6 +867,36 @@ def test_aggregate_bundle_size_is_bounded_before_full_allocation(
         verify_bundle(bundle["root"])
 
 
+def test_bundle_file_count_is_bounded_during_inventory_scan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "file-count-bound")
+    count = sum(1 for _ in bundle["root"].iterdir())
+    monkeypatch.setattr(public_bundle, "_MAX_REPRO_FILES", count - 1)
+    with pytest.raises(BundleError, match="file-count bound"):
+        verify_bundle(bundle["root"])
+
+
+def test_inventory_json_depth_is_bounded(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "artifact-depth")
+    nested: object = "leaf"
+    for _ in range(70):
+        nested = {"nested": nested}
+    artifact = bundle["root"] / "adapter.json"
+    artifact_bytes = _write_json(artifact, nested)
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["manifests"]["adapter"] = _named_ref("adapter", artifact_bytes)
+    entry = next(item for item in manifest["hashes"] if item["path"] == "adapter.json")
+    entry["size"] = len(artifact_bytes)
+    entry["sha256"] = _sha256_ref(artifact_bytes)
+    _write_json(manifest_path, manifest)
+    with pytest.raises(BundleError, match="nesting"):
+        verify_bundle(bundle["root"])
+
+
 def test_hardlinked_inventory_artifact_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "hardlink")
     artifact = bundle["root"] / "result.json"

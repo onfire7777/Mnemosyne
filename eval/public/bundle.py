@@ -148,6 +148,7 @@ _HEX_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _MAX_REPRO_JSON_DEPTH = 64
 _MAX_REPRO_FILE_BYTES = 16 * 1024 * 1024
 _MAX_REPRO_BUNDLE_BYTES = 1024 * 1024 * 1024
+_MAX_REPRO_FILES = 4097  # schema maximum plus the reproducibility manifest
 _REGISTERED_SCORING_PROFILES = {
     "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
     "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
@@ -696,7 +697,9 @@ def _inventory_bytes(
     payloads: dict[str, bytes] = {}
     scanned: dict[str, bytes] = {}
     total_size = 0
-    for entry in root.iterdir():
+    for entry_number, entry in enumerate(root.iterdir(), start=1):
+        if entry_number > _MAX_REPRO_FILES:
+            raise BundleError("bundle exceeds the closed file-count bound")
         if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
             raise BundleError(f"links and non-files are forbidden: {entry.name}")
         if entry.resolve().parent != root.resolve():
@@ -720,9 +723,9 @@ def _inventory_bytes(
         text = payload.decode("utf-8", errors="replace")
         if name.endswith(".jsonl"):
             for line in text.splitlines():
-                _parse_json(line, name)
+                _parse_bounded_json(line, name)
         elif name.endswith(".json"):
-            _parse_json(text, name)
+            _parse_bounded_json(text, name)
     for entry in hashes:
         path = str(entry["path"])
         payload = payloads[path]
@@ -1003,7 +1006,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         trace_lines = payloads["traces.jsonl"].decode("utf-8").splitlines()
     except UnicodeDecodeError as exc:
         raise BundleError("traces.jsonl is not UTF-8") from exc
-    traces = [_parse_json(line, "traces.jsonl") for line in trace_lines if line]
+    traces = [_parse_bounded_json(line, "traces.jsonl") for line in trace_lines if line]
     if "metrics.json" not in payloads:
         raise BundleError("missing metrics")
     _recompute_repro_metrics(
@@ -1116,7 +1119,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
             shutil.copyfile(src, temp / name, follow_symlinks=False)
         config = _load_json(temp / "config.json")
         traces = [
-            _parse_json(line, "traces.jsonl")
+            _parse_bounded_json(line, "traces.jsonl")
             for line in (temp / "traces.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         ]
@@ -2207,7 +2210,13 @@ def _load_inventory_json(payloads: dict[str, bytes], name: str) -> Any:
         raise BundleError(f"missing {name}") from exc
     except UnicodeDecodeError as exc:
         raise BundleError(f"invalid UTF-8 in {name}") from exc
-    return _parse_json(raw, name)
+    return _parse_bounded_json(raw, name)
+
+
+def _parse_bounded_json(raw: str, label: str) -> Any:
+    value = _parse_json(raw, label)
+    _json_depth(value)
+    return value
 
 
 def _parse_json(raw: str, label: str) -> Any:
@@ -2217,7 +2226,7 @@ def _parse_json(raw: str, label: str) -> Any:
             parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
             object_pairs_hook=_unique_object,
         )
-    except (json.JSONDecodeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError, RecursionError) as exc:
         raise BundleError(f"invalid JSON in {label}") from exc
     _reject_non_finite(value)
     return value
