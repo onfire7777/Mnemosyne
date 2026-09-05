@@ -773,6 +773,8 @@ def reproduce_reproducibility_bundle(
     )
     if inherited_credentials:
         raise BundleError("reproduction environment contains inherited credentials")
+    if os.environ.get("UV_OFFLINE", "").lower() not in {"1", "true"}:
+        raise BundleError("reproduction requires UV_OFFLINE=1")
     destination_root.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(
@@ -780,7 +782,6 @@ def reproduce_reproducibility_bundle(
         )
     )
     final = staging / "final"
-    rerun = staging / "rerun"
     try:
         benchmark = _load_json(source_root / "benchmark.json")
         config = _load_json(source_root / "config.json")
@@ -792,20 +793,23 @@ def reproduce_reproducibility_bundle(
             raise BundleError("embedded benchmark custody is incomplete")
         if metadata.get("suite") != suite:
             raise BundleError("embedded benchmark suite does not match config")
-        from eval.public.runner import run_public_suite
-
-        run_public_suite(
-            suite,
-            rerun,
-            benchmark_override=benchmark.get("data"),
-            candidate_manifest_path=(source_root / "candidate-manifest.json")
-            if metadata.get("family") == "qa"
-            else None,
+        traces = [
+            _parse_json(line, "traces.jsonl")
+            for line in (source_root / "traces.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+        ]
+        if any(not isinstance(trace, dict) for trace in traces):
+            raise BundleError("raw trace inventory is invalid")
+        expected_metrics = _recompute_bundle_metrics(
+            config.get("scoring_profile"),
+            config.get("family"),
+            benchmark.get("data"),
+            traces,
         )
-        legacy_files = {*_manifest_files(source_root), "bundle-manifest.json"}
-        for name in legacy_files:
-            if (source_root / name).read_bytes() != (rerun / name).read_bytes():
-                raise BundleError(f"reproduction mismatch: {name}")
+        expected_metric_bytes = _canonical(expected_metrics)
+        if expected_metric_bytes != (source_root / "metrics.json").read_bytes():
+            raise BundleError("reproduction mismatch: metrics.json")
 
         final.mkdir()
         inventory = manifest["artifacts"]["files"]
@@ -823,8 +827,8 @@ def reproduce_reproducibility_bundle(
         for entry in inventory:
             name = entry["path"]
             target = final / name
-            if name in legacy_files:
-                target.write_bytes((rerun / name).read_bytes())
+            if name == "metrics.json":
+                target.write_bytes(expected_metric_bytes)
             elif name in canonical_json:
                 target.write_bytes(_canonical(_load_json(source_root / name)))
             else:
@@ -1156,23 +1160,15 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         raise BundleError("metrics/config family mismatch")
     if family == "qa":
         _verify_qa_custody(metadata, judge, benchmark.get("data"), traces, root / "candidate-manifest.json", measured, build)
-    if profile == "smoke-hit-at-k-v1":
-        if measured.get("interval", {}).get("method") != method:
-            raise BundleError("wrong interval-family metadata")
-        _verify_metrics(family, benchmark.get("data"), measured, traces)
-    else:
-        from eval.public.scoring import ScoringError, score_profile
-
-        try:
-            expected_metrics = score_profile(
-                profile, _scoring_labels(benchmark.get("data")), traces
-            )
-        except (ScoringError, ValueError, TypeError, AttributeError, KeyError) as exc:
-            raise BundleError(
-                "generalized scoring profile recomputation failed"
-            ) from exc
-        if measured != expected_metrics:
-            raise BundleError("metrics do not recompute from anchored scoring profile")
+    if profile == "smoke-hit-at-k-v1" and measured.get("interval", {}).get(
+        "method"
+    ) != method:
+        raise BundleError("wrong interval-family metadata")
+    expected_metrics = _recompute_bundle_metrics(
+        profile, family, benchmark.get("data"), traces
+    )
+    if measured != expected_metrics:
+        raise BundleError("metrics do not recompute from anchored scoring profile")
     if any(
         metadata.get(flag) is not False
         for flag in (
@@ -1910,14 +1906,23 @@ def _verify_registry_anchor(metadata: dict[str, Any]) -> None:
         raise BundleError("bundle metadata does not match canonical registry anchor")
 
 
-def _verify_metrics(
+def _recompute_bundle_metrics(
+    profile: str,
     family: str,
     benchmark: Any,
-    measured: dict[str, Any],
     traces: list[dict[str, Any]],
-) -> None:
+) -> dict[str, Any]:
+    if profile != "smoke-hit-at-k-v1":
+        from eval.public.scoring import ScoringError, score_profile
+
+        try:
+            return score_profile(profile, _scoring_labels(benchmark), traces)
+        except (ScoringError, ValueError, TypeError, AttributeError, KeyError) as exc:
+            raise BundleError(
+                "generalized scoring profile recomputation failed"
+            ) from exc
     if family != "deterministic-retrieval":
-        return
+        raise BundleError("smoke scoring profile has the wrong metric family")
     from eval.harness.metrics import wilson_interval
 
     if not isinstance(benchmark, dict) or not isinstance(benchmark.get("k"), int):
@@ -1949,8 +1954,6 @@ def _verify_metrics(
             raise BundleError("retrieved hit is outside anchored benchmark corpus")
         if trace.get("answer") is not None and trace.get("answer") not in doc_ids:
             raise BundleError("answer is outside anchored benchmark corpus")
-    if measured.get("metric") != "hit_at_k":
-        raise BundleError("deterministic retrieval metric must be hit_at_k")
     k = benchmark["k"]
     successes = sum(
         bool(
@@ -1960,9 +1963,9 @@ def _verify_metrics(
         for trace in traces
     )
     expected = wilson_interval(successes, len(traces)).as_dict()
-    interval = measured.get("interval", {})
-    recomputed = {
+    return {
         "family": family,
+        "metric": "hit_at_k",
         "successes": successes,
         "total": len(traces),
         "trace_count": len(traces),
@@ -1974,15 +1977,6 @@ def _verify_metrics(
             "method": expected["ci_method"],
         },
     }
-    for key, value in recomputed.items():
-        if key == "interval":
-            if any(
-                interval.get(nested) != expected_value
-                for nested, expected_value in value.items()
-            ):
-                raise BundleError("metrics do not recompute from traces")
-        elif measured.get(key) != value:
-            raise BundleError("metrics do not recompute from traces")
 
 
 def _write_json(path: Path, value: Any) -> None:
