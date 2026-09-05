@@ -1470,7 +1470,7 @@ def test_reproduction_recomputes_metrics_and_byte_compares_everything(
         assert (destination / "reproduce.sh").stat().st_mode & 0o777 == source_mode
 
 
-def test_reproduction_retains_validated_manifest_snapshot(
+def test_reproduction_rejects_manifest_change_after_verification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "source"
@@ -1496,9 +1496,10 @@ def test_reproduction_retains_validated_manifest_snapshot(
     )
     _clear_credential_environment(monkeypatch)
 
-    assert public_bundle.reproduce_bundle(source, destination)["valid"] is True
+    with pytest.raises(BundleError, match="manifest changed during reproduction"):
+        public_bundle.reproduce_bundle(source, destination)
     assert not tmp_path.joinpath("escape").exists()
-    assert original_verify(destination)["valid"] is True
+    assert not destination.exists()
 
 
 def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
