@@ -855,6 +855,27 @@ def test_secret_like_material_fails_closed(tmp_path: Path) -> None:
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize(
+    "secret",
+    (
+        "github_" + "pat_" + ("A" * 24),
+        "glpat-" + ("B" * 24),
+        "xoxb-" + ("1" * 24),
+        "AKIA" + ("C" * 16),
+        "Bearer " + ("d" * 24),
+        "https://user:password@example.invalid/resource",
+    ),
+)
+def test_common_credential_families_fail_closed(tmp_path: Path, secret: str) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / hashlib.sha256(secret.encode()).hexdigest())
+    leaked = bundle["root"] / "environment.json"
+    env = json.loads(leaked.read_text(encoding="utf-8"))
+    env["credential"] = secret
+    _write_json(leaked, env)
+    with pytest.raises(BundleError, match="secret"):
+        verify_bundle(bundle["root"])
+
+
 def test_aggregate_bundle_size_is_bounded_before_full_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
