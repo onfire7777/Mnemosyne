@@ -1099,3 +1099,44 @@ def test_cli_validates_v2_record(
 
     assert validate.main([str(path)]) == 0
     assert capsys.readouterr().err == ""
+
+
+def test_operator_run_cannot_claim_headline_eligibility() -> None:
+    record = _v2_official_record()
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+    publication["pbpp_headline_eligible"] = True
+
+    assert "/publication/pbpp_headline_eligible" in validate_record(record)
+    assert publication["label"] == "operator-run"
+
+
+def test_independent_signer_does_not_upgrade_headline() -> None:
+    record = _v2_official_record()
+    record["signer_role"] = "independent"
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+
+    assert validate_record(record) == []
+    assert publication["pbpp_headline_eligible"] is False
+    assert publication["label"] == "operator-run"
+
+    publication["pbpp_headline_eligible"] = True
+    assert "/publication/pbpp_headline_eligible" in validate_record(record)
+
+
+def test_implemented_evidence_cannot_upgrade_admission_to_run_ready() -> None:
+    record = _v2_official_record()
+    record["evidence_level"] = "IMPLEMENTED"
+    record["admission_state"] = "RUN-READY-OFFICIAL-LOCAL"
+
+    assert "/admission_state" in validate_record(record)
+
+
+def test_v1_schema_bytes_are_not_reinterpreted_as_v2() -> None:
+    v1 = _retrieval_record()
+    assert v1["schema_version"] == SCHEMA_VERSION
+    assert validate_record(v1) == []
+    assert Path("leaderboard/schema/result-v1.schema.json").read_bytes()
+    v1["pbpp_headline_eligible"] = True
+    assert "/pbpp_headline_eligible" in validate_record(v1)

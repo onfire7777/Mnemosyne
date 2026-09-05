@@ -498,7 +498,11 @@ def _validate_publication_v2(record: dict[str, object]) -> list[str]:
     headline = publication.get("pbpp_headline_eligible")
     if not isinstance(headline, bool):
         errors.append("/publication/pbpp_headline_eligible")
-    elif development and headline is True:
+    elif headline is True and (
+        development
+        or label != "neutral"
+        or publication.get("register_b_satisfied") is not True
+    ):
         errors.append("/publication/pbpp_headline_eligible")
     if "register_b_satisfied" in publication and not isinstance(
         publication["register_b_satisfied"], bool
@@ -686,6 +690,13 @@ def _validate_record_v2(record: dict[str, object]) -> list[str]:
             errors.append("/operator_entry/disclosed")
     errors.extend(_validate_enum(record, "admission_state", _ADMISSION_STATES))
     errors.extend(_validate_enum(record, "evidence_level", _EVIDENCE_LEVELS))
+    admission = record.get("admission_state")
+    if (
+        isinstance(admission, str)
+        and admission.startswith("RUN-READY-")
+        and record.get("evidence_level") != "PUBLICLY_MEASURED"
+    ):
+        errors.append("/admission_state")
     errors.extend(_validate_enum(record, "track_kind", _TRACK_KINDS))
     errors.extend(_validate_enum(record, "division", _DIVISIONS))
     errors.extend(_validate_enum(record, "capability", _CAPABILITIES))

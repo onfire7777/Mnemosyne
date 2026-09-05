@@ -302,3 +302,23 @@ def test_cli_dispatches_v2_result_records(
     assert payload["ready"] is False
     assert "publication" in payload["blocked_gates"]
     assert output.err == ""
+
+
+def test_proposed_admission_is_an_explicit_blocked_prerequisite() -> None:
+    result = evaluate_result_v2(_v2_official_record())
+
+    assert result["ready"] is False
+    assert "admission" in result["blocked_gates"]
+    assert "human_approval" in result["blocked_gates"]
+
+
+def test_missing_prerequisites_are_not_a_soft_pass() -> None:
+    development = evaluate_result_v2(_v2_development_record())
+
+    assert development["ready"] is False
+    assert {
+        "admission",
+        "human_approval",
+        "pbpp",
+        "publication",
+    } <= set(development["blocked_gates"])

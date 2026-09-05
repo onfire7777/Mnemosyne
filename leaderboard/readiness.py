@@ -68,6 +68,11 @@ def evaluate_result_v2(record: object) -> dict[str, object]:
     blocked: list[str] = ["human_approval"]
     publication = record["publication"]
     assert isinstance(publication, dict)
+    admission = record.get("admission_state")
+    if not (
+        isinstance(admission, str) and admission.startswith("RUN-READY-")
+    ):
+        blocked.append("admission")
     if record.get("track_kind") == "DEVELOPMENT" or publication.get(
         "publishable"
     ) is not True:

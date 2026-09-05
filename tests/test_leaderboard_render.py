@@ -702,3 +702,67 @@ def test_rejects_v2_render_without_bound_artifacts(tmp_path: Path) -> None:
     with pytest.raises(RenderError, match="artifact"):
         render_site(results, {str(record["record_id"]): traces}, tmp_path / "site")
     assert not (tmp_path / "site").exists()
+
+
+def test_v2_render_is_deterministic_from_local_artifacts_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record = _v2_development_record()
+    artifacts = _bind_v2_artifacts(tmp_path, record)
+    results = _write_json(tmp_path / "results.json", record)
+    first = tmp_path / "first-site"
+    second = tmp_path / "second-site"
+
+    def forbid_network(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("render must not use the network")
+
+    monkeypatch.setattr("socket.create_connection", forbid_network)
+    render_site(
+        results,
+        {str(record["record_id"]): artifacts["traces.jsonl"]},
+        first,
+        artifacts={
+            str(record["record_id"]): {
+                "build": artifacts["build.json"],
+                "config": artifacts["config.json"],
+                "bundle": artifacts["bundle-manifest.json"],
+            }
+        },
+    )
+    render_site(
+        results,
+        {str(record["record_id"]): artifacts["traces.jsonl"]},
+        second,
+        artifacts={
+            str(record["record_id"]): {
+                "build": artifacts["build.json"],
+                "config": artifacts["config.json"],
+                "bundle": artifacts["bundle-manifest.json"],
+            }
+        },
+    )
+
+    assert _tree(first) == _tree(second)
+    assert renderer.NETWORK_IO is False
+    assert renderer.TELEMETRY is False
+
+
+def test_rejects_remote_artifact_uri_without_network(tmp_path: Path) -> None:
+    record = _v2_development_record()
+    artifacts = _bind_v2_artifacts(tmp_path, record)
+    results = _write_json(tmp_path / "results.json", record)
+
+    with pytest.raises(RenderError, match="local artifact"):
+        render_site(
+            results,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            tmp_path / "site",
+            artifacts={
+                str(record["record_id"]): {
+                    "build": "https://example.invalid/build.json",
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()

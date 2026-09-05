@@ -200,6 +200,25 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "admission_state": {
+            "enum": [
+              "RUN-READY-OFFICIAL-LOCAL",
+              "RUN-READY-HOSTED-X",
+              "RUN-READY-P32-OPS"
+            ]
+          }
+        },
+        "required": ["admission_state"]
+      },
+      "then": {
+        "properties": {
+          "evidence_level": { "const": "PUBLICLY_MEASURED" }
+        }
+      }
     }
   ],
   "$defs": {
@@ -355,7 +374,31 @@
         },
         "register_b_satisfied": { "type": "boolean" },
         "pbpp_headline_eligible": { "type": "boolean" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "label": { "const": "operator-run" } },
+            "required": ["label"]
+          },
+          "then": {
+            "properties": { "pbpp_headline_eligible": { "const": false } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "pbpp_headline_eligible": { "const": true } },
+            "required": ["pbpp_headline_eligible"]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "neutral" },
+              "register_b_satisfied": { "const": true }
+            },
+            "required": ["register_b_satisfied"]
+          }
+        }
+      ]
     },
     "operator_entry": {
       "type": "object",
