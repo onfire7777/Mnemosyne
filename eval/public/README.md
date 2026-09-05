@@ -28,6 +28,10 @@ source permission bits, including the executable mode of `reproduce.sh`; those
 mode bits are operational metadata rather than digest-bound evidence. The
 assembler grants no evidence status.
 
+Inventory paths are portable POSIX-relative names. Validation rejects Unicode
+NFC/case-fold aliases, Windows device names, trailing dots or spaces, control
+characters, and Windows-forbidden filename characters before assembly.
+
 | Manifest section | Bound material |
 |---|---|
 | `result_ref` | Result-v2 record ID, exact result bytes, ledger entry, track kind, and track-specific lineage |
