@@ -797,7 +797,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("config_digest digest mismatch")
     if manifest["traces"]["trace_index_digest"] != _sha256_ref(payloads["traces.jsonl"]):
         raise BundleError("trace_index_digest digest mismatch")
-    result = _load_json(root / "result.json")
+    result = _load_inventory_json(payloads, "result.json")
     if manifest["result_ref"] != f"result-v2@sha256:{hashlib.sha256(payloads['result.json']).hexdigest()}":
         raise BundleError("result digest mismatch")
     if "uv.lock" not in payloads:
@@ -830,7 +830,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("result run_commit does not match bound commit")
     if "canonical-replay.json" not in payloads:
         raise BundleError("canonical replay artifact is missing")
-    replay = _load_json(root / "canonical-replay.json")
+    replay = _load_inventory_json(payloads, "canonical-replay.json")
     expected = manifest["canonical_replay"]
     if (
         not isinstance(expected, dict)
@@ -844,21 +844,27 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         from leaderboard.ledger import _canonical as ledger_canonical
         from leaderboard.ledger import verify_ledger
 
-        ledger_path = root / "ledger.jsonl"
-        public_key = root / "ledger-public.pem"
-        lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
-        if "ledger.jsonl" not in payloads or "ledger-public.pem" not in payloads:
+        ledger_names = (
+            "ledger.jsonl",
+            "ledger.jsonl.head.json",
+            "ledger-public.pem",
+        )
+        if any(name not in payloads for name in ledger_names):
             raise BundleError("missing ledger inclusion receipt")
-        try:
-            entries = verify_ledger(ledger_path, public_key)
-        except LedgerError as exc:
-            raise BundleError("ledger verification failed") from exc
-        finally:
-            if lock_path.is_file() and not lock_path.is_symlink():
-                try:
-                    lock_path.unlink()
-                except OSError:
-                    pass
+        # ``verify_ledger`` uses a lock file and therefore cannot safely run
+        # against an untrusted, supposedly read-only bundle.  Verify the exact
+        # inventory-bound bytes in a private snapshot instead.  This also
+        # prevents a pathname swap after ``_inventory_bytes`` hashed the files.
+        with tempfile.TemporaryDirectory(prefix="mneme-repro-ledger-") as temporary:
+            snapshot = Path(temporary)
+            for name in ledger_names:
+                (snapshot / name).write_bytes(payloads[name])
+            try:
+                entries = verify_ledger(
+                    snapshot / "ledger.jsonl", snapshot / "ledger-public.pem"
+                )
+            except LedgerError as exc:
+                raise BundleError("ledger verification failed") from exc
         matched = [
             entry
             for entry in entries
@@ -872,19 +878,19 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
             for entry in matched
         ):
             raise BundleError("ledger_ref digest mismatch")
-    traces = [
-        _parse_json(line, "traces.jsonl")
-        for line in payloads["traces.jsonl"].decode("utf-8").splitlines()
-        if line
-    ]
+    try:
+        trace_lines = payloads["traces.jsonl"].decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise BundleError("traces.jsonl is not UTF-8") from exc
+    traces = [_parse_json(line, "traces.jsonl") for line in trace_lines if line]
     if "metrics.json" not in payloads:
         raise BundleError("missing metrics")
     _recompute_repro_metrics(
         traces,
-        _load_json(root / "metrics.json"),
+        _load_inventory_json(payloads, "metrics.json"),
         manifest.get("metrics"),
         manifest.get("intervals"),
-        config=_load_json(root / "config.json"),
+        config=_load_inventory_json(payloads, "config.json"),
     )
     publication = manifest["publication"]
     return {
@@ -903,15 +909,30 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
 
 
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
-    verified = _verify_reproducibility_bundle(source)
-    _assert_reproduction_checkout(str(verified["run_commit"]))
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    snapshot = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}-source-", dir=destination.parent)
+    )
     temp = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
     try:
-        source_manifest = _load_json(source / REPRODUCIBILITY_MANIFEST_NAME)
+        manifest_path = source / REPRODUCIBILITY_MANIFEST_NAME
+        try:
+            manifest_bytes = manifest_path.read_bytes()
+            source_manifest = _validate_reproducibility_manifest(
+                _parse_json(manifest_bytes.decode("utf-8"), REPRODUCIBILITY_MANIFEST_NAME)
+            )
+        except (OSError, UnicodeDecodeError) as exc:
+            raise BundleError("reproducibility manifest cannot be snapshotted") from exc
+        payloads = _inventory_bytes(source, source_manifest)
+        (snapshot / REPRODUCIBILITY_MANIFEST_NAME).write_bytes(manifest_bytes)
+        for name, payload in payloads.items():
+            (snapshot / name).write_bytes(payload)
+
+        verified = _verify_reproducibility_bundle(snapshot)
+        _assert_reproduction_checkout(str(verified["run_commit"]))
         owned = [
             str(entry["path"])
             for entry in source_manifest["hashes"]
@@ -920,7 +941,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         for name in owned:
             if name == "metrics.json":
                 continue
-            src = source / name
+            src = snapshot / name
             if src.is_symlink() or not src.is_file():
                 raise BundleError(f"links and non-files are forbidden: {name}")
             shutil.copyfile(src, temp / name, follow_symlinks=False)
@@ -942,13 +963,15 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         _write_json(temp / "metrics.json", recomputed)
         _verify_reproducibility_bundle(temp)
         for name in owned:
-            if (temp / name).read_bytes() != (source / name).read_bytes():
+            if (temp / name).read_bytes() != (snapshot / name).read_bytes():
                 raise BundleError(f"reproduction mismatch: {name}")
         temp.rename(destination)
         return verified
     except BaseException:
         shutil.rmtree(temp, ignore_errors=True)
         raise
+    finally:
+        shutil.rmtree(snapshot, ignore_errors=True)
 
 
 def write_bundle(
@@ -2005,6 +2028,17 @@ def _canonical(value: Any) -> bytes:
 
 def _load_json(path: Path) -> Any:
     return _parse_json(path.read_text(encoding="utf-8"), path.name)
+
+
+def _load_inventory_json(payloads: dict[str, bytes], name: str) -> Any:
+    """Parse JSON from the exact bytes authenticated by the bundle inventory."""
+    try:
+        raw = payloads[name].decode("utf-8")
+    except KeyError as exc:
+        raise BundleError(f"missing {name}") from exc
+    except UnicodeDecodeError as exc:
+        raise BundleError(f"invalid UTF-8 in {name}") from exc
+    return _parse_json(raw, name)
 
 
 def _parse_json(raw: str, label: str) -> Any:

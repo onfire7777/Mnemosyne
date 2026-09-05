@@ -965,6 +965,79 @@ def test_fabricated_ledger_and_manifest_refs_fail_closed(tmp_path: Path) -> None
         verify_bundle(adapter["root"])
 
 
+def test_ledger_verification_uses_inventory_bound_private_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "ledger-snapshot")
+    root = bundle["root"]
+    expected_ledger = (root / "ledger.jsonl").read_bytes()
+    observed: list[Path] = []
+
+    def observe_snapshot(ledger_path: Path, public_key_path: Path) -> list[dict[str, object]]:
+        ledger_path = Path(ledger_path)
+        public_key_path = Path(public_key_path)
+        observed.append(ledger_path.parent)
+        assert ledger_path.parent != root
+        assert public_key_path.parent == ledger_path.parent
+        assert ledger_path.read_bytes() == expected_ledger
+        return verify_ledger(ledger_path, public_key_path)
+
+    monkeypatch.setattr("leaderboard.ledger.verify_ledger", observe_snapshot)
+    assert verify_bundle(root)["valid"] is True
+    assert len(observed) == 1
+    assert not observed[0].exists()
+    assert not (root / "ledger.jsonl.lock").exists()
+
+
+def test_semantic_verification_uses_inventory_bound_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "semantic-snapshot")
+    root = bundle["root"]
+    original_inventory = public_bundle._inventory_bytes
+
+    def mutate_after_snapshot(
+        inventory_root: Path, manifest: dict[str, Any]
+    ) -> dict[str, bytes]:
+        payloads = original_inventory(inventory_root, manifest)
+        (inventory_root / "result.json").write_text("{}\n", encoding="utf-8")
+        (inventory_root / "canonical-replay.json").write_text("{}\n", encoding="utf-8")
+        (inventory_root / "config.json").write_text("{}\n", encoding="utf-8")
+        (inventory_root / "metrics.json").write_text("{}\n", encoding="utf-8")
+        return payloads
+
+    monkeypatch.setattr(public_bundle, "_inventory_bytes", mutate_after_snapshot)
+    assert verify_bundle(root)["valid"] is True
+
+
+def test_reproduction_uses_one_inventory_bound_source_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "reproduction-snapshot")
+    root = bundle["root"]
+    expected_result = (root / "result.json").read_bytes()
+    original_inventory = public_bundle._inventory_bytes
+
+    def mutate_source_after_snapshot(
+        inventory_root: Path, manifest: dict[str, Any]
+    ) -> dict[str, bytes]:
+        payloads = original_inventory(inventory_root, manifest)
+        if inventory_root == root:
+            (root / "result.json").write_text("{}\n", encoding="utf-8")
+        return payloads
+
+    monkeypatch.setattr(public_bundle, "_inventory_bytes", mutate_source_after_snapshot)
+    monkeypatch.setattr(public_bundle, "_assert_reproduction_checkout", lambda _sha: None)
+    destination = tmp_path / "reproduction-destination"
+    assert reproduce_bundle(root, destination)["valid"] is True
+    assert (destination / "result.json").read_bytes() == expected_result
+    assert verify_bundle(destination)["valid"] is True
+
+
 def test_reproduce_cleanup_does_not_delete_foreign_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
