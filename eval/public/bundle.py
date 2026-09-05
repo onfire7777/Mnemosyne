@@ -948,10 +948,10 @@ def _runtime_version() -> str:
     return f"cpython-{sys.version_info.major}.{sys.version_info.minor}"
 
 
-def _locked_dependencies(path: Path) -> list[str]:
+def _locked_dependencies_from_bytes(raw: bytes) -> list[str]:
     try:
-        payload = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        payload = tomllib.loads(raw.decode("utf-8"))
+    except (UnicodeError, tomllib.TOMLDecodeError) as exc:
         raise BundleError("lockfile dependency inventory cannot be read") from exc
     packages = payload.get("package") if isinstance(payload, dict) else None
     if not isinstance(packages, list) or not packages:
@@ -983,6 +983,14 @@ def _locked_dependencies(path: Path) -> list[str]:
     if len(ordered) != len(set(ordered)):
         raise BundleError("lockfile dependency inventory contains duplicates")
     return ordered
+
+
+def _locked_dependencies(path: Path) -> list[str]:
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise BundleError("lockfile dependency inventory cannot be read") from exc
+    return _locked_dependencies_from_bytes(raw)
 
 
 def _verify_embedded_legacy_bundle(
@@ -1205,9 +1213,10 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         "lockfile_digest": "uv.lock",
     }
     for field, name in bindings.items():
-        if name not in names or artifacts[field] != _sha256_reference(root / name):
+        if name not in entries or artifacts[field] != entries[name]["digest"]:
             raise BundleError(f"digest mismatch: {field}")
-    if manifest["run"]["dependencies"] != _locked_dependencies(root / "uv.lock"):
+    lock_raw = _read_bound_artifact(root / "uv.lock", entries["uv.lock"])
+    if manifest["run"]["dependencies"] != _locked_dependencies_from_bytes(lock_raw):
         raise BundleError("dependency inventory does not match lockfile")
 
     input_bindings = {
@@ -1745,13 +1754,18 @@ def reproduce_reproducibility_bundle(
     if manifest["run"]["runtime"] != _runtime_version():
         raise BundleError("reproduction runtime does not match manifest")
     checkout_lock = Path.cwd() / "uv.lock"
+    entries = {
+        entry["path"]: entry for entry in manifest["artifacts"]["files"]
+    }
+    try:
+        checkout_lock_raw = _read_bound_artifact(checkout_lock, entries["uv.lock"])
+    except (BundleError, KeyError) as exc:
+        raise BundleError("reproduction checkout lockfile digest mismatch") from exc
     if (
-        not checkout_lock.is_file()
-        or checkout_lock.is_symlink()
-        or _sha256_reference(checkout_lock)
-        != manifest["artifacts"]["lockfile_digest"]
+        manifest["run"]["dependencies"]
+        != _locked_dependencies_from_bytes(checkout_lock_raw)
     ):
-        raise BundleError("reproduction checkout lockfile digest mismatch")
+        raise BundleError("reproduction checkout dependency inventory mismatch")
     inherited_credentials = sorted(
         name
         for name in os.environ
