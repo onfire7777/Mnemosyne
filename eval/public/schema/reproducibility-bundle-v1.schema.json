@@ -95,7 +95,7 @@
             "properties": {
               "path": {"allOf": [{"$ref": "#/$defs/path"}, {"not": {"const": "reproducibility-manifest.json"}}]},
               "size": {"type": "integer", "minimum": 0, "maximum": 67108864},
-              "media_type": {"type": "string", "minLength": 1, "maxLength": 128},
+              "media_type": {"type": "string", "minLength": 3, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}$"},
               "canonicalization": {"enum": ["exact-bytes"]},
               "digest": {"$ref": "#/$defs/digest"}
             }
