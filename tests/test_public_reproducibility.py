@@ -439,6 +439,128 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
         _validate(secret)
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("value", "1.0", "metric value"),
+        ("numerator", True, "metric numerator"),
+        ("denominator", "2", "metric denominator"),
+    ],
+)
+def test_runtime_validator_enforces_metric_number_types(
+    field: str, value: object, message: str
+) -> None:
+    manifest = _manifest()
+    manifest["metrics"][0][field] = value  # type: ignore[index]
+    with pytest.raises(BundleError, match=message):
+        _validate(manifest)
+
+
+def test_metric_numerator_and_denominator_are_optional_only_as_a_pair() -> None:
+    sample_count_only = _manifest()
+    sample_count_only["metrics"][0]["numerator"] = None  # type: ignore[index]
+    sample_count_only["metrics"][0]["denominator"] = None  # type: ignore[index]
+    assert _validate(sample_count_only)["valid"] is True
+
+    unpaired = _manifest()
+    unpaired["metrics"][0]["numerator"] = None  # type: ignore[index]
+    with pytest.raises(BundleError, match="must be paired"):
+        _validate(unpaired)
+
+
+def test_runtime_validator_enforces_metric_parameter_and_exclusion_bounds() -> None:
+    invalid_parameter = _manifest()
+    invalid_parameter["metrics"][0]["interval"]["parameters"] = {  # type: ignore[index]
+        "nested": {"not": "a scalar"}
+    }
+    with pytest.raises(BundleError, match="interval parameters"):
+        _validate(invalid_parameter)
+
+    oversized_exclusion = _manifest()
+    oversized_exclusion["metrics"][0]["exclusions"] = ["x" * 513]  # type: ignore[index]
+    with pytest.raises(BundleError, match="exclusions"):
+        _validate(oversized_exclusion)
+
+
+def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_items() -> None:
+    oversized_version = _manifest()
+    oversized_version["metrics"][0]["version"] = "v" * 65  # type: ignore[index]
+    with pytest.raises(BundleError, match="metric version"):
+        _validate(oversized_version)
+
+    unhashable_dependency = _manifest()
+    unhashable_dependency["run"]["dependencies"] = [["not-a-string"]]  # type: ignore[index]
+    with pytest.raises(BundleError, match="dependency inventory"):
+        _validate(unhashable_dependency)
+
+    oversized_operator_role = _manifest()
+    oversized_operator_role["disclosures"]["operator_role"] = "o" * 129  # type: ignore[index]
+    with pytest.raises(BundleError, match="operator role"):
+        _validate(oversized_operator_role)
+
+
+def test_every_recomputed_metric_and_interval_is_bound_to_manifest() -> None:
+    declared = [
+        {
+            "name": "exact_match",
+            "version": "1",
+            "value": 0.5,
+            "numerator": 1.0,
+            "denominator": 2,
+            "sample_count": 2,
+            "interval": {
+                "method": "wilson",
+                "confidence_level": 0.95,
+                "low": 0.1,
+                "high": 0.9,
+                "parameters": {},
+            },
+        },
+        {
+            "name": "token_f1",
+            "version": "1",
+            "value": 0.75,
+            "numerator": None,
+            "denominator": None,
+            "sample_count": 2,
+            "interval": {
+                "method": "bootstrap",
+                "confidence_level": 0.95,
+                "low": 0.5,
+                "high": 1.0,
+                "parameters": {"iterations": 2000, "seed": 20260728},
+            },
+        },
+    ]
+    recomputed = {
+        "profile_version": 1,
+        "trace_count": 2,
+        "metrics": {"exact_match": 0.5, "token_f1": 0.75},
+        "intervals": {
+            "exact_match": {
+                "method": "wilson",
+                "confidence": 0.95,
+                "low": 0.1,
+                "high": 0.9,
+            },
+            "token_f1": {
+                "method": "bootstrap",
+                "confidence": 0.95,
+                "low": 0.5,
+                "high": 1.0,
+                "iterations": 2000,
+                "seed": 20260728,
+            },
+        },
+    }
+
+    public_bundle._verify_recomputed_metric_declarations(recomputed, declared)
+    forged = copy.deepcopy(declared)
+    forged[1]["value"] = 0.8
+    with pytest.raises(BundleError, match="raw traces"):
+        public_bundle._verify_recomputed_metric_declarations(recomputed, forged)
+
+
 def test_rejects_cyclic_or_excessively_large_manifest_structures() -> None:
     cyclic = _manifest()
     cyclic["cycle"] = cyclic
