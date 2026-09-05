@@ -1531,6 +1531,7 @@ def test_checkout_verification_uses_a_sanitized_git_environment(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "attacker-repository"))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "attacker-config"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(tmp_path / "attacker-worktree"))
 
     def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         environment = kwargs["env"]
@@ -1566,6 +1567,10 @@ def test_checkout_verification_uses_a_sanitized_git_environment(
         environment["GIT_CONFIG_SYSTEM"] == os.devnull for environment in environments
     )
     assert all(environment["GIT_OPTIONAL_LOCKS"] == "0" for environment in environments)
+    assert all(
+        environment["GIT_WORK_TREE"] == str(tmp_path.resolve())
+        for environment in environments
+    )
     assert all(
         environment["GIT_CONFIG_NOSYSTEM"] == "1" for environment in environments
     )

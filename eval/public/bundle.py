@@ -1382,6 +1382,7 @@ def _require_clean_reproduction_checkout(expected_sha: str) -> None:
             "GIT_CONFIG_SYSTEM": os.devnull,
             "GIT_OPTIONAL_LOCKS": "0",
             "GIT_TERMINAL_PROMPT": "0",
+            "GIT_WORK_TREE": str(Path.cwd().resolve()),
             "LC_ALL": "C",
             "LANG": "C",
             "TZ": "UTC",
