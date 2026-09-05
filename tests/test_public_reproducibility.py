@@ -1127,6 +1127,33 @@ def test_verifier_rejects_artifact_changed_after_initial_digest_pass(
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_verifier_rejects_same_content_hardlink_added_after_initial_tree_walk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    readme = root / "README.md"
+    external = tmp_path / "external-readme.md"
+    original_replay_digest = public_bundle.canonical_replay_digest
+
+    def replace_after_semantic_verification(payload: object) -> str:
+        digest = original_replay_digest(payload)
+        content = readme.read_bytes()
+        readme.unlink()
+        external.write_bytes(content)
+        os.link(external, readme)
+        return digest
+
+    monkeypatch.setattr(
+        public_bundle,
+        "canonical_replay_digest",
+        replace_after_semantic_verification,
+    )
+
+    with pytest.raises(BundleError, match="hard-linked files are forbidden"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)

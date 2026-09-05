@@ -1203,6 +1203,11 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
+    final_files, final_directories = _reproducibility_tree(
+        root, expected_files, expected_directories
+    )
+    if final_files != expected_files or final_directories != expected_directories:
+        raise BundleError("reproducibility bundle changed during verification")
     for entry in inventory:
         path = root / entry["path"]
         try:
