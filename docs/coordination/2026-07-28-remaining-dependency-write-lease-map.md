@@ -336,14 +336,12 @@ The following packages are complete source history, not runnable work:
   recompute the canonical baseline (baseline stays `main@f688c747`).
 - PR #142: ordinary documentation receipt recording the merged PR #139
   lease-map lapse. It is **MERGED** at tip
-  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`. It was **OPEN/READY** at the
-  `2026-09-05T13:22:00Z` capture and adds only the PR #139 merged-baseline
-  bullet, the #141 MERGED mark, and this structured self-record in this
-  map. Exclusive File Set:
+  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`. It adds only the PR #139
+  merged-baseline bullet, the #141 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   PR #142 changes no benchmark result or admission state and does not
-  recompute the canonical baseline. The OPEN/READY pre-merge instruction
-  is historical; delivery is MERGED at tip
+  recompute the canonical baseline. Delivery is MERGED at tip
   `687884dbd14b32d3245fba2e6bc9797fc705e1f2`.
 - PR #140: Exact 1 smoke `tests/test_leaderboard_render_output_smoke.py`
   (title: test(leaderboard): Frontend render-output smoke (CLEAR of N12))
