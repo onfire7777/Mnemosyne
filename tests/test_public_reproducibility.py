@@ -1290,6 +1290,20 @@ def test_artifact_secret_scan_handles_large_benign_tokens(tmp_path: Path) -> Non
     )
 
 
+@pytest.mark.parametrize("media_type", ["application/json", "application/x-ndjson"])
+def test_artifact_media_rejects_json_escaped_credentials(
+    tmp_path: Path, media_type: str
+) -> None:
+    path = tmp_path / "artifact"
+    path.write_text(
+        '{"value":"ghp_\\u0061aaaaaaaaaaaaaaaaaaa"}\n', encoding="utf-8"
+    )
+
+    assert public_bundle._inspect_artifact(path)[2] is False
+    with pytest.raises(BundleError, match="secret-like material detected"):
+        public_bundle._validate_artifact_media(path, media_type)
+
+
 @pytest.mark.parametrize(
     ("media_type", "payload", "message"),
     [
