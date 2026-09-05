@@ -162,7 +162,7 @@ _CREDENTIAL_ENV_NAMES = {
     "REDIS_URL",
     "SSH_AUTH_SOCK",
 }
-_FIXED_REPRODUCTION_ENV = {"UV_OFFLINE", "LC_ALL", "TZ"}
+_FIXED_REPRODUCTION_ENV = {"UV_OFFLINE", "UV_RUN_RECURSION_DEPTH", "LC_ALL", "TZ"}
 _SAFE_DECLARED_PYTHON_ENV = {"PYTHONHASHSEED", "PYTHONUTF8", "PYTHONIOENCODING"}
 _INFLUENTIAL_ENV_PREFIXES = ("PYTHON", "PIP_", "UV_", "DYLD_", "GIT_")
 _INFLUENTIAL_ENV_NAMES = {
@@ -1491,6 +1491,8 @@ def reproduce_reproducibility_bundle(
         raise BundleError("reproduction environment contains undeclared influences")
     if os.environ.get("UV_OFFLINE", "").lower() not in {"1", "true"}:
         raise BundleError("reproduction requires UV_OFFLINE=1")
+    if os.environ.get("UV_RUN_RECURSION_DEPTH") != "1":
+        raise BundleError("reproduction requires one isolated uv run layer")
     if any(
         os.environ.get(name) != value
         for name, value in declared_environment.items()

@@ -295,6 +295,7 @@ def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         ):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("UV_RUN_RECURSION_DEPTH", "1")
     monkeypatch.setenv("PYTHONHASHSEED", "0")
     monkeypatch.setenv("LC_ALL", "C")
     monkeypatch.setenv("TZ", "UTC")
@@ -1593,6 +1594,7 @@ def test_reproduction_requires_offline_mode_and_rejects_inherited_credentials(
     ("name", "value", "message"),
     [
         ("PYTHONHASHSEED", "1", "allowlist"),
+        ("UV_RUN_RECURSION_DEPTH", "2", "isolated uv run"),
         ("LC_ALL", "en_US.UTF-8", "locale or timezone"),
         ("TZ", "Europe/London", "locale or timezone"),
     ],
