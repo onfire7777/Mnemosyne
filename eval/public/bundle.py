@@ -31,6 +31,9 @@ SECRET = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9]{20,}|sk_(?:live|test)_[A-Za-z0-9]{16,}|"
     r"-----(?:BEGIN|END) [A-Z ]*PRIVATE KEY-----)"
 )
+SECRET_BYTES = re.compile(SECRET.pattern.encode("ascii"))
+_SECRET_SCAN_CHUNK_SIZE = 1024 * 1024
+_SECRET_SCAN_OVERLAP = 128
 CANONICAL_REPLAY_VOLATILE_FIELDS = frozenset(
     {
         "host_path",
@@ -591,6 +594,17 @@ def _files_equal(left: Path, right: Path) -> bool:
                 return True
 
 
+def _contains_secret(path: Path) -> bool:
+    carry = b""
+    with path.open("rb") as handle:
+        while chunk := handle.read(_SECRET_SCAN_CHUNK_SIZE):
+            window = carry + chunk
+            if SECRET_BYTES.search(window):
+                return True
+            carry = window[-_SECRET_SCAN_OVERLAP:]
+    return False
+
+
 def _runtime_platform() -> str:
     return f"{sys.platform}-{platform.machine().lower()}"
 
@@ -767,7 +781,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             raise BundleError("reproducibility bundle file cannot be read") from exc
         if digest != entry["digest"]:
             raise BundleError(f"digest mismatch: {entry['path']}")
-        if SECRET.search(path.read_text(encoding="utf-8", errors="replace")):
+        if _contains_secret(path):
             raise BundleError("secret-like material detected")
 
     bindings = {

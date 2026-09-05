@@ -940,6 +940,14 @@ def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
         return original_read_bytes(path)
 
     monkeypatch.setattr(Path, "read_bytes", reject_opaque_read_bytes)
+    original_read_text = Path.read_text
+
+    def reject_opaque_read_text(path: Path, *args: object, **kwargs: object) -> str:
+        if path.name == "raw.bin":
+            raise AssertionError("opaque artifacts must not be decoded wholesale")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", reject_opaque_read_text)
     monkeypatch.setattr(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
@@ -951,6 +959,18 @@ def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
     with (destination / "evidence" / "raw.bin").open("rb") as handle:
         assert handle.read() == payload
     assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
+
+
+def test_secret_scan_detects_a_credential_across_stream_chunks(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    prefix = b"sk_live_"
+    path.write_bytes(
+        b"x" * (public_bundle._SECRET_SCAN_CHUNK_SIZE - len(prefix))
+        + prefix
+        + b"a" * 16
+    )
+
+    assert public_bundle._contains_secret(path) is True
 
 
 def test_reproduction_rejects_linked_source_path(tmp_path: Path) -> None:
