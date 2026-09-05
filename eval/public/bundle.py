@@ -363,6 +363,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         raise BundleError("file inventory must be a bounded non-empty array")
     paths: set[str] = set()
     portable_paths: set[str] = set()
+    ordered_paths: list[str] = []
     for index, item in enumerate(files):
         entry = _closed_object(
             item,
@@ -379,6 +380,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             raise BundleError("file inventory contains a non-portable path collision")
         paths.add(path)
         portable_paths.add(portable_path)
+        ordered_paths.append(path)
         if type(entry["size"]) is not int or not 0 <= entry["size"] <= 64 * 2**20:
             raise BundleError("file inventory size is invalid")
         media_type = entry["media_type"]
@@ -393,6 +395,8 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         if entry["canonicalization"] != "exact-bytes":
             raise BundleError("file canonicalization must be exact-bytes")
         _repro_digest(entry["digest"], "file digest")
+    if ordered_paths != sorted(ordered_paths):
+        raise BundleError("file inventory must be sorted by path")
     if any(
         _portable_path_key(parent.as_posix()) in portable_paths
         for path in paths
