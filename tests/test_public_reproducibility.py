@@ -1527,6 +1527,7 @@ def test_checkout_verification_uses_a_sanitized_git_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     environments: list[dict[str, str]] = []
+    commands: list[list[str]] = []
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GIT_DIR", str(tmp_path / "attacker-repository"))
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "attacker-config"))
@@ -1535,7 +1536,8 @@ def test_checkout_verification_uses_a_sanitized_git_environment(
         environment = kwargs["env"]
         assert isinstance(environment, dict)
         environments.append(environment)
-        if command[1] == "symbolic-ref":
+        commands.append(command)
+        if "symbolic-ref" in command:
             stdout = ""
             returncode = 1
         elif command[-1] == "HEAD":
@@ -1544,7 +1546,7 @@ def test_checkout_verification_uses_a_sanitized_git_environment(
         elif command[-1] == "--show-toplevel":
             stdout = str(tmp_path) + "\n"
             returncode = 0
-        elif command[-1] == "--porcelain":
+        elif "status" in command and command[-1] == "--porcelain":
             stdout = ""
             returncode = 0
         else:
@@ -1557,9 +1559,26 @@ def test_checkout_verification_uses_a_sanitized_git_environment(
 
     assert len(environments) == 4
     assert all("GIT_DIR" not in environment for environment in environments)
-    assert all("GIT_CONFIG_GLOBAL" not in environment for environment in environments)
+    assert all(
+        environment["GIT_CONFIG_GLOBAL"] == os.devnull for environment in environments
+    )
+    assert all(
+        environment["GIT_CONFIG_SYSTEM"] == os.devnull for environment in environments
+    )
+    assert all(environment["GIT_OPTIONAL_LOCKS"] == "0" for environment in environments)
     assert all(
         environment["GIT_CONFIG_NOSYSTEM"] == "1" for environment in environments
+    )
+    assert all(
+        command[:5]
+        == [
+            "git",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.untrackedCache=false",
+        ]
+        for command in commands
     )
 
 
