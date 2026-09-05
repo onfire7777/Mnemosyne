@@ -1111,7 +1111,7 @@ def _require_clean_reproduction_checkout(expected_sha: str) -> None:
 def reproduce_reproducibility_bundle(
     source: Path | str, destination: Path | str
 ) -> dict[str, Any]:
-    """Recompute the embedded run and atomically reproduce a REPRO-001 bundle."""
+    """Recompute metrics from retained traces and atomically reproduce the bundle."""
     source_path = Path(source)
     destination_path = Path(destination)
     _reject_reproducibility_link_path(source_path)
