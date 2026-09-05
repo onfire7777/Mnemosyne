@@ -464,11 +464,21 @@ PR #91 replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen of tho
 records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked task boxes:
 those boxes record the plan as written at the time and are not a delivery
 signal, because each round's merged receipts are recorded here and in the
-lease map rather than back-filled into the round record. The first actual
-scheduled-cadence receipt and every official/upstream benchmark run remain
-open.
+lease map rather than back-filled into the round record. P13-C's first actual
+scheduled-cadence receipt is discharged by successful `schedule` run
+`30807305055` on `b8673031a80158c49d552a4b3647829d213243bd`, started
+`2026-08-03T10:52:57Z`; job `91665545558` and its fixed public-contract test
+step succeeded. The GitHub run/job metadata was verified on 2026-09-05 and is
+retained in the lease map. Every official/upstream benchmark run remains open.
 
-Result-v2 remains blocked by the protected signed-publication lease. Local OCI
+Result-v2 remains blocked pending the Mac worktree's residual-work disposition
+and explicit lease release. PR #69 merged the signed-publication source as
+`a4e80b5a67b0437d3a864af0fe347febfe32e58b`; PR #70 merged its delivery receipt
+as `eeb8765ea1f4cc924002ad8234df50326e227aed`. Both are ancestors of inspected
+`origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, where
+`leaderboard/publish.py` has blob `f6506215ece4dba8d37ce07829b5c22d84020963`.
+Those merged receipts do not establish the external worktree's current dirty
+state or release its lease. P13-C discharge alone admits no N12 writer. Local OCI
 sandbox commits are reviewed development-source receipts only and remain
 quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next

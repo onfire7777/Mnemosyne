@@ -166,11 +166,13 @@ PR #91 replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
 of those records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked
 task boxes: those boxes record the plan as written at the time and are not a
 delivery signal, because each round's merged receipts are recorded in this
-file and in the lease map rather than back-filled into the round record. The
-first actual scheduled-cadence receipt is still open: the
-workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
-2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
-measurement, or publication claim changed in PRs #87-#92. Official
+file and in the lease map rather than back-filled into the round record. P13-C's
+first actual scheduled-cadence receipt is discharged: `schedule` run
+`30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd`, started
+`2026-08-03T10:52:57Z`, with successful job `91665545558` and fixed
+public-contract test step. GitHub metadata was verified on 2026-09-05 and is
+retained in the lease map; this is real cron evidence, not the manual dispatch.
+No benchmark, measurement, or publication claim changed in PRs #87-#92. Official
 MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
 open. The earlier Phase 12 lease sweep remains delivered and its operator-only
 measurement boundary is unchanged.
@@ -194,12 +196,21 @@ weekly/manual development-regression workflow through PR #86 with no dispatch
 inputs, secrets, artifacts, providers, official assets, or claim outputs.
 Exact post-merge main CI run `30561266140` passed on `main@661343ce`.
 BENCH-006 remains Partial behind official/upstream rights, disclosure,
-operator, and execution evidence. BENCH-007 remains Partial until the first
-actual scheduled-cadence receipt is retained; the passing manual run proves
-only development operability.
+operator, and execution evidence. The P13-C scheduled-cadence subgate is
+discharged by retained run `30807305055`; the passing manual run proves only
+development operability. This receipt-only correction does not change the
+BENCH-007 requirement status or progress counters, and does not establish
+official benchmark evidence.
 
 Phase 14 has one frozen plan. REPRO-001 implementation is blocked on additive
-result-v2 dispatch and release of the protected signed-publication lease;
+result-v2 dispatch and release of the protected signed-publication lease.
+PR #69's source merge `a4e80b5a67b0437d3a864af0fe347febfe32e58b` and PR #70's
+delivery-receipt merge `eeb8765ea1f4cc924002ad8234df50326e227aed` are verified
+ancestors of inspected `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`.
+The remaining N12 blocker is disposition of any residual work in
+`/Users/admin/Mnemosyne.codex-phase16-signed-publication` and explicit lease
+release; a remote merge does not prove that external worktree is clean.
+No N12 or downstream source writer is admitted by this receipt.
 REPRO-002 additionally requires a headline-eligible pinned official result.
 Phase 15 has four ordered frozen plans. S2 depends on Phase 14; S3-S5 then
 serialize behind S2, with hardware, scale, protected, licensed, and operator
