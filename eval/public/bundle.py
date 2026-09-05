@@ -1217,6 +1217,15 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     }
     if replay_manifests != expected_replay_manifests:
         raise BundleError("canonical replay manifest custody does not match artifacts")
+    replay_build = replay.get("build")
+    retained_build = _load_json(root / "build.json")
+    if (
+        not isinstance(replay_build, dict)
+        or not isinstance(retained_build, dict)
+        or replay_build.get("candidate_git_sha") != manifest["run"]["candidate_git_sha"]
+        or replay_build.get("system_seam") != retained_build.get("system_seam")
+    ):
+        raise BundleError("canonical replay build custody does not match run")
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")

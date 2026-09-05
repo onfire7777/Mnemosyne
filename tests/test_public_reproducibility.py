@@ -168,6 +168,10 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
     replay["fixture"] = (  # type: ignore[index]
         "wmbs-m01-development@" + _digest(payloads["fixture-manifest.json"])
     )
+    replay["build"] = {  # type: ignore[index]
+        "candidate_git_sha": GIT_SHA,
+        "system_seam": json.loads(payloads["build.json"])["system_seam"],
+    }
     payloads["canonical-replay.json"] = _canonical(replay)
     for name, payload in payloads.items():
         (root / name).write_bytes(payload)
@@ -917,6 +921,31 @@ def test_canonical_replay_manifests_must_match_retained_artifacts(
     manifest_path.write_bytes(_canonical(manifest))
 
     with pytest.raises(BundleError, match="replay manifest custody"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("candidate_git_sha", "d" * 40), ("system_seam", "forged-seam")],
+)
+def test_canonical_replay_build_must_match_run_custody(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    replay_path = root / "canonical-replay.json"
+    replay = json.loads(replay_path.read_text(encoding="utf-8"))
+    replay["build"][field] = value
+    replay_path.write_bytes(_canonical(replay))
+    _refresh_owned_file(root, "canonical-replay.json")
+    manifest_path = root / "reproducibility-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"]["canonical_replay_digest"] = (  # type: ignore[index]
+        "sha256:" + public_bundle.canonical_replay_digest(replay)
+    )
+    manifest_path.write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="replay build custody"):
         public_bundle.verify_reproducibility_bundle(root)
 
 

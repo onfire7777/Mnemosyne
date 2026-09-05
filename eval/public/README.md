@@ -98,6 +98,7 @@ remain unchanged.
 The canonical M15 replay keeps list order digest-bound, and its seed inventory
 must exactly match the ordered result/run seed custody in REPRO-001. Its bundle,
 fixture, and generator manifest hashes must likewise match the retained artifacts.
+Its candidate commit and system seam must match the authenticated run and build.
 
 Official-upstream, enhanced-successor, and development tracks have distinct
 lineage shapes and cannot be blended. Development and private-suite artifacts
