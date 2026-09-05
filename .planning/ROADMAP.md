@@ -92,8 +92,11 @@ PR #86 merged the scheduled development-regression workflow at
 four-test job, and exact post-merge main CI run `30561266140` passed on the
 merge commit. BENCH-006 remains Partial because official/upstream execution,
 rights, provider/model/judge disclosure, and operator evidence are still
-gated. BENCH-007 remains Partial until an actual scheduled-cadence receipt is
-retained; source and manual operability do not prove that cron event occurred.
+gated. BENCH-007 is Complete: real `schedule` run `30807305055` succeeded on
+`b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03, including the fixed
+public-contract test step in job `91665545558`. The verified metadata receipt
+is retained in the lease map. This closes scheduled development cadence only;
+Phase 13 remains open for BENCH-006's official/upstream evidence.
 
 ### Phase 14: Reproducibility Standard
 
