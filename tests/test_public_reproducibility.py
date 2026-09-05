@@ -855,6 +855,29 @@ def test_secret_like_material_fails_closed(tmp_path: Path) -> None:
         verify_bundle(bundle["root"])
 
 
+def test_aggregate_bundle_size_is_bounded_before_full_allocation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "aggregate-bound")
+    total_size = sum(path.stat().st_size for path in bundle["root"].iterdir())
+    monkeypatch.setattr(public_bundle, "_MAX_REPRO_BUNDLE_BYTES", total_size - 1)
+    with pytest.raises(BundleError, match="aggregate size bound"):
+        verify_bundle(bundle["root"])
+
+
+def test_hardlinked_inventory_artifact_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "hardlink")
+    artifact = bundle["root"] / "result.json"
+    external = tmp_path / "external-result.json"
+    external.write_bytes(artifact.read_bytes())
+    artifact.unlink()
+    os.link(external, artifact)
+    with pytest.raises(BundleError, match="hardlink"):
+        verify_bundle(bundle["root"])
+
+
 def test_non_finite_duplicate_and_deep_json_fail_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "json")
     metrics = json.loads((bundle["root"] / "metrics.json").read_text(encoding="utf-8"))
