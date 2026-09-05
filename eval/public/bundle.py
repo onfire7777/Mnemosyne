@@ -594,15 +594,20 @@ def _files_equal(left: Path, right: Path) -> bool:
                 return True
 
 
-def _contains_secret(path: Path) -> bool:
+def _inspect_artifact(path: Path) -> tuple[int, str, bool]:
+    digest = hashlib.sha256()
+    size = 0
+    secret_found = False
     carry = b""
     with path.open("rb") as handle:
         while chunk := handle.read(_SECRET_SCAN_CHUNK_SIZE):
+            size += len(chunk)
+            digest.update(chunk)
             window = carry + chunk
             if SECRET_BYTES.search(window):
-                return True
+                secret_found = True
             carry = window[-_SECRET_SCAN_OVERLAP:]
-    return False
+    return size, "sha256:" + digest.hexdigest(), secret_found
 
 
 def _runtime_platform() -> str:
@@ -773,15 +778,12 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     for entry in inventory:
         path = root / entry["path"]
         try:
-            size = path.stat().st_size
-            if size != entry["size"]:
-                raise BundleError(f"digest mismatch: {entry['path']}")
-            digest = _sha256_reference(path)
+            size, digest, secret_found = _inspect_artifact(path)
         except OSError as exc:
             raise BundleError("reproducibility bundle file cannot be read") from exc
-        if digest != entry["digest"]:
+        if size != entry["size"] or digest != entry["digest"]:
             raise BundleError(f"digest mismatch: {entry['path']}")
-        if _contains_secret(path):
+        if secret_found:
             raise BundleError("secret-like material detected")
 
     bindings = {
