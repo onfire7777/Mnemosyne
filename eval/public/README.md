@@ -106,7 +106,12 @@ remain non-publishable and must never be used to tune or support a headline.
 Successful verification proves REPRO-001 contract integrity only: it does not
 prove REPRO-002, headline eligibility, independent reproduction, neutrality,
 certification, production readiness, custody approval, or publication approval.
-Those remain operator/human evidence gates. An independent reproduction receipt,
+The signed operator ledger authenticates the embedded result and the manifest
+fields explicitly cross-bound to that result. Disclosure-only statements such as
+software/data licensing, PII and consent status, takedown process, and
+`operator_role` are structurally validated self-assertions; verification does not
+authenticate their issuer or establish that they are true. Those remain
+operator/human evidence gates. An independent reproduction receipt,
 when present, must identify a different entrant through a succeeded entry in a
 separate cryptographically verified ledger, bind the same atomic result, and use
 a digest-bound public key distinct from the operator ledger key. This proves key
