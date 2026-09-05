@@ -16,7 +16,8 @@ intervals. Families are never aggregated.
 It does not change result-v1 bytes or behavior. It binds one validated result-v2
 atomic attempt to the existing public bundle, its signed-ledger inclusion
 reference, M15 canonical replay, and every manifest-owned byte needed to
-recompute the run. Unknown and missing fields fail closed.
+recompute the declared metrics from retained raw traces and verify the exact run
+artifacts. Unknown and missing fields fail closed.
 
 | Manifest section | Bound material |
 |---|---|
@@ -80,6 +81,12 @@ separation and artifact integrity, not that the disclosed identity is a genuine
 third party; external identity/custody verification remains part of REPRO-002.
 The receipt neither relabels the original operator nor grants a neutral or
 certified claim.
+
+The reproduction command does not rerun the candidate adapter, memory system,
+reader, judge, or model. It independently recomputes the declared score and
+uncertainty from retained raw traces, then byte-compares every retained artifact.
+A second end-to-end system execution is REPRO-002 evidence and is not implied by
+a valid REPRO-001 bundle.
 
 ## Deterministic action development suites
 

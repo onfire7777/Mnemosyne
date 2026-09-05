@@ -962,7 +962,7 @@ def test_independent_reproduction_rejects_operator_signing_key(tmp_path: Path) -
         public_bundle.verify_reproducibility_bundle(root)
 
 
-def test_reproduction_recomputes_legacy_outputs_and_byte_compares_everything(
+def test_reproduction_recomputes_metrics_and_byte_compares_everything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = tmp_path / "source"
