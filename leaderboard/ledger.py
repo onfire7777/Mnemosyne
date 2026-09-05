@@ -352,6 +352,7 @@ def _validate_entry(
     if status == "succeeded":
         if reason is not None:
             raise LedgerError("ledger reason must be null for succeeded entries")
+        # Version dispatch accepts additive result-v2 without a second ledger.
         errors = validate_record(entry["result"])
         if errors:
             raise LedgerError("ledger result is invalid: " + ", ".join(errors))
