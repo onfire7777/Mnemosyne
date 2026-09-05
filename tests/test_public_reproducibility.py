@@ -1302,6 +1302,15 @@ def test_manifest_rejects_aggregate_artifact_size_above_bundle_limit() -> None:
         public_bundle.validate_reproducibility_manifest(manifest)
 
 
+def test_inventory_path_depth_is_bounded() -> None:
+    accepted = "/".join(["a"] * public_bundle._REPRODUCIBILITY_PATH_MAX_PARTS)
+    rejected = accepted + "/overflow.bin"
+
+    assert public_bundle._repro_relative_path(accepted) == accepted
+    with pytest.raises(BundleError, match="normalized relative path"):
+        public_bundle._repro_relative_path(rejected)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)

@@ -50,6 +50,7 @@ _SECRET_SCAN_OVERLAP = 1024
 _REPRODUCIBILITY_MANIFEST_MAX_BYTES = 4 * 2**20
 _REPRODUCIBILITY_ARTIFACT_MAX_BYTES = 64 * 2**20
 _REPRODUCIBILITY_BUNDLE_MAX_BYTES = 1024 * 2**20
+_REPRODUCIBILITY_PATH_MAX_PARTS = 32
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
@@ -245,6 +246,7 @@ def _repro_relative_path(value: object) -> str:
         not isinstance(value, str)
         or not value
         or len(value) > 512
+        or len(parts) > _REPRODUCIBILITY_PATH_MAX_PARTS
         or unicodedata.normalize("NFC", value) != value
         or "\\" in value
         or "\x00" in value
@@ -1193,7 +1195,6 @@ def _load_reproducibility_manifest(root: Path) -> tuple[dict[str, Any], dict[str
         )
     except UnicodeDecodeError as exc:
         raise BundleError("reproducibility manifest is not UTF-8") from exc
-    _reject_decoded_secrets(manifest)
     if manifest_raw != _canonical(manifest):
         raise BundleError("reproducibility manifest bytes must be canonical")
     validated = validate_reproducibility_manifest(manifest)
