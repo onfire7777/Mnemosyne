@@ -503,7 +503,7 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY", "OPENAI_API_KEY"]
+    "name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY", "GIT_DIR", "OPENAI_API_KEY"]
 )
 def test_manifest_cannot_allowlist_execution_influences(name: str) -> None:
     manifest = _manifest()
@@ -1440,6 +1440,46 @@ def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
     assert not destination.exists()
 
 
+def test_checkout_verification_uses_a_sanitized_git_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environments: list[dict[str, str]] = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "attacker-repository"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "attacker-config"))
+
+    def run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        environment = kwargs["env"]
+        assert isinstance(environment, dict)
+        environments.append(environment)
+        if command[1] == "symbolic-ref":
+            stdout = ""
+            returncode = 1
+        elif command[-1] == "HEAD":
+            stdout = GIT_SHA + "\n"
+            returncode = 0
+        elif command[-1] == "--show-toplevel":
+            stdout = str(tmp_path) + "\n"
+            returncode = 0
+        elif command[-1] == "--porcelain":
+            stdout = ""
+            returncode = 0
+        else:
+            raise AssertionError(f"unexpected Git command: {command}")
+        return subprocess.CompletedProcess(command, returncode, stdout, "")
+
+    monkeypatch.setattr(public_bundle.subprocess, "run", run)
+
+    public_bundle._require_clean_reproduction_checkout(GIT_SHA)
+
+    assert len(environments) == 4
+    assert all("GIT_DIR" not in environment for environment in environments)
+    assert all("GIT_CONFIG_GLOBAL" not in environment for environment in environments)
+    assert all(
+        environment["GIT_CONFIG_NOSYSTEM"] == "1" for environment in environments
+    )
+
+
 def test_reproduction_requires_offline_mode_and_rejects_inherited_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1496,7 +1536,7 @@ def test_reproduction_requires_manifest_bound_process_environment(
         )
 
 
-@pytest.mark.parametrize("name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY"])
+@pytest.mark.parametrize("name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY", "GIT_DIR"])
 def test_reproduction_rejects_undeclared_execution_influences(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

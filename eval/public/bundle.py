@@ -148,7 +148,7 @@ _CREDENTIAL_ENV_MARKERS = (
 )
 _FIXED_REPRODUCTION_ENV = {"UV_OFFLINE", "LC_ALL", "TZ"}
 _SAFE_DECLARED_PYTHON_ENV = {"PYTHONHASHSEED", "PYTHONUTF8", "PYTHONIOENCODING"}
-_INFLUENTIAL_ENV_PREFIXES = ("PYTHON", "PIP_", "UV_", "DYLD_")
+_INFLUENTIAL_ENV_PREFIXES = ("PYTHON", "PIP_", "UV_", "DYLD_", "GIT_")
 _INFLUENTIAL_ENV_NAMES = {
     "HTTP_PROXY",
     "HTTPS_PROXY",
@@ -263,7 +263,7 @@ def _forbidden_declared_environment_name(name: str) -> bool:
     normalized = name.upper()
     if normalized in _FIXED_REPRODUCTION_ENV or normalized in _INFLUENTIAL_ENV_NAMES:
         return True
-    if normalized.startswith(("PIP_", "UV_", "DYLD_")):
+    if normalized.startswith(("PIP_", "UV_", "DYLD_", "GIT_")):
         return True
     return normalized.startswith("PYTHON") and normalized not in _SAFE_DECLARED_PYTHON_ENV
 
