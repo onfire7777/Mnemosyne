@@ -24,10 +24,18 @@ upgrade, and no Stage A implement.
 | #116 | docs: PROPOSED M06 consolidation plan (not code-ready) | `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98` | M06 consolidation plan PROPOSED / NOT CODE-READY; docs only. Historical tip; VOID as live tip. |
 | #135 | docs: discharge P13-C and retire obsolete publication lease | `c67e917410d7b468a337fda19ba654d57367d843` | P13-C discharge; lease-map / N12 admission (**READY FOR ADMISSION**); obsolete Mac publication lease retired; not N12 implement. Merged 18:51 PT. |
 | #138 | eval: pin M02 canonical-replay seed | `ec26c40d359fc1f6904a97eac51aab461f9fd0f6` | M02 canonical-replay seed pin. Merged ~19:50 PT 2026-09-04. Tip was red until #141. |
-| #141 | docs: record merged PR #138 in write-lease map | `1df2416ad89afbc11b12943a6984bbcbc17ee5a2` | Lease-map receipt curing post-#138 Unit+drift. Live tip. Merged ~04:55 PT 2026-09-05. |
 
 #121 is **not** in this window (merged `2026-08-31T19:05:19Z`; merge
 `eea12f798c22e281100a62552589225321b6c424`). Recorded on this day only via #129.
+
+## Merged next calendar day (PT) — 2026-09-05
+
+#141 is the overnight live-tip cure of red tip #138. Recorded here so this
+receipt tracks current `main`; it is **not** a 2026-09-04 PT merge.
+
+| PR | title | merge tip | notes |
+|---|---|---|---|
+| #141 | docs: record merged PR #138 in write-lease map | `1df2416ad89afbc11b12943a6984bbcbc17ee5a2` | Lease-map receipt curing post-#138 Unit+drift. Live tip. Merged ~04:55 PT 2026-09-05. |
 
 ## Open / holds
 
