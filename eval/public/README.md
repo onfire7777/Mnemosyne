@@ -424,8 +424,9 @@ publication renderer. Existing result-v1 records remain valid. The additive
 path consumes merged result-v2 through explicit version dispatch.
 
 One repository-root command from a clean detached checkout of the bound commit
-verifies the source bundle, regenerates the result, recomputes metrics and
-intervals from raw traces, verifies every digest, and byte-compares
+verifies the source bundle, regenerates the result, recomputes every metric
+value and Wilson interval from raw traces (not from matching `metrics.json`
+and manifest declarations), verifies every digest, and byte-compares
 manifest-owned output:
 
 ```

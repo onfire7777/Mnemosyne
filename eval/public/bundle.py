@@ -17,6 +17,8 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
+from eval.harness.metrics import wilson_interval
+
 REQUIRED = (
     "README.md",
     "benchmark.json",
@@ -637,30 +639,44 @@ def _recompute_repro_metrics(
         if isinstance(trace, dict)
     )
     total = len(traces)
+    if total == 0:
+        raise BundleError("metrics do not recompute from traces")
+    expected = wilson_interval(successes, total).as_dict()
+    expected_value = expected["point"]
+    expected_interval = {
+        "confidence": 0.95,
+        "high": expected["ci_high"],
+        "low": expected["ci_low"],
+        "method": expected["ci_method"],
+    }
     if (
         measured.get("trace_count") != total
         or measured.get("successes") != successes
         or measured.get("total") != total
+        or measured.get("metric") != "hit_at_k"
+        or measured.get("value") != expected_value
     ):
         raise BundleError("metrics do not recompute from traces")
     if not isinstance(manifest_metrics, list) or not manifest_metrics:
         raise BundleError("missing metrics")
     measured_interval = measured.get("interval", {})
-    if not isinstance(measured_interval, dict):
+    if not isinstance(measured_interval, dict) or any(
+        measured_interval.get(key) != expected_interval[key] for key in expected_interval
+    ):
         raise BundleError("intervals do not recompute from traces")
     for declared in manifest_metrics:
         if not isinstance(declared, dict):
             raise BundleError("missing metrics")
         declared_interval = declared.get("interval", {})
         if (
-            declared.get("name") != measured.get("metric")
+            declared.get("name") != "hit_at_k"
             or declared.get("numerator") != successes
             or declared.get("denominator") != total
             or declared.get("sample_count") != total
-            or declared.get("value") != measured.get("value")
+            or declared.get("value") != expected_value
             or not isinstance(declared_interval, dict)
-            or declared_interval.get("low") != measured_interval.get("low")
-            or declared_interval.get("high") != measured_interval.get("high")
+            or declared_interval.get("low") != expected_interval["low"]
+            or declared_interval.get("high") != expected_interval["high"]
         ):
             raise BundleError("metrics do not recompute from traces")
     if not isinstance(manifest_intervals, list) or not manifest_intervals:
@@ -668,10 +684,10 @@ def _recompute_repro_metrics(
     for interval in manifest_intervals:
         if (
             not isinstance(interval, dict)
-            or interval.get("metric") != measured.get("metric")
-            or interval.get("low") != measured_interval.get("low")
-            or interval.get("high") != measured_interval.get("high")
-            or interval.get("method") != measured_interval.get("method")
+            or interval.get("metric") != "hit_at_k"
+            or interval.get("low") != expected_interval["low"]
+            or interval.get("high") != expected_interval["high"]
+            or interval.get("method") != expected_interval["method"]
         ):
             raise BundleError("intervals do not recompute from traces")
     if len(manifest_metrics) != 1 or len(manifest_intervals) != 1:
