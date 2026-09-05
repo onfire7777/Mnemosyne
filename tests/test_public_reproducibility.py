@@ -448,6 +448,16 @@ def test_schema_is_valid_closed_draft_2020_12() -> None:
         "OFFICIAL-UPSTREAM",
         "ENHANCED-SUCCESSOR",
     }
+    assert (
+        schema["$defs"]["count"]["maximum"]
+        == public_bundle._REPRODUCIBILITY_COUNT_MAX
+    )
+    assert (
+        schema["properties"]["run"]["properties"]["seed_records"]["items"][
+            "maximum"
+        ]
+        == public_bundle._REPRODUCIBILITY_COUNT_MAX
+    )
 
 
 def test_accepts_closed_development_manifest() -> None:
@@ -614,6 +624,33 @@ def test_runtime_validator_enforces_metric_parameter_and_exclusion_bounds() -> N
     oversized_exclusion["metrics"][0]["exclusions"] = ["x" * 513]  # type: ignore[index]
     with pytest.raises(BundleError, match="exclusions"):
         _validate(oversized_exclusion)
+
+
+@pytest.mark.parametrize("field", ["retries", "aborts"])
+def test_run_counts_are_bounded_signed_64_bit(field: str) -> None:
+    manifest = _manifest()
+    manifest["run"][field] = public_bundle._REPRODUCIBILITY_COUNT_MAX + 1  # type: ignore[index]
+
+    with pytest.raises(BundleError, match=field):
+        _validate(manifest)
+
+
+def test_seed_sample_and_outcome_counts_are_bounded_signed_64_bit() -> None:
+    too_large = public_bundle._REPRODUCIBILITY_COUNT_MAX + 1
+    seed = _manifest()
+    seed["run"]["seed_records"] = [too_large]  # type: ignore[index]
+    with pytest.raises(BundleError, match="seed record inventory"):
+        _validate(seed)
+
+    sample = _manifest()
+    sample["metrics"][0]["sample_count"] = too_large  # type: ignore[index]
+    with pytest.raises(BundleError, match="sample count"):
+        _validate(sample)
+
+    outcome = _manifest()
+    outcome["metrics"][0]["outcomes"]["missing"] = too_large  # type: ignore[index]
+    with pytest.raises(BundleError, match="outcome counts"):
+        _validate(outcome)
 
 
 def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_items() -> None:

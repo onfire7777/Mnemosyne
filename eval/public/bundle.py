@@ -51,6 +51,7 @@ _REPRODUCIBILITY_MANIFEST_MAX_BYTES = 4 * 2**20
 _REPRODUCIBILITY_ARTIFACT_MAX_BYTES = 64 * 2**20
 _REPRODUCIBILITY_BUNDLE_MAX_BYTES = 1024 * 2**20
 _REPRODUCIBILITY_PATH_MAX_PARTS = 32
+_REPRODUCIBILITY_COUNT_MAX = 2**63 - 1
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
@@ -489,13 +490,19 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         not isinstance(seeds, list)
         or not seeds
         or len(seeds) > 4096
-        or any(type(seed) is not int for seed in seeds)
+        or any(
+            type(seed) is not int or not 0 <= seed <= _REPRODUCIBILITY_COUNT_MAX
+            for seed in seeds
+        )
         or len(seeds) != len(set(seeds))
     ):
         raise BundleError("seed record inventory is invalid")
     for field in ("retries", "aborts"):
-        if type(run[field]) is not int or run[field] < 0:
-            raise BundleError(f"{field} must be a non-negative integer")
+        if (
+            type(run[field]) is not int
+            or not 0 <= run[field] <= _REPRODUCIBILITY_COUNT_MAX
+        ):
+            raise BundleError(f"{field} must be a bounded non-negative integer")
     environment = run["environment"]
     if not isinstance(environment, dict) or len(environment) > 128:
         raise BundleError("environment allowlist is invalid")
@@ -569,7 +576,10 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
                 raise BundleError(f"metric {field} is invalid")
         if (metric["numerator"] is None) != (metric["denominator"] is None):
             raise BundleError("metric numerator and denominator must be paired")
-        if type(metric["sample_count"]) is not int or metric["sample_count"] < 0:
+        if (
+            type(metric["sample_count"]) is not int
+            or not 0 <= metric["sample_count"] <= _REPRODUCIBILITY_COUNT_MAX
+        ):
             raise BundleError("metric sample count is invalid")
         interval = _closed_object(
             metric["interval"],
@@ -618,7 +628,11 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             {"missing", "unsupported", "failed", "aborted", "not_measured"},
             "metric outcomes",
         )
-        if any(type(value) is not int or value < 0 for value in outcomes.values()):
+        if any(
+            type(value) is not int
+            or not 0 <= value <= _REPRODUCIBILITY_COUNT_MAX
+            for value in outcomes.values()
+        ):
             raise BundleError("metric outcome counts are invalid")
     if ordered_metric_identities != sorted(ordered_metric_identities):
         raise BundleError("metric inventory must be sorted by family and name")
