@@ -1615,7 +1615,10 @@ def test_distinct_signed_ledger_receipt_records_independent_reproduction(
     assert public_bundle.verify_reproducibility_bundle(root)["valid"] is True
 
 
-def test_independent_reproduction_rejects_operator_signing_key(tmp_path: Path) -> None:
+@pytest.mark.parametrize("pem_suffix", [b"", b"\n"])
+def test_independent_reproduction_rejects_operator_signing_key(
+    tmp_path: Path, pem_suffix: bytes
+) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))
@@ -1632,7 +1635,7 @@ def test_independent_reproduction_rejects_operator_signing_key(tmp_path: Path) -
         roster={"external-reproducer"},
     )
     (root / "independent-public.pem").write_bytes(
-        (root / "ledger-public.pem").read_bytes()
+        (root / "ledger-public.pem").read_bytes() + pem_suffix
     )
     manifest["disclosures"]["independent_reproduction"] = {  # type: ignore[index]
         "receipt_digest": receipt["entry_digest"],
