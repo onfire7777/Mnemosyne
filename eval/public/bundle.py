@@ -1203,6 +1203,16 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
+    for entry in inventory:
+        path = root / entry["path"]
+        try:
+            size, digest, secret_found = _inspect_artifact(path)
+        except OSError as exc:
+            raise BundleError("reproducibility bundle changed during verification") from exc
+        if size != entry["size"] or digest != entry["digest"]:
+            raise BundleError(f"artifact changed during verification: {entry['path']}")
+        if secret_found:
+            raise BundleError("secret-like material detected")
     return validated
 
 

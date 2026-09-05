@@ -1104,6 +1104,29 @@ def test_size_mismatch_fails_before_hashing_file(
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_verifier_rejects_artifact_changed_after_initial_digest_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    readme = root / "README.md"
+    original_replay_digest = public_bundle.canonical_replay_digest
+
+    def mutate_after_semantic_verification(payload: object) -> str:
+        digest = original_replay_digest(payload)
+        readme.write_bytes(readme.read_bytes() + b"changed")
+        return digest
+
+    monkeypatch.setattr(
+        public_bundle,
+        "canonical_replay_digest",
+        mutate_after_semantic_verification,
+    )
+
+    with pytest.raises(BundleError, match="artifact changed during verification: README.md"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
