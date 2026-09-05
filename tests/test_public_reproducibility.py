@@ -961,16 +961,23 @@ def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
     assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
 
 
-def test_secret_scan_detects_a_credential_across_stream_chunks(tmp_path: Path) -> None:
+def test_artifact_inspection_hashes_counts_and_detects_across_chunks(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "artifact.bin"
     prefix = b"sk_live_"
-    path.write_bytes(
+    payload = (
         b"x" * (public_bundle._SECRET_SCAN_CHUNK_SIZE - len(prefix))
         + prefix
         + b"a" * 16
     )
+    path.write_bytes(payload)
 
-    assert public_bundle._contains_secret(path) is True
+    assert public_bundle._inspect_artifact(path) == (
+        len(payload),
+        _digest(payload),
+        True,
+    )
 
 
 def test_reproduction_rejects_linked_source_path(tmp_path: Path) -> None:
