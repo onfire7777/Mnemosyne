@@ -664,7 +664,30 @@ def _read_inventory_file(path: Path) -> tuple[bytes, int]:
     return payload, len(payload)
 
 
-def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
+def _read_reproducibility_manifest(root: Path) -> tuple[bytes, dict[str, Any]]:
+    """Read, parse, and validate one stable manifest inode snapshot."""
+    manifest_path = root / REPRODUCIBILITY_MANIFEST_NAME
+    try:
+        manifest_bytes, _ = _read_inventory_file(manifest_path)
+        loaded = _parse_json(
+            manifest_bytes.decode("utf-8"), REPRODUCIBILITY_MANIFEST_NAME
+        )
+    except UnicodeDecodeError as exc:
+        raise BundleError("reproducibility manifest is not UTF-8") from exc
+    except BundleError as exc:
+        cause = exc.__cause__
+        if isinstance(cause, ValueError) and "duplicate" in str(cause):
+            raise BundleError("duplicate JSON key in reproducibility manifest") from exc
+        raise
+    return manifest_bytes, _validate_reproducibility_manifest(loaded)
+
+
+def _inventory_bytes(
+    root: Path,
+    manifest: dict[str, Any],
+    *,
+    manifest_bytes: bytes | None = None,
+) -> dict[str, bytes]:
     hashes = manifest["hashes"]
     listed = [entry["path"] for entry in hashes]
     if len(listed) != len(set(listed)):
@@ -678,7 +701,10 @@ def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
             raise BundleError(f"links and non-files are forbidden: {entry.name}")
         if entry.resolve().parent != root.resolve():
             raise BundleError(f"path escapes bundle: {entry.name}")
-        payload, entry_size = _read_inventory_file(entry)
+        if entry.name == REPRODUCIBILITY_MANIFEST_NAME and manifest_bytes is not None:
+            payload, entry_size = manifest_bytes, len(manifest_bytes)
+        else:
+            payload, entry_size = _read_inventory_file(entry)
         total_size += entry_size
         if total_size > _MAX_REPRO_BUNDLE_BYTES:
             raise BundleError("bundle exceeds the closed aggregate size bound")
@@ -847,20 +873,10 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or getattr(root, "is_junction", lambda: False)()
     ):
         raise BundleError("bundle must be a real directory, not a link")
-    manifest_path = root / REPRODUCIBILITY_MANIFEST_NAME
-    if manifest_path.is_symlink() or not manifest_path.is_file():
-        raise BundleError("reproducibility manifest must be a real file, not a link")
     if not REPRODUCIBILITY_BUNDLE_SCHEMA_PATH.is_file():
         raise BundleError("reproducibility schema is missing")
-    try:
-        loaded_manifest = _load_json(manifest_path)
-    except BundleError as exc:
-        cause = exc.__cause__
-        if isinstance(cause, ValueError) and "duplicate" in str(cause):
-            raise BundleError("duplicate JSON key in reproducibility manifest") from exc
-        raise
-    manifest = _validate_reproducibility_manifest(loaded_manifest)
-    payloads = _inventory_bytes(root, manifest)
+    manifest_bytes, manifest = _read_reproducibility_manifest(root)
+    payloads = _inventory_bytes(root, manifest, manifest_bytes=manifest_bytes)
     for required in ("traces.jsonl", "config.json", "build.json", "result.json", "bundle-manifest.json"):
         if required not in payloads:
             raise BundleError(f"missing {required}")
@@ -1044,15 +1060,10 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
     )
     temp = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
     try:
-        manifest_path = source / REPRODUCIBILITY_MANIFEST_NAME
-        try:
-            manifest_bytes = manifest_path.read_bytes()
-            source_manifest = _validate_reproducibility_manifest(
-                _parse_json(manifest_bytes.decode("utf-8"), REPRODUCIBILITY_MANIFEST_NAME)
-            )
-        except (OSError, UnicodeDecodeError) as exc:
-            raise BundleError("reproducibility manifest cannot be snapshotted") from exc
-        payloads = _inventory_bytes(source, source_manifest)
+        manifest_bytes, source_manifest = _read_reproducibility_manifest(source)
+        payloads = _inventory_bytes(
+            source, source_manifest, manifest_bytes=manifest_bytes
+        )
         (snapshot / REPRODUCIBILITY_MANIFEST_NAME).write_bytes(manifest_bytes)
         for name, payload in payloads.items():
             (snapshot / name).write_bytes(payload)

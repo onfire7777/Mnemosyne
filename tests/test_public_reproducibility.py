@@ -1022,9 +1022,14 @@ def test_semantic_verification_uses_inventory_bound_bytes(
     original_inventory = public_bundle._inventory_bytes
 
     def mutate_after_snapshot(
-        inventory_root: Path, manifest: dict[str, Any]
+        inventory_root: Path,
+        manifest: dict[str, Any],
+        *,
+        manifest_bytes: bytes | None = None,
     ) -> dict[str, bytes]:
-        payloads = original_inventory(inventory_root, manifest)
+        payloads = original_inventory(
+            inventory_root, manifest, manifest_bytes=manifest_bytes
+        )
         (inventory_root / "result.json").write_text("{}\n", encoding="utf-8")
         (inventory_root / "canonical-replay.json").write_text("{}\n", encoding="utf-8")
         (inventory_root / "config.json").write_text("{}\n", encoding="utf-8")
@@ -1032,6 +1037,33 @@ def test_semantic_verification_uses_inventory_bound_bytes(
         return payloads
 
     monkeypatch.setattr(public_bundle, "_inventory_bytes", mutate_after_snapshot)
+    assert verify_bundle(root)["valid"] is True
+
+
+def test_manifest_schema_and_inventory_share_one_inode_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "manifest-snapshot")
+    root = bundle["root"]
+    original_inventory = public_bundle._inventory_bytes
+
+    def replace_manifest_after_validation(
+        inventory_root: Path,
+        manifest: dict[str, Any],
+        *,
+        manifest_bytes: bytes | None = None,
+    ) -> dict[str, bytes]:
+        assert manifest_bytes is not None
+        (inventory_root / REPRO_MANIFEST_NAME).write_text("{}\n", encoding="utf-8")
+        return original_inventory(
+            inventory_root, manifest, manifest_bytes=manifest_bytes
+        )
+
+    monkeypatch.setattr(
+        public_bundle, "_inventory_bytes", replace_manifest_after_validation
+    )
     assert verify_bundle(root)["valid"] is True
 
 
@@ -1046,9 +1078,14 @@ def test_reproduction_uses_one_inventory_bound_source_snapshot(
     original_inventory = public_bundle._inventory_bytes
 
     def mutate_source_after_snapshot(
-        inventory_root: Path, manifest: dict[str, Any]
+        inventory_root: Path,
+        manifest: dict[str, Any],
+        *,
+        manifest_bytes: bytes | None = None,
     ) -> dict[str, bytes]:
-        payloads = original_inventory(inventory_root, manifest)
+        payloads = original_inventory(
+            inventory_root, manifest, manifest_bytes=manifest_bytes
+        )
         if inventory_root == root:
             (root / "result.json").write_text("{}\n", encoding="utf-8")
         return payloads
