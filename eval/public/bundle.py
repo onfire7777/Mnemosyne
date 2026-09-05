@@ -220,11 +220,14 @@ def _repro_finite(value: object) -> None:
             if identity in containers:
                 raise BundleError("reproducibility manifest contains a cycle")
             containers.add(identity)
-            nested = (
-                (item for pair in current.items() for item in pair)
-                if isinstance(current, dict)
-                else current
-            )
+            if isinstance(current, dict):
+                if any(
+                    isinstance(key, str) and SECRET.search(key) for key in current
+                ):
+                    raise BundleError("secret-like material detected in manifest")
+                nested = current.values()
+            else:
+                nested = current
             stack.extend((item, depth + 1) for item in nested)
 
 

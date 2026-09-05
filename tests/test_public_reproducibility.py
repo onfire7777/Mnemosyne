@@ -531,6 +531,10 @@ def test_manifest_rejects_credential_in_parameter_key() -> None:
         _validate(manifest)
 
 
+def test_manifest_structural_budget_counts_values_without_double_counting_keys() -> None:
+    public_bundle._repro_finite({f"field_{index}": index for index in range(60_000)})
+
+
 @pytest.mark.parametrize(
     "name",
     [
