@@ -1449,6 +1449,13 @@ def reproduce_reproducibility_bundle(
         raise BundleError("reproduction destination must be outside the source bundle")
     manifest, _ = _load_reproducibility_manifest(source_root)
     verify_reproducibility_bundle(source_root)
+    try:
+        if (source_root / "reproducibility-manifest.json").read_bytes() != _canonical(
+            manifest
+        ):
+            raise BundleError("reproducibility manifest changed during reproduction")
+    except OSError as exc:
+        raise BundleError("reproducibility manifest changed during reproduction") from exc
     expected_sha = manifest["run"]["candidate_git_sha"]
     _require_clean_reproduction_checkout(expected_sha)
     if manifest["run"]["platform"] != _runtime_platform():
