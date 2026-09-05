@@ -308,11 +308,10 @@ The following packages are complete source history, not runnable work:
   `2026-09-05T11:24:20Z` capture and adds only the PR #138 merged-baseline
   bullet and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #141 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #141 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. The OPEN/READY pre-merge instruction
+  is historical; delivery is MERGED at tip
+  `1df2416ad89afbc11b12943a6984bbcbc17ee5a2`.
 - PR #139: N12 result-v2 Exact 12 leaderboard files
   (title: feat(leaderboard): additive result-v2 integration (N12))
   from exact head `eef9c57316ca28a3ef3959f024bd0d132bb0ecb7`; all
