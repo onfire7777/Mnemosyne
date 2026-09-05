@@ -1184,6 +1184,7 @@ def _load_reproducibility_manifest(root: Path) -> tuple[dict[str, Any], dict[str
         )
     except UnicodeDecodeError as exc:
         raise BundleError("reproducibility manifest is not UTF-8") from exc
+    _reject_decoded_secrets(manifest)
     if manifest_raw != _canonical(manifest):
         raise BundleError("reproducibility manifest bytes must be canonical")
     validated = validate_reproducibility_manifest(manifest)

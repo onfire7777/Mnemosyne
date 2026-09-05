@@ -1275,6 +1275,16 @@ def test_manifest_reader_rejects_hard_link_before_parsing(tmp_path: Path) -> Non
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_manifest_rejects_secret_like_decoded_values(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    manifest["disclosures"]["operator_identity"] = "sk_live_abcdefghijklmnop"  # type: ignore[index]
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="secret-like material detected"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
