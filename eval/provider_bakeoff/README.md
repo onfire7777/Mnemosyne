@@ -27,8 +27,16 @@ with judge disclosure, and no private-suite conflation. Independent
 reproduction strengthens an operator-run public result but is not a
 prerequisite unless the claim uses `independent`, `neutral`, or `certified`.
 Development and private-suite numbers remain non-publishable and
-non-headline. Additive result-v2 records keep those claim labels separate
-from immutable result-v1 bytes.
+non-headline.
+
+### Claim labels vs result records
+
+- Bake-off promotion decisions stay on the private suite + conformance lane above.
+- Public claim labels (if any) are carried only on additive **result-v2** leaderboard
+  records (`leaderboard/schema/result-v2.schema.json`), never by rewriting immutable
+  result-v1 bytes.
+- Validate a candidate v2 row with the leaderboard validators in-tree
+  (`leaderboard/validate.py`); do not embed a second schema under `eval/provider_bakeoff/`.
 
 Source policy:
 

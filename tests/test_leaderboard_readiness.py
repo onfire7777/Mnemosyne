@@ -274,6 +274,25 @@ def test_official_v2_result_stays_human_gated() -> None:
     assert "human_approval" in result["blocked_gates"]
 
 
+def test_operator_run_without_register_b_blocks_pbpp() -> None:
+    record = _v2_official_record()
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+    assert publication["label"] == "operator-run"
+    assert "register_b_satisfied" not in publication
+
+    result = evaluate_result_v2(record)
+    assert result["ready"] is False
+    assert "pbpp" in result["blocked_gates"]
+    assert "human_approval" in result["blocked_gates"]
+
+    publication["register_b_satisfied"] = True
+    cleared = evaluate_result_v2(record)
+    assert "pbpp" not in cleared["blocked_gates"]
+    assert "human_approval" in cleared["blocked_gates"]
+    assert cleared["ready"] is False
+
+
 def test_failed_safety_gate_blocks_v2_readiness() -> None:
     record = _v2_official_record()
     record["safety_gates"] = [{"name": "no-leakage", "status": "failed"}]

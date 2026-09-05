@@ -157,6 +157,27 @@ _SUCCESSOR_FIELDS = (
     "difference_manifest_digest",
 )
 _PROJECTION_VERSION = "mnemosyne.leaderboard.projection/v1"
+_PROJECTION_REQUIRED_FIELDS = (
+    "schema_version",
+    "projection_id",
+    "kind",
+    "source_record_ids",
+    "filters",
+    "compatibility_key",
+    "exclusions",
+    "numerator",
+    "denominator",
+    "uncertainty_method",
+    "missing_count",
+    "unsupported_count",
+    "failed_count",
+    "aborted_count",
+    "not_measured_count",
+    "certified",
+    "official",
+    "headline",
+    "safety_failures_visible",
+)
 _OUTCOME_COUNT_FIELDS = {
     "missing": "missing_count",
     "unsupported": "unsupported_count",
@@ -769,11 +790,32 @@ def _outcome_counts(sources: list[dict[str, object]]) -> dict[str, int]:
     return counts
 
 
+def _lineage_scorer_digest(record: dict[str, object]) -> str | None:
+    lineage = record.get("lineage")
+    if not isinstance(lineage, dict):
+        return None
+    fidelity = lineage.get("fidelity")
+    if not isinstance(fidelity, dict):
+        return None
+    digest = fidelity.get("scorer_digest")
+    return digest if isinstance(digest, str) else None
+
+
+def _identity_value(record: dict[str, object], field: str) -> object:
+    identity = record.get("identity")
+    if not isinstance(identity, dict):
+        return None
+    return identity.get(field)
+
+
 def validate_projection(projection: object, records: list[object]) -> list[str]:
     """Return stable JSON-pointer errors for one derived projection."""
     if not isinstance(projection, dict):
         return ["/"]
     errors: list[str] = []
+    for field in _PROJECTION_REQUIRED_FIELDS:
+        if field not in projection:
+            errors.append(f"/{field}")
     if projection.get("schema_version") != _PROJECTION_VERSION:
         errors.append("/schema_version")
     if projection.get("kind") != "exploratory":
@@ -786,7 +828,11 @@ def validate_projection(projection: object, records: list[object]) -> list[str]:
         errors.append("/headline")
     sources = _source_records(projection, records)
     source_ids = projection.get("source_record_ids")
-    if not isinstance(source_ids, list) or len(sources) != len(source_ids):
+    if (
+        not isinstance(source_ids, list)
+        or not source_ids
+        or len(sources) != len(source_ids)
+    ):
         errors.append("/source_record_ids")
     expected = _outcome_counts(sources)
     for field, value in expected.items():
@@ -820,6 +866,27 @@ def validate_projection(projection: object, records: list[object]) -> list[str]:
             for record in sources
         ):
             errors.append("/compatibility_key/resource_treatment")
+        benchmark_id = compatibility.get("benchmark_id")
+        if isinstance(benchmark_id, str) and any(
+            record.get("benchmark") != benchmark_id
+            or _identity_value(record, "benchmark_id") not in {None, benchmark_id}
+            for record in sources
+        ):
+            errors.append("/compatibility_key/benchmark_id")
+        benchmark_version = compatibility.get("benchmark_version")
+        if isinstance(benchmark_version, str) and any(
+            record.get("benchmark_version") != benchmark_version
+            or _identity_value(record, "benchmark_version")
+            not in {None, benchmark_version}
+            for record in sources
+        ):
+            errors.append("/compatibility_key/benchmark_version")
+        scorer = compatibility.get("scorer_digest")
+        if isinstance(scorer, str) and any(
+            actual is not None and actual != scorer
+            for actual in (_lineage_scorer_digest(record) for record in sources)
+        ):
+            errors.append("/compatibility_key/scorer_digest")
         metric = compatibility.get("metric")
         if isinstance(metric, dict):
             for record in sources:
