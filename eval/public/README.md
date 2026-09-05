@@ -430,7 +430,10 @@ Wilson interval from raw traces, binds metric metadata (family, unit,
 uncertainty, confidence, exclusions, and status counts) to that measurement,
 and byte-compares manifest-owned output. Matching fabricated declarations
 fail. The scorer rewrite of `metrics.json` is required; copy-only success is
-not reproduction. If `k` or traces cannot be scored, the command fails closed:
+not reproduction. If `k` or traces cannot be scored, the command fails closed.
+`config.scoring_profile` must be a registered profile and is recomputed only
+through its canonical scorer (`smoke-hit-at-k-v1` for this standard). Unknown
+profiles and duplicate `ranked_retrieved_hits` IDs fail closed:
 
 ```
 uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST

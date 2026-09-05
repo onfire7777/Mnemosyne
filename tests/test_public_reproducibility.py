@@ -322,11 +322,11 @@ def _result_for_track(
     return record
 
 
-def _metric_record() -> dict[str, object]:
+def _metric_record(*, version: str = "smoke-hit-at-k-v1") -> dict[str, object]:
     return {
         "family": "retrieval",
         "name": "hit_at_k",
-        "version": "smoke-hit-at-k-v1",
+        "version": version,
         "value": 1.0,
         "unit": "ratio",
         "numerator": 1,
@@ -358,6 +358,7 @@ def _write_reproducibility_bundle(
     command: list[str] | None = None,
     k: int | None = 1,
     traces: bytes | None = None,
+    scoring_profile: str = "smoke-hit-at-k-v1",
 ) -> dict[str, Any]:
     root.mkdir(parents=True)
     commit = run_commit or "0123456789abcdef0123456789abcdef01234567"
@@ -371,7 +372,7 @@ def _write_reproducibility_bundle(
             "family": "deterministic-retrieval",
             "interval_method": "wilson",
             "locale": "C",
-            "scoring_profile": "smoke-hit-at-k-v1",
+            "scoring_profile": scoring_profile,
             "suite": "smoke",
             "timezone": "UTC",
             **({"k": k} if k is not None else {}),
@@ -423,7 +424,7 @@ def _write_reproducibility_bundle(
         "model-ref.json": {"id": None, "kind": "model"},
         "prompt-ref.json": {"id": None, "kind": "prompt"},
         "reader-ref.json": {"id": None, "kind": "reader"},
-        "scorer.json": {"id": "smoke-hit-at-k-v1", "kind": "scorer"},
+        "scorer.json": {"id": scoring_profile, "kind": "scorer"},
         "environment.json": environment,
         "metrics.json": metrics_payload,
         "canonical-replay.json": replay,
@@ -558,7 +559,7 @@ def _write_reproducibility_bundle(
         "reader": _named_ref("reader", written["reader-ref.json"]),
         "scorer": _named_ref("scorer", written["scorer.json"]),
     }
-    metric = _metric_record()
+    metric = _metric_record(version=scoring_profile)
     publication = {
         "certified": False,
         "headline": False,
@@ -1101,6 +1102,26 @@ def test_reproduce_reruns_scorer_and_fails_closed_without_k(
     with pytest.raises(BundleError, match="k"):
         reproduce_bundle(bundle["root"], destination)
     assert not destination.exists()
+
+
+def test_unregistered_scoring_profile_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "unknown-profile",
+        scoring_profile="unregistered-hit-at-k-v9",
+    )
+    with pytest.raises(BundleError, match="scoring profile"):
+        verify_bundle(bundle["root"])
+
+
+def test_duplicate_ranked_retrieved_ids_fail_closed(tmp_path: Path) -> None:
+    traces = (
+        b'{"answer":"d1","gold_references":["d1"],"question_id":"q1",'
+        b'"ranked_retrieved_hits":["d1","d1"],"scoring_family":"deterministic-retrieval",'
+        b'"stored_records":["d1"]}\n'
+    )
+    bundle = _write_reproducibility_bundle(tmp_path / "dup-ranks", traces=traces)
+    with pytest.raises(BundleError, match="duplicate|ranked"):
+        verify_bundle(bundle["root"])
 
 
 def test_missing_canonical_replay_artifact_fails_closed(tmp_path: Path) -> None:
