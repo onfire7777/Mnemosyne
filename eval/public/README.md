@@ -73,7 +73,7 @@ source-nested destination, a wrong/dirty/non-root checkout, altered lock or
 environment, symlinks, path escapes, inventory drift, duplicate JSON keys,
 secret-like values, inherited token/secret/password/private-key/API-key/
 access-key/credential/authorization variables, and any digest, metric, interval,
-result, ledger, or replay mismatch. Undeclared Python, uv, package-index, proxy,
+result, ledger, or replay mismatch. Undeclared Python, Git, uv, package-index, proxy,
 certificate, and dynamic-loader environment influences are also rejected.
 Those influence classes cannot be admitted through the manifest allowlist;
 only `PYTHONHASHSEED`, `PYTHONUTF8`, and `PYTHONIOENCODING` are accepted from the
