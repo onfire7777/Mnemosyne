@@ -932,6 +932,14 @@ def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
         }
     )
     (source / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+    original_read_bytes = Path.read_bytes
+
+    def reject_opaque_read_bytes(path: Path) -> bytes:
+        if path.name == "raw.bin":
+            raise AssertionError("opaque artifacts must be streamed")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", reject_opaque_read_bytes)
     monkeypatch.setattr(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
@@ -940,7 +948,8 @@ def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
     assert public_bundle.verify_reproducibility_bundle(source)["valid"] is True
     public_bundle.reproduce_reproducibility_bundle(source, destination)
 
-    assert (destination / "evidence" / "raw.bin").read_bytes() == payload
+    with (destination / "evidence" / "raw.bin").open("rb") as handle:
+        assert handle.read() == payload
     assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
 
 
