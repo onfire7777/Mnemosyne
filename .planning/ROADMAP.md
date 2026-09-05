@@ -92,8 +92,11 @@ PR #86 merged the scheduled development-regression workflow at
 four-test job, and exact post-merge main CI run `30561266140` passed on the
 merge commit. BENCH-006 remains Partial because official/upstream execution,
 rights, provider/model/judge disclosure, and operator evidence are still
-gated. BENCH-007 remains Partial until an actual scheduled-cadence receipt is
-retained; source and manual operability do not prove that cron event occurred.
+gated. BENCH-007 is Complete: real `schedule` run `30807305055` succeeded on
+`b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03, including the fixed
+public-contract test step in job `91665545558`. The verified metadata receipt
+is retained in the lease map. This closes scheduled development cadence only;
+Phase 13 remains open for BENCH-006's official/upstream evidence.
 
 ### Phase 14: Reproducibility Standard
 
@@ -111,7 +114,9 @@ Plans:
 - [ ] 14-01-PLAN.md — Neutral reproducibility bundle standard.
 
 **Boundary:** REPRO-001 is implementation-ready only after additive result-v2
-dispatch lands and the protected signed-publication lease is released.
+dispatch lands. The obsolete signed-publication reservation is released by
+the 2026-09-05 owner-confirmed unavailability disposition in the lease map; N12 is ready for
+single-owner admission after that receipt lands, but is not implemented.
 REPRO-002 additionally waits for a headline-eligible pinned official result
 with complete custody/operator evidence. No development fixture closes either
 evidence gate.
