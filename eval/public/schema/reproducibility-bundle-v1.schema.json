@@ -197,7 +197,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["argv", "network"],
       "properties": {
-        "argv": {"const": ["uv", "run", "--locked", "mneme", "eval-public", "--reproduce-bundle", "BUNDLE", "--out-dir", "DEST"]},
+        "argv": {"const": ["uv", "run", "--locked", "--isolated", "mneme", "eval-public", "--reproduce-bundle", "BUNDLE", "--out-dir", "DEST"]},
         "network": {"const": "forbidden"}
       }
     }

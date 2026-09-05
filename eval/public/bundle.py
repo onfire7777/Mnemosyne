@@ -122,6 +122,7 @@ REPRODUCTION_ARGV = (
     "uv",
     "run",
     "--locked",
+    "--isolated",
     "mneme",
     "eval-public",
     "--reproduce-bundle",

@@ -53,16 +53,16 @@ case IDs are non-empty, unique, and lexicographically sorted.
 | `reproduction` | The one fixed argv command and reproduction-time network prohibition |
 
 From the repository root of a clean detached checkout at the manifest's exact
-candidate commit, with a pre-provisioned lockfile-exact environment or verified
-offline wheelhouse/cache, run exactly:
+candidate commit, with a verified offline wheelhouse/cache, run exactly:
 
 ```bash
-uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
+uv run --locked --isolated mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
 ```
 
 `BUNDLE` and `DEST` are path operands; every other token is fixed. Dependency
 acquisition is a separate disclosed preparation step. The reproduction command
-itself requires `UV_OFFLINE=1`, `LC_ALL=C`, `TZ=UTC`, and every value in the
+creates an isolated lockfile-exact environment instead of trusting the checkout's
+mutable `.venv`. It requires `UV_OFFLINE=1`, `LC_ALL=C`, `TZ=UTC`, and every value in the
 manifest's public environment allowlist (including `PYTHONHASHSEED` when
 declared). The disclosed dependency inventory must be the canonical sorted
 inventory from the digest-bound `uv.lock`: `name==version` for versioned packages
@@ -126,7 +126,7 @@ uv run --locked mneme eval-public --suite pm-bench-development --out-dir /tmp/mn
 uv run --locked mneme eval-public --suite triggerbench-development --out-dir /tmp/mneme-triggerbench
 uv run --locked mneme eval-public --suite working-memory-action-development --out-dir /tmp/mneme-working-action
 uv run --locked mneme eval-public --verify-bundle /tmp/mneme-pm-bench
-uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-pm-bench --out-dir /tmp/mneme-pm-bench-reproduced
+uv run --locked --isolated mneme eval-public --reproduce-bundle /tmp/mneme-pm-bench --out-dir /tmp/mneme-pm-bench-reproduced
 ```
 
 Every profile produces a deterministic development bundle with its exact
