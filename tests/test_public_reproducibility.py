@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from jsonschema import Draft202012Validator
 
+from eval.harness.metrics import wilson_interval
 from eval.public.bundle import (
     REQUIRED,
     BundleError,
@@ -70,6 +71,7 @@ V1_BUNDLE_CONCAT_SHA256 = (
     "fb260088a2678b5148f206d0b05d86648b796f6e485b5d8e28d37f1833b51df1"
 )
 TRACK_KINDS = ("OFFICIAL-UPSTREAM", "ENHANCED-SUCCESSOR", "DEVELOPMENT")
+_SMOKE_WILSON = wilson_interval(1, 1).as_dict()
 REQUIRED_REPRO_FIELDS = (
     "schema_version",
     "result_ref",
@@ -333,7 +335,10 @@ def _metric_record() -> dict[str, object]:
         "uncertainty_method": "wilson",
         "uncertainty_parameters": {"z": 1.96},
         "confidence_level": 0.95,
-        "interval": {"low": 0.2, "high": 1.0},
+        "interval": {
+            "low": _SMOKE_WILSON["ci_low"],
+            "high": _SMOKE_WILSON["ci_high"],
+        },
         "exclusions": [],
         "missing_count": 0,
         "unsupported_count": 0,
@@ -391,12 +396,17 @@ def _write_reproducibility_bundle(
     }
     metrics_payload = {
         "family": "deterministic-retrieval",
-        "interval": {"confidence": 0.95, "high": 1.0, "low": 0.2, "method": "wilson"},
+        "interval": {
+            "confidence": 0.95,
+            "high": _SMOKE_WILSON["ci_high"],
+            "low": _SMOKE_WILSON["ci_low"],
+            "method": "wilson",
+        },
         "metric": "hit_at_k",
         "successes": 1,
         "total": 1,
         "trace_count": 1,
-        "value": 1.0,
+        "value": _SMOKE_WILSON["point"],
     }
     replay = _m02_replay_payload()
     supporting = {
@@ -602,8 +612,8 @@ def _write_reproducibility_bundle(
                 "metric": "hit_at_k",
                 "method": "wilson",
                 "confidence_level": 0.95,
-                "low": 0.2,
-                "high": 1.0,
+                "low": _SMOKE_WILSON["ci_low"],
+                "high": _SMOKE_WILSON["ci_high"],
             }
         ],
         "hashes": hashes,
@@ -986,6 +996,31 @@ def test_manifest_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) ->
         verify_bundle(bundle["root"])
 
 
+def _rewrite_metrics_and_manifest(
+    root: Path,
+    *,
+    value: float,
+    low: float,
+    high: float,
+) -> None:
+    metrics_path = root / "metrics.json"
+    measured = json.loads(metrics_path.read_text(encoding="utf-8"))
+    measured["value"] = value
+    measured["interval"]["low"] = low
+    measured["interval"]["high"] = high
+    metrics_bytes = _write_json(metrics_path, measured)
+    payload = json.loads((root / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["metrics"][0]["value"] = value
+    payload["metrics"][0]["interval"] = {"low": low, "high": high}
+    payload["intervals"][0]["low"] = low
+    payload["intervals"][0]["high"] = high
+    for entry in payload["hashes"]:
+        if entry["path"] == "metrics.json":
+            entry["size"] = len(metrics_bytes)
+            entry["sha256"] = _sha256_ref(metrics_bytes)
+    _write_json(root / REPRO_MANIFEST_NAME, payload)
+
+
 def test_later_manifest_metrics_and_intervals_must_recompute(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "later-metrics")
     payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
@@ -1005,6 +1040,24 @@ def test_later_manifest_metrics_and_intervals_must_recompute(tmp_path: Path) -> 
         }
     )
     _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="metrics|intervals"):
+        verify_bundle(bundle["root"])
+
+
+def test_fabricated_score_matching_metrics_and_manifest_is_rejected(
+    tmp_path: Path,
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "fake-score")
+    _rewrite_metrics_and_manifest(bundle["root"], value=0.0, low=0.2, high=1.0)
+    with pytest.raises(BundleError, match="metrics"):
+        verify_bundle(bundle["root"])
+
+
+def test_fabricated_confidence_interval_matching_metrics_and_manifest_is_rejected(
+    tmp_path: Path,
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "fake-ci")
+    _rewrite_metrics_and_manifest(bundle["root"], value=1.0, low=0.0, high=0.1)
     with pytest.raises(BundleError, match="metrics|intervals"):
         verify_bundle(bundle["root"])
 
