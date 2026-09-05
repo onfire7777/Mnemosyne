@@ -38,7 +38,9 @@ JSONL, PEM, Markdown, shell, and lock artifacts use their canonical types.
 Declared JSON and NDJSON must parse without duplicate keys, and declared text
 must be valid UTF-8; opaque binary artifacts use a non-text media type.
 The file inventory is lexicographically sorted by path so equivalent bundles
-have one canonical manifest representation.
+have one canonical manifest representation. Individual artifacts are limited to
+64 MiB and the declared aggregate inventory is limited to 1 GiB, bounding the
+verification, staging, and reproduction work accepted from one bundle.
 Metric declarations are sorted by family/name identity; each metric's excluded
 case IDs are non-empty, unique, and lexicographically sorted.
 

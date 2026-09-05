@@ -1285,6 +1285,23 @@ def test_manifest_rejects_secret_like_decoded_values(tmp_path: Path) -> None:
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_manifest_rejects_aggregate_artifact_size_above_bundle_limit() -> None:
+    manifest = _manifest()
+    manifest["artifacts"]["files"] = [  # type: ignore[index]
+        {
+            "path": f"evidence/{index:02}.bin",
+            "size": public_bundle._REPRODUCIBILITY_ARTIFACT_MAX_BYTES,
+            "media_type": "application/octet-stream",
+            "canonicalization": "exact-bytes",
+            "digest": DIGEST,
+        }
+        for index in range(17)
+    ]
+
+    with pytest.raises(BundleError, match="aggregate size exceeds bundle limit"):
+        public_bundle.validate_reproducibility_manifest(manifest)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
