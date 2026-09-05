@@ -356,10 +356,12 @@ def _write_reproducibility_bundle(
     run_commit: str | None = None,
     dirty: bool = False,
     command: list[str] | None = None,
+    k: int | None = 1,
+    traces: bytes | None = None,
 ) -> dict[str, Any]:
     root.mkdir(parents=True)
     commit = run_commit or "0123456789abcdef0123456789abcdef01234567"
-    traces = (
+    traces = traces or (
         b'{"answer":"d1","gold_references":["d1"],"question_id":"q1",'
         b'"ranked_retrieved_hits":["d1"],"scoring_family":"deterministic-retrieval",'
         b'"stored_records":["d1"]}\n'
@@ -372,6 +374,7 @@ def _write_reproducibility_bundle(
             "scoring_profile": "smoke-hit-at-k-v1",
             "suite": "smoke",
             "timezone": "UTC",
+            **({"k": k} if k is not None else {}),
         }
     )
     build = _canonical(
@@ -1060,6 +1063,44 @@ def test_fabricated_confidence_interval_matching_metrics_and_manifest_is_rejecte
     _rewrite_metrics_and_manifest(bundle["root"], value=1.0, low=0.0, high=0.1)
     with pytest.raises(BundleError, match="metrics|intervals"):
         verify_bundle(bundle["root"])
+
+
+def test_hit_at_k_scores_only_the_bound_prefix(tmp_path: Path) -> None:
+    traces = (
+        b'{"answer":"d1","gold_references":["d2"],"question_id":"q1",'
+        b'"ranked_retrieved_hits":["d1","d2"],"scoring_family":"deterministic-retrieval",'
+        b'"stored_records":["d1","d2"]}\n'
+    )
+    bundle = _write_reproducibility_bundle(tmp_path / "topk", traces=traces)
+    with pytest.raises(BundleError, match="metrics"):
+        verify_bundle(bundle["root"])
+
+
+def test_schema_valid_metric_metadata_mismatch_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "meta")
+    payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["metrics"][0]["family"] = "performance"
+    payload["metrics"][0]["unit"] = "milliseconds"
+    payload["metrics"][0]["uncertainty_method"] = "bootstrap"
+    payload["metrics"][0]["confidence_level"] = 0.9
+    payload["metrics"][0]["exclusions"] = ["late"]
+    payload["metrics"][0]["failed_count"] = 1
+    _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="metrics"):
+        verify_bundle(bundle["root"])
+
+
+def test_reproduce_reruns_scorer_and_fails_closed_without_k(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "no-k", k=None)
+    monkeypatch.setattr(
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+    )
+    destination = tmp_path / "no-k-dest"
+    with pytest.raises(BundleError, match="k"):
+        reproduce_bundle(bundle["root"], destination)
+    assert not destination.exists()
 
 
 def test_missing_canonical_replay_artifact_fails_closed(tmp_path: Path) -> None:
