@@ -14,6 +14,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import ValidationError
+
 REQUIRED = (
     "README.md",
     "benchmark.json",
@@ -316,7 +319,35 @@ def _require_enum(value: object, allowed: tuple[str, ...], label: str) -> str:
     return str(value)
 
 
+def _validate_repro_schema(manifest: object) -> None:
+    try:
+        schema = json.loads(REPRODUCIBILITY_BUNDLE_SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BundleError("reproducibility schema is invalid") from exc
+    try:
+        Draft202012Validator(schema).validate(manifest)
+    except ValidationError as exc:
+        path = "/".join(str(part) for part in exc.absolute_path)
+        detail = f"{path}: {exc.message}" if path else exc.message
+        raise BundleError(f"reproducibility manifest fails schema: {detail}") from exc
+
+
+def _named_digest_hex(value: object, label: str) -> str:
+    ref = _require_named_digest(value, label)
+    if ref is None:
+        raise BundleError(f"missing {label}")
+    return ref.rsplit("@sha256:", 1)[1]
+
+
+def _require_bound_digest(value: object, label: str, payloads: dict[str, bytes]) -> str:
+    digest = _named_digest_hex(value, label)
+    if not any(hashlib.sha256(payload).hexdigest() == digest for payload in payloads.values()):
+        raise BundleError(f"{label} digest is not bound to an inventory file")
+    return digest
+
+
 def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
+    _validate_repro_schema(manifest)
     payload = _closed_object(manifest, _REPRO_REQUIRED_FIELDS, "reproducibility manifest")
     _json_depth(payload)
     if payload.get("schema_version") != REPRODUCIBILITY_BUNDLE_SCHEMA_VERSION:
@@ -550,10 +581,6 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
     return payload
 
 
-def _is_ephemeral_jsonl_lock(listed: set[str], name: str) -> bool:
-    return name.endswith(".jsonl.lock") and name[: -len(".lock")] in listed
-
-
 def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
     hashes = manifest["hashes"]
     listed = [entry["path"] for entry in hashes]
@@ -575,9 +602,7 @@ def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
         raise BundleError("secret-like material detected")
     expected = listed_set | {REPRODUCIBILITY_MANIFEST_NAME}
     extras = set(scanned) - expected
-    if any(name not in scanned for name in expected) or any(
-        not _is_ephemeral_jsonl_lock(listed_set, name) for name in extras
-    ):
+    if extras or any(name not in scanned for name in expected):
         raise BundleError("inventory mismatch")
     payloads = {name: scanned[name] for name in expected}
     for name, payload in payloads.items():
@@ -624,7 +649,8 @@ def _recompute_repro_metrics(
     if not isinstance(declared, dict):
         raise BundleError("missing metrics")
     if (
-        declared.get("numerator") != successes
+        declared.get("name") != measured.get("metric")
+        or declared.get("numerator") != successes
         or declared.get("denominator") != total
         or declared.get("sample_count") != total
         or declared.get("value") != measured.get("value")
@@ -682,6 +708,14 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     result = _load_json(root / "result.json")
     if manifest["result_ref"] != f"result-v2@sha256:{hashlib.sha256(payloads['result.json']).hexdigest()}":
         raise BundleError("result digest mismatch")
+    if "uv.lock" not in payloads:
+        raise BundleError("missing lockfile")
+    if manifest["build"]["lockfile"] != f"uv.lock@sha256:{hashlib.sha256(payloads['uv.lock']).hexdigest()}":
+        raise BundleError("lockfile digest mismatch")
+    refs = manifest["manifests"]
+    for key, ref in refs.items():
+        if ref is not None:
+            _require_bound_digest(ref, key, payloads)
     from leaderboard.validate import validate_record, verify_result_digests
 
     errors = validate_record(result)
@@ -714,22 +748,38 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     ):
         raise BundleError("canonical replay digest mismatch")
     if manifest.get("ledger_ref") is not None:
-        from leaderboard.ledger import LedgerError, verify_ledger
+        from leaderboard.ledger import LedgerError
+        from leaderboard.ledger import _canonical as ledger_canonical
+        from leaderboard.ledger import verify_ledger
 
         ledger_path = root / "ledger.jsonl"
         public_key = root / "ledger-public.pem"
+        lock_path = ledger_path.with_suffix(ledger_path.suffix + ".lock")
         if "ledger.jsonl" not in payloads or "ledger-public.pem" not in payloads:
             raise BundleError("missing ledger inclusion receipt")
         try:
             entries = verify_ledger(ledger_path, public_key)
         except LedgerError as exc:
             raise BundleError("ledger verification failed") from exc
-        if not any(
-            isinstance(entry, dict)
-            and entry.get("result") == result
+        finally:
+            if lock_path.is_file() and not lock_path.is_symlink():
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+        matched = [
+            entry
             for entry in entries
-        ):
+            if isinstance(entry, dict) and entry.get("result") == result
+        ]
+        if not matched:
             raise BundleError("ledger result reference mismatch")
+        if not any(
+            manifest["ledger_ref"]
+            == f"ledger-entry@sha256:{hashlib.sha256(ledger_canonical(entry)).hexdigest()}"
+            for entry in matched
+        ):
+            raise BundleError("ledger_ref digest mismatch")
     traces = [
         _parse_json(line, "traces.jsonl")
         for line in payloads["traces.jsonl"].decode("utf-8").splitlines()
@@ -799,8 +849,6 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         return verified
     except BaseException:
         shutil.rmtree(temp, ignore_errors=True)
-        if destination.exists():
-            shutil.rmtree(destination, ignore_errors=True)
         raise
 
 
