@@ -986,6 +986,29 @@ def test_manifest_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) ->
         verify_bundle(bundle["root"])
 
 
+def test_later_manifest_metrics_and_intervals_must_recompute(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "later-metrics")
+    payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    extra = _metric_record()
+    extra["name"] = "fabricated_recall"
+    extra["value"] = 0.0
+    extra["numerator"] = 0
+    extra["interval"] = {"low": 0.0, "high": 0.1}
+    payload["metrics"].append(extra)
+    payload["intervals"].append(
+        {
+            "metric": "fabricated_recall",
+            "method": "wilson",
+            "confidence_level": 0.95,
+            "low": 0.0,
+            "high": 0.1,
+        }
+    )
+    _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="metrics|intervals"):
+        verify_bundle(bundle["root"])
+
+
 def test_missing_canonical_replay_artifact_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "no-replay")
     replay = bundle["root"] / "canonical-replay.json"
