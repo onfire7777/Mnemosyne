@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -818,6 +820,78 @@ def test_atomic_publication_never_replaces_an_empty_directory(tmp_path: Path) ->
 
     assert source.is_dir()
     assert destination.is_dir()
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "symbol", "expected_flag"),
+    [
+        ("linux", "renameat2", public_bundle._RENAME_NOREPLACE),
+        ("darwin", "renamex_np", public_bundle._RENAME_EXCL),
+    ],
+)
+def test_atomic_publication_dispatches_native_exclusive_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform_name: str,
+    symbol: str,
+    expected_flag: int,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class NativeRename:
+        argtypes: object = None
+        restype: object = None
+
+        def __call__(self, *args: object) -> int:
+            calls.append(args)
+            return 0
+
+    library = type("Library", (), {symbol: NativeRename()})()
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: library)
+    monkeypatch.setattr(public_bundle.os, "name", "posix")
+    monkeypatch.setattr(public_bundle.sys, "platform", platform_name)
+
+    public_bundle._publish_directory_noreplace(
+        tmp_path / "source", tmp_path / "destination"
+    )
+
+    assert len(calls) == 1
+    assert calls[0][-1] == expected_flag
+
+
+def test_atomic_publication_maps_native_collision_to_file_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class NativeRename:
+        argtypes: object = None
+        restype: object = None
+
+        def __call__(self, *args: object) -> int:
+            return -1
+
+    library = type("Library", (), {"renameat2": NativeRename()})()
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: library)
+    monkeypatch.setattr(ctypes, "get_errno", lambda: errno.EEXIST)
+    monkeypatch.setattr(public_bundle.os, "name", "posix")
+    monkeypatch.setattr(public_bundle.sys, "platform", "linux")
+
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        public_bundle._publish_directory_noreplace(
+            tmp_path / "source", tmp_path / "destination"
+        )
+
+
+def test_atomic_publication_fails_closed_on_unsupported_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(ctypes, "CDLL", lambda *args, **kwargs: object())
+    monkeypatch.setattr(public_bundle.os, "name", "posix")
+    monkeypatch.setattr(public_bundle.sys, "platform", "unsupported")
+
+    with pytest.raises(BundleError, match="no-replace publication is unavailable"):
+        public_bundle._publish_directory_noreplace(
+            tmp_path / "source", tmp_path / "destination"
+        )
 
 
 @pytest.mark.parametrize(

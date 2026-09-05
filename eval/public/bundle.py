@@ -39,6 +39,9 @@ SECRET = re.compile(
 SECRET_BYTES = re.compile(SECRET.pattern.encode("ascii"))
 _SECRET_SCAN_CHUNK_SIZE = 1024 * 1024
 _SECRET_SCAN_OVERLAP = 128
+_AT_FDCWD = -100
+_RENAME_NOREPLACE = 1
+_RENAME_EXCL = 4
 _WINDOWS_RESERVED_NAMES = {
     "aux",
     "con",
@@ -793,7 +796,13 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
             ctypes.c_uint,
         ]
         rename.restype = ctypes.c_int
-        result = rename(-100, source_bytes, -100, destination_bytes, 1)
+        result = rename(
+            _AT_FDCWD,
+            source_bytes,
+            _AT_FDCWD,
+            destination_bytes,
+            _RENAME_NOREPLACE,
+        )
     elif sys.platform == "darwin":
         try:
             rename = library.renamex_np
@@ -801,7 +810,7 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
             raise BundleError("atomic no-replace publication is unavailable") from exc
         rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
         rename.restype = ctypes.c_int
-        result = rename(source_bytes, destination_bytes, 4)
+        result = rename(source_bytes, destination_bytes, _RENAME_EXCL)
     else:
         raise BundleError("atomic no-replace publication is unavailable")
     if result == 0:
