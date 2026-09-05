@@ -726,6 +726,62 @@ def _inspect_artifact(path: Path) -> tuple[int, str, bool]:
     return size, "sha256:" + digest.hexdigest(), secret_found
 
 
+def _copy_inventory_artifact(
+    source: Path, target: Path, entry: dict[str, Any]
+) -> None:
+    """Copy one validated source inode without reopening its pathname."""
+    try:
+        path_stat = source.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or path_stat.st_mode & _UNSAFE_MODE_BITS
+        ):
+            raise BundleError("reproducibility artifact changed before copy")
+        with source.open("rb") as source_handle:
+            opened_stat = os.fstat(source_handle.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or opened_stat.st_nlink != 1
+                or (opened_stat.st_dev, opened_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise BundleError("reproducibility artifact changed before copy")
+            digest = hashlib.sha256()
+            size = 0
+            secret_found = False
+            carry = b""
+            with target.open("xb") as target_handle:
+                while chunk := source_handle.read(_SECRET_SCAN_CHUNK_SIZE):
+                    target_handle.write(chunk)
+                    size += len(chunk)
+                    digest.update(chunk)
+                    window = carry + chunk
+                    if SECRET_BYTES.search(window):
+                        secret_found = True
+                    carry = window[-_SECRET_SCAN_OVERLAP:]
+            current_stat = source.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(current_stat.st_mode)
+                or current_stat.st_nlink != 1
+                or (current_stat.st_dev, current_stat.st_ino)
+                != (opened_stat.st_dev, opened_stat.st_ino)
+            ):
+                raise BundleError("reproducibility artifact changed during copy")
+    except BundleError:
+        raise
+    except OSError as exc:
+        raise BundleError("reproducibility artifact changed during copy") from exc
+    if (
+        size != entry["size"]
+        or "sha256:" + digest.hexdigest() != entry["digest"]
+    ):
+        raise BundleError(f"digest mismatch: {entry['path']}")
+    if secret_found:
+        raise BundleError("secret-like material detected")
+    os.chmod(target, stat.S_IMODE(opened_stat.st_mode))
+
+
 def _reject_decoded_secrets(value: object) -> None:
     stack = [value]
     while stack:
@@ -1316,8 +1372,7 @@ def assemble_reproducibility_bundle(
             source_file = source_root / name
             target = final / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source_file, target)
-            shutil.copymode(source_file, target, follow_symlinks=False)
+            _copy_inventory_artifact(source_file, target, entry)
         (final / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
         result = verify_reproducibility_bundle(final)
         if os.path.lexists(destination_root):
