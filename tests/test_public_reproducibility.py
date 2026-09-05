@@ -77,6 +77,20 @@ def _digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
+def _media_type(name: str) -> str:
+    if name.endswith(".json"):
+        return "application/json"
+    if name.endswith(".jsonl"):
+        return "application/x-ndjson"
+    if name.endswith(".pem"):
+        return "application/x-pem-file"
+    if name == "README.md":
+        return "text/markdown"
+    if name == "reproduce.sh":
+        return "text/x-shellscript"
+    return "text/plain"
+
+
 def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
     run_public_suite("smoke", root)
     payloads = {entry.name: entry.read_bytes() for entry in root.iterdir()}
@@ -220,9 +234,7 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
                 {
                     "path": name,
                     "size": len(payload),
-                    "media_type": "application/json"
-                    if name.endswith(".json")
-                    else "text/plain",
+                    "media_type": _media_type(name),
                     "canonicalization": "exact-bytes",
                     "digest": _digest(payload),
                 }
@@ -594,7 +606,11 @@ def test_inventory_rejects_reserved_manifest_and_file_directory_collisions() -> 
     entry = copy.deepcopy(collision["artifacts"]["files"][0])  # type: ignore[index]
     collision["artifacts"]["files"] = [  # type: ignore[index]
         {**entry, "path": "evidence"},
-        {**entry, "path": "evidence/raw.json"},
+        {
+            **entry,
+            "path": "evidence/raw.json",
+            "media_type": "application/json",
+        },
     ]
     with pytest.raises(BundleError, match="file-directory collision"):
         _validate(collision)
@@ -602,11 +618,29 @@ def test_inventory_rejects_reserved_manifest_and_file_directory_collisions() -> 
     portable_collision = _manifest()
     entry = copy.deepcopy(portable_collision["artifacts"]["files"][0])  # type: ignore[index]
     portable_collision["artifacts"]["files"] = [  # type: ignore[index]
-        {**entry, "path": "Evidence.json"},
-        {**entry, "path": "evidence.JSON"},
+        {**entry, "path": "Evidence.json", "media_type": "application/json"},
+        {**entry, "path": "evidence.JSON", "media_type": "application/json"},
     ]
     with pytest.raises(BundleError, match="non-portable path collision"):
         _validate(portable_collision)
+
+
+def test_inventory_media_types_are_valid_and_match_core_artifacts() -> None:
+    invalid = _manifest()
+    invalid["artifacts"]["files"][0]["media_type"] = "not-a-media-type"  # type: ignore[index]
+    with pytest.raises(BundleError, match="media type is invalid"):
+        _validate(invalid)
+
+    mismatched = _manifest()
+    mismatched["artifacts"]["files"][0]["media_type"] = "text/plain"  # type: ignore[index]
+    with pytest.raises(BundleError, match="does not match artifact"):
+        _validate(mismatched)
+
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    media_type_rule = schema["properties"]["artifacts"]["properties"]["files"][  # type: ignore[index]
+        "items"
+    ]["properties"]["media_type"]
+    assert re.fullmatch(media_type_rule["pattern"], "not-a-media-type") is None
 
 
 def test_every_recomputed_metric_and_interval_is_bound_to_manifest() -> None:
@@ -1252,7 +1286,7 @@ def test_distinct_signed_ledger_receipt_records_independent_reproduction(
             {
                 "path": name,
                 "size": len(payload),
-                "media_type": "text/plain",
+                    "media_type": _media_type(name),
                 "canonicalization": "exact-bytes",
                 "digest": _digest(payload),
             }
@@ -1298,7 +1332,7 @@ def test_independent_reproduction_rejects_operator_signing_key(tmp_path: Path) -
             {
                 "path": name,
                 "size": len(payload),
-                "media_type": "text/plain",
+                    "media_type": _media_type(name),
                 "canonicalization": "exact-bytes",
                 "digest": _digest(payload),
             }

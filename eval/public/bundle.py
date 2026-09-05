@@ -44,6 +44,22 @@ _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
 _UNSAFE_MODE_BITS = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
+_MEDIA_TYPE = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}/"
+    r"[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]{0,63}"
+)
+_REQUIRED_MEDIA_TYPES = {
+    "README.md": "text/markdown",
+    "ledger-public.pem": "application/x-pem-file",
+    "independent-public.pem": "application/x-pem-file",
+    "ledger.jsonl": "application/x-ndjson",
+    "independent-ledger.jsonl": "application/x-ndjson",
+    "traces.jsonl": "application/x-ndjson",
+    "ledger.jsonl.lock": "text/plain",
+    "independent-ledger.jsonl.lock": "text/plain",
+    "reproduce.sh": "text/x-shellscript",
+    "uv.lock": "text/plain",
+}
 _WINDOWS_RESERVED_NAMES = {
     "aux",
     "con",
@@ -365,7 +381,15 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         portable_paths.add(portable_path)
         if type(entry["size"]) is not int or not 0 <= entry["size"] <= 64 * 2**20:
             raise BundleError("file inventory size is invalid")
-        _repro_nonempty(entry["media_type"], "file media type", maximum=128)
+        media_type = entry["media_type"]
+        _repro_nonempty(media_type, "file media type", maximum=128)
+        if _MEDIA_TYPE.fullmatch(media_type) is None:
+            raise BundleError("file media type is invalid")
+        expected_media_type = _REQUIRED_MEDIA_TYPES.get(path)
+        if expected_media_type is None and path.lower().endswith(".json"):
+            expected_media_type = "application/json"
+        if expected_media_type is not None and media_type != expected_media_type:
+            raise BundleError(f"file media type does not match artifact: {path}")
         if entry["canonicalization"] != "exact-bytes":
             raise BundleError("file canonicalization must be exact-bytes")
         _repro_digest(entry["digest"], "file digest")
