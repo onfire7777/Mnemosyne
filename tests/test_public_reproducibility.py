@@ -760,6 +760,41 @@ def test_one_byte_tampering_fails_closed(tmp_path: Path, name: str) -> None:
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_digest_reference_streams_without_path_read_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"streamed artifact" * 100_000
+    artifact = tmp_path / "artifact.bin"
+    artifact.write_bytes(payload)
+
+    def reject_read_bytes(_path: Path) -> bytes:
+        raise AssertionError("digest helper must stream")
+
+    monkeypatch.setattr(Path, "read_bytes", reject_read_bytes)
+
+    assert public_bundle._sha256_reference(artifact) == _digest(payload)
+
+
+def test_size_mismatch_fails_before_hashing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    readme = root / "README.md"
+    readme.write_bytes(readme.read_bytes() + b"x")
+    original = public_bundle._sha256_reference
+
+    def guard(path: Path) -> str:
+        if path == readme:
+            raise AssertionError("size-mismatched file must not be hashed")
+        return original(path)
+
+    monkeypatch.setattr(public_bundle, "_sha256_reference", guard)
+
+    with pytest.raises(BundleError, match="digest mismatch: README.md"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)

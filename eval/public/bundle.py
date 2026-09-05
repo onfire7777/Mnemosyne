@@ -562,7 +562,11 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
 
 
 def _sha256_reference(path: Path) -> str:
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
 
 
 def _runtime_platform() -> str:
@@ -734,10 +738,12 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         path = root / entry["path"]
         try:
             size = path.stat().st_size
+            if size != entry["size"]:
+                raise BundleError(f"digest mismatch: {entry['path']}")
             digest = _sha256_reference(path)
         except OSError as exc:
             raise BundleError("reproducibility bundle file cannot be read") from exc
-        if size != entry["size"] or digest != entry["digest"]:
+        if digest != entry["digest"]:
             raise BundleError(f"digest mismatch: {entry['path']}")
         if SECRET.search(path.read_text(encoding="utf-8", errors="replace")):
             raise BundleError("secret-like material detected")
