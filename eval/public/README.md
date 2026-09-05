@@ -41,7 +41,9 @@ must be valid UTF-8; opaque binary artifacts use a non-text media type.
 The file inventory is lexicographically sorted by path so equivalent bundles
 have one canonical manifest representation. Individual artifacts are limited to
 64 MiB and the declared aggregate inventory is limited to 1 GiB, bounding the
-verification, staging, and reproduction work accepted from one bundle.
+verification, staging, and reproduction work accepted from one bundle. The
+canonical reproducibility manifest itself is limited to 4 MiB at both assembly
+and verification boundaries.
 Metric declarations are sorted by family/name identity; each metric's excluded
 case IDs are non-empty, unique, and lexicographically sorted.
 
