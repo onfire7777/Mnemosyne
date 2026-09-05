@@ -1,6 +1,6 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-08-15
+Updated: 2026-09-05 (P13-C discharge and obsolete signed-publication lease release)
 Baseline: `main@f688c74757365a9d946100687a04288cde12a7fc`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
@@ -190,6 +190,11 @@ The following packages are complete source history, not runnable work:
   head, merge SHA/time, or post-main CI is claimed here. PR #117 is not a
   topology-only refresh, changes no benchmark result or admission state, and
   must pass fresh exact-head review, security, and CI before merge.
+  Subsequent delivery verified on 2026-09-05: merged from
+  `b818ab3237f85f311bb6a1e6ae7195f40a9d6f63` as
+  `d11ffe5e61511269efcf38ccd2ad064564580109` at `2026-08-31T18:03:53Z`.
+  The OPEN/READY text above is the historical self-record; PR #117 owns no
+  current lifecycle writer.
 - PR #121: M04-B public-harness registration of `wmbs-m04-development`
   (title: M04-B: register wmbs-m04-development (PROPOSED)) from exact head
   `5c629a67f7466e9a4d75b82681bac53612abb076`; all required exact-head
@@ -410,6 +415,94 @@ record.
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
 
+- PR #116: M06 plan-only delivery from head
+  `e463f61f00fef1913bd7a0df9db739616a906b54`, with successful exact-head CI
+  `33933485295`; merged as `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98`
+  at `2026-09-05T01:11:18Z`. It adds only
+  `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`; it
+  changes no N12 path and does not deliver M06 implementation. PR #135's
+  branch incorporated that main update before continuing gate delivery.
+- PR #135: receipt-only correction discharging P13-C from verified scheduled
+  run `30807305055`, with matching `GOAL.md`, `.planning/STATE.md`,
+  `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and Phase 13 summary
+  corrections closing BENCH-007 and retiring the unavailable Mac reservation,
+  plus the matching current-status checkpoints in the executable pilot plan.
+  Open at the 2026-09-05 capture;
+  no final-head CI, merge, or post-main result is claimed in this self-record.
+  It preserves the canonical baseline and progress counters, releases the
+  obsolete signed-publication lease, and marks N12 READY FOR ADMISSION after
+  this receipt lands. It assigns no implementation writer.
+
+## P13-C discharge and N12 admission check (2026-09-05)
+
+The owner requested resolution of the stale gate checklist. This bounded
+receipt changes this map, `GOAL.md`, `.planning/STATE.md`,
+`.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and
+`.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`
+to reconcile BENCH-007's sole remaining cadence gate, plus the lease-status
+checkpoints in `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+so that the executable authority agrees with N12's admission state. Its approved
+implementation contract is unchanged. The gate
+check used clean `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, whose
+post-main CI run `33927734374` succeeded. The standing canonical baseline
+above is preserved; this receipt admits no source writer.
+
+- **P13-C: DISCHARGED.** GitHub's authenticated run and job APIs verify
+  [Public regression run 30807305055](https://github.com/onfire7777/Mnemosyne/actions/runs/30807305055):
+  `event=schedule`, `status=completed`, `conclusion=success`, workflow
+  `.github/workflows/public-regression.yml`, head
+  `b8673031a80158c49d552a4b3647829d213243bd`, started
+  `2026-08-03T10:52:57Z`, updated `2026-08-03T10:53:18Z`.
+  Job `91665545558` (`public-regression`) completed successfully at
+  `2026-08-03T10:53:17Z`; its `Run fixed public contract regression` step
+  succeeded. The configured Monday cron is `23 7 * * 1`; the actual delayed
+  start time above is retained without substituting the nominal cron time.
+  No workflow artifacts exist (`total_count=0`), as expected for this fixed
+  contract-test workflow. This durable metadata receipt closes cadence only;
+  it supplies no official benchmark result, BENCH-006 closure, publication
+  eligibility, or progress-counter increment. BENCH-007 is Complete because
+  its merged source and this retained scheduled run satisfy its contract;
+  Phase 13 remains open for BENCH-006, and the source plan was already complete.
+- **Signed-publication source: MERGED.** PR #69 merged at
+  `2026-07-26T12:42:20Z` as `a4e80b5a67b0437d3a864af0fe347febfe32e58b`.
+  PR #70 delivered its completion receipt at `2026-07-26T12:59:59Z` as
+  `eeb8765ea1f4cc924002ad8234df50326e227aed`. Both are ancestors of the
+  inspected main tip. `leaderboard/publish.py` exists there with blob
+  `f6506215ece4dba8d37ce07829b5c22d84020963`.
+- **Protected signed-publication lease: RELEASED.** On 2026-09-05 the owner
+  clarified, "dont have old mac or its files", while requesting full resolution
+  of this gate. The unavailable worktree
+  `/Users/admin/Mnemosyne.codex-phase16-signed-publication` is therefore retired
+  as an active reservation and its repository paths are released. This is an
+  administrative disposition based on the owner's confirmation, not a clean
+  worktree inspection or a claim that unavailable residual files were recovered,
+  landed, or deleted. The delivered source remains preserved in PRs #69-#70.
+  Any future recovery requires a fresh handoff/review and cannot revive this
+  retired reservation. The separate whole-memory-spec lease is unchanged.
+- **N12: READY FOR ADMISSION after this receipt lands.** Recomputed against
+  `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`: the result-v1 schema,
+  validator, signed ledger, renderer, publisher, and readiness source exist;
+  `leaderboard/schema/result-v2.schema.json` is absent, so N12 is not delivered.
+  Open PRs #116, #118-#120, #122-#127, #135, and #137 change none of N12's
+  eleven exact source/test/documentation paths. The three local worktrees
+  likewise have no changes on those paths. The runtime-hardening worktree has
+  unrelated dirty work, which remains untouched. PR #120 overlaps this
+  receipt on `GOAL.md` and is not merged or otherwise consumed here.
+  The next step is one result-v2 integration owner's assignment on current
+  main, preserving result-v1 bytes/behavior and rechecking exact leases at
+  that time. This closes the obsolete lease blocker; it neither implements
+  N12 nor starts a source writer automatically.
+  Refresh after PR #116: main advanced to
+  `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98`; its sole changed file is the
+  M06 plan, so the N12 lease/source assessment is unchanged. PR #116 is now
+  merged rather than open. Before N12 source edits, the assigned owner must
+  snapshot result-v1 golden bytes/behavior and prove its existing contract
+  tests pass, as required by N12's compatibility contract.
+
+The downstream order remains `N12 -> P14-B -> P15-S2`; module-specific
+conditions still apply. This receipt starts no module implementation and
+leaves the unrelated PR #120 unchanged.
+
 ## Shared-file owners
 
 Every surface below is an exact repository-relative path. A trailing `/`
@@ -421,7 +514,7 @@ repository.
 |---|---|---|
 | GoalEx lifecycle/integration owner | `GOAL.md`; `.planning/`; `docs/plans/`; `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`; `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md`; `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`; `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md` | One writer. Update only from verified merged reality. |
 | Public-harness integration owner | `eval/public/runner.py`; `eval/public/scoring.py`; `eval/public/bundle.py`; `eval/public/registry.json`; `eval/public/README.md`; `eval/public/adapters/whole_memory_reference.py`; `eval/public/schema/wmbs-0.1-draft.schema.json`; `tests/test_public_whole_memory_reference.py`; `src/mnemosyne/cli.py`; `eval/harness/cli_driver.py` | One writer; serialize any package touching one of these paths. |
-| Result-v2 integration owner | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; `tests/test_leaderboard_readiness.py` | No admission until the protected signed-publication paths are released on current main. |
+| Result-v2 integration owner | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; `tests/test_leaderboard_readiness.py` | Obsolete signed-publication reservation released by the 2026-09-05 owner confirmation. N12 is ready for one owner's admission after this receipt lands, with a fresh main/lease check. |
 | CI integration owner | `.github/workflows/`; `tests/test_public_regression_workflow.py` | One writer; one exact-head authoritative full suite. |
 | Evidence/operator owner | `eval/public/receipts/` | One process and one worker; no concurrent coding or broad tests during measured runs. Future run-staging and evidence-index paths remain unleased until an approved plan names their exact repository-relative paths. |
 
@@ -447,10 +540,10 @@ exact lease, shared owner/integration edge, and external gate.
 | T1 | COMPLETE | GitHub Wiki reconciliation; consumed verified canonical main | Current Home, status, evaluation, and development pages with no v2 claim upgrade | `wiki:Home.md`; `wiki:Roadmap-and-Status.md`; `wiki:Calibration-and-Evaluation.md`; `wiki:Development-Guide.md`. Wiki owner only | Complete: wiki commit `46c34287fe064842e72c3f52a9afad0c822b1846`; PR #88 changed no benchmark boundary, claim, or status any wiki page asserts, so it required no further wiki change |
 | T2 | COMPLETE | Deduplicated knowledge refresh; consumed final canonical and wiki source | One current CBM graph and one Gbrain milestone | No product/source lease | Complete: single deduplicated refresh of 2026-07-30, Gbrain milestone `milestones/mnemosyne-pr86-pr87-wiki-canonical-delivery-2026-07-30`; the earlier refresh at `90841427` was not duplicated |
 | P12-E | EXTERNAL/OPERATOR BLOCKED | Phase 12 measured closure; consumes existing 12-04 source, production Postgres PPR parity, runtime readiness, grounded-reader QA, protected attempt | Frozen/held-out EM/F1 and positive graph/PPR evidence | No new code lease; operator evidence paths in Phase 12 plan 12-04 | Protected data, production/runtime, operator authorization |
-| P13-C | EXTERNAL EVENT | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Still open: only the manual dispatch `30561430522` exists; the first eligible real `schedule` event is 2026-08-03; manual dispatch is not a substitute |
+| P13-C | DISCHARGED | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Real `schedule` run `30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03; job `91665545558` and its fixed public-contract test step succeeded. Metadata and scope are retained in the P13-C discharge section; no official benchmark or publication claim |
 | P13-O | EXTERNAL/PLAN BLOCKED | Official MemoryAgentBench and BEAM; consumes P12-E plus pinned upstream revisions/protocols | BENCH-006 conforming upstream evidence | No admitted lease; a future exact plan must name every source/evidence path | Rights/license, provider/model/judge disclosure, capacity, operator admission |
 | SBOX | QUARANTINED | Development sandbox/external-meter candidate; consumes the common ABI and local reviewed sandbox commits | Only development-source isolation receipts until enforcement is proven | Current local source/test lease: `eval/public/sandbox.py`, `eval/public/sandbox/Dockerfile`, `tests/test_public_sandbox.py`; public-harness owner for any later shared integration | No push/PR/merge until immutable image, daemon probe, filesystem/network/write-boundary enforcement, SBOM, provenance, and resource receipts exist |
-| N12 | LEASE BLOCKED | Additive result-v2 and M20 publication-integrity dispatch; consumes result-v1, signed ledger, renderer/publisher/readiness, official/enhanced lineage, atomic attempt identities | Compatible result-v2 projections, visible safety failures, cross-version supersession | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; result-v2 owner only | Protected signed-publication patch/paths must be released on current main; result-v1 bytes and behavior remain immutable |
+| N12 | READY FOR ADMISSION | Additive result-v2 and M20 publication-integrity dispatch; consumes result-v1, signed ledger, renderer/publisher/readiness, official/enhanced lineage, atomic attempt identities | Compatible result-v2 projections, visible safety failures, cross-version supersession | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; result-v2 owner only | Obsolete protected reservation released by the 2026-09-05 owner confirmation; effective after this receipt lands. Assign one owner and recheck current main/exact leases before implementation; result-v1 bytes and behavior remain immutable |
 | P14-B | BLOCKED on N12 | REPRO-001 implementation; consumes N12, existing bundle/reproduce lifecycle, M15 replay, signed ledger, static renderer | Neutral reproducibility-bundle v1 schema and one clean-checkout reproduction command | Exactly `eval/public/schema/reproducibility-bundle-v1.schema.json`, `eval/public/bundle.py`, `eval/public/README.md`, `tests/test_public_reproducibility.py`; one integration owner | N12 merged, protected lease released, result-v1 golden compatibility green |
 | P14-R | EVIDENCE BLOCKED | REPRO-002; consumes P14-B and a headline-eligible official result | Clean-checkout reproduction receipt | Evidence-only future lease | Official result, public bundle, custody, disclosed judge, human approval |
 | P15-S2 | BLOCKED on P14-B | CAP-007/008 capability work; consumes Phase 14 and existing consolidation/queue/retrieval rails | Cadence tiers, bounded sleep consolidation, global sensemaking, surprise-gated writes | Exact `files_modified` list in `15-01-PLAN.md`; shared lifecycle files excluded | Phase 14 implementation and fresh Worktrunk lease check |
@@ -528,11 +621,11 @@ Delivered Windows portability wave (serialized; content-anchored)
 
 Independent external gates (do not block T0-T10)
   P12-E operator measurement
-  P13-C real scheduled event
+  P13-C real scheduled event (DISCHARGED: run 30807305055)
   P13-O official upstream admission
 
 Future benchmark source wave (currently no benchmark node is admitted)
-  release protected result-v2 lease
+  protected result-v2 lease released (2026-09-05 owner confirmation)
     -> N12 result-v2/M20
       -> P14-B REPRO-001 implementation
         -> P15-S2
@@ -558,9 +651,10 @@ Quarantine
   exact-head, security, and post-main receipts. The controller/CI integration
   owner remains the sole writer for any future serialized
   `.github/workflows/ci.yml` edge.
-- Current safe coding concurrency is **zero new module-implementation
-  writers**: every remaining source package is dependency-, lease-, evidence-,
-  or spec-blocked. `T7` and `T8` were delivered by PR #99; `T9` was delivered
+- Current admitted coding concurrency is **zero new module-implementation
+  writers**. N12 is ready for a single result-v2 owner's admission after this
+  receipt lands; other packages retain their dependency, evidence, and spec
+  conditions. `T7` and `T8` were delivered by PR #99; `T9` was delivered
   by PR #100 at `main@b3570937`. Their required order is discharged, and no
   writer remains admitted from that wave or active on `eval/public/*`. `T7` and
   `T8` shared the lifecycle files and landed together; `T9` shared
@@ -573,22 +667,22 @@ Quarantine
   record are accepted standing conditions of the controller branch. They are
   discharged only by branch-resident recomputation, never by admitting a
   successor node. `T6` admits no successor node and no source node.
-- **Next dependency-ready item: external gate `P13-C`; no new source node is
-  admitted.** `T9` is already delivered, and `P13-C` was first eligible
-  2026-08-03. The Phase 12
+- **P13-C is discharged; no new source node is admitted.** `T9` is already
+  delivered. Real scheduled run `30807305055` supplies the previously missing
+  cadence receipt. The Phase 12
   evidence path remains `P12-E`: exact candidate/runtime manifest and resolved model digest, repeated
   synthetic plus 24-case `qa_scale_dev_v1`, then one protected `qa_hard_v2`
   attempt, and only after that held-out LongMemEval/Hippo evidence. Host,
-  mTLS, custody, and operator gates remain fail-closed. `N12` is lease blocked (the protected
-  signed-publication paths are not released on current `main`) and gates
+  mTLS, custody, and operator gates remain fail-closed. `N12` is ready for
+  admission after the obsolete reservation's release lands, but still gates
   `P14-B` and the whole `P15-*` chain behind it; `SBOX` is quarantined until
   real enforcement receipts exist; `U-MODULES` lack approved exact plans;
   `P12-E`, `P13-O`, and `P14-R` are operator/evidence blocked; and `P16-L`
-  needs human approval. The one genuinely pending item is the external event
-  `P13-C` — the first real weekly `schedule` receipt, first eligible
-  2026-08-03 — which is an external gate, not an admissible writer. The next
-  source admission therefore waits on an external gate opening, and this map
-  must be recomputed from then-current `main` at that time.
+  needs human approval. For the N12 chain, the next action is to assign one
+  result-v2 integration owner from then-current main after this receipt lands
+  and the live exact-lease check passes. The old Mac reservation is retired
+  on the owner's confirmation that the Mac and its files are unavailable;
+  no access to that machine is required to close this administrative blocker.
 - After N12 becomes genuinely admissible, sustain at most **4-6** useful
   exact-disjoint writers and burst to **7-8** only for short read-only review,
   focused-test, or plan-contract work. These are ceilings, never targets.
