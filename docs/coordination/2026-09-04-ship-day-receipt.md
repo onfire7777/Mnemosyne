@@ -5,8 +5,8 @@ upgrade, and no Stage A implement.
 
 ## Tip
 
-- `main` SHA `3281e61ed6b3d077628e3fd03ce0ec8de22cde18` (short `3281e61e`)
-- CI `33927734374` **SUCCESS** (Unit + drift checks green)
+- `main` SHA `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98` (short `1f6b3b1c`) via #116
+- Tip advanced via #116 merge. No new tip CI run id recorded. Prior tip `3281e61e` CI `33927734374` **SUCCESS** (Unit + drift checks green).
 
 ## Merged this day (PT)
 
@@ -18,14 +18,15 @@ upgrade, and no Stage A implement.
 | #130 | docs: M05 README hierarchy residual + M12/M13 peer cells | `0679cdc762d6ac7be610b6be11f62a474fa74240` | README/disclosure residual only. Merged 14:20 PT. |
 | #133 | docs: record merged PR #130 in write-lease map | `661e3f3f3b8fc8714094e6e84c186871c842f756` | Lease-map receipt for #130. Merged 14:54 PT. |
 | #132 | docs: inventory — record ACCEPT plan PRs for M06–M09/M11/M17–M19 | `83804715d19c90c77161924f6acc79e62e567998` | Inventory ACCEPT receipts. Docs-only. Merged 15:26 PT. |
-| #134 | docs(coordination): record #132 inventory ACCEPT in lease-map | `3281e61ed6b3d077628e3fd03ce0ec8de22cde18` | Lease-map receipt for #132. Current tip. Merged 15:59 PT. |
+| #134 | docs(coordination): record #132 inventory ACCEPT in lease-map | `3281e61ed6b3d077628e3fd03ce0ec8de22cde18` | Lease-map receipt for #132. Prior tip before #116. Merged 15:59 PT. |
+| #116 | docs: PROPOSED M06 consolidation plan (not code-ready) | `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98` | M06 consolidation plan PROPOSED / NOT CODE-READY; docs only. |
 
 #121 is **not** in this window (merged `2026-08-31T19:05:19Z`; merge
 `eea12f798c22e281100a62552589225321b6c424`). Recorded on this day only via #129.
 
 ## Open / holds
 
-- ACCEPT plan land wave `#116→#118→#119→#122→#123→#124→#125→#127` (#126 DEFERRED, #120 OFF)
+- ACCEPT plan land wave `#118→#119→#122→#123→#124→#125→#127` (#126 DEFERRED, #120 OFF)
 - #135 Jake P13-C discharge (`GOAL.md` / `.planning/STATE.md` / lease-map) — N12 still **LEASE BLOCKED** pending Mac worktree residual
 - Stage A implement **HOLD** (gates)
 - Memory/GBrain Mac offline — receipts drafted **HOLD**
