@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -19,6 +20,7 @@ class PublicationError(ValueError):
 
 
 _ARTIFACT_KEYS = ("build", "config", "bundle")
+_BINDING_MARK = re.compile(r",([^=,]+)=")
 _USAGE = (
     "usage: python -m leaderboard.publish "
     "LEDGER PUBLIC_KEY DESTINATION "
@@ -32,26 +34,26 @@ def _parse_record_mapping(
     record_id, separator, rest = item.partition("=")
     if not separator or not record_id or not rest:
         raise PublicationError(f"invalid trace mapping: {item}")
-    parts = rest.split(",")
-    trace = parts[0]
-    extras = parts[1:]
-    if not trace or "=" in trace:
-        raise PublicationError(f"invalid trace mapping: {item}")
-    if not extras:
-        return record_id, Path(trace), None
-    files: dict[str, Path] = {}
-    for extra in extras:
-        key, equals, path = extra.partition("=")
-        if (
-            not equals
-            or key not in _ARTIFACT_KEYS
-            or not path
-            or key in files
-        ):
-            raise PublicationError(f"invalid artifact mapping: {item}")
-        files[key] = Path(path)
-    if any(key not in files for key in _ARTIFACT_KEYS):
+    marks = list(_BINDING_MARK.finditer(rest))
+    artifact_marks = [mark for mark in marks if mark.group(1) in _ARTIFACT_KEYS]
+    if not artifact_marks:
+        return record_id, Path(rest), None
+    if any(mark.group(1) not in _ARTIFACT_KEYS for mark in marks):
         raise PublicationError(f"invalid artifact mapping: {item}")
+    keys = [mark.group(1) for mark in artifact_marks]
+    if len(keys) != len(set(keys)) or any(key not in keys for key in _ARTIFACT_KEYS):
+        raise PublicationError(f"invalid artifact mapping: {item}")
+    ordered = sorted(artifact_marks, key=lambda mark: mark.start())
+    trace = rest[: ordered[0].start()]
+    if not trace:
+        raise PublicationError(f"invalid trace mapping: {item}")
+    files: dict[str, Path] = {}
+    for index, mark in enumerate(ordered):
+        end = ordered[index + 1].start() if index + 1 < len(ordered) else len(rest)
+        path = rest[mark.end() : end]
+        if not path:
+            raise PublicationError(f"invalid artifact mapping: {item}")
+        files[mark.group(1)] = Path(path)
     return record_id, Path(trace), files
 
 
