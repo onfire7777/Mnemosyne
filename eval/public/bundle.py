@@ -932,6 +932,68 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     return validated
 
 
+def assemble_reproducibility_bundle(
+    source: Path | str,
+    destination: Path | str,
+    manifest: object,
+) -> dict[str, Any]:
+    """Atomically package and verify manifest-owned REPRO-001 artifacts."""
+    validate_reproducibility_manifest(manifest)
+    if not isinstance(manifest, dict):  # narrowed by the validator
+        raise BundleError("manifest must be an object")
+    source_path = Path(source)
+    destination_path = Path(destination)
+    _reject_reproducibility_link_path(source_path)
+    _reject_reproducibility_link_path(destination_path)
+    source_root = source_path.resolve()
+    destination_root = destination_path.resolve()
+    if not source_root.is_dir():
+        raise BundleError("reproducibility artifact source must be a real directory")
+    if os.path.lexists(destination_root):
+        raise FileExistsError(f"refusing to overwrite bundle: {destination_root}")
+    if source_root == destination_root or source_root in destination_root.parents:
+        raise BundleError("assembly destination must be outside the artifact source")
+
+    inventory = manifest["artifacts"]["files"]
+    names = {entry["path"] for entry in inventory}
+    expected_directories = {
+        parent.as_posix()
+        for name in names
+        for parent in Path(name).parents
+        if parent != Path(".")
+    }
+    actual_files, actual_directories = _reproducibility_tree(
+        source_root, names, expected_directories
+    )
+    if actual_files != names or actual_directories != expected_directories:
+        raise BundleError("reproducibility artifact source inventory mismatch")
+
+    destination_root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(
+            prefix=f".{destination_root.name}-assemble-", dir=destination_root.parent
+        )
+    )
+    final = staging / "final"
+    try:
+        final.mkdir()
+        for entry in inventory:
+            name = entry["path"]
+            target = final / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_root / name, target)
+        (final / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+        result = verify_reproducibility_bundle(final)
+        if os.path.lexists(destination_root):
+            raise FileExistsError(
+                f"refusing to overwrite bundle: {destination_root}"
+            )
+        final.rename(destination_root)
+        return result
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
 def _verify_result_bundle_bindings(
     result: dict[str, Any], manifest: dict[str, Any], benchmark_manifest: object
 ) -> None:

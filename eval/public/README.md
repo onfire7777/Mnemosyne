@@ -19,6 +19,12 @@ reference, M15 canonical replay, and every manifest-owned byte needed to
 recompute the declared metrics from retained raw traces and verify the exact run
 artifacts. Unknown and missing fields fail closed.
 
+Operator-side packaging code should call `assemble_reproducibility_bundle`
+with an exact artifact-only source directory and the completed manifest. The
+assembler rejects source inventory drift and linked paths, writes through a
+private staging directory, verifies the complete result, and publishes the
+destination by one non-overwriting rename. It grants no evidence status.
+
 | Manifest section | Bound material |
 |---|---|
 | `result_ref` | Result-v2 record ID, exact result bytes, ledger entry, track kind, and track-specific lineage |
