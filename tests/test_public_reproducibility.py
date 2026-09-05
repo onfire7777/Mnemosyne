@@ -1208,6 +1208,24 @@ def test_artifact_inspection_allows_noncredential_prefixes(tmp_path: Path) -> No
     assert public_bundle._inspect_artifact(path)[2] is False
 
 
+@pytest.mark.parametrize(
+    ("media_type", "payload", "message"),
+    [
+        ("application/json", b"not json", "declared as JSON"),
+        ("application/x-ndjson", b'{"ok":true}\n\n', "declared as NDJSON"),
+        ("text/plain", b"invalid UTF-8: \xff", "not UTF-8"),
+    ],
+)
+def test_artifact_media_type_is_enforced_against_content(
+    tmp_path: Path, media_type: str, payload: bytes, message: str
+) -> None:
+    path = tmp_path / "artifact"
+    path.write_bytes(payload)
+
+    with pytest.raises(BundleError, match=message):
+        public_bundle._validate_artifact_media(path, media_type)
+
+
 def test_reproduction_rejects_linked_source_path(tmp_path: Path) -> None:
     source = tmp_path / "source"
     linked = tmp_path / "linked-source"

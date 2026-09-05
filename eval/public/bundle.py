@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import errno
 import hashlib
 import json
@@ -697,6 +698,35 @@ def _inspect_artifact(path: Path) -> tuple[int, str, bool]:
     return size, "sha256:" + digest.hexdigest(), secret_found
 
 
+def _validate_artifact_media(path: Path, media_type: str) -> None:
+    if media_type == "application/json":
+        try:
+            _load_json(path)
+        except (OSError, UnicodeError, BundleError) as exc:
+            raise BundleError("artifact declared as JSON is invalid") from exc
+        return
+    if media_type == "application/x-ndjson":
+        try:
+            with path.open("rb") as handle:
+                for line_number, raw_line in enumerate(handle, 1):
+                    line = raw_line.decode("utf-8").strip()
+                    if not line:
+                        raise BundleError("NDJSON contains an empty record")
+                    _parse_json(line, f"NDJSON record {line_number}")
+        except (OSError, UnicodeError, BundleError) as exc:
+            raise BundleError("artifact declared as NDJSON is invalid") from exc
+        return
+    if media_type.startswith("text/"):
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        try:
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    decoder.decode(chunk)
+            decoder.decode(b"", final=True)
+        except (OSError, UnicodeError) as exc:
+            raise BundleError("artifact declared as text is not UTF-8") from exc
+
+
 def _runtime_platform() -> str:
     return f"{sys.platform}-{platform.machine().lower()}"
 
@@ -935,6 +965,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             raise BundleError(f"digest mismatch: {entry['path']}")
         if secret_found:
             raise BundleError("secret-like material detected")
+        _validate_artifact_media(path, entry["media_type"])
 
     bindings = {
         "build_fingerprint": "build.json",
