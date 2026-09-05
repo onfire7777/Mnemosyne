@@ -6,9 +6,11 @@ import hashlib
 import json
 import math
 import os
+import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -314,6 +316,8 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             raise BundleError("environment allowlist is invalid")
         if SECRET.search(value):
             raise BundleError("secret-like material detected in environment")
+        if any(marker in name for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE", "KEY")):
+            raise BundleError("credential-like environment names are forbidden")
 
     metrics = manifest["metrics"]
     if not isinstance(metrics, list) or not metrics or len(metrics) > 1024:
@@ -438,6 +442,14 @@ def _sha256_reference(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _runtime_platform() -> str:
+    return f"{sys.platform}-{platform.machine().lower()}"
+
+
+def _runtime_version() -> str:
+    return f"cpython-{sys.version_info.major}.{sys.version_info.minor}"
+
+
 def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
     manifest = _load_json(root / "bundle-manifest.json")
     files = manifest.get("files") if isinstance(manifest, dict) else None
@@ -529,6 +541,22 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     for field, name in input_bindings.items():
         if name not in names or inputs[field] != _sha256_reference(root / name):
             raise BundleError(f"digest mismatch: {field}")
+    environment_record = _load_json(root / "environment.json")
+    expected_environment = {
+        field: manifest["run"][field]
+        for field in (
+            "platform",
+            "runtime",
+            "dependencies",
+            "locale",
+            "timezone",
+            "environment",
+        )
+    }
+    if environment_record != expected_environment:
+        raise BundleError("environment manifest does not match run declaration")
+    if (root / "environment.json").read_bytes() != _canonical(environment_record):
+        raise BundleError("environment manifest bytes must be canonical")
     _verify_embedded_legacy_bundle(root)
 
     required = {
@@ -720,6 +748,28 @@ def reproduce_reproducibility_bundle(
     manifest = _load_json(source_root / "reproducibility-manifest.json")
     expected_sha = manifest["run"]["candidate_git_sha"]
     _require_clean_reproduction_checkout(expected_sha)
+    if manifest["run"]["platform"] != _runtime_platform():
+        raise BundleError("reproduction platform does not match manifest")
+    if manifest["run"]["runtime"] != _runtime_version():
+        raise BundleError("reproduction runtime does not match manifest")
+    checkout_lock = Path.cwd() / "uv.lock"
+    if (
+        not checkout_lock.is_file()
+        or checkout_lock.is_symlink()
+        or _sha256_reference(checkout_lock)
+        != manifest["artifacts"]["lockfile_digest"]
+    ):
+        raise BundleError("reproduction checkout lockfile digest mismatch")
+    inherited_credentials = sorted(
+        name
+        for name in os.environ
+        if any(
+            marker in name.upper()
+            for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
+        )
+    )
+    if inherited_credentials:
+        raise BundleError("reproduction environment contains inherited credentials")
     destination_root.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(
