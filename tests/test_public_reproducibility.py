@@ -893,6 +893,74 @@ def test_missing_raw_traces_config_build_or_operator_fail_closed(tmp_path: Path)
         verify_bundle(bundle["root"])
 
 
+def test_unhashed_lock_named_file_is_scanned_and_rejected(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "lock-secret")
+    leaked = bundle["root"] / "credentials.jsonl.lock"
+    leaked.write_text("sk_test_" + ("B" * 20) + "\n", encoding="utf-8")
+    with pytest.raises(BundleError, match="secret|inventory"):
+        verify_bundle(bundle["root"])
+
+
+def test_unhashed_lock_named_file_is_not_copied_on_reproduce(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "lock-copy")
+    monkeypatch.setattr(
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+    )
+    extra = bundle["root"] / "sidecar.jsonl.lock"
+    extra.write_text("not-a-secret\n", encoding="utf-8")
+    destination = tmp_path / "lock-dest"
+    with pytest.raises(BundleError, match="inventory"):
+        reproduce_bundle(bundle["root"], destination)
+    assert not destination.exists()
+    assert not (destination / "sidecar.jsonl.lock").exists()
+
+
+def test_manifest_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "metric-drift")
+    payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["metrics"][0]["value"] = 0.0
+    payload["metrics"][0]["numerator"] = 0
+    _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="metrics"):
+        verify_bundle(bundle["root"])
+
+
+def test_missing_canonical_replay_artifact_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "no-replay")
+    replay = bundle["root"] / "canonical-replay.json"
+    replay.unlink()
+    payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["hashes"] = [
+        entry for entry in payload["hashes"] if entry["path"] != "canonical-replay.json"
+    ]
+    _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="replay"):
+        verify_bundle(bundle["root"])
+
+
+def test_null_custody_and_operator_values_fail_closed(tmp_path: Path) -> None:
+    custody = _write_reproducibility_bundle(tmp_path / "null-custody")
+    payload = json.loads((custody["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["custody"] = {"class": None, "declaration": None}
+    _write_json(custody["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="custody"):
+        verify_bundle(custody["root"])
+
+    operator = _write_reproducibility_bundle(tmp_path / "null-operator")
+    payload = json.loads((operator["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["operator"] = {
+        "identity": "",
+        "role": "auditor",
+        "signer_role": "auditor",
+        "disclosure_state": "disclosed",
+    }
+    _write_json(operator["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="operator"):
+        verify_bundle(operator["root"])
+
+
 def test_result_ledger_and_m15_cross_reference_mismatches_fail_closed(
     tmp_path: Path,
 ) -> None:
@@ -926,6 +994,13 @@ def test_reproduce_deletes_incomplete_output_and_does_not_use_shell(
     assert destination.is_dir()
     for name in ("result.json", "traces.jsonl", "bundle-manifest.json", REPRO_MANIFEST_NAME):
         assert (destination / name).read_bytes() == (bundle["root"] / name).read_bytes()
+    dest_names = {path.name for path in destination.iterdir()}
+    source_names = {path.name for path in bundle["root"].iterdir() if path.is_file()}
+    assert dest_names <= source_names
+    assert "metrics.json" in dest_names
+    assert json.loads((destination / "metrics.json").read_text(encoding="utf-8")) == (
+        json.loads((bundle["root"] / "metrics.json").read_text(encoding="utf-8"))
+    )
 
     colliding = tmp_path / "collision"
     colliding.mkdir()

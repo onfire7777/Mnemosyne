@@ -127,6 +127,12 @@ _REPRO_PUBLICATION_FLAGS = (
     "pbpp_headline_eligible",
     "publishable",
 )
+_REPRO_CUSTODY_CLASSES = (
+    "development-public",
+    "operator-held-out",
+    "certification-held-out",
+)
+_REPRO_OPERATOR_ROLES = ("operator", "independent", "custodian")
 _NAMED_DIGEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*@sha256:[0-9a-f]{64}$")
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -298,6 +304,18 @@ def _require_sha256_digest(value: object, label: str) -> str:
     return value
 
 
+def _require_nonempty_string(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BundleError(f"missing {label}")
+    return value
+
+
+def _require_enum(value: object, allowed: tuple[str, ...], label: str) -> str:
+    if value not in allowed:
+        raise BundleError(f"unknown {label}")
+    return str(value)
+
+
 def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
     payload = _closed_object(manifest, _REPRO_REQUIRED_FIELDS, "reproducibility manifest")
     _json_depth(payload)
@@ -420,12 +438,19 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
         ),
         "rights",
     )
-    _closed_object(payload.get("custody"), ("class", "declaration"), "custody")
-    _closed_object(
+    custody = _closed_object(payload.get("custody"), ("class", "declaration"), "custody")
+    _require_enum(custody.get("class"), _REPRO_CUSTODY_CLASSES, "custody")
+    _require_nonempty_string(custody.get("declaration"), "custody")
+    operator = _closed_object(
         payload.get("operator"),
         ("identity", "role", "signer_role", "disclosure_state"),
         "operator",
     )
+    _require_nonempty_string(operator.get("identity"), "operator")
+    _require_enum(operator.get("role"), _REPRO_OPERATOR_ROLES, "operator")
+    _require_enum(operator.get("signer_role"), _REPRO_OPERATOR_ROLES, "operator")
+    if operator.get("disclosure_state") != "disclosed":
+        raise BundleError("missing operator")
     lineage = payload.get("lineage")
     if track_kind == "DEVELOPMENT":
         if lineage != {}:
@@ -525,33 +550,36 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
     return payload
 
 
+def _is_ephemeral_jsonl_lock(listed: set[str], name: str) -> bool:
+    return name.endswith(".jsonl.lock") and name[: -len(".lock")] in listed
+
+
 def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
     hashes = manifest["hashes"]
     listed = [entry["path"] for entry in hashes]
     if len(listed) != len(set(listed)):
         raise BundleError("duplicate normalized path")
-    actual = {
-        entry.name
-        for entry in root.iterdir()
-        if not entry.name.endswith(".jsonl.lock")
-    }
-    expected = set(listed) | {REPRODUCIBILITY_MANIFEST_NAME}
-    if actual != expected:
-        raise BundleError("inventory mismatch")
+    listed_set = set(listed)
     payloads: dict[str, bytes] = {}
+    scanned: dict[str, bytes] = {}
     for entry in root.iterdir():
-        if entry.name.endswith(".jsonl.lock"):
-            continue
         if entry.is_symlink() or not entry.is_file():
             raise BundleError(f"links and non-files are forbidden: {entry.name}")
         if entry.resolve().parent != root.resolve():
             raise BundleError(f"path escapes bundle: {entry.name}")
         if entry.stat().st_size > _MAX_REPRO_FILE_BYTES:
             raise BundleError("bundle file exceeds the closed size bound")
-        payloads[entry.name] = entry.read_bytes()
-    raw = b"".join(payloads[name] for name in sorted(payloads))
+        scanned[entry.name] = entry.read_bytes()
+    raw = b"".join(scanned[name] for name in sorted(scanned))
     if SECRET.search(raw.decode("utf-8", errors="replace")):
         raise BundleError("secret-like material detected")
+    expected = listed_set | {REPRODUCIBILITY_MANIFEST_NAME}
+    extras = set(scanned) - expected
+    if any(name not in scanned for name in expected) or any(
+        not _is_ephemeral_jsonl_lock(listed_set, name) for name in extras
+    ):
+        raise BundleError("inventory mismatch")
+    payloads = {name: scanned[name] for name in expected}
     for name, payload in payloads.items():
         text = payload.decode("utf-8", errors="replace")
         if name.endswith(".jsonl"):
@@ -565,6 +593,64 @@ def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
         if len(payload) != entry["size"] or _sha256_ref(payload) != entry["sha256"]:
             raise BundleError(f"digest mismatch: {path}")
     return payloads
+
+
+def _recompute_repro_metrics(
+    traces: list[dict[str, Any]],
+    measured: object,
+    manifest_metrics: object,
+    manifest_intervals: object,
+) -> dict[str, Any]:
+    if not isinstance(measured, dict):
+        raise BundleError("missing metrics")
+    successes = sum(
+        bool(
+            set(trace.get("ranked_retrieved_hits") or [])
+            & set(trace.get("gold_references") or [])
+        )
+        for trace in traces
+        if isinstance(trace, dict)
+    )
+    total = len(traces)
+    if (
+        measured.get("trace_count") != total
+        or measured.get("successes") != successes
+        or measured.get("total") != total
+    ):
+        raise BundleError("metrics do not recompute from traces")
+    if not isinstance(manifest_metrics, list) or not manifest_metrics:
+        raise BundleError("missing metrics")
+    declared = manifest_metrics[0]
+    if not isinstance(declared, dict):
+        raise BundleError("missing metrics")
+    if (
+        declared.get("numerator") != successes
+        or declared.get("denominator") != total
+        or declared.get("sample_count") != total
+        or declared.get("value") != measured.get("value")
+    ):
+        raise BundleError("metrics do not recompute from traces")
+    measured_interval = measured.get("interval", {})
+    declared_interval = declared.get("interval", {})
+    if (
+        not isinstance(measured_interval, dict)
+        or not isinstance(declared_interval, dict)
+        or declared_interval.get("low") != measured_interval.get("low")
+        or declared_interval.get("high") != measured_interval.get("high")
+    ):
+        raise BundleError("intervals do not recompute from traces")
+    if isinstance(manifest_intervals, list) and manifest_intervals:
+        interval = manifest_intervals[0]
+        if (
+            isinstance(interval, dict)
+            and (
+                interval.get("low") != measured_interval.get("low")
+                or interval.get("high") != measured_interval.get("high")
+                or interval.get("method") != measured_interval.get("method")
+            )
+        ):
+            raise BundleError("intervals do not recompute from traces")
+    return measured
 
 
 def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
@@ -616,16 +702,17 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("track_kind mismatch")
     if result.get("run_commit") != manifest["build"]["candidate_git_sha"]:
         raise BundleError("result run_commit does not match bound commit")
-    if "canonical-replay.json" in payloads:
-        replay = _load_json(root / "canonical-replay.json")
-        expected = manifest["canonical_replay"]
-        if (
-            not isinstance(expected, dict)
-            or expected.get("digest") != canonical_replay_digest(replay)
-            or expected.get("suite") != replay.get("suite")
-            or expected.get("seed_records") != replay.get("seed_records")
-        ):
-            raise BundleError("canonical replay digest mismatch")
+    if "canonical-replay.json" not in payloads:
+        raise BundleError("canonical replay artifact is missing")
+    replay = _load_json(root / "canonical-replay.json")
+    expected = manifest["canonical_replay"]
+    if (
+        not isinstance(expected, dict)
+        or expected.get("digest") != canonical_replay_digest(replay)
+        or expected.get("suite") != replay.get("suite")
+        or expected.get("seed_records") != replay.get("seed_records")
+    ):
+        raise BundleError("canonical replay digest mismatch")
     if manifest.get("ledger_ref") is not None:
         from leaderboard.ledger import LedgerError, verify_ledger
 
@@ -648,36 +735,14 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         for line in payloads["traces.jsonl"].decode("utf-8").splitlines()
         if line
     ]
-    measured = _load_json(root / "metrics.json") if "metrics.json" in payloads else None
-    if isinstance(measured, dict):
-        successes = sum(
-            bool(
-                set(trace.get("ranked_retrieved_hits") or [])
-                & set(trace.get("gold_references") or [])
-            )
-            for trace in traces
-            if isinstance(trace, dict)
-        )
-        if (
-            measured.get("trace_count") != len(traces)
-            or measured.get("successes") != successes
-            or measured.get("total") != len(traces)
-        ):
-            raise BundleError("metrics do not recompute from traces")
-        intervals = manifest.get("intervals")
-        if isinstance(intervals, list) and intervals:
-            interval = intervals[0]
-            measured_interval = measured.get("interval", {})
-            if (
-                isinstance(interval, dict)
-                and isinstance(measured_interval, dict)
-                and (
-                    interval.get("low") != measured_interval.get("low")
-                    or interval.get("high") != measured_interval.get("high")
-                    or interval.get("method") != measured_interval.get("method")
-                )
-            ):
-                raise BundleError("intervals do not recompute from traces")
+    if "metrics.json" not in payloads:
+        raise BundleError("missing metrics")
+    _recompute_repro_metrics(
+        traces,
+        _load_json(root / "metrics.json"),
+        manifest.get("metrics"),
+        manifest.get("intervals"),
+    )
     publication = manifest["publication"]
     return {
         "family": "reproducibility",
@@ -703,14 +768,33 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
     try:
-        for entry in source.iterdir():
-            if entry.is_symlink() or not entry.is_file():
-                raise BundleError(f"links and non-files are forbidden: {entry.name}")
-            shutil.copyfile(entry, temp / entry.name, follow_symlinks=False)
+        source_manifest = _load_json(source / REPRODUCIBILITY_MANIFEST_NAME)
+        owned = [
+            str(entry["path"])
+            for entry in source_manifest["hashes"]
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        ] + [REPRODUCIBILITY_MANIFEST_NAME]
+        for name in owned:
+            src = source / name
+            if src.is_symlink() or not src.is_file():
+                raise BundleError(f"links and non-files are forbidden: {name}")
+            shutil.copyfile(src, temp / name, follow_symlinks=False)
+        traces = [
+            _parse_json(line, "traces.jsonl")
+            for line in (temp / "traces.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        recomputed = _recompute_repro_metrics(
+            traces,
+            _load_json(temp / "metrics.json"),
+            source_manifest.get("metrics"),
+            source_manifest.get("intervals"),
+        )
+        _write_json(temp / "metrics.json", recomputed)
         _verify_reproducibility_bundle(temp)
-        for entry in source.iterdir():
-            if (temp / entry.name).read_bytes() != entry.read_bytes():
-                raise BundleError(f"reproduction mismatch: {entry.name}")
+        for name in owned:
+            if (temp / name).read_bytes() != (source / name).read_bytes():
+                raise BundleError(f"reproduction mismatch: {name}")
         temp.rename(destination)
         return verified
     except BaseException:
