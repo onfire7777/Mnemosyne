@@ -1218,6 +1218,11 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             raise BundleError(f"artifact changed during verification: {entry['path']}")
         if secret_found:
             raise BundleError("secret-like material detected")
+    try:
+        if manifest_path.read_bytes() != _canonical(manifest):
+            raise BundleError("reproducibility manifest changed during verification")
+    except OSError as exc:
+        raise BundleError("reproducibility manifest changed during verification") from exc
     return validated
 
 
