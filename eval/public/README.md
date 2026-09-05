@@ -49,7 +49,9 @@ source-nested destination, a wrong/dirty/non-root checkout, altered lock or
 environment, symlinks, path escapes, inventory drift, duplicate JSON keys,
 secret-like values, inherited token/secret/password/private-key/API-key/
 access-key/credential/authorization variables, and any digest, metric, interval,
-result, ledger, or replay mismatch. Failures remove incomplete output.
+result, ledger, or replay mismatch. Undeclared Python, uv, package-index, proxy,
+certificate, and dynamic-loader environment influences are also rejected.
+Failures remove incomplete output.
 
 The four result-v2 lineage digests have exact byte meanings:
 
