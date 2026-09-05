@@ -9,6 +9,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -146,6 +147,7 @@ _RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _HEX_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _MAX_REPRO_JSON_DEPTH = 64
 _MAX_REPRO_FILE_BYTES = 16 * 1024 * 1024
+_MAX_REPRO_BUNDLE_BYTES = 1024 * 1024 * 1024
 _REGISTERED_SCORING_PROFILES = {
     "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
     "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
@@ -624,6 +626,44 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
     return payload
 
 
+def _read_inventory_file(path: Path) -> tuple[bytes, int]:
+    """Read one stable, regular, singly-linked inventory inode."""
+    try:
+        path_stat = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or path_stat.st_size > _MAX_REPRO_FILE_BYTES
+        ):
+            raise BundleError("bundle files must be bounded regular non-hardlinks")
+        with path.open("rb") as handle:
+            opened_stat = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or opened_stat.st_nlink != 1
+                or opened_stat.st_size != path_stat.st_size
+                or (opened_stat.st_dev, opened_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise BundleError(f"bundle file changed before reading: {path.name}")
+            payload = handle.read(_MAX_REPRO_FILE_BYTES + 1)
+            final_stat = os.fstat(handle.fileno())
+        current_stat = path.stat(follow_symlinks=False)
+    except BundleError:
+        raise
+    except OSError as exc:
+        raise BundleError(f"bundle file cannot be read safely: {path.name}") from exc
+    if (
+        len(payload) != opened_stat.st_size
+        or len(payload) > _MAX_REPRO_FILE_BYTES
+        or final_stat.st_size != opened_stat.st_size
+        or (current_stat.st_dev, current_stat.st_ino)
+        != (opened_stat.st_dev, opened_stat.st_ino)
+    ):
+        raise BundleError(f"bundle file changed while reading: {path.name}")
+    return payload, len(payload)
+
+
 def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
     hashes = manifest["hashes"]
     listed = [entry["path"] for entry in hashes]
@@ -632,17 +672,19 @@ def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
     listed_set = set(listed)
     payloads: dict[str, bytes] = {}
     scanned: dict[str, bytes] = {}
+    total_size = 0
     for entry in root.iterdir():
-        if entry.is_symlink() or not entry.is_file():
+        if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
             raise BundleError(f"links and non-files are forbidden: {entry.name}")
         if entry.resolve().parent != root.resolve():
             raise BundleError(f"path escapes bundle: {entry.name}")
-        if entry.stat().st_size > _MAX_REPRO_FILE_BYTES:
-            raise BundleError("bundle file exceeds the closed size bound")
-        scanned[entry.name] = entry.read_bytes()
-    raw = b"".join(scanned[name] for name in sorted(scanned))
-    if SECRET.search(raw.decode("utf-8", errors="replace")):
-        raise BundleError("secret-like material detected")
+        payload, entry_size = _read_inventory_file(entry)
+        total_size += entry_size
+        if total_size > _MAX_REPRO_BUNDLE_BYTES:
+            raise BundleError("bundle exceeds the closed aggregate size bound")
+        if SECRET.search(payload.decode("utf-8", errors="replace")):
+            raise BundleError("secret-like material detected")
+        scanned[entry.name] = payload
     expected = listed_set | {REPRODUCIBILITY_MANIFEST_NAME}
     extras = set(scanned) - expected
     if extras or any(name not in scanned for name in expected):
@@ -799,7 +841,11 @@ def _recompute_repro_metrics(
 
 
 def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
-    if not root.is_dir() or root.is_symlink():
+    if (
+        not root.is_dir()
+        or root.is_symlink()
+        or getattr(root, "is_junction", lambda: False)()
+    ):
         raise BundleError("bundle must be a real directory, not a link")
     manifest_path = root / REPRODUCIBILITY_MANIFEST_NAME
     if manifest_path.is_symlink() or not manifest_path.is_file():
