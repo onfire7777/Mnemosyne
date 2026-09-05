@@ -47,8 +47,9 @@ must have no network access, inherited credentials, production secrets,
 protected data, or untracked repository inputs. It refuses an existing or
 source-nested destination, a wrong/dirty/non-root checkout, altered lock or
 environment, symlinks, path escapes, inventory drift, duplicate JSON keys,
-secret-like values, and any digest, metric, interval, result, ledger, or replay
-mismatch. Failures remove incomplete output.
+secret-like values, inherited token/secret/password/private-key/API-key/
+access-key/credential/authorization variables, and any digest, metric, interval,
+result, ledger, or replay mismatch. Failures remove incomplete output.
 
 The four result-v2 lineage digests have exact byte meanings:
 

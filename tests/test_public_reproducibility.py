@@ -271,10 +271,7 @@ def _refresh_owned_file(root: Path, name: str) -> None:
 
 def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(os.environ):
-        if any(
-            marker in name.upper()
-            for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
-        ):
+        if public_bundle._credential_environment_name(name):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("PYTHONHASHSEED", "0")
@@ -1009,6 +1006,12 @@ def test_reproduction_requires_offline_mode_and_rejects_inherited_credentials(
         public_bundle.reproduce_bundle(source, tmp_path / "credentialed")
     assert not (tmp_path / "credentialed").exists()
 
+    monkeypatch.delenv("EXAMPLE_API_TOKEN")
+    monkeypatch.setenv("OPENAI_API_KEY", "not-even-a-real-secret")
+    with pytest.raises(BundleError, match="inherited credentials"):
+        public_bundle.reproduce_bundle(source, tmp_path / "api-key-credentialed")
+    assert not (tmp_path / "api-key-credentialed").exists()
+
 
 @pytest.mark.parametrize(
     ("name", "value", "message"),
@@ -1130,10 +1133,7 @@ def test_exact_command_reproduces_from_clean_detached_offline_checkout(
     environment = {
         name: value
         for name, value in os.environ.items()
-        if not any(
-            marker in name.upper()
-            for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
-        )
+        if not public_bundle._credential_environment_name(name)
     }
     environment.update(
         {

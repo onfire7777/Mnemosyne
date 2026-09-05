@@ -98,6 +98,16 @@ _REPRO_TOP_LEVEL = {
 }
 _REPRO_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 _REPRO_COMMIT = re.compile(r"[0-9a-f]{40}")
+_CREDENTIAL_ENV_MARKERS = (
+    "TOKEN",
+    "SECRET",
+    "PASSWORD",
+    "PRIVATE_KEY",
+    "API_KEY",
+    "ACCESS_KEY",
+    "CREDENTIAL",
+    "AUTHORIZATION",
+)
 
 
 def _closed_object(
@@ -156,6 +166,11 @@ def _repro_relative_path(value: object) -> str:
     ):
         raise BundleError("inventory path must be a normalized relative path")
     return value
+
+
+def _credential_environment_name(name: str) -> bool:
+    normalized = name.upper()
+    return any(marker in normalized for marker in _CREDENTIAL_ENV_MARKERS)
 
 
 def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
@@ -1090,10 +1105,7 @@ def reproduce_reproducibility_bundle(
     inherited_credentials = sorted(
         name
         for name in os.environ
-        if any(
-            marker in name.upper()
-            for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
-        )
+        if _credential_environment_name(name)
     )
     if inherited_credentials:
         raise BundleError("reproduction environment contains inherited credentials")
