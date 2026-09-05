@@ -444,7 +444,7 @@ Incomplete output is deleted. A destination collision fails closed.
 
 | Field | Meaning |
 | --- | --- |
-| `schema_version` | Closed const `mnemosyne.reproducibility-bundle/v1`. |
+| `schema_version` | Closed const `mnemosyne.reproducibility-bundle/v1`. Verify runs the Draft 2020-12 schema against the manifest; a present schema file is not enough. |
 | `result_ref` | Canonical `result-v2@sha256:…` binding of the atomic result. |
 | `ledger_ref` | Optional signed-ledger inclusion receipt; absence is not neutrality. |
 | `manifests` | Digest-bound benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge/reader/model/prompt, plus official fidelity or successor parent/difference. |

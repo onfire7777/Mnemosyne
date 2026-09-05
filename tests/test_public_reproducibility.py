@@ -736,7 +736,7 @@ def test_unknown_field_and_missing_declaration_fail_closed(tmp_path: Path) -> No
     manifest = json.loads((root / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
     manifest["unexpected"] = "field"
     _write_json(root / REPRO_MANIFEST_NAME, manifest)
-    with pytest.raises(BundleError, match="unknown"):
+    with pytest.raises(BundleError, match="unknown|schema"):
         verify_bundle(root)
 
     missing = _write_reproducibility_bundle(tmp_path / "missing")
@@ -820,14 +820,14 @@ def test_symlink_absolute_and_escaping_paths_fail_closed(tmp_path: Path) -> None
     payload = json.loads((escaping["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
     payload["hashes"][0]["path"] = "../outside.json"
     _write_json(escaping["root"] / REPRO_MANIFEST_NAME, payload)
-    with pytest.raises(BundleError, match="path"):
+    with pytest.raises(BundleError, match="path|schema"):
         verify_bundle(escaping["root"])
 
     absolute = _write_reproducibility_bundle(tmp_path / "absolute")
     payload = json.loads((absolute["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
     payload["hashes"][0]["path"] = "/tmp/absolute.json"
     _write_json(absolute["root"] / REPRO_MANIFEST_NAME, payload)
-    with pytest.raises(BundleError, match="path"):
+    with pytest.raises(BundleError, match="path|schema"):
         verify_bundle(absolute["root"])
 
 
@@ -875,7 +875,7 @@ def test_command_must_be_exact_argv(tmp_path: Path) -> None:
             "OTHER",
         ],
     )
-    with pytest.raises(BundleError, match="command"):
+    with pytest.raises(BundleError, match="command|schema"):
         verify_bundle(bundle["root"])
 
 
@@ -889,7 +889,7 @@ def test_missing_raw_traces_config_build_or_operator_fail_closed(tmp_path: Path)
     payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
     del payload["operator"]
     _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
-    with pytest.raises(BundleError, match="operator|missing"):
+    with pytest.raises(BundleError, match="operator|missing|schema"):
         verify_bundle(bundle["root"])
 
 
@@ -915,6 +915,65 @@ def test_unhashed_lock_named_file_is_not_copied_on_reproduce(
         reproduce_bundle(bundle["root"], destination)
     assert not destination.exists()
     assert not (destination / "sidecar.jsonl.lock").exists()
+
+
+def test_schema_constraints_are_enforced_not_just_file_presence(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "schema-bypass")
+    payload = json.loads((bundle["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["metrics"][0]["family"] = "unknown"
+    payload["metrics"][0]["uncertainty_parameters"]["extra"] = True
+    payload["metrics"][0]["sample_count"] = 1.0
+    _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="schema"):
+        verify_bundle(bundle["root"])
+
+
+def test_listed_sibling_lock_file_fails_inventory(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "listed-lock")
+    (bundle["root"] / "traces.jsonl.lock").write_text("not-a-secret\n", encoding="utf-8")
+    with pytest.raises(BundleError, match="inventory"):
+        verify_bundle(bundle["root"])
+
+
+def test_fabricated_ledger_and_manifest_refs_fail_closed(tmp_path: Path) -> None:
+    ledger = _write_reproducibility_bundle(tmp_path / "fake-ledger")
+    payload = json.loads((ledger["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["ledger_ref"] = _named_ref("ledger-entry", b"fabricated-ledger")
+    _write_json(ledger["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="ledger"):
+        verify_bundle(ledger["root"])
+
+    adapter = _write_reproducibility_bundle(tmp_path / "fake-adapter")
+    payload = json.loads((adapter["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    payload["manifests"]["adapter"] = _named_ref("adapter", b"fabricated-adapter")
+    _write_json(adapter["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="adapter"):
+        verify_bundle(adapter["root"])
+
+
+def test_reproduce_cleanup_does_not_delete_foreign_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "foreign-source")
+    monkeypatch.setattr(
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+    )
+    destination = tmp_path / "foreign-dest"
+    original_rename = Path.rename
+
+    def collide(self: Path, target: Path | str) -> Path:
+        target_path = Path(target)
+        if target_path == destination:
+            destination.mkdir()
+            (destination / "marker.txt").write_text("keep\n", encoding="utf-8")
+            raise OSError("simulated rename collision")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", collide)
+    with pytest.raises(OSError, match="rename collision"):
+        reproduce_bundle(bundle["root"], destination)
+    assert destination.is_dir()
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "keep\n"
 
 
 def test_manifest_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) -> None:
@@ -945,7 +1004,7 @@ def test_null_custody_and_operator_values_fail_closed(tmp_path: Path) -> None:
     payload = json.loads((custody["root"] / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
     payload["custody"] = {"class": None, "declaration": None}
     _write_json(custody["root"] / REPRO_MANIFEST_NAME, payload)
-    with pytest.raises(BundleError, match="custody"):
+    with pytest.raises(BundleError, match="custody|schema"):
         verify_bundle(custody["root"])
 
     operator = _write_reproducibility_bundle(tmp_path / "null-operator")
