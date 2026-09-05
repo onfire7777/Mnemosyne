@@ -1200,6 +1200,11 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         ):
             raise BundleError("independent reproduction receipt is not independently bound")
     replay = _load_json(root / "canonical-replay.json")
+    if (
+        not isinstance(replay, dict)
+        or replay.get("seed_records") != manifest["run"]["seed_records"]
+    ):
+        raise BundleError("canonical replay seed records do not match run custody")
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
