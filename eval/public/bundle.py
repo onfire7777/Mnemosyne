@@ -36,6 +36,7 @@ SECRET = re.compile(
     r"glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
     r"AIza[A-Za-z0-9_-]{35}|AKIA[A-Z0-9]{16}|"
     r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"(?i:bearer|basic)\s+[A-Za-z0-9._~+/-]{20,}={0,2}|"
     r"[A-Za-z][A-Za-z0-9+.-]{0,31}://"
     r"[^/\s:@]{1,256}:[^/\s@]{1,256}@|"
     r"-----(?:BEGIN|END) [A-Z ]*PRIVATE KEY-----)"
