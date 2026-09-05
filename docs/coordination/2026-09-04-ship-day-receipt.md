@@ -5,9 +5,10 @@ upgrade, and no Stage A implement.
 
 ## Tip
 
-- `main` SHA `4af5b20ca871c9768965f808a7482839bc92d26a` (short `4af5b20c`) via #139
-- Tip Unit+drift CI `33968198517` **IN_PROGRESS** at receipt time (rebase allowed).
-- Prior tip `1df2416a` via #141 is historical (was live tip before N12 landed).
+- `main` SHA `687884dbd14b32d3245fba2e6bc9797fc705e1f2` (short `687884db`) via #142
+- Tip Unit+drift CI `33971409778` **SUCCESS**.
+- Prior tip `4af5b20c` via #139 is historical (was red; cured by #142).
+- Prior tip `1df2416a` via #141 remains historical (was live tip before N12 landed).
 - Prior tip `ec26c40d` via #138 remains historical (was red; cured by #141).
 - Prior tip `c67e9174` via #135 remains historical.
 
@@ -31,20 +32,23 @@ upgrade, and no Stage A implement.
 
 ## Merged next calendar day (PT) — 2026-09-05
 
-#141 cured red tip #138 overnight. #139 then landed N12 and is the live tip.
-Both are recorded here so this receipt tracks current `main`; neither is a
-2026-09-04 PT merge.
+#141 cured red tip #138 overnight. #139 then landed N12. Prior tip `4af5b20`
+(#139) was red (Unit+drift `33968198517` FAILURE); #142 (lease-map for #139)
+cured it and is the live tip. Recorded here so this receipt tracks current
+`main`; none is a 2026-09-04 PT merge.
 
 | PR | title | merge tip | notes |
 |---|---|---|---|
 | #141 | docs: record merged PR #138 in write-lease map | `1df2416ad89afbc11b12943a6984bbcbc17ee5a2` | Lease-map receipt curing post-#138 Unit+drift. Prior live tip. Merged ~04:55 PT 2026-09-05. |
-| #139 | feat(leaderboard): additive result-v2 integration (N12) | `4af5b20ca871c9768965f808a7482839bc92d26a` | N12 landed. Live tip. Merged ~06:11 PT 2026-09-05. Tip CI `33968198517` IN_PROGRESS at receipt time. |
+| #139 | feat(leaderboard): additive result-v2 integration (N12) | `4af5b20ca871c9768965f808a7482839bc92d26a` | N12 landed. Prior live tip. Merged ~06:11 PT 2026-09-05. Tip CI `33968198517` FAILURE; cured by #142. |
+| #142 | docs: record merged PR #139 in write-lease map | `687884dbd14b32d3245fba2e6bc9797fc705e1f2` | Lease-map receipt for #139. Cured post-#139 Unit+drift. Live tip. Merged ~07:18 PT 2026-09-05. Tip CI `33971409778` Unit+drift SUCCESS. |
 
 ## Open / holds
 
 - ACCEPT plan land wave `#118→#119→#122→#123→#124→#125→#127` (#126 DEFERRED, #120 OFF)
 - Code lanes after N12:
-  - #139 N12 **MERGED** at `4af5b20ca871c9768965f808a7482839bc92d26a`. #135 lease-map admission is historical; N12 implement landed in #139.
+  - #142 lease-map for #139 **MERGED** at `687884dbd14b32d3245fba2e6bc9797fc705e1f2`. Live tip. Tip CI `33971409778` Unit+drift SUCCESS.
+  - #139 N12 **MERGED** at `4af5b20ca871c9768965f808a7482839bc92d26a`. Prior tip was red; cured by #142. #135 lease-map admission is historical; N12 implement landed in #139.
   - #140 Frontend smoke **CLOSED** (not merged) at `2026-09-05T13:11:56Z`.
 - Stage A implement **HOLD** (gates)
 - Memory/GBrain Mac offline — receipts drafted **HOLD**
