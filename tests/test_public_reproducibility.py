@@ -697,6 +697,94 @@ def test_signed_ledger_is_cryptographically_verified_after_inventory_check(
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_missing_ledger_lock_fails_without_mutating_bundle(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    lock = root / "ledger.jsonl.lock"
+    lock.unlink()
+    manifest["artifacts"]["files"] = [  # type: ignore[index]
+        entry
+        for entry in manifest["artifacts"]["files"]  # type: ignore[index]
+        if entry["path"] != lock.name
+    ]
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="missing required file: ledger.jsonl.lock"):
+        public_bundle.verify_reproducibility_bundle(root)
+    assert not lock.exists()
+
+
+def test_independent_reproduction_requires_distinct_signed_ledger_receipt(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    manifest["disclosures"]["independent_reproduction"] = {  # type: ignore[index]
+        "receipt_digest": DIGEST,
+        "reproducer_identity": "external-reproducer",
+        "signed": True,
+    }
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="not ledger-bound"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
+def test_distinct_signed_ledger_receipt_records_independent_reproduction(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    ledger = root / "ledger.jsonl"
+    private_key = root.parent / "ledger-private.pem"
+    for path in (
+        ledger,
+        root / "ledger.jsonl.head.json",
+        root / "ledger.jsonl.lock",
+    ):
+        path.unlink(missing_ok=True)
+    roster = {"mnemosyne-development", "external-reproducer"}
+    original = append_entry(
+        ledger,
+        private_key,
+        entry_id="repro-entry-1",
+        timestamp="2026-09-05T12:00:00Z",
+        entrant_id="mnemosyne-development",
+        status="succeeded",
+        run_id="repro-run-1",
+        result=result,
+        roster=roster,
+    )
+    receipt = append_entry(
+        ledger,
+        private_key,
+        entry_id="repro-entry-2",
+        timestamp="2026-09-05T12:01:00Z",
+        entrant_id="external-reproducer",
+        status="succeeded",
+        run_id="external-reproduction-1",
+        result=result,
+        roster=roster,
+    )
+    manifest["result_ref"]["ledger_entry_digest"] = original["entry_digest"]  # type: ignore[index]
+    manifest["disclosures"]["independent_reproduction"] = {  # type: ignore[index]
+        "receipt_digest": receipt["entry_digest"],
+        "reproducer_identity": "external-reproducer",
+        "signed": True,
+    }
+    inventory = {  # type: ignore[union-attr]
+        entry["path"]: entry for entry in manifest["artifacts"]["files"]  # type: ignore[index]
+    }
+    for name in ("ledger.jsonl", "ledger.jsonl.head.json", "ledger.jsonl.lock"):
+        payload = (root / name).read_bytes()
+        inventory[name]["size"] = len(payload)
+        inventory[name]["digest"] = _digest(payload)
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+
+    assert public_bundle.verify_reproducibility_bundle(root)["valid"] is True
+
+
 def test_reproduction_recomputes_legacy_outputs_and_byte_compares_everything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

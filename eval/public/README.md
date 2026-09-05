@@ -64,8 +64,10 @@ Successful verification proves REPRO-001 contract integrity only: it does not
 prove REPRO-002, headline eligibility, independent reproduction, neutrality,
 certification, production readiness, custody approval, or publication approval.
 Those remain operator/human evidence gates. An independent reproduction receipt,
-when present, identifies only its reproducer and signature; it neither relabels
-the original operator nor grants a neutral or certified claim.
+when present, must identify a different entrant through a distinct succeeded
+entry in the bundle's cryptographically verified signed ledger and bind the same
+atomic result. It neither relabels the original operator nor grants a neutral or
+certified claim.
 
 ## Deterministic action development suites
 

@@ -670,6 +670,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         "result.json",
         "ledger.jsonl",
         "ledger.jsonl.head.json",
+        "ledger.jsonl.lock",
         "ledger-public.pem",
         "canonical-replay.json",
     }
@@ -755,6 +756,24 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         or matching_entries[0].get("result") != result
     ):
         raise BundleError("signed-ledger inclusion reference mismatch")
+    independent = manifest["disclosures"]["independent_reproduction"]
+    if independent is not None:
+        receipt_entries = [
+            entry
+            for entry in ledger_entries
+            if entry.get("entry_digest") == independent["receipt_digest"]
+        ]
+        if (
+            independent["receipt_digest"] == result_ref["ledger_entry_digest"]
+            or len(receipt_entries) != 1
+            or receipt_entries[0].get("status") != "succeeded"
+            or receipt_entries[0].get("result") != result
+            or receipt_entries[0].get("entrant_id")
+            != independent["reproducer_identity"]
+            or receipt_entries[0].get("entrant_id")
+            == matching_entries[0].get("entrant_id")
+        ):
+            raise BundleError("independent reproduction receipt is not ledger-bound")
     replay = _load_json(root / "canonical-replay.json")
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
