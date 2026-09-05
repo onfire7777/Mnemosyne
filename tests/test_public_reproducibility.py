@@ -1041,26 +1041,43 @@ def test_reproduction_uses_one_inventory_bound_source_snapshot(
 def test_reproduce_cleanup_does_not_delete_foreign_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from eval.public import bundle as public_bundle
+
     bundle = _write_reproducibility_bundle(tmp_path / "foreign-source")
     monkeypatch.setattr(
         "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
     )
     destination = tmp_path / "foreign-dest"
-    original_rename = Path.rename
 
-    def collide(self: Path, target: Path | str) -> Path:
+    def collide(_source: Path, target: Path) -> None:
         target_path = Path(target)
         if target_path == destination:
             destination.mkdir()
             (destination / "marker.txt").write_text("keep\n", encoding="utf-8")
             raise OSError("simulated rename collision")
-        return original_rename(self, target)
+        raise AssertionError(f"unexpected publication target: {target_path}")
 
-    monkeypatch.setattr(Path, "rename", collide)
+    monkeypatch.setattr(public_bundle, "_publish_directory_noreplace", collide)
     with pytest.raises(OSError, match="rename collision"):
         reproduce_bundle(bundle["root"], destination)
     assert destination.is_dir()
     assert (destination / "marker.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_atomic_publication_never_replaces_existing_destination(tmp_path: Path) -> None:
+    from eval.public.bundle import _publish_directory_noreplace
+
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+    (source / "new.txt").write_text("new\n", encoding="utf-8")
+    (destination / "marker.txt").write_text("keep\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        _publish_directory_noreplace(source, destination)
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "keep\n"
+    assert not (destination / "new.txt").exists()
+    assert (source / "new.txt").is_file()
 
 
 def test_manifest_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) -> None:
