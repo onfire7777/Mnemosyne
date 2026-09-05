@@ -43,7 +43,6 @@ _CANONICAL_REPLAY_SEEDS = {
     "wmbs-m01-development": (20260728,),
     "wmbs-m02-retrieval-development": (20260801,),
     "wmbs-m03-valid-time-development": (11, 23, 37, 53, 71),
-    "wmbs-m04-development": (11, 23, 37, 53, 71),
     "wmbs-m05-provenance-development": (13, 29, 41, 59, 73),
     "wmbs-m10-development": (0, 1, 2, 3, 4),
 }

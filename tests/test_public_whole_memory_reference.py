@@ -4054,18 +4054,6 @@ def test_m04_monotonic_allows_gold_perfect_conflict_drops() -> None:
     assert _m04_monotonic_violation(events, [], ["alpha", "beta"], gold, "c") is True
 
 
-def test_m04_bundle_declares_canonical_replay_seed() -> None:
-    from eval.public.bundle import _CANONICAL_REPLAY_SEEDS
-
-    assert _CANONICAL_REPLAY_SEEDS["wmbs-m04-development"] == (
-        11,
-        23,
-        37,
-        53,
-        71,
-    )
-
-
 def _m05_suite() -> dict[str, object]:
     from eval.public.runner import load_registry
 
