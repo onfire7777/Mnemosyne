@@ -425,7 +425,8 @@ profile, publishable result, leaderboard activation, or launch.
 - PR #135: receipt-only correction discharging P13-C from verified scheduled
   run `30807305055`, with matching `GOAL.md`, `.planning/STATE.md`,
   `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and Phase 13 summary
-  corrections closing BENCH-007 and retiring the unavailable Mac reservation.
+  corrections closing BENCH-007 and retiring the unavailable Mac reservation,
+  plus the matching current-status checkpoints in the executable pilot plan.
   Open at the 2026-09-05 capture;
   no final-head CI, merge, or post-main result is claimed in this self-record.
   It preserves the canonical baseline and progress counters, releases the
@@ -438,7 +439,10 @@ The owner requested resolution of the stale gate checklist. This bounded
 receipt changes this map, `GOAL.md`, `.planning/STATE.md`,
 `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and
 `.planning/phases/13-external-benchmark-adapters-and-scheduled-ci/13-01-SUMMARY.md`
-to reconcile BENCH-007's sole remaining cadence gate. The gate
+to reconcile BENCH-007's sole remaining cadence gate, plus the lease-status
+checkpoints in `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
+so that the executable authority agrees with N12's admission state. Its approved
+implementation contract is unchanged. The gate
 check used clean `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, whose
 post-main CI run `33927734374` succeeded. The standing canonical baseline
 above is preserved; this receipt admits no source writer.
