@@ -79,7 +79,9 @@ result, ledger, or replay mismatch. Undeclared Python, Git, uv, package-index, p
 certificate, and dynamic-loader environment influences are also rejected.
 Those influence classes cannot be admitted through the manifest allowlist;
 only `PYTHONHASHSEED`, `PYTHONUTF8`, and `PYTHONIOENCODING` are accepted from the
-Python control family. Failures remove incomplete output.
+Python control family. Git checkout probes additionally disable global/system
+configuration, filesystem monitors, untracked caches, optional locks, and
+terminal prompting. Failures remove incomplete output.
 
 The four result-v2 lineage digests have exact byte meanings:
 

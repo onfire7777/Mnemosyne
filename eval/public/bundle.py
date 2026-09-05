@@ -1377,16 +1377,26 @@ def _require_clean_reproduction_checkout(expected_sha: str) -> None:
     }
     environment.update(
         {
+            "GIT_CONFIG_GLOBAL": os.devnull,
             "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_OPTIONAL_LOCKS": "0",
             "GIT_TERMINAL_PROMPT": "0",
             "LC_ALL": "C",
             "LANG": "C",
             "TZ": "UTC",
         }
     )
+    git = [
+        "git",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+    ]
     try:
         head = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            [*git, "rev-parse", "HEAD"],
             cwd=Path.cwd(),
             env=environment,
             check=True,
@@ -1395,7 +1405,7 @@ def _require_clean_reproduction_checkout(expected_sha: str) -> None:
             timeout=10,
         ).stdout.strip()
         top_level = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            [*git, "rev-parse", "--show-toplevel"],
             cwd=Path.cwd(),
             env=environment,
             check=True,
@@ -1404,7 +1414,7 @@ def _require_clean_reproduction_checkout(expected_sha: str) -> None:
             timeout=10,
         ).stdout.strip()
         dirty = subprocess.run(
-            ["git", "status", "--porcelain"],
+            [*git, "status", "--porcelain"],
             cwd=Path.cwd(),
             env=environment,
             check=True,
@@ -1413,7 +1423,7 @@ def _require_clean_reproduction_checkout(expected_sha: str) -> None:
             timeout=10,
         ).stdout
         symbolic = subprocess.run(
-            ["git", "symbolic-ref", "-q", "HEAD"],
+            [*git, "symbolic-ref", "-q", "HEAD"],
             cwd=Path.cwd(),
             env=environment,
             check=False,
