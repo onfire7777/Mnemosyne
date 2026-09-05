@@ -503,7 +503,16 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY", "GIT_DIR", "OPENAI_API_KEY"]
+    "name",
+    [
+        "PYTHONPATH",
+        "UV_INDEX_URL",
+        "HTTPS_PROXY",
+        "GIT_DIR",
+        "OPENAI_API_KEY",
+        "DATABASE_URL",
+        "SSH_AUTH_SOCK",
+    ],
 )
 def test_manifest_cannot_allowlist_execution_influences(name: str) -> None:
     manifest = _manifest()
@@ -1190,6 +1199,7 @@ def test_artifact_inspection_hashes_counts_and_detects_across_chunks(
         b"xoxb-" + b"a" * 12,
         b"AIza" + b"a" * 35,
         b"AKIA" + b"A" * 16,
+        b"postgresql://public:supersecret@database.example/mnemosyne",
     ],
 )
 def test_artifact_inspection_rejects_prefixed_credentials(
@@ -1203,9 +1213,24 @@ def test_artifact_inspection_rejects_prefixed_credentials(
 
 def test_artifact_inspection_allows_noncredential_prefixes(tmp_path: Path) -> None:
     path = tmp_path / "artifact.bin"
-    path.write_bytes(b"github_pat_redacted glpat-redacted xoxb-redacted AKIA-redacted")
+    path.write_bytes(
+        b"github_pat_redacted glpat-redacted xoxb-redacted AKIA-redacted "
+        b"https://database.example/mnemosyne"
+    )
 
     assert public_bundle._inspect_artifact(path)[2] is False
+
+
+def test_artifact_secret_scan_handles_large_benign_tokens(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    payload = b"a" * (public_bundle._SECRET_SCAN_CHUNK_SIZE * 2)
+    path.write_bytes(payload)
+
+    assert public_bundle._inspect_artifact(path) == (
+        len(payload),
+        _digest(payload),
+        False,
+    )
 
 
 @pytest.mark.parametrize(

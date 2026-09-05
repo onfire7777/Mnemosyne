@@ -36,6 +36,8 @@ SECRET = re.compile(
     r"glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
     r"AIza[A-Za-z0-9_-]{35}|AKIA[A-Z0-9]{16}|"
     r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
+    r"[A-Za-z][A-Za-z0-9+.-]{0,31}://"
+    r"[^/\s:@]{1,256}:[^/\s@]{1,256}@|"
     r"-----(?:BEGIN|END) [A-Z ]*PRIVATE KEY-----)"
 )
 SECRET_BYTES = re.compile(SECRET.pattern.encode("ascii"))
@@ -146,6 +148,16 @@ _CREDENTIAL_ENV_MARKERS = (
     "CREDENTIAL",
     "AUTHORIZATION",
 )
+_CREDENTIAL_ENV_NAMES = {
+    "AWS_PROFILE",
+    "DATABASE_URL",
+    "DOCKER_CONFIG",
+    "KUBECONFIG",
+    "NETRC",
+    "PGPASSFILE",
+    "REDIS_URL",
+    "SSH_AUTH_SOCK",
+}
 _FIXED_REPRODUCTION_ENV = {"UV_OFFLINE", "LC_ALL", "TZ"}
 _SAFE_DECLARED_PYTHON_ENV = {"PYTHONHASHSEED", "PYTHONUTF8", "PYTHONIOENCODING"}
 _INFLUENTIAL_ENV_PREFIXES = ("PYTHON", "PIP_", "UV_", "DYLD_", "GIT_")
@@ -245,7 +257,9 @@ def _portable_path_key(value: str) -> str:
 
 def _credential_environment_name(name: str) -> bool:
     normalized = name.upper()
-    return any(marker in normalized for marker in _CREDENTIAL_ENV_MARKERS)
+    return normalized in _CREDENTIAL_ENV_NAMES or any(
+        marker in normalized for marker in _CREDENTIAL_ENV_MARKERS
+    )
 
 
 def _undeclared_influential_environment_name(
@@ -468,7 +482,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             raise BundleError("environment allowlist is invalid")
         if SECRET.search(value):
             raise BundleError("secret-like material detected in environment")
-        if any(
+        if _credential_environment_name(name) or any(
             marker in name
             for marker in (
                 "TOKEN",
