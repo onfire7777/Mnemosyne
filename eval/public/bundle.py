@@ -231,6 +231,7 @@ def _repro_relative_path(value: object) -> str:
         not isinstance(value, str)
         or not value
         or len(value) > 512
+        or unicodedata.normalize("NFC", value) != value
         or "\\" in value
         or "\x00" in value
         or value.startswith("/")

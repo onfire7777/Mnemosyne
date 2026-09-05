@@ -796,6 +796,7 @@ def test_rights_and_consent_disclosures_fail_closed() -> None:
         "evidence/a:b",
         "evidence/control\x1f",
         "evidence/" + "é" * 128,
+        "evidence/e\u0301.json",
         "evidence/\ud800",
     ],
 )
@@ -807,6 +808,7 @@ def test_inventory_paths_are_normalized_relative_posix_paths(path: str) -> None:
     if path not in {
         "evidence/CON.txt",
         "evidence/" + "é" * 128,
+        "evidence/e\u0301.json",
         "evidence/\ud800",
     }:
         schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
