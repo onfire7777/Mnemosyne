@@ -17,6 +17,7 @@ import sys
 import tempfile
 import tomllib
 import unicodedata
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -750,6 +751,52 @@ def _inspect_artifact(path: Path) -> tuple[int, str, bool]:
     return size, "sha256:" + digest.hexdigest(), secret_found
 
 
+def _read_bound_artifact(path: Path, entry: dict[str, Any]) -> bytes:
+    """Read the exact regular inode described by one inventory entry."""
+    try:
+        path_stat = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or path_stat.st_mode & _UNSAFE_MODE_BITS
+        ):
+            raise BundleError("artifact changed before bound read")
+        with path.open("rb") as handle:
+            opened_stat = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or opened_stat.st_nlink != 1
+                or (opened_stat.st_dev, opened_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise BundleError("artifact changed before bound read")
+            raw = handle.read(entry["size"] + 1)
+            current_stat = path.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(current_stat.st_mode)
+                or current_stat.st_nlink != 1
+                or (current_stat.st_dev, current_stat.st_ino)
+                != (opened_stat.st_dev, opened_stat.st_ino)
+            ):
+                raise BundleError("artifact changed during bound read")
+    except BundleError:
+        raise
+    except OSError as exc:
+        raise BundleError("artifact changed during bound read") from exc
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+    if len(raw) != entry["size"] or digest != entry["digest"]:
+        raise BundleError(f"digest mismatch: {entry['path']}")
+    return raw
+
+
+def _load_bound_json(path: Path, entry: dict[str, Any]) -> object:
+    raw = _read_bound_artifact(path, entry)
+    try:
+        return _parse_json(raw.decode("utf-8"), entry["path"])
+    except UnicodeDecodeError as exc:
+        raise BundleError(f"artifact is not UTF-8: {entry['path']}") from exc
+
+
 def _copy_inventory_artifact(
     source: Path, target: Path, entry: dict[str, Any]
 ) -> None:
@@ -819,18 +866,29 @@ def _reject_decoded_secrets(value: object) -> None:
             stack.extend(current)
 
 
-def _validate_artifact_media(path: Path, media_type: str) -> None:
+def _validate_artifact_media(
+    path: Path, media_type: str, entry: dict[str, Any] | None = None
+) -> None:
+    raw = _read_bound_artifact(path, entry) if entry is not None else None
     if media_type == "application/json":
         try:
-            value = _load_json(path)
+            value = (
+                _parse_json(raw.decode("utf-8"), path.name)
+                if raw is not None
+                else _load_json(path)
+            )
         except (OSError, UnicodeError, BundleError) as exc:
             raise BundleError("artifact declared as JSON is invalid") from exc
         _reject_decoded_secrets(value)
         return
     if media_type == "application/x-ndjson":
         try:
-            with path.open("rb") as handle:
-                for line_number, raw_line in enumerate(handle, 1):
+            if raw is not None:
+                records = raw.splitlines(keepends=True)
+            else:
+                records = path.open("rb")
+            with (nullcontext(records) if raw is not None else records) as lines:
+                for line_number, raw_line in enumerate(lines, 1):
                     try:
                         line = raw_line.decode("utf-8").strip()
                         if not line:
@@ -843,12 +901,15 @@ def _validate_artifact_media(path: Path, media_type: str) -> None:
             raise BundleError("artifact declared as NDJSON is invalid") from exc
         return
     if media_type.startswith("text/"):
-        decoder = codecs.getincrementaldecoder("utf-8")()
         try:
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                    decoder.decode(chunk)
-            decoder.decode(b"", final=True)
+            if raw is not None:
+                raw.decode("utf-8")
+            else:
+                decoder = codecs.getincrementaldecoder("utf-8")()
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                        decoder.decode(chunk)
+                decoder.decode(b"", final=True)
         except (OSError, UnicodeError) as exc:
             raise BundleError("artifact declared as text is not UTF-8") from exc
 
@@ -1073,6 +1134,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     artifacts = manifest["artifacts"]
     inventory = artifacts["files"]
     names = {entry["path"] for entry in inventory}
+    entries = {entry["path"]: entry for entry in inventory}
     expected_directories = {
         parent.as_posix()
         for name in names
@@ -1100,7 +1162,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             raise BundleError(f"digest mismatch: {entry['path']}")
         if secret_found:
             raise BundleError("secret-like material detected")
-        _validate_artifact_media(path, entry["media_type"])
+        _validate_artifact_media(path, entry["media_type"], entry)
 
     bindings = {
         "build_fingerprint": "build.json",
@@ -1131,7 +1193,12 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     for field, name in input_bindings.items():
         if name not in names or inputs[field] != _sha256_reference(root / name):
             raise BundleError(f"digest mismatch: {field}")
-    environment_record = _load_json(root / "environment.json")
+    environment_raw = _read_bound_artifact(
+        root / "environment.json", entries["environment.json"]
+    )
+    environment_record = _load_bound_json(
+        root / "environment.json", entries["environment.json"]
+    )
     expected_environment = {
         field: manifest["run"][field]
         for field in (
@@ -1145,7 +1212,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     }
     if environment_record != expected_environment:
         raise BundleError("environment manifest does not match run declaration")
-    if (root / "environment.json").read_bytes() != _canonical(environment_record):
+    if environment_raw != _canonical(environment_record):
         raise BundleError("environment manifest bytes must be canonical")
     _verify_embedded_legacy_bundle(root)
 
@@ -1170,7 +1237,8 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     missing = sorted(required - names)
     if missing:
         raise BundleError(f"reproducibility bundle missing required file: {missing[0]}")
-    result = _load_json(root / "result.json")
+    result_raw = _read_bound_artifact(root / "result.json", entries["result.json"])
+    result = _load_bound_json(root / "result.json", entries["result.json"])
     from leaderboard.validate import validate_record, verify_result_digests
 
     result_errors = validate_record(result)
@@ -1183,20 +1251,26 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         or result.get("run_commit") != manifest["run"]["candidate_git_sha"]
         or result.get("track_kind") != result_ref["track_kind"]
         or result.get("lineage") != result_ref["lineage"]
-        or _sha256_reference(root / "result.json") != result_ref["result_digest"]
+        or "sha256:" + hashlib.sha256(result_raw).hexdigest()
+        != result_ref["result_digest"]
     ):
         raise BundleError("result-v2 reference mismatch")
     if manifest["disclosures"]["source_revision"] != result.get("run_commit"):
         raise BundleError("source revision does not match result-v2 run commit")
-    benchmark_manifest = _load_json(root / "benchmark.json")
+    benchmark_manifest = _load_bound_json(
+        root / "benchmark.json", entries["benchmark.json"]
+    )
     _verify_result_bundle_bindings(result, manifest, benchmark_manifest)
     digest_errors = verify_result_digests(
         result,
         {
-            "build.json": (root / "build.json").read_bytes(),
-            "config.json": (root / "config.json").read_bytes(),
-            "bundle-manifest.json": (root / "bundle-manifest.json").read_bytes(),
-            "traces.jsonl": (root / "traces.jsonl").read_bytes(),
+            name: _read_bound_artifact(root / name, entries[name])
+            for name in (
+                "build.json",
+                "config.json",
+                "bundle-manifest.json",
+                "traces.jsonl",
+            )
         },
     )
     if digest_errors:
@@ -1229,7 +1303,8 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             raise BundleError("result-v2 metric binding mismatch")
 
     _verify_recomputed_metric_declarations(
-        _load_json(root / "metrics.json"), declared_metrics
+        _load_bound_json(root / "metrics.json", entries["metrics.json"]),
+        declared_metrics,
     )
 
     from leaderboard.ledger import LedgerError, verify_ledger
@@ -1293,7 +1368,9 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             == matching_entries[0].get("entrant_id")
         ):
             raise BundleError("independent reproduction receipt is not independently bound")
-    replay = _load_json(root / "canonical-replay.json")
+    replay = _load_bound_json(
+        root / "canonical-replay.json", entries["canonical-replay.json"]
+    )
     if (
         not isinstance(replay, dict)
         or replay.get("seed_records") != manifest["run"]["seed_records"]
@@ -1312,7 +1389,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if replay_manifests != expected_replay_manifests:
         raise BundleError("canonical replay manifest custody does not match artifacts")
     replay_build = replay.get("build")
-    retained_build = _load_json(root / "build.json")
+    retained_build = _load_bound_json(root / "build.json", entries["build.json"])
     if (
         not isinstance(replay_build, dict)
         or not isinstance(retained_build, dict)
