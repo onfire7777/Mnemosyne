@@ -21,7 +21,7 @@ upgrade, and no Stage A implement.
 | #132 | docs: inventory — record ACCEPT plan PRs for M06–M09/M11/M17–M19 | `83804715d19c90c77161924f6acc79e62e567998` | Inventory ACCEPT receipts. Docs-only. Merged 15:26 PT. |
 | #134 | docs(coordination): record #132 inventory ACCEPT in lease-map | `3281e61ed6b3d077628e3fd03ce0ec8de22cde18` | Lease-map receipt for #132. Prior tip before #116. Merged 15:59 PT. |
 | #116 | docs: PROPOSED M06 consolidation plan (not code-ready) | `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98` | M06 consolidation plan PROPOSED / NOT CODE-READY; docs only. Historical tip; VOID as live tip. |
-| #135 | docs: discharge P13-C and retire obsolete publication lease | `c67e917410d7b468a337fda19ba654d57367d843` | P13-C discharge; obsolete Mac publication lease retired; N12 READY FOR ADMISSION; not N12 implement. Merged 18:51 PT. |
+| #135 | docs: discharge P13-C and retire obsolete publication lease | `c67e917410d7b468a337fda19ba654d57367d843` | P13-C discharge; lease-map / N12 admission (**READY FOR ADMISSION**); obsolete Mac publication lease retired; not N12 implement. Merged 18:51 PT. |
 
 #121 is **not** in this window (merged `2026-08-31T19:05:19Z`; merge
 `eea12f798c22e281100a62552589225321b6c424`). Recorded on this day only via #129.
@@ -29,7 +29,10 @@ upgrade, and no Stage A implement.
 ## Open / holds
 
 - ACCEPT plan land wave `#118→#119→#122→#123→#124→#125→#127` (#126 DEFERRED, #120 OFF)
-- #139 N12 OPEN (Backend Exact File Lease; 12 paths). Mac publication reservation retired by #135; N12 **READY FOR ADMISSION**, not implemented.
+- Open code lanes (not merged): #139 N12 / #138 M02 / #140 Frontend smoke
+  - #139 N12 OPEN (Backend Exact File Lease; 12 paths). #135 lease-map admission: **READY FOR ADMISSION**, not implemented. N12 receipt waits for #139 merge.
+  - #138 M02 OPEN (canonical-replay seed pin)
+  - #140 Frontend smoke OPEN (render-output smoke; CLEAR of N12)
 - Stage A implement **HOLD** (gates)
 - Memory/GBrain Mac offline — receipts drafted **HOLD**
 
