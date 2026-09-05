@@ -1262,6 +1262,19 @@ def test_verifier_rejects_manifest_changed_after_initial_snapshot(
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_manifest_reader_rejects_hard_link_before_parsing(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    manifest = root / "reproducibility-manifest.json"
+    external = tmp_path / "manifest.json"
+    external.write_bytes(manifest.read_bytes())
+    manifest.unlink()
+    os.link(external, manifest)
+
+    with pytest.raises(BundleError, match="manifest must be a real file"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
