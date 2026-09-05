@@ -414,3 +414,101 @@ quarantines remain recorded in
 [`docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`](../../docs/plans/wmb-m05-provenance-explanation-implementation-plan.md).
 Nothing here is a publication, comparability, ranking, superiority, or
 upstream-equivalence claim.
+
+## Neutral reproducibility bundle (REPRO-001)
+
+REPRO-001 freezes an opt-in closed `mnemosyne.reproducibility-bundle/v1`
+manifest. It does not change result-v1 schema bytes, the version-1
+`bundle-manifest.json` write/verify/reproduce path, the signed ledger, or any
+publication renderer. Existing result-v1 records remain valid. The additive
+path consumes merged result-v2 through explicit version dispatch.
+
+One repository-root command from a clean detached checkout of the bound commit
+verifies the source bundle, reruns the bound hit@k scorer (first `k` retrieved
+hits only; `k` comes from `config.json`), recomputes every metric value and
+Wilson interval from raw traces, binds metric metadata (family, unit,
+uncertainty, confidence, exclusions, and status counts) to that measurement,
+and byte-compares manifest-owned output. Matching fabricated declarations
+fail. The scorer rewrite of `metrics.json` is required; copy-only success is
+not reproduction. If `k` or traces cannot be scored, the command fails closed.
+`config.scoring_profile` must be a registered profile and is recomputed only
+through its canonical scorer (`smoke-hit-at-k-v1` for this standard). Unknown
+profiles and duplicate `ranked_retrieved_hits` IDs fail closed:
+
+```
+uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
+```
+
+`BUNDLE` and `DEST` are the only placeholders. The command is argv-only: no
+shell string, no bundle-provided executable, and no execution from inside the
+untrusted bundle directory. Dependency acquisition, if any, is a separately
+disclosed preparation step. The reproduction command itself has no network.
+The invoking checkout must be clean, match `build.candidate_git_sha`, honor
+`uv.lock`, and use only the declared environment allowlist with UTC/C locale.
+Incomplete output is deleted. A destination collision fails closed.
+
+### Manifest fields
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Closed const `mnemosyne.reproducibility-bundle/v1`. Verify runs the Draft 2020-12 schema against the manifest; a present schema file is not enough. |
+| `result_ref` | Canonical `result-v2@sha256:…` binding of the atomic result. |
+| `ledger_ref` | Optional signed-ledger inclusion receipt; absence is not neutrality. |
+| `manifests` | Digest-bound benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge/reader/model/prompt, plus official fidelity or successor parent/difference. |
+| `traces` | Raw `traces.jsonl` path, seed records, retries/aborts, and `trace_index_digest`. |
+| `config` | Canonical `config.json` path, locale `C`, timezone `UTC`, and `config_digest`. |
+| `build` | `build.json` path, lockfile/toolchain, clean `candidate_git_sha`, and `build_fingerprint`. |
+| `environment` | Allowlist, platform/runtime, locale/timezone, optional wheelhouse digest. |
+| `metrics` / `intervals` | Family, name, version, value, unit, numerator/denominator, uncertainty, confidence, low/high, exclusions, and missing/unsupported/failed/aborted/not-measured counts. |
+| `hashes` | Complete file inventory: relative path, size, media type, `raw-bytes` canonicalization, SHA-256. |
+| `rights` | Software/data license, source revision, redistribution, PII, consent, takedown, disclosure. |
+| `custody` | Custody class and declaration. Missing declarations fail. |
+| `operator` | Operator identity, role, signer role, and disclosure state. |
+| `command` | The exact argv above. |
+| `track_kind` / `lineage` | Exact result-v2 `OFFICIAL-UPSTREAM`, `ENHANCED-SUCCESSOR`, or `DEVELOPMENT` values. |
+| `canonical_replay` | Merged M15 digest; not an alias of the four result-v2 lineage digests. |
+| `publication` | Always non-publishable, non-headline, non-independent, non-certified on this standard. |
+
+### Digest meanings
+
+Each value hashes the exact stored bytes of the named file. There is no
+parsing, reserialization, newline conversion, or Unicode normalization before
+hashing. Encoding is lowercase hexadecimal SHA-256 with the `sha256:` prefix.
+
+- `build_fingerprint = sha256(build.json)`
+- `config_digest = sha256(config.json)`
+- `bundle_digest = sha256(bundle-manifest.json)`
+- `trace_index_digest = sha256(traces.jsonl)`
+
+Result, ledger, M15 replay, inventory-entry, and environment/wheelhouse
+digests remain separate cross-references.
+
+### Official vs successor vs development
+
+`track_kind` stays one of the result-v2 values. Official-upstream records
+require their frozen fidelity manifest. Enhanced-successor records require
+parent and difference manifests. Development records are non-publishable and
+non-headline. Official, successor, and development records must not be blended
+into one certified projection, rank, or headline.
+
+### Custody, license, and operator duties
+
+Producers must declare software and data licenses, source revision,
+redistribution rights, PII/consent, takedown, custody class, and operator
+identity/role/signer. Missing or unknown fields fail closed. Tests and
+development fixtures use only synthetic public inputs. Secret-like material,
+symlinks, absolute or escaping paths, duplicate normalized paths, and
+inventory drift are rejected before execution.
+
+### Result-v1 compatibility and REPRO-002
+
+Version-1 bundles keep their previous bytes and branches. result-v1
+schema/validator/ledger behavior is unchanged. A successful development
+reproduction is not headline eligibility, not independent or neutral
+certified evidence, and not REPRO-002. REPRO-002 remains open and blocked
+until a headline-eligible pinned official result exists with a complete public
+bundle, operator/custody approval, and human approval. Independent third-party
+reproduction is an optional separately signed receipt; its absence does not
+block an otherwise operator-run claim, and its presence does not relabel the
+operator or imply certification.
+
