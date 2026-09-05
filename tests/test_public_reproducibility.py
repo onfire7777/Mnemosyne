@@ -3,7 +3,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import platform
 from pathlib import Path
+import sys
 
 import pytest
 from cryptography.hazmat.primitives import serialization
@@ -36,6 +39,8 @@ SCHEMA_PATH = (
     / "schema"
     / "reproducibility-bundle-v1.schema.json"
 )
+PLATFORM = f"{sys.platform}-{platform.machine().lower()}"
+RUNTIME = f"cpython-{sys.version_info.major}.{sys.version_info.minor}"
 
 
 def _validate(manifest: object) -> dict[str, object]:
@@ -66,8 +71,17 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
     payloads = {entry.name: entry.read_bytes() for entry in root.iterdir()}
     payloads.update(
         {
-        "environment.json": _canonical({"dependencies": ["mnemosyne==0.1.0"]}),
-        "uv.lock": b"version = 1\n",
+            "environment.json": _canonical(
+                {
+                    "platform": PLATFORM,
+                    "runtime": RUNTIME,
+                    "dependencies": ["mnemosyne==0.1.0"],
+                    "locale": "C",
+                    "timezone": "UTC",
+                    "environment": {"PYTHONHASHSEED": "0"},
+                }
+            ),
+            "uv.lock": Path("uv.lock").read_bytes(),
             "fixture-manifest.json": _canonical({"kind": "synthetic"}),
             "generator-manifest.json": _canonical({"seeded": True}),
             "adapter-manifest.json": _canonical({"adapter": "smoke"}),
@@ -219,6 +233,15 @@ def _refresh_owned_file(root: Path, name: str) -> None:
     manifest_path.write_bytes(_canonical(manifest))
 
 
+def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in list(os.environ):
+        if any(
+            marker in name.upper()
+            for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
+        ):
+            monkeypatch.delenv(name, raising=False)
+
+
 def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
     lineage: dict[str, object]
     if track_kind == "OFFICIAL-UPSTREAM":
@@ -272,8 +295,8 @@ def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
         "run": {
             "candidate_git_sha": "b" * 40,
             "dirty": False,
-            "platform": "linux-x86_64",
-            "runtime": "cpython-3.12",
+            "platform": PLATFORM,
+            "runtime": RUNTIME,
             "dependencies": ["mnemosyne==0.1.0"],
             "locale": "C",
             "timezone": "UTC",
@@ -509,6 +532,7 @@ def test_reproduction_recomputes_legacy_outputs_and_byte_compares_everything(
     monkeypatch.setattr(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
+    _clear_credential_environment(monkeypatch)
 
     result = public_bundle.reproduce_bundle(source, destination)
 
@@ -530,6 +554,7 @@ def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
         raise BundleError("reproduction checkout is dirty")
 
     monkeypatch.setattr(public_bundle, "_require_clean_reproduction_checkout", reject)
+    _clear_credential_environment(monkeypatch)
     with pytest.raises(BundleError, match="dirty"):
         public_bundle.reproduce_bundle(source, destination)
     assert not destination.exists()
@@ -546,6 +571,7 @@ def test_reproduction_drift_removes_partial_destination(
     monkeypatch.setattr(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
+    _clear_credential_environment(monkeypatch)
     original = runner._ADAPTERS["smoke"]
 
     def drifted(benchmark: object, cli: object) -> tuple[list[dict], dict]:
