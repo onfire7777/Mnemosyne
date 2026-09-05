@@ -38,8 +38,12 @@ uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
 
 `BUNDLE` and `DEST` are path operands; every other token is fixed. Dependency
 acquisition is a separate disclosed preparation step. The reproduction command
-itself requires `UV_OFFLINE=1` and must have no network access, inherited
-credentials, production secrets,
+itself requires `UV_OFFLINE=1`, `LC_ALL=C`, `TZ=UTC`, and every value in the
+manifest's public environment allowlist (including `PYTHONHASHSEED` when
+declared). The disclosed dependency inventory must be the canonical sorted
+inventory from the digest-bound `uv.lock`: `name==version` for versioned packages
+and `name @ source-kind:source-value` for unversioned source packages. The command
+must have no network access, inherited credentials, production secrets,
 protected data, or untracked repository inputs. It refuses an existing or
 source-nested destination, a wrong/dirty/non-root checkout, altered lock or
 environment, symlinks, path escapes, inventory drift, duplicate JSON keys,
