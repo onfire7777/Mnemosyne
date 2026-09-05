@@ -22,8 +22,23 @@
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["fidelity_manifest_digest"],
-              "properties": {"fidelity_manifest_digest": {"$ref": "#/$defs/digest"}}
+              "required": ["fidelity"],
+              "properties": {
+                "fidelity": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["upstream_protocol_digest", "dataset_digest", "split_digest", "preprocessing_digest", "scorer_digest", "environment_digest", "revision_digest"],
+                  "properties": {
+                    "upstream_protocol_digest": {"$ref": "#/$defs/digest"},
+                    "dataset_digest": {"$ref": "#/$defs/digest"},
+                    "split_digest": {"$ref": "#/$defs/digest"},
+                    "preprocessing_digest": {"$ref": "#/$defs/digest"},
+                    "scorer_digest": {"$ref": "#/$defs/digest"},
+                    "environment_digest": {"$ref": "#/$defs/digest"},
+                    "revision_digest": {"$ref": "#/$defs/digest"}
+                  }
+                }
+              }
             },
             {
               "type": "object",
