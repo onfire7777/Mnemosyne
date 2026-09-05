@@ -1293,6 +1293,20 @@ def test_lockfile_dependencies_can_be_parsed_from_bound_bytes() -> None:
     ) == public_bundle._locked_dependencies(lockfile)
 
 
+def test_semantic_digest_bindings_reuse_verified_inventory_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+
+    def reject_path_rehash(_path: Path) -> str:
+        raise AssertionError("semantic digest bindings must not reopen pathnames")
+
+    monkeypatch.setattr(public_bundle, "_sha256_reference", reject_path_rehash)
+
+    assert public_bundle.verify_reproducibility_bundle(root)["valid"] is True
+
+
 def test_reproduction_rejects_checkout_lockfile_outside_inventory_binding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
