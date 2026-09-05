@@ -1477,6 +1477,18 @@ def test_artifact_inspection_allows_noncredential_prefixes(tmp_path: Path) -> No
     assert public_bundle._inspect_artifact(path)[2] is False
 
 
+def test_artifact_inspection_rejects_hard_linked_path(tmp_path: Path) -> None:
+    original = tmp_path / "original.bin"
+    linked = tmp_path / "linked.bin"
+    original.write_bytes(b"public artifact bytes\n")
+    os.link(original, linked)
+
+    with pytest.raises(BundleError, match="changed before inspection"):
+        public_bundle._inspect_artifact(linked)
+    with pytest.raises(BundleError, match="changed before inspection"):
+        public_bundle._sha256_reference(linked)
+
+
 def test_artifact_secret_scan_handles_large_benign_tokens(tmp_path: Path) -> None:
     path = tmp_path / "artifact.bin"
     payload = b"a" * (public_bundle._SECRET_SCAN_CHUNK_SIZE * 2)
