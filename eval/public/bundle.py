@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import json
 import math
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -158,6 +160,9 @@ _REGISTERED_SCORING_PROFILES = {
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
 }
 _REPRO_CANONICAL_HIT_AT_K_PROFILE = "smoke-hit-at-k-v1"
+_AT_FDCWD = -100
+_RENAME_NOREPLACE = 1
+_RENAME_EXCL = 4
 
 
 class BundleError(ValueError):
@@ -908,6 +913,59 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     }
 
 
+def _publish_directory_noreplace(source: Path, destination: Path) -> None:
+    """Atomically publish a directory without replacing an existing path."""
+    if os.name == "nt":
+        source.rename(destination)
+        return
+
+    import ctypes
+
+    library = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    if sys.platform.startswith("linux"):
+        try:
+            rename = library.renameat2
+        except AttributeError as exc:
+            raise BundleError("atomic no-replace publication is unavailable") from exc
+        rename.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename.restype = ctypes.c_int
+        result = rename(
+            _AT_FDCWD,
+            source_bytes,
+            _AT_FDCWD,
+            destination_bytes,
+            _RENAME_NOREPLACE,
+        )
+    elif sys.platform == "darwin":
+        try:
+            rename = library.renamex_np
+        except AttributeError as exc:
+            raise BundleError("atomic no-replace publication is unavailable") from exc
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        result = rename(source_bytes, destination_bytes, _RENAME_EXCL)
+    else:
+        raise BundleError("atomic no-replace publication is unavailable")
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise FileExistsError(
+            error_number,
+            "refusing to overwrite reproducibility bundle",
+            destination,
+        )
+    raise OSError(error_number, os.strerror(error_number), destination)
+
+
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
     destination = destination.resolve()
     if destination.exists():
@@ -965,7 +1023,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         for name in owned:
             if (temp / name).read_bytes() != (snapshot / name).read_bytes():
                 raise BundleError(f"reproduction mismatch: {name}")
-        temp.rename(destination)
+        _publish_directory_noreplace(temp, destination)
         return verified
     except BaseException:
         shutil.rmtree(temp, ignore_errors=True)
