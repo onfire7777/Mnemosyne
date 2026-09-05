@@ -410,6 +410,13 @@ record.
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
 
+- PR #135: receipt-only correction discharging P13-C from verified scheduled
+  run `30807305055`, with the matching `GOAL.md` and `.planning/STATE.md`
+  corrections and N12 blocker clarification. Open at the 2026-09-05 capture;
+  no final-head CI, merge, or post-main result is claimed in this self-record.
+  It preserves the canonical baseline, progress counters, and source leases;
+  N12 still requires external-worktree disposition and lease release.
+
 ## P13-C discharge and N12 admission check (2026-09-05)
 
 The owner requested resolution of the stale gate checklist. This bounded
