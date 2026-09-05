@@ -204,7 +204,9 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             "successor lineage",
         )
         _repro_nonempty(
-            lineage["parent_official_record_id"], "parent official record ID"
+            lineage["parent_official_record_id"],
+            "parent official record ID",
+            maximum=256,
         )
         _repro_digest(lineage["parent_construct_digest"], "parent construct")
         _repro_digest(lineage["difference_manifest_digest"], "difference manifest")
@@ -287,8 +289,11 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     if (
         not isinstance(dependencies, list)
         or len(dependencies) > 4096
+        or any(
+            not isinstance(item, str) or not item or len(item) > 512
+            for item in dependencies
+        )
         or len(dependencies) != len(set(dependencies))
-        or any(not isinstance(item, str) or not item for item in dependencies)
     ):
         raise BundleError("dependency inventory is invalid")
     seeds = run["seed_records"]
@@ -337,8 +342,25 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     }
     for index, item in enumerate(metrics):
         metric = _closed_object(item, metric_fields, f"metric {index}")
-        for field in ("family", "name", "version", "unit"):
-            _repro_nonempty(metric[field], f"metric {field}", maximum=128)
+        for field, maximum in (
+            ("family", 128),
+            ("name", 128),
+            ("version", 64),
+            ("unit", 64),
+        ):
+            _repro_nonempty(metric[field], f"metric {field}", maximum=maximum)
+        if not isinstance(metric["value"], (int, float)) or isinstance(
+            metric["value"], bool
+        ):
+            raise BundleError("metric value is invalid")
+        for field in ("numerator", "denominator"):
+            value = metric[field]
+            if value is not None and (
+                not isinstance(value, (int, float)) or isinstance(value, bool)
+            ):
+                raise BundleError(f"metric {field} is invalid")
+        if (metric["numerator"] is None) != (metric["denominator"] is None):
+            raise BundleError("metric numerator and denominator must be paired")
         if type(metric["sample_count"]) is not int or metric["sample_count"] < 0:
             raise BundleError("metric sample count is invalid")
         interval = _closed_object(
@@ -356,11 +378,22 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             for field in ("low", "high")
         ) or interval["low"] > interval["high"]:
             raise BundleError("metric interval bounds are invalid")
-        if not isinstance(interval["parameters"], dict) or len(interval["parameters"]) > 32:
+        parameters = interval["parameters"]
+        if (
+            not isinstance(parameters, dict)
+            or len(parameters) > 32
+            or any(
+                not isinstance(key, str)
+                or not 1 <= len(key) <= 64
+                or value is not None
+                and not isinstance(value, (str, int, float, bool))
+                for key, value in parameters.items()
+            )
+        ):
             raise BundleError("metric interval parameters are invalid")
         exclusions = metric["exclusions"]
         if not isinstance(exclusions, list) or len(exclusions) > 1024 or any(
-            not isinstance(item, str) for item in exclusions
+            not isinstance(item, str) or len(item) > 512 for item in exclusions
         ):
             raise BundleError("metric exclusions are invalid")
         outcomes = _closed_object(
@@ -389,17 +422,19 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     disclosures = _closed_object(
         manifest["disclosures"], disclosure_fields, "disclosures"
     )
-    for field in (
-        "software_license",
-        "data_license",
-        "source_revision",
-        "takedown_process",
-        "custody_class",
-        "operator_identity",
-        "operator_role",
-        "signer_role",
+    for field, maximum in (
+        ("software_license", 256),
+        ("data_license", 256),
+        ("source_revision", 256),
+        ("takedown_process", 512),
+        ("custody_class", 128),
+        ("operator_identity", 256),
+        ("operator_role", 128),
+        ("signer_role", 128),
     ):
-        _repro_nonempty(disclosures[field], field.replace("_", " "))
+        _repro_nonempty(
+            disclosures[field], field.replace("_", " "), maximum=maximum
+        )
     for field in ("redistribution_permitted", "pii_present", "consent_documented"):
         if type(disclosures[field]) is not bool:
             raise BundleError(f"{field.replace('_', ' ')} disclosure is invalid")
@@ -420,7 +455,11 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             "independent reproduction",
         )
         _repro_digest(independent["receipt_digest"], "reproduction receipt")
-        _repro_nonempty(independent["reproducer_identity"], "reproducer identity")
+        _repro_nonempty(
+            independent["reproducer_identity"],
+            "reproducer identity",
+            maximum=256,
+        )
         if independent["signed"] is not True:
             raise BundleError("independent reproduction receipt must be signed")
 
@@ -468,36 +507,50 @@ def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
         return verify_bundle(legacy)
 
 
-def _reproducibility_tree(root: Path) -> tuple[set[str], set[str]]:
+def _reproducibility_tree(
+    root: Path, expected_files: set[str], expected_directories: set[str]
+) -> tuple[set[str], set[str]]:
     """Return real files/directories below root without following links."""
     root_resolved = root.resolve()
     files: set[str] = set()
     directories: set[str] = set()
     pending = [root]
+    seen = 0
+    maximum_nodes = len(expected_files) + len(expected_directories)
     while pending:
         parent = pending.pop()
         try:
-            children = list(parent.iterdir())
+            for child in parent.iterdir():
+                seen += 1
+                if seen > maximum_nodes:
+                    raise BundleError("reproducibility bundle inventory mismatch")
+                relative = child.relative_to(root).as_posix()
+                is_junction = getattr(child, "is_junction", lambda: False)()
+                if child.is_symlink() or is_junction:
+                    raise BundleError("links and junctions are forbidden")
+                try:
+                    resolved = child.resolve(strict=True)
+                except OSError as exc:
+                    raise BundleError(
+                        "reproducibility bundle path cannot be resolved"
+                    ) from exc
+                if root_resolved not in resolved.parents:
+                    raise BundleError("reproducibility bundle path escapes root")
+                if child.is_dir():
+                    if relative not in expected_directories:
+                        raise BundleError("reproducibility bundle inventory mismatch")
+                    directories.add(relative)
+                    pending.append(child)
+                elif child.is_file():
+                    if relative not in expected_files:
+                        raise BundleError("reproducibility bundle inventory mismatch")
+                    files.add(relative)
+                else:
+                    raise BundleError("non-files are forbidden")
+        except BundleError:
+            raise
         except OSError as exc:
             raise BundleError("reproducibility bundle tree cannot be read") from exc
-        for child in children:
-            relative = child.relative_to(root).as_posix()
-            is_junction = getattr(child, "is_junction", lambda: False)()
-            if child.is_symlink() or is_junction:
-                raise BundleError("links and junctions are forbidden")
-            try:
-                resolved = child.resolve(strict=True)
-            except OSError as exc:
-                raise BundleError("reproducibility bundle path cannot be resolved") from exc
-            if root_resolved not in resolved.parents:
-                raise BundleError("reproducibility bundle path escapes root")
-            if child.is_dir():
-                directories.add(relative)
-                pending.append(child)
-            elif child.is_file():
-                files.add(relative)
-            else:
-                raise BundleError("non-files are forbidden")
     return files, directories
 
 
@@ -547,9 +600,12 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         for parent in Path(name).parents
         if parent != Path(".")
     }
-    actual_files, actual_directories = _reproducibility_tree(root)
+    expected_files = names | {manifest_path.name}
+    actual_files, actual_directories = _reproducibility_tree(
+        root, expected_files, expected_directories
+    )
     if (
-        actual_files != names | {manifest_path.name}
+        actual_files != expected_files
         or actual_directories != expected_directories
     ):
         raise BundleError("reproducibility bundle inventory mismatch")
@@ -676,24 +732,9 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         ):
             raise BundleError("result-v2 metric binding mismatch")
 
-    recomputed = _load_json(root / "metrics.json")
-    if len(declared_metrics) == 1 and isinstance(recomputed, dict):
-        declared = declared_metrics[0]
-        interval = recomputed.get("interval")
-        if (
-            recomputed.get("metric") != declared["name"]
-            or recomputed.get("value") != declared["value"]
-            or recomputed.get("successes") != declared["numerator"]
-            or recomputed.get("total") != declared["denominator"]
-            or recomputed.get("trace_count") != declared["sample_count"]
-            or not isinstance(interval, dict)
-            or interval.get("method") != declared["interval"]["method"]
-            or interval.get("confidence")
-            != declared["interval"]["confidence_level"]
-            or interval.get("low") != declared["interval"]["low"]
-            or interval.get("high") != declared["interval"]["high"]
-        ):
-            raise BundleError("metrics do not recompute from raw traces")
+    _verify_recomputed_metric_declarations(
+        _load_json(root / "metrics.json"), declared_metrics
+    )
 
     from leaderboard.ledger import LedgerError, verify_ledger
 
@@ -719,6 +760,71 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
     return validated
+
+
+def _verify_recomputed_metric_declarations(
+    recomputed: object, declared_metrics: list[dict[str, Any]]
+) -> None:
+    if not isinstance(recomputed, dict):
+        raise BundleError("metrics do not recompute from raw traces")
+    trace_count = recomputed.get("trace_count")
+    if type(trace_count) is not int or trace_count < 0:
+        raise BundleError("metrics do not recompute from raw traces")
+    if "metric" in recomputed:
+        metric_name = recomputed.get("metric")
+        measured = {metric_name: recomputed.get("value")}
+        intervals = {metric_name: recomputed.get("interval")}
+        numerators = {metric_name: recomputed.get("successes")}
+        denominators = {metric_name: recomputed.get("total")}
+        version = "1"
+    else:
+        measured = recomputed.get("metrics")
+        intervals = recomputed.get("intervals")
+        numerators = {}
+        denominators = {}
+        version = str(recomputed.get("profile_version"))
+    if (
+        not isinstance(measured, dict)
+        or not isinstance(intervals, dict)
+        or any(not isinstance(name, str) for name in measured)
+        or set(measured) != set(intervals)
+        or set(measured) != {metric["name"] for metric in declared_metrics}
+    ):
+        raise BundleError("metrics do not recompute from raw traces")
+    for declared in declared_metrics:
+        name = declared["name"]
+        interval = intervals[name]
+        if not isinstance(interval, dict):
+            raise BundleError("metrics do not recompute from raw traces")
+        parameters = {
+            key: value
+            for key, value in interval.items()
+            if key not in {"confidence", "high", "low", "method"}
+        }
+        numerator = declared["numerator"]
+        denominator = declared["denominator"]
+        if name not in numerators:
+            expected_numerator = measured[name] * trace_count
+        else:
+            expected_numerator = numerators.get(name)
+        if name not in denominators:
+            expected_denominator = trace_count
+        else:
+            expected_denominator = denominators.get(name)
+        if (
+            declared["version"] != version
+            or measured[name] != declared["value"]
+            or trace_count != declared["sample_count"]
+            or (numerator is not None and numerator != expected_numerator)
+            or (denominator is not None and denominator != expected_denominator)
+            or interval.get("method") != declared["interval"]["method"]
+            or interval.get("confidence")
+            != declared["interval"]["confidence_level"]
+            or interval.get("low") != declared["interval"]["low"]
+            or interval.get("high") != declared["interval"]["high"]
+            or parameters != declared["interval"]["parameters"]
+        ):
+            raise BundleError("metrics do not recompute from raw traces")
 
 
 def _require_clean_reproduction_checkout(expected_sha: str) -> None:
