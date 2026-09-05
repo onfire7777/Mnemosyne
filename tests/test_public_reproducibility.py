@@ -35,6 +35,7 @@ COMMAND = [
     "uv",
     "run",
     "--locked",
+    "--isolated",
     "mneme",
     "eval-public",
     "--reproduce-bundle",
@@ -1747,6 +1748,7 @@ def test_exact_command_reproduces_from_clean_detached_offline_checkout(
             "uv",
             "run",
             "--locked",
+            "--isolated",
             "mneme",
             "eval-public",
             "--reproduce-bundle",
@@ -1756,11 +1758,12 @@ def test_exact_command_reproduces_from_clean_detached_offline_checkout(
         ],
         cwd=checkout,
         env=environment,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         timeout=120,
     )
+    assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["valid"] is True
     assert subprocess.run(
         ["git", "status", "--porcelain"],
