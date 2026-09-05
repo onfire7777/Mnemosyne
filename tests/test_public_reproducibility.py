@@ -76,13 +76,14 @@ def _digest(payload: bytes) -> str:
 def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
     run_public_suite("smoke", root)
     payloads = {entry.name: entry.read_bytes() for entry in root.iterdir()}
+    locked_dependencies = public_bundle._locked_dependencies(Path("uv.lock"))
     payloads.update(
         {
             "environment.json": _canonical(
                 {
                     "platform": PLATFORM,
                     "runtime": RUNTIME,
-                    "dependencies": ["mnemosyne==0.1.0"],
+                    "dependencies": locked_dependencies,
                     "locale": "C",
                     "timezone": "UTC",
                     "environment": {"PYTHONHASHSEED": "0"},
@@ -181,6 +182,7 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
         payloads[name] = (root / name).read_bytes()
 
     manifest = _manifest()
+    manifest["run"]["dependencies"] = locked_dependencies  # type: ignore[index]
     manifest["inputs"] = {
         "benchmark_manifest_digest": _digest(payloads["benchmark.json"]),
         "dataset_manifest_digest": _digest(payloads["benchmark.json"]),
@@ -275,6 +277,9 @@ def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         ):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("PYTHONHASHSEED", "0")
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("TZ", "UTC")
 
 
 def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
@@ -684,6 +689,29 @@ def test_one_byte_tampering_fails_closed(tmp_path: Path, name: str) -> None:
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    forged_dependencies = ["forged-package==9.9.9"]
+    manifest["run"]["dependencies"] = forged_dependencies  # type: ignore[index]
+    environment = json.loads((root / "environment.json").read_text(encoding="utf-8"))
+    environment["dependencies"] = forged_dependencies
+    environment_payload = _canonical(environment)
+    (root / "environment.json").write_bytes(environment_payload)
+    manifest["artifacts"]["environment_digest"] = _digest(  # type: ignore[index]
+        environment_payload
+    )
+    for entry in manifest["artifacts"]["files"]:  # type: ignore[index]
+        if entry["path"] == "environment.json":
+            entry["size"] = len(environment_payload)
+            entry["digest"] = _digest(environment_payload)
+            break
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="dependency inventory does not match lockfile"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_inventory_drift_and_symlinks_fail_before_validation(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     _write_reproducibility_bundle(root)
@@ -900,6 +928,35 @@ def test_reproduction_requires_offline_mode_and_rejects_inherited_credentials(
     assert not (tmp_path / "credentialed").exists()
 
 
+@pytest.mark.parametrize(
+    ("name", "value", "message"),
+    [
+        ("PYTHONHASHSEED", "1", "allowlist"),
+        ("LC_ALL", "en_US.UTF-8", "locale or timezone"),
+        ("TZ", "Europe/London", "locale or timezone"),
+    ],
+)
+def test_reproduction_requires_manifest_bound_process_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+    message: str,
+) -> None:
+    source = tmp_path / "source"
+    _write_reproducibility_bundle(source)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+    monkeypatch.setenv(name, value)
+
+    with pytest.raises(BundleError, match=message):
+        public_bundle.reproduce_reproducibility_bundle(
+            source, tmp_path / f"reproduced-{name.lower()}"
+        )
+
+
 def test_reproduction_drift_removes_partial_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1000,6 +1057,8 @@ def test_exact_command_reproduces_from_clean_detached_offline_checkout(
         {
             "PATH": str(Path(uv).parent) + os.pathsep + environment.get("PATH", ""),
             "PYTHONHASHSEED": "0",
+            "LC_ALL": "C",
+            "TZ": "UTC",
             "UV_OFFLINE": "1",
         }
     )

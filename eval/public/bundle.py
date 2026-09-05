@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -498,6 +499,43 @@ def _runtime_version() -> str:
     return f"cpython-{sys.version_info.major}.{sys.version_info.minor}"
 
 
+def _locked_dependencies(path: Path) -> list[str]:
+    try:
+        payload = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
+        raise BundleError("lockfile dependency inventory cannot be read") from exc
+    packages = payload.get("package") if isinstance(payload, dict) else None
+    if not isinstance(packages, list) or not packages:
+        raise BundleError("lockfile dependency inventory is invalid")
+    dependencies: list[str] = []
+    for package in packages:
+        if not isinstance(package, dict):
+            raise BundleError("lockfile dependency inventory is invalid")
+        name = package.get("name")
+        version = package.get("version")
+        if not isinstance(name, str) or not name:
+            raise BundleError("lockfile dependency inventory is invalid")
+        if isinstance(version, str) and version:
+            dependencies.append(f"{name}=={version}")
+            continue
+        source = package.get("source")
+        if not isinstance(source, dict) or len(source) != 1:
+            raise BundleError("lockfile dependency inventory is invalid")
+        source_kind, source_value = next(iter(source.items()))
+        if (
+            not isinstance(source_kind, str)
+            or not source_kind
+            or not isinstance(source_value, str)
+            or not source_value
+        ):
+            raise BundleError("lockfile dependency inventory is invalid")
+        dependencies.append(f"{name} @ {source_kind}:{source_value}")
+    ordered = sorted(dependencies)
+    if len(ordered) != len(set(ordered)):
+        raise BundleError("lockfile dependency inventory contains duplicates")
+    return ordered
+
+
 def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
     manifest = _load_json(root / "bundle-manifest.json")
     files = manifest.get("files") if isinstance(manifest, dict) else None
@@ -641,6 +679,8 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     for field, name in bindings.items():
         if name not in names or artifacts[field] != _sha256_reference(root / name):
             raise BundleError(f"digest mismatch: {field}")
+    if manifest["run"]["dependencies"] != _locked_dependencies(root / "uv.lock"):
+        raise BundleError("dependency inventory does not match lockfile")
 
     input_bindings = {
         "benchmark_manifest_digest": "benchmark.json",
@@ -1017,6 +1057,17 @@ def reproduce_reproducibility_bundle(
         raise BundleError("reproduction environment contains inherited credentials")
     if os.environ.get("UV_OFFLINE", "").lower() not in {"1", "true"}:
         raise BundleError("reproduction requires UV_OFFLINE=1")
+    declared_environment = manifest["run"]["environment"]
+    if any(
+        os.environ.get(name) != value
+        for name, value in declared_environment.items()
+    ):
+        raise BundleError("reproduction environment does not match manifest allowlist")
+    if (
+        os.environ.get("LC_ALL") != manifest["run"]["locale"]
+        or os.environ.get("TZ") != manifest["run"]["timezone"]
+    ):
+        raise BundleError("reproduction locale or timezone does not match manifest")
     destination_root.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(
