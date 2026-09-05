@@ -47,6 +47,7 @@ _SECRET_SCAN_CHUNK_SIZE = 1024 * 1024
 # Longer than the maximum bounded credential-URL match so a match cannot be
 # split across adjacent streaming scan windows.
 _SECRET_SCAN_OVERLAP = 1024
+_REPRODUCIBILITY_MANIFEST_MAX_BYTES = 4 * 2**20
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
@@ -1136,17 +1137,47 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
     raise OSError(error_number, os.strerror(error_number), destination)
 
 
+def _read_reproducibility_manifest(manifest_path: Path) -> bytes:
+    """Read one bounded manifest inode without a check/open pathname race."""
+    try:
+        path_stat = manifest_path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or path_stat.st_mode & _UNSAFE_MODE_BITS
+        ):
+            raise BundleError("reproducibility manifest must be a real file")
+        with manifest_path.open("rb") as handle:
+            opened_stat = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or opened_stat.st_nlink != 1
+                or (opened_stat.st_dev, opened_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise BundleError("reproducibility manifest changed before read")
+            raw = handle.read(_REPRODUCIBILITY_MANIFEST_MAX_BYTES + 1)
+            current_stat = manifest_path.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(current_stat.st_mode)
+                or current_stat.st_nlink != 1
+                or (current_stat.st_dev, current_stat.st_ino)
+                != (opened_stat.st_dev, opened_stat.st_ino)
+            ):
+                raise BundleError("reproducibility manifest changed during read")
+    except BundleError:
+        raise
+    except OSError as exc:
+        raise BundleError("reproducibility manifest cannot be read") from exc
+    if len(raw) > _REPRODUCIBILITY_MANIFEST_MAX_BYTES:
+        raise BundleError("reproducibility manifest exceeds size bound")
+    return raw
+
+
 def _load_reproducibility_manifest(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """Load one bounded, canonical, validated manifest snapshot."""
     manifest_path = root / "reproducibility-manifest.json"
-    if manifest_path.is_symlink() or not manifest_path.is_file():
-        raise BundleError("reproducibility manifest must be a real file")
-    try:
-        manifest_raw = manifest_path.read_bytes()
-    except OSError as exc:
-        raise BundleError("reproducibility manifest cannot be read") from exc
-    if len(manifest_raw) > 4 * 2**20:
-        raise BundleError("reproducibility manifest exceeds size bound")
+    manifest_raw = _read_reproducibility_manifest(manifest_path)
     try:
         manifest = _parse_json(
             manifest_raw.decode("utf-8"), "reproducibility-manifest.json"
@@ -1448,11 +1479,8 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             raise BundleError(f"artifact changed during verification: {entry['path']}")
         if secret_found:
             raise BundleError("secret-like material detected")
-    try:
-        if manifest_path.read_bytes() != _canonical(manifest):
-            raise BundleError("reproducibility manifest changed during verification")
-    except OSError as exc:
-        raise BundleError("reproducibility manifest changed during verification") from exc
+    if _read_reproducibility_manifest(manifest_path) != _canonical(manifest):
+        raise BundleError("reproducibility manifest changed during verification")
     return validated
 
 
@@ -1740,13 +1768,10 @@ def reproduce_reproducibility_bundle(
         raise BundleError("reproduction destination must be outside the source bundle")
     manifest, _ = _load_reproducibility_manifest(source_root)
     verify_reproducibility_bundle(source_root)
-    try:
-        if (source_root / "reproducibility-manifest.json").read_bytes() != _canonical(
-            manifest
-        ):
-            raise BundleError("reproducibility manifest changed during reproduction")
-    except OSError as exc:
-        raise BundleError("reproducibility manifest changed during reproduction") from exc
+    if _read_reproducibility_manifest(
+        source_root / "reproducibility-manifest.json"
+    ) != _canonical(manifest):
+        raise BundleError("reproducibility manifest changed during reproduction")
     expected_sha = manifest["run"]["candidate_git_sha"]
     _require_clean_reproduction_checkout(expected_sha)
     if manifest["run"]["platform"] != _runtime_platform():
