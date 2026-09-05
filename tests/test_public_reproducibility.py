@@ -1446,6 +1446,42 @@ def test_atomic_assembler_rejects_file_replaced_after_inventory(
     assert not (tmp_path / "assembled").exists()
 
 
+def test_assembler_uses_canonical_manifest_object_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "assembled"
+    manifest = _write_reproducibility_bundle(source)
+    (source / "reproducibility-manifest.json").unlink()
+    original_tree = public_bundle._reproducibility_tree
+    mutated = False
+
+    def mutate_caller_manifest_after_inventory(
+        root: Path, expected_files: set[str], expected_directories: set[str]
+    ) -> tuple[set[str], set[str]]:
+        nonlocal mutated
+        result = original_tree(root, expected_files, expected_directories)
+        if root == source.resolve() and not mutated:
+            manifest["artifacts"]["files"][0]["path"] = "../../escape"  # type: ignore[index]
+            mutated = True
+        return result
+
+    monkeypatch.setattr(
+        public_bundle,
+        "_reproducibility_tree",
+        mutate_caller_manifest_after_inventory,
+    )
+
+    result = public_bundle.assemble_reproducibility_bundle(
+        source, destination, manifest
+    )
+
+    assert mutated is True
+    assert result["valid"] is True
+    assert not tmp_path.joinpath("escape").exists()
+    assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
+
+
 def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
