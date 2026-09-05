@@ -213,12 +213,18 @@ def _repro_finite(value: object) -> None:
             raise BundleError("reproducibility manifest exceeds structural bounds")
         if isinstance(current, float) and not math.isfinite(current):
             raise BundleError("reproducibility manifest numbers must be finite")
+        if isinstance(current, str) and SECRET.search(current):
+            raise BundleError("secret-like material detected in manifest")
         if isinstance(current, (dict, list)):
             identity = id(current)
             if identity in containers:
                 raise BundleError("reproducibility manifest contains a cycle")
             containers.add(identity)
-            nested = current.values() if isinstance(current, dict) else current
+            nested = (
+                (item for pair in current.items() for item in pair)
+                if isinstance(current, dict)
+                else current
+            )
             stack.extend((item, depth + 1) for item in nested)
 
 

@@ -505,6 +505,33 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
 
 
 @pytest.mark.parametrize(
+    ("field", "credential"),
+    [
+        ("operator_identity", "Authorization: Bearer " + "a" * 32),
+        ("takedown_process", "postgresql://public:supersecret@database.example/db"),
+    ],
+)
+def test_manifest_rejects_credentials_outside_environment(
+    field: str, credential: str
+) -> None:
+    manifest = _manifest()
+    manifest["disclosures"][field] = credential  # type: ignore[index]
+
+    with pytest.raises(BundleError, match="secret-like material detected in manifest"):
+        _validate(manifest)
+
+
+def test_manifest_rejects_credential_in_parameter_key() -> None:
+    manifest = _manifest()
+    manifest["metrics"][0]["interval"]["parameters"] = {  # type: ignore[index]
+        "github_pat_" + "a" * 24: "redacted"
+    }
+
+    with pytest.raises(BundleError, match="secret-like material detected in manifest"):
+        _validate(manifest)
+
+
+@pytest.mark.parametrize(
     "name",
     [
         "PYTHONPATH",
