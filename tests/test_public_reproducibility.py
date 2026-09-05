@@ -18,7 +18,11 @@ from eval.public import bundle as public_bundle
 from eval.public.bundle import BundleError
 from leaderboard.ledger import append_entry
 from eval.public.runner import run_public_suite
-from tests.test_leaderboard_result_contract import _v2_development_record
+from tests.test_leaderboard_result_contract import (
+    _v2_development_record,
+    _v2_official_record,
+    _v2_successor_record,
+)
 from tests.test_public_eval import _canonical_replay_payload
 
 
@@ -94,7 +98,11 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
         }
     )
     record = _v2_development_record()
+    benchmark_manifest = json.loads(payloads["benchmark.json"])
+    benchmark_metadata = benchmark_manifest["metadata"]
     record["run_commit"] = GIT_SHA
+    record["benchmark"] = benchmark_metadata["suite"]
+    record["benchmark_version"] = benchmark_metadata["revision"]
     record["build_fingerprint"] = _digest(payloads["build.json"])
     record["config_digest"] = _digest(payloads["config.json"])
     record["bundle_digest"] = _digest(payloads["bundle-manifest.json"])
@@ -108,6 +116,28 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
             "confidence_interval": {"low": 0.3424, "high": 1.0},
         }
     ]
+    identity = record["identity"]
+    identity.update(  # type: ignore[union-attr]
+        {
+            "adapter_id": benchmark_metadata["adapter"],
+            "benchmark_id": record["benchmark"],
+            "benchmark_version": record["benchmark_version"],
+            "dataset_split_digest": _digest(payloads["benchmark.json"]),
+            "seed": 20260728,
+        }
+    )
+    record["run_profile"] = {
+        "profile_id": "L16-DEV",
+        "seeds": [20260728],
+        "retries": 0,
+        "aborts": 0,
+    }
+    record["operator_entry"] = {
+        "operator": "development-test",
+        "disclosed": True,
+    }
+    record["custody"] = "development-public"
+    record["signer_role"] = "operator"
     payloads["result.json"] = _canonical(record)
     replay = _canonical_replay_payload("wmbs-m01-development")
     payloads["canonical-replay.json"] = _canonical(replay)
@@ -250,13 +280,9 @@ def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
     lineage: dict[str, object]
     if track_kind == "OFFICIAL-UPSTREAM":
-        lineage = {"fidelity_manifest_digest": DIGEST}
+        lineage = copy.deepcopy(_v2_official_record()["lineage"])  # type: ignore[assignment]
     elif track_kind == "ENHANCED-SUCCESSOR":
-        lineage = {
-            "difference_manifest_digest": DIGEST,
-            "parent_construct_digest": DIGEST,
-            "parent_official_record_id": "official-result-1",
-        }
+        lineage = copy.deepcopy(_v2_successor_record()["lineage"])  # type: ignore[assignment]
     else:
         lineage = {}
     return {
@@ -345,10 +371,10 @@ def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
             "pii_present": False,
             "consent_documented": True,
             "takedown_process": "security@example.invalid",
-            "custody_class": "PUBLIC-SYNTHETIC",
+            "custody_class": "development-public",
             "operator_identity": "development-test",
             "operator_role": "test-operator",
-            "signer_role": "development-signer",
+            "signer_role": "operator",
             "disclosure_state": "COMPLETE",
             "independent_reproduction": None,
         },
@@ -384,9 +410,14 @@ def test_accepts_closed_development_manifest() -> None:
 
 @pytest.mark.parametrize("track_kind", ["OFFICIAL-UPSTREAM", "ENHANCED-SUCCESSOR"])
 def test_accepts_each_lineage_without_blending(track_kind: str) -> None:
-    assert _validate(_manifest(track_kind=track_kind))[
-        "track_kind"
-    ] == track_kind
+    manifest = _manifest(track_kind=track_kind)
+    authoritative = (
+        _v2_official_record()
+        if track_kind == "OFFICIAL-UPSTREAM"
+        else _v2_successor_record()
+    )
+    assert manifest["result_ref"]["lineage"] == authoritative["lineage"]  # type: ignore[index]
+    assert _validate(manifest)["track_kind"] == track_kind
 
 
 def test_rejects_unknown_or_missing_top_level_fields() -> None:
@@ -612,6 +643,32 @@ def test_verifies_manifest_owned_bytes_and_existing_result_and_replay_contracts(
     assert public_bundle.verify_bundle(root)["schema_version"] == (
         "mnemosyne.reproducibility-bundle/v1"
     )
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("result", "benchmark", "different-suite"),
+        ("identity", "seed", 999),
+        ("run_profile", "retries", 1),
+        ("publication", "publishable", True),
+        ("operator_entry", "operator", "different-operator"),
+        ("result", "custody", "operator-held-out"),
+        ("result", "signer_role", "independent"),
+    ],
+)
+def test_result_bundle_custody_mismatches_fail_closed(
+    tmp_path: Path, section: str, field: str, value: object
+) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    benchmark = json.loads((root / "benchmark.json").read_text(encoding="utf-8"))
+    target = result if section == "result" else result[section]
+    target[field] = value
+
+    with pytest.raises(BundleError, match="embedded bundle custody"):
+        public_bundle._verify_result_bundle_bindings(result, manifest, benchmark)
 
 
 @pytest.mark.parametrize(
@@ -868,6 +925,33 @@ def test_reproduction_drift_removes_partial_destination(
     with pytest.raises(BundleError, match="reproduction mismatch"):
         public_bundle.reproduce_bundle(source, destination)
     assert not destination.exists()
+
+
+def test_destination_collision_race_never_deletes_external_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    sentinel = destination / "external-owner.txt"
+    _write_reproducibility_bundle(source)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+    original_rename = Path.rename
+
+    def collide(path: Path, target: Path) -> Path:
+        if path.name == "final" and Path(target) == destination:
+            destination.mkdir()
+            sentinel.write_text("do not delete", encoding="utf-8")
+            raise FileExistsError("simulated destination race")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", collide)
+    with pytest.raises(FileExistsError, match="destination race"):
+        public_bundle.reproduce_reproducibility_bundle(source, destination)
+
+    assert sentinel.read_text(encoding="utf-8") == "do not delete"
 
 
 def test_exact_command_reproduces_from_clean_detached_offline_checkout(

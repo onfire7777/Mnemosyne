@@ -187,12 +187,21 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     if track_kind == "DEVELOPMENT":
         _closed_object(lineage, set(), "development lineage")
     elif track_kind == "OFFICIAL-UPSTREAM":
-        lineage = _closed_object(
-            lineage, {"fidelity_manifest_digest"}, "official lineage"
+        lineage = _closed_object(lineage, {"fidelity"}, "official lineage")
+        fidelity_fields = {
+            "upstream_protocol_digest",
+            "dataset_digest",
+            "split_digest",
+            "preprocessing_digest",
+            "scorer_digest",
+            "environment_digest",
+            "revision_digest",
+        }
+        fidelity = _closed_object(
+            lineage["fidelity"], fidelity_fields, "official fidelity"
         )
-        _repro_digest(
-            lineage["fidelity_manifest_digest"], "official fidelity manifest"
-        )
+        for field in fidelity_fields:
+            _repro_digest(fidelity[field], field.replace("_", " "))
     else:
         lineage = _closed_object(
             lineage,
@@ -695,6 +704,8 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         raise BundleError("result-v2 reference mismatch")
     if manifest["disclosures"]["source_revision"] != result.get("run_commit"):
         raise BundleError("source revision does not match result-v2 run commit")
+    benchmark_manifest = _load_json(root / "benchmark.json")
+    _verify_result_bundle_bindings(result, manifest, benchmark_manifest)
     digest_errors = verify_result_digests(
         result,
         {
@@ -779,6 +790,57 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
     return validated
+
+
+def _verify_result_bundle_bindings(
+    result: dict[str, Any], manifest: dict[str, Any], benchmark_manifest: object
+) -> None:
+    if not isinstance(benchmark_manifest, dict) or not isinstance(
+        benchmark_manifest.get("metadata"), dict
+    ):
+        raise BundleError("benchmark manifest metadata is invalid")
+    metadata = benchmark_manifest["metadata"]
+    identity = result.get("identity")
+    run_profile = result.get("run_profile")
+    publication = result.get("publication")
+    operator_entry = result.get("operator_entry")
+    if not all(
+        isinstance(value, dict)
+        for value in (identity, run_profile, publication, operator_entry)
+    ):
+        raise BundleError("result-v2 run custody is incomplete")
+    run = manifest["run"]
+    disclosures = manifest["disclosures"]
+    inputs = manifest["inputs"]
+    if (
+        result.get("benchmark") != metadata.get("suite")
+        or result.get("benchmark_version") != metadata.get("revision")
+        or identity.get("benchmark_id") != metadata.get("suite")
+        or identity.get("benchmark_version") != metadata.get("revision")
+        or identity.get("adapter_id") != metadata.get("adapter")
+        or identity.get("dataset_split_digest")
+        != inputs["dataset_manifest_digest"]
+        or identity.get("seed") not in run["seed_records"]
+        or run_profile.get("seeds") != run["seed_records"]
+        or run_profile.get("retries") != run["retries"]
+        or run_profile.get("aborts") != run["aborts"]
+        or publication.get("publishable") != metadata.get("publishable")
+        or publication.get("pbpp_headline_eligible")
+        != metadata.get("pbpp_headline_eligible")
+        or operator_entry.get("operator") != disclosures["operator_identity"]
+        or result.get("custody") != disclosures["custody_class"]
+        or result.get("signer_role") != disclosures["signer_role"]
+    ):
+        raise BundleError("result-v2 does not bind embedded bundle custody")
+    for result_field, metadata_field in (
+        ("module_id", "module_id"),
+        ("admission_state", "admission_state"),
+        ("track_kind", "track_kind"),
+    ):
+        if metadata_field in metadata and result.get(result_field) != metadata.get(
+            metadata_field
+        ):
+            raise BundleError("result-v2 does not bind embedded bundle custody")
 
 
 def _verify_recomputed_metric_declarations(
@@ -1020,12 +1082,12 @@ def reproduce_reproducibility_bundle(
             _canonical(manifest)
         )
         result = verify_reproducibility_bundle(final)
+        if os.path.lexists(destination_root):
+            raise FileExistsError(
+                f"refusing to overwrite bundle: {destination_root}"
+            )
         final.rename(destination_root)
         return result
-    except BaseException:
-        if destination_root.is_dir():
-            shutil.rmtree(destination_root, ignore_errors=True)
-        raise
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
