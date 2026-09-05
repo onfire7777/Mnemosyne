@@ -424,10 +424,13 @@ publication renderer. Existing result-v1 records remain valid. The additive
 path consumes merged result-v2 through explicit version dispatch.
 
 One repository-root command from a clean detached checkout of the bound commit
-verifies the source bundle, regenerates the result, recomputes every metric
-value and Wilson interval from raw traces (not from matching `metrics.json`
-and manifest declarations), verifies every digest, and byte-compares
-manifest-owned output:
+verifies the source bundle, reruns the bound hit@k scorer (first `k` retrieved
+hits only; `k` comes from `config.json`), recomputes every metric value and
+Wilson interval from raw traces, binds metric metadata (family, unit,
+uncertainty, confidence, exclusions, and status counts) to that measurement,
+and byte-compares manifest-owned output. Matching fabricated declarations
+fail. The scorer rewrite of `metrics.json` is required; copy-only success is
+not reproduction. If `k` or traces cannot be scored, the command fails closed:
 
 ```
 uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST

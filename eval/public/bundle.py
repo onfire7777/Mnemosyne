@@ -622,40 +622,78 @@ def _inventory_bytes(root: Path, manifest: dict[str, Any]) -> dict[str, bytes]:
     return payloads
 
 
+def _bound_repro_k(config: object) -> int:
+    if not isinstance(config, dict):
+        raise BundleError("bound k is unavailable")
+    k = config.get("k")
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1:
+        raise BundleError("bound k is unavailable")
+    return k
+
+
+def _bound_repro_scoring_profile(config: object) -> str:
+    if not isinstance(config, dict):
+        raise BundleError("metrics do not recompute from traces")
+    profile = config.get("scoring_profile")
+    if not isinstance(profile, str) or not profile.strip():
+        raise BundleError("metrics do not recompute from traces")
+    return profile
+
+
+def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]:
+    if k < 1:
+        raise BundleError("bound k is unavailable")
+    successes = 0
+    total = 0
+    for trace in traces:
+        if not isinstance(trace, dict):
+            raise BundleError("metrics do not recompute from traces")
+        hits = trace.get("ranked_retrieved_hits")
+        gold = trace.get("gold_references")
+        if not isinstance(hits, list) or not isinstance(gold, list):
+            raise BundleError("metrics do not recompute from traces")
+        successes += bool(set(hits[:k]) & set(gold))
+        total += 1
+    if total == 0:
+        raise BundleError("metrics do not recompute from traces")
+    return successes, total
+
+
+def _measured_from_repro_score(successes: int, total: int) -> dict[str, Any]:
+    expected = wilson_interval(successes, total).as_dict()
+    return {
+        "family": "deterministic-retrieval",
+        "interval": {
+            "confidence": 0.95,
+            "high": expected["ci_high"],
+            "low": expected["ci_low"],
+            "method": expected["ci_method"],
+        },
+        "metric": "hit_at_k",
+        "successes": successes,
+        "total": total,
+        "trace_count": total,
+        "value": expected["point"],
+    }
+
+
 def _recompute_repro_metrics(
     traces: list[dict[str, Any]],
     measured: object,
     manifest_metrics: object,
     manifest_intervals: object,
+    *,
+    config: object,
 ) -> dict[str, Any]:
     if not isinstance(measured, dict):
         raise BundleError("missing metrics")
-    successes = sum(
-        bool(
-            set(trace.get("ranked_retrieved_hits") or [])
-            & set(trace.get("gold_references") or [])
-        )
-        for trace in traces
-        if isinstance(trace, dict)
-    )
-    total = len(traces)
-    if total == 0:
-        raise BundleError("metrics do not recompute from traces")
-    expected = wilson_interval(successes, total).as_dict()
-    expected_value = expected["point"]
-    expected_interval = {
-        "confidence": 0.95,
-        "high": expected["ci_high"],
-        "low": expected["ci_low"],
-        "method": expected["ci_method"],
-    }
-    if (
-        measured.get("trace_count") != total
-        or measured.get("successes") != successes
-        or measured.get("total") != total
-        or measured.get("metric") != "hit_at_k"
-        or measured.get("value") != expected_value
-    ):
+    k = _bound_repro_k(config)
+    version = _bound_repro_scoring_profile(config)
+    successes, total = _score_repro_traces(traces, k)
+    recomputed = _measured_from_repro_score(successes, total)
+    expected_value = recomputed["value"]
+    expected_interval = recomputed["interval"]
+    if any(measured.get(key) != recomputed[key] for key in recomputed if key != "interval"):
         raise BundleError("metrics do not recompute from traces")
     if not isinstance(manifest_metrics, list) or not manifest_metrics:
         raise BundleError("missing metrics")
@@ -669,7 +707,19 @@ def _recompute_repro_metrics(
             raise BundleError("missing metrics")
         declared_interval = declared.get("interval", {})
         if (
-            declared.get("name") != "hit_at_k"
+            declared.get("family") != "retrieval"
+            or declared.get("name") != "hit_at_k"
+            or declared.get("version") != version
+            or declared.get("unit") != "ratio"
+            or declared.get("uncertainty_method") != "wilson"
+            or declared.get("uncertainty_parameters") != {"z": 1.96}
+            or declared.get("confidence_level") != 0.95
+            or declared.get("exclusions") != []
+            or declared.get("missing_count") != 0
+            or declared.get("unsupported_count") != 0
+            or declared.get("failed_count") != 0
+            or declared.get("aborted_count") != 0
+            or declared.get("not_measured_count") != 0
             or declared.get("numerator") != successes
             or declared.get("denominator") != total
             or declared.get("sample_count") != total
@@ -688,11 +738,12 @@ def _recompute_repro_metrics(
             or interval.get("low") != expected_interval["low"]
             or interval.get("high") != expected_interval["high"]
             or interval.get("method") != expected_interval["method"]
+            or interval.get("confidence_level") != 0.95
         ):
             raise BundleError("intervals do not recompute from traces")
     if len(manifest_metrics) != 1 or len(manifest_intervals) != 1:
         raise BundleError("metrics do not recompute from traces")
-    return measured
+    return recomputed
 
 
 def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
@@ -808,6 +859,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         _load_json(root / "metrics.json"),
         manifest.get("metrics"),
         manifest.get("intervals"),
+        config=_load_json(root / "config.json"),
     )
     publication = manifest["publication"]
     return {
@@ -841,20 +893,26 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
             if isinstance(entry, dict) and isinstance(entry.get("path"), str)
         ] + [REPRODUCIBILITY_MANIFEST_NAME]
         for name in owned:
+            if name == "metrics.json":
+                continue
             src = source / name
             if src.is_symlink() or not src.is_file():
                 raise BundleError(f"links and non-files are forbidden: {name}")
             shutil.copyfile(src, temp / name, follow_symlinks=False)
+        config = _load_json(temp / "config.json")
         traces = [
             _parse_json(line, "traces.jsonl")
             for line in (temp / "traces.jsonl").read_text(encoding="utf-8").splitlines()
             if line
         ]
-        recomputed = _recompute_repro_metrics(
+        successes, total = _score_repro_traces(traces, _bound_repro_k(config))
+        recomputed = _measured_from_repro_score(successes, total)
+        _recompute_repro_metrics(
             traces,
-            _load_json(temp / "metrics.json"),
+            recomputed,
             source_manifest.get("metrics"),
             source_manifest.get("intervals"),
+            config=config,
         )
         _write_json(temp / "metrics.json", recomputed)
         _verify_reproducibility_bundle(temp)
