@@ -9,7 +9,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import leaderboard.publish as publication
 from leaderboard.ledger import append_entry
-from leaderboard.publish import PublicationError, main, publish_site
+from leaderboard.publish import (
+    PublicationError,
+    _parse_record_mapping,
+    main,
+    publish_site,
+)
 from leaderboard.render import render_site
 from leaderboard.validate import DIGEST_PAYLOAD_NAMES
 from tests.test_leaderboard_result_contract import (
@@ -585,6 +590,117 @@ def test_cli_forwards_artifact_bindings_to_publish_site(
         "config": artifacts["config.json"],
         "bundle": artifacts["bundle-manifest.json"],
     }
+
+
+def test_parse_preserves_commas_in_trace_path_without_artifacts() -> None:
+    record_id, trace, files = _parse_record_mapping(
+        "r1=/tmp/trace,part.jsonl"
+    )
+    assert record_id == "r1"
+    assert trace == Path("/tmp/trace,part.jsonl")
+    assert files is None
+
+
+def test_parse_preserves_commas_in_trace_path_with_artifact_bindings() -> None:
+    record_id, trace, files = _parse_record_mapping(
+        "r1=/tmp/trace,part.jsonl,build=/tmp/build,a.json,"
+        "config=/tmp/config,b.json,bundle=/tmp/bundle,c.json"
+    )
+    assert record_id == "r1"
+    assert trace == Path("/tmp/trace,part.jsonl")
+    assert files == {
+        "build": Path("/tmp/build,a.json"),
+        "config": Path("/tmp/config,b.json"),
+        "bundle": Path("/tmp/bundle,c.json"),
+    }
+
+
+def test_cli_preserves_commas_in_trace_path_without_artifacts(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    traces = _trace(tmp_path / "trace,part.jsonl")
+    captured: dict[str, object] = {}
+
+    def _capture(
+        ledger_path: Path,
+        public_key_path: Path,
+        traces: dict[str, Path],
+        destination: Path,
+        artifacts: dict[str, dict[str, Path]] | None = None,
+    ) -> None:
+        captured["traces"] = traces
+        captured["artifacts"] = artifacts
+
+    monkeypatch.setattr(publication, "publish_site", _capture)
+    mapping = f"result-success={traces}"
+
+    assert main([str(ledger), str(public_key), str(tmp_path / "site"), mapping]) == 0
+    forwarded = captured["traces"]
+    assert isinstance(forwarded, dict)
+    assert forwarded["result-success"] == traces
+    assert "," in str(forwarded["result-success"])
+    assert captured["artifacts"] is None
+
+
+def test_cli_preserves_commas_in_trace_path_with_artifact_bindings(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    comma_trace = tmp_path / "trace,part.jsonl"
+    comma_trace.write_bytes(artifacts["traces.jsonl"].read_bytes())
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    captured: dict[str, object] = {}
+
+    def _capture(
+        ledger_path: Path,
+        public_key_path: Path,
+        traces: dict[str, Path],
+        destination: Path,
+        artifacts: dict[str, dict[str, Path]] | None = None,
+    ) -> None:
+        captured["traces"] = traces
+        captured["artifacts"] = artifacts
+
+    monkeypatch.setattr(publication, "publish_site", _capture)
+    record_id = str(record["record_id"])
+    mapping = (
+        f"{record_id}={comma_trace}"
+        f",build={artifacts['build.json']}"
+        f",config={artifacts['config.json']}"
+        f",bundle={artifacts['bundle-manifest.json']}"
+    )
+
+    assert main([str(ledger), str(public_key), str(tmp_path / "site"), mapping]) == 0
+    forwarded = captured["traces"]
+    assert isinstance(forwarded, dict)
+    assert forwarded[record_id] == comma_trace
+    bound = captured["artifacts"]
+    assert isinstance(bound, dict)
+    assert bound[record_id]["build"] == artifacts["build.json"]
 
 
 def test_cli_v2_without_artifact_bindings_reports_missing_source(
