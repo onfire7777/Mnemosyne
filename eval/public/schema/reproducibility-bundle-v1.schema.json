@@ -89,6 +89,7 @@
         "lockfile_digest": {"$ref": "#/$defs/digest"},
         "files": {
           "type": "array", "minItems": 1, "maxItems": 4096,
+          "$comment": "The canonical runtime validator additionally limits the sum of file sizes to 1073741824 bytes.",
           "items": {
             "type": "object", "additionalProperties": false,
             "required": ["path", "size", "media_type", "canonicalization", "digest"],
@@ -204,6 +205,6 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[<>:\"|?*\\u0000-\\u001f])(?!.*[ .](?:/|$))[^/\\u0000]+(?:/[^/\\u0000]+)*$"}
+    "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!(?:[^/]+/){32})(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[<>:\"|?*\\u0000-\\u001f])(?!.*[ .](?:/|$))[^/\\u0000]+(?:/[^/\\u0000]+)*$"}
   }
 }

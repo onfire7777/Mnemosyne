@@ -1311,6 +1311,21 @@ def test_inventory_path_depth_is_bounded() -> None:
         public_bundle._repro_relative_path(rejected)
 
 
+def test_schema_and_runtime_share_inventory_path_depth_bound() -> None:
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    path_pattern = schema["$defs"]["path"]["pattern"]
+    accepted = "/".join(["a"] * 32)
+    rejected = "/".join(["a"] * 32 + ["overflow.bin"])
+    assert re.fullmatch(path_pattern, accepted) is not None
+    assert re.fullmatch(path_pattern, rejected) is None
+
+    manifest = _manifest()
+    manifest["artifacts"]["files"][0]["path"] = rejected  # type: ignore[index]
+
+    with pytest.raises(BundleError, match="normalized relative path"):
+        public_bundle.validate_reproducibility_manifest(manifest)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
