@@ -985,8 +985,13 @@ def _locked_dependencies(path: Path) -> list[str]:
     return ordered
 
 
-def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
-    manifest = _load_json(root / "bundle-manifest.json")
+def _verify_embedded_legacy_bundle(
+    root: Path, entries: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    manifest_entry = entries.get("bundle-manifest.json")
+    if manifest_entry is None:
+        raise BundleError("embedded public bundle manifest is not inventoried")
+    manifest = _load_bound_json(root / "bundle-manifest.json", manifest_entry)
     files = manifest.get("files") if isinstance(manifest, dict) else None
     if not isinstance(files, dict) or not files:
         raise BundleError("embedded public bundle manifest is invalid")
@@ -994,12 +999,13 @@ def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
         legacy = Path(temporary) / "bundle"
         legacy.mkdir()
         for name in (*files.keys(), "bundle-manifest.json"):
-            if not isinstance(name, str) or _repro_relative_path(name) != name:
+            if (
+                not isinstance(name, str)
+                or _repro_relative_path(name) != name
+                or name not in entries
+            ):
                 raise BundleError("embedded public bundle inventory is invalid")
-            source = root / name
-            if source.is_symlink() or not source.is_file():
-                raise BundleError("embedded public bundle file is invalid")
-            shutil.copyfile(source, legacy / name)
+            _copy_inventory_artifact(root / name, legacy / name, entries[name])
         return verify_bundle(legacy)
 
 
@@ -1240,7 +1246,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         raise BundleError("environment manifest does not match run declaration")
     if environment_raw != _canonical(environment_record):
         raise BundleError("environment manifest bytes must be canonical")
-    _verify_embedded_legacy_bundle(root)
+    _verify_embedded_legacy_bundle(root, entries)
 
     required = {
         "result.json",

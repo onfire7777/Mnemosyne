@@ -1538,6 +1538,35 @@ def test_signed_ledger_verification_uses_inventory_bound_snapshot(
     assert len(observed) == 1
 
 
+def test_embedded_legacy_verification_uses_inventory_bound_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    entries = {
+        entry["path"]: entry
+        for entry in manifest["artifacts"]["files"]  # type: ignore[index]
+    }
+    original_verify = public_bundle.verify_bundle
+    observed: list[Path] = []
+
+    def observe_snapshot(snapshot: Path) -> dict[str, object]:
+        observed.append(snapshot)
+        assert snapshot != root
+        assert (snapshot / "metrics.json").read_bytes() == (
+            root / "metrics.json"
+        ).read_bytes()
+        (root / "metrics.json").write_bytes(b"{}\n")
+        return original_verify(snapshot)
+
+    monkeypatch.setattr(public_bundle, "verify_bundle", observe_snapshot)
+
+    result = public_bundle._verify_embedded_legacy_bundle(root, entries)
+
+    assert result["valid"] is True
+    assert len(observed) == 1
+
+
 def test_artifact_secret_scan_handles_large_benign_tokens(tmp_path: Path) -> None:
     path = tmp_path / "artifact.bin"
     payload = b"a" * (public_bundle._SECRET_SCAN_CHUNK_SIZE * 2)
