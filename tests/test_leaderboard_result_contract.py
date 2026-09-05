@@ -821,6 +821,48 @@ def test_v2_schema_is_additive_closed_contract() -> None:
     }
 
 
+def test_v2_schema_aligns_metric_contract_with_runtime() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v2.schema.json").read_text(encoding="utf-8")
+    )
+    families = {
+        "retrieval",
+        "judged_qa",
+        "security",
+        "calibration",
+        "performance",
+        "reproducibility",
+    }
+
+    assert set(schema["$defs"]["metric"]["properties"]["family"]["enum"]) == families
+    family_rules = next(
+        rule["properties"]["metrics"]["anyOf"]
+        for rule in schema["allOf"]
+        if "properties" in rule and "metrics" in rule["properties"]
+    )
+    assert {
+        rule["items"]["properties"]["family"]["const"] for rule in family_rules
+    } == families
+    judge_rule = schema["$defs"]["metric"]["allOf"][0]
+    assert judge_rule["if"]["properties"]["family"]["const"] == "judged_qa"
+    assert judge_rule["then"]["required"] == ["judge"]
+    assert judge_rule["else"]["not"]["required"] == ["judge"]
+    assert "low <= high" in schema["$defs"]["confidenceInterval"]["$comment"]
+
+
+def test_v2_projection_schema_declares_closed_properties() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v2.schema.json").read_text(encoding="utf-8")
+    )
+    projection = schema["$defs"]["projection"]
+
+    assert projection["additionalProperties"] is False
+    assert "properties" in projection
+    assert set(projection["required"]) <= set(projection["properties"])
+    assert "weighting" in projection["properties"]
+    assert projection["properties"]["source_record_ids"]["minItems"] == 1
+
+
 def test_accepts_minimal_v2_development_record() -> None:
     assert validate_record(_v2_development_record()) == []
 
@@ -1011,6 +1053,31 @@ def test_accepts_exploratory_projection_over_compatible_records() -> None:
     assert validate_projection(_projection(["synthetic-v2-dev-001"]), records) == []
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "projection_id",
+        "filters",
+        "compatibility_key",
+        "exclusions",
+        "numerator",
+        "denominator",
+        "uncertainty_method",
+    ],
+)
+def test_rejects_incomplete_projection_contract(field: str) -> None:
+    projection = _projection(["synthetic-v2-dev-001"])
+    del projection[field]
+
+    assert f"/{field}" in validate_projection(projection, [_v2_development_record()])
+
+
+def test_rejects_empty_projection_sources() -> None:
+    projection = _projection([])
+
+    assert "/source_record_ids" in validate_projection(projection, [])
+
+
 def test_rejects_certified_blend_of_official_and_enhanced_records() -> None:
     records = [_v2_official_record(), _v2_successor_record()]
     projection = _projection(
@@ -1045,6 +1112,55 @@ def test_rejects_incompatible_track_scorer_division_metric_or_resource() -> None
 
     assert "/compatibility_key/track_kind" in validate_projection(
         projection, [official, successor]
+    )
+
+
+def test_rejects_projection_with_mismatched_benchmark_or_scorer() -> None:
+    record = _v2_official_record()
+    projection = _projection(
+        ["synthetic-v2-official-001"],
+        compatibility_key={
+            "track_kind": "OFFICIAL-UPSTREAM",
+            "benchmark_id": "synthetic-retrieval",
+            "benchmark_version": "1",
+            "scorer_digest": f"sha256:{'11' * 32}",
+            "division": "COMPONENT-CLOSED",
+            "metric": {
+                "name": "recall_at_10",
+                "family": "retrieval",
+                "unit": "ratio",
+            },
+            "resource_treatment": "verified",
+        },
+    )
+    assert validate_projection(projection, [record]) == []
+
+    mismatched_benchmark = copy.deepcopy(record)
+    mismatched_benchmark["benchmark"] = "other-suite"
+    identity = mismatched_benchmark["identity"]
+    assert isinstance(identity, dict)
+    identity["benchmark_id"] = "other-suite"
+    assert "/compatibility_key/benchmark_id" in validate_projection(
+        projection, [mismatched_benchmark]
+    )
+
+    mismatched_version = copy.deepcopy(record)
+    mismatched_version["benchmark_version"] = "2"
+    version_identity = mismatched_version["identity"]
+    assert isinstance(version_identity, dict)
+    version_identity["benchmark_version"] = "2"
+    assert "/compatibility_key/benchmark_version" in validate_projection(
+        projection, [mismatched_version]
+    )
+
+    mismatched_scorer = copy.deepcopy(record)
+    lineage = mismatched_scorer["lineage"]
+    assert isinstance(lineage, dict)
+    fidelity = lineage["fidelity"]
+    assert isinstance(fidelity, dict)
+    fidelity["scorer_digest"] = f"sha256:{'22' * 32}"
+    assert "/compatibility_key/scorer_digest" in validate_projection(
+        projection, [mismatched_scorer]
     )
 
 

@@ -219,6 +219,20 @@
           "evidence_level": { "const": "PUBLICLY_MEASURED" }
         }
       }
+    },
+    {
+      "properties": {
+        "metrics": {
+          "anyOf": [
+            { "items": { "properties": { "family": { "const": "retrieval" } } } },
+            { "items": { "properties": { "family": { "const": "judged_qa" } } } },
+            { "items": { "properties": { "family": { "const": "security" } } } },
+            { "items": { "properties": { "family": { "const": "calibration" } } } },
+            { "items": { "properties": { "family": { "const": "performance" } } } },
+            { "items": { "properties": { "family": { "const": "reproducibility" } } } }
+          ]
+        }
+      }
     }
   ],
   "$defs": {
@@ -464,6 +478,7 @@
     "confidenceInterval": {
       "type": "object",
       "additionalProperties": false,
+      "$comment": "The standard-library validator additionally enforces low <= high.",
       "required": ["low", "high"],
       "properties": {
         "low": { "type": "number" },
@@ -500,7 +515,17 @@
         "unit": { "$ref": "#/$defs/nonEmptyString" },
         "confidence_interval": { "$ref": "#/$defs/confidenceInterval" },
         "judge": { "$ref": "#/$defs/judge" }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "family": { "const": "judged_qa" } },
+            "required": ["family"]
+          },
+          "then": { "required": ["judge"] },
+          "else": { "not": { "required": ["judge"] } }
+        }
+      ]
     },
     "projection": {
       "type": "object",
@@ -526,7 +551,85 @@
         "official",
         "headline",
         "safety_failures_visible"
-      ]
+      ],
+      "properties": {
+        "schema_version": { "const": "mnemosyne.leaderboard.projection/v1" },
+        "projection_id": { "$ref": "#/$defs/nonEmptyString" },
+        "kind": { "const": "exploratory" },
+        "source_record_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "filters": { "type": "object" },
+        "compatibility_key": { "$ref": "#/$defs/projectionCompatibilityKey" },
+        "exclusions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonEmptyString" }
+        },
+        "weighting": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "properties": {
+            "formula": { "$ref": "#/$defs/nonEmptyString" },
+            "disclosed": { "type": "boolean" }
+          }
+        },
+        "numerator": { "type": "number" },
+        "denominator": { "type": "number" },
+        "uncertainty_method": { "$ref": "#/$defs/nonEmptyString" },
+        "missing_count": { "type": "integer", "minimum": 0 },
+        "unsupported_count": { "type": "integer", "minimum": 0 },
+        "failed_count": { "type": "integer", "minimum": 0 },
+        "aborted_count": { "type": "integer", "minimum": 0 },
+        "not_measured_count": { "type": "integer", "minimum": 0 },
+        "certified": { "const": false },
+        "official": { "const": false },
+        "headline": { "const": false },
+        "safety_failures_visible": { "type": "boolean" }
+      }
+    },
+    "projectionCompatibilityKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "track_kind",
+        "benchmark_id",
+        "benchmark_version",
+        "scorer_digest",
+        "division",
+        "metric",
+        "resource_treatment"
+      ],
+      "properties": {
+        "track_kind": { "$ref": "#/$defs/track_kind" },
+        "benchmark_id": { "$ref": "#/$defs/nonEmptyString" },
+        "benchmark_version": { "$ref": "#/$defs/nonEmptyString" },
+        "scorer_digest": { "$ref": "#/$defs/sha256Digest" },
+        "division": { "$ref": "#/$defs/division" },
+        "metric": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "family", "unit"],
+          "properties": {
+            "name": { "$ref": "#/$defs/nonEmptyString" },
+            "family": {
+              "enum": [
+                "retrieval",
+                "judged_qa",
+                "security",
+                "calibration",
+                "performance",
+                "reproducibility"
+              ]
+            },
+            "unit": { "$ref": "#/$defs/nonEmptyString" }
+          }
+        },
+        "resource_treatment": {
+          "enum": ["verified", "resource-unverified"]
+        }
+      }
     }
   }
 }

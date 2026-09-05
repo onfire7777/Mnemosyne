@@ -77,11 +77,11 @@ def evaluate_result_v2(record: object) -> dict[str, object]:
         "publishable"
     ) is not True:
         blocked.append("publication")
-    if record.get("track_kind") == "DEVELOPMENT":
+    if (
+        record.get("track_kind") == "DEVELOPMENT"
+        or publication.get("register_b_satisfied") is not True
+    ):
         blocked.append("pbpp")
-    elif publication.get("label") in {"neutral", "certified", "independent"}:
-        if publication.get("register_b_satisfied") is not True:
-            blocked.append("pbpp")
     gates = record.get("safety_gates")
     if isinstance(gates, list) and any(
         isinstance(gate, dict) and gate.get("status") == "failed" for gate in gates
