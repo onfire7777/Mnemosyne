@@ -24,7 +24,7 @@ recompute the run. Unknown and missing fields fail closed.
 | `inputs` | Benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge, and prompt manifests |
 | `artifacts` | Build, config, legacy bundle manifest, raw trace index, M15 replay, environment, lockfile, and complete normalized file inventory |
 | `run` | Candidate Git SHA, clean-state assertion, platform/runtime/dependencies, `C` locale, `UTC`, public environment allowlist, seeds, retries, and aborts |
-| `metrics` | Family/name/version/value/unit, counts, uncertainty method and parameters, interval, exclusions, and missing/unsupported/failed/aborted/not-measured counts |
+| `metrics` | Unique family/name identities, version/value/unit, counts, uncertainty method and parameters, interval, benchmark-bound exclusions, and run-bound aborted counts alongside missing/unsupported/failed/not-measured counts |
 | `disclosures` | Software/data licenses, source revision, redistribution, PII/consent/takedown, custody, operator and signer roles, and optional separately signed reproduction receipt |
 | `reproduction` | The one fixed argv command and reproduction-time network prohibition |
 
