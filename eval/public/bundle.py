@@ -578,6 +578,19 @@ def _sha256_reference(path: Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def _files_equal(left: Path, right: Path) -> bool:
+    if left.stat().st_size != right.stat().st_size:
+        return False
+    with left.open("rb") as left_handle, right.open("rb") as right_handle:
+        while True:
+            left_chunk = left_handle.read(1024 * 1024)
+            right_chunk = right_handle.read(1024 * 1024)
+            if left_chunk != right_chunk:
+                return False
+            if not left_chunk:
+                return True
+
+
 def _runtime_platform() -> str:
     return f"{sys.platform}-{platform.machine().lower()}"
 
@@ -1309,16 +1322,17 @@ def reproduce_reproducibility_bundle(
         }
         for entry in inventory:
             name = entry["path"]
+            source_file = source_root / name
             target = final / name
             target.parent.mkdir(parents=True, exist_ok=True)
             if name == "metrics.json":
                 target.write_bytes(expected_metric_bytes)
             elif name in canonical_json:
-                target.write_bytes(_canonical(_load_json(source_root / name)))
+                target.write_bytes(_canonical(_load_json(source_file)))
             else:
-                target.write_bytes((source_root / name).read_bytes())
-            shutil.copymode(source_root / name, target, follow_symlinks=False)
-            if target.read_bytes() != (source_root / name).read_bytes():
+                shutil.copyfile(source_file, target)
+            shutil.copymode(source_file, target, follow_symlinks=False)
+            if not _files_equal(target, source_file):
                 raise BundleError(f"reproduction mismatch: {name}")
         (final / "reproducibility-manifest.json").write_bytes(
             _canonical(manifest)
