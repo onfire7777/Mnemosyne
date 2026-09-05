@@ -690,11 +690,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
 
 
 def _sha256_reference(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return "sha256:" + digest.hexdigest()
+    return _inspect_artifact(path)[1]
 
 
 def _files_equal(left: Path, right: Path) -> bool:
@@ -711,18 +707,46 @@ def _files_equal(left: Path, right: Path) -> bool:
 
 
 def _inspect_artifact(path: Path) -> tuple[int, str, bool]:
-    digest = hashlib.sha256()
-    size = 0
-    secret_found = False
-    carry = b""
-    with path.open("rb") as handle:
-        while chunk := handle.read(_SECRET_SCAN_CHUNK_SIZE):
-            size += len(chunk)
-            digest.update(chunk)
-            window = carry + chunk
-            if SECRET_BYTES.search(window):
-                secret_found = True
-            carry = window[-_SECRET_SCAN_OVERLAP:]
+    try:
+        path_stat = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or path_stat.st_nlink != 1
+            or path_stat.st_mode & _UNSAFE_MODE_BITS
+        ):
+            raise BundleError("artifact changed before inspection")
+        digest = hashlib.sha256()
+        size = 0
+        secret_found = False
+        carry = b""
+        with path.open("rb") as handle:
+            opened_stat = os.fstat(handle.fileno())
+            if (
+                not stat.S_ISREG(opened_stat.st_mode)
+                or opened_stat.st_nlink != 1
+                or (opened_stat.st_dev, opened_stat.st_ino)
+                != (path_stat.st_dev, path_stat.st_ino)
+            ):
+                raise BundleError("artifact changed before inspection")
+            while chunk := handle.read(_SECRET_SCAN_CHUNK_SIZE):
+                size += len(chunk)
+                digest.update(chunk)
+                window = carry + chunk
+                if SECRET_BYTES.search(window):
+                    secret_found = True
+                carry = window[-_SECRET_SCAN_OVERLAP:]
+            current_stat = path.stat(follow_symlinks=False)
+            if (
+                not stat.S_ISREG(current_stat.st_mode)
+                or current_stat.st_nlink != 1
+                or (current_stat.st_dev, current_stat.st_ino)
+                != (opened_stat.st_dev, opened_stat.st_ino)
+            ):
+                raise BundleError("artifact changed during inspection")
+    except BundleError:
+        raise
+    except OSError as exc:
+        raise BundleError("artifact changed during inspection") from exc
     return size, "sha256:" + digest.hexdigest(), secret_found
 
 
