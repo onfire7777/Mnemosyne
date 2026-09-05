@@ -847,7 +847,66 @@ def test_v2_schema_aligns_metric_contract_with_runtime() -> None:
     assert judge_rule["if"]["properties"]["family"]["const"] == "judged_qa"
     assert judge_rule["then"]["required"] == ["judge"]
     assert judge_rule["else"]["not"]["required"] == ["judge"]
-    assert "low <= high" in schema["$defs"]["confidenceInterval"]["$comment"]
+    items = schema["properties"]["metrics"]["items"]
+    assert items["allOf"][0] == {"$ref": "#/$defs/metric"}
+    published_judge = items["allOf"][1]
+    assert published_judge["if"]["properties"]["family"]["const"] == "judged_qa"
+    assert published_judge["then"]["required"] == ["judge"]
+    assert published_judge["else"]["not"]["required"] == ["judge"]
+    interval = schema["$defs"]["confidenceInterval"]
+    assert "low <= high" in interval["$comment"]
+    splits = interval["anyOf"]
+    assert splits
+
+    def _covers(low: float, high: float) -> bool:
+        return any(
+            low <= branch["properties"]["low"]["maximum"]
+            and high >= branch["properties"]["high"]["minimum"]
+            for branch in splits
+        )
+
+    assert _covers(0.60, 0.85)
+    assert _covers(0.70, 0.90)
+    assert not _covers(0.9, 0.1)
+
+
+def test_v2_runtime_rejects_metric_contract_violations() -> None:
+    missing_judge = _v2_development_record()
+    missing_judge["metrics"] = [
+        {
+            "name": "answer_quality",
+            "family": "judged_qa",
+            "value": 0.80,
+            "unit": "ratio",
+            "confidence_interval": {"low": 0.70, "high": 0.90},
+        }
+    ]
+    assert "/metrics/0/judge" in validate_record(missing_judge)
+
+    mixed = _v2_development_record()
+    metrics = mixed["metrics"]
+    assert isinstance(metrics, list)
+    metrics.append(
+        {
+            "name": "answer_quality",
+            "family": "judged_qa",
+            "value": 0.80,
+            "unit": "ratio",
+            "confidence_interval": {"low": 0.70, "high": 0.90},
+            "judge": {
+                "model": "synthetic-judge-v1",
+                "prompt_digest": f"sha256:{'5' * 64}",
+                "config_digest": f"sha256:{'6' * 64}",
+            },
+        }
+    )
+    assert "/metrics" in validate_record(mixed)
+
+    inverted = _v2_development_record()
+    inverted_metrics = inverted["metrics"]
+    assert isinstance(inverted_metrics, list)
+    inverted_metrics[0]["confidence_interval"] = {"low": 0.9, "high": 0.1}
+    assert "/metrics/0/confidence_interval" in validate_record(inverted)
 
 
 def test_v2_projection_schema_declares_closed_properties() -> None:
