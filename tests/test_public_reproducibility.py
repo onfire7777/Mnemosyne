@@ -571,6 +571,32 @@ def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_i
         _validate(oversized_operator_role)
 
 
+def test_inventory_rejects_reserved_manifest_and_file_directory_collisions() -> None:
+    reserved = _manifest()
+    reserved["artifacts"]["files"][0][  # type: ignore[index]
+        "path"
+    ] = "reproducibility-manifest.json"
+    with pytest.raises(BundleError, match="cannot own"):
+        _validate(reserved)
+
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    path_rules = schema["properties"]["artifacts"]["properties"]["files"][  # type: ignore[index]
+        "items"
+    ]["properties"]["path"]["allOf"]
+    assert {rule["not"]["const"] for rule in path_rules if "not" in rule} == {
+        "reproducibility-manifest.json"
+    }
+
+    collision = _manifest()
+    entry = copy.deepcopy(collision["artifacts"]["files"][0])  # type: ignore[index]
+    collision["artifacts"]["files"] = [  # type: ignore[index]
+        {**entry, "path": "evidence"},
+        {**entry, "path": "evidence/raw.json"},
+    ]
+    with pytest.raises(BundleError, match="file-directory collision"):
+        _validate(collision)
+
+
 def test_every_recomputed_metric_and_interval_is_bound_to_manifest() -> None:
     declared = [
         {
