@@ -65,8 +65,10 @@ def test_v1_render_site_writes_leaderboard_html_with_escaped_result_pages(
 
     render_site(results, {HOSTILE_RECORD_ID: traces}, output)
 
-    result_path = _assert_leaderboard_site(output, HOSTILE_RECORD_ID)
-    rendered = result_path.read_text(encoding="utf-8")
+    _assert_leaderboard_site(output, HOSTILE_RECORD_ID)
+    rendered = "".join(
+        path.read_text(encoding="utf-8") for path in output.rglob("*.html")
+    )
     assert "<script>" not in rendered
     assert "&lt;script&gt;" in rendered
     assert HOSTILE_RECORD_ID not in "\n".join(
@@ -96,7 +98,8 @@ def test_v2_development_record_renders_when_artifacts_are_bound(
         },
     )
 
-    _assert_leaderboard_site(output, record_id)
+    result_path = _assert_leaderboard_site(output, record_id)
+    assert "DEVELOPMENT" in result_path.read_text(encoding="utf-8")
 
 
 def test_render_error_does_not_leave_partial_destination(tmp_path: Path) -> None:
