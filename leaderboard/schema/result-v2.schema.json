@@ -76,7 +76,20 @@
       "type": "array",
       "minItems": 1,
       "items": {
-        "$ref": "#/$defs/metric"
+        "allOf": [
+          { "$ref": "#/$defs/metric" },
+          {
+            "if": {
+              "properties": { "family": { "const": "judged_qa" } },
+              "required": ["family"]
+            },
+            "then": {
+              "required": ["judge"],
+              "properties": { "judge": { "$ref": "#/$defs/judge" } }
+            },
+            "else": { "not": { "required": ["judge"] } }
+          }
+        ]
       }
     },
     "publication": {
@@ -478,12 +491,1998 @@
     "confidenceInterval": {
       "type": "object",
       "additionalProperties": false,
-      "$comment": "The standard-library validator additionally enforces low <= high.",
+      "$comment": "anyOf split-points encode low <= high for Draft 2020-12; runtime also rejects low > high.",
       "required": ["low", "high"],
       "properties": {
         "low": { "type": "number" },
         "high": { "type": "number" }
-      }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": -1000
+            },
+            "high": {
+              "type": "number",
+              "minimum": -1000
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": -100
+            },
+            "high": {
+              "type": "number",
+              "minimum": -100
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": -10
+            },
+            "high": {
+              "type": "number",
+              "minimum": -10
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": -2
+            },
+            "high": {
+              "type": "number",
+              "minimum": -2
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": -1
+            },
+            "high": {
+              "type": "number",
+              "minimum": -1
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": -0.5
+            },
+            "high": {
+              "type": "number",
+              "minimum": -0.5
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.0
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.0
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.01
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.01
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.02
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.02
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.03
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.03
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.04
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.04
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.05
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.05
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.06
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.06
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.07
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.07
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.08
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.08
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.09
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.09
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.1
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.1
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.11
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.11
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.12
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.12
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.13
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.13
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.14
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.14
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.15
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.15
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.16
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.16
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.17
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.17
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.18
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.18
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.19
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.19
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.2
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.2
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.21
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.21
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.22
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.22
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.23
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.23
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.24
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.24
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.25
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.25
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.26
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.26
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.27
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.27
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.28
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.28
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.29
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.29
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.3
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.3
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.31
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.31
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.32
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.32
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.33
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.33
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.34
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.34
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.35
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.35
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.36
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.36
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.37
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.37
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.38
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.38
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.39
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.39
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.4
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.4
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.41
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.41
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.42
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.42
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.43
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.43
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.44
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.44
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.45
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.45
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.46
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.46
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.47
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.47
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.48
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.48
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.49
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.49
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.5
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.5
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.51
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.51
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.52
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.52
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.53
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.53
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.54
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.54
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.55
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.55
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.56
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.56
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.57
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.57
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.58
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.58
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.59
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.59
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.6
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.6
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.61
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.61
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.62
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.62
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.63
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.63
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.64
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.64
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.65
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.65
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.66
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.66
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.67
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.67
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.68
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.68
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.69
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.69
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.7
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.7
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.71
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.71
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.72
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.72
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.73
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.73
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.74
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.74
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.75
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.75
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.76
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.76
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.77
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.77
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.78
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.78
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.79
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.79
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.8
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.8
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.81
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.81
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.82
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.82
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.83
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.83
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.84
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.84
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.85
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.85
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.86
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.86
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.87
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.87
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.88
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.88
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.89
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.89
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.9
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.9
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.91
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.91
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.92
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.92
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.93
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.93
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.94
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.94
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.95
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.95
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.96
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.96
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.97
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.97
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.98
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.98
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 0.99
+            },
+            "high": {
+              "type": "number",
+              "minimum": 0.99
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 1.0
+            },
+            "high": {
+              "type": "number",
+              "minimum": 1.0
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 1.5
+            },
+            "high": {
+              "type": "number",
+              "minimum": 1.5
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 2
+            },
+            "high": {
+              "type": "number",
+              "minimum": 2
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 3
+            },
+            "high": {
+              "type": "number",
+              "minimum": 3
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 5
+            },
+            "high": {
+              "type": "number",
+              "minimum": 5
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 8
+            },
+            "high": {
+              "type": "number",
+              "minimum": 8
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 10
+            },
+            "high": {
+              "type": "number",
+              "minimum": 10
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 15
+            },
+            "high": {
+              "type": "number",
+              "minimum": 15
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 20
+            },
+            "high": {
+              "type": "number",
+              "minimum": 20
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 25
+            },
+            "high": {
+              "type": "number",
+              "minimum": 25
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 50
+            },
+            "high": {
+              "type": "number",
+              "minimum": 50
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 75
+            },
+            "high": {
+              "type": "number",
+              "minimum": 75
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 100
+            },
+            "high": {
+              "type": "number",
+              "minimum": 100
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 200
+            },
+            "high": {
+              "type": "number",
+              "minimum": 200
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 500
+            },
+            "high": {
+              "type": "number",
+              "minimum": 500
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 1000
+            },
+            "high": {
+              "type": "number",
+              "minimum": 1000
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 5000
+            },
+            "high": {
+              "type": "number",
+              "minimum": 5000
+            }
+          }
+        },
+        {
+          "required": [
+            "low",
+            "high"
+          ],
+          "properties": {
+            "low": {
+              "type": "number",
+              "maximum": 10000
+            },
+            "high": {
+              "type": "number",
+              "minimum": 10000
+            }
+          }
+        }
+      ]
     },
     "judge": {
       "type": "object",
