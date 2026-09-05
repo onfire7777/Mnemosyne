@@ -579,11 +579,14 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if (
         result.get("schema_version") != "mnemosyne.leaderboard.result/v2"
         or result.get("record_id") != result_ref["record_id"]
+        or result.get("run_commit") != manifest["run"]["candidate_git_sha"]
         or result.get("track_kind") != result_ref["track_kind"]
         or result.get("lineage") != result_ref["lineage"]
         or _sha256_reference(root / "result.json") != result_ref["result_digest"]
     ):
         raise BundleError("result-v2 reference mismatch")
+    if manifest["disclosures"]["source_revision"] != result.get("run_commit"):
+        raise BundleError("source revision does not match result-v2 run commit")
     digest_errors = verify_result_digests(
         result,
         {
