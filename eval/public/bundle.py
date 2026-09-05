@@ -71,6 +71,353 @@ class BundleError(ValueError):
     """Bundle failed closed under the public custody contract."""
 
 
+REPRODUCIBILITY_SCHEMA_VERSION = "mnemosyne.reproducibility-bundle/v1"
+REPRODUCTION_ARGV = (
+    "uv",
+    "run",
+    "--locked",
+    "mneme",
+    "eval-public",
+    "--reproduce-bundle",
+    "BUNDLE",
+    "--out-dir",
+    "DEST",
+)
+_REPRO_TOP_LEVEL = {
+    "schema_version",
+    "result_ref",
+    "inputs",
+    "artifacts",
+    "run",
+    "metrics",
+    "disclosures",
+    "reproduction",
+}
+_REPRO_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_REPRO_COMMIT = re.compile(r"[0-9a-f]{40}")
+
+
+def _closed_object(
+    value: object, required: set[str], label: str
+) -> dict[str, Any]:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        raise BundleError(f"{label} must be an object")
+    missing = sorted(required - value.keys())
+    if missing:
+        raise BundleError(f"{label} missing field: {missing[0]}")
+    unknown = sorted(value.keys() - required)
+    if unknown:
+        raise BundleError(f"{label} unknown field: {unknown[0]}")
+    return value
+
+
+def _repro_digest(value: object, label: str) -> None:
+    if not isinstance(value, str) or _REPRO_DIGEST.fullmatch(value) is None:
+        raise BundleError(f"{label} must be a canonical sha256 digest")
+
+
+def _repro_nonempty(value: object, label: str, *, maximum: int = 512) -> None:
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise BundleError(f"{label} must be a bounded non-empty string")
+
+
+def _repro_finite(value: object) -> None:
+    if isinstance(value, float) and not math.isfinite(value):
+        raise BundleError("reproducibility manifest numbers must be finite")
+    if isinstance(value, dict):
+        for nested in value.values():
+            _repro_finite(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _repro_finite(nested)
+
+
+def _repro_relative_path(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 512
+        or "\\" in value
+        or "\x00" in value
+        or value.startswith("/")
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+    ):
+        raise BundleError("inventory path must be a normalized relative path")
+    return value
+
+
+def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
+    """Validate the closed, additive REPRO-001 manifest contract.
+
+    This validates untrusted metadata only. It grants no publication, neutrality,
+    certification, or independent-reproduction status.
+    """
+    _repro_finite(payload)
+    manifest = _closed_object(payload, _REPRO_TOP_LEVEL, "manifest")
+    if manifest["schema_version"] != REPRODUCIBILITY_SCHEMA_VERSION:
+        raise BundleError("unsupported reproducibility manifest version")
+
+    result = _closed_object(
+        manifest["result_ref"],
+        {"record_id", "result_digest", "ledger_entry_digest", "track_kind", "lineage"},
+        "result reference",
+    )
+    _repro_nonempty(result["record_id"], "result record ID", maximum=256)
+    _repro_digest(result["result_digest"], "result digest")
+    _repro_digest(result["ledger_entry_digest"], "ledger entry digest")
+    track_kind = result["track_kind"]
+    if track_kind not in {
+        "OFFICIAL-UPSTREAM",
+        "ENHANCED-SUCCESSOR",
+        "DEVELOPMENT",
+    }:
+        raise BundleError("result track kind is unsupported")
+    lineage = result["lineage"]
+    if track_kind == "DEVELOPMENT":
+        _closed_object(lineage, set(), "development lineage")
+    elif track_kind == "OFFICIAL-UPSTREAM":
+        lineage = _closed_object(
+            lineage, {"fidelity_manifest_digest"}, "official lineage"
+        )
+        _repro_digest(
+            lineage["fidelity_manifest_digest"], "official fidelity manifest"
+        )
+    else:
+        lineage = _closed_object(
+            lineage,
+            {
+                "parent_official_record_id",
+                "parent_construct_digest",
+                "difference_manifest_digest",
+            },
+            "successor lineage",
+        )
+        _repro_nonempty(
+            lineage["parent_official_record_id"], "parent official record ID"
+        )
+        _repro_digest(lineage["parent_construct_digest"], "parent construct")
+        _repro_digest(lineage["difference_manifest_digest"], "difference manifest")
+
+    input_fields = {
+        "benchmark_manifest_digest",
+        "dataset_manifest_digest",
+        "fixture_manifest_digest",
+        "generator_manifest_digest",
+        "adapter_manifest_digest",
+        "scorer_manifest_digest",
+        "baseline_manifest_digest",
+        "judge_manifest_digest",
+        "prompt_manifest_digest",
+    }
+    inputs = _closed_object(manifest["inputs"], input_fields, "inputs")
+    for field in input_fields:
+        _repro_digest(inputs[field], field.replace("_", " "))
+
+    artifact_fields = {
+        "build_fingerprint",
+        "config_digest",
+        "bundle_digest",
+        "trace_index_digest",
+        "canonical_replay_digest",
+        "environment_digest",
+        "lockfile_digest",
+        "files",
+    }
+    artifacts = _closed_object(manifest["artifacts"], artifact_fields, "artifacts")
+    for field in artifact_fields - {"files"}:
+        _repro_digest(artifacts[field], field.replace("_", " "))
+    files = artifacts["files"]
+    if not isinstance(files, list) or not files or len(files) > 4096:
+        raise BundleError("file inventory must be a bounded non-empty array")
+    paths: set[str] = set()
+    for index, item in enumerate(files):
+        entry = _closed_object(
+            item,
+            {"path", "size", "media_type", "canonicalization", "digest"},
+            f"file inventory entry {index}",
+        )
+        path = _repro_relative_path(entry["path"])
+        if path in paths:
+            raise BundleError("file inventory contains a duplicate relative path")
+        paths.add(path)
+        if type(entry["size"]) is not int or not 0 <= entry["size"] <= 2**30:
+            raise BundleError("file inventory size is invalid")
+        _repro_nonempty(entry["media_type"], "file media type", maximum=128)
+        if entry["canonicalization"] != "exact-bytes":
+            raise BundleError("file canonicalization must be exact-bytes")
+        _repro_digest(entry["digest"], "file digest")
+
+    run_fields = {
+        "candidate_git_sha",
+        "dirty",
+        "platform",
+        "runtime",
+        "dependencies",
+        "locale",
+        "timezone",
+        "environment",
+        "seed_records",
+        "retries",
+        "aborts",
+    }
+    run = _closed_object(manifest["run"], run_fields, "run")
+    if (
+        not isinstance(run["candidate_git_sha"], str)
+        or _REPRO_COMMIT.fullmatch(run["candidate_git_sha"]) is None
+    ):
+        raise BundleError("candidate Git SHA is invalid")
+    if run["dirty"] is not False:
+        raise BundleError("candidate checkout must be declared clean")
+    for field in ("platform", "runtime"):
+        _repro_nonempty(run[field], field, maximum=128)
+    if run["locale"] != "C" or run["timezone"] != "UTC":
+        raise BundleError("locale and timezone must be C and UTC")
+    dependencies = run["dependencies"]
+    if (
+        not isinstance(dependencies, list)
+        or len(dependencies) > 4096
+        or len(dependencies) != len(set(dependencies))
+        or any(not isinstance(item, str) or not item for item in dependencies)
+    ):
+        raise BundleError("dependency inventory is invalid")
+    seeds = run["seed_records"]
+    if (
+        not isinstance(seeds, list)
+        or not seeds
+        or len(seeds) > 4096
+        or any(type(seed) is not int for seed in seeds)
+        or len(seeds) != len(set(seeds))
+    ):
+        raise BundleError("seed record inventory is invalid")
+    for field in ("retries", "aborts"):
+        if type(run[field]) is not int or run[field] < 0:
+            raise BundleError(f"{field} must be a non-negative integer")
+    environment = run["environment"]
+    if not isinstance(environment, dict) or len(environment) > 128:
+        raise BundleError("environment allowlist is invalid")
+    for name, value in environment.items():
+        if (
+            not isinstance(name, str)
+            or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", name) is None
+            or not isinstance(value, str)
+            or len(value) > 1024
+        ):
+            raise BundleError("environment allowlist is invalid")
+        if SECRET.search(value):
+            raise BundleError("secret-like material detected in environment")
+
+    metrics = manifest["metrics"]
+    if not isinstance(metrics, list) or not metrics or len(metrics) > 1024:
+        raise BundleError("metrics must be a bounded non-empty array")
+    metric_fields = {
+        "family",
+        "name",
+        "version",
+        "value",
+        "unit",
+        "numerator",
+        "denominator",
+        "sample_count",
+        "interval",
+        "exclusions",
+        "outcomes",
+    }
+    for index, item in enumerate(metrics):
+        metric = _closed_object(item, metric_fields, f"metric {index}")
+        for field in ("family", "name", "version", "unit"):
+            _repro_nonempty(metric[field], f"metric {field}", maximum=128)
+        if type(metric["sample_count"]) is not int or metric["sample_count"] < 0:
+            raise BundleError("metric sample count is invalid")
+        interval = _closed_object(
+            metric["interval"],
+            {"method", "confidence_level", "low", "high", "parameters"},
+            "metric interval",
+        )
+        _repro_nonempty(interval["method"], "interval method", maximum=64)
+        confidence = interval["confidence_level"]
+        if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 < confidence < 1:
+            raise BundleError("interval confidence level is invalid")
+        if not all(
+            isinstance(interval[field], (int, float))
+            and not isinstance(interval[field], bool)
+            for field in ("low", "high")
+        ) or interval["low"] > interval["high"]:
+            raise BundleError("metric interval bounds are invalid")
+        if not isinstance(interval["parameters"], dict) or len(interval["parameters"]) > 32:
+            raise BundleError("metric interval parameters are invalid")
+        exclusions = metric["exclusions"]
+        if not isinstance(exclusions, list) or len(exclusions) > 1024 or any(
+            not isinstance(item, str) for item in exclusions
+        ):
+            raise BundleError("metric exclusions are invalid")
+        outcomes = _closed_object(
+            metric["outcomes"],
+            {"missing", "unsupported", "failed", "aborted", "not_measured"},
+            "metric outcomes",
+        )
+        if any(type(value) is not int or value < 0 for value in outcomes.values()):
+            raise BundleError("metric outcome counts are invalid")
+
+    disclosure_fields = {
+        "software_license",
+        "data_license",
+        "source_revision",
+        "redistribution_permitted",
+        "pii_present",
+        "consent_documented",
+        "takedown_process",
+        "custody_class",
+        "operator_identity",
+        "operator_role",
+        "signer_role",
+        "disclosure_state",
+        "independent_reproduction",
+    }
+    disclosures = _closed_object(
+        manifest["disclosures"], disclosure_fields, "disclosures"
+    )
+    for field in (
+        "software_license",
+        "data_license",
+        "source_revision",
+        "takedown_process",
+        "custody_class",
+        "operator_identity",
+        "operator_role",
+        "signer_role",
+    ):
+        _repro_nonempty(disclosures[field], field.replace("_", " "))
+    for field in ("redistribution_permitted", "pii_present", "consent_documented"):
+        if type(disclosures[field]) is not bool:
+            raise BundleError(f"{field.replace('_', ' ')} disclosure is invalid")
+    if disclosures["disclosure_state"] != "COMPLETE":
+        raise BundleError("disclosure state must be COMPLETE")
+    independent = disclosures["independent_reproduction"]
+    if independent is not None:
+        independent = _closed_object(
+            independent,
+            {"receipt_digest", "reproducer_identity", "signed"},
+            "independent reproduction",
+        )
+        _repro_digest(independent["receipt_digest"], "reproduction receipt")
+        _repro_nonempty(independent["reproducer_identity"], "reproducer identity")
+        if independent["signed"] is not True:
+            raise BundleError("independent reproduction receipt must be signed")
+
+    reproduction = _closed_object(
+        manifest["reproduction"], {"argv", "network"}, "reproduction"
+    )
+    if reproduction["argv"] != list(REPRODUCTION_ARGV):
+        raise BundleError("reproduction command does not match the frozen argv")
+    if reproduction["network"] != "forbidden":
+        raise BundleError("reproduction network must be forbidden")
+    return {
+        "schema_version": REPRODUCIBILITY_SCHEMA_VERSION,
+        "track_kind": track_kind,
+        "valid": True,
+    }
+
+
 def canonical_replay_fixture_custody(payload: object) -> bool:
     """Validate that the closed fixture reference is bound to its manifest."""
     if not isinstance(payload, dict):
