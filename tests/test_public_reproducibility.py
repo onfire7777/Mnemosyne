@@ -1154,6 +1154,29 @@ def test_verifier_rejects_same_content_hardlink_added_after_initial_tree_walk(
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_verifier_rejects_manifest_changed_after_initial_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    manifest_path = root / "reproducibility-manifest.json"
+    original_replay_digest = public_bundle.canonical_replay_digest
+
+    def mutate_after_semantic_verification(payload: object) -> str:
+        digest = original_replay_digest(payload)
+        manifest_path.write_bytes(manifest_path.read_bytes() + b" ")
+        return digest
+
+    monkeypatch.setattr(
+        public_bundle,
+        "canonical_replay_digest",
+        mutate_after_semantic_verification,
+    )
+
+    with pytest.raises(BundleError, match="manifest changed during verification"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
 def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
