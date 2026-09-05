@@ -42,7 +42,9 @@ SECRET = re.compile(
 )
 SECRET_BYTES = re.compile(SECRET.pattern.encode("ascii"))
 _SECRET_SCAN_CHUNK_SIZE = 1024 * 1024
-_SECRET_SCAN_OVERLAP = 128
+# Longer than the maximum bounded credential-URL match so a match cannot be
+# split across adjacent streaming scan windows.
+_SECRET_SCAN_OVERLAP = 1024
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
