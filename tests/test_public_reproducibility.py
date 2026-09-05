@@ -643,6 +643,18 @@ def test_inventory_media_types_are_valid_and_match_core_artifacts() -> None:
     assert re.fullmatch(media_type_rule["pattern"], "not-a-media-type") is None
 
 
+def test_file_inventory_requires_canonical_path_order() -> None:
+    manifest = _manifest()
+    entry = copy.deepcopy(manifest["artifacts"]["files"][0])  # type: ignore[index]
+    manifest["artifacts"]["files"] = [  # type: ignore[index]
+        {**entry, "path": "z.txt", "media_type": "text/plain"},
+        {**entry, "path": "a.txt", "media_type": "text/plain"},
+    ]
+
+    with pytest.raises(BundleError, match="sorted by path"):
+        _validate(manifest)
+
+
 def test_every_recomputed_metric_and_interval_is_bound_to_manifest() -> None:
     declared = [
         {
@@ -1096,6 +1108,7 @@ def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
             "digest": _digest(payload),
         }
     )
+    manifest["artifacts"]["files"].sort(key=lambda entry: entry["path"])  # type: ignore[index,union-attr]
     (source / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
     original_read_bytes = Path.read_bytes
 
@@ -1286,11 +1299,12 @@ def test_distinct_signed_ledger_receipt_records_independent_reproduction(
             {
                 "path": name,
                 "size": len(payload),
-                    "media_type": _media_type(name),
+                "media_type": _media_type(name),
                 "canonicalization": "exact-bytes",
                 "digest": _digest(payload),
             }
         )
+    manifest["artifacts"]["files"].sort(key=lambda entry: entry["path"])  # type: ignore[index,union-attr]
     (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
 
     assert public_bundle.verify_reproducibility_bundle(root)["valid"] is True
@@ -1332,11 +1346,12 @@ def test_independent_reproduction_rejects_operator_signing_key(tmp_path: Path) -
             {
                 "path": name,
                 "size": len(payload),
-                    "media_type": _media_type(name),
+                "media_type": _media_type(name),
                 "canonicalization": "exact-bytes",
                 "digest": _digest(payload),
             }
         )
+    manifest["artifacts"]["files"].sort(key=lambda entry: entry["path"])  # type: ignore[index,union-attr]
     (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
 
     with pytest.raises(BundleError, match="key is not distinct"):

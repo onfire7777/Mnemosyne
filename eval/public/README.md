@@ -35,6 +35,8 @@ NFC/case-fold aliases, Windows device names, trailing dots or spaces, control
 characters, and Windows-forbidden filename characters before assembly.
 Media-type declarations must use bounded parameter-free MIME syntax; core JSON,
 JSONL, PEM, Markdown, shell, and lock artifacts use their canonical types.
+The file inventory is lexicographically sorted by path so equivalent bundles
+have one canonical manifest representation.
 
 | Manifest section | Bound material |
 |---|---|
