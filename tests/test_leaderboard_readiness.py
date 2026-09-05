@@ -9,7 +9,8 @@ from pathlib import Path
 import pytest
 
 import leaderboard.readiness as readiness
-from leaderboard.readiness import ReadinessError, evaluate, main
+from leaderboard.readiness import ReadinessError, evaluate, evaluate_result_v2, main
+from tests.test_leaderboard_result_contract import _v2_development_record, _v2_official_record
 
 
 GATES = (
@@ -251,3 +252,53 @@ def _gate(record: dict[str, object], name: str) -> dict[str, object]:
     value = record[name]
     assert isinstance(value, dict)
     return value
+
+
+def test_v1_readiness_evaluate_remains_unchanged() -> None:
+    assert evaluate(_record()) == {"blocked_gates": [], "ready": True}
+
+
+def test_development_v2_result_is_never_publication_ready() -> None:
+    result = evaluate_result_v2(_v2_development_record())
+
+    assert result["ready"] is False
+    assert "publication" in result["blocked_gates"]
+    assert "pbpp" in result["blocked_gates"]
+    assert "human_approval" in result["blocked_gates"]
+
+
+def test_official_v2_result_stays_human_gated() -> None:
+    result = evaluate_result_v2(_v2_official_record())
+
+    assert result["ready"] is False
+    assert "human_approval" in result["blocked_gates"]
+
+
+def test_failed_safety_gate_blocks_v2_readiness() -> None:
+    record = _v2_official_record()
+    record["safety_gates"] = [{"name": "no-leakage", "status": "failed"}]
+
+    result = evaluate_result_v2(record)
+    assert result["ready"] is False
+    assert "safety_gates" in result["blocked_gates"]
+
+
+def test_rejects_invalid_v2_readiness_record() -> None:
+    record = _v2_development_record()
+    del record["track_kind"]
+
+    with pytest.raises(ReadinessError):
+        evaluate_result_v2(record)
+
+
+def test_cli_dispatches_v2_result_records(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _write(tmp_path / "v2.json", _v2_development_record())
+
+    assert main([str(path)]) == 1
+    output = capsys.readouterr()
+    payload = json.loads(output.out)
+    assert payload["ready"] is False
+    assert "publication" in payload["blocked_gates"]
+    assert output.err == ""

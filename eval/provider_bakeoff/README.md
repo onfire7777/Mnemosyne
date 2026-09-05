@@ -23,8 +23,12 @@ public benchmark number may become a claim only under the Public-Benchmark
 Publication Protocol (PBPP) in
 `docs/EXECUTION-PLAN-B-Benchmark-and-Leaderboard.md` §2: pinned public harness,
 complete artifact bundle, separate retrieval-recall and LLM-judged-QA columns
-with judge disclosure, no private-suite conflation, and independent
-reproduction before any headline claim.
+with judge disclosure, and no private-suite conflation. Independent
+reproduction strengthens an operator-run public result but is not a
+prerequisite unless the claim uses `independent`, `neutral`, or `certified`.
+Development and private-suite numbers remain non-publishable and
+non-headline. Additive result-v2 records keep those claim labels separate
+from immutable result-v1 bytes.
 
 Source policy:
 

@@ -10,6 +10,7 @@ from pathlib import Path
 
 from leaderboard.ledger import LedgerError, verify_ledger
 from leaderboard.render import RenderError, render_site
+from leaderboard.validate import SCHEMA_VERSION, SCHEMA_VERSION_V2, verify_result_digests
 
 
 class PublicationError(ValueError):
@@ -21,6 +22,7 @@ def publish_site(
     public_key: str | Path,
     traces: dict[str, str | Path],
     destination: str | Path,
+    artifacts: dict[str, dict[str, str | Path]] | None = None,
 ) -> None:
     """Verify LEDGER and publish its active successful results."""
     try:
@@ -49,11 +51,20 @@ def publish_site(
     unlinked = sorted(set(traces) - set(record_ids))
     if unlinked:
         raise PublicationError("unlinked trace source: " + ", ".join(unlinked))
+    versions = {
+        result.get("schema_version")
+        for result in results
+        if isinstance(result, dict)
+    }
+    if SCHEMA_VERSION in versions and SCHEMA_VERSION_V2 in versions:
+        raise PublicationError("mixed result schema versions")
 
     try:
         with tempfile.TemporaryDirectory() as temporary:
             temporary_path = Path(temporary)
             verified_traces: dict[str, Path] = {}
+            verified_artifacts: dict[str, dict[str, Path]] = {}
+            bound = artifacts or {}
             for index, result in enumerate(results):
                 record_id = str(result["record_id"])
                 trace = traces.get(record_id)
@@ -68,6 +79,41 @@ def publish_site(
                 verified_trace = temporary_path / f"trace-{index}.jsonl"
                 verified_trace.write_bytes(trace_bytes)
                 verified_traces[record_id] = verified_trace
+                if result.get("schema_version") != SCHEMA_VERSION_V2:
+                    continue
+                files = bound.get(record_id)
+                if not isinstance(files, dict):
+                    raise PublicationError(f"missing artifact source: {record_id}")
+                try:
+                    build_bytes = Path(files["build"]).read_bytes()
+                    config_bytes = Path(files["config"]).read_bytes()
+                    bundle_bytes = Path(files["bundle"]).read_bytes()
+                except (KeyError, OSError) as exc:
+                    raise PublicationError(
+                        f"missing artifact source: {record_id}"
+                    ) from exc
+                digest_errors = verify_result_digests(
+                    result,
+                    {
+                        "build.json": build_bytes,
+                        "config.json": config_bytes,
+                        "bundle-manifest.json": bundle_bytes,
+                        "traces.jsonl": trace_bytes,
+                    },
+                )
+                if digest_errors:
+                    raise PublicationError(
+                        "digest mismatch: " + ", ".join(digest_errors)
+                    )
+                copied = {
+                    "build": temporary_path / f"build-{index}.json",
+                    "config": temporary_path / f"config-{index}.json",
+                    "bundle": temporary_path / f"bundle-{index}.json",
+                }
+                copied["build"].write_bytes(build_bytes)
+                copied["config"].write_bytes(config_bytes)
+                copied["bundle"].write_bytes(bundle_bytes)
+                verified_artifacts[record_id] = copied
 
             result_path = temporary_path / "results.json"
             result_path.write_text(
@@ -80,7 +126,15 @@ def publish_site(
                 ),
                 encoding="utf-8",
             )
-            render_site(result_path, verified_traces, destination)
+            if verified_artifacts:
+                render_site(
+                    result_path,
+                    verified_traces,
+                    destination,
+                    verified_artifacts,
+                )
+            else:
+                render_site(result_path, verified_traces, destination)
     except (OSError, RenderError, TypeError, ValueError) as exc:
         raise PublicationError(str(exc)) from exc
 
