@@ -1191,6 +1191,26 @@ def test_artifact_inspection_hashes_counts_and_detects_across_chunks(
     )
 
 
+def test_artifact_inspection_detects_long_credential_url_across_chunks(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "artifact.bin"
+    credential = (
+        b"postgresql://" + b"u" * 256 + b":" + b"p" * 256 + b"@database.example"
+    )
+    payload = (
+        b"x" * (public_bundle._SECRET_SCAN_CHUNK_SIZE - len(credential) // 2)
+        + credential
+    )
+    path.write_bytes(payload)
+
+    assert public_bundle._inspect_artifact(path) == (
+        len(payload),
+        _digest(payload),
+        True,
+    )
+
+
 @pytest.mark.parametrize(
     "credential",
     [
