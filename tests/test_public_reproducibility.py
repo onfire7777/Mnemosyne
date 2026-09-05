@@ -1285,6 +1285,33 @@ def test_dependency_disclosures_must_match_digest_bound_lockfile(tmp_path: Path)
         public_bundle.verify_reproducibility_bundle(root)
 
 
+def test_lockfile_dependencies_can_be_parsed_from_bound_bytes() -> None:
+    lockfile = Path("uv.lock")
+
+    assert public_bundle._locked_dependencies_from_bytes(
+        lockfile.read_bytes()
+    ) == public_bundle._locked_dependencies(lockfile)
+
+
+def test_reproduction_rejects_checkout_lockfile_outside_inventory_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    _write_reproducibility_bundle(source)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / "uv.lock").write_bytes(b"version = 1\n")
+    monkeypatch.chdir(checkout)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+
+    with pytest.raises(BundleError, match="checkout lockfile digest mismatch"):
+        public_bundle.reproduce_reproducibility_bundle(
+            source, tmp_path / "reproduced"
+        )
+
+
 def test_inventory_drift_and_symlinks_fail_before_validation(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     _write_reproducibility_bundle(root)
