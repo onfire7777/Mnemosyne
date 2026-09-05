@@ -32,7 +32,8 @@ assembler grants no evidence status.
 
 Inventory paths are portable POSIX-relative names. Validation rejects Unicode
 NFC/case-fold aliases, Windows device names, trailing dots or spaces, control
-characters, and Windows-forbidden filename characters before assembly.
+characters, Windows-forbidden filename characters, and paths deeper than 32
+components before assembly.
 Media-type declarations must use bounded parameter-free MIME syntax; core JSON,
 JSONL, PEM, Markdown, shell, and lock artifacts use their canonical types.
 Declared JSON and NDJSON must parse without duplicate keys, and declared text
