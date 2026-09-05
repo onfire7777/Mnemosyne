@@ -529,6 +529,13 @@ def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_i
     with pytest.raises(BundleError, match="dependency inventory"):
         _validate(unhashable_dependency)
 
+    duplicate_metric = _manifest()
+    duplicate_metric["metrics"].append(  # type: ignore[union-attr]
+        copy.deepcopy(duplicate_metric["metrics"][0])  # type: ignore[index]
+    )
+    with pytest.raises(BundleError, match="duplicate identity"):
+        _validate(duplicate_metric)
+
     oversized_operator_role = _manifest()
     oversized_operator_role["disclosures"]["operator_role"] = "o" * 129  # type: ignore[index]
     with pytest.raises(BundleError, match="operator role"):
@@ -673,6 +680,27 @@ def test_result_bundle_custody_mismatches_fail_closed(
     target[field] = value
 
     with pytest.raises(BundleError, match="embedded bundle custody"):
+        public_bundle._verify_result_bundle_bindings(result, manifest, benchmark)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("exclusions", ["undisclosed-case"]), ("aborted", 1)],
+)
+def test_metric_outcome_accounting_must_match_run_custody(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    benchmark = json.loads((root / "benchmark.json").read_text(encoding="utf-8"))
+    metric = manifest["metrics"][0]  # type: ignore[index]
+    if field == "exclusions":
+        metric[field] = value
+    else:
+        metric["outcomes"][field] = value
+
+    with pytest.raises(BundleError, match="outcome accounting"):
         public_bundle._verify_result_bundle_bindings(result, manifest, benchmark)
 
 

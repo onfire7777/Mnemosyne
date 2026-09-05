@@ -350,6 +350,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         "exclusions",
         "outcomes",
     }
+    metric_identities: set[tuple[str, str]] = set()
     for index, item in enumerate(metrics):
         metric = _closed_object(item, metric_fields, f"metric {index}")
         for field, maximum in (
@@ -359,6 +360,10 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             ("unit", 64),
         ):
             _repro_nonempty(metric[field], f"metric {field}", maximum=maximum)
+        identity = (metric["family"], metric["name"])
+        if identity in metric_identities:
+            raise BundleError("metric inventory contains a duplicate identity")
+        metric_identities.add(identity)
         if not isinstance(metric["value"], (int, float)) or isinstance(
             metric["value"], bool
         ):
@@ -852,6 +857,17 @@ def _verify_result_bundle_bindings(
     run = manifest["run"]
     disclosures = manifest["disclosures"]
     inputs = manifest["inputs"]
+    excluded_count = metadata.get("excluded_count", 0)
+    if (
+        type(excluded_count) is not int
+        or excluded_count < 0
+        or any(
+            len(metric["exclusions"]) != excluded_count
+            or metric["outcomes"]["aborted"] != run["aborts"]
+            for metric in manifest["metrics"]
+        )
+    ):
+        raise BundleError("bundle outcome accounting does not match run custody")
     if (
         result.get("benchmark") != metadata.get("suite")
         or result.get("benchmark_version") != metadata.get("revision")
