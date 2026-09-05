@@ -310,6 +310,8 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             f"file inventory entry {index}",
         )
         path = _repro_relative_path(entry["path"])
+        if path == "reproducibility-manifest.json":
+            raise BundleError("file inventory cannot own the reproducibility manifest")
         if path in paths:
             raise BundleError("file inventory contains a duplicate relative path")
         paths.add(path)
@@ -319,6 +321,13 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         if entry["canonicalization"] != "exact-bytes":
             raise BundleError("file canonicalization must be exact-bytes")
         _repro_digest(entry["digest"], "file digest")
+    if any(
+        parent.as_posix() in paths
+        for path in paths
+        for parent in Path(path).parents
+        if parent != Path(".")
+    ):
+        raise BundleError("file inventory contains a file-directory collision")
 
     run_fields = {
         "candidate_git_sha",

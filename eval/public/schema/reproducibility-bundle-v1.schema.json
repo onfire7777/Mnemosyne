@@ -93,7 +93,7 @@
             "type": "object", "additionalProperties": false,
             "required": ["path", "size", "media_type", "canonicalization", "digest"],
             "properties": {
-              "path": {"$ref": "#/$defs/path"},
+              "path": {"allOf": [{"$ref": "#/$defs/path"}, {"not": {"const": "reproducibility-manifest.json"}}]},
               "size": {"type": "integer", "minimum": 0, "maximum": 67108864},
               "media_type": {"type": "string", "minLength": 1, "maxLength": 128},
               "canonicalization": {"enum": ["exact-bytes"]},
