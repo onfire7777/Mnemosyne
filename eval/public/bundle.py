@@ -10,6 +10,7 @@ import os
 import platform
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,7 @@ _SECRET_SCAN_OVERLAP = 128
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 4
+_UNSAFE_MODE_BITS = stat.S_ISUID | stat.S_ISGID | stat.S_ISVTX
 _WINDOWS_RESERVED_NAMES = {
     "aux",
     "con",
@@ -738,6 +740,14 @@ def _reproducibility_tree(
                 if child.is_symlink() or is_junction:
                     raise BundleError("links and junctions are forbidden")
                 try:
+                    mode = child.stat(follow_symlinks=False).st_mode
+                except OSError as exc:
+                    raise BundleError(
+                        "reproducibility bundle path cannot be inspected"
+                    ) from exc
+                if mode & _UNSAFE_MODE_BITS:
+                    raise BundleError("special permission bits are forbidden")
+                try:
                     resolved = child.resolve(strict=True)
                 except OSError as exc:
                     raise BundleError(
@@ -874,6 +884,8 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     for entry in inventory:
         path = root / entry["path"]
         try:
+            if path.stat().st_size != entry["size"]:
+                raise BundleError(f"digest mismatch: {entry['path']}")
             size, digest, secret_found = _inspect_artifact(path)
         except OSError as exc:
             raise BundleError("reproducibility bundle file cannot be read") from exc

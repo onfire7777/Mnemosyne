@@ -25,8 +25,9 @@ assembler rejects source inventory drift and linked paths, writes through a
 private staging directory, verifies the complete result, and publishes the
 destination by one OS-level atomic non-overwriting rename. Platforms without
 that primitive fail closed. Assembly and reproduction preserve
-source permission bits, including the executable mode of `reproduce.sh`; those
-mode bits are operational metadata rather than digest-bound evidence. The
+ordinary source permission bits, including the executable mode of
+`reproduce.sh`; setuid, setgid, and sticky bits are rejected before copying.
+Mode bits are operational metadata rather than digest-bound evidence. The
 assembler grants no evidence status.
 
 Inventory paths are portable POSIX-relative names. Validation rejects Unicode
