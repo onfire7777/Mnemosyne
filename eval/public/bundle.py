@@ -108,6 +108,19 @@ _CREDENTIAL_ENV_MARKERS = (
     "CREDENTIAL",
     "AUTHORIZATION",
 )
+_FIXED_REPRODUCTION_ENV = {"UV_OFFLINE", "LC_ALL", "TZ"}
+_INFLUENTIAL_ENV_PREFIXES = ("PYTHON", "PIP_", "UV_", "DYLD_")
+_INFLUENTIAL_ENV_NAMES = {
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+}
 
 
 def _closed_object(
@@ -171,6 +184,17 @@ def _repro_relative_path(value: object) -> str:
 def _credential_environment_name(name: str) -> bool:
     normalized = name.upper()
     return any(marker in normalized for marker in _CREDENTIAL_ENV_MARKERS)
+
+
+def _undeclared_influential_environment_name(
+    name: str, declared: set[str]
+) -> bool:
+    normalized = name.upper()
+    if normalized in declared or normalized in _FIXED_REPRODUCTION_ENV:
+        return False
+    return normalized in _INFLUENTIAL_ENV_NAMES or normalized.startswith(
+        _INFLUENTIAL_ENV_PREFIXES
+    )
 
 
 def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
@@ -1109,9 +1133,18 @@ def reproduce_reproducibility_bundle(
     )
     if inherited_credentials:
         raise BundleError("reproduction environment contains inherited credentials")
+    declared_environment = manifest["run"]["environment"]
+    influential_environment = sorted(
+        name
+        for name in os.environ
+        if _undeclared_influential_environment_name(
+            name, set(declared_environment)
+        )
+    )
+    if influential_environment:
+        raise BundleError("reproduction environment contains undeclared influences")
     if os.environ.get("UV_OFFLINE", "").lower() not in {"1", "true"}:
         raise BundleError("reproduction requires UV_OFFLINE=1")
-    declared_environment = manifest["run"]["environment"]
     if any(
         os.environ.get(name) != value
         for name, value in declared_environment.items()

@@ -271,7 +271,11 @@ def _refresh_owned_file(root: Path, name: str) -> None:
 
 def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(os.environ):
-        if public_bundle._credential_environment_name(name):
+        if public_bundle._credential_environment_name(
+            name
+        ) or public_bundle._undeclared_influential_environment_name(
+            name, {"PYTHONHASHSEED"}
+        ):
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("UV_OFFLINE", "1")
     monkeypatch.setenv("PYTHONHASHSEED", "0")
@@ -1042,6 +1046,26 @@ def test_reproduction_requires_manifest_bound_process_environment(
         )
 
 
+@pytest.mark.parametrize("name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY"])
+def test_reproduction_rejects_undeclared_execution_influences(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+) -> None:
+    source = tmp_path / "source"
+    _write_reproducibility_bundle(source)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+    monkeypatch.setenv(name, "attacker-controlled")
+
+    with pytest.raises(BundleError, match="undeclared influences"):
+        public_bundle.reproduce_reproducibility_bundle(
+            source, tmp_path / f"influenced-{name.lower()}"
+        )
+
+
 def test_reproduction_drift_removes_partial_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1134,6 +1158,9 @@ def test_exact_command_reproduces_from_clean_detached_offline_checkout(
         name: value
         for name, value in os.environ.items()
         if not public_bundle._credential_environment_name(name)
+        and not public_bundle._undeclared_influential_environment_name(
+            name, {"PYTHONHASHSEED"}
+        )
     }
     environment.update(
         {
