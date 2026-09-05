@@ -726,22 +726,40 @@ def _inspect_artifact(path: Path) -> tuple[int, str, bool]:
     return size, "sha256:" + digest.hexdigest(), secret_found
 
 
+def _reject_decoded_secrets(value: object) -> None:
+    stack = [value]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, str) and SECRET.search(current):
+            raise BundleError("secret-like material detected in decoded artifact")
+        if isinstance(current, dict):
+            stack.extend(current.keys())
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+
+
 def _validate_artifact_media(path: Path, media_type: str) -> None:
     if media_type == "application/json":
         try:
-            _load_json(path)
+            value = _load_json(path)
         except (OSError, UnicodeError, BundleError) as exc:
             raise BundleError("artifact declared as JSON is invalid") from exc
+        _reject_decoded_secrets(value)
         return
     if media_type == "application/x-ndjson":
         try:
             with path.open("rb") as handle:
                 for line_number, raw_line in enumerate(handle, 1):
-                    line = raw_line.decode("utf-8").strip()
-                    if not line:
-                        raise BundleError("NDJSON contains an empty record")
-                    _parse_json(line, f"NDJSON record {line_number}")
-        except (OSError, UnicodeError, BundleError) as exc:
+                    try:
+                        line = raw_line.decode("utf-8").strip()
+                        if not line:
+                            raise BundleError("NDJSON contains an empty record")
+                        value = _parse_json(line, f"NDJSON record {line_number}")
+                    except (UnicodeError, BundleError) as exc:
+                        raise BundleError("artifact declared as NDJSON is invalid") from exc
+                    _reject_decoded_secrets(value)
+        except OSError as exc:
             raise BundleError("artifact declared as NDJSON is invalid") from exc
         return
     if media_type.startswith("text/"):
