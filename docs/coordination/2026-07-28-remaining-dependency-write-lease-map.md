@@ -341,11 +341,10 @@ The following packages are complete source history, not runnable work:
   bullet, the #141 MERGED mark, and this structured self-record in this
   map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #142 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #142 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. The OPEN/READY pre-merge instruction
+  is historical; delivery is MERGED at tip
+  `687884dbd14b32d3245fba2e6bc9797fc705e1f2`.
 - PR #140: Exact 1 smoke `tests/test_leaderboard_render_output_smoke.py`
   (title: test(leaderboard): Frontend render-output smoke (CLEAR of N12))
   from exact head `65f39d6bab91a4e6e29b1c89bd02f543cec2cde1`; all
