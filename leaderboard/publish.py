@@ -18,6 +18,43 @@ class PublicationError(ValueError):
     """Raised when signed ledger results cannot be published."""
 
 
+_ARTIFACT_KEYS = ("build", "config", "bundle")
+_USAGE = (
+    "usage: python -m leaderboard.publish "
+    "LEDGER PUBLIC_KEY DESTINATION "
+    "RECORD_ID=TRACES[,build=BUILD,config=CONFIG,bundle=BUNDLE] [...]"
+)
+
+
+def _parse_record_mapping(
+    item: str,
+) -> tuple[str, Path, dict[str, Path] | None]:
+    record_id, separator, rest = item.partition("=")
+    if not separator or not record_id or not rest:
+        raise PublicationError(f"invalid trace mapping: {item}")
+    parts = rest.split(",")
+    trace = parts[0]
+    extras = parts[1:]
+    if not trace or "=" in trace:
+        raise PublicationError(f"invalid trace mapping: {item}")
+    if not extras:
+        return record_id, Path(trace), None
+    files: dict[str, Path] = {}
+    for extra in extras:
+        key, equals, path = extra.partition("=")
+        if (
+            not equals
+            or key not in _ARTIFACT_KEYS
+            or not path
+            or key in files
+        ):
+            raise PublicationError(f"invalid artifact mapping: {item}")
+        files[key] = Path(path)
+    if any(key not in files for key in _ARTIFACT_KEYS):
+        raise PublicationError(f"invalid artifact mapping: {item}")
+    return record_id, Path(trace), files
+
+
 def publish_site(
     ledger: str | Path,
     public_key: str | Path,
@@ -154,20 +191,25 @@ def main(argv: list[str] | None = None) -> int:
     """Publish LEDGER with RECORD_ID=TRACES mappings into DESTINATION."""
     args = sys.argv[1:] if argv is None else argv
     if len(args) < 4:
-        print(
-            "usage: python -m leaderboard.publish "
-            "LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]",
-            file=sys.stderr,
-        )
+        print(_USAGE, file=sys.stderr)
         return 2
     mappings: dict[str, Path] = {}
+    artifacts: dict[str, dict[str, Path]] = {}
     try:
         for item in args[3:]:
-            record_id, separator, path = item.partition("=")
-            if not separator or not record_id or not path or record_id in mappings:
+            record_id, trace, files = _parse_record_mapping(item)
+            if record_id in mappings:
                 raise PublicationError(f"invalid trace mapping: {item}")
-            mappings[record_id] = Path(path)
-        publish_site(Path(args[0]), Path(args[1]), mappings, Path(args[2]))
+            mappings[record_id] = trace
+            if files is not None:
+                artifacts[record_id] = files
+        publish_site(
+            Path(args[0]),
+            Path(args[1]),
+            mappings,
+            Path(args[2]),
+            artifacts=artifacts or None,
+        )
     except PublicationError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

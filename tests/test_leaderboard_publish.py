@@ -479,7 +479,8 @@ def test_cli_reports_usage_for_too_few_arguments(
     assert main([]) == 2
     assert capsys.readouterr().err == (
         "usage: python -m leaderboard.publish "
-        "LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]\n"
+        "LEDGER PUBLIC_KEY DESTINATION "
+        "RECORD_ID=TRACES[,build=BUILD,config=CONFIG,bundle=BUNDLE] [...]\n"
     )
 
 
@@ -533,6 +534,164 @@ def _v2_bound_result(tmp_path: Path, record: dict[str, object]) -> dict[str, Pat
     for field, name in DIGEST_PAYLOAD_NAMES.items():
         record[field] = "sha256:" + hashlib.sha256(payloads[name]).hexdigest()
     return paths
+
+
+def test_cli_forwards_artifact_bindings_to_publish_site(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    captured: dict[str, object] = {}
+
+    def _capture(
+        ledger_path: Path,
+        public_key_path: Path,
+        traces: dict[str, Path],
+        destination: Path,
+        artifacts: dict[str, dict[str, Path]] | None = None,
+    ) -> None:
+        captured["traces"] = traces
+        captured["artifacts"] = artifacts
+
+    monkeypatch.setattr(publication, "publish_site", _capture)
+    record_id = str(record["record_id"])
+    mapping = (
+        f"{record_id}={artifacts['traces.jsonl']}"
+        f",build={artifacts['build.json']}"
+        f",config={artifacts['config.json']}"
+        f",bundle={artifacts['bundle-manifest.json']}"
+    )
+
+    assert main([str(ledger), str(public_key), str(tmp_path / "site"), mapping]) == 0
+    traces = captured["traces"]
+    assert isinstance(traces, dict)
+    assert traces[record_id] == artifacts["traces.jsonl"]
+    bound = captured["artifacts"]
+    assert isinstance(bound, dict)
+    assert bound[record_id] == {
+        "build": artifacts["build.json"],
+        "config": artifacts["config.json"],
+        "bundle": artifacts["bundle-manifest.json"],
+    }
+
+
+def test_cli_v2_without_artifact_bindings_reports_missing_source(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    destination = tmp_path / "site"
+    mapping = f"{record['record_id']}={artifacts['traces.jsonl']}"
+
+    assert main([str(ledger), str(public_key), str(destination), mapping]) == 2
+    error = capsys.readouterr().err
+    assert error.startswith("error: missing artifact source: ")
+    assert "Traceback" not in error
+    assert not destination.exists()
+
+
+def test_cli_v2_with_artifact_bindings_reaches_readiness_gate(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    destination = tmp_path / "site"
+    mapping = (
+        f"{record['record_id']}={artifacts['traces.jsonl']}"
+        f",build={artifacts['build.json']}"
+        f",config={artifacts['config.json']}"
+        f",bundle={artifacts['bundle-manifest.json']}"
+    )
+
+    assert main([str(ledger), str(public_key), str(destination), mapping]) == 2
+    error = capsys.readouterr().err
+    assert error.startswith("error: result is not ready")
+    assert "missing artifact source" not in error
+    assert "Traceback" not in error
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        ",build=build.json",
+        ",build=build.json,config=config.json",
+        ",build=build.json,config=config.json,bundle=bundle.json,extra=x",
+        ",unknown=build.json,config=config.json,bundle=bundle.json",
+        ",build=,config=config.json,bundle=bundle.json",
+        ",build=build.json,build=other.json,config=config.json,bundle=bundle.json",
+    ],
+)
+def test_cli_rejects_invalid_artifact_mappings_without_mutating_destination(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    suffix: str,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    traces = _trace(tmp_path / "trace.jsonl")
+    destination = tmp_path / "site"
+
+    assert (
+        main(
+            [
+                str(ledger),
+                str(public_key),
+                str(destination),
+                f"result-success={traces}{suffix}",
+            ]
+        )
+        == 2
+    )
+    error = capsys.readouterr().err
+    assert error.startswith("error: invalid artifact mapping: ")
+    assert "Traceback" not in error
+    assert not destination.exists()
 
 
 def test_rejects_not_ready_v2_even_when_four_digests_match(
