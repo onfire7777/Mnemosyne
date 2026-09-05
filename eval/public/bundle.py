@@ -1164,6 +1164,8 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "method"
     ) != method:
         raise BundleError("wrong interval-family metadata")
+    if profile == "smoke-hit-at-k-v1" and measured.get("metric") != "hit_at_k":
+        raise BundleError("deterministic retrieval metric must be hit_at_k")
     expected_metrics = _recompute_bundle_metrics(
         profile, family, benchmark.get("data"), traces
     )
