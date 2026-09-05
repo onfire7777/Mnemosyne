@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import math
@@ -768,6 +769,53 @@ def _reject_reproducibility_link_path(path: Path) -> None:
             raise BundleError("reproducibility paths must not contain links or junctions")
 
 
+def _publish_directory_noreplace(source: Path, destination: Path) -> None:
+    """Atomically publish a directory without replacing any destination entry."""
+    if os.name == "nt":
+        source.rename(destination)
+        return
+
+    import ctypes
+
+    library = ctypes.CDLL(None, use_errno=True)
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    if sys.platform.startswith("linux"):
+        try:
+            rename = library.renameat2
+        except AttributeError as exc:
+            raise BundleError("atomic no-replace publication is unavailable") from exc
+        rename.argtypes = [
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        ]
+        rename.restype = ctypes.c_int
+        result = rename(-100, source_bytes, -100, destination_bytes, 1)
+    elif sys.platform == "darwin":
+        try:
+            rename = library.renamex_np
+        except AttributeError as exc:
+            raise BundleError("atomic no-replace publication is unavailable") from exc
+        rename.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+        rename.restype = ctypes.c_int
+        result = rename(source_bytes, destination_bytes, 4)
+    else:
+        raise BundleError("atomic no-replace publication is unavailable")
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise FileExistsError(
+            error_number,
+            "refusing to overwrite reproducibility bundle",
+            destination,
+        )
+    raise OSError(error_number, os.strerror(error_number), destination)
+
+
 def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     """Verify a REPRO-001 bundle without executing bundle-controlled content."""
     root = Path(bundle)
@@ -1067,7 +1115,7 @@ def assemble_reproducibility_bundle(
             raise FileExistsError(
                 f"refusing to overwrite bundle: {destination_root}"
             )
-        final.rename(destination_root)
+        _publish_directory_noreplace(final, destination_root)
         return result
     finally:
         shutil.rmtree(staging, ignore_errors=True)
@@ -1397,7 +1445,7 @@ def reproduce_reproducibility_bundle(
             raise FileExistsError(
                 f"refusing to overwrite bundle: {destination_root}"
             )
-        final.rename(destination_root)
+        _publish_directory_noreplace(final, destination_root)
         return result
     finally:
         shutil.rmtree(staging, ignore_errors=True)

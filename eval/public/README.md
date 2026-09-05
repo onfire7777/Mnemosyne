@@ -23,7 +23,8 @@ Operator-side packaging code should call `assemble_reproducibility_bundle`
 with an exact artifact-only source directory and the completed manifest. The
 assembler rejects source inventory drift and linked paths, writes through a
 private staging directory, verifies the complete result, and publishes the
-destination by one non-overwriting rename. Assembly and reproduction preserve
+destination by one OS-level atomic non-overwriting rename. Platforms without
+that primitive fail closed. Assembly and reproduction preserve
 source permission bits, including the executable mode of `reproduce.sh`; those
 mode bits are operational metadata rather than digest-bound evidence. The
 assembler grants no evidence status.

@@ -787,16 +787,16 @@ def test_atomic_assembler_collision_preserves_external_destination(
     sentinel = destination / "external-owner.txt"
     manifest = _write_reproducibility_bundle(source)
     (source / "reproducibility-manifest.json").unlink()
-    original_rename = Path.rename
+    original_publish = public_bundle._publish_directory_noreplace
 
-    def collide(path: Path, target: Path) -> Path:
-        if path.name == "final" and Path(target) == destination:
+    def collide(path: Path, target: Path) -> None:
+        if path.name == "final" and target == destination:
             destination.mkdir()
             sentinel.write_text("do not delete", encoding="utf-8")
             raise FileExistsError("simulated assembly destination race")
-        return original_rename(path, target)
+        original_publish(path, target)
 
-    monkeypatch.setattr(Path, "rename", collide)
+    monkeypatch.setattr(public_bundle, "_publish_directory_noreplace", collide)
 
     with pytest.raises(FileExistsError, match="assembly destination race"):
         public_bundle.assemble_reproducibility_bundle(
@@ -805,6 +805,19 @@ def test_atomic_assembler_collision_preserves_external_destination(
 
     assert sentinel.read_text(encoding="utf-8") == "do not delete"
     assert list(tmp_path.glob(".bundle-assemble-*")) == []
+
+
+def test_atomic_publication_never_replaces_an_empty_directory(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    source.mkdir()
+    destination.mkdir()
+
+    with pytest.raises(FileExistsError):
+        public_bundle._publish_directory_noreplace(source, destination)
+
+    assert source.is_dir()
+    assert destination.is_dir()
 
 
 @pytest.mark.parametrize(
@@ -1353,16 +1366,16 @@ def test_destination_collision_race_never_deletes_external_directory(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
     _clear_credential_environment(monkeypatch)
-    original_rename = Path.rename
+    original_publish = public_bundle._publish_directory_noreplace
 
-    def collide(path: Path, target: Path) -> Path:
-        if path.name == "final" and Path(target) == destination:
+    def collide(path: Path, target: Path) -> None:
+        if path.name == "final" and target == destination:
             destination.mkdir()
             sentinel.write_text("do not delete", encoding="utf-8")
             raise FileExistsError("simulated destination race")
-        return original_rename(path, target)
+        original_publish(path, target)
 
-    monkeypatch.setattr(Path, "rename", collide)
+    monkeypatch.setattr(public_bundle, "_publish_directory_noreplace", collide)
     with pytest.raises(FileExistsError, match="destination race"):
         public_bundle.reproduce_reproducibility_bundle(source, destination)
 
