@@ -8,6 +8,8 @@ import stat
 import sys
 from typing import Any
 
+from leaderboard.validate import SCHEMA_VERSION_V2, validate_record
+
 
 GATES = (
     "pbpp",
@@ -58,6 +60,32 @@ def evaluate(record: object) -> dict[str, object]:
     return {"blocked_gates": blocked, "ready": not blocked}
 
 
+def evaluate_result_v2(record: object) -> dict[str, object]:
+    """Return fail-closed publication readiness for one result-v2 record."""
+    if not isinstance(record, dict) or validate_record(record):
+        raise ReadinessError("invalid result-v2 record")
+
+    blocked: list[str] = ["human_approval"]
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+    if record.get("track_kind") == "DEVELOPMENT" or publication.get(
+        "publishable"
+    ) is not True:
+        blocked.append("publication")
+    if record.get("track_kind") == "DEVELOPMENT":
+        blocked.append("pbpp")
+    elif publication.get("label") in {"neutral", "certified", "independent"}:
+        if publication.get("register_b_satisfied") is not True:
+            blocked.append("pbpp")
+    gates = record.get("safety_gates")
+    if isinstance(gates, list) and any(
+        isinstance(gate, dict) and gate.get("status") == "failed" for gate in gates
+    ):
+        blocked.append("safety_gates")
+    blocked = sorted(set(blocked))
+    return {"blocked_gates": blocked, "ready": not blocked}
+
+
 def main(argv: list[str] | None = None) -> int:
     """Read one UTF-8 JSON record and emit its deterministic readiness result."""
     args = sys.argv[1:] if argv is None else argv
@@ -90,7 +118,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result = evaluate(record)
+        if isinstance(record, dict) and record.get("schema_version") == SCHEMA_VERSION_V2:
+            result = evaluate_result_v2(record)
+        else:
+            result = evaluate(record)
     except ReadinessError:
         print("error: invalid readiness record", file=sys.stderr)
         return 2

@@ -7,6 +7,8 @@ import pytest
 
 import leaderboard.render as renderer
 from leaderboard.render import RenderError, main, render_site
+from leaderboard.validate import DIGEST_PAYLOAD_NAMES
+from tests.test_leaderboard_result_contract import _v2_development_record
 
 
 def _result(record_id: str = "result-001") -> dict[str, object]:
@@ -595,3 +597,108 @@ def test_cli_renders_valid_input_and_rejects_duplicate_mappings(
     assert (tmp_path / "site" / "index.html").is_file()
     assert main([str(results), str(tmp_path / "other-site"), mapping, mapping]) == 2
     assert "invalid trace mapping" in capsys.readouterr().err
+
+
+def _bind_v2_artifacts(
+    tmp_path: Path, record: dict[str, object]
+) -> dict[str, Path]:
+    payloads = {
+        "build.json": b'{"build":true}\n',
+        "config.json": b'{"config":true}\n',
+        "bundle-manifest.json": b'{"bundle":true}\n',
+        "traces.jsonl": (
+            json.dumps(_trace(), sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+    }
+    paths: dict[str, Path] = {}
+    for name, content in payloads.items():
+        path = tmp_path / name
+        path.write_bytes(content)
+        paths[name] = path
+    for field, name in DIGEST_PAYLOAD_NAMES.items():
+        record[field] = "sha256:" + hashlib.sha256(payloads[name]).hexdigest()
+    return paths
+
+
+def test_renders_v2_record_fields_and_safety_gates(tmp_path: Path) -> None:
+    record = _v2_development_record()
+    record["safety_gates"] = [{"name": "no-leakage", "status": "failed"}]
+    artifacts = _bind_v2_artifacts(tmp_path, record)
+    results = _write_json(tmp_path / "results.json", record)
+    output = tmp_path / "site"
+
+    render_site(
+        results,
+        {str(record["record_id"]): artifacts["traces.jsonl"]},
+        output,
+        artifacts={
+            str(record["record_id"]): {
+                "build": artifacts["build.json"],
+                "config": artifacts["config.json"],
+                "bundle": artifacts["bundle-manifest.json"],
+            }
+        },
+    )
+
+    page = (
+        output / "results" / f"{_digest(str(record['record_id']))}.html"
+    ).read_text(encoding="utf-8")
+    assert "DEVELOPMENT" in page
+    assert "PROPOSED" in page
+    assert "IMPLEMENTED" in page
+    assert "M01" in page
+    assert "no-leakage" in page
+    assert "failed" in page
+    assert "operator" in page
+    assert "trace-001" in page
+
+
+def test_rejects_mixed_v1_and_v2_rendering(tmp_path: Path) -> None:
+    v1 = _result("result-v1")
+    v2 = _v2_development_record()
+    artifacts = _bind_v2_artifacts(tmp_path, v2)
+    results = _write_json(tmp_path / "results.json", [v1, v2])
+    traces_v1 = _write_traces(tmp_path / "v1-traces.jsonl", [_trace()])
+
+    with pytest.raises(RenderError, match="mixed result schema"):
+        render_site(
+            results,
+            {
+                "result-v1": traces_v1,
+                str(v2["record_id"]): artifacts["traces.jsonl"],
+            },
+            tmp_path / "site",
+        )
+    assert not (tmp_path / "site").exists()
+
+
+def test_rejects_v2_digest_payload_mismatch_before_render(tmp_path: Path) -> None:
+    record = _v2_development_record()
+    artifacts = _bind_v2_artifacts(tmp_path, record)
+    artifacts["build.json"].write_bytes(b'{"build":false}\n')
+    results = _write_json(tmp_path / "results.json", record)
+
+    with pytest.raises(RenderError, match="digest"):
+        render_site(
+            results,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            tmp_path / "site",
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()
+
+
+def test_rejects_v2_render_without_bound_artifacts(tmp_path: Path) -> None:
+    record = _v2_development_record()
+    results = _write_json(tmp_path / "results.json", record)
+    traces = _write_traces(tmp_path / "traces.jsonl", [_trace()])
+
+    with pytest.raises(RenderError, match="artifact"):
+        render_site(results, {str(record["record_id"]): traces}, tmp_path / "site")
+    assert not (tmp_path / "site").exists()

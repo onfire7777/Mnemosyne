@@ -16,6 +16,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from leaderboard.ledger import LedgerError, append_entry, verify_ledger
 from mnemosyne._file_lock import exclusive_file_lock
+from tests.test_leaderboard_result_contract import (
+    _v2_development_record,
+    _v2_successor_record,
+)
 
 
 _DEFAULT_RUN_ID = object()
@@ -972,3 +976,84 @@ def test_module_verify_command_handles_unhashable_status(
     assert invalid.returncode == 1
     assert invalid.stdout == ""
     assert invalid.stderr == "ledger verification failed: ledger status is invalid at entry entry-cli\n"
+
+
+def test_appends_v2_result_on_the_same_ledger(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    v1 = _append(ledger_path, private_key, entry_id="entry-v1")
+    v1_bytes = ledger_path.read_bytes()
+    v2_result = _v2_development_record()
+    v2 = _append(
+        ledger_path,
+        private_key,
+        entry_id="entry-v2",
+        result=v2_result,
+    )
+
+    assert ledger_path.read_bytes().startswith(v1_bytes)
+    assert not ledger_path.with_name("runs-v2.jsonl").exists()
+    assert v2["result"] == v2_result
+    assert verify_ledger(ledger_path, public_key) == [v1, v2]
+
+
+def test_cross_version_supersession_does_not_rewrite_v1_bytes(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    original = _append(ledger_path, private_key, entry_id="entry-v1")
+    original_bytes = ledger_path.read_bytes()
+    correction = append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-v1-superseded",
+        timestamp="2026-07-25T12:01:00Z",
+        entrant_id="synthetic-entrant",
+        status="superseded",
+        reason="migrate to result-v2",
+        supersedes="entry-v1",
+        roster={"synthetic-entrant"},
+    )
+    successor = _v2_successor_record()
+    successor["history"] = {"supersedes": "synthetic-result-001"}
+    replacement = append_entry(
+        ledger_path,
+        private_key,
+        entry_id="entry-v2-successor",
+        timestamp="2026-07-25T12:02:00Z",
+        entrant_id="synthetic-entrant",
+        status="succeeded",
+        run_id="run-v2-successor",
+        result=successor,
+        roster={"synthetic-entrant"},
+    )
+
+    assert ledger_path.read_bytes().startswith(original_bytes)
+    assert json.loads(original_bytes.splitlines()[0])["result"]["schema_version"] == (
+        "mnemosyne.leaderboard.result/v1"
+    )
+    assert replacement["result"]["schema_version"] == (
+        "mnemosyne.leaderboard.result/v2"
+    )
+    assert verify_ledger(ledger_path, public_key) == [
+        original,
+        correction,
+        replacement,
+    ]
+
+
+def test_rejects_invalid_v2_success_result(
+    ledger_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, _ = key_paths
+    invalid = _v2_development_record()
+    del invalid["track_kind"]
+
+    with pytest.raises(LedgerError, match="/track_kind"):
+        _append(
+            ledger_path,
+            private_key,
+            entry_id="entry-invalid-v2",
+            result=invalid,
+        )

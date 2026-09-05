@@ -4,10 +4,18 @@ import json
 import math
 import re
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = "mnemosyne.leaderboard.result/v1"
+SCHEMA_VERSION_V2 = "mnemosyne.leaderboard.result/v2"
+DIGEST_PAYLOAD_NAMES = {
+    "build_fingerprint": "build.json",
+    "config_digest": "config.json",
+    "bundle_digest": "bundle-manifest.json",
+    "trace_index_digest": "traces.jsonl",
+}
 _REQUIRED_FIELDS = (
     "schema_version",
     "record_id",
@@ -55,6 +63,107 @@ _DIGEST_FIELDS = (
     "bundle_digest",
     "trace_index_digest",
 )
+_V2_REQUIRED_FIELDS = _REQUIRED_FIELDS + (
+    "module_id",
+    "admission_state",
+    "evidence_level",
+    "track_kind",
+    "lineage",
+    "identity",
+    "division",
+    "capability",
+    "safety_gates",
+    "resources",
+    "run_profile",
+    "custody",
+    "signer_role",
+    "trace_id",
+    "attempt_outcome",
+)
+_ADMISSION_STATES = (
+    "PROPOSED",
+    "CONTRACT-READY",
+    "PILOT-READY-DEV",
+    "RUN-READY-OFFICIAL-LOCAL",
+    "RUN-READY-HOSTED-X",
+    "RUN-READY-P32-OPS",
+    "DEFERRED",
+    "DEFERRED-CONFLICT",
+    "UNSUPPORTED-BY-SYSTEM",
+    "REJECTED",
+)
+_EVIDENCE_LEVELS = (
+    "DESIGN_ONLY",
+    "IMPLEMENTED",
+    "INTERNALLY_MEASURED",
+    "PUBLICLY_MEASURED",
+)
+_TRACK_KINDS = ("OFFICIAL-UPSTREAM", "ENHANCED-SUCCESSOR", "DEVELOPMENT")
+_DIVISIONS = (
+    "COMPONENT-CLOSED",
+    "AGENT-CLOSED",
+    "SYSTEM-OPEN",
+    "HOSTED-OUTCOME",
+)
+_CAPABILITIES = ("native", "emulated", "unsupported")
+_CUSTODY_LABELS = (
+    "development-public",
+    "operator-held-out",
+    "certification-held-out",
+)
+_SIGNER_ROLES = ("operator", "independent", "custodian")
+_ATTEMPT_OUTCOMES = (
+    "measured",
+    "missing",
+    "unsupported",
+    "failed",
+    "aborted",
+    "not-measured",
+)
+_RESOURCE_TREATMENTS = ("verified", "resource-unverified")
+_SAFETY_STATUSES = ("passed", "failed", "not-measured")
+_IDENTITY_FIELDS = (
+    "system_id",
+    "system_version",
+    "adapter_id",
+    "adapter_version",
+    "track_kind",
+    "benchmark_id",
+    "benchmark_version",
+    "module_id",
+    "division",
+    "resource_profile",
+    "backend_id",
+    "hardware_fingerprint",
+    "model_policy_id",
+    "dataset_split_digest",
+    "run_id",
+    "attempt_id",
+    "seed",
+)
+_IDENTITY_DIGEST_FIELDS = ("hardware_fingerprint", "dataset_split_digest")
+_FIDELITY_FIELDS = (
+    "upstream_protocol_digest",
+    "dataset_digest",
+    "split_digest",
+    "preprocessing_digest",
+    "scorer_digest",
+    "environment_digest",
+    "revision_digest",
+)
+_SUCCESSOR_FIELDS = (
+    "parent_official_record_id",
+    "parent_construct_digest",
+    "difference_manifest_digest",
+)
+_PROJECTION_VERSION = "mnemosyne.leaderboard.projection/v1"
+_OUTCOME_COUNT_FIELDS = {
+    "missing": "missing_count",
+    "unsupported": "unsupported_count",
+    "failed": "failed_count",
+    "aborted": "aborted_count",
+    "not-measured": "not_measured_count",
+}
 
 
 def _is_number(value: object) -> bool:
@@ -259,14 +368,46 @@ def _validate_records(records: list[object]) -> list[str]:
             cyclic.update(path[positions[current] :])
         resolved.update(path)
     errors.extend(f"/{indexes[record_id]}/history/supersedes" for record_id in cyclic)
+
+    identities: dict[tuple[object, ...], int] = {}
+    for index, record in enumerate(records):
+        if not isinstance(record, dict):
+            continue
+        if record.get("schema_version") != SCHEMA_VERSION_V2:
+            continue
+        identity = record.get("identity")
+        key = _identity_key(identity)
+        if key is None:
+            continue
+        if key in identities:
+            errors.append(f"/{index}/identity")
+        else:
+            identities[key] = index
     return sorted(set(errors))
+
+
+def _identity_key(identity: object) -> tuple[object, ...] | None:
+    if not isinstance(identity, dict):
+        return None
+    key: list[object] = []
+    for field in _IDENTITY_FIELDS:
+        value = identity.get(field)
+        if value is None:
+            return None
+        key.append(value)
+    return tuple(key)
 
 
 def validate_record(record: object) -> list[str]:
     """Return stable JSON-pointer errors; an empty list means valid."""
     if not isinstance(record, dict):
         return ["/"]
+    if record.get("schema_version") == SCHEMA_VERSION_V2:
+        return _validate_record_v2(record)
+    return _validate_record_v1(record)
 
+
+def _validate_record_v1(record: dict[str, object]) -> list[str]:
     errors = _unexpected_keys(record, _REQUIRED_FIELDS, "")
     errors.extend(f"/{field}" for field in _REQUIRED_FIELDS if field not in record)
     if record.get("schema_version") != SCHEMA_VERSION:
@@ -317,6 +458,370 @@ def validate_record(record: object) -> list[str]:
             errors.append("/operator_entry/disclosed")
     errors.extend(_validate_publication(record))
     errors.extend(_validate_history(record))
+    return sorted(set(errors))
+
+
+def _nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _validate_enum(
+    record: dict[str, object], field: str, allowed: tuple[str, ...]
+) -> list[str]:
+    value = record.get(field)
+    if not isinstance(value, str) or value not in allowed:
+        return [f"/{field}"]
+    return []
+
+
+def _validate_publication_v2(record: dict[str, object]) -> list[str]:
+    publication = record.get("publication")
+    if not isinstance(publication, dict):
+        return []
+    errors = _unexpected_keys(
+        publication,
+        ("publishable", "label", "register_b_satisfied", "pbpp_headline_eligible"),
+        "/publication",
+    )
+    publishable = publication.get("publishable")
+    if not isinstance(publishable, bool):
+        errors.append("/publication/publishable")
+    label = publication.get("label")
+    if not isinstance(label, str) or label not in _PUBLICATION_LABELS:
+        errors.append("/publication/label")
+    development = (
+        record.get("track") == "development"
+        or record.get("track_kind") == "DEVELOPMENT"
+    )
+    if development and publishable is True:
+        errors.append("/publication/publishable")
+    headline = publication.get("pbpp_headline_eligible")
+    if not isinstance(headline, bool):
+        errors.append("/publication/pbpp_headline_eligible")
+    elif development and headline is True:
+        errors.append("/publication/pbpp_headline_eligible")
+    if "register_b_satisfied" in publication and not isinstance(
+        publication["register_b_satisfied"], bool
+    ):
+        errors.append("/publication/register_b_satisfied")
+    if label == "neutral" and publication.get("register_b_satisfied") is not True:
+        errors.append("/publication/register_b_satisfied")
+    return errors
+
+
+def _validate_identity(record: dict[str, object]) -> list[str]:
+    identity = record.get("identity")
+    if not isinstance(identity, dict):
+        return []
+    errors = _unexpected_keys(identity, _IDENTITY_FIELDS, "/identity")
+    for field in _IDENTITY_FIELDS:
+        if field not in identity:
+            errors.append(f"/identity/{field}")
+    for field in _IDENTITY_FIELDS:
+        if field == "seed":
+            continue
+        if field in identity and not _nonempty_string(identity.get(field)):
+            errors.append(f"/identity/{field}")
+    seed = identity.get("seed")
+    if "seed" in identity and type(seed) is not int:
+        errors.append("/identity/seed")
+    for field in _IDENTITY_DIGEST_FIELDS:
+        value = identity.get(field)
+        if isinstance(value, str) and not _SHA256.fullmatch(value):
+            errors.append(f"/identity/{field}")
+    if (
+        isinstance(identity.get("track_kind"), str)
+        and identity.get("track_kind") != record.get("track_kind")
+    ):
+        errors.append("/identity/track_kind")
+    if (
+        isinstance(identity.get("division"), str)
+        and identity.get("division") != record.get("division")
+    ):
+        errors.append("/identity/division")
+    if (
+        isinstance(identity.get("module_id"), str)
+        and identity.get("module_id") != record.get("module_id")
+    ):
+        errors.append("/identity/module_id")
+    return errors
+
+
+def _validate_lineage(record: dict[str, object]) -> list[str]:
+    lineage = record.get("lineage")
+    if not isinstance(lineage, dict):
+        return []
+    track_kind = record.get("track_kind")
+    if track_kind == "DEVELOPMENT":
+        return _unexpected_keys(lineage, (), "/lineage")
+    if track_kind == "OFFICIAL-UPSTREAM":
+        errors = _unexpected_keys(lineage, ("fidelity",), "/lineage")
+        fidelity = lineage.get("fidelity")
+        if not isinstance(fidelity, dict):
+            errors.append("/lineage/fidelity")
+            return errors
+        errors.extend(_unexpected_keys(fidelity, _FIDELITY_FIELDS, "/lineage/fidelity"))
+        for field in _FIDELITY_FIELDS:
+            value = fidelity.get(field)
+            if not isinstance(value, str) or not _SHA256.fullmatch(value):
+                errors.append(f"/lineage/fidelity/{field}")
+        return errors
+    if track_kind == "ENHANCED-SUCCESSOR":
+        errors = _unexpected_keys(lineage, _SUCCESSOR_FIELDS, "/lineage")
+        parent = lineage.get("parent_official_record_id")
+        if not _nonempty_string(parent):
+            errors.append("/lineage/parent_official_record_id")
+        for field in ("parent_construct_digest", "difference_manifest_digest"):
+            value = lineage.get(field)
+            if not isinstance(value, str) or not _SHA256.fullmatch(value):
+                errors.append(f"/lineage/{field}")
+        return errors
+    return []
+
+
+def _validate_safety_gates(record: dict[str, object]) -> list[str]:
+    gates = record.get("safety_gates")
+    if not isinstance(gates, list) or not gates:
+        return ["/safety_gates"] if "safety_gates" in record else []
+    errors: list[str] = []
+    for index, gate in enumerate(gates):
+        pointer = f"/safety_gates/{index}"
+        if not isinstance(gate, dict):
+            errors.append(pointer)
+            continue
+        errors.extend(_unexpected_keys(gate, ("name", "status"), pointer))
+        if not _nonempty_string(gate.get("name")):
+            errors.append(f"{pointer}/name")
+        if gate.get("status") not in _SAFETY_STATUSES:
+            errors.append(f"{pointer}/status")
+    return errors
+
+
+def _validate_resources(record: dict[str, object]) -> list[str]:
+    resources = record.get("resources")
+    if not isinstance(resources, dict):
+        return []
+    allowed = (
+        "treatment",
+        "wall_time_ms",
+        "peak_rss_bytes",
+        "cost",
+        "latency_ms",
+    )
+    errors = _unexpected_keys(resources, allowed, "/resources")
+    if resources.get("treatment") not in _RESOURCE_TREATMENTS:
+        errors.append("/resources/treatment")
+    for field in ("wall_time_ms", "peak_rss_bytes", "cost", "latency_ms"):
+        if field in resources and not _is_number(resources[field]):
+            errors.append(f"/resources/{field}")
+    return errors
+
+
+def _validate_run_profile(record: dict[str, object]) -> list[str]:
+    profile = record.get("run_profile")
+    if not isinstance(profile, dict):
+        return []
+    errors = _unexpected_keys(
+        profile, ("profile_id", "seeds", "retries", "aborts"), "/run_profile"
+    )
+    if not _nonempty_string(profile.get("profile_id")):
+        errors.append("/run_profile/profile_id")
+    seeds = profile.get("seeds")
+    if not isinstance(seeds, list) or any(type(seed) is not int for seed in seeds):
+        errors.append("/run_profile/seeds")
+    for field in ("retries", "aborts"):
+        if type(profile.get(field)) is not int or profile[field] < 0:
+            errors.append(f"/run_profile/{field}")
+    return errors
+
+
+def _validate_record_v2(record: dict[str, object]) -> list[str]:
+    errors = _unexpected_keys(record, _V2_REQUIRED_FIELDS, "")
+    errors.extend(f"/{field}" for field in _V2_REQUIRED_FIELDS if field not in record)
+    if record.get("schema_version") != SCHEMA_VERSION_V2:
+        errors.append("/schema_version")
+    for field in _STRING_FIELDS + ("module_id", "trace_id"):
+        if field in record and not _nonempty_string(record.get(field)):
+            errors.append(f"/{field}")
+    run_commit = record.get("run_commit")
+    if isinstance(run_commit, str) and not _COMMIT.fullmatch(run_commit):
+        errors.append("/run_commit")
+    for field in _DIGEST_FIELDS:
+        value = record.get(field)
+        if isinstance(value, str) and not _SHA256.fullmatch(value):
+            errors.append(f"/{field}")
+
+    metrics: Any = record.get("metrics")
+    if not isinstance(metrics, list) or not metrics:
+        if "metrics" in record:
+            errors.append("/metrics")
+    else:
+        families: set[object] = set()
+        for index, metric in enumerate(metrics):
+            errors.extend(_validate_metric(metric, index))
+            if isinstance(metric, dict):
+                family = metric.get("family")
+                if family in _METRIC_FAMILIES:
+                    families.add(family)
+        if len(families) > 1:
+            errors.append("/metrics")
+
+    for field in ("publication", "operator_entry", "history", "lineage", "identity", "resources", "run_profile"):
+        value = record.get(field)
+        if field in record and field != "lineage" and (not isinstance(value, dict) or not value):
+            errors.append(f"/{field}")
+        elif field == "lineage" and field in record and not isinstance(value, dict):
+            errors.append("/lineage")
+    operator_entry = record.get("operator_entry")
+    if isinstance(operator_entry, dict):
+        errors.extend(
+            _unexpected_keys(
+                operator_entry, ("operator", "disclosed"), "/operator_entry"
+            )
+        )
+        operator = operator_entry.get("operator")
+        if not _nonempty_string(operator):
+            errors.append("/operator_entry/operator")
+        if operator_entry.get("disclosed") is not True:
+            errors.append("/operator_entry/disclosed")
+    errors.extend(_validate_enum(record, "admission_state", _ADMISSION_STATES))
+    errors.extend(_validate_enum(record, "evidence_level", _EVIDENCE_LEVELS))
+    errors.extend(_validate_enum(record, "track_kind", _TRACK_KINDS))
+    errors.extend(_validate_enum(record, "division", _DIVISIONS))
+    errors.extend(_validate_enum(record, "capability", _CAPABILITIES))
+    errors.extend(_validate_enum(record, "custody", _CUSTODY_LABELS))
+    errors.extend(_validate_enum(record, "signer_role", _SIGNER_ROLES))
+    errors.extend(_validate_enum(record, "attempt_outcome", _ATTEMPT_OUTCOMES))
+    errors.extend(_validate_publication_v2(record))
+    errors.extend(_validate_history(record))
+    errors.extend(_validate_identity(record))
+    errors.extend(_validate_lineage(record))
+    errors.extend(_validate_safety_gates(record))
+    errors.extend(_validate_resources(record))
+    errors.extend(_validate_run_profile(record))
+    return sorted(set(errors))
+
+
+def verify_result_digests(
+    record: dict[str, object], artifacts: dict[str, bytes]
+) -> list[str]:
+    """Hash the named payload bytes; do not parse or reserialize them."""
+    errors: list[str] = []
+    for field, name in DIGEST_PAYLOAD_NAMES.items():
+        payload = artifacts.get(name)
+        if payload is None:
+            errors.append(f"/{field}")
+            continue
+        actual = "sha256:" + sha256(payload).hexdigest()
+        if record.get(field) != actual:
+            errors.append(f"/{field}")
+    return sorted(set(errors))
+
+
+def _source_records(
+    projection: dict[str, object], records: list[object]
+) -> list[dict[str, object]]:
+    wanted = projection.get("source_record_ids")
+    if not isinstance(wanted, list):
+        return []
+    by_id = {
+        item.get("record_id"): item
+        for item in records
+        if isinstance(item, dict) and isinstance(item.get("record_id"), str)
+    }
+    sources: list[dict[str, object]] = []
+    for record_id in wanted:
+        item = by_id.get(record_id)
+        if isinstance(item, dict):
+            sources.append(item)
+    return sources
+
+
+def _has_failed_safety(record: dict[str, object]) -> bool:
+    gates = record.get("safety_gates")
+    if not isinstance(gates, list):
+        return False
+    return any(
+        isinstance(gate, dict) and gate.get("status") == "failed" for gate in gates
+    )
+
+
+def _outcome_counts(sources: list[dict[str, object]]) -> dict[str, int]:
+    counts = {field: 0 for field in _OUTCOME_COUNT_FIELDS.values()}
+    for record in sources:
+        outcome = record.get("attempt_outcome")
+        field = _OUTCOME_COUNT_FIELDS.get(str(outcome))
+        if field is not None:
+            counts[field] += 1
+        if _has_failed_safety(record) and outcome != "failed":
+            counts["failed_count"] += 1
+    return counts
+
+
+def validate_projection(projection: object, records: list[object]) -> list[str]:
+    """Return stable JSON-pointer errors for one derived projection."""
+    if not isinstance(projection, dict):
+        return ["/"]
+    errors: list[str] = []
+    if projection.get("schema_version") != _PROJECTION_VERSION:
+        errors.append("/schema_version")
+    if projection.get("kind") != "exploratory":
+        errors.append("/kind")
+    if projection.get("certified") is not False:
+        errors.append("/certified")
+    if projection.get("official") is not False:
+        errors.append("/official")
+    if projection.get("headline") is not False:
+        errors.append("/headline")
+    sources = _source_records(projection, records)
+    source_ids = projection.get("source_record_ids")
+    if not isinstance(source_ids, list) or len(sources) != len(source_ids):
+        errors.append("/source_record_ids")
+    expected = _outcome_counts(sources)
+    for field, value in expected.items():
+        if projection.get(field) != value:
+            errors.append(f"/{field}")
+    failed_visible = any(
+        _has_failed_safety(record) or record.get("attempt_outcome") == "failed"
+        for record in sources
+    )
+    if failed_visible and projection.get("safety_failures_visible") is not True:
+        errors.append("/safety_failures_visible")
+    weighting = projection.get("weighting")
+    if failed_visible and weighting is not None:
+        errors.append("/weighting")
+    compatibility = projection.get("compatibility_key")
+    if isinstance(compatibility, dict) and sources:
+        track = compatibility.get("track_kind")
+        if isinstance(track, str) and any(
+            record.get("track_kind") != track for record in sources
+        ):
+            errors.append("/compatibility_key/track_kind")
+        division = compatibility.get("division")
+        if isinstance(division, str) and any(
+            record.get("division") != division for record in sources
+        ):
+            errors.append("/compatibility_key/division")
+        treatment = compatibility.get("resource_treatment")
+        if isinstance(treatment, str) and any(
+            not isinstance(record.get("resources"), dict)
+            or record["resources"].get("treatment") != treatment
+            for record in sources
+        ):
+            errors.append("/compatibility_key/resource_treatment")
+        metric = compatibility.get("metric")
+        if isinstance(metric, dict):
+            for record in sources:
+                metrics = record.get("metrics")
+                if not isinstance(metrics, list) or not any(
+                    isinstance(item, dict)
+                    and item.get("name") == metric.get("name")
+                    and item.get("family") == metric.get("family")
+                    and item.get("unit") == metric.get("unit")
+                    for item in metrics
+                ):
+                    errors.append("/compatibility_key/metric")
+                    break
     return sorted(set(errors))
 
 

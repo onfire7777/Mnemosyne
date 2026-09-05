@@ -11,6 +11,11 @@ import leaderboard.publish as publication
 from leaderboard.ledger import append_entry
 from leaderboard.publish import PublicationError, main, publish_site
 from leaderboard.render import render_site
+from leaderboard.validate import DIGEST_PAYLOAD_NAMES
+from tests.test_leaderboard_result_contract import (
+    _v2_development_record,
+    _v2_successor_record,
+)
 
 _TRACE_TEXT = (
     json.dumps(
@@ -510,3 +515,192 @@ def test_cli_rejects_invalid_trace_mappings_without_mutating_destination(
     assert error.startswith("error: invalid trace mapping: ")
     assert "Traceback" not in error
     assert not destination.exists()
+
+
+def _v2_bound_result(tmp_path: Path, record: dict[str, object]) -> dict[str, Path]:
+    payloads = {
+        "build.json": b'{"build":true}\n',
+        "config.json": b'{"config":true}\n',
+        "bundle-manifest.json": b'{"bundle":true}\n',
+        "traces.jsonl": _TRACE_TEXT.encode(),
+    }
+    paths: dict[str, Path] = {}
+    for name, content in payloads.items():
+        path = tmp_path / name
+        path.write_bytes(content)
+        paths[name] = path
+    for field, name in DIGEST_PAYLOAD_NAMES.items():
+        record[field] = "sha256:" + hashlib.sha256(payloads[name]).hexdigest()
+    return paths
+
+
+def test_publishes_v2_after_verifying_four_digest_payloads(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    destination = tmp_path / "site"
+
+    publish_site(
+        ledger,
+        public_key,
+        {str(record["record_id"]): artifacts["traces.jsonl"]},
+        destination,
+        artifacts={
+            str(record["record_id"]): {
+                "build": artifacts["build.json"],
+                "config": artifacts["config.json"],
+                "bundle": artifacts["bundle-manifest.json"],
+            }
+        },
+    )
+
+    index = (destination / "index.html").read_text(encoding="utf-8")
+    assert str(record["record_id"]) in index
+    assert "DEVELOPMENT" in index
+
+
+def test_rejects_v2_publish_on_digest_mismatch(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    artifacts["config.json"].write_bytes(b'{"config":false}\n')
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+
+    with pytest.raises(PublicationError, match="digest"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            tmp_path / "site",
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()
+
+
+def test_rejects_mixed_v1_and_v2_publication(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    roster = {"entrant-a", "entrant-b"}
+    v2 = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, v2)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v1",
+        entrant_id="entrant-a",
+        roster=roster,
+        result=_result("result-v1"),
+    )
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="entrant-b",
+        roster=roster,
+        result=v2,
+    )
+
+    with pytest.raises(PublicationError, match="mixed result schema"):
+        publish_site(
+            ledger,
+            public_key,
+            {
+                "result-v1": _trace(tmp_path / "v1.jsonl"),
+                str(v2["record_id"]): artifacts["traces.jsonl"],
+            },
+            tmp_path / "site",
+            artifacts={
+                str(v2["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()
+
+
+def test_publishes_only_active_v2_after_v1_supersession(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    roster = {"synthetic-entrant"}
+    original_bytes_path = tmp_path / "original.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v1",
+        entrant_id="synthetic-entrant",
+        roster=roster,
+        result=_result("result-v1"),
+    )
+    original_bytes_path.write_bytes(ledger.read_bytes())
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v1-superseded",
+        entrant_id="synthetic-entrant",
+        roster=roster,
+        status="superseded",
+        supersedes="entry-v1",
+    )
+    successor = _v2_successor_record()
+    artifacts = _v2_bound_result(tmp_path, successor)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster=roster,
+        result=successor,
+    )
+    destination = tmp_path / "site"
+
+    publish_site(
+        ledger,
+        public_key,
+        {str(successor["record_id"]): artifacts["traces.jsonl"]},
+        destination,
+        artifacts={
+            str(successor["record_id"]): {
+                "build": artifacts["build.json"],
+                "config": artifacts["config.json"],
+                "bundle": artifacts["bundle-manifest.json"],
+            }
+        },
+    )
+
+    assert ledger.read_bytes().startswith(original_bytes_path.read_bytes())
+    index = (destination / "index.html").read_text(encoding="utf-8")
+    assert str(successor["record_id"]) in index
+    assert "result-v1" not in index
