@@ -835,11 +835,12 @@ def test_independent_reproduction_requires_distinct_signed_ledger_receipt(
     manifest["disclosures"]["independent_reproduction"] = {  # type: ignore[index]
         "receipt_digest": DIGEST,
         "reproducer_identity": "external-reproducer",
+        "public_key_digest": DIGEST,
         "signed": True,
     }
     (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
 
-    with pytest.raises(BundleError, match="not ledger-bound"):
+    with pytest.raises(BundleError, match="missing required file"):
         public_bundle.verify_reproducibility_bundle(root)
 
 
@@ -849,53 +850,106 @@ def test_distinct_signed_ledger_receipt_records_independent_reproduction(
     root = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(root)
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))
-    ledger = root / "ledger.jsonl"
-    private_key = root.parent / "ledger-private.pem"
-    for path in (
-        ledger,
-        root / "ledger.jsonl.head.json",
-        root / "ledger.jsonl.lock",
-    ):
-        path.unlink(missing_ok=True)
-    roster = {"mnemosyne-development", "external-reproducer"}
-    original = append_entry(
-        ledger,
-        private_key,
-        entry_id="repro-entry-1",
-        timestamp="2026-09-05T12:00:00Z",
-        entrant_id="mnemosyne-development",
-        status="succeeded",
-        run_id="repro-run-1",
-        result=result,
-        roster=roster,
+    independent_private_key = Ed25519PrivateKey.generate()
+    independent_private_path = root.parent / "independent-private.pem"
+    independent_public_path = root / "independent-public.pem"
+    independent_private_path.write_bytes(
+        independent_private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
     )
+    independent_public_path.write_bytes(
+        independent_private_key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    independent_ledger = root / "independent-ledger.jsonl"
     receipt = append_entry(
-        ledger,
-        private_key,
-        entry_id="repro-entry-2",
+        independent_ledger,
+        independent_private_path,
+        entry_id="independent-repro-entry-1",
         timestamp="2026-09-05T12:01:00Z",
         entrant_id="external-reproducer",
         status="succeeded",
         run_id="external-reproduction-1",
         result=result,
-        roster=roster,
+        roster={"external-reproducer"},
     )
-    manifest["result_ref"]["ledger_entry_digest"] = original["entry_digest"]  # type: ignore[index]
     manifest["disclosures"]["independent_reproduction"] = {  # type: ignore[index]
         "receipt_digest": receipt["entry_digest"],
         "reproducer_identity": "external-reproducer",
+        "public_key_digest": _digest(independent_public_path.read_bytes()),
         "signed": True,
     }
-    inventory = {  # type: ignore[union-attr]
-        entry["path"]: entry for entry in manifest["artifacts"]["files"]  # type: ignore[index]
-    }
-    for name in ("ledger.jsonl", "ledger.jsonl.head.json", "ledger.jsonl.lock"):
+    for name in (
+        "independent-ledger.jsonl",
+        "independent-ledger.jsonl.head.json",
+        "independent-ledger.jsonl.lock",
+        "independent-public.pem",
+    ):
         payload = (root / name).read_bytes()
-        inventory[name]["size"] = len(payload)
-        inventory[name]["digest"] = _digest(payload)
+        manifest["artifacts"]["files"].append(  # type: ignore[index]
+            {
+                "path": name,
+                "size": len(payload),
+                "media_type": "text/plain",
+                "canonicalization": "exact-bytes",
+                "digest": _digest(payload),
+            }
+        )
     (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
 
     assert public_bundle.verify_reproducibility_bundle(root)["valid"] is True
+
+
+def test_independent_reproduction_rejects_operator_signing_key(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    independent_ledger = root / "independent-ledger.jsonl"
+    receipt = append_entry(
+        independent_ledger,
+        root.parent / "ledger-private.pem",
+        entry_id="forged-independent-entry",
+        timestamp="2026-09-05T12:01:00Z",
+        entrant_id="external-reproducer",
+        status="succeeded",
+        run_id="forged-independent-run",
+        result=result,
+        roster={"external-reproducer"},
+    )
+    (root / "independent-public.pem").write_bytes(
+        (root / "ledger-public.pem").read_bytes()
+    )
+    manifest["disclosures"]["independent_reproduction"] = {  # type: ignore[index]
+        "receipt_digest": receipt["entry_digest"],
+        "reproducer_identity": "external-reproducer",
+        "public_key_digest": _digest((root / "independent-public.pem").read_bytes()),
+        "signed": True,
+    }
+    for name in (
+        "independent-ledger.jsonl",
+        "independent-ledger.jsonl.head.json",
+        "independent-ledger.jsonl.lock",
+        "independent-public.pem",
+    ):
+        payload = (root / name).read_bytes()
+        manifest["artifacts"]["files"].append(  # type: ignore[index]
+            {
+                "path": name,
+                "size": len(payload),
+                "media_type": "text/plain",
+                "canonicalization": "exact-bytes",
+                "digest": _digest(payload),
+            }
+        )
+    (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="key is not distinct"):
+        public_bundle.verify_reproducibility_bundle(root)
 
 
 def test_reproduction_recomputes_legacy_outputs_and_byte_compares_everything(

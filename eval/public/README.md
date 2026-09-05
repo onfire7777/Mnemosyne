@@ -25,7 +25,7 @@ recompute the run. Unknown and missing fields fail closed.
 | `artifacts` | Build, config, legacy bundle manifest, raw trace index, M15 replay, environment, lockfile, and complete normalized file inventory |
 | `run` | Candidate Git SHA, clean-state assertion, platform/runtime/dependencies, `C` locale, `UTC`, public environment allowlist, seeds, retries, and aborts |
 | `metrics` | Unique family/name identities, version/value/unit, counts, uncertainty method and parameters, interval, benchmark-bound exclusions, and run-bound aborted counts alongside missing/unsupported/failed/not-measured counts |
-| `disclosures` | Software/data licenses, source revision, redistribution, PII/consent/takedown, custody, operator and signer roles, and optional separately signed reproduction receipt |
+| `disclosures` | Software/data licenses, source revision, redistribution, PII/consent/takedown, custody, operator and signer roles, and optional reproduction receipt on a separately signed ledger with a distinct public key |
 | `reproduction` | The one fixed argv command and reproduction-time network prohibition |
 
 From the repository root of a clean detached checkout at the manifest's exact
@@ -68,9 +68,12 @@ Successful verification proves REPRO-001 contract integrity only: it does not
 prove REPRO-002, headline eligibility, independent reproduction, neutrality,
 certification, production readiness, custody approval, or publication approval.
 Those remain operator/human evidence gates. An independent reproduction receipt,
-when present, must identify a different entrant through a distinct succeeded
-entry in the bundle's cryptographically verified signed ledger and bind the same
-atomic result. It neither relabels the original operator nor grants a neutral or
+when present, must identify a different entrant through a succeeded entry in a
+separate cryptographically verified ledger, bind the same atomic result, and use
+a digest-bound public key distinct from the operator ledger key. This proves key
+separation and artifact integrity, not that the disclosed identity is a genuine
+third party; external identity/custody verification remains part of REPRO-002.
+The receipt neither relabels the original operator nor grants a neutral or
 certified claim.
 
 ## Deterministic action development suites

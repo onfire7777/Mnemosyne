@@ -466,10 +466,16 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     if independent is not None:
         independent = _closed_object(
             independent,
-            {"receipt_digest", "reproducer_identity", "signed"},
+            {
+                "receipt_digest",
+                "reproducer_identity",
+                "public_key_digest",
+                "signed",
+            },
             "independent reproduction",
         )
         _repro_digest(independent["receipt_digest"], "reproduction receipt")
+        _repro_digest(independent["public_key_digest"], "reproducer public key")
         _repro_nonempty(
             independent["reproducer_identity"],
             "reproducer identity",
@@ -728,6 +734,16 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         "ledger-public.pem",
         "canonical-replay.json",
     }
+    independent = manifest["disclosures"]["independent_reproduction"]
+    if independent is not None:
+        required.update(
+            {
+                "independent-ledger.jsonl",
+                "independent-ledger.jsonl.head.json",
+                "independent-ledger.jsonl.lock",
+                "independent-public.pem",
+            }
+        )
     missing = sorted(required - names)
     if missing:
         raise BundleError(f"reproducibility bundle missing required file: {missing[0]}")
@@ -812,16 +828,26 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         or matching_entries[0].get("result") != result
     ):
         raise BundleError("signed-ledger inclusion reference mismatch")
-    independent = manifest["disclosures"]["independent_reproduction"]
     if independent is not None:
+        independent_key = root / "independent-public.pem"
+        if (
+            _sha256_reference(independent_key) != independent["public_key_digest"]
+            or independent_key.read_bytes() == (root / "ledger-public.pem").read_bytes()
+        ):
+            raise BundleError("independent reproduction key is not distinct and bound")
+        try:
+            independent_entries = verify_ledger(
+                root / "independent-ledger.jsonl", independent_key
+            )
+        except LedgerError as exc:
+            raise BundleError("independent signed-ledger verification failed") from exc
         receipt_entries = [
             entry
-            for entry in ledger_entries
+            for entry in independent_entries
             if entry.get("entry_digest") == independent["receipt_digest"]
         ]
         if (
-            independent["receipt_digest"] == result_ref["ledger_entry_digest"]
-            or len(receipt_entries) != 1
+            len(receipt_entries) != 1
             or receipt_entries[0].get("status") != "succeeded"
             or receipt_entries[0].get("result") != result
             or receipt_entries[0].get("entrant_id")
@@ -829,7 +855,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
             or receipt_entries[0].get("entrant_id")
             == matching_entries[0].get("entrant_id")
         ):
-            raise BundleError("independent reproduction receipt is not ledger-bound")
+            raise BundleError("independent reproduction receipt is not independently bound")
     replay = _load_json(root / "canonical-replay.json")
     replay_digest = "sha256:" + canonical_replay_digest(replay)
     if replay_digest != artifacts["canonical_replay_digest"]:
