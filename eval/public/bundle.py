@@ -924,16 +924,8 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
     raise OSError(error_number, os.strerror(error_number), destination)
 
 
-def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
-    """Verify a REPRO-001 bundle without executing bundle-controlled content."""
-    root = Path(bundle)
-    _reject_reproducibility_link_path(root)
-    if (
-        not root.is_dir()
-        or root.is_symlink()
-        or getattr(root, "is_junction", lambda: False)()
-    ):
-        raise BundleError("reproducibility bundle must be a real directory")
+def _load_reproducibility_manifest(root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load one bounded, canonical, validated manifest snapshot."""
     manifest_path = root / "reproducibility-manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise BundleError("reproducibility manifest must be a real file")
@@ -952,6 +944,21 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if manifest_raw != _canonical(manifest):
         raise BundleError("reproducibility manifest bytes must be canonical")
     validated = validate_reproducibility_manifest(manifest)
+    return manifest, validated
+
+
+def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
+    """Verify a REPRO-001 bundle without executing bundle-controlled content."""
+    root = Path(bundle)
+    _reject_reproducibility_link_path(root)
+    if (
+        not root.is_dir()
+        or root.is_symlink()
+        or getattr(root, "is_junction", lambda: False)()
+    ):
+        raise BundleError("reproducibility bundle must be a real directory")
+    manifest_path = root / "reproducibility-manifest.json"
+    manifest, validated = _load_reproducibility_manifest(root)
     artifacts = manifest["artifacts"]
     inventory = artifacts["files"]
     names = {entry["path"] for entry in inventory}
@@ -1440,8 +1447,8 @@ def reproduce_reproducibility_bundle(
         raise FileExistsError(f"refusing to overwrite bundle: {destination_root}")
     if source_root == destination_root or source_root in destination_root.parents:
         raise BundleError("reproduction destination must be outside the source bundle")
+    manifest, _ = _load_reproducibility_manifest(source_root)
     verify_reproducibility_bundle(source_root)
-    manifest = _load_json(source_root / "reproducibility-manifest.json")
     expected_sha = manifest["run"]["candidate_git_sha"]
     _require_clean_reproduction_checkout(expected_sha)
     if manifest["run"]["platform"] != _runtime_platform():
