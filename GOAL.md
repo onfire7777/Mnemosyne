@@ -101,7 +101,7 @@ it; that backlog is discharged.
   of a document alone. A plan is complete when its code, its tests, and its
   documentation are merged and exact-head CI is green.
 - Items gated on operator or external evidence — P12-E operator measurement,
-  P13-C a real scheduled event, P13-O official upstream admission, production
+  P13-O official upstream admission, production
   Postgres/PPR parity, physical-hardware and held-out evidence — **stay gated**.
   Do not synthesize their evidence, weaken their validators, or reclassify them
   to reach a higher number. If every ungated plan is exhausted, say so and stop
@@ -317,9 +317,14 @@ regression workflow as
 - `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
 
 Do not copy, edit, commit, stash, reset, or otherwise consume uncommitted work
-from `/Users/admin/Mnemosyne.codex-whole-memory-benchmark-spec`. Do not touch
-`/Users/admin/Mnemosyne.codex-phase16-signed-publication`; both are external
-leases until their owners land or hand them off.
+from `/Users/admin/Mnemosyne.codex-whole-memory-benchmark-spec`; its separate
+external lease remains unchanged. The owner confirmed on 2026-09-05 that the
+old Mac and its files are no longer available. In fulfillment of the owner's
+request to resolve the gate, the reservation for
+`/Users/admin/Mnemosyne.codex-phase16-signed-publication` is retired and its
+repository paths released. No inspection, recovery, or deletion of those
+unavailable files is claimed. Any later recovered work requires a fresh
+handoff and review; it cannot resume the retired lease.
 
 ## Current Phase
 
@@ -474,14 +479,17 @@ roadmap, and Phase 13 summary reconciled to that receipt; the already-complete
 source plan and still-open Phase 13 do not change any progress counter.
 Every official/upstream benchmark run remains open.
 
-Result-v2 remains blocked pending the Mac worktree's residual-work disposition
-and explicit lease release. PR #69 merged the signed-publication source as
+The obsolete Mac signed-publication reservation is released by the owner-confirmed unavailability
+disposition above. PR #69 merged the signed-publication source as
 `a4e80b5a67b0437d3a864af0fe347febfe32e58b`; PR #70 merged its delivery receipt
 as `eeb8765ea1f4cc924002ad8234df50326e227aed`. Both are ancestors of inspected
 `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`, where
 `leaderboard/publish.py` has blob `f6506215ece4dba8d37ce07829b5c22d84020963`.
-Those merged receipts do not establish the external worktree's current dirty
-state or release its lease. P13-C discharge alone admits no N12 writer. Local OCI
+The release relies on the owner's confirmation, not an inference that the
+unavailable worktree was clean. N12 is READY FOR ADMISSION after this receipt
+lands: the current open-PR/local-worktree inventory has no overlap with its
+exact source lease. Assign one result-v2 integration owner from then-current
+main before implementation; this receipt starts no source writer. Local OCI
 sandbox commits are reviewed development-source receipts only and remain
 quarantined: no immutable build, daemon probe, filesystem/network/write-boundary
 enforcement receipt, SBOM, provenance, or admission evidence exists. The next
@@ -492,9 +500,10 @@ under the standing controller Authority carve-out above; neither result-v2
 nor sandbox delivery is implicitly admitted.
 That map admits no source node or current writer at this baseline: the bounded
 documentation-and-tests nodes `T7` and `T8` and the bounded public-harness
-reachability node `T9` are all delivered. The next source admission waits on an
-external gate opening, and the map must be recomputed from then-current `main`
-at that time.
+reachability node `T9` are all delivered. N12 is the next source-admission
+candidate following this gate resolution. Recheck current main and exact
+writer leases at assignment; P14-B still requires N12's implementation to
+merge, and no downstream implementation is automatically admitted.
 
 ## Scope
 

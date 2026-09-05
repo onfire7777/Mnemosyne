@@ -4,8 +4,8 @@ milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
 stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@f688c747`; PRs #114 and #110-#112 are merged with exact-head and post-main CI receipts recorded in the lease map. PR #115 merged M02 Stage-B at `f688c74757365a9d946100687a04288cde12a7fc` after exact-head CI `31899050596`; post-main run `31900402252` then failed solely because PR #115 was absent from the lifecycle authorities (1 failed, 4752 passed, 156 skipped, 191 deselected), which PR #117 repairs. PR #115's reproduced M02 defects still require a serialized corrective successor before M02 can be treated as clean or publishable. PR #117 exclusively owns the coupled lifecycle reconciliation and topology-verifier remediation. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T18:38:41Z"
-last_activity: 2026-08-15
+last_updated: "2026-09-05T01:00:38Z"
+last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
@@ -39,7 +39,13 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-08-02 — PR #86 merged the two-file bounded scheduled
+Last activity: 2026-09-05 — PR #135 records successful scheduled run
+`30807305055`, closes BENCH-007, and releases the obsolete signed-publication
+reservation after the owner confirmed the old Mac and its files are no longer
+available. N12 is ready for one owner's admission after this receipt lands;
+no source writer starts here. Phase/plan progress counters remain unchanged.
+
+Historical activity: 2026-08-02 — PR #86 merged the two-file bounded scheduled
 development-regression workflow at `main@661343ce`; input-free manual run
 `30561430522` passed the fixed four-test contract job. PR #87 then merged the
 canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
@@ -204,13 +210,18 @@ the source plan was already complete, while Phase 13 remains open for
 BENCH-006. This does not establish official benchmark evidence.
 
 Phase 14 has one frozen plan. REPRO-001 implementation is blocked on additive
-result-v2 dispatch and release of the protected signed-publication lease.
+result-v2 dispatch; the obsolete signed-publication reservation is released
+by the owner-confirmed unavailability disposition recorded on 2026-09-05.
 PR #69's source merge `a4e80b5a67b0437d3a864af0fe347febfe32e58b` and PR #70's
 delivery-receipt merge `eeb8765ea1f4cc924002ad8234df50326e227aed` are verified
 ancestors of inspected `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`.
-The remaining N12 blocker is disposition of any residual work in
-`/Users/admin/Mnemosyne.codex-phase16-signed-publication` and explicit lease
-release; a remote merge does not prove that external worktree is clean.
+The owner confirmed that the old Mac and its files are no longer available.
+The reservation for `/Users/admin/Mnemosyne.codex-phase16-signed-publication`
+is retired; this does not claim its files were inspected, recovered, or deleted.
+Any subsequently recovered work requires a fresh handoff and review.
+Current open PRs and local worktrees do not overlap N12's exact source paths,
+so N12 is READY FOR ADMISSION after this receipt lands, with one result-v2
+integration owner and a fresh main/lease check at assignment.
 No N12 or downstream source writer is admitted by this receipt.
 REPRO-002 additionally requires a headline-eligible pinned official result.
 Phase 15 has four ordered frozen plans. S2 depends on Phase 14; S3-S5 then
