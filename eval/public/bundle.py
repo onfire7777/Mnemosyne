@@ -1502,7 +1502,13 @@ def assemble_reproducibility_bundle(
 ) -> dict[str, Any]:
     """Atomically package and verify manifest-owned REPRO-001 artifacts."""
     validate_reproducibility_manifest(manifest)
-    if not isinstance(manifest, dict):  # narrowed by the validator
+    try:
+        manifest_raw = _canonical(manifest)
+        manifest = _parse_json(manifest_raw.decode("utf-8"), "reproducibility manifest")
+    except (TypeError, UnicodeError, ValueError, RecursionError) as exc:
+        raise BundleError("reproducibility manifest cannot be snapshotted") from exc
+    validate_reproducibility_manifest(manifest)
+    if not isinstance(manifest, dict):  # narrowed by the second validator
         raise BundleError("manifest must be an object")
     source_path = Path(source)
     destination_path = Path(destination)
@@ -1546,7 +1552,7 @@ def assemble_reproducibility_bundle(
             target = final / name
             target.parent.mkdir(parents=True, exist_ok=True)
             _copy_inventory_artifact(source_file, target, entry)
-        (final / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
+        (final / "reproducibility-manifest.json").write_bytes(manifest_raw)
         result = verify_reproducibility_bundle(final)
         if os.path.lexists(destination_root):
             raise FileExistsError(
