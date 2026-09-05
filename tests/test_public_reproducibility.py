@@ -6,6 +6,8 @@ import json
 import os
 import platform
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -584,3 +586,85 @@ def test_reproduction_drift_removes_partial_destination(
     with pytest.raises(BundleError, match="reproduction mismatch"):
         public_bundle.reproduce_bundle(source, destination)
     assert not destination.exists()
+
+
+def test_exact_command_reproduces_from_clean_detached_offline_checkout(
+    tmp_path: Path,
+) -> None:
+    uv = shutil.which("uv")
+    if uv is None:
+        pytest.skip("uv executable is required for the clean-checkout contract")
+    source = tmp_path / "source-bundle"
+    checkout = tmp_path / "checkout"
+    destination = tmp_path / "reproduced"
+    _write_reproducibility_bundle(source)
+    repository = Path(__file__).parents[1]
+    subprocess.run(
+        ["git", "clone", "--local", "--no-hardlinks", str(repository), str(checkout)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    subprocess.run(
+        ["git", "checkout", "--detach", GIT_SHA],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    subprocess.run(
+        [uv, "sync", "--locked", "--offline"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not any(
+            marker in name.upper()
+            for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
+        )
+    }
+    environment.update(
+        {
+            "PATH": str(Path(uv).parent) + os.pathsep + environment.get("PATH", ""),
+            "PYTHONHASHSEED": "0",
+            "UV_OFFLINE": "1",
+        }
+    )
+    completed = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--locked",
+            "mneme",
+            "eval-public",
+            "--reproduce-bundle",
+            str(source),
+            "--out-dir",
+            str(destination),
+        ],
+        cwd=checkout,
+        env=environment,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert json.loads(completed.stdout)["valid"] is True
+    assert subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=checkout,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    ).stdout == ""
+    assert {entry.name: entry.read_bytes() for entry in source.iterdir()} == {
+        entry.name: entry.read_bytes() for entry in destination.iterdir()
+    }
