@@ -190,6 +190,11 @@ The following packages are complete source history, not runnable work:
   head, merge SHA/time, or post-main CI is claimed here. PR #117 is not a
   topology-only refresh, changes no benchmark result or admission state, and
   must pass fresh exact-head review, security, and CI before merge.
+  Subsequent delivery verified on 2026-09-05: merged from
+  `b818ab3237f85f311bb6a1e6ae7195f40a9d6f63` as
+  `d11ffe5e61511269efcf38ccd2ad064564580109` at `2026-08-31T18:03:53Z`.
+  The OPEN/READY text above is the historical self-record; PR #117 owns no
+  current lifecycle writer.
 - PR #121: M04-B public-harness registration of `wmbs-m04-development`
   (title: M04-B: register wmbs-m04-development (PROPOSED)) from exact head
   `5c629a67f7466e9a4d75b82681bac53612abb076`; all required exact-head
@@ -410,6 +415,13 @@ record.
 These receipts do not prove an official benchmark, measured sandbox, hardware
 profile, publishable result, leaderboard activation, or launch.
 
+- PR #116: M06 plan-only delivery from head
+  `e463f61f00fef1913bd7a0df9db739616a906b54`, with successful exact-head CI
+  `33933485295`; merged as `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98`
+  at `2026-09-05T01:11:18Z`. It adds only
+  `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`; it
+  changes no N12 path and does not deliver M06 implementation. PR #135's
+  branch incorporated that main update before continuing gate delivery.
 - PR #135: receipt-only correction discharging P13-C from verified scheduled
   run `30807305055`, with matching `GOAL.md`, `.planning/STATE.md`,
   `.planning/REQUIREMENTS.md`, `.planning/ROADMAP.md`, and Phase 13 summary
@@ -476,6 +488,12 @@ above is preserved; this receipt admits no source writer.
   main, preserving result-v1 bytes/behavior and rechecking exact leases at
   that time. This closes the obsolete lease blocker; it neither implements
   N12 nor starts a source writer automatically.
+  Refresh after PR #116: main advanced to
+  `1f6b3b1c236c837aee77ba504f9eb06eab2a9c98`; its sole changed file is the
+  M06 plan, so the N12 lease/source assessment is unchanged. PR #116 is now
+  merged rather than open. Before N12 source edits, the assigned owner must
+  snapshot result-v1 golden bytes/behavior and prove its existing contract
+  tests pass, as required by N12's compatibility contract.
 
 The downstream order remains `N12 -> P14-B -> P15-S2`; module-specific
 conditions still apply. This receipt starts no module implementation and
