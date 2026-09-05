@@ -359,13 +359,38 @@ The following packages are complete source history, not runnable work:
   changes no benchmark result or admission state and does not
   recompute the canonical baseline (baseline stays `main@f688c747`).
 - PR #143: ordinary documentation receipt recording the merged PR #140
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-05T18:37:00Z`
-  capture and adds only the PR #140 merged-baseline bullet, the #142
+  lease-map lapse. It is **MERGED** at tip
+  `012f791347369f9adb0ae065b7fe016af3060201`. It adds only the PR #140
+  merged-baseline bullet, the #142 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #143 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `012f791347369f9adb0ae065b7fe016af3060201`.
+- PR #137: Exact 1 ship-day receipt
+  `docs/coordination/2026-09-04-ship-day-receipt.md`
+  (title: docs(coordination): 2026-09-04 ship-day receipt)
+  from exact head `41db83ad976521440df30230a84e75a252c92cbc`; all
+  required exact-head checks passed in run `33988815458`; merge
+  `59e9378603b6cbbf36821f01f00e6a706a2bfd24` at `2026-09-05T20:30:00Z`.
+  Prior tip was `012f791347369f9adb0ae065b7fe016af3060201` (PR #143).
+  Post-main tip CI may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #137 was absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set (Exact 1):
+  `docs/coordination/2026-09-04-ship-day-receipt.md`.
+  Purpose: 2026-09-04 ship-day receipt; docs-only privacy for THIS
+  receipt PR (the recorded #137 was documentation). This receipt
+  changes no benchmark result or admission state and does not
+  recompute the canonical baseline (baseline stays `main@f688c747`).
+- PR #145: ordinary documentation receipt recording the merged PR #137
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-05T20:55:00Z`
+  capture and adds only the PR #137 merged-baseline bullet, the #143
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #143 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #145 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
