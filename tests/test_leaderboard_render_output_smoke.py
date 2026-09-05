@@ -4,6 +4,7 @@ Consumes `leaderboard.render.render_site` only. Does not re-test Backend
 unit cases (validation matrix, publication restore, mixed-schema, etc.).
 """
 
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -23,8 +24,24 @@ from tests.test_leaderboard_result_contract import _v2_development_record
 HOSTILE_RECORD_ID = "../../<script>alert(1)</script>"
 
 
+class _HrefCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.hrefs: list[str] = []
+
+    def handle_starttag(
+        self, tag: str, attrs: list[tuple[str, str | None]]
+    ) -> None:
+        for name, value in attrs:
+            if name == "href" and value is not None:
+                self.hrefs.append(value)
+
+
 def _hrefs(html: str) -> list[str]:
-    return [part.split('"', 1)[0] for part in html.split('href="')[1:]]
+    collector = _HrefCollector()
+    collector.feed(html)
+    collector.close()
+    return collector.hrefs
 
 
 def _assert_safe_relative_hrefs(html: str) -> None:
@@ -33,6 +50,19 @@ def _assert_safe_relative_hrefs(html: str) -> None:
         assert parsed.scheme == "", href
         assert parsed.netloc == "", href
         assert not href.startswith("/"), href
+
+
+@pytest.mark.parametrize(
+    "markup",
+    [
+        "<a href='javascript:alert(1)'>bad</a>",
+        '<a HREF="https://example.invalid/">bad</a>',
+        "<a href=//example.invalid/>bad</a>",
+    ],
+)
+def test_href_safety_check_rejects_all_html_attribute_forms(markup: str) -> None:
+    with pytest.raises(AssertionError):
+        _assert_safe_relative_hrefs(markup)
 
 
 def _assert_leaderboard_site(output: Path, record_id: str) -> Path:
