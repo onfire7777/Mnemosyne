@@ -41,6 +41,7 @@ SCHEMA_PATH = (
 )
 PLATFORM = f"{sys.platform}-{platform.machine().lower()}"
 RUNTIME = f"cpython-{sys.version_info.major}.{sys.version_info.minor}"
+GIT_SHA = public_bundle._git_sha()
 
 
 def _validate(manifest: object) -> dict[str, object]:
@@ -91,6 +92,7 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
         }
     )
     record = _v2_development_record()
+    record["run_commit"] = GIT_SHA
     record["build_fingerprint"] = _digest(payloads["build.json"])
     record["config_digest"] = _digest(payloads["config.json"])
     record["bundle_digest"] = _digest(payloads["bundle-manifest.json"])
@@ -293,7 +295,7 @@ def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
             ],
         },
         "run": {
-            "candidate_git_sha": "b" * 40,
+            "candidate_git_sha": GIT_SHA,
             "dirty": False,
             "platform": PLATFORM,
             "runtime": RUNTIME,
@@ -335,7 +337,7 @@ def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
         "disclosures": {
             "software_license": "Apache-2.0",
             "data_license": "synthetic-test-data",
-            "source_revision": "b" * 40,
+            "source_revision": GIT_SHA,
             "redistribution_permitted": True,
             "pii_present": False,
             "consent_documented": True,
