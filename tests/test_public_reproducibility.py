@@ -580,6 +580,19 @@ def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_i
     with pytest.raises(BundleError, match="duplicate identity"):
         _validate(duplicate_metric)
 
+    unsorted_metrics = _manifest()
+    second_metric = copy.deepcopy(unsorted_metrics["metrics"][0])  # type: ignore[index]
+    second_metric["name"] = "a_metric"
+    unsorted_metrics["metrics"].append(second_metric)  # type: ignore[union-attr]
+    with pytest.raises(BundleError, match="sorted by family and name"):
+        _validate(unsorted_metrics)
+
+    for exclusions in ([""], ["case-b", "case-a"], ["case-a", "case-a"]):
+        invalid_exclusions = _manifest()
+        invalid_exclusions["metrics"][0]["exclusions"] = exclusions  # type: ignore[index]
+        with pytest.raises(BundleError, match="metric exclusions"):
+            _validate(invalid_exclusions)
+
     oversized_operator_role = _manifest()
     oversized_operator_role["disclosures"]["operator_role"] = "o" * 129  # type: ignore[index]
     with pytest.raises(BundleError, match="operator role"):

@@ -37,6 +37,8 @@ Media-type declarations must use bounded parameter-free MIME syntax; core JSON,
 JSONL, PEM, Markdown, shell, and lock artifacts use their canonical types.
 The file inventory is lexicographically sorted by path so equivalent bundles
 have one canonical manifest representation.
+Metric declarations are sorted by family/name identity; each metric's excluded
+case IDs are non-empty, unique, and lexicographically sorted.
 
 | Manifest section | Bound material |
 |---|---|
