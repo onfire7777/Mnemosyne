@@ -244,6 +244,7 @@ def _clear_credential_environment(monkeypatch: pytest.MonkeyPatch) -> None:
             for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE_KEY")
         ):
             monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("UV_OFFLINE", "1")
 
 
 def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
@@ -564,11 +565,30 @@ def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
     assert not destination.exists()
 
 
+def test_reproduction_requires_offline_mode_and_rejects_inherited_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    _write_reproducibility_bundle(source)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+    monkeypatch.delenv("UV_OFFLINE")
+    with pytest.raises(BundleError, match="UV_OFFLINE"):
+        public_bundle.reproduce_bundle(source, tmp_path / "online")
+    assert not (tmp_path / "online").exists()
+
+    monkeypatch.setenv("UV_OFFLINE", "1")
+    monkeypatch.setenv("EXAMPLE_API_TOKEN", "not-even-a-real-secret")
+    with pytest.raises(BundleError, match="inherited credentials"):
+        public_bundle.reproduce_bundle(source, tmp_path / "credentialed")
+    assert not (tmp_path / "credentialed").exists()
+
+
 def test_reproduction_drift_removes_partial_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from eval.public import runner
-
     source = tmp_path / "source"
     destination = tmp_path / "reproduced"
     _write_reproducibility_bundle(source)
@@ -576,13 +596,18 @@ def test_reproduction_drift_removes_partial_destination(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
     _clear_credential_environment(monkeypatch)
-    original = runner._ADAPTERS["smoke"]
+    original = public_bundle._recompute_bundle_metrics
+    calls = 0
 
-    def drifted(benchmark: object, cli: object) -> tuple[list[dict], dict]:
-        traces, metrics = original(benchmark, cli)
-        return list(reversed(traces)), metrics
+    def drifted(*args: object, **kwargs: object) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        metrics = original(*args, **kwargs)
+        if calls == 2:
+            metrics = {**metrics, "value": 0.0}
+        return metrics
 
-    monkeypatch.setitem(runner._ADAPTERS, "smoke", drifted)
+    monkeypatch.setattr(public_bundle, "_recompute_bundle_metrics", drifted)
     with pytest.raises(BundleError, match="reproduction mismatch"):
         public_bundle.reproduce_bundle(source, destination)
     assert not destination.exists()

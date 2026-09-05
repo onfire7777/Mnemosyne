@@ -38,7 +38,8 @@ uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
 
 `BUNDLE` and `DEST` are path operands; every other token is fixed. Dependency
 acquisition is a separate disclosed preparation step. The reproduction command
-itself must have no network access, inherited credentials, production secrets,
+itself requires `UV_OFFLINE=1` and must have no network access, inherited
+credentials, production secrets,
 protected data, or untracked repository inputs. It refuses an existing or
 source-nested destination, a wrong/dirty/non-root checkout, altered lock or
 environment, symlinks, path escapes, inventory drift, duplicate JSON keys,
