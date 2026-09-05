@@ -144,6 +144,20 @@ _RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _HEX_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _MAX_REPRO_JSON_DEPTH = 64
 _MAX_REPRO_FILE_BYTES = 16 * 1024 * 1024
+_REGISTERED_SCORING_PROFILES = {
+    "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
+    "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
+    "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
+    "qa-em-f1-v1": ("qa", "bootstrap"),
+    "pm-bench-action-v1": ("deterministic-action", "wilson"),
+    "triggerbench-action-v1": ("deterministic-action", "wilson"),
+    "working-memory-action-v1": ("deterministic-action", "bootstrap"),
+    "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
+}
+_REPRO_CANONICAL_HIT_AT_K_PROFILE = "smoke-hit-at-k-v1"
 
 
 class BundleError(ValueError):
@@ -633,10 +647,15 @@ def _bound_repro_k(config: object) -> int:
 
 def _bound_repro_scoring_profile(config: object) -> str:
     if not isinstance(config, dict):
-        raise BundleError("metrics do not recompute from traces")
+        raise BundleError("unknown scoring profile")
     profile = config.get("scoring_profile")
-    if not isinstance(profile, str) or not profile.strip():
-        raise BundleError("metrics do not recompute from traces")
+    if not isinstance(profile, str) or profile not in _REGISTERED_SCORING_PROFILES:
+        raise BundleError("unknown scoring profile")
+    family, method = _REGISTERED_SCORING_PROFILES[profile]
+    if config.get("family") != family or config.get("interval_method") != method:
+        raise BundleError("wrong interval-family metadata")
+    if profile != _REPRO_CANONICAL_HIT_AT_K_PROFILE:
+        raise BundleError("scoring profile cannot be recomputed")
     return profile
 
 
@@ -652,6 +671,12 @@ def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]
         gold = trace.get("gold_references")
         if not isinstance(hits, list) or not isinstance(gold, list):
             raise BundleError("metrics do not recompute from traces")
+        try:
+            unique_hits = set(hits)
+        except TypeError as exc:
+            raise BundleError("ranked retrieved hits are malformed") from exc
+        if len(hits) != len(unique_hits):
+            raise BundleError("duplicate ranked retrieved ids")
         successes += bool(set(hits[:k]) & set(gold))
         total += 1
     if total == 0:
@@ -1075,19 +1100,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     # the benchmark it is derived from has been digest-anchored to the registry.
     if profile != "wmbs-m03-valid-time-v1" and measured.get("total") != len(traces):
         raise BundleError("trace/metric count drift")
-    allowed_profile = {
-        "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
-        "longmemeval-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
-        "hipporag-retrieval-v1": ("deterministic-retrieval", "bootstrap"),
-        "qa-em-f1-v1": ("qa", "bootstrap"),
-        "pm-bench-action-v1": ("deterministic-action", "wilson"),
-        "triggerbench-action-v1": ("deterministic-action", "wilson"),
-        "working-memory-action-v1": ("deterministic-action", "bootstrap"),
-        "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
-        "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
-        "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
-        "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
-    }.get(profile)
+    allowed_profile = _REGISTERED_SCORING_PROFILES.get(profile)
     if any(trace.get("scoring_family") != family for trace in traces):
         raise BundleError("metric families may not be blended")
     if family in {
