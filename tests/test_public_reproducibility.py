@@ -573,6 +573,11 @@ def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_i
     with pytest.raises(BundleError, match="dependency inventory"):
         _validate(unhashable_dependency)
 
+    unsorted_dependencies = _manifest()
+    unsorted_dependencies["run"]["dependencies"] = ["zeta==1", "alpha==1"]  # type: ignore[index]
+    with pytest.raises(BundleError, match="dependency inventory"):
+        _validate(unsorted_dependencies)
+
     duplicate_metric = _manifest()
     duplicate_metric["metrics"].append(  # type: ignore[union-attr]
         copy.deepcopy(duplicate_metric["metrics"][0])  # type: ignore[index]
@@ -597,6 +602,12 @@ def test_runtime_validator_matches_schema_string_bounds_and_rejects_unhashable_i
     oversized_operator_role["disclosures"]["operator_role"] = "o" * 129  # type: ignore[index]
     with pytest.raises(BundleError, match="operator role"):
         _validate(oversized_operator_role)
+
+    disjoint_interval = _manifest()
+    disjoint_interval["metrics"][0]["value"] = 0.5  # type: ignore[index]
+    disjoint_interval["metrics"][0]["interval"]["low"] = 0.6  # type: ignore[index]
+    with pytest.raises(BundleError, match="fall within its interval"):
+        _validate(disjoint_interval)
 
 
 def test_inventory_rejects_reserved_manifest_and_file_directory_collisions() -> None:

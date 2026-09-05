@@ -439,6 +439,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             for item in dependencies
         )
         or len(dependencies) != len(set(dependencies))
+        or dependencies != sorted(dependencies)
     ):
         raise BundleError("dependency inventory is invalid")
     seeds = run["seed_records"]
@@ -543,6 +544,8 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             for field in ("low", "high")
         ) or interval["low"] > interval["high"]:
             raise BundleError("metric interval bounds are invalid")
+        if not interval["low"] <= metric["value"] <= interval["high"]:
+            raise BundleError("metric value must fall within its interval")
         parameters = interval["parameters"]
         if (
             not isinstance(parameters, dict)
