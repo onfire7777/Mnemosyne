@@ -176,6 +176,7 @@ def _repro_relative_path(value: object) -> str:
         or "\\" in value
         or "\x00" in value
         or value.startswith("/")
+        or re.match(r"[A-Za-z]:", value) is not None
         or any(part in {"", ".", ".."} for part in value.split("/"))
     ):
         raise BundleError("inventory path must be a normalized relative path")

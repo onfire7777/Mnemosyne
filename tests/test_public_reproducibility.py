@@ -409,6 +409,16 @@ def test_schema_is_valid_closed_draft_2020_12() -> None:
     collect(schema)
     assert authored_objects
     assert all(item.get("additionalProperties") is False for item in authored_objects)
+    result_ref = schema["properties"]["result_ref"]
+    lineage_conditions = {
+        condition["if"]["properties"]["track_kind"]["const"]
+        for condition in result_ref["allOf"]
+    }
+    assert lineage_conditions == {
+        "DEVELOPMENT",
+        "OFFICIAL-UPSTREAM",
+        "ENHANCED-SUCCESSOR",
+    }
 
 
 def test_accepts_closed_development_manifest() -> None:
@@ -652,12 +662,26 @@ def test_rights_and_consent_disclosures_fail_closed() -> None:
         _validate(no_consent)
 
 
-@pytest.mark.parametrize("path", ["../traces.jsonl", "/traces.jsonl", "a\\b"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../traces.jsonl",
+        "/traces.jsonl",
+        "a\\b",
+        "a//b",
+        "./a",
+        "a/.",
+        "a/",
+        "C:/escape",
+    ],
+)
 def test_inventory_paths_are_normalized_relative_posix_paths(path: str) -> None:
     manifest = _manifest()
     manifest["artifacts"]["files"][0]["path"] = path  # type: ignore[index]
     with pytest.raises(BundleError, match="relative path"):
         _validate(manifest)
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    assert re.fullmatch(schema["$defs"]["path"]["pattern"], path) is None
 
 
 def test_verifies_manifest_owned_bytes_and_existing_result_and_replay_contracts(
