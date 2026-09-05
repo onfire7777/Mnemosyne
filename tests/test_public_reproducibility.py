@@ -980,6 +980,32 @@ def test_artifact_inspection_hashes_counts_and_detects_across_chunks(
     )
 
 
+@pytest.mark.parametrize(
+    "credential",
+    [
+        b"github_pat_" + b"a" * 24,
+        b"glpat-" + b"a" * 20,
+        b"xoxb-" + b"a" * 12,
+        b"AIza" + b"a" * 35,
+        b"AKIA" + b"A" * 16,
+    ],
+)
+def test_artifact_inspection_rejects_prefixed_credentials(
+    tmp_path: Path, credential: bytes
+) -> None:
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"retained evidence: " + credential)
+
+    assert public_bundle._inspect_artifact(path)[2] is True
+
+
+def test_artifact_inspection_allows_noncredential_prefixes(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"github_pat_redacted glpat-redacted xoxb-redacted AKIA-redacted")
+
+    assert public_bundle._inspect_artifact(path)[2] is False
+
+
 def test_reproduction_rejects_linked_source_path(tmp_path: Path) -> None:
     source = tmp_path / "source"
     linked = tmp_path / "linked-source"
