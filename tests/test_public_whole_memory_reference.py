@@ -3464,7 +3464,7 @@ def test_m02_registry_revision_matches_fixture_bytes() -> None:
     ).stdout.strip()
     assert suite["revision"] == revision
     shown = subprocess.run(
-        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT).as_posix()}"],
         capture_output=True,
         check=True,
         cwd=REPO_ROOT,
@@ -3826,7 +3826,7 @@ def test_m04_registry_revision_matches_fixture_bytes() -> None:
     ).stdout.strip()
     assert suite["revision"] == revision
     shown = subprocess.run(
-        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT).as_posix()}"],
         capture_output=True,
         check=True,
         cwd=REPO_ROOT,
@@ -3939,6 +3939,8 @@ def test_m04_metrics_recompute_from_anchored_profile() -> None:
     expected = m04.score_conflict(fixture, observations, ablations)
     expected["family"] = "whole-memory-development"
     expected["profile"] = "wmbs-m04-v1"
+    expected["total"] = len(observations)
+    expected["trace_count"] = len(traces)
     measured = score_profile("wmbs-m04-v1", [{"fixture": fixture}], traces)
     assert measured == expected
     drifted = list(traces)
@@ -4157,7 +4159,7 @@ def test_m05_registry_revision_matches_fixture_bytes() -> None:
     ).stdout.strip()
     assert suite["revision"] == revision
     shown = subprocess.run(
-        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT).as_posix()}"],
         capture_output=True,
         check=True,
         cwd=REPO_ROOT,

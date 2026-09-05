@@ -291,7 +291,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         _parse_json(line, "traces.jsonl")
         for line in (root / "traces.jsonl").read_text().splitlines()
     ]
-    trace_ids = [_trace_id(trace, family=config.get("family")) for trace in traces]
+    trace_ids = [_trace_id(trace, family=config.get("family"), profile=config.get("scoring_profile")) for trace in traces]
     if len(trace_ids) != len(set(trace_ids)):
         raise BundleError("duplicate trace IDs")
     family, method, profile = (
@@ -301,10 +301,9 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     )
     if measured.get("trace_count") != len(traces):
         raise BundleError("trace/metric count drift")
-    # M03's scored population is its as-of history queries, not its traces, so
-    # `total` carries its own denominator and is pinned separately below, once
-    # the benchmark it is derived from has been digest-anchored to the registry.
-    if profile != "wmbs-m03-valid-time-v1" and measured.get("total") != len(traces):
+    # M03 counts as-of queries; M04 counts observations without ablation rows.
+    # Pin those populations separately below after anchoring their fixtures.
+    if profile not in {"wmbs-m03-valid-time-v1", "wmbs-m04-v1"} and measured.get("total") != len(traces):
         raise BundleError("trace/metric count drift")
     allowed_profile = {
         "smoke-hit-at-k-v1": ("deterministic-retrieval", "wilson"),
@@ -315,7 +314,9 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "triggerbench-action-v1": ("deterministic-action", "wilson"),
         "working-memory-action-v1": ("deterministic-action", "bootstrap"),
         "wmbs-m01-v1": ("whole-memory-development", "descriptive"),
+        "wmbs-m02-retrieval-v1": ("whole-memory-development", "descriptive"),
         "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
+        "wmbs-m04-v1": ("whole-memory-development", "descriptive"),
         "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
         "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
     }.get(profile)
@@ -345,6 +346,12 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if hashlib.sha256(dataset_bytes).hexdigest() != metadata.get("dataset_sha256"):
         raise BundleError("benchmark custody digest mismatch")
     _verify_registry_anchor(metadata)
+    if profile == "wmbs-m04-v1":
+        data = benchmark.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("cases"), list) or not isinstance(data.get("permutations"), list):
+            raise BundleError("trace/metric count drift")
+        if measured.get("total") != len(data["cases"]) * len(data["permutations"]):
+            raise BundleError("trace/metric count drift")
     if profile == "wmbs-m03-valid-time-v1":
         # The fixture is now digest-anchored to the registry, so its own shape
         # fixes the scored denominator exactly: one as-of history query per
@@ -718,6 +725,11 @@ def _render_report_note(report: dict[str, Any], report_digest: str) -> bytes:
 def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
     if not isinstance(benchmark, dict):
         raise BundleError("scoring profile benchmark is missing")
+    if benchmark.get("schema_id") in {
+        "wmbs-m02-retrieval-development/fixture/0.1",
+        "wmbs-m04-development/fixture/0.1",
+    }:
+        return [{"fixture": benchmark}]
     if isinstance(benchmark.get("cases"), list):
         if benchmark.get("schema_id") == "wmbs-m10-development/fixture/0.1":
             artifact = benchmark.get("calibration_artifact")
@@ -798,7 +810,15 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
     return labels
 
 
-def _trace_id(trace: dict[str, Any], *, family: Any) -> tuple[Any, ...]:
+def _trace_id(trace: dict[str, Any], *, family: Any, profile: Any = None) -> tuple[Any, ...]:
+    if profile == "wmbs-m04-v1":
+        case_id, permutation = trace.get("case_id"), trace.get("permutation")
+        source_id = trace.get("source_id")
+        if not isinstance(case_id, str) or not case_id or not isinstance(permutation, str) or not permutation:
+            raise BundleError("missing M04 trace ID")
+        if "source_id" in trace and (not isinstance(source_id, str) or not source_id):
+            raise BundleError("missing M04 ablation trace ID")
+        return (case_id, permutation, source_id)
     if family in {"deterministic-action", "whole-memory-development"}:
         case_id, step_id = trace.get("case_id"), trace.get("step_id")
         if not isinstance(case_id, str) or not case_id or (

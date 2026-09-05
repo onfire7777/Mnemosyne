@@ -219,6 +219,7 @@ def _m02_trace_from_cli(
         "abstained": abstained,
         "case_id": question_id,
         "question_id": question_id,
+        "scoring_family": "whole-memory-development",
         "ranked_hits": [
             {"rank": rank, "stable_item_id": item_id}
             for rank, item_id in enumerate(ranked_ids, 1)
@@ -240,24 +241,33 @@ def _m02_ranked_ids(
             or search_result.get("items")
             or []
         )
-        blob = json.dumps(search_result, sort_keys=True)
-    else:
-        blob = ""
     if isinstance(raw, list):
         for item in raw:
             if isinstance(item, Mapping):
-                candidate = (
-                    item.get("stable_item_id")
-                    or item.get("id")
-                    or item.get("source_identity")
+                candidate = next(
+                    (
+                        item[key]
+                        for key in ("stable_item_id", "source_identity", "id")
+                        if isinstance(item.get(key), str) and item[key] in corpus_ids
+                    ),
+                    None,
                 )
+                if candidate is None:
+                    # Bind only this hit's exact content. Searching the whole
+                    # response can fabricate hits from diagnostics and replace
+                    # retrieval order with corpus order.
+                    text = item.get("text", item.get("content"))
+                    matches = [
+                        item_id
+                        for item_id, content in content_by_id.items()
+                        if content and content == text and item_id in corpus_ids
+                    ]
+                    if len(matches) == 1:
+                        candidate = matches[0]
                 if isinstance(candidate, str):
                     hits.append(candidate)
             elif isinstance(item, str):
                 hits.append(item)
-    for item_id, content in content_by_id.items():
-        if item_id not in hits and content and content in blob:
-            hits.append(item_id)
     ordered: list[str] = []
     seen: set[str] = set()
     for item_id in hits:
@@ -500,6 +510,7 @@ def run_m04_conflict_development(
                 {
                     "case_id": case_id,
                     "permutation": perm,
+                    "scoring_family": "whole-memory-development",
                     "current": {
                         "objects": current_objects,
                         "as_of": gold["current_as_of"],
@@ -527,6 +538,7 @@ def run_m04_conflict_development(
                     {
                         "case_id": case_id,
                         "permutation": perm,
+                        "scoring_family": "whole-memory-development",
                         "source_id": source_id,
                         "current": {
                             "objects": _m04_as_of(
