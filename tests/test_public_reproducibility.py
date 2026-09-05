@@ -1847,6 +1847,43 @@ def test_reproduction_recomputes_metrics_and_byte_compares_everything(
         assert (destination / "reproduce.sh").stat().st_mode & 0o777 == source_mode
 
 
+def test_reproduction_uses_one_inventory_bound_source_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    _write_reproducibility_bundle(source)
+    expected_metrics = (source / "metrics.json").read_bytes()
+    original_copy = public_bundle._copy_inventory_artifact
+    mutated = False
+    metrics_copies = 0
+
+    def mutate_source_after_metrics_snapshot(
+        source_file: Path, target: Path, entry: dict[str, object]
+    ) -> None:
+        nonlocal metrics_copies, mutated
+        original_copy(source_file, target, entry)
+        if source_file == source / "metrics.json":
+            metrics_copies += 1
+            if metrics_copies == 2:
+                (source / "metrics.json").write_bytes(b"{}\n")
+                mutated = True
+
+    monkeypatch.setattr(
+        public_bundle, "_copy_inventory_artifact", mutate_source_after_metrics_snapshot
+    )
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    _clear_credential_environment(monkeypatch)
+
+    result = public_bundle.reproduce_bundle(source, destination)
+
+    assert mutated is True
+    assert result["valid"] is True
+    assert (destination / "metrics.json").read_bytes() == expected_metrics
+
+
 def test_reproduction_rejects_manifest_change_after_verification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
