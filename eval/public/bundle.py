@@ -1232,7 +1232,7 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     }
     inputs = manifest["inputs"]
     for field, name in input_bindings.items():
-        if name not in names or inputs[field] != _sha256_reference(root / name):
+        if name not in entries or inputs[field] != entries[name]["digest"]:
             raise BundleError(f"digest mismatch: {field}")
     environment_raw = _read_bound_artifact(
         root / "environment.json", entries["environment.json"]
