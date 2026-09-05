@@ -109,7 +109,7 @@
         "dependencies": {"type": "array", "maxItems": 4096, "items": {"type": "string", "minLength": 1, "maxLength": 512}, "uniqueItems": true},
         "locale": {"const": "C"},
         "timezone": {"const": "UTC"},
-        "environment": {"type": "object", "maxProperties": 128, "propertyNames": {"allOf": [{"pattern": "^[A-Z][A-Z0-9_]{0,63}$"}, {"not": {"pattern": "^(?:PIP_|UV_|DYLD_|PYTHON(?!HASHSEED$|UTF8$|IOENCODING$)|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|NO_PROXY$|LD_PRELOAD$|LD_LIBRARY_PATH$|REQUESTS_CA_BUNDLE$|SSL_CERT_FILE$|SSL_CERT_DIR$)"}}]}, "patternProperties": {"^.*$": {"type": "string", "maxLength": 1024}}, "additionalProperties": false},
+        "environment": {"type": "object", "maxProperties": 128, "propertyNames": {"allOf": [{"pattern": "^[A-Z][A-Z0-9_]{0,63}$"}, {"not": {"pattern": ".*(?:TOKEN|SECRET|PASSWORD|PRIVATE|KEY|CREDENTIAL|AUTHORIZATION).*"}}, {"not": {"pattern": "^(?:PIP_|UV_|DYLD_|PYTHON(?!HASHSEED$|UTF8$|IOENCODING$)|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|NO_PROXY$|LD_PRELOAD$|LD_LIBRARY_PATH$|REQUESTS_CA_BUNDLE$|SSL_CERT_FILE$|SSL_CERT_DIR$)"}}]}, "patternProperties": {"^.*$": {"type": "string", "maxLength": 1024}}, "additionalProperties": false},
         "seed_records": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"type": "integer"}, "uniqueItems": true},
         "retries": {"type": "integer", "minimum": 0},
         "aborts": {"type": "integer", "minimum": 0}
