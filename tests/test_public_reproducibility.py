@@ -1489,6 +1489,22 @@ def test_artifact_inspection_rejects_hard_linked_path(tmp_path: Path) -> None:
         public_bundle._sha256_reference(linked)
 
 
+def test_semantic_artifact_reads_are_bound_to_inventory_bytes(tmp_path: Path) -> None:
+    path = tmp_path / "record.json"
+    expected = _canonical({"state": "expected"})
+    path.write_bytes(_canonical({"state": "substituted"}))
+    entry = {
+        "path": "record.json",
+        "size": len(expected),
+        "digest": _digest(expected),
+    }
+
+    with pytest.raises(BundleError, match="digest mismatch: record.json"):
+        public_bundle._load_bound_json(path, entry)
+    with pytest.raises(BundleError, match="digest mismatch: record.json"):
+        public_bundle._validate_artifact_media(path, "application/json", entry)
+
+
 def test_artifact_secret_scan_handles_large_benign_tokens(tmp_path: Path) -> None:
     path = tmp_path / "artifact.bin"
     payload = b"a" * (public_bundle._SECRET_SCAN_CHUNK_SIZE * 2)
