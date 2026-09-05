@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -476,13 +477,21 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
         _validate(secret)
 
 
-@pytest.mark.parametrize("name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY"])
+@pytest.mark.parametrize(
+    "name", ["PYTHONPATH", "UV_INDEX_URL", "HTTPS_PROXY", "OPENAI_API_KEY"]
+)
 def test_manifest_cannot_allowlist_execution_influences(name: str) -> None:
     manifest = _manifest()
     manifest["run"]["environment"][name] = "attacker-controlled"  # type: ignore[index]
 
-    with pytest.raises(BundleError, match="execution-influencing"):
+    with pytest.raises(BundleError, match="environment names are forbidden"):
         _validate(manifest)
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    property_rules = schema["properties"]["run"]["properties"]["environment"][  # type: ignore[index]
+        "propertyNames"
+    ]["allOf"]
+    denial_patterns = [rule["not"]["pattern"] for rule in property_rules if "not" in rule]
+    assert any(re.search(pattern, name) for pattern in denial_patterns)
 
 
 @pytest.mark.parametrize(

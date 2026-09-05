@@ -380,7 +380,18 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             raise BundleError("environment allowlist is invalid")
         if SECRET.search(value):
             raise BundleError("secret-like material detected in environment")
-        if any(marker in name for marker in ("TOKEN", "SECRET", "PASSWORD", "PRIVATE", "KEY")):
+        if any(
+            marker in name
+            for marker in (
+                "TOKEN",
+                "SECRET",
+                "PASSWORD",
+                "PRIVATE",
+                "KEY",
+                "CREDENTIAL",
+                "AUTHORIZATION",
+            )
+        ):
             raise BundleError("credential-like environment names are forbidden")
         if _forbidden_declared_environment_name(name):
             raise BundleError("execution-influencing environment names are forbidden")
