@@ -1315,6 +1315,47 @@ def test_special_permission_bits_are_rejected_before_copy(tmp_path: Path) -> Non
         )
 
 
+def test_atomic_assembler_rejects_file_replaced_after_inventory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    manifest = _write_reproducibility_bundle(source)
+    (source / "reproducibility-manifest.json").unlink()
+    external = tmp_path / "external.txt"
+    external.write_bytes(b"benign external bytes\n")
+    entry = next(
+        item
+        for item in manifest["artifacts"]["files"]  # type: ignore[index]
+        if item["path"] == "reproduce.sh"
+    )
+    entry["size"] = external.stat().st_size
+    entry["digest"] = _digest(external.read_bytes())
+    original_tree = public_bundle._reproducibility_tree
+    swapped = False
+
+    def swap_after_inventory(
+        root: Path, expected_files: set[str], expected_directories: set[str]
+    ) -> tuple[set[str], set[str]]:
+        nonlocal swapped
+        result = original_tree(root, expected_files, expected_directories)
+        if root == source.resolve() and not swapped:
+            swapped = True
+            artifact = source / "reproduce.sh"
+            artifact.unlink()
+            os.link(external, artifact)
+        return result
+
+    monkeypatch.setattr(
+        public_bundle, "_reproducibility_tree", swap_after_inventory
+    )
+
+    with pytest.raises(BundleError, match="changed before copy"):
+        public_bundle.assemble_reproducibility_bundle(
+            source, tmp_path / "assembled", manifest
+        )
+    assert not (tmp_path / "assembled").exists()
+
+
 def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
