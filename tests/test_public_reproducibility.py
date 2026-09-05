@@ -755,6 +755,34 @@ def test_atomic_assembler_rejects_source_inventory_drift(tmp_path: Path) -> None
     assert not destination.exists()
 
 
+def test_atomic_assembler_collision_preserves_external_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "artifacts"
+    destination = tmp_path / "bundle"
+    sentinel = destination / "external-owner.txt"
+    manifest = _write_reproducibility_bundle(source)
+    (source / "reproducibility-manifest.json").unlink()
+    original_rename = Path.rename
+
+    def collide(path: Path, target: Path) -> Path:
+        if path.name == "final" and Path(target) == destination:
+            destination.mkdir()
+            sentinel.write_text("do not delete", encoding="utf-8")
+            raise FileExistsError("simulated assembly destination race")
+        return original_rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", collide)
+
+    with pytest.raises(FileExistsError, match="assembly destination race"):
+        public_bundle.assemble_reproducibility_bundle(
+            source, destination, manifest
+        )
+
+    assert sentinel.read_text(encoding="utf-8") == "do not delete"
+    assert list(tmp_path.glob(".bundle-assemble-*")) == []
+
+
 @pytest.mark.parametrize(
     ("section", "field", "value"),
     [
