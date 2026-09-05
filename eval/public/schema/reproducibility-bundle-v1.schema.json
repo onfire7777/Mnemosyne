@@ -52,7 +52,12 @@
             }
           ]
         }
-      }
+      },
+      "allOf": [
+        {"if": {"properties": {"track_kind": {"const": "DEVELOPMENT"}}}, "then": {"properties": {"lineage": {"maxProperties": 0}}}},
+        {"if": {"properties": {"track_kind": {"const": "OFFICIAL-UPSTREAM"}}}, "then": {"properties": {"lineage": {"required": ["fidelity"]}}}},
+        {"if": {"properties": {"track_kind": {"const": "ENHANCED-SUCCESSOR"}}}, "then": {"properties": {"lineage": {"required": ["parent_official_record_id", "parent_construct_digest", "difference_manifest_digest"]}}}}
+      ]
     },
     "inputs": {
       "type": "object",
@@ -199,6 +204,6 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\)[^\\u0000]+$"}
+    "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)[^/\\u0000]+(?:/[^/\\u0000]+)*$"}
   }
 }
