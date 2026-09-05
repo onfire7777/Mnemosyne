@@ -10,6 +10,7 @@ import platform
 import re
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 
@@ -976,14 +977,14 @@ def test_size_mismatch_fails_before_hashing_file(
     _write_reproducibility_bundle(root)
     readme = root / "README.md"
     readme.write_bytes(readme.read_bytes() + b"x")
-    original = public_bundle._sha256_reference
+    original = public_bundle._inspect_artifact
 
-    def guard(path: Path) -> str:
+    def guard(path: Path) -> tuple[int, str, bool]:
         if path == readme:
             raise AssertionError("size-mismatched file must not be hashed")
         return original(path)
 
-    monkeypatch.setattr(public_bundle, "_sha256_reference", guard)
+    monkeypatch.setattr(public_bundle, "_inspect_artifact", guard)
 
     with pytest.raises(BundleError, match="digest mismatch: README.md"):
         public_bundle.verify_reproducibility_bundle(root)
@@ -1018,6 +1019,28 @@ def test_inventory_drift_and_symlinks_fail_before_validation(tmp_path: Path) -> 
     (root / "unowned.txt").write_text("drift", encoding="utf-8")
     with pytest.raises(BundleError, match="inventory mismatch"):
         public_bundle.verify_reproducibility_bundle(root)
+
+
+def test_special_permission_bits_are_classified_as_unsafe() -> None:
+    assert public_bundle._UNSAFE_MODE_BITS & 0o7000 == 0o7000
+    assert 0o755 & public_bundle._UNSAFE_MODE_BITS == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits required")
+def test_special_permission_bits_are_rejected_before_copy(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    manifest = _write_reproducibility_bundle(source)
+    artifact = source / "reproduce.sh"
+    artifact.chmod(artifact.stat().st_mode | stat.S_ISUID)
+
+    with pytest.raises(BundleError, match="special permission bits"):
+        public_bundle.verify_reproducibility_bundle(source)
+
+    (source / "reproducibility-manifest.json").unlink()
+    with pytest.raises(BundleError, match="special permission bits"):
+        public_bundle.assemble_reproducibility_bundle(
+            source, tmp_path / "assembled", manifest
+        )
 
 
 def test_nested_inventory_paths_verify_and_reproduce_exact_bytes(
