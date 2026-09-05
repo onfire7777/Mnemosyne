@@ -396,8 +396,9 @@ after all required/native checks passed in run `31865413163`, as
 current canonical baseline is `main@f688c747`. `T5` and `T6` are discharged.
 PR #115 is merged at that baseline, but its reproduced M02 Stage-B review
 defects are not waived; a serialized corrective successor remains mandatory
-before M02 can be treated as clean or publishable. PR #117 owns the coupled
-lifecycle reconciliation and topology-verifier remediation.
+before M02 can be treated as clean or publishable. PR #117 delivered the
+coupled lifecycle reconciliation and topology-verifier remediation as merge
+`d11ffe5e61511269efcf38ccd2ad064564580109` on 2026-08-31; it owns no active writer.
 Through PR #96
 the recorded position was that no GoalEx lifecycle or source node is currently
 admitted; PR #99 admitted and delivered `T7` and `T8`, and PR #100 has now
