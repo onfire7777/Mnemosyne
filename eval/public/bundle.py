@@ -418,6 +418,103 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     }
 
 
+def _sha256_reference(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
+    """Verify a REPRO-001 bundle without executing bundle-controlled content."""
+    root = Path(bundle)
+    if not root.is_dir() or root.is_symlink():
+        raise BundleError("reproducibility bundle must be a real directory")
+    manifest_path = root / "reproducibility-manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise BundleError("reproducibility manifest must be a real file")
+    manifest = _load_json(manifest_path)
+    if manifest_path.read_bytes() != _canonical(manifest):
+        raise BundleError("reproducibility manifest bytes must be canonical")
+    validated = validate_reproducibility_manifest(manifest)
+    artifacts = manifest["artifacts"]
+    inventory = artifacts["files"]
+    names = {entry["path"] for entry in inventory}
+    actual = {entry.name for entry in root.iterdir()}
+    if actual != names | {manifest_path.name}:
+        raise BundleError("reproducibility bundle inventory mismatch")
+    for entry in root.iterdir():
+        if entry.is_symlink() or not entry.is_file():
+            raise BundleError("links and non-files are forbidden")
+        if entry.resolve().parent != root.resolve():
+            raise BundleError("reproducibility bundle path escapes root")
+    for entry in inventory:
+        path = root / entry["path"]
+        try:
+            size = path.stat().st_size
+            digest = _sha256_reference(path)
+        except OSError as exc:
+            raise BundleError("reproducibility bundle file cannot be read") from exc
+        if size != entry["size"] or digest != entry["digest"]:
+            raise BundleError(f"digest mismatch: {entry['path']}")
+        if SECRET.search(path.read_text(encoding="utf-8", errors="replace")):
+            raise BundleError("secret-like material detected")
+
+    bindings = {
+        "build_fingerprint": "build.json",
+        "config_digest": "config.json",
+        "bundle_digest": "bundle-manifest.json",
+        "trace_index_digest": "traces.jsonl",
+        "environment_digest": "environment.json",
+        "lockfile_digest": "uv.lock",
+    }
+    for field, name in bindings.items():
+        if name not in names or artifacts[field] != _sha256_reference(root / name):
+            raise BundleError(f"digest mismatch: {field}")
+
+    required = {"result.json", "ledger-entry.json", "canonical-replay.json"}
+    missing = sorted(required - names)
+    if missing:
+        raise BundleError(f"reproducibility bundle missing required file: {missing[0]}")
+    result = _load_json(root / "result.json")
+    from leaderboard.validate import validate_record, verify_result_digests
+
+    result_errors = validate_record(result)
+    if result_errors:
+        raise BundleError("result-v2 validation failed: " + ", ".join(result_errors))
+    result_ref = manifest["result_ref"]
+    if (
+        result.get("schema_version") != "mnemosyne.leaderboard.result/v2"
+        or result.get("record_id") != result_ref["record_id"]
+        or result.get("track_kind") != result_ref["track_kind"]
+        or result.get("lineage") != result_ref["lineage"]
+        or _sha256_reference(root / "result.json") != result_ref["result_digest"]
+    ):
+        raise BundleError("result-v2 reference mismatch")
+    digest_errors = verify_result_digests(
+        result,
+        {
+            "build.json": (root / "build.json").read_bytes(),
+            "config.json": (root / "config.json").read_bytes(),
+            "bundle-manifest.json": (root / "bundle-manifest.json").read_bytes(),
+            "traces.jsonl": (root / "traces.jsonl").read_bytes(),
+        },
+    )
+    if digest_errors:
+        raise BundleError("result-v2 artifact digest mismatch: " + ", ".join(digest_errors))
+
+    ledger_entry = _load_json(root / "ledger-entry.json")
+    if (
+        not isinstance(ledger_entry, dict)
+        or ledger_entry.get("entry_digest") != result_ref["ledger_entry_digest"]
+        or ledger_entry.get("status") != "succeeded"
+        or ledger_entry.get("result") != result
+    ):
+        raise BundleError("signed-ledger inclusion reference mismatch")
+    replay = _load_json(root / "canonical-replay.json")
+    replay_digest = "sha256:" + canonical_replay_digest(replay)
+    if replay_digest != artifacts["canonical_replay_digest"]:
+        raise BundleError("canonical replay digest mismatch")
+    return validated
+
+
 def canonical_replay_fixture_custody(payload: object) -> bool:
     """Validate that the closed fixture reference is bound to its manifest."""
     if not isinstance(payload, dict):
@@ -607,6 +704,8 @@ def write_bundle(
 
 def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     root = Path(bundle)
+    if (root / "reproducibility-manifest.json").exists():
+        return verify_reproducibility_bundle(root)
     if not root.is_dir() or root.is_symlink():
         raise BundleError("bundle must be a real directory, not a link")
     actual = {entry.name for entry in root.iterdir()}
