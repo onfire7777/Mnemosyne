@@ -176,10 +176,11 @@
             {"type": "null"},
             {
               "type": "object", "additionalProperties": false,
-              "required": ["receipt_digest", "reproducer_identity", "signed"],
+              "required": ["receipt_digest", "reproducer_identity", "public_key_digest", "signed"],
               "properties": {
                 "receipt_digest": {"$ref": "#/$defs/digest"},
                 "reproducer_identity": {"type": "string", "minLength": 1, "maxLength": 256},
+                "public_key_digest": {"$ref": "#/$defs/digest"},
                 "signed": {"const": true}
               }
             }
