@@ -264,28 +264,50 @@ def _sha256_ref(data: bytes) -> str:
 
 
 def _assert_reproduction_checkout(expected_sha: str) -> None:
-    """Require the invoking checkout (cwd) to match the bound commit and be clean."""
+    """Require a detached, clean checkout at the exact bundle-bound commit."""
     if not isinstance(expected_sha, str) or _HEX_COMMIT.fullmatch(expected_sha) is None:
         raise BundleError("bound commit is unavailable")
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=Path.cwd(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    git = shutil.which("git")
+    if git is None:
+        raise BundleError("reproduction checkout is unavailable")
+    git_environment = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LC_ALL": "C",
+        "PATH": os.environ.get("PATH", ""),
+    }
+    if os.name == "nt" and "SystemRoot" in os.environ:
+        git_environment["SystemRoot"] = os.environ["SystemRoot"]
+
+    def run_git(*arguments: str) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                [git, *arguments],
+                cwd=Path.cwd(),
+                env=git_environment,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BundleError("reproduction checkout is unavailable") from exc
+
+    result = run_git("rev-parse", "--verify", "HEAD^{commit}")
     if result.returncode != 0:
         raise BundleError("reproduction checkout is unavailable")
     actual = result.stdout.strip()
     if actual != expected_sha:
         raise BundleError("reproduction checkout does not match bound commit")
-    dirty = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=Path.cwd(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    detached = run_git("symbolic-ref", "-q", "HEAD")
+    if detached.returncode == 0:
+        raise BundleError("reproduction checkout must be detached")
+    if detached.returncode != 1:
+        raise BundleError("reproduction checkout is unavailable")
+    dirty = run_git("status", "--porcelain=v1", "--untracked-files=all")
     if dirty.returncode != 0 or dirty.stdout:
         raise BundleError("reproduction checkout is dirty")
 

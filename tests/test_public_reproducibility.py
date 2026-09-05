@@ -1410,6 +1410,48 @@ def test_clean_checkout_runs_exact_documented_argv(tmp_path: Path) -> None:
     ).read_bytes()
 
 
+def test_reproduction_checkout_rejects_attached_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public.bundle import _assert_reproduction_checkout
+
+    clone = _clone_clean_checkout(tmp_path)
+    subprocess.run(
+        ["git", "switch", "-c", "attached-reproduction"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.chdir(clone)
+    with pytest.raises(BundleError, match="detached"):
+        _assert_reproduction_checkout(sha)
+
+
+def test_reproduction_checkout_accepts_clean_detached_exact_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public.bundle import _assert_reproduction_checkout
+
+    clone = _clone_clean_checkout(tmp_path)
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.chdir(clone)
+    _assert_reproduction_checkout(sha)
+
+
 @pytest.mark.parametrize(
     "mutation",
     ("dirty", "wrong-commit", "command-token", "output-collision"),
