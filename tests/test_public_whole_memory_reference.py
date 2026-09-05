@@ -3713,6 +3713,12 @@ def test_m02_custody_rejects_wellformed_fake_hashes() -> None:
     assert traces and evidence["backend"] == "local"
 
 
+def test_m02_bundle_declares_canonical_replay_seed() -> None:
+    from eval.public.bundle import _CANONICAL_REPLAY_SEEDS
+
+    assert _CANONICAL_REPLAY_SEEDS["wmbs-m02-retrieval-development"] == (20260801,)
+
+
 def _m04_suite() -> dict[str, object]:
     from eval.public.runner import load_registry
 
@@ -4046,6 +4052,18 @@ def test_m04_monotonic_allows_gold_perfect_conflict_drops() -> None:
     }
     assert _m04_monotonic_violation(events, ["current"], ["alpha", "beta"], gold, "c") is False
     assert _m04_monotonic_violation(events, [], ["alpha", "beta"], gold, "c") is True
+
+
+def test_m04_bundle_declares_canonical_replay_seed() -> None:
+    from eval.public.bundle import _CANONICAL_REPLAY_SEEDS
+
+    assert _CANONICAL_REPLAY_SEEDS["wmbs-m04-development"] == (
+        11,
+        23,
+        37,
+        53,
+        71,
+    )
 
 
 def _m05_suite() -> dict[str, object]:
