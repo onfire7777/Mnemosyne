@@ -645,37 +645,37 @@ def _recompute_repro_metrics(
         raise BundleError("metrics do not recompute from traces")
     if not isinstance(manifest_metrics, list) or not manifest_metrics:
         raise BundleError("missing metrics")
-    declared = manifest_metrics[0]
-    if not isinstance(declared, dict):
-        raise BundleError("missing metrics")
-    if (
-        declared.get("name") != measured.get("metric")
-        or declared.get("numerator") != successes
-        or declared.get("denominator") != total
-        or declared.get("sample_count") != total
-        or declared.get("value") != measured.get("value")
-    ):
-        raise BundleError("metrics do not recompute from traces")
     measured_interval = measured.get("interval", {})
-    declared_interval = declared.get("interval", {})
-    if (
-        not isinstance(measured_interval, dict)
-        or not isinstance(declared_interval, dict)
-        or declared_interval.get("low") != measured_interval.get("low")
-        or declared_interval.get("high") != measured_interval.get("high")
-    ):
+    if not isinstance(measured_interval, dict):
         raise BundleError("intervals do not recompute from traces")
-    if isinstance(manifest_intervals, list) and manifest_intervals:
-        interval = manifest_intervals[0]
+    for declared in manifest_metrics:
+        if not isinstance(declared, dict):
+            raise BundleError("missing metrics")
+        declared_interval = declared.get("interval", {})
         if (
-            isinstance(interval, dict)
-            and (
-                interval.get("low") != measured_interval.get("low")
-                or interval.get("high") != measured_interval.get("high")
-                or interval.get("method") != measured_interval.get("method")
-            )
+            declared.get("name") != measured.get("metric")
+            or declared.get("numerator") != successes
+            or declared.get("denominator") != total
+            or declared.get("sample_count") != total
+            or declared.get("value") != measured.get("value")
+            or not isinstance(declared_interval, dict)
+            or declared_interval.get("low") != measured_interval.get("low")
+            or declared_interval.get("high") != measured_interval.get("high")
+        ):
+            raise BundleError("metrics do not recompute from traces")
+    if not isinstance(manifest_intervals, list) or not manifest_intervals:
+        raise BundleError("missing intervals")
+    for interval in manifest_intervals:
+        if (
+            not isinstance(interval, dict)
+            or interval.get("metric") != measured.get("metric")
+            or interval.get("low") != measured_interval.get("low")
+            or interval.get("high") != measured_interval.get("high")
+            or interval.get("method") != measured_interval.get("method")
         ):
             raise BundleError("intervals do not recompute from traces")
+    if len(manifest_metrics) != 1 or len(manifest_intervals) != 1:
+        raise BundleError("metrics do not recompute from traces")
     return measured
 
 
