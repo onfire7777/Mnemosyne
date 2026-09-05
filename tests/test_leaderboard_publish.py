@@ -80,7 +80,7 @@ def _result(record_id: str) -> dict[str, object]:
 
 
 def _trace(path: Path) -> Path:
-    path.write_text(_TRACE_TEXT, encoding="utf-8")
+    path.write_bytes(_TRACE_TEXT.encode("utf-8"))
     return path
 
 
@@ -121,6 +121,7 @@ def _corrupt_signature(ledger: Path) -> None:
             for entry in entries
         ),
         encoding="utf-8",
+        newline="\n",
     )
 
 

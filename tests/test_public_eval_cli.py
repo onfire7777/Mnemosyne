@@ -1016,7 +1016,7 @@ def test_cli_qa_run_verify_reproduce_and_report_round_trip(tmp_path: Path, monke
         "abstention": protocol["abstention"], "transport_retries": 0,
     }
     candidate_path = tmp_path / "candidate.json"
-    candidate_path.write_text(json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n")
+    candidate_path.write_bytes((json.dumps(candidate, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"))
     source, reproduced = tmp_path / "qa-source", tmp_path / "qa-reproduced"
     report, note = tmp_path / "qa-report.json", tmp_path / "qa-report.md"
     monkeypatch.setattr(public_runner, "require_clean_candidate_checkout", lambda _sha: None)

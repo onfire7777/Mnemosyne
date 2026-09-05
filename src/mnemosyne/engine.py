@@ -10,7 +10,7 @@ import secrets
 import threading
 import weakref
 from collections import OrderedDict, defaultdict
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -2673,7 +2673,12 @@ class LocalMemoryEngine:
 
     def append_evidence(self, ev: Evidence, branch: str = "main") -> str:
         access_policy = validate_access_policy(ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy")
-        with self._lock:
+        with self._lock, ExitStack() as journal_scope:
+            journal_append = None
+            if self._journal_dir is not None:
+                journal_append = journal_scope.enter_context(
+                    CIDJournal(self._journal_dir / journal_filename(ev.tenant_id)).owned_append(ev.tenant_id)
+                )
             self._require_branch(branch)
             cid = evidence_cid(
                 ev.content,
@@ -2801,8 +2806,8 @@ class LocalMemoryEngine:
                 capability_tags=ev.capability_tags,
             )
             self._persist()
-            if self._journal_dir is not None:
-                CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
+            if journal_append is not None:
+                journal_append(
                     {
                         "cid": stored.cid,
                         "tenant_id": stored.tenant_id,

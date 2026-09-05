@@ -61,6 +61,7 @@ import sqlite3
 import threading
 import time
 from collections import OrderedDict
+from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -777,12 +778,14 @@ class SqliteEngine:
             key = str(path)
             cached = self._connections.get(key)
             if cached is not None:
+                self._validate_tenant_file_owner(cached, tenant_id)
                 return cached
             existed = path.exists()
             conn = sqlite3.connect(path, check_same_thread=False)
             try:
                 conn.row_factory = sqlite3.Row
                 try:
+                    self._validate_tenant_file_owner(conn, tenant_id)
                     for pragma in PRAGMA_STATEMENTS:
                         conn.execute(pragma)
                     if key not in self._integrity_checked:
@@ -807,8 +810,27 @@ class SqliteEngine:
             raise RuntimeError(f"sqlite integrity_check failed for {path}: {result}")
 
     @staticmethod
+    def _validate_tenant_file_owner(conn: sqlite3.Connection, tenant_id: str) -> None:
+        """Reject filename aliases before accessing another tenant's store.
+
+        Every initialized database has a main branch, including legacy stores.
+        This also fails closed for files already containing colliding tenants.
+        """
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'branches'"
+        ).fetchone() is None:
+            return
+        if conn.execute(
+            "SELECT 1 FROM branches WHERE tenant_id != ? LIMIT 1", (tenant_id,)
+        ).fetchone() is not None:
+            raise ValueError("tenant database ownership mismatch")
+
+    @staticmethod
     def _ensure_schema(conn: sqlite3.Connection, tenant_id: str) -> None:
         with conn:
+            # Serialize first-owner admission across independently opened engines.
+            conn.execute("BEGIN IMMEDIATE")
+            SqliteEngine._validate_tenant_file_owner(conn, tenant_id)
             for statement in ENSURE_STATEMENTS:
                 conn.execute(statement)
             working_columns = {
@@ -1349,8 +1371,13 @@ class SqliteEngine:
         access_policy = validate_access_policy(
             ev.access_policy, tenant_id=ev.tenant_id, location="evidence.access_policy"
         )
-        with self._lock:
+        with self._lock, ExitStack() as journal_scope:
             conn = self._connect(ev.tenant_id)
+            journal_append = None
+            if self._journal_dir is not None:
+                journal_append = journal_scope.enter_context(
+                    CIDJournal(self._journal_dir / journal_filename(ev.tenant_id)).owned_append(ev.tenant_id)
+                )
             self._require_branch(conn, ev.tenant_id, branch)
             cid = evidence_cid(
                 ev.content,
@@ -1476,12 +1503,12 @@ class SqliteEngine:
                     trust_tier=ev.trust_tier,
                     capability_tags=ev.capability_tags,
                 )
-            if self._journal_dir is not None:
+            if journal_append is not None:
                 # Evidence-durability signal (§1a, highest SLO): the per-line
                 # CIDJournal.append fsyncs — time it as the durability/journal-lag
                 # sample so a divergence between ledger and journal is observable.
                 journal_start = time.perf_counter()
-                CIDJournal(self._journal_dir / journal_filename(stored.tenant_id)).append(
+                journal_append(
                     {
                         "cid": stored.cid,
                         "tenant_id": stored.tenant_id,
@@ -2768,6 +2795,7 @@ class SqliteEngine:
         registering the rebuildable projections: cached-ppr, evidence-fts, and —
         only when ``sqlite_vec_available()`` — the optional evidence-vec0 index."""
         key = str(tenant_id)
+        self._connect(key)  # validate ownership before opening projection state
         registry = self._registries.get(key)
         if registry is not None:
             return registry
@@ -3878,6 +3906,8 @@ class SqliteEngine:
                 ).fetchone()
                 if target is None:
                     return {"erased": False, "reason": "evidence_not_found", "cid": cid, "erasure_mode": mode.value}
+                if self._journal_dir is not None:
+                    CIDJournal(self._journal_dir / journal_filename(tenant_id)).validate_owner(tenant_id)
                 candidate_rows = conn.execute(
                     "SELECT cid, metadata, source_type FROM evidence "
                     "WHERE tenant_id = ? AND branch = ? AND erased = 0 AND cid <> ? ORDER BY rowid",
@@ -4198,13 +4228,14 @@ class SqliteEngine:
                 erased_at = utc_now().isoformat()
                 for affected_cid in affected_order:
                     if mode is ErasureMode.HARD_DELETE_LEGAL:
-                        journal.purge(affected_cid)
+                        journal.purge(affected_cid, tenant_id=tenant_id)
                     else:
                         original_content, original_user = originals.get(affected_cid, ("", ""))
                         journal.tombstone(
                             affected_cid,
                             salted_hash=erasure_tombstone_hash(original_content, tenant_id, original_user),
                             erased_at=erased_at,
+                            tenant_id=tenant_id,
                         )
         # Erasure / deletion-propagation signal (§3): an erasure produces a
         # traceable propagation log — the deletion_log entry plus the crypto-shred

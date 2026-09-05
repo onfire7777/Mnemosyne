@@ -160,6 +160,18 @@ def _score_wmbs_m01(
 
 
 
+def _development_trace_payloads(traces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove only the checked transport family; keep module schemas closed."""
+    payloads = []
+    for row in traces:
+        if not isinstance(row, dict):
+            raise ScoringError("development trace must be an object")
+        if "scoring_family" in row and row["scoring_family"] != "whole-memory-development":
+            raise ScoringError("development trace scoring family mismatch")
+        payloads.append({key: value for key, value in row.items() if key != "scoring_family"})
+    return payloads
+
+
 def _score_wmbs_m02_retrieval(
     labels: list[dict[str, Any]], traces: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -170,7 +182,7 @@ def _score_wmbs_m02_retrieval(
         fixture = labels[0]["fixture"]
     else:
         fixture = m02.load_fixture()
-    return m02.score_retrieval(fixture, traces)
+    return m02.score_retrieval(fixture, _development_trace_payloads(traces))
 
 
 def _score_wmbs_m04(
@@ -183,11 +195,14 @@ def _score_wmbs_m04(
         fixture = labels[0]["fixture"]
     else:
         fixture = m04.load_fixture()
-    observations = [row for row in traces if "source_id" not in row]
-    ablations = [row for row in traces if "source_id" in row]
+    payloads = _development_trace_payloads(traces)
+    observations = [row for row in payloads if "source_id" not in row]
+    ablations = [row for row in payloads if "source_id" in row]
     measured = m04.score_conflict(fixture, observations, ablations)
     measured["family"] = "whole-memory-development"
     measured["profile"] = "wmbs-m04-v1"
+    measured["total"] = len(observations)
+    measured["trace_count"] = len(traces)
     return measured
 
 

@@ -1490,7 +1490,7 @@ def _refresh_digest(bundle: Path, name: str) -> None:
 
 
 def _rewrite_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n")
+    path.write_bytes((json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8"))
 
 
 def _canonical_digest(value: object) -> str:
