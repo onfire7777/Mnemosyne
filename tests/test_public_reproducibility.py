@@ -596,6 +596,15 @@ def test_inventory_rejects_reserved_manifest_and_file_directory_collisions() -> 
     with pytest.raises(BundleError, match="file-directory collision"):
         _validate(collision)
 
+    portable_collision = _manifest()
+    entry = copy.deepcopy(portable_collision["artifacts"]["files"][0])  # type: ignore[index]
+    portable_collision["artifacts"]["files"] = [  # type: ignore[index]
+        {**entry, "path": "Evidence.json"},
+        {**entry, "path": "evidence.JSON"},
+    ]
+    with pytest.raises(BundleError, match="non-portable path collision"):
+        _validate(portable_collision)
+
 
 def test_every_recomputed_metric_and_interval_is_bound_to_manifest() -> None:
     declared = [
@@ -699,6 +708,13 @@ def test_rights_and_consent_disclosures_fail_closed() -> None:
         "a/.",
         "a/",
         "C:/escape",
+        "evidence/CON.txt",
+        "evidence/trailing.",
+        "evidence/trailing ",
+        "evidence/a:b",
+        "evidence/control\x1f",
+        "evidence/" + "é" * 128,
+        "evidence/\ud800",
     ],
 )
 def test_inventory_paths_are_normalized_relative_posix_paths(path: str) -> None:
@@ -706,8 +722,13 @@ def test_inventory_paths_are_normalized_relative_posix_paths(path: str) -> None:
     manifest["artifacts"]["files"][0]["path"] = path  # type: ignore[index]
     with pytest.raises(BundleError, match="relative path"):
         _validate(manifest)
-    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    assert re.fullmatch(schema["$defs"]["path"]["pattern"], path) is None
+    if path not in {
+        "evidence/CON.txt",
+        "evidence/" + "é" * 128,
+        "evidence/\ud800",
+    }:
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+        assert re.fullmatch(schema["$defs"]["path"]["pattern"], path) is None
 
 
 def test_verifies_manifest_owned_bytes_and_existing_result_and_replay_contracts(

@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,14 @@ SECRET = re.compile(
 SECRET_BYTES = re.compile(SECRET.pattern.encode("ascii"))
 _SECRET_SCAN_CHUNK_SIZE = 1024 * 1024
 _SECRET_SCAN_OVERLAP = 128
+_WINDOWS_RESERVED_NAMES = {
+    "aux",
+    "con",
+    "nul",
+    "prn",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
 CANONICAL_REPLAY_VOLATILE_FIELDS = frozenset(
     {
         "host_path",
@@ -175,6 +184,11 @@ def _repro_finite(value: object) -> None:
 
 
 def _repro_relative_path(value: object) -> str:
+    parts = value.split("/") if isinstance(value, str) else []
+    try:
+        encoded_parts = [part.encode("utf-8") for part in parts]
+    except UnicodeEncodeError as exc:
+        raise BundleError("inventory path must be a normalized relative path") from exc
     if (
         not isinstance(value, str)
         or not value
@@ -183,10 +197,27 @@ def _repro_relative_path(value: object) -> str:
         or "\x00" in value
         or value.startswith("/")
         or re.match(r"[A-Za-z]:", value) is not None
-        or any(part in {"", ".", ".."} for part in value.split("/"))
+        or any(part in {"", ".", ".."} for part in parts)
+        or any(len(part) > 255 for part in encoded_parts)
+        or any(part.endswith((" ", ".")) for part in parts)
+        or any(
+            any(
+                ord(character) < 32 or character in '<>:"|?*'
+                for character in part
+            )
+            for part in parts
+        )
+        or any(
+            part.split(".", 1)[0].casefold() in _WINDOWS_RESERVED_NAMES
+            for part in parts
+        )
     ):
         raise BundleError("inventory path must be a normalized relative path")
     return value
+
+
+def _portable_path_key(value: str) -> str:
+    return unicodedata.normalize("NFC", value).casefold()
 
 
 def _credential_environment_name(name: str) -> bool:
@@ -309,6 +340,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     if not isinstance(files, list) or not files or len(files) > 4096:
         raise BundleError("file inventory must be a bounded non-empty array")
     paths: set[str] = set()
+    portable_paths: set[str] = set()
     for index, item in enumerate(files):
         entry = _closed_object(
             item,
@@ -316,11 +348,15 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             f"file inventory entry {index}",
         )
         path = _repro_relative_path(entry["path"])
-        if path == "reproducibility-manifest.json":
+        portable_path = _portable_path_key(path)
+        if portable_path == _portable_path_key("reproducibility-manifest.json"):
             raise BundleError("file inventory cannot own the reproducibility manifest")
         if path in paths:
             raise BundleError("file inventory contains a duplicate relative path")
+        if portable_path in portable_paths:
+            raise BundleError("file inventory contains a non-portable path collision")
         paths.add(path)
+        portable_paths.add(portable_path)
         if type(entry["size"]) is not int or not 0 <= entry["size"] <= 64 * 2**20:
             raise BundleError("file inventory size is invalid")
         _repro_nonempty(entry["media_type"], "file media type", maximum=128)
@@ -328,7 +364,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
             raise BundleError("file canonicalization must be exact-bytes")
         _repro_digest(entry["digest"], "file digest")
     if any(
-        parent.as_posix() in paths
+        _portable_path_key(parent.as_posix()) in portable_paths
         for path in paths
         for parent in Path(path).parents
         if parent != Path(".")
