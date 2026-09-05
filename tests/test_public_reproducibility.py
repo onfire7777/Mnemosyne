@@ -1505,6 +1505,39 @@ def test_semantic_artifact_reads_are_bound_to_inventory_bytes(tmp_path: Path) ->
         public_bundle._validate_artifact_media(path, "application/json", entry)
 
 
+def test_signed_ledger_verification_uses_inventory_bound_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "bundle"
+    manifest = _write_reproducibility_bundle(root)
+    entries = {
+        entry["path"]: entry
+        for entry in manifest["artifacts"]["files"]  # type: ignore[index]
+    }
+    from leaderboard import ledger as ledger_module
+
+    original_verify = ledger_module.verify_ledger
+    observed: list[tuple[Path, Path]] = []
+
+    def observe_snapshot(ledger_path: Path, public_key_path: Path) -> object:
+        observed.append((ledger_path, public_key_path))
+        assert ledger_path.parent == public_key_path.parent
+        assert ledger_path.parent != root
+        assert ledger_path.read_bytes() == (root / "ledger.jsonl").read_bytes()
+        assert public_key_path.read_bytes() == (root / "ledger-public.pem").read_bytes()
+        return original_verify(ledger_path, public_key_path)
+
+    monkeypatch.setattr(ledger_module, "verify_ledger", observe_snapshot)
+
+    verified, fingerprint = public_bundle._verify_bound_ledger(
+        root, entries, "ledger.jsonl", "ledger-public.pem"
+    )
+
+    assert verified
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", fingerprint)
+    assert len(observed) == 1
+
+
 def test_artifact_secret_scan_handles_large_benign_tokens(tmp_path: Path) -> None:
     path = tmp_path / "artifact.bin"
     payload = b"a" * (public_bundle._SECRET_SCAN_CHUNK_SIZE * 2)
