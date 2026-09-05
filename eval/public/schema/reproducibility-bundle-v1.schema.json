@@ -116,9 +116,9 @@
         "locale": {"const": "C"},
         "timezone": {"const": "UTC"},
         "environment": {"type": "object", "maxProperties": 128, "propertyNames": {"allOf": [{"pattern": "^[A-Z][A-Z0-9_]{0,63}$"}, {"not": {"pattern": ".*(?:TOKEN|SECRET|PASSWORD|PRIVATE|KEY|CREDENTIAL|AUTHORIZATION).*"}}, {"not": {"pattern": "^(?:AWS_PROFILE$|DATABASE_URL$|DOCKER_CONFIG$|KUBECONFIG$|NETRC$|PGPASSFILE$|REDIS_URL$|SSH_AUTH_SOCK$|PIP_|UV_|DYLD_|GIT_|PYTHON(?!HASHSEED$|UTF8$|IOENCODING$)|HTTP_PROXY$|HTTPS_PROXY$|ALL_PROXY$|NO_PROXY$|LD_PRELOAD$|LD_LIBRARY_PATH$|REQUESTS_CA_BUNDLE$|SSL_CERT_FILE$|SSL_CERT_DIR$)"}}]}, "patternProperties": {"^.*$": {"type": "string", "maxLength": 1024}}, "additionalProperties": false},
-        "seed_records": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"type": "integer"}, "uniqueItems": true},
-        "retries": {"type": "integer", "minimum": 0},
-        "aborts": {"type": "integer", "minimum": 0}
+        "seed_records": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807}, "uniqueItems": true},
+        "retries": {"$ref": "#/$defs/count"},
+        "aborts": {"$ref": "#/$defs/count"}
       }
     },
     "metrics": {
@@ -134,7 +134,7 @@
           "unit": {"type": "string", "minLength": 1, "maxLength": 64},
           "numerator": {"type": ["number", "null"]},
           "denominator": {"type": ["number", "null"]},
-          "sample_count": {"type": "integer", "minimum": 0},
+          "sample_count": {"$ref": "#/$defs/count"},
           "interval": {
             "type": "object", "additionalProperties": false,
             "required": ["method", "confidence_level", "low", "high", "parameters"],
@@ -151,11 +151,11 @@
             "type": "object", "additionalProperties": false,
             "required": ["missing", "unsupported", "failed", "aborted", "not_measured"],
             "properties": {
-              "missing": {"type": "integer", "minimum": 0},
-              "unsupported": {"type": "integer", "minimum": 0},
-              "failed": {"type": "integer", "minimum": 0},
-              "aborted": {"type": "integer", "minimum": 0},
-              "not_measured": {"type": "integer", "minimum": 0}
+              "missing": {"$ref": "#/$defs/count"},
+              "unsupported": {"$ref": "#/$defs/count"},
+              "failed": {"$ref": "#/$defs/count"},
+              "aborted": {"$ref": "#/$defs/count"},
+              "not_measured": {"$ref": "#/$defs/count"}
             }
           }
         }
@@ -204,6 +204,7 @@
     }
   },
   "$defs": {
+    "count": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "path": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^(?!(?:[^/]+/){32})(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*\\\\)(?!.*[<>:\"|?*\\u0000-\\u001f])(?!.*[ .](?:/|$))[^/\\u0000]+(?:/[^/\\u0000]+)*$"}
   }
