@@ -880,6 +880,38 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     for required in ("traces.jsonl", "config.json", "build.json", "result.json", "bundle-manifest.json"):
         if required not in payloads:
             raise BundleError(f"missing {required}")
+    config_payload = _load_inventory_json(payloads, "config.json")
+    build_payload = _load_inventory_json(payloads, "build.json")
+    environment_payload = _load_inventory_json(payloads, "environment.json")
+    if not isinstance(config_payload, dict) or any(
+        config_payload.get(field) != manifest["config"][field]
+        for field in ("locale", "timezone")
+    ):
+        raise BundleError("config declaration does not match bound artifact")
+    if not isinstance(build_payload, dict) or any(
+        build_payload.get(field) != manifest["build"][field]
+        for field in (
+            "candidate_git_sha",
+            "dirty",
+            "environment_contract",
+            "toolchain",
+        )
+    ):
+        raise BundleError("build declaration does not match bound artifact")
+    if build_payload.get("lockfile") != "uv.lock":
+        raise BundleError("build lockfile declaration does not match bound artifact")
+    if not isinstance(environment_payload, dict) or any(
+        environment_payload.get(field) != manifest["environment"][field]
+        for field in (
+            "allowlist",
+            "locale",
+            "timezone",
+            "platform",
+            "runtime",
+            "wheelhouse_digest",
+        )
+    ):
+        raise BundleError("environment declaration does not match bound artifact")
     if manifest["build"]["build_fingerprint"] != _sha256_ref(payloads["build.json"]):
         raise BundleError("build_fingerprint digest mismatch")
     if manifest["config"]["config_digest"] != _sha256_ref(payloads["config.json"]):

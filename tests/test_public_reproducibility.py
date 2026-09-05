@@ -1067,6 +1067,28 @@ def test_manifest_schema_and_inventory_share_one_inode_snapshot(
     assert verify_bundle(root)["valid"] is True
 
 
+@pytest.mark.parametrize(
+    ("section", "field", "replacement"),
+    (
+        ("build", "toolchain", "pip"),
+        ("environment", "runtime", "cpython-3.13"),
+        ("environment", "platform", "windows"),
+    ),
+)
+def test_manifest_runtime_declarations_match_inventory_artifacts(
+    tmp_path: Path, section: str, field: str, replacement: object
+) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / f"declaration-{section}-{field}"
+    )
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[section][field] = replacement
+    _write_json(manifest_path, manifest)
+    with pytest.raises(BundleError, match="declaration does not match"):
+        verify_bundle(bundle["root"])
+
+
 def test_reproduction_uses_one_inventory_bound_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
