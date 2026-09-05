@@ -1736,6 +1736,7 @@ def test_exact_command_reproduces_from_clean_detached_offline_checkout(
             name, {"PYTHONHASHSEED"}
         )
     }
+    environment.pop("UV_RUN_RECURSION_DEPTH", None)
     environment.update(
         {
             "PATH": str(Path(uv).parent) + os.pathsep + environment.get("PATH", ""),
