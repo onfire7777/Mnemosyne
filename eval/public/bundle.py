@@ -122,14 +122,23 @@ def _repro_nonempty(value: object, label: str, *, maximum: int = 512) -> None:
 
 
 def _repro_finite(value: object) -> None:
-    if isinstance(value, float) and not math.isfinite(value):
-        raise BundleError("reproducibility manifest numbers must be finite")
-    if isinstance(value, dict):
-        for nested in value.values():
-            _repro_finite(nested)
-    elif isinstance(value, list):
-        for nested in value:
-            _repro_finite(nested)
+    stack: list[tuple[object, int]] = [(value, 0)]
+    containers: set[int] = set()
+    nodes = 0
+    while stack:
+        current, depth = stack.pop()
+        nodes += 1
+        if nodes > 100_000 or depth > 64:
+            raise BundleError("reproducibility manifest exceeds structural bounds")
+        if isinstance(current, float) and not math.isfinite(current):
+            raise BundleError("reproducibility manifest numbers must be finite")
+        if isinstance(current, (dict, list)):
+            identity = id(current)
+            if identity in containers:
+                raise BundleError("reproducibility manifest contains a cycle")
+            containers.add(identity)
+            nested = current.values() if isinstance(current, dict) else current
+            stack.extend((item, depth + 1) for item in nested)
 
 
 def _repro_relative_path(value: object) -> str:
@@ -240,7 +249,7 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
         if path in paths:
             raise BundleError("file inventory contains a duplicate relative path")
         paths.add(path)
-        if type(entry["size"]) is not int or not 0 <= entry["size"] <= 2**30:
+        if type(entry["size"]) is not int or not 0 <= entry["size"] <= 64 * 2**20:
             raise BundleError("file inventory size is invalid")
         _repro_nonempty(entry["media_type"], "file media type", maximum=128)
         if entry["canonicalization"] != "exact-bytes":
@@ -390,6 +399,13 @@ def validate_reproducibility_manifest(payload: object) -> dict[str, Any]:
     for field in ("redistribution_permitted", "pii_present", "consent_documented"):
         if type(disclosures[field]) is not bool:
             raise BundleError(f"{field.replace('_', ' ')} disclosure is invalid")
+    if disclosures["redistribution_permitted"] is not True:
+        raise BundleError("redistribution rights are required")
+    if (
+        disclosures["pii_present"] is True
+        and disclosures["consent_documented"] is not True
+    ):
+        raise BundleError("PII requires documented consent")
     if disclosures["disclosure_state"] != "COMPLETE":
         raise BundleError("disclosure state must be COMPLETE")
     independent = disclosures["independent_reproduction"]
@@ -422,6 +438,24 @@ def _sha256_reference(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _verify_embedded_legacy_bundle(root: Path) -> dict[str, Any]:
+    manifest = _load_json(root / "bundle-manifest.json")
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict) or not files:
+        raise BundleError("embedded public bundle manifest is invalid")
+    with tempfile.TemporaryDirectory() as temporary:
+        legacy = Path(temporary) / "bundle"
+        legacy.mkdir()
+        for name in (*files.keys(), "bundle-manifest.json"):
+            if not isinstance(name, str) or _repro_relative_path(name) != name:
+                raise BundleError("embedded public bundle inventory is invalid")
+            source = root / name
+            if source.is_symlink() or not source.is_file():
+                raise BundleError("embedded public bundle file is invalid")
+            shutil.copyfile(source, legacy / name)
+        return verify_bundle(legacy)
+
+
 def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     """Verify a REPRO-001 bundle without executing bundle-controlled content."""
     root = Path(bundle)
@@ -430,8 +464,19 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     manifest_path = root / "reproducibility-manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise BundleError("reproducibility manifest must be a real file")
-    manifest = _load_json(manifest_path)
-    if manifest_path.read_bytes() != _canonical(manifest):
+    try:
+        manifest_raw = manifest_path.read_bytes()
+    except OSError as exc:
+        raise BundleError("reproducibility manifest cannot be read") from exc
+    if len(manifest_raw) > 4 * 2**20:
+        raise BundleError("reproducibility manifest exceeds size bound")
+    try:
+        manifest = _parse_json(
+            manifest_raw.decode("utf-8"), "reproducibility-manifest.json"
+        )
+    except UnicodeDecodeError as exc:
+        raise BundleError("reproducibility manifest is not UTF-8") from exc
+    if manifest_raw != _canonical(manifest):
         raise BundleError("reproducibility manifest bytes must be canonical")
     validated = validate_reproducibility_manifest(manifest)
     artifacts = manifest["artifacts"]
@@ -469,7 +514,30 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
         if name not in names or artifacts[field] != _sha256_reference(root / name):
             raise BundleError(f"digest mismatch: {field}")
 
-    required = {"result.json", "ledger-entry.json", "canonical-replay.json"}
+    input_bindings = {
+        "benchmark_manifest_digest": "benchmark.json",
+        "dataset_manifest_digest": "benchmark.json",
+        "fixture_manifest_digest": "fixture-manifest.json",
+        "generator_manifest_digest": "generator-manifest.json",
+        "adapter_manifest_digest": "adapter-manifest.json",
+        "scorer_manifest_digest": "scorer-manifest.json",
+        "baseline_manifest_digest": "baseline-manifest.json",
+        "judge_manifest_digest": "judge.json",
+        "prompt_manifest_digest": "prompt-manifest.json",
+    }
+    inputs = manifest["inputs"]
+    for field, name in input_bindings.items():
+        if name not in names or inputs[field] != _sha256_reference(root / name):
+            raise BundleError(f"digest mismatch: {field}")
+    _verify_embedded_legacy_bundle(root)
+
+    required = {
+        "result.json",
+        "ledger.jsonl",
+        "ledger.jsonl.head.json",
+        "ledger-public.pem",
+        "canonical-replay.json",
+    }
     missing = sorted(required - names)
     if missing:
         raise BundleError(f"reproducibility bundle missing required file: {missing[0]}")
@@ -500,12 +568,68 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if digest_errors:
         raise BundleError("result-v2 artifact digest mismatch: " + ", ".join(digest_errors))
 
-    ledger_entry = _load_json(root / "ledger-entry.json")
+    result_metrics = result.get("metrics")
+    declared_metrics = manifest["metrics"]
+    if not isinstance(result_metrics, list) or len(result_metrics) != len(declared_metrics):
+        raise BundleError("result-v2 metric inventory mismatch")
+    for declared in declared_metrics:
+        candidates = [
+            metric
+            for metric in result_metrics
+            if isinstance(metric, dict)
+            and metric.get("name") == declared["name"]
+            and metric.get("family") == declared["family"]
+        ]
+        if len(candidates) != 1:
+            raise BundleError("result-v2 metric inventory mismatch")
+        metric = candidates[0]
+        interval = metric.get("confidence_interval")
+        declared_interval = declared["interval"]
+        if (
+            metric.get("value") != declared["value"]
+            or metric.get("unit") != declared["unit"]
+            or not isinstance(interval, dict)
+            or interval.get("low") != declared_interval["low"]
+            or interval.get("high") != declared_interval["high"]
+        ):
+            raise BundleError("result-v2 metric binding mismatch")
+
+    recomputed = _load_json(root / "metrics.json")
+    if len(declared_metrics) == 1 and isinstance(recomputed, dict):
+        declared = declared_metrics[0]
+        interval = recomputed.get("interval")
+        if (
+            recomputed.get("metric") != declared["name"]
+            or recomputed.get("value") != declared["value"]
+            or recomputed.get("successes") != declared["numerator"]
+            or recomputed.get("total") != declared["denominator"]
+            or recomputed.get("trace_count") != declared["sample_count"]
+            or not isinstance(interval, dict)
+            or interval.get("method") != declared["interval"]["method"]
+            or interval.get("confidence")
+            != declared["interval"]["confidence_level"]
+            or interval.get("low") != declared["interval"]["low"]
+            or interval.get("high") != declared["interval"]["high"]
+        ):
+            raise BundleError("metrics do not recompute from raw traces")
+
+    from leaderboard.ledger import LedgerError, verify_ledger
+
+    try:
+        ledger_entries = verify_ledger(
+            root / "ledger.jsonl", root / "ledger-public.pem"
+        )
+    except LedgerError as exc:
+        raise BundleError("signed-ledger verification failed") from exc
+    matching_entries = [
+        entry
+        for entry in ledger_entries
+        if entry.get("entry_digest") == result_ref["ledger_entry_digest"]
+    ]
     if (
-        not isinstance(ledger_entry, dict)
-        or ledger_entry.get("entry_digest") != result_ref["ledger_entry_digest"]
-        or ledger_entry.get("status") != "succeeded"
-        or ledger_entry.get("result") != result
+        len(matching_entries) != 1
+        or matching_entries[0].get("status") != "succeeded"
+        or matching_entries[0].get("result") != result
     ):
         raise BundleError("signed-ledger inclusion reference mismatch")
     replay = _load_json(root / "canonical-replay.json")
@@ -513,6 +637,159 @@ def verify_reproducibility_bundle(bundle: Path | str) -> dict[str, Any]:
     if replay_digest != artifacts["canonical_replay_digest"]:
         raise BundleError("canonical replay digest mismatch")
     return validated
+
+
+def _require_clean_reproduction_checkout(expected_sha: str) -> None:
+    """Require the command to run at the manifest-bound clean Git checkout."""
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key.upper() in {"PATH", "PATHEXT", "SYSTEMDRIVE", "SYSTEMROOT", "WINDIR"}
+    }
+    environment.update(
+        {
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "LC_ALL": "C",
+            "LANG": "C",
+            "TZ": "UTC",
+        }
+    )
+    try:
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=Path.cwd(),
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        top_level = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=Path.cwd(),
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=Path.cwd(),
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        ).stdout
+        symbolic = subprocess.run(
+            ["git", "symbolic-ref", "-q", "HEAD"],
+            cwd=Path.cwd(),
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise BundleError("reproduction checkout could not be verified") from exc
+    if head != expected_sha:
+        raise BundleError("reproduction checkout does not match candidate Git SHA")
+    if Path(top_level).resolve() != Path.cwd().resolve():
+        raise BundleError("reproduction command must run from repository root")
+    if symbolic.returncode == 0:
+        raise BundleError("reproduction checkout must be detached")
+    if symbolic.returncode != 1:
+        raise BundleError("reproduction checkout state could not be verified")
+    if dirty:
+        raise BundleError("reproduction checkout is dirty")
+
+
+def reproduce_reproducibility_bundle(
+    source: Path | str, destination: Path | str
+) -> dict[str, Any]:
+    """Recompute the embedded run and atomically reproduce a REPRO-001 bundle."""
+    source_root = Path(source).resolve()
+    destination_root = Path(destination).resolve()
+    if destination_root.exists():
+        raise FileExistsError(f"refusing to overwrite bundle: {destination_root}")
+    if source_root == destination_root or source_root in destination_root.parents:
+        raise BundleError("reproduction destination must be outside the source bundle")
+    verify_reproducibility_bundle(source_root)
+    manifest = _load_json(source_root / "reproducibility-manifest.json")
+    expected_sha = manifest["run"]["candidate_git_sha"]
+    _require_clean_reproduction_checkout(expected_sha)
+    destination_root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(
+            prefix=f".{destination_root.name}-reproduce-", dir=destination_root.parent
+        )
+    )
+    final = staging / "final"
+    rerun = staging / "rerun"
+    try:
+        benchmark = _load_json(source_root / "benchmark.json")
+        config = _load_json(source_root / "config.json")
+        if not isinstance(benchmark, dict) or not isinstance(config, dict):
+            raise BundleError("embedded benchmark or config is invalid")
+        metadata = benchmark.get("metadata")
+        suite = config.get("suite")
+        if not isinstance(metadata, dict) or not isinstance(suite, str):
+            raise BundleError("embedded benchmark custody is incomplete")
+        if metadata.get("suite") != suite:
+            raise BundleError("embedded benchmark suite does not match config")
+        from eval.public.runner import run_public_suite
+
+        run_public_suite(
+            suite,
+            rerun,
+            benchmark_override=benchmark.get("data"),
+            candidate_manifest_path=(source_root / "candidate-manifest.json")
+            if metadata.get("family") == "qa"
+            else None,
+        )
+        legacy_files = {*_manifest_files(source_root), "bundle-manifest.json"}
+        for name in legacy_files:
+            if (source_root / name).read_bytes() != (rerun / name).read_bytes():
+                raise BundleError(f"reproduction mismatch: {name}")
+
+        final.mkdir()
+        inventory = manifest["artifacts"]["files"]
+        canonical_json = {
+            "adapter-manifest.json",
+            "baseline-manifest.json",
+            "canonical-replay.json",
+            "environment.json",
+            "fixture-manifest.json",
+            "generator-manifest.json",
+            "prompt-manifest.json",
+            "result.json",
+            "scorer-manifest.json",
+        }
+        for entry in inventory:
+            name = entry["path"]
+            target = final / name
+            if name in legacy_files:
+                target.write_bytes((rerun / name).read_bytes())
+            elif name in canonical_json:
+                target.write_bytes(_canonical(_load_json(source_root / name)))
+            else:
+                target.write_bytes((source_root / name).read_bytes())
+            if target.read_bytes() != (source_root / name).read_bytes():
+                raise BundleError(f"reproduction mismatch: {name}")
+        (final / "reproducibility-manifest.json").write_bytes(
+            _canonical(manifest)
+        )
+        result = verify_reproducibility_bundle(final)
+        final.rename(destination_root)
+        return result
+    except BaseException:
+        if destination_root.is_dir():
+            shutil.rmtree(destination_root, ignore_errors=True)
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def canonical_replay_fixture_custody(payload: object) -> bool:
@@ -856,6 +1133,8 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
 
 
 def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, Any]:
+    if (Path(source) / "reproducibility-manifest.json").exists():
+        return reproduce_reproducibility_bundle(source, destination)
     verify_bundle(source)
     custody = _load_json(Path(source) / "benchmark.json")
     from eval.public.runner import run_public_suite
@@ -1675,7 +1954,7 @@ def _parse_json(raw: str, label: str) -> Any:
             parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)),
             object_pairs_hook=_unique_object,
         )
-    except (json.JSONDecodeError, ValueError) as exc:
+    except (json.JSONDecodeError, ValueError, RecursionError) as exc:
         raise BundleError(f"invalid JSON in {label}") from exc
     _reject_non_finite(value)
     return value

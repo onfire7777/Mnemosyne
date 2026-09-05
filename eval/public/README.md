@@ -10,6 +10,62 @@ independent external reproduction. Retrieval proportions use Wilson intervals;
 future answer-quality tracks must name their reader/judge and use bootstrap
 intervals. Families are never aggregated.
 
+## Neutral reproducibility bundle v1 (REPRO-001)
+
+`mnemosyne.reproducibility-bundle/v1` is an additive, closed manifest contract.
+It does not change result-v1 bytes or behavior. It binds one validated result-v2
+atomic attempt to the existing public bundle, its signed-ledger inclusion
+reference, M15 canonical replay, and every manifest-owned byte needed to
+recompute the run. Unknown and missing fields fail closed.
+
+| Manifest section | Bound material |
+|---|---|
+| `result_ref` | Result-v2 record ID, exact result bytes, ledger entry, track kind, and track-specific lineage |
+| `inputs` | Benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge, and prompt manifests |
+| `artifacts` | Build, config, legacy bundle manifest, raw trace index, M15 replay, environment, lockfile, and complete normalized file inventory |
+| `run` | Candidate Git SHA, clean-state assertion, platform/runtime/dependencies, `C` locale, `UTC`, public environment allowlist, seeds, retries, and aborts |
+| `metrics` | Family/name/version/value/unit, counts, uncertainty method and parameters, interval, exclusions, and missing/unsupported/failed/aborted/not-measured counts |
+| `disclosures` | Software/data licenses, source revision, redistribution, PII/consent/takedown, custody, operator and signer roles, and optional separately signed reproduction receipt |
+| `reproduction` | The one fixed argv command and reproduction-time network prohibition |
+
+From the repository root of a clean detached checkout at the manifest's exact
+candidate commit, with a pre-provisioned lockfile-exact environment or verified
+offline wheelhouse/cache, run exactly:
+
+```bash
+uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
+```
+
+`BUNDLE` and `DEST` are path operands; every other token is fixed. Dependency
+acquisition is a separate disclosed preparation step. The reproduction command
+itself must have no network access, inherited credentials, production secrets,
+protected data, or untracked repository inputs. It refuses an existing or
+source-nested destination, a wrong/dirty/non-root checkout, altered lock or
+environment, symlinks, path escapes, inventory drift, duplicate JSON keys,
+secret-like values, and any digest, metric, interval, result, ledger, or replay
+mismatch. Failures remove incomplete output.
+
+The four result-v2 lineage digests have exact byte meanings:
+
+- `build_fingerprint = sha256(build.json)`
+- `config_digest = sha256(config.json)`
+- `bundle_digest = sha256(bundle-manifest.json)`
+- `trace_index_digest = sha256(traces.jsonl)`
+
+No parsing, newline conversion, reserialization, or Unicode normalization occurs
+before those hashes. The existing result-v1 and legacy version-1 bundle formats
+remain unchanged.
+
+Official-upstream, enhanced-successor, and development tracks have distinct
+lineage shapes and cannot be blended. Development and private-suite artifacts
+remain non-publishable and must never be used to tune or support a headline.
+Successful verification proves REPRO-001 contract integrity only: it does not
+prove REPRO-002, headline eligibility, independent reproduction, neutrality,
+certification, production readiness, custody approval, or publication approval.
+Those remain operator/human evidence gates. An independent reproduction receipt,
+when present, identifies only its reproducer and signature; it neither relabels
+the original operator nor grants a neutral or certified claim.
+
 ## Deterministic action development suites
 
 The live registry exposes three repository-authored, non-publishable action

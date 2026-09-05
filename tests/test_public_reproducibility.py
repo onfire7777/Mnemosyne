@@ -6,9 +6,13 @@ import json
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from eval.public import bundle as public_bundle
 from eval.public.bundle import BundleError
+from leaderboard.ledger import append_entry
+from eval.public.runner import run_public_suite
 from tests.test_leaderboard_result_contract import _v2_development_record
 from tests.test_public_eval import _canonical_replay_payload
 
@@ -58,37 +62,92 @@ def _digest(payload: bytes) -> str:
 
 
 def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
-    root.mkdir()
-    payloads = {
-        "build.json": _canonical({"candidate_git_sha": "b" * 40}),
-        "config.json": _canonical({"locale": "C", "timezone": "UTC"}),
-        "bundle-manifest.json": _canonical({"files": {}, "version": 1}),
-        "traces.jsonl": _canonical({"question_id": "q1", "score": 1.0}),
+    run_public_suite("smoke", root)
+    payloads = {entry.name: entry.read_bytes() for entry in root.iterdir()}
+    payloads.update(
+        {
         "environment.json": _canonical({"dependencies": ["mnemosyne==0.1.0"]}),
         "uv.lock": b"version = 1\n",
-    }
+            "fixture-manifest.json": _canonical({"kind": "synthetic"}),
+            "generator-manifest.json": _canonical({"seeded": True}),
+            "adapter-manifest.json": _canonical({"adapter": "smoke"}),
+            "scorer-manifest.json": _canonical({"profile": "smoke-hit-at-k-v1"}),
+            "baseline-manifest.json": _canonical({"baseline": "none"}),
+            "prompt-manifest.json": _canonical({"prompt": "none"}),
+        }
+    )
     record = _v2_development_record()
     record["build_fingerprint"] = _digest(payloads["build.json"])
     record["config_digest"] = _digest(payloads["config.json"])
     record["bundle_digest"] = _digest(payloads["bundle-manifest.json"])
     record["trace_index_digest"] = _digest(payloads["traces.jsonl"])
+    record["metrics"] = [
+        {
+            "name": "hit_at_k",
+            "family": "retrieval",
+            "value": 1.0,
+            "unit": "ratio",
+            "confidence_interval": {"low": 0.3424, "high": 1.0},
+        }
+    ]
     payloads["result.json"] = _canonical(record)
     replay = _canonical_replay_payload("wmbs-m01-development")
     payloads["canonical-replay.json"] = _canonical(replay)
-    ledger_entry = {
-        "entry_digest": DIGEST,
-        "result": record,
-        "status": "succeeded",
-    }
-    payloads["ledger-entry.json"] = _canonical(ledger_entry)
     for name, payload in payloads.items():
         (root / name).write_bytes(payload)
 
+    private_key = Ed25519PrivateKey.generate()
+    private_path = root.parent / "ledger-private.pem"
+    public_path = root / "ledger-public.pem"
+    private_path.write_bytes(
+        private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    public_path.write_bytes(
+        private_key.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    ledger_path = root / "ledger.jsonl"
+    ledger_entry = append_entry(
+        ledger_path,
+        private_path,
+        entry_id="repro-entry-1",
+        timestamp="2026-09-05T12:00:00Z",
+        entrant_id="mnemosyne-development",
+        status="succeeded",
+        run_id="repro-run-1",
+        result=record,
+        roster={"mnemosyne-development"},
+    )
+    for name in (
+        "ledger.jsonl",
+        "ledger.jsonl.head.json",
+        "ledger.jsonl.lock",
+        "ledger-public.pem",
+    ):
+        payloads[name] = (root / name).read_bytes()
+
     manifest = _manifest()
+    manifest["inputs"] = {
+        "benchmark_manifest_digest": _digest(payloads["benchmark.json"]),
+        "dataset_manifest_digest": _digest(payloads["benchmark.json"]),
+        "fixture_manifest_digest": _digest(payloads["fixture-manifest.json"]),
+        "generator_manifest_digest": _digest(payloads["generator-manifest.json"]),
+        "adapter_manifest_digest": _digest(payloads["adapter-manifest.json"]),
+        "scorer_manifest_digest": _digest(payloads["scorer-manifest.json"]),
+        "baseline_manifest_digest": _digest(payloads["baseline-manifest.json"]),
+        "judge_manifest_digest": _digest(payloads["judge.json"]),
+        "prompt_manifest_digest": _digest(payloads["prompt-manifest.json"]),
+    }
     manifest["result_ref"] = {
         "record_id": record["record_id"],
         "result_digest": _digest(payloads["result.json"]),
-        "ledger_entry_digest": DIGEST,
+        "ledger_entry_digest": ledger_entry["entry_digest"],
         "track_kind": record["track_kind"],
         "lineage": record["lineage"],
     }
@@ -117,8 +176,47 @@ def _write_reproducibility_bundle(root: Path) -> dict[str, object]:
             ],
         }
     )
+    manifest["metrics"] = [
+        {
+            "family": "retrieval",
+            "name": "hit_at_k",
+            "version": "1",
+            "value": 1.0,
+            "unit": "ratio",
+            "numerator": 2,
+            "denominator": 2,
+            "sample_count": 2,
+            "interval": {
+                "method": "wilson",
+                "confidence_level": 0.95,
+                "low": 0.3424,
+                "high": 1.0,
+                "parameters": {},
+            },
+            "exclusions": [],
+            "outcomes": {
+                "missing": 0,
+                "unsupported": 0,
+                "failed": 0,
+                "aborted": 0,
+                "not_measured": 0,
+            },
+        }
+    ]
     (root / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
     return manifest
+
+
+def _refresh_owned_file(root: Path, name: str) -> None:
+    manifest_path = root / "reproducibility-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload = (root / name).read_bytes()
+    entry = next(
+        item for item in manifest["artifacts"]["files"] if item["path"] == name
+    )
+    entry["size"] = len(payload)
+    entry["digest"] = _digest(payload)
+    manifest_path.write_bytes(_canonical(manifest))
 
 
 def _manifest(*, track_kind: str = "DEVELOPMENT") -> dict[str, object]:
@@ -313,6 +411,35 @@ def test_rejects_non_finite_metric_and_secret_environment_value() -> None:
         _validate(secret)
 
 
+def test_rejects_cyclic_or_excessively_large_manifest_structures() -> None:
+    cyclic = _manifest()
+    cyclic["cycle"] = cyclic
+    with pytest.raises(BundleError, match="cycle"):
+        _validate(cyclic)
+
+    oversized = _manifest()
+    file_entry = oversized["artifacts"]["files"][0]  # type: ignore[index]
+    oversized["artifacts"]["files"] = [  # type: ignore[index]
+        {**file_entry, "path": f"traces/{index}.jsonl"}
+        for index in range(4097)
+    ]
+    with pytest.raises(BundleError, match="bounded"):
+        _validate(oversized)
+
+
+def test_rights_and_consent_disclosures_fail_closed() -> None:
+    no_rights = _manifest()
+    no_rights["disclosures"]["redistribution_permitted"] = False  # type: ignore[index]
+    with pytest.raises(BundleError, match="redistribution"):
+        _validate(no_rights)
+
+    no_consent = _manifest()
+    no_consent["disclosures"]["pii_present"] = True  # type: ignore[index]
+    no_consent["disclosures"]["consent_documented"] = False  # type: ignore[index]
+    with pytest.raises(BundleError, match="consent"):
+        _validate(no_consent)
+
+
 @pytest.mark.parametrize("path", ["../traces.jsonl", "/traces.jsonl", "a\\b"])
 def test_inventory_paths_are_normalized_relative_posix_paths(path: str) -> None:
     manifest = _manifest()
@@ -356,3 +483,76 @@ def test_inventory_drift_and_symlinks_fail_before_validation(tmp_path: Path) -> 
     (root / "unowned.txt").write_text("drift", encoding="utf-8")
     with pytest.raises(BundleError, match="inventory mismatch"):
         public_bundle.verify_reproducibility_bundle(root)
+
+
+def test_signed_ledger_is_cryptographically_verified_after_inventory_check(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "bundle"
+    _write_reproducibility_bundle(root)
+    ledger = root / "ledger.jsonl"
+    entry = json.loads(ledger.read_text(encoding="utf-8"))
+    entry["signature"] = "!" + entry["signature"][1:]
+    ledger.write_bytes(_canonical(entry))
+    _refresh_owned_file(root, "ledger.jsonl")
+
+    with pytest.raises(BundleError, match="signed-ledger verification"):
+        public_bundle.verify_reproducibility_bundle(root)
+
+
+def test_reproduction_recomputes_legacy_outputs_and_byte_compares_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    _write_reproducibility_bundle(source)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+
+    result = public_bundle.reproduce_bundle(source, destination)
+
+    assert result["schema_version"] == "mnemosyne.reproducibility-bundle/v1"
+    assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
+    assert {
+        entry.name: entry.read_bytes() for entry in source.iterdir()
+    } == {entry.name: entry.read_bytes() for entry in destination.iterdir()}
+
+
+def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    _write_reproducibility_bundle(source)
+
+    def reject(_sha: str) -> None:
+        raise BundleError("reproduction checkout is dirty")
+
+    monkeypatch.setattr(public_bundle, "_require_clean_reproduction_checkout", reject)
+    with pytest.raises(BundleError, match="dirty"):
+        public_bundle.reproduce_bundle(source, destination)
+    assert not destination.exists()
+
+
+def test_reproduction_drift_removes_partial_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    destination = tmp_path / "reproduced"
+    _write_reproducibility_bundle(source)
+    monkeypatch.setattr(
+        public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
+    )
+    original = runner._ADAPTERS["smoke"]
+
+    def drifted(benchmark: object, cli: object) -> tuple[list[dict], dict]:
+        traces, metrics = original(benchmark, cli)
+        return list(reversed(traces)), metrics
+
+    monkeypatch.setitem(runner._ADAPTERS, "smoke", drifted)
+    with pytest.raises(BundleError, match="reproduction mismatch"):
+        public_bundle.reproduce_bundle(source, destination)
+    assert not destination.exists()
