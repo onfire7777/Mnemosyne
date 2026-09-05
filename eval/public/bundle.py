@@ -988,9 +988,11 @@ def assemble_reproducibility_bundle(
         final.mkdir()
         for entry in inventory:
             name = entry["path"]
+            source_file = source_root / name
             target = final / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source_root / name, target)
+            shutil.copyfile(source_file, target)
+            shutil.copymode(source_file, target, follow_symlinks=False)
         (final / "reproducibility-manifest.json").write_bytes(_canonical(manifest))
         result = verify_reproducibility_bundle(final)
         if os.path.lexists(destination_root):
@@ -1315,6 +1317,7 @@ def reproduce_reproducibility_bundle(
                 target.write_bytes(_canonical(_load_json(source_root / name)))
             else:
                 target.write_bytes((source_root / name).read_bytes())
+            shutil.copymode(source_root / name, target, follow_symlinks=False)
             if target.read_bytes() != (source_root / name).read_bytes():
                 raise BundleError(f"reproduction mismatch: {name}")
         (final / "reproducibility-manifest.json").write_bytes(

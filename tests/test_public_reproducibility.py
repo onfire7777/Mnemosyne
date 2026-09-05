@@ -731,6 +731,7 @@ def test_atomic_assembler_packages_and_verifies_owned_artifacts(tmp_path: Path) 
     destination = tmp_path / "bundle"
     manifest = _write_reproducibility_bundle(source)
     (source / "reproducibility-manifest.json").unlink()
+    source_mode = (source / "reproduce.sh").stat().st_mode & 0o777
 
     result = public_bundle.assemble_reproducibility_bundle(
         source, destination, manifest
@@ -739,6 +740,8 @@ def test_atomic_assembler_packages_and_verifies_owned_artifacts(tmp_path: Path) 
     assert result["valid"] is True
     assert not source.joinpath("reproducibility-manifest.json").exists()
     assert public_bundle.verify_reproducibility_bundle(destination)["valid"] is True
+    if os.name != "nt":
+        assert (destination / "reproduce.sh").stat().st_mode & 0o777 == source_mode
 
 
 def test_atomic_assembler_rejects_source_inventory_drift(tmp_path: Path) -> None:
@@ -1119,6 +1122,7 @@ def test_reproduction_recomputes_metrics_and_byte_compares_everything(
     source = tmp_path / "source"
     destination = tmp_path / "reproduced"
     _write_reproducibility_bundle(source)
+    source_mode = (source / "reproduce.sh").stat().st_mode & 0o777
     monkeypatch.setattr(
         public_bundle, "_require_clean_reproduction_checkout", lambda _sha: None
     )
@@ -1131,6 +1135,8 @@ def test_reproduction_recomputes_metrics_and_byte_compares_everything(
     assert {
         entry.name: entry.read_bytes() for entry in source.iterdir()
     } == {entry.name: entry.read_bytes() for entry in destination.iterdir()}
+    if os.name != "nt":
+        assert (destination / "reproduce.sh").stat().st_mode & 0o777 == source_mode
 
 
 def test_reproduction_rejects_dirty_or_wrong_checkout_before_output(
