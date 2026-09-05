@@ -1805,8 +1805,29 @@ def reproduce_reproducibility_bundle(
     )
     final = staging / "final"
     try:
-        benchmark = _load_json(source_root / "benchmark.json")
-        config = _load_json(source_root / "config.json")
+        snapshot = staging / "source"
+        snapshot.mkdir()
+        manifest_raw = _canonical(manifest)
+        manifest_entry = {
+            "path": "reproducibility-manifest.json",
+            "size": len(manifest_raw),
+            "digest": "sha256:" + hashlib.sha256(manifest_raw).hexdigest(),
+        }
+        _copy_inventory_artifact(
+            source_root / "reproducibility-manifest.json",
+            snapshot / "reproducibility-manifest.json",
+            manifest_entry,
+        )
+        inventory = manifest["artifacts"]["files"]
+        for entry in inventory:
+            snapshot_file = snapshot / entry["path"]
+            snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            _copy_inventory_artifact(
+                source_root / entry["path"], snapshot_file, entry
+            )
+
+        benchmark = _load_json(snapshot / "benchmark.json")
+        config = _load_json(snapshot / "config.json")
         if not isinstance(benchmark, dict) or not isinstance(config, dict):
             raise BundleError("embedded benchmark or config is invalid")
         metadata = benchmark.get("metadata")
@@ -1817,7 +1838,7 @@ def reproduce_reproducibility_bundle(
             raise BundleError("embedded benchmark suite does not match config")
         traces = [
             _parse_json(line, "traces.jsonl")
-            for line in (source_root / "traces.jsonl").read_text(
+            for line in (snapshot / "traces.jsonl").read_text(
                 encoding="utf-8"
             ).splitlines()
         ]
@@ -1830,11 +1851,10 @@ def reproduce_reproducibility_bundle(
             traces,
         )
         expected_metric_bytes = _canonical(expected_metrics)
-        if expected_metric_bytes != (source_root / "metrics.json").read_bytes():
+        if expected_metric_bytes != (snapshot / "metrics.json").read_bytes():
             raise BundleError("reproduction mismatch: metrics.json")
 
         final.mkdir()
-        inventory = manifest["artifacts"]["files"]
         canonical_json = {
             "adapter-manifest.json",
             "baseline-manifest.json",
@@ -1848,7 +1868,7 @@ def reproduce_reproducibility_bundle(
         }
         for entry in inventory:
             name = entry["path"]
-            source_file = source_root / name
+            source_file = snapshot / name
             target = final / name
             target.parent.mkdir(parents=True, exist_ok=True)
             if name == "metrics.json":
