@@ -5,6 +5,7 @@ unit cases (validation matrix, publication restore, mixed-schema, etc.).
 """
 
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 
@@ -28,8 +29,10 @@ def _hrefs(html: str) -> list[str]:
 
 def _assert_safe_relative_hrefs(html: str) -> None:
     for href in _hrefs(html):
-        assert not href.startswith(("http:", "https:", "javascript:", "/")), href
-        assert "://" not in href, href
+        parsed = urlparse(href)
+        assert parsed.scheme == "", href
+        assert parsed.netloc == "", href
+        assert not href.startswith("/"), href
 
 
 def _assert_leaderboard_site(output: Path, record_id: str) -> Path:
