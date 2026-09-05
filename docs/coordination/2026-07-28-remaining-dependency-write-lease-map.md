@@ -287,6 +287,31 @@ The following packages are complete source history, not runnable work:
   claimed here. PR #134 changes no benchmark result or admission state,
   does not recompute the canonical baseline, and must pass fresh
   exact-head review, security, and CI before merge.
+- PR #138: M02 canonical-replay seed pin
+  (title: eval: pin M02 canonical-replay seed)
+  from exact head `93bb5845a57a7c08a74e858dc4850fd9f02424b1`; all
+  required exact-head checks passed in run `33938772720`; merge
+  `ec26c40d359fc1f6904a97eac51aab461f9fd0f6` at `2026-09-05T02:50:49Z`.
+  Prior tip was `c67e917410d7b468a337fda19ba654d57367d843` (PR #135).
+  Post-main run `33940223834` failed solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #138 was absent from this lease-map; this receipt repairs
+  that bookkeeping. Exclusive File Set:
+  `eval/public/bundle.py`, `tests/test_public_whole_memory_reference.py`.
+  Purpose: M02 canonical-replay seed pin; docs-only privacy for THIS
+  receipt PR (the recorded #138 was code). This receipt changes no
+  benchmark result or admission state and does not recompute the
+  canonical baseline (baseline stays `main@f688c747`).
+- PR #141: ordinary documentation receipt recording the merged PR #138
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-05T11:24:20Z`
+  capture and adds only the PR #138 merged-baseline bullet and this
+  structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #141 changes no
+  benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review, security,
+  and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
