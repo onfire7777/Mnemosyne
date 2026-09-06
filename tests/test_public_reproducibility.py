@@ -999,6 +999,13 @@ def test_result_lineage_must_match_authenticated_manifest(
             "fidelity artifact",
         ),
         (
+            "OFFICIAL-UPSTREAM",
+            "fidelity.json",
+            "dataset_digest",
+            "sha256:" + "9" * 64,
+            "fidelity artifact",
+        ),
+        (
             "ENHANCED-SUCCESSOR",
             "parent.json",
             "record_id",
