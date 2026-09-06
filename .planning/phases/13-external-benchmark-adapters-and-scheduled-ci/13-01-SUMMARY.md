@@ -3,7 +3,7 @@ phase: 13-external-benchmark-adapters-and-scheduled-ci
 plan: 01
 status: complete
 completed: 2026-07-30
-requirements-completed: []
+requirements-completed: [BENCH-007]
 ---
 
 # Phase 13 Plan 01 Summary: Scheduled Development Regression CI
@@ -26,10 +26,16 @@ claim output.
   development job on that merge commit.
 - Exact post-merge main CI run `30561266140` passed all gating jobs on that
   merge commit; the nightly-only soak was correctly skipped.
+- Cadence evidence added on 2026-09-05: real `schedule` run `30807305055`
+  succeeded on `b8673031a80158c49d552a4b3647829d213243bd`, started
+  `2026-08-03T10:52:57Z`. Job `91665545558` and its fixed public-contract test
+  step succeeded. Authenticated GitHub run/job metadata is retained in
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Together with the merged source, this closes BENCH-007; the original source
+  completion date above is preserved.
 
 ## Remaining Gates
 
-- BENCH-007 remains Partial until a real scheduled-cadence run is retained.
 - BENCH-006 remains Partial until exact upstream revisions, rights, full
   provider/model/judge disclosure, operator admission, and official execution
   evidence exist.

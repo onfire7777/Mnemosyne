@@ -9,8 +9,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import leaderboard.publish as publication
 from leaderboard.ledger import append_entry
-from leaderboard.publish import PublicationError, main, publish_site
+from leaderboard.publish import (
+    PublicationError,
+    _parse_record_mapping,
+    main,
+    publish_site,
+)
 from leaderboard.render import render_site
+from leaderboard.validate import DIGEST_PAYLOAD_NAMES
+from tests.test_leaderboard_result_contract import (
+    _v2_development_record,
+    _v2_official_record,
+    _v2_successor_record,
+)
 
 _TRACE_TEXT = (
     json.dumps(
@@ -473,7 +484,8 @@ def test_cli_reports_usage_for_too_few_arguments(
     assert main([]) == 2
     assert capsys.readouterr().err == (
         "usage: python -m leaderboard.publish "
-        "LEDGER PUBLIC_KEY DESTINATION RECORD_ID=TRACES [...]\n"
+        "LEDGER PUBLIC_KEY DESTINATION "
+        "RECORD_ID=TRACES[,build=BUILD,config=CONFIG,bundle=BUNDLE] [...]\n"
     )
 
 
@@ -510,3 +522,491 @@ def test_cli_rejects_invalid_trace_mappings_without_mutating_destination(
     assert error.startswith("error: invalid trace mapping: ")
     assert "Traceback" not in error
     assert not destination.exists()
+
+
+def _v2_bound_result(tmp_path: Path, record: dict[str, object]) -> dict[str, Path]:
+    payloads = {
+        "build.json": b'{"build":true}\n',
+        "config.json": b'{"config":true}\n',
+        "bundle-manifest.json": b'{"bundle":true}\n',
+        "traces.jsonl": _TRACE_TEXT.encode(),
+    }
+    paths: dict[str, Path] = {}
+    for name, content in payloads.items():
+        path = tmp_path / name
+        path.write_bytes(content)
+        paths[name] = path
+    for field, name in DIGEST_PAYLOAD_NAMES.items():
+        record[field] = "sha256:" + hashlib.sha256(payloads[name]).hexdigest()
+    return paths
+
+
+def test_cli_forwards_artifact_bindings_to_publish_site(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    captured: dict[str, object] = {}
+
+    def _capture(
+        ledger_path: Path,
+        public_key_path: Path,
+        traces: dict[str, Path],
+        destination: Path,
+        artifacts: dict[str, dict[str, Path]] | None = None,
+    ) -> None:
+        captured["traces"] = traces
+        captured["artifacts"] = artifacts
+
+    monkeypatch.setattr(publication, "publish_site", _capture)
+    record_id = str(record["record_id"])
+    mapping = (
+        f"{record_id}={artifacts['traces.jsonl']}"
+        f",build={artifacts['build.json']}"
+        f",config={artifacts['config.json']}"
+        f",bundle={artifacts['bundle-manifest.json']}"
+    )
+
+    assert main([str(ledger), str(public_key), str(tmp_path / "site"), mapping]) == 0
+    traces = captured["traces"]
+    assert isinstance(traces, dict)
+    assert traces[record_id] == artifacts["traces.jsonl"]
+    bound = captured["artifacts"]
+    assert isinstance(bound, dict)
+    assert bound[record_id] == {
+        "build": artifacts["build.json"],
+        "config": artifacts["config.json"],
+        "bundle": artifacts["bundle-manifest.json"],
+    }
+
+
+def test_parse_preserves_commas_in_trace_path_without_artifacts() -> None:
+    record_id, trace, files = _parse_record_mapping(
+        "r1=/tmp/trace,part.jsonl"
+    )
+    assert record_id == "r1"
+    assert trace == Path("/tmp/trace,part.jsonl")
+    assert files is None
+
+
+def test_parse_preserves_commas_in_trace_path_with_artifact_bindings() -> None:
+    record_id, trace, files = _parse_record_mapping(
+        "r1=/tmp/trace,part.jsonl,build=/tmp/build,a.json,"
+        "config=/tmp/config,b.json,bundle=/tmp/bundle,c.json"
+    )
+    assert record_id == "r1"
+    assert trace == Path("/tmp/trace,part.jsonl")
+    assert files == {
+        "build": Path("/tmp/build,a.json"),
+        "config": Path("/tmp/config,b.json"),
+        "bundle": Path("/tmp/bundle,c.json"),
+    }
+
+
+def test_cli_preserves_commas_in_trace_path_without_artifacts(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    traces = _trace(tmp_path / "trace,part.jsonl")
+    captured: dict[str, object] = {}
+
+    def _capture(
+        ledger_path: Path,
+        public_key_path: Path,
+        traces: dict[str, Path],
+        destination: Path,
+        artifacts: dict[str, dict[str, Path]] | None = None,
+    ) -> None:
+        captured["traces"] = traces
+        captured["artifacts"] = artifacts
+
+    monkeypatch.setattr(publication, "publish_site", _capture)
+    mapping = f"result-success={traces}"
+
+    assert main([str(ledger), str(public_key), str(tmp_path / "site"), mapping]) == 0
+    forwarded = captured["traces"]
+    assert isinstance(forwarded, dict)
+    assert forwarded["result-success"] == traces
+    assert "," in str(forwarded["result-success"])
+    assert captured["artifacts"] is None
+
+
+def test_cli_preserves_commas_in_trace_path_with_artifact_bindings(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    comma_trace = tmp_path / "trace,part.jsonl"
+    comma_trace.write_bytes(artifacts["traces.jsonl"].read_bytes())
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    captured: dict[str, object] = {}
+
+    def _capture(
+        ledger_path: Path,
+        public_key_path: Path,
+        traces: dict[str, Path],
+        destination: Path,
+        artifacts: dict[str, dict[str, Path]] | None = None,
+    ) -> None:
+        captured["traces"] = traces
+        captured["artifacts"] = artifacts
+
+    monkeypatch.setattr(publication, "publish_site", _capture)
+    record_id = str(record["record_id"])
+    mapping = (
+        f"{record_id}={comma_trace}"
+        f",build={artifacts['build.json']}"
+        f",config={artifacts['config.json']}"
+        f",bundle={artifacts['bundle-manifest.json']}"
+    )
+
+    assert main([str(ledger), str(public_key), str(tmp_path / "site"), mapping]) == 0
+    forwarded = captured["traces"]
+    assert isinstance(forwarded, dict)
+    assert forwarded[record_id] == comma_trace
+    bound = captured["artifacts"]
+    assert isinstance(bound, dict)
+    assert bound[record_id]["build"] == artifacts["build.json"]
+
+
+def test_cli_v2_without_artifact_bindings_reports_missing_source(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    destination = tmp_path / "site"
+    mapping = f"{record['record_id']}={artifacts['traces.jsonl']}"
+
+    assert main([str(ledger), str(public_key), str(destination), mapping]) == 2
+    error = capsys.readouterr().err
+    assert error.startswith("error: missing artifact source: ")
+    assert "Traceback" not in error
+    assert not destination.exists()
+
+
+def test_cli_v2_with_artifact_bindings_reaches_readiness_gate(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    destination = tmp_path / "site"
+    mapping = (
+        f"{record['record_id']}={artifacts['traces.jsonl']}"
+        f",build={artifacts['build.json']}"
+        f",config={artifacts['config.json']}"
+        f",bundle={artifacts['bundle-manifest.json']}"
+    )
+
+    assert main([str(ledger), str(public_key), str(destination), mapping]) == 2
+    error = capsys.readouterr().err
+    assert error.startswith("error: result is not ready")
+    assert "missing artifact source" not in error
+    assert "Traceback" not in error
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        ",build=build.json",
+        ",build=build.json,config=config.json",
+        ",build=build.json,config=config.json,bundle=bundle.json,extra=x",
+        ",unknown=build.json,config=config.json,bundle=bundle.json",
+        ",build=,config=config.json,bundle=bundle.json",
+        ",build=build.json,build=other.json,config=config.json,bundle=bundle.json",
+    ],
+)
+def test_cli_rejects_invalid_artifact_mappings_without_mutating_destination(
+    tmp_path: Path,
+    key_paths: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+    suffix: str,
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-success",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=_result("result-success"),
+    )
+    traces = _trace(tmp_path / "trace.jsonl")
+    destination = tmp_path / "site"
+
+    assert (
+        main(
+            [
+                str(ledger),
+                str(public_key),
+                str(destination),
+                f"result-success={traces}{suffix}",
+            ]
+        )
+        == 2
+    )
+    error = capsys.readouterr().err
+    assert error.startswith("error: invalid artifact mapping: ")
+    assert "Traceback" not in error
+    assert not destination.exists()
+
+
+def test_rejects_not_ready_v2_even_when_four_digests_match(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+    destination = tmp_path / "site"
+
+    with pytest.raises(PublicationError, match="not ready"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            destination,
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not destination.exists()
+
+
+def test_rejects_v2_publish_on_digest_mismatch(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    artifacts["config.json"].write_bytes(b'{"config":false}\n')
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+
+    with pytest.raises(PublicationError, match="digest"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            tmp_path / "site",
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()
+
+
+def test_rejects_mixed_v1_and_v2_publication(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    roster = {"entrant-a", "entrant-b"}
+    v2 = _v2_development_record()
+    artifacts = _v2_bound_result(tmp_path, v2)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v1",
+        entrant_id="entrant-a",
+        roster=roster,
+        result=_result("result-v1"),
+    )
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="entrant-b",
+        roster=roster,
+        result=v2,
+    )
+
+    with pytest.raises(PublicationError, match="mixed result schema"):
+        publish_site(
+            ledger,
+            public_key,
+            {
+                "result-v1": _trace(tmp_path / "v1.jsonl"),
+                str(v2["record_id"]): artifacts["traces.jsonl"],
+            },
+            tmp_path / "site",
+            artifacts={
+                str(v2["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()
+
+
+def test_publishes_only_active_v2_after_v1_supersession(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    roster = {"synthetic-entrant"}
+    original_bytes_path = tmp_path / "original.jsonl"
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v1",
+        entrant_id="synthetic-entrant",
+        roster=roster,
+        result=_result("result-v1"),
+    )
+    original_bytes_path.write_bytes(ledger.read_bytes())
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v1-superseded",
+        entrant_id="synthetic-entrant",
+        roster=roster,
+        status="superseded",
+        supersedes="entry-v1",
+    )
+    successor = _v2_successor_record()
+    artifacts = _v2_bound_result(tmp_path, successor)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-v2",
+        entrant_id="synthetic-entrant",
+        roster=roster,
+        result=successor,
+    )
+    destination = tmp_path / "site"
+
+    with pytest.raises(PublicationError, match="not ready|admission"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(successor["record_id"]): artifacts["traces.jsonl"]},
+            destination,
+            artifacts={
+                str(successor["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+
+    assert ledger.read_bytes().startswith(original_bytes_path.read_bytes())
+    assert not destination.exists()
+
+
+def test_rejects_v2_publish_when_admission_is_proposed(
+    tmp_path: Path, key_paths: tuple[Path, Path]
+) -> None:
+    private_key, public_key = key_paths
+    ledger = tmp_path / "runs.jsonl"
+    record = _v2_official_record()
+    artifacts = _v2_bound_result(tmp_path, record)
+    _append(
+        ledger,
+        private_key,
+        entry_id="entry-official",
+        entrant_id="synthetic-entrant",
+        roster={"synthetic-entrant"},
+        result=record,
+    )
+
+    with pytest.raises(PublicationError, match="admission|not ready"):
+        publish_site(
+            ledger,
+            public_key,
+            {str(record["record_id"]): artifacts["traces.jsonl"]},
+            tmp_path / "site",
+            artifacts={
+                str(record["record_id"]): {
+                    "build": artifacts["build.json"],
+                    "config": artifacts["config.json"],
+                    "bundle": artifacts["bundle-manifest.json"],
+                }
+            },
+        )
+    assert not (tmp_path / "site").exists()
