@@ -150,6 +150,23 @@ _REPRO_MANIFEST_ARTIFACTS = {
     "reader": ("reader", "reader-ref.json"),
     "scorer": ("scorer", "scorer.json"),
 }
+_REPRO_CORE_ARTIFACTS = {
+    REPRODUCIBILITY_MANIFEST_NAME,
+    "build.json",
+    "bundle-manifest.json",
+    "canonical-replay.json",
+    "config.json",
+    "environment.json",
+    "metrics.json",
+    "result.json",
+    "traces.jsonl",
+    "uv.lock",
+}
+_REPRO_LEDGER_ARTIFACTS = {
+    "ledger.jsonl",
+    "ledger.jsonl.head.json",
+    "ledger-public.pem",
+}
 _REPRO_PUBLICATION_FLAGS = (
     "certified",
     "headline",
@@ -1263,11 +1280,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         for field in ("locale", "timezone")
     ):
         raise BundleError("canonical replay config custody mismatch")
-    ledger_names = (
-        "ledger.jsonl",
-        "ledger.jsonl.head.json",
-        "ledger-public.pem",
-    )
+    ledger_names = tuple(sorted(_REPRO_LEDGER_ARTIFACTS))
     present_ledger_names = {name for name in ledger_names if name in payloads}
     if manifest.get("ledger_ref") is None:
         if present_ledger_names:
@@ -1321,6 +1334,15 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
             for entry in matched
         ):
             raise BundleError("ledger_ref digest mismatch")
+    expected_artifacts = _REPRO_CORE_ARTIFACTS | {
+        _REPRO_MANIFEST_ARTIFACTS[key][1]
+        for key, ref in refs.items()
+        if ref is not None
+    }
+    if manifest.get("ledger_ref") is not None:
+        expected_artifacts |= _REPRO_LEDGER_ARTIFACTS
+    if set(payloads) - expected_artifacts:
+        raise BundleError("reproducibility bundle contains an unexpected artifact")
     try:
         trace_lines = payloads["traces.jsonl"].decode("utf-8").splitlines()
     except UnicodeDecodeError as exc:

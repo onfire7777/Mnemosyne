@@ -1471,17 +1471,30 @@ def test_unreferenced_named_manifest_artifact_fails_closed(tmp_path: Path) -> No
         verify_bundle(root)
 
 
-def test_opaque_inventory_artifact_fails_closed(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("name", "media_type", "artifact", "message"),
+    (
+        ("payload.bin", "application/octet-stream", b"opaque\x00\xff", "media type"),
+        (
+            "official-proof.json",
+            "application/json",
+            b'{"claim":"official"}\n',
+            "unexpected artifact",
+        ),
+    ),
+)
+def test_unrecognized_inventory_artifact_fails_closed(
+    tmp_path: Path, name: str, media_type: str, artifact: bytes, message: str
+) -> None:
     bundle = _write_reproducibility_bundle(
-        tmp_path / "opaque-artifact", include_ledger=False
+        tmp_path / "unrecognized-artifact", include_ledger=False
     )
     root = bundle["root"]
-    opaque = b"opaque-binary-artifact\x00\xff"
-    (root / "payload.bin").write_bytes(opaque)
+    (root / name).write_bytes(artifact)
 
     nested_path = root / "bundle-manifest.json"
     nested = json.loads(nested_path.read_text(encoding="utf-8"))
-    nested["files"]["payload.bin"] = _sha256_hex(opaque)
+    nested["files"][name] = _sha256_hex(artifact)
     nested_bytes = _write_json(nested_path, nested)
 
     result_path = root / "result.json"
@@ -1495,10 +1508,10 @@ def test_opaque_inventory_artifact_fails_closed(tmp_path: Path) -> None:
     manifest["hashes"].append(
         {
             "canonicalization": "raw-bytes",
-            "media_type": "application/octet-stream",
-            "path": "payload.bin",
-            "sha256": _sha256_ref(opaque),
-            "size": len(opaque),
+            "media_type": media_type,
+            "path": name,
+            "sha256": _sha256_ref(artifact),
+            "size": len(artifact),
         }
     )
     manifest["hashes"].sort(key=lambda item: item["path"])
@@ -1511,7 +1524,7 @@ def test_opaque_inventory_artifact_fails_closed(tmp_path: Path) -> None:
         entry["sha256"] = _sha256_ref(payload)
     _write_json(manifest_path, manifest)
 
-    with pytest.raises(BundleError, match="inventory media type"):
+    with pytest.raises(BundleError, match=message):
         verify_bundle(root)
 
 
