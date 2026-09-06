@@ -36,7 +36,8 @@ REQUIRED = (
 SECRET = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
-    r"AIza[A-Za-z0-9_-]{35}|AKIA[A-Z0-9]{16}|"
+    r"AIza[A-Za-z0-9_-]{35}|(?:AKIA|ASIA)[A-Z0-9]{16}|"
+    r"sk-(?:(?:proj|svcacct)-[A-Za-z0-9_-]{16,}|[A-Za-z0-9]{20,})|"
     r"sk_(?:live|test)_[A-Za-z0-9]{16,}|"
     r"(?i:bearer|basic)\s+[A-Za-z0-9._~+/-]{20,}={0,2}|"
     r"[A-Za-z][A-Za-z0-9+.-]{0,31}://"
