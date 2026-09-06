@@ -1778,6 +1778,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     raw = b"".join(payloads[name] for name in sorted(actual))
     if SECRET.search(raw.decode("utf-8", errors="replace")):
         raise BundleError("secret-like material detected")
+    _validate_legacy_canonical_bytes(payloads)
     manifest = _load_inventory_json(payloads, "bundle-manifest.json")
     if set(manifest.get("files", {})) != set(payload_files):
         raise BundleError("manifest inventory mismatch")
@@ -1907,6 +1908,24 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     ):
         raise BundleError("smoke publication flags must remain false")
     return {"family": family, "suite": metadata.get("suite"), "valid": True}
+
+
+def _validate_legacy_canonical_bytes(payloads: dict[str, bytes]) -> None:
+    """Require the exact deterministic JSON encoding emitted by result-v1."""
+    for name, payload in payloads.items():
+        if not (name.endswith(".json") or name.endswith(".jsonl")):
+            continue
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BundleError(f"invalid UTF-8 in {name}") from exc
+        if name.endswith(".jsonl"):
+            values = [_parse_bounded_json(line, name) for line in text.splitlines()]
+            canonical = b"".join(_canonical(value) for value in values)
+        else:
+            canonical = _canonical(_parse_bounded_json(text, name))
+        if payload != canonical:
+            raise BundleError(f"non-canonical JSON bytes in {name}")
 
 
 def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, Any]:
