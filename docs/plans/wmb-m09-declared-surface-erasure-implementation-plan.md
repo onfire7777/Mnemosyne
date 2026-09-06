@@ -38,35 +38,45 @@ its own placement was authorized.
 
 ### 0.2 Why this plan is NOT CODE-READY
 
-All of the following are blocking. None is discharged by writing this file.
+**Source-readiness blockers** (must clear before descriptive Stage A). None
+is discharged by writing this file.
 
 1. Spec WMBS-D (`…standard-design.md:1394–1398`): build M06–M13 only after
    WMBS-B **and** after each product capability exists through a public
-   contract. C11 / RAIL-001 is not a public contract on this base.
-2. Spec M09 resource prerequisite (`…standard-design.md:839–840`): a measured
-   local or P32 receipt for the exact declared surfaces. None exists.
-3. Spec M09 acceptance (`…standard-design.md:832–836`): zero recoverable
-   residue on every declared surface, zero unrelated mutation, 100% valid
-   signed receipts, and zero attributable semantic leakage where the gold can
-   objectively tie the leaked fact to the erased subject. No preregistered
-   surface set or receipt protocol exists on this base. Stage A cannot claim
-   those bounds. Passing is technical conformance for declared surfaces, not
-   a legal-compliance opinion.
-4. Spec M09 deferral (`…standard-design.md:843–845`): no erasure claim if any
+   contract. C11 / RAIL-001 is not a public contract on this base (same as R2).
+2. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M09 is not
+   in the first pilot (`…standard-design.md:847–848`). Freeze is a later step.
+   This file does not freeze itself. CoS ACCEPT of this one-file plan is the
+   GoalEx write-slot grant for this Exact 1 path only; it does not recompute
+   the lease-map or inventory.
+3. Spec M09 deferral (`…standard-design.md:843–845`): no erasure claim if any
    declared readable surface cannot be probed, backup scope is undisclosed,
    or identity authorization cannot be exercised. Unsupported systems receive
    no erasure claim. An unprobeable surface is not a pass.
-5. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M09 is not
-   in the first pilot (`…standard-design.md:847–848`). Freeze is a later step.
-   This file does not freeze itself.
-6. P32 replicas, object storage, and full PITR are `DEFERRED`
-   (`…standard-design.md:846–847`). Docker/P32 is an external dependency only
-   for those surfaces. This plan does not admit them.
+
+**Measured / admitted-claim gates** (not Stage A source blockers). R1 and
+acceptance bounds do **not** refuse descriptive Stage A.
+
+- R1 — Spec M09 resource prerequisite (`…standard-design.md:839–840`): measured
+  local or P32 receipt for the exact declared surfaces. Gates measured/admitted
+  claims only; Stage A oracle/fixture/tests create the inputs that later earn
+  that receipt.
+- Spec M09 acceptance (`…standard-design.md:832–836`): zero recoverable
+  residue, zero unrelated mutation, 100% valid signed receipts, zero
+  attributable semantic leakage where gold ties the leaked fact to the erased
+  subject. Gates scored-run acceptance evidence only (independent of R1).
+
+**Deferred surfaces (not Stage A):** P32 replicas, object storage, and full
+PITR (`…standard-design.md:846–847`).
 
 Missing Stage A artifacts are tree state, not a gate. WMBS-D is an implement
-sequencing gate, not a reason to refuse this plan file.
+sequencing gate, not a reason to refuse this plan file. Inventory reconcile
+after this plan merges is a separate GoalEx Exact-1 on the completeness
+inventory — not this PR.
 
-**Verdict: NOT CODE-READY.** Do not implement from this file.
+**Verdict: NOT CODE-READY.** Do not implement from this file until the
+**source-readiness blockers** above clear. Do not treat R1 or acceptance
+bounds as Stage A source blockers.
 
 ## 1. Module scope (copied from the spec, not rewritten)
 
@@ -123,7 +133,7 @@ claim this file may make. This plan never labels a run "erasure certified."
 | G1 | Lease map recomputed; M09 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured local or P32 receipt for the exact declared surfaces (spec L839–840) | Operator | Missing. |
+| R1 | Measured local or P32 receipt for the exact declared surfaces (spec L839–840) | Operator | Missing — measured-claim gate, not Stage A source. |
 | R2 | C11 capability exists through a public contract (WMBS-D) | Product | Open. |
 | R3 | Every declared readable surface is probeable; backup scope disclosed; identity authorization exercisable. Else no erasure claim (spec L843–845) | Public-harness | Open. An unprobeable surface is not a pass. |
 | R4 | P32 / object storage / PITR surfaces | Operator | `DEFERRED`. Not in this cell. |
@@ -161,7 +171,13 @@ add a **new** stdlib-only oracle:
   unrelated mutation, completion SLA, signed receipt validity.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   claim zero residue, zero unrelated mutation, 100% receipt validity, or zero
-  attributable semantic leakage as an admission bound (that is R1+R3).
+  attributable semantic leakage as an admission bound (that is R1 + scored
+  acceptance; R1 does not discharge acceptance evidence alone).
+- Signed receipt validity (Local/SQLite): bind to the existing fail-closed
+  Ed25519 contract in `docs/ENGINE-CONTRACT.md` via
+  `verify_signed_deletion_manifest` — accepted schema/payload/trusted key and
+  failure states are those of that verifier; do not invent a parallel receipt
+  crypto path in Stage A.
 - An unprobeable declared readable surface, undisclosed backup scope, or
   unexercisable identity authorization yields **no erasure claim**, not a
   pass and not a zero-as-failure substitute.
@@ -182,11 +198,16 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-B + C11 public contract (R2) + measured receipt (R1) + G0/G1/G2
+WMBS-B + C11 public contract (R2) + G0/G1/G2
   -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+      -> measured / admitted claims require R1 receipt
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
+
+R1 gates measured/admitted profile claims, not creation of the Stage A
+oracle/fixture/tests that produce receipt inputs. Spec §4.2 allows
+`CONTRACT-READY` before a measured receipt.
 
 P32 / object / PITR stay behind R4. Do not touch PR #116, #117, #118, #119,
 #120, or #121. Do not write GOAL.md, STATE.md, or the lease-map.
@@ -199,7 +220,8 @@ No path below is writable from this document.
 docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R3), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates measured
+claims only), not now:
 
 ```text
 eval/public/wmbs_m09.py                                                      (new)
