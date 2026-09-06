@@ -839,7 +839,8 @@ def _validate_bound_lockfile(raw: bytes) -> None:
         raise BundleError("bound uv.lock is invalid") from exc
     packages = lock.get("package")
     if (
-        lock.get("version") != 1
+        type(lock.get("version")) is not int
+        or lock.get("version") != 1
         or not isinstance(lock.get("revision"), int)
         or not isinstance(lock.get("requires-python"), str)
         or not isinstance(packages, list)
@@ -880,7 +881,12 @@ def _validate_bound_bundle_manifest(payloads: dict[str, bytes]) -> None:
         "result.json",
     }
     expected = set(payloads) - excluded
-    if manifest.get("version") != 1 or not isinstance(files, dict) or set(files) != expected:
+    if (
+        type(manifest.get("version")) is not int
+        or manifest.get("version") != 1
+        or not isinstance(files, dict)
+        or set(files) != expected
+    ):
         raise BundleError("bound bundle manifest inventory mismatch")
     for name, digest in files.items():
         if (
@@ -1002,9 +1008,7 @@ def _recompute_repro_metrics(
     recomputed = _measured_from_repro_score(successes, total)
     expected_value = recomputed["value"]
     expected_interval = recomputed["interval"]
-    if set(measured) != set(recomputed) or any(
-        measured.get(key) != recomputed[key] for key in recomputed if key != "interval"
-    ):
+    if _canonical(measured) != _canonical(recomputed):
         raise BundleError("metrics do not recompute from traces")
     if not isinstance(manifest_metrics, list) or not manifest_metrics:
         raise BundleError("missing metrics")
@@ -1093,6 +1097,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     if (
         not isinstance(build_payload, dict)
         or set(build_payload) != _REPRO_BUILD_ARTIFACT_FIELDS
+        or type(build_payload.get("version")) is not int
         or build_payload.get("version") != 1
         or any(
             build_payload.get(field) != manifest["build"][field]
