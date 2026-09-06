@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -6,7 +7,14 @@ from pathlib import Path
 import pytest
 
 from leaderboard import validate
-from leaderboard.validate import validate_record
+from leaderboard.validate import (
+    DIGEST_PAYLOAD_NAMES,
+    SCHEMA_VERSION,
+    SCHEMA_VERSION_V2,
+    validate_projection,
+    validate_record,
+    verify_result_digests,
+)
 
 
 def _retrieval_record() -> dict[str, object]:
@@ -599,3 +607,728 @@ def test_cli_rejects_non_finite_json_numbers(
 
     assert validate.main([str(path)]) == 2
     assert capsys.readouterr().err == f"error: invalid JSON: {path}\n"
+
+
+_V1_SCHEMA_SHA256 = (
+    "22544dbcfbad5f09cc4bccbbfd6b79f4bda1b70d2a903f6908cd89cfd3e51817"
+)
+
+
+def _v2_identity(**overrides: object) -> dict[str, object]:
+    identity: dict[str, object] = {
+        "system_id": "mnemosyne",
+        "system_version": "0.1.0",
+        "adapter_id": "whole-memory-reference",
+        "adapter_version": "0.1.0",
+        "track_kind": "DEVELOPMENT",
+        "benchmark_id": "synthetic-retrieval",
+        "benchmark_version": "1",
+        "module_id": "M01",
+        "division": "COMPONENT-CLOSED",
+        "resource_profile": "L16-DEV",
+        "backend_id": "sqlite",
+        "hardware_fingerprint": f"sha256:{'a' * 64}",
+        "model_policy_id": "none",
+        "dataset_split_digest": f"sha256:{'b' * 64}",
+        "run_id": "run-001",
+        "attempt_id": "attempt-001",
+        "seed": 1,
+    }
+    identity.update(overrides)
+    return identity
+
+
+def _v2_development_record() -> dict[str, object]:
+    return {
+        "schema_version": SCHEMA_VERSION_V2,
+        "record_id": "synthetic-v2-dev-001",
+        "system": "mnemosyne",
+        "track": "development",
+        "benchmark": "synthetic-retrieval",
+        "benchmark_version": "1",
+        "run_commit": "0123456789abcdef0123456789abcdef01234567",
+        "build_fingerprint": f"sha256:{'1' * 64}",
+        "config_digest": f"sha256:{'2' * 64}",
+        "bundle_digest": f"sha256:{'3' * 64}",
+        "trace_index_digest": f"sha256:{'4' * 64}",
+        "metrics": [
+            {
+                "name": "recall_at_10",
+                "family": "retrieval",
+                "value": 0.75,
+                "unit": "ratio",
+                "confidence_interval": {"low": 0.60, "high": 0.85},
+            }
+        ],
+        "publication": {
+            "publishable": False,
+            "label": "operator-run",
+            "pbpp_headline_eligible": False,
+        },
+        "operator_entry": {"operator": "synthetic-test", "disclosed": True},
+        "history": {"supersedes": None},
+        "module_id": "M01",
+        "admission_state": "PROPOSED",
+        "evidence_level": "IMPLEMENTED",
+        "track_kind": "DEVELOPMENT",
+        "lineage": {},
+        "identity": _v2_identity(),
+        "division": "COMPONENT-CLOSED",
+        "capability": "native",
+        "safety_gates": [{"name": "no-leakage", "status": "passed"}],
+        "resources": {
+            "treatment": "verified",
+            "wall_time_ms": 10,
+            "peak_rss_bytes": 1024,
+            "cost": 0,
+            "latency_ms": 5,
+        },
+        "run_profile": {
+            "profile_id": "L16-DEV",
+            "seeds": [1],
+            "retries": 0,
+            "aborts": 0,
+        },
+        "custody": "development-public",
+        "signer_role": "operator",
+        "trace_id": "trace-001",
+        "attempt_outcome": "measured",
+    }
+
+
+def _v2_official_record() -> dict[str, object]:
+    record = _v2_development_record()
+    record.update(
+        {
+            "record_id": "synthetic-v2-official-001",
+            "track": "official-upstream",
+            "track_kind": "OFFICIAL-UPSTREAM",
+            "admission_state": "PROPOSED",
+            "evidence_level": "PUBLICLY_MEASURED",
+            "identity": _v2_identity(
+                track_kind="OFFICIAL-UPSTREAM",
+                attempt_id="attempt-official",
+            ),
+            "lineage": {
+                "fidelity": {
+                    "upstream_protocol_digest": f"sha256:{'c' * 64}",
+                    "dataset_digest": f"sha256:{'d' * 64}",
+                    "split_digest": f"sha256:{'e' * 64}",
+                    "preprocessing_digest": f"sha256:{'f' * 64}",
+                    "scorer_digest": f"sha256:{'11' * 32}",
+                    "environment_digest": f"sha256:{'12' * 32}",
+                    "revision_digest": f"sha256:{'13' * 32}",
+                }
+            },
+            "publication": {
+                "publishable": True,
+                "label": "operator-run",
+                "pbpp_headline_eligible": False,
+            },
+            "custody": "operator-held-out",
+        }
+    )
+    return record
+
+
+def _v2_successor_record() -> dict[str, object]:
+    record = _v2_official_record()
+    record.update(
+        {
+            "record_id": "synthetic-v2-successor-001",
+            "track": "enhanced-successor",
+            "track_kind": "ENHANCED-SUCCESSOR",
+            "identity": _v2_identity(
+                track_kind="ENHANCED-SUCCESSOR",
+                attempt_id="attempt-successor",
+            ),
+            "lineage": {
+                "parent_official_record_id": "synthetic-v2-official-001",
+                "parent_construct_digest": f"sha256:{'14' * 32}",
+                "difference_manifest_digest": f"sha256:{'15' * 32}",
+            },
+        }
+    )
+    return record
+
+
+def _projection(source_ids: list[str], **overrides: object) -> dict[str, object]:
+    projection: dict[str, object] = {
+        "schema_version": "mnemosyne.leaderboard.projection/v1",
+        "projection_id": "proj-001",
+        "kind": "exploratory",
+        "source_record_ids": source_ids,
+        "filters": {"backend_id": "sqlite"},
+        "compatibility_key": {
+            "track_kind": "DEVELOPMENT",
+            "benchmark_id": "synthetic-retrieval",
+            "benchmark_version": "1",
+            "scorer_digest": f"sha256:{'11' * 32}",
+            "division": "COMPONENT-CLOSED",
+            "metric": {
+                "name": "recall_at_10",
+                "family": "retrieval",
+                "unit": "ratio",
+            },
+            "resource_treatment": "verified",
+        },
+        "exclusions": [],
+        "weighting": {"formula": "unweighted-mean", "disclosed": True},
+        "numerator": 3,
+        "denominator": 4,
+        "uncertainty_method": "bootstrap-percentile",
+        "missing_count": 0,
+        "unsupported_count": 0,
+        "failed_count": 0,
+        "aborted_count": 0,
+        "not_measured_count": 0,
+        "certified": False,
+        "official": False,
+        "headline": False,
+        "safety_failures_visible": False,
+    }
+    projection.update(overrides)
+    return projection
+
+
+def test_v1_schema_bytes_remain_immutable() -> None:
+    digest = hashlib.sha256(
+        Path("leaderboard/schema/result-v1.schema.json").read_bytes()
+    ).hexdigest()
+    assert digest == _V1_SCHEMA_SHA256
+    assert SCHEMA_VERSION == "mnemosyne.leaderboard.result/v1"
+
+
+def test_v2_schema_is_additive_closed_contract() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v2.schema.json").read_text(encoding="utf-8")
+    )
+
+    assert schema["$id"] == SCHEMA_VERSION_V2
+    assert schema["additionalProperties"] is False
+    assert "atomic_identity" in schema["$defs"]
+    assert schema["$defs"]["atomic_identity"]["additionalProperties"] is False
+    assert set(schema["$defs"]["track_kind"]["enum"]) == {
+        "OFFICIAL-UPSTREAM",
+        "ENHANCED-SUCCESSOR",
+        "DEVELOPMENT",
+    }
+    assert DIGEST_PAYLOAD_NAMES == {
+        "build_fingerprint": "build.json",
+        "config_digest": "config.json",
+        "bundle_digest": "bundle-manifest.json",
+        "trace_index_digest": "traces.jsonl",
+    }
+
+
+def _confidence_interval_covers(splits: list[object], low: float, high: float) -> bool:
+    return any(
+        isinstance(branch, dict)
+        and low <= branch["properties"]["low"]["maximum"]
+        and high >= branch["properties"]["high"]["minimum"]
+        for branch in splits
+    )
+
+
+def test_v2_schema_aligns_metric_contract_with_runtime() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v2.schema.json").read_text(encoding="utf-8")
+    )
+    families = {
+        "retrieval",
+        "judged_qa",
+        "security",
+        "calibration",
+        "performance",
+        "reproducibility",
+    }
+
+    assert set(schema["$defs"]["metric"]["properties"]["family"]["enum"]) == families
+    family_rules = next(
+        rule["properties"]["metrics"]["anyOf"]
+        for rule in schema["allOf"]
+        if "properties" in rule and "metrics" in rule["properties"]
+    )
+    assert {
+        rule["items"]["properties"]["family"]["const"] for rule in family_rules
+    } == families
+    judge_rule = schema["$defs"]["metric"]["allOf"][0]
+    assert judge_rule["if"]["properties"]["family"]["const"] == "judged_qa"
+    assert judge_rule["then"]["required"] == ["judge"]
+    assert judge_rule["else"]["not"]["required"] == ["judge"]
+    items = schema["properties"]["metrics"]["items"]
+    assert items["allOf"][0] == {"$ref": "#/$defs/metric"}
+    published_judge = items["allOf"][1]
+    assert published_judge["if"]["properties"]["family"]["const"] == "judged_qa"
+    assert published_judge["then"]["required"] == ["judge"]
+    assert published_judge["else"]["not"]["required"] == ["judge"]
+    interval = schema["$defs"]["confidenceInterval"]
+    assert "low <= high" in interval["$comment"]
+    splits = interval["anyOf"]
+    assert splits
+
+    unit_maxima = [
+        branch["properties"]["low"]["maximum"]
+        for branch in splits
+        if 0.0 <= branch["properties"]["low"]["maximum"] <= 1.0
+    ]
+    assert 0.995 in unit_maxima
+    assert len(unit_maxima) >= 1001
+
+    assert _confidence_interval_covers(splits, 0.60, 0.85)
+    assert _confidence_interval_covers(splits, 0.70, 0.90)
+    assert _confidence_interval_covers(splits, 0.995, 0.995)
+    assert not _confidence_interval_covers(splits, 0.9, 0.1)
+
+
+def test_v2_runtime_rejects_metric_contract_violations() -> None:
+    missing_judge = _v2_development_record()
+    missing_judge["metrics"] = [
+        {
+            "name": "answer_quality",
+            "family": "judged_qa",
+            "value": 0.80,
+            "unit": "ratio",
+            "confidence_interval": {"low": 0.70, "high": 0.90},
+        }
+    ]
+    assert "/metrics/0/judge" in validate_record(missing_judge)
+
+    mixed = _v2_development_record()
+    metrics = mixed["metrics"]
+    assert isinstance(metrics, list)
+    metrics.append(
+        {
+            "name": "answer_quality",
+            "family": "judged_qa",
+            "value": 0.80,
+            "unit": "ratio",
+            "confidence_interval": {"low": 0.70, "high": 0.90},
+            "judge": {
+                "model": "synthetic-judge-v1",
+                "prompt_digest": f"sha256:{'5' * 64}",
+                "config_digest": f"sha256:{'6' * 64}",
+            },
+        }
+    )
+    assert "/metrics" in validate_record(mixed)
+
+    inverted = _v2_development_record()
+    inverted_metrics = inverted["metrics"]
+    assert isinstance(inverted_metrics, list)
+    inverted_metrics[0]["confidence_interval"] = {"low": 0.9, "high": 0.1}
+    assert "/metrics/0/confidence_interval" in validate_record(inverted)
+
+    equal_milli = _v2_development_record()
+    equal_metrics = equal_milli["metrics"]
+    assert isinstance(equal_metrics, list)
+    equal_metrics[0]["confidence_interval"] = {"low": 0.995, "high": 0.995}
+    assert validate_record(equal_milli) == []
+
+
+def test_v2_projection_schema_declares_closed_properties() -> None:
+    schema = json.loads(
+        Path("leaderboard/schema/result-v2.schema.json").read_text(encoding="utf-8")
+    )
+    projection = schema["$defs"]["projection"]
+
+    assert projection["additionalProperties"] is False
+    assert "properties" in projection
+    assert set(projection["required"]) <= set(projection["properties"])
+    assert "weighting" in projection["properties"]
+    assert projection["properties"]["source_record_ids"]["minItems"] == 1
+
+
+def test_accepts_minimal_v2_development_record() -> None:
+    assert validate_record(_v2_development_record()) == []
+
+
+def test_accepts_official_record_with_complete_fidelity_pins() -> None:
+    assert validate_record(_v2_official_record()) == []
+
+
+def test_accepts_successor_record_with_parent_and_difference() -> None:
+    assert validate_record(_v2_successor_record()) == []
+
+
+def test_v1_records_are_unchanged_by_v2_dispatch() -> None:
+    assert validate_record(_retrieval_record()) == []
+    v2_as_v1 = _v2_development_record()
+    v2_as_v1["schema_version"] = SCHEMA_VERSION
+    errors = validate_record(v2_as_v1)
+    assert "/identity" in errors
+    assert "/schema_version" not in errors
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "module_id",
+        "admission_state",
+        "evidence_level",
+        "track_kind",
+        "lineage",
+        "identity",
+        "division",
+        "capability",
+        "safety_gates",
+        "resources",
+        "run_profile",
+        "custody",
+        "signer_role",
+        "trace_id",
+        "attempt_outcome",
+    ],
+)
+def test_rejects_missing_required_v2_fields(field: str) -> None:
+    record = _v2_development_record()
+    del record[field]
+
+    assert f"/{field}" in validate_record(record)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "pointer"),
+    [
+        ("admission_state", "READY", "/admission_state"),
+        ("evidence_level", "CERTIFIED", "/evidence_level"),
+        ("track_kind", "official", "/track_kind"),
+        ("division", "open", "/division"),
+        ("capability", "partial", "/capability"),
+        ("custody", "public", "/custody"),
+        ("signer_role", "anonymous", "/signer_role"),
+        ("attempt_outcome", "zeroed", "/attempt_outcome"),
+    ],
+)
+def test_rejects_closed_v2_enum_violations(
+    field: str, value: object, pointer: str
+) -> None:
+    record = _v2_development_record()
+    record[field] = value
+
+    assert pointer in validate_record(record)
+
+
+def test_rejects_resource_unverified_as_verified_alias() -> None:
+    record = _v2_development_record()
+    resources = record["resources"]
+    assert isinstance(resources, dict)
+    resources["treatment"] = "unmetered"
+
+    assert "/resources/treatment" in validate_record(record)
+
+
+def test_accepts_resource_unverified_disclosure() -> None:
+    record = _v2_development_record()
+    resources = record["resources"]
+    assert isinstance(resources, dict)
+    resources["treatment"] = "resource-unverified"
+
+    assert validate_record(record) == []
+
+
+@pytest.mark.parametrize("role", ["operator", "independent", "custodian"])
+def test_accepts_distinct_signer_roles(role: str) -> None:
+    record = _v2_development_record()
+    record["signer_role"] = role
+
+    assert validate_record(record) == []
+
+
+def test_rejects_development_result_marked_publishable_or_headline() -> None:
+    record = _v2_development_record()
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+    publication["publishable"] = True
+
+    assert "/publication/publishable" in validate_record(record)
+
+    publication["publishable"] = False
+    publication["pbpp_headline_eligible"] = True
+    assert "/publication/pbpp_headline_eligible" in validate_record(record)
+
+
+def test_rejects_official_record_missing_fidelity_pins() -> None:
+    record = _v2_official_record()
+    record["lineage"] = {}
+
+    assert "/lineage/fidelity" in validate_record(record)
+
+
+def test_rejects_successor_record_missing_parent_or_difference() -> None:
+    record = _v2_successor_record()
+    record["lineage"] = {"parent_official_record_id": "synthetic-v2-official-001"}
+
+    assert "/lineage/difference_manifest_digest" in validate_record(record)
+
+
+def test_rejects_track_kind_mismatch_with_identity() -> None:
+    record = _v2_development_record()
+    identity = record["identity"]
+    assert isinstance(identity, dict)
+    identity["track_kind"] = "OFFICIAL-UPSTREAM"
+
+    assert "/identity/track_kind" in validate_record(record)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["average", "mean", "rank", "composite", "members", "source_record_ids"],
+)
+def test_rejects_cross_attempt_aggregate_fields_on_atomic_rows(field: str) -> None:
+    record = _v2_development_record()
+    record[field] = True
+
+    assert f"/{field}" in validate_record(record)
+
+
+def test_cli_rejects_duplicate_atomic_identity_keys(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    first = _v2_development_record()
+    second = _v2_development_record()
+    second["record_id"] = "synthetic-v2-dev-002"
+    path = tmp_path / "records.json"
+    path.write_text(json.dumps([first, second]), encoding="utf-8")
+
+    assert validate.main([str(path)]) == 1
+    assert "/1/identity" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["build_fingerprint", "config_digest", "bundle_digest", "trace_index_digest"],
+)
+def test_rejects_v2_digest_format_mismatches(field: str) -> None:
+    record = _v2_development_record()
+    record[field] = "not-a-digest"
+
+    assert f"/{field}" in validate_record(record)
+
+
+def test_verify_result_digests_hashes_named_payload_bytes() -> None:
+    record = _v2_development_record()
+    artifacts = {
+        "build.json": b'{"build":true}\n',
+        "config.json": b'{"config":true}\n',
+        "bundle-manifest.json": b'{"bundle":true}\n',
+        "traces.jsonl": b'{"question_id":"q1"}\n',
+    }
+    for field, name in DIGEST_PAYLOAD_NAMES.items():
+        digest = hashlib.sha256(artifacts[name]).hexdigest()
+        record[field] = f"sha256:{digest}"
+
+    assert verify_result_digests(record, artifacts) == []
+
+    artifacts["build.json"] = b'{"build":false}\n'
+    assert "/build_fingerprint" in verify_result_digests(record, artifacts)
+
+
+def test_accepts_exploratory_projection_over_compatible_records() -> None:
+    records = [_v2_development_record()]
+    assert validate_projection(_projection(["synthetic-v2-dev-001"]), records) == []
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "projection_id",
+        "filters",
+        "compatibility_key",
+        "exclusions",
+        "numerator",
+        "denominator",
+        "uncertainty_method",
+    ],
+)
+def test_rejects_incomplete_projection_contract(field: str) -> None:
+    projection = _projection(["synthetic-v2-dev-001"])
+    del projection[field]
+
+    assert f"/{field}" in validate_projection(projection, [_v2_development_record()])
+
+
+def test_rejects_empty_projection_sources() -> None:
+    projection = _projection([])
+
+    assert "/source_record_ids" in validate_projection(projection, [])
+
+
+def test_rejects_certified_blend_of_official_and_enhanced_records() -> None:
+    records = [_v2_official_record(), _v2_successor_record()]
+    projection = _projection(
+        ["synthetic-v2-official-001", "synthetic-v2-successor-001"],
+        certified=True,
+        kind="certified",
+    )
+
+    errors = validate_projection(projection, records)
+    assert "/certified" in errors
+
+
+def test_rejects_incompatible_track_scorer_division_metric_or_resource() -> None:
+    official = _v2_official_record()
+    successor = _v2_successor_record()
+    projection = _projection(
+        ["synthetic-v2-official-001", "synthetic-v2-successor-001"],
+        compatibility_key={
+            "track_kind": "OFFICIAL-UPSTREAM",
+            "benchmark_id": "synthetic-retrieval",
+            "benchmark_version": "1",
+            "scorer_digest": f"sha256:{'11' * 32}",
+            "division": "COMPONENT-CLOSED",
+            "metric": {
+                "name": "recall_at_10",
+                "family": "retrieval",
+                "unit": "ratio",
+            },
+            "resource_treatment": "verified",
+        },
+    )
+
+    assert "/compatibility_key/track_kind" in validate_projection(
+        projection, [official, successor]
+    )
+
+
+def test_rejects_projection_with_mismatched_benchmark_or_scorer() -> None:
+    record = _v2_official_record()
+    projection = _projection(
+        ["synthetic-v2-official-001"],
+        compatibility_key={
+            "track_kind": "OFFICIAL-UPSTREAM",
+            "benchmark_id": "synthetic-retrieval",
+            "benchmark_version": "1",
+            "scorer_digest": f"sha256:{'11' * 32}",
+            "division": "COMPONENT-CLOSED",
+            "metric": {
+                "name": "recall_at_10",
+                "family": "retrieval",
+                "unit": "ratio",
+            },
+            "resource_treatment": "verified",
+        },
+    )
+    assert validate_projection(projection, [record]) == []
+
+    mismatched_benchmark = copy.deepcopy(record)
+    mismatched_benchmark["benchmark"] = "other-suite"
+    identity = mismatched_benchmark["identity"]
+    assert isinstance(identity, dict)
+    identity["benchmark_id"] = "other-suite"
+    assert "/compatibility_key/benchmark_id" in validate_projection(
+        projection, [mismatched_benchmark]
+    )
+
+    mismatched_version = copy.deepcopy(record)
+    mismatched_version["benchmark_version"] = "2"
+    version_identity = mismatched_version["identity"]
+    assert isinstance(version_identity, dict)
+    version_identity["benchmark_version"] = "2"
+    assert "/compatibility_key/benchmark_version" in validate_projection(
+        projection, [mismatched_version]
+    )
+
+    mismatched_scorer = copy.deepcopy(record)
+    lineage = mismatched_scorer["lineage"]
+    assert isinstance(lineage, dict)
+    fidelity = lineage["fidelity"]
+    assert isinstance(fidelity, dict)
+    fidelity["scorer_digest"] = f"sha256:{'22' * 32}"
+    assert "/compatibility_key/scorer_digest" in validate_projection(
+        projection, [mismatched_scorer]
+    )
+
+
+def test_safety_gate_failure_is_visible_and_non_averageable() -> None:
+    record = _v2_development_record()
+    record["safety_gates"] = [{"name": "no-leakage", "status": "failed"}]
+    projection = _projection(["synthetic-v2-dev-001"])
+
+    errors = validate_projection(projection, [record])
+    assert "/safety_failures_visible" in errors
+
+    projection["safety_failures_visible"] = True
+    projection["failed_count"] = 0
+    assert "/failed_count" in validate_projection(projection, [record])
+
+    projection["failed_count"] = 1
+    projection["weighting"] = {"formula": "unweighted-mean", "disclosed": True}
+    assert "/weighting" in validate_projection(projection, [record])
+
+
+@pytest.mark.parametrize(
+    ("outcome", "count_field"),
+    [
+        ("missing", "missing_count"),
+        ("unsupported", "unsupported_count"),
+        ("failed", "failed_count"),
+        ("aborted", "aborted_count"),
+        ("not-measured", "not_measured_count"),
+    ],
+)
+def test_projection_keeps_distinct_non_measured_states(
+    outcome: str, count_field: str
+) -> None:
+    record = _v2_development_record()
+    record["attempt_outcome"] = outcome
+    projection = _projection(["synthetic-v2-dev-001"])
+
+    assert f"/{count_field}" in validate_projection(projection, [record])
+
+    projection[count_field] = 1
+    if outcome == "failed":
+        projection["safety_failures_visible"] = True
+        projection["weighting"] = None
+    assert validate_projection(projection, [record]) == []
+
+
+def test_cli_validates_v2_record(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "v2.json"
+    path.write_text(json.dumps(_v2_development_record()), encoding="utf-8")
+
+    assert validate.main([str(path)]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_operator_run_cannot_claim_headline_eligibility() -> None:
+    record = _v2_official_record()
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+    publication["pbpp_headline_eligible"] = True
+
+    assert "/publication/pbpp_headline_eligible" in validate_record(record)
+    assert publication["label"] == "operator-run"
+
+
+def test_independent_signer_does_not_upgrade_headline() -> None:
+    record = _v2_official_record()
+    record["signer_role"] = "independent"
+    publication = record["publication"]
+    assert isinstance(publication, dict)
+
+    assert validate_record(record) == []
+    assert publication["pbpp_headline_eligible"] is False
+    assert publication["label"] == "operator-run"
+
+    publication["pbpp_headline_eligible"] = True
+    assert "/publication/pbpp_headline_eligible" in validate_record(record)
+
+
+def test_implemented_evidence_cannot_upgrade_admission_to_run_ready() -> None:
+    record = _v2_official_record()
+    record["evidence_level"] = "IMPLEMENTED"
+    record["admission_state"] = "RUN-READY-OFFICIAL-LOCAL"
+
+    assert "/admission_state" in validate_record(record)
+
+
+def test_v1_schema_bytes_are_not_reinterpreted_as_v2() -> None:
+    v1 = _retrieval_record()
+    assert v1["schema_version"] == SCHEMA_VERSION
+    assert validate_record(v1) == []
+    assert Path("leaderboard/schema/result-v1.schema.json").read_bytes()
+    v1["pbpp_headline_eligible"] = True
+    assert "/pbpp_headline_eligible" in validate_record(v1)
