@@ -1580,7 +1580,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         or getattr(source, "is_junction", lambda: False)()
     ):
         raise BundleError("bundle must be a real directory, not a link")
-    destination = destination.absolute()
+    destination = _absolute_normalized_path(destination)
     _reject_reproducibility_link_path(destination)
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
@@ -1664,7 +1664,7 @@ def write_bundle(
     traces: list[dict[str, Any]],
     candidate_manifest_path: Path | str | None = None,
 ) -> None:
-    destination = destination.absolute()
+    destination = _absolute_normalized_path(destination)
     _reject_reproducibility_link_path(destination)
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
@@ -2034,7 +2034,7 @@ def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, A
         return _reproduce_reproducibility_bundle(source_root, Path(destination))
     from eval.public.runner import run_public_suite
 
-    destination = Path(destination).absolute()
+    destination = _absolute_normalized_path(Path(destination))
     _reject_reproducibility_link_path(destination)
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
@@ -2113,8 +2113,8 @@ def write_report(
     report_note: Path | str,
 ) -> dict[str, Any]:
     """Write a report from private snapshots of two matching legacy bundles."""
-    source_display = Path(source).absolute()
-    reproduced_display = Path(reproduced).absolute()
+    source_display = _absolute_normalized_path(Path(source))
+    reproduced_display = _absolute_normalized_path(Path(reproduced))
     source_snapshot = Path(tempfile.mkdtemp(prefix="mnemo-report-source-"))
     source_identity = _owned_directory_identity(source_snapshot)
     try:
@@ -2163,7 +2163,8 @@ def _write_report_from_snapshots(
     for name in source_files:
         if (source_root / name).read_bytes() != (reproduced_root / name).read_bytes():
             raise BundleError(f"source and reproduced bundle mismatch: {name}")
-    output, note = Path(report_output).absolute(), Path(report_note).absolute()
+    output = _absolute_normalized_path(Path(report_output))
+    note = _absolute_normalized_path(Path(report_note))
     _reject_reproducibility_link_path(output)
     _reject_reproducibility_link_path(note)
     if output.exists() or note.exists():
@@ -2196,21 +2197,21 @@ def _write_report_from_snapshots(
             "mneme",
             "eval-public",
             "--write-report",
-            str(source_display.resolve()),
+            str(_absolute_normalized_path(source_display)),
             "--reproduced-bundle",
-            str(reproduced_display.resolve()),
+            str(_absolute_normalized_path(reproduced_display)),
             "--report-output",
-            str(output.resolve()),
+            str(_absolute_normalized_path(output)),
             "--report-note",
-            str(note.resolve()),
+            str(_absolute_normalized_path(note)),
         ],
         "publication": {
             "independent_external_reproduction": False,
             "pbpp_headline_eligible": False,
             "publishable": False,
         },
-        "reproduced_bundle": str(reproduced_display.resolve()),
-        "source_bundle": str(source_display.resolve()),
+        "reproduced_bundle": str(_absolute_normalized_path(reproduced_display)),
+        "source_bundle": str(_absolute_normalized_path(source_display)),
         "suite": source_result["suite"],
         "version": 1,
     }
@@ -2228,8 +2229,8 @@ def _write_report_from_snapshots(
         _remove_owned_file(output, output_identity)
         raise
     return {
-        "report": str(output.resolve()),
-        "report_note": str(note.resolve()),
+        "report": str(_absolute_normalized_path(output)),
+        "report_note": str(_absolute_normalized_path(note)),
         "sha256": report_digest,
         "valid": True,
     }
@@ -2375,13 +2376,13 @@ def _verify_report(
         "mneme",
         "eval-public",
         "--write-report",
-        str(source_display.resolve()),
+        str(_absolute_normalized_path(source_display)),
         "--reproduced-bundle",
-        str(reproduced_display.resolve()),
+        str(_absolute_normalized_path(reproduced_display)),
         "--report-output",
-        str(report_file.resolve()),
+        str(_absolute_normalized_path(report_file)),
         "--report-note",
-        str(note_file.resolve()),
+        str(_absolute_normalized_path(note_file)),
     ]
     if report.get("command") != expected_command:
         raise BundleError("report command provenance mismatch")
@@ -2446,8 +2447,8 @@ def _verify_report(
         if projection not in note:
             raise BundleError("report note evidence projection mismatch")
     return {
-        "report": str(report_file.resolve()),
-        "report_note": str(note_file.resolve()),
+        "report": str(_absolute_normalized_path(report_file)),
+        "report_note": str(_absolute_normalized_path(note_file)),
         "sha256": report_digest,
         "valid": True,
     }
@@ -2494,12 +2495,12 @@ def _report_evidence(
         "metrics": metrics,
         "provenance": {
             "build": build,
-            "source_bundle": str(source_display.resolve()),
+            "source_bundle": str(_absolute_normalized_path(source_display)),
             "system_seam": build.get("system_seam"),
         },
         "reproduction": {
             "matched_files": list(_manifest_files(source)),
-            "reproduced_bundle": str(reproduced_display.resolve()),
+            "reproduced_bundle": str(_absolute_normalized_path(reproduced_display)),
             "verified": True,
         },
     }
@@ -2909,7 +2910,7 @@ def _reject_symlink_path(path: Path) -> None:
 
 def _reject_reproducibility_link_path(path: Path) -> None:
     """Reject symlinks or junctions in every existing path component."""
-    absolute = path.absolute()
+    absolute = _absolute_normalized_path(path)
     current = Path(absolute.anchor)
     parts = absolute.parts[1:] if absolute.anchor else absolute.parts
     try:
@@ -2925,6 +2926,11 @@ def _reject_reproducibility_link_path(path: Path) -> None:
         raise
     except OSError as exc:
         raise BundleError("reproducibility path components cannot be inspected") from exc
+
+
+def _absolute_normalized_path(path: Path) -> Path:
+    """Normalize dot segments without resolving symlinks or junctions."""
+    return Path(os.path.abspath(os.fspath(path)))
 
 
 def _require_sha256(value: Any, label: str) -> None:
