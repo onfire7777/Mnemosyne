@@ -442,7 +442,12 @@ uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
 `BUNDLE` and `DEST` are the only placeholders. The command is argv-only: no
 shell string, no bundle-provided executable, and no execution from inside the
 untrusted bundle directory. Dependency acquisition, if any, is a separately
-disclosed preparation step. The reproduction command itself has no network.
+disclosed preparation step. The Python verifier opens no network connection,
+but `uv` runs before that verifier and may acquire a missing locked dependency.
+Set `UV_OFFLINE=1` after preparing the locked cache, or use an externally
+network-isolated runner. Without one of those controls, do not describe the
+overall command as offline.
+
 The invoking checkout must be clean, match `build.candidate_git_sha`, honor
 `uv.lock`, and use only the declared environment allowlist with UTC/C locale.
 Incomplete output is deleted. A destination collision fails closed.
@@ -511,4 +516,3 @@ bundle, operator/custody approval, and human approval. Independent third-party
 reproduction is an optional separately signed receipt; its absence does not
 block an otherwise operator-run claim, and its presence does not relabel the
 operator or imply certification.
-
