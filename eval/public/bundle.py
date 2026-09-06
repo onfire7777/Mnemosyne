@@ -467,7 +467,9 @@ def _require_enum(value: object, allowed: tuple[str, ...], label: str) -> str:
 
 def _validate_repro_schema(manifest: object) -> None:
     try:
-        schema_bytes, _ = _read_inventory_file(REPRODUCIBILITY_BUNDLE_SCHEMA_PATH)
+        schema_bytes, _ = _read_inventory_file(
+            REPRODUCIBILITY_BUNDLE_SCHEMA_PATH, allow_hardlinks=True
+        )
         schema = _parse_json(schema_bytes.decode("utf-8"), "reproducibility schema")
         _json_depth(schema)
     except (OSError, UnicodeDecodeError, BundleError) as exc:
@@ -783,13 +785,15 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
     return payload
 
 
-def _read_inventory_file(path: Path) -> tuple[bytes, int]:
-    """Read one stable, regular, singly-linked inventory inode."""
+def _read_inventory_file(
+    path: Path, *, allow_hardlinks: bool = False
+) -> tuple[bytes, int]:
+    """Read one stable, bounded regular file; inventories must be single-link."""
     try:
         path_stat = path.stat(follow_symlinks=False)
         if (
             not stat.S_ISREG(path_stat.st_mode)
-            or path_stat.st_nlink != 1
+            or (not allow_hardlinks and path_stat.st_nlink != 1)
             or path_stat.st_size > _MAX_REPRO_FILE_BYTES
         ):
             raise BundleError("bundle files must be bounded regular non-hardlinks")
@@ -797,7 +801,7 @@ def _read_inventory_file(path: Path) -> tuple[bytes, int]:
             opened_stat = os.fstat(handle.fileno())
             if (
                 not stat.S_ISREG(opened_stat.st_mode)
-                or opened_stat.st_nlink != 1
+                or (not allow_hardlinks and opened_stat.st_nlink != 1)
                 or opened_stat.st_size != path_stat.st_size
                 or (opened_stat.st_dev, opened_stat.st_ino)
                 != (path_stat.st_dev, path_stat.st_ino)
