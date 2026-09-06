@@ -1449,6 +1449,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    _reject_reproducibility_link_path(destination)
     snapshot = Path(
         tempfile.mkdtemp(prefix=f".{destination.name}-source-", dir=destination.parent)
     )
@@ -1500,6 +1501,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
             reproduced, _ = _read_inventory_file(temp / name)
             if reproduced != payloads[name]:
                 raise BundleError(f"reproduction mismatch: {name}")
+        _reject_reproducibility_link_path(destination)
         _publish_directory_noreplace(temp, destination)
         return verified
     except BaseException:
