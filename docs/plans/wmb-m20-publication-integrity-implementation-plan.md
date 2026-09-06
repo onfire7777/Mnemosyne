@@ -107,8 +107,9 @@ Per `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
   supersession rather than rewriting history.
 - **Placement:** mandatory standard infrastructure.
 
-The spec's own exclusion is load-bearing: this contract plans a *successor*
-development/v2-delta cell under the already-admitted M20 pilot scope.
+M20 is **in** the first reference-harness pilot. This file is a result-v2 /
+N12 **delta** against that already-authorized pilot scope — not a
+pilot-exclusion successor and not outside M20's admitted placement.
 
 C22 is standard infrastructure (GOV-001; LEAD-001/002/003), not a score.
 C24 (`…standard-design.md:525`) is a mandatory report dimension, not a
@@ -171,8 +172,10 @@ add a **new** stdlib-only oracle:
   or non-mutation of published history as an admission bound. R1 is the
   resource-admission receipt only; behavioral bounds need a distinct
   scored-run / acceptance evidence gate (not R1 alone).
-- v1 `IMPLEMENTED` is not v2 admission. Missing R2/R3/R4 yields **no public
-  release and no v2 admission**, not a pass.
+- v1 `IMPLEMENTED` is not v2 admission. Missing **R4** (digest verify)
+  yields **no v2 admission**, not a pass. **R2** gates public release /
+  hosting only (not local v2 admission). **R3** gates mixed v1/v2 rendering
+  only (fail-closed residual) — not pure-v2 admission.
 - Anti-gaming (spec L1291): no privileged internal ledger rewrite; gold,
   graders, and expected fingerprints stay outside the SUT. Do not
   reinterpret signed v1 bytes.
@@ -233,7 +236,7 @@ Do not add a second ledger. Do not rewrite v1 history.
 | v1 substrate | `IMPLEMENTED`; no implied v2 | same | same |
 | Mixed v1/v2 render | blocked (fail-closed residual) | blocked | blocked (fail-closed residual; R3 discharge ≠ enable mixed render) |
 | Public release | `DEFERRED` (R2) | `DEFERRED` | `DEFERRED` until human approval + PBPP |
-| Spec accept/reject / digest / history bounds | `DEFERRED` (R1) | `DEFERRED` | `DEFERRED` until receipt |
+| Spec accept/reject / digest / history bounds | `DEFERRED` (acceptance-evidence gate) | `DEFERRED` | `DEFERRED` until scored-run acceptance evidence (R1 resource receipt alone is not enough) |
 | "Publication certified" | never claimed | never claimed | never claimed |
 | Recoverable public evidence (spec L1252–1259) | `DEFERRED` until M15+M16+M17+M20 are all admitted | `DEFERRED` | `DEFERRED` |
 | Publishable / headline | `false` | `false` | `false` |
