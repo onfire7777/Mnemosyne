@@ -220,45 +220,27 @@ work. Run its contract suite with:
 uv run --locked python -m pytest tests/test_public_whole_memory_reference.py -q
 ```
 
-The M01 capture/durability and M10 calibration/abstention reference cores also
-run through the common bundle custody path:
+The M01, M03, and M10 development cells also run through this common bundle
+custody path. Their suite commands, publication flags, and disclosures live
+under the peer module cells below.
+
+### M01 capture and durability
+
+**PROPOSED.**
+
+`wmbs-m01-development` is `PROPOSED`, `ENHANCED-SUCCESSOR`,
+`split_role: development`, `license: CC0-1.0`,
+`system_seam: harness-owned-reference-core`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+
+The cell exercises a harness-owned deterministic core rather than a real SUT
+and supports no publication, comparability, or superiority claim.
 
 ```bash
 uv run --locked mneme eval-public --suite wmbs-m01-development --out-dir /tmp/wmbs-m01
 uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m01
-uv run --locked mneme eval-public --suite wmbs-m10-development --out-dir /tmp/wmbs-m10
-uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m10
 ```
-
-Both suites remain `PROPOSED`, `ENHANCED-SUCCESSOR`, development-only reference
-runs. They exercise harness-owned deterministic cores rather than a real SUT,
-remain non-publishable and non-comparable to upstream tracks, and support no
-benchmark superiority claim.
-
-The M03 valid-time cell runs through the same bundle custody path, but over the
-public CLI subprocess seam rather than a harness-owned core:
-
-```bash
-uv run --locked mneme eval-public --suite wmbs-m03-valid-time-development --out-dir /tmp/wmbs-m03
-uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m03
-```
-
-`wmbs-m03-valid-time-development` is `PROPOSED`, `DEVELOPMENT`,
-`split_role: development`, and carries `publishable: false`,
-`pbpp_headline_eligible: false`, `headline_eligible: false`,
-`upstream_comparable: false`, and
-`independent_external_reproduction: false`. Its registration is a reachability
-fix only — it advances no admission state and supports no publication,
-comparability, or superiority claim.
-
-The cell covers **valid-time only**. Full bitemporal transaction-time query
-semantics stay a hard deferral: the fixture itself declares
-`transaction_time.supported: false`, because transaction-time is system-owned
-and not exposed by this development cell. Scored coverage is the five canonical
-timelines (`ordered-events`, `late-event`, `retroactive-correction`,
-`exact-boundary`, `tied-valid-time`) across the five canonical seeds
-`[11, 23, 37, 53, 71]`.
-
 
 ### M02 retrieval development
 
@@ -300,6 +282,34 @@ portability claim. `verify_bundle` still has no `allowed_profile` or
 canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
 `bundle.py` is outside this lease; Stage B scores through
 `score_profile` instead.
+
+### M03 valid-time development
+
+**PROPOSED.**
+
+`wmbs-m03-valid-time-development` is `PROPOSED`, `DEVELOPMENT`,
+`split_role: development`, `license: CC0-1.0`, and carries
+`publishable: false`, `pbpp_headline_eligible: false`,
+`headline_eligible: false`, `upstream_comparable: false`, and
+`independent_external_reproduction: false`. Its registration is a
+reachability fix only — it advances no admission state and supports no
+publication, comparability, or superiority claim.
+
+The M03 valid-time cell runs through the same bundle custody path, but over
+the public CLI subprocess seam rather than a harness-owned core.
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m03-valid-time-development --out-dir /tmp/wmbs-m03
+uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m03
+```
+
+The cell covers **valid-time only**. Full bitemporal transaction-time query
+semantics stay a hard deferral: the fixture itself declares
+`transaction_time.supported: false`, because transaction-time is system-owned
+and not exposed by this development cell. Scored coverage is the five canonical
+timelines (`ordered-events`, `late-event`, `retroactive-correction`,
+`exact-boundary`, `tied-valid-time`) across the five canonical seeds
+`[11, 23, 37, 53, 71]`.
 
 ### M04 conflict development
 
@@ -414,6 +424,24 @@ quarantines remain recorded in
 [`docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`](../../docs/plans/wmb-m05-provenance-explanation-implementation-plan.md).
 Nothing here is a publication, comparability, ranking, superiority, or
 upstream-equivalence claim.
+
+### M10 calibration and abstention
+
+**PROPOSED.**
+
+`wmbs-m10-development` is `PROPOSED`, `ENHANCED-SUCCESSOR`,
+`split_role: development`, `license: CC0-1.0`,
+`system_seam: harness-owned-reference-core`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+
+The cell exercises a harness-owned deterministic core rather than a real SUT
+and supports no publication, comparability, or superiority claim.
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m10-development --out-dir /tmp/wmbs-m10
+uv run --locked mneme eval-public --verify-bundle /tmp/wmbs-m10
+```
 
 ## Neutral reproducibility bundle (REPRO-001)
 
