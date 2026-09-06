@@ -456,8 +456,11 @@ The invoking checkout must be clean, match `build.candidate_git_sha`, and use
 the bundle's exact `uv.lock` under the fixed `uv run --locked` toolchain. The
 manifest declares an environment allowlist and the verifier binds it to the
 environment artifact while freezing locale/timezone to C/UTC; this declaration
-does not scrub the parent process environment. Incomplete output is deleted. A
-destination collision fails closed.
+does not scrub the parent process environment. The reproduction entry point
+therefore rejects non-empty credential-shaped variables (tokens, API/access or
+private keys, secrets, passwords, credentials, and database URLs) before it
+creates a destination; variable values are never included in the error.
+Incomplete output is deleted. A destination collision fails closed.
 
 ### Manifest fields
 

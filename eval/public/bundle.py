@@ -239,6 +239,10 @@ _NAMED_DIGEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*@sha256:[0-9a-f]{64}$")
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _HEX_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_CREDENTIAL_ENVIRONMENT_NAME = re.compile(
+    r"(?:^|_)(?:ACCESS_KEY|API_KEY|CREDENTIALS?|PASSWORD|PASSWD|PRIVATE_KEY|SECRET|TOKEN)(?:$|_)",
+    re.IGNORECASE,
+)
 _MAX_REPRO_JSON_DEPTH = 64
 _MAX_REPRO_FILE_BYTES = 16 * 1024 * 1024
 _MAX_REPRO_BUNDLE_BYTES = 1024 * 1024 * 1024
@@ -416,6 +420,20 @@ def _assert_reproduction_checkout(expected_sha: str, expected_lockfile: bytes) -
     checkout_lockfile, _ = _read_inventory_file(Path.cwd() / "uv.lock")
     if checkout_lockfile != expected_lockfile:
         raise BundleError("reproduction checkout lockfile does not match bundle")
+
+
+def _reject_inherited_credentials() -> None:
+    """Fail before reproduction when the parent environment exposes credentials."""
+    forbidden = any(
+        value
+        and (
+            _CREDENTIAL_ENVIRONMENT_NAME.search(name) is not None
+            or name.upper() in {"DATABASE_URL", "GH_TOKEN", "GITHUB_TOKEN"}
+        )
+        for name, value in os.environ.items()
+    )
+    if forbidden:
+        raise BundleError("reproduction environment contains credential variables")
 
 
 def _json_depth(value: object, depth: int = 0) -> int:
@@ -1573,6 +1591,7 @@ def _remove_owned_directory(path: Path, identity: tuple[int, int]) -> None:
 
 
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
+    _reject_inherited_credentials()
     _reject_reproducibility_link_path(source)
     if (
         not source.is_dir()
