@@ -579,6 +579,36 @@ def test_version_1_reproduction_uses_private_source_snapshot(
     assert (source / "benchmark.json").read_bytes() != original_benchmark
 
 
+def test_legacy_snapshot_bounds_final_inventory_rescan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    snapshot = tmp_path / "snapshot"
+    runner.run_public_suite("smoke", source)
+    snapshot.mkdir()
+    original_iterdir = Path.iterdir
+    source_scans = 0
+    source_entries = tuple(original_iterdir(source))
+    monkeypatch.setattr(public_bundle, "_MAX_REPRO_FILES", len(source_entries))
+
+    def expanding_iterdir(path: Path) -> Any:
+        nonlocal source_scans
+        if path == source:
+            source_scans += 1
+            if source_scans == 2:
+                return iter((*source_entries, source / "racing-extra"))
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", expanding_iterdir)
+    with pytest.raises(BundleError, match="closed file-count bound"):
+        public_bundle._snapshot_legacy_bundle(source, snapshot)
+
+    assert source_scans == 2
+
+
 def test_version_1_reproduction_failure_preserves_unowned_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

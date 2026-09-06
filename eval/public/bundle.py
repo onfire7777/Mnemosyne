@@ -2151,7 +2151,12 @@ def _snapshot_legacy_bundle(source: Path, snapshot: Path) -> None:
             raise BundleError("bundle exceeds the closed aggregate size bound")
         (snapshot / entry.name).write_bytes(payload)
         names.add(entry.name)
-    if names != {entry.name for entry in source.iterdir()}:
+    current_names: set[str] = set()
+    for entry_number, entry in enumerate(source.iterdir(), start=1):
+        if entry_number > _MAX_REPRO_FILES:
+            raise BundleError("bundle exceeds the closed file-count bound")
+        current_names.add(entry.name)
+    if names != current_names:
         raise BundleError("bundle inventory changed while snapshotting")
     _assert_directory_identity(source, source_identity, "bundle")
 
