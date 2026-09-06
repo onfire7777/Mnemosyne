@@ -1469,6 +1469,29 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
     raise OSError(error_number, os.strerror(error_number), destination)
 
 
+def _owned_directory_identity(path: Path) -> tuple[int, int]:
+    """Capture the filesystem identity of one process-created directory."""
+    metadata = path.stat(follow_symlinks=False)
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise BundleError("private reproduction path is not a directory")
+    return metadata.st_dev, metadata.st_ino
+
+
+def _remove_owned_directory(path: Path, identity: tuple[int, int]) -> None:
+    """Remove a private directory only while its original inode is still named."""
+    try:
+        metadata = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
+    if (
+        stat.S_ISDIR(metadata.st_mode)
+        and (metadata.st_dev, metadata.st_ino) == identity
+    ):
+        shutil.rmtree(path, ignore_errors=True)
+
+
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
     _reject_reproducibility_link_path(source)
     if (
@@ -1487,6 +1510,8 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         tempfile.mkdtemp(prefix=f".{destination.name}-source-", dir=destination.parent)
     )
     temp = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
+    snapshot_identity = _owned_directory_identity(snapshot)
+    temp_identity = _owned_directory_identity(temp)
     try:
         manifest_bytes, source_manifest = _read_reproducibility_manifest(source)
         payloads = _inventory_bytes(
@@ -1538,10 +1563,10 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         _publish_directory_noreplace(temp, destination)
         return verified
     except BaseException:
-        shutil.rmtree(temp, ignore_errors=True)
+        _remove_owned_directory(temp, temp_identity)
         raise
     finally:
-        shutil.rmtree(snapshot, ignore_errors=True)
+        _remove_owned_directory(snapshot, snapshot_identity)
 
 
 def write_bundle(

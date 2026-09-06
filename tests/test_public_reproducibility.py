@@ -1842,6 +1842,38 @@ def test_reproduce_cleanup_does_not_delete_foreign_destination(
     assert (destination / "marker.txt").read_text(encoding="utf-8") == "keep\n"
 
 
+def test_reproduce_cleanup_does_not_delete_replacement_temp_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "swapped-temp-source")
+    monkeypatch.setattr(
+        public_bundle, "_assert_reproduction_checkout", lambda _sha, _lock: None
+    )
+    destination = tmp_path / "swapped-temp-dest"
+    displaced = tmp_path / "displaced-owned-temp"
+    replacement: Path | None = None
+
+    def swap_private_temp(source: Path, target: Path) -> None:
+        nonlocal replacement
+        assert target == destination
+        source.rename(displaced)
+        source.mkdir()
+        replacement = source
+        (source / "marker.txt").write_text("foreign\n", encoding="utf-8")
+        raise OSError("simulated private-directory swap")
+
+    monkeypatch.setattr(
+        public_bundle, "_publish_directory_noreplace", swap_private_temp
+    )
+    with pytest.raises(OSError, match="private-directory swap"):
+        reproduce_bundle(bundle["root"], destination)
+    assert replacement is not None
+    assert (replacement / "marker.txt").read_text(encoding="utf-8") == "foreign\n"
+    assert displaced.is_dir()
+
+
 def test_atomic_publication_never_replaces_existing_destination(tmp_path: Path) -> None:
     from eval.public.bundle import _publish_directory_noreplace
 
