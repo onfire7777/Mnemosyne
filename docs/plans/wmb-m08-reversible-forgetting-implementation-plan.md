@@ -35,28 +35,36 @@ its own placement was authorized.
 
 ### 0.2 Why this plan is NOT CODE-READY
 
-All of the following are blocking. None is discharged by writing this file.
+**Source-readiness blockers** (must clear before descriptive Stage A). None
+is discharged by writing this file.
 
 1. Spec WMBS-D (`…standard-design.md:1394–1398`): build M06–M13 only after
    WMBS-B **and** after each product capability exists through a public
-   contract. C10 is not a public contract on this base.
-2. Spec M08 resource prerequisite (`…standard-design.md:814`): a measured
-   admission receipt. None exists.
-3. Spec M08 acceptance (`…standard-design.md:809–811`): zero exact-canary
-   leakage, semantic leakage at most 1%, unrelated utility loss at most 0.5
-   percentage points, and 100% restore correctness when restore is claimed.
-   No preregistered canary set or restore-claim protocol exists on this base.
-4. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M08 is not
+   contract. C10 is not a public contract on this base (same as R2).
+2. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M08 is not
    in the first pilot (`…standard-design.md:819`). Freeze is a later step.
    This file does not freeze itself.
-5. Systems without a reversible-delete operation are `UNSUPPORTED-BY-SYSTEM`
+3. Systems without a reversible-delete operation are `UNSUPPORTED-BY-SYSTEM`
    (`…standard-design.md:816–817`). They are not scored zero. No public
-   reversible-delete hook is admitted on this base.
+   reversible-delete hook is admitted on this base (same as R3).
+
+**Measured / admitted-claim gates** (not Stage A source blockers; align with
+§6). R1 and the acceptance bounds do **not** refuse descriptive Stage A.
+
+- R1 — Spec M08 resource prerequisite (`…standard-design.md:814`): measured
+  admission receipt. Gates measured/admitted profile claims only.
+- Spec M08 acceptance (`…standard-design.md:809–811`): zero exact-canary
+  leakage, semantic leakage ≤1%, unrelated utility loss ≤0.5pp, 100% restore
+  correctness when restore is claimed. Gates scored-run acceptance evidence
+  only (independent of R1); no preregistered canary/restore protocol on this
+  base yet.
 
 Missing Stage A artifacts are tree state (inventory L56), not a gate. WMBS-D
 is an implement sequencing gate, not a reason to refuse this plan file.
 
-**Verdict: NOT CODE-READY.** Do not implement from this file.
+**Verdict: NOT CODE-READY.** Do not implement from this file until the
+**source-readiness blockers** above clear. Do not treat R1 or acceptance
+bounds as Stage A source blockers.
 
 ## 1. Module scope (copied from the spec, not rewritten)
 
