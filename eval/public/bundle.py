@@ -1782,6 +1782,19 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         raise BundleError("secret-like material detected")
     _validate_legacy_canonical_bytes(payloads)
     manifest = _load_inventory_json(payloads, "bundle-manifest.json")
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"files", "version"}
+        or type(manifest.get("version")) is not int
+        or manifest["version"] != 1
+        or not isinstance(manifest.get("files"), dict)
+        or any(
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            for digest in manifest["files"].values()
+        )
+    ):
+        raise BundleError("invalid legacy bundle manifest schema")
     if set(manifest.get("files", {})) != set(payload_files):
         raise BundleError("manifest inventory mismatch")
     for name, expected_digest in manifest["files"].items():
@@ -1799,6 +1812,11 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     except UnicodeDecodeError as exc:
         raise BundleError("invalid UTF-8 in traces.jsonl") from exc
     traces = [_parse_bounded_json(line, "traces.jsonl") for line in trace_text.splitlines()]
+    if any(
+        not isinstance(value, dict)
+        for value in (benchmark, config, measured, build, judge, *traces)
+    ):
+        raise BundleError("legacy bundle JSON artifacts must be objects")
     trace_ids = [_trace_id(trace, family=config.get("family")) for trace in traces]
     if len(trace_ids) != len(set(trace_ids)):
         raise BundleError("duplicate trace IDs")
@@ -1835,6 +1853,8 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if allowed_profile != (family, method):
         raise BundleError("wrong interval-family metadata")
     metadata = benchmark.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise BundleError("legacy benchmark metadata must be an object")
     dataset_bytes = _canonical(benchmark.get("data"))
     if family == "deterministic-action":
         dataset_bytes = dataset_bytes.rstrip(b"\n")
@@ -1861,6 +1881,16 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         "system_seam", "public-cli-subprocess"
     ):
         raise BundleError("build system seam does not match registry metadata")
+    expected_build_keys = {"environment_contract", "system_seam", "version"}
+    if family == "qa":
+        expected_build_keys.add("candidate_git_sha")
+    if (
+        set(build) != expected_build_keys
+        or build.get("environment_contract") != "uv run --locked"
+        or type(build.get("version")) is not int
+        or build["version"] != 1
+    ):
+        raise BundleError("invalid legacy build contract")
     expected_config = {
         "family": metadata.get("family"),
         "interval_method": metadata.get("interval_method"),
@@ -1874,6 +1904,18 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if measured.get("family") != family:
         raise BundleError("metrics/config family mismatch")
     if family == "qa":
+        custody = metadata.get("reader_custody")
+        expected_reader = (
+            custody.get("reader", {}).get("name")
+            if isinstance(custody, dict)
+            else None
+        )
+        if judge != {
+            "custody": custody,
+            "judge": "benchmark-owned-qa-em-f1-v1",
+            "reader": expected_reader,
+        }:
+            raise BundleError("invalid legacy QA judge contract")
         _verify_qa_custody(
             metadata,
             judge,
@@ -1883,6 +1925,12 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
             measured,
             build,
         )
+    elif judge != {
+        "judge": None,
+        "reader": None,
+        "reason": f"{family} family",
+    }:
+        raise BundleError("invalid legacy deterministic judge contract")
     if profile == "smoke-hit-at-k-v1":
         if measured.get("interval", {}).get("method") != method:
             raise BundleError("wrong interval-family metadata")

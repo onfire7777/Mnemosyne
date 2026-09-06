@@ -336,6 +336,58 @@ def test_version_1_verifier_binds_human_and_executable_surfaces(
         verify_bundle(destination)
 
 
+@pytest.mark.parametrize(
+    ("artifact_name", "mutation", "message"),
+    (
+        (
+            "build.json",
+            lambda value: value.update({"environment_contract": "python -m mnemosyne"}),
+            "build contract",
+        ),
+        (
+            "judge.json",
+            lambda value: value.update({"reason": "official benchmark"}),
+            "judge contract",
+        ),
+    ),
+)
+def test_version_1_verifier_closes_control_plane_artifacts(
+    tmp_path: Path,
+    artifact_name: str,
+    mutation: Any,
+    message: str,
+) -> None:
+    from eval.public import runner
+
+    destination = tmp_path / artifact_name.replace(".", "-")
+    runner.run_public_suite("smoke", destination)
+    artifact = destination / artifact_name
+    value = json.loads(artifact.read_text(encoding="utf-8"))
+    mutation(value)
+    artifact.write_bytes(_canonical(value))
+    manifest_path = destination / "bundle-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][artifact_name] = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    manifest_path.write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match=message):
+        verify_bundle(destination)
+
+
+def test_version_1_verifier_closes_bundle_manifest_envelope(tmp_path: Path) -> None:
+    from eval.public import runner
+
+    destination = tmp_path / "manifest-envelope"
+    runner.run_public_suite("smoke", destination)
+    manifest_path = destination / "bundle-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["publication"] = "official"
+    manifest_path.write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="bundle manifest schema"):
+        verify_bundle(destination)
+
+
 def test_version_1_reproduction_uses_private_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
