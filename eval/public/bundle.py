@@ -2112,11 +2112,18 @@ def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, A
         )
         destination_identity = _owned_directory_identity(destination)
         verify_bundle(destination)
-        for name in _manifest_files(snapshot):
+        destination_payloads: dict[str, bytes] = {}
+        compared_names = (*_manifest_files(snapshot), "bundle-manifest.json")
+        for name in compared_names:
             expected, _ = _read_inventory_file(snapshot / name)
             reproduced, _ = _read_inventory_file(destination / name)
             if expected != reproduced:
                 raise BundleError(f"reproduction mismatch: {name}")
+            destination_payloads[name] = reproduced
+        _assert_directory_identity(
+            destination, destination_identity, "reproduced bundle"
+        )
+        _assert_inventory_snapshot(destination, destination_payloads)
         return result
     except BaseException:
         if destination_identity is not None:
