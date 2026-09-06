@@ -455,6 +455,45 @@ def test_report_verification_uses_private_bundle_snapshots(
     assert (source / "benchmark.json").read_bytes() == b"{}\n"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("source_bundle", 1),
+        ("reproduced_bundle", None),
+        ("git_sha", []),
+        ("publication", []),
+        ("command", {}),
+        ("suite", ""),
+        ("version", True),
+    ),
+)
+def test_report_verifier_rejects_invalid_envelope_types(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    reproduced = tmp_path / "reproduced"
+    report = tmp_path / "report.json"
+    note = tmp_path / "report.md"
+    runner.run_public_suite("smoke", source)
+    reproduce_bundle(source, reproduced)
+    public_bundle.write_report(source, reproduced, report, note)
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    payload[field] = value
+    report_bytes = _canonical(payload)
+    report.write_bytes(report_bytes)
+    note.write_bytes(
+        public_bundle._render_report_note(
+            payload, hashlib.sha256(report_bytes).hexdigest()
+        )
+    )
+
+    with pytest.raises(BundleError, match="invalid report schema"):
+        public_bundle.verify_report(report, note)
+
+
 def test_m15_helpers_are_reused_not_copied() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
     assert canonical_replay_digest(payload) == REPLAY_DIGESTS["wmbs-m01-development"]
