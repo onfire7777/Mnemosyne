@@ -1470,6 +1470,13 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
 
 
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
+    _reject_reproducibility_link_path(source)
+    if (
+        not source.is_dir()
+        or source.is_symlink()
+        or getattr(source, "is_junction", lambda: False)()
+    ):
+        raise BundleError("bundle must be a real directory, not a link")
     destination = destination.absolute()
     _reject_reproducibility_link_path(destination)
     if destination.exists():
