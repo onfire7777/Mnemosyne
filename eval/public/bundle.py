@@ -1032,6 +1032,20 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or expected.get("seed_records") != replay.get("seed_records")
     ):
         raise BundleError("canonical replay digest mismatch")
+    replay_build = replay.get("build") if isinstance(replay, dict) else None
+    replay_config = replay.get("config") if isinstance(replay, dict) else None
+    if (
+        not isinstance(replay_build, dict)
+        or replay_build.get("candidate_git_sha")
+        != manifest["build"]["candidate_git_sha"]
+        or replay_build.get("system_seam") != build_payload.get("system_seam")
+    ):
+        raise BundleError("canonical replay build custody mismatch")
+    if not isinstance(replay_config, dict) or any(
+        replay_config.get(field) != manifest["config"][field]
+        for field in ("locale", "timezone")
+    ):
+        raise BundleError("canonical replay config custody mismatch")
     if manifest.get("ledger_ref") is not None:
         from leaderboard.ledger import LedgerError
         from leaderboard.ledger import _canonical as ledger_canonical
