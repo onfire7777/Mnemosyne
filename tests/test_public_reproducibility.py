@@ -1142,6 +1142,8 @@ def test_symlinked_bundle_ancestor_fails_closed(tmp_path: Path) -> None:
     with pytest.raises(BundleError, match="links or junctions"):
         verify_bundle(alias / bundle["root"].name)
     with pytest.raises(BundleError, match="links or junctions"):
+        reproduce_bundle(alias / bundle["root"].name, tmp_path / "source-alias-destination")
+    with pytest.raises(BundleError, match="links or junctions"):
         reproduce_bundle(bundle["root"], alias / "destination")
 
 
