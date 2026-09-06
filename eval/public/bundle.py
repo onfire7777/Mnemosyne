@@ -661,10 +661,10 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
             else None
         )
         if (
-            item.get("canonicalization") != "raw-bytes"
+            expected_media_type is None
+            or item.get("canonicalization") != "raw-bytes"
             or (
-                expected_media_type is not None
-                and item.get("media_type") != expected_media_type
+                item.get("media_type") != expected_media_type
             )
         ):
             raise BundleError("inventory media type or canonicalization mismatch")
