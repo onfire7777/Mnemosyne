@@ -2239,6 +2239,33 @@ def test_final_reproduction_comparison_uses_stable_artifact_snapshot(
     assert not destination.exists()
 
 
+def test_reproduction_rechecks_destination_ancestry_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "ancestry-source")
+    destination = tmp_path / "new-parent" / "ancestry-destination"
+    original_reject = public_bundle._reject_reproducibility_link_path
+    destination_checks = 0
+
+    def track_destination_checks(path: Path) -> None:
+        nonlocal destination_checks
+        if path.absolute() == destination.absolute():
+            destination_checks += 1
+        original_reject(path)
+
+    monkeypatch.setattr(
+        public_bundle,
+        "_reject_reproducibility_link_path",
+        track_destination_checks,
+    )
+    monkeypatch.setattr(public_bundle, "_assert_reproduction_checkout", lambda *_: None)
+
+    assert reproduce_bundle(bundle["root"], destination)["valid"] is True
+    assert destination_checks == 3
+
+
 def test_digest_consistent_malformed_lockfile_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "malformed-lock")
     root = bundle["root"]
