@@ -2097,6 +2097,13 @@ def test_duplicate_ranked_retrieved_ids_fail_closed(tmp_path: Path) -> None:
             "identifiers are malformed",
         ),
         (
+            b'{"answer":" ","gold_references":[" "],"question_id":"q1",'
+            b'"ranked_retrieved_hits":[" "],'
+            b'"scoring_family":"deterministic-retrieval",'
+            b'"stored_records":[" "]}\n',
+            "identifiers are malformed",
+        ),
+        (
             b'{"answer":"d1","gold_references":["d1"],"question_id":"q1",'
             b'"ranked_retrieved_hits":["d1"],'
             b'"scoring_family":"deterministic-retrieval",'

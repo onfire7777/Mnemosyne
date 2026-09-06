@@ -987,7 +987,10 @@ def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]
             not isinstance(hits, list)
             or not isinstance(gold, list)
             or not gold
-            or any(not isinstance(item, str) or not item for item in [*hits, *gold])
+            or any(
+                not isinstance(item, str) or not item.strip()
+                for item in [*hits, *gold]
+            )
         ):
             raise BundleError("retrieval trace identifiers are malformed")
         unique_hits = set(hits)
@@ -995,7 +998,7 @@ def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]
             raise BundleError("duplicate ranked retrieved ids")
         if (
             not isinstance(stored, list)
-            or any(not isinstance(item, str) or not item for item in stored)
+            or any(not isinstance(item, str) or not item.strip() for item in stored)
             or len(stored) != len(set(stored))
         ):
             raise BundleError("stored trace population is malformed")
