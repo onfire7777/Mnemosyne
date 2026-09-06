@@ -790,6 +790,28 @@ def test_runtime_rejects_semantically_invalid_reproducibility_schema(
         verify_bundle(bundle["root"])
 
 
+def test_runtime_rejects_duplicate_reproducibility_schema_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "duplicate-runtime-schema")
+    duplicate_schema = tmp_path / "duplicate-schema.json"
+    duplicate_schema.write_text(
+        '{"$id":"mnemosyne.reproducibility-bundle/v1",'
+        '"$schema":"https://json-schema.org/draft/2020-12/schema",'
+        '"type":"object","type":"array"}\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+    monkeypatch.setattr(
+        public_bundle, "REPRODUCIBILITY_BUNDLE_SCHEMA_PATH", duplicate_schema
+    )
+
+    with pytest.raises(BundleError, match="schema is invalid"):
+        verify_bundle(bundle["root"])
+
+
 @pytest.mark.parametrize(
     "replacement",
     (

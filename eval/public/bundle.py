@@ -467,8 +467,10 @@ def _require_enum(value: object, allowed: tuple[str, ...], label: str) -> str:
 
 def _validate_repro_schema(manifest: object) -> None:
     try:
-        schema = json.loads(REPRODUCIBILITY_BUNDLE_SCHEMA_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        schema_bytes, _ = _read_inventory_file(REPRODUCIBILITY_BUNDLE_SCHEMA_PATH)
+        schema = _parse_json(schema_bytes.decode("utf-8"), "reproducibility schema")
+        _json_depth(schema)
+    except (OSError, UnicodeDecodeError, BundleError) as exc:
         raise BundleError("reproducibility schema is invalid") from exc
     if not isinstance(schema, dict) or (
         schema.get("$schema") != REPRODUCIBILITY_BUNDLE_SCHEMA_DIALECT
