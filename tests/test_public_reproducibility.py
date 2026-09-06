@@ -2100,12 +2100,20 @@ def test_digest_consistent_malformed_lockfile_fails_closed(tmp_path: Path) -> No
         verify_bundle(root)
 
 
-def test_lockfile_boolean_version_fails_closed(tmp_path: Path) -> None:
-    lockfile = (REPO_ROOT / "uv.lock").read_bytes().replace(
-        b"version = 1", b"version = true", 1
-    )
+@pytest.mark.parametrize(
+    ("old", "new"),
+    (
+        (b"version = 1", b"version = true"),
+        (b"revision = 3", b"revision = true"),
+        (b'requires-python = ">=3.12"', b'requires-python = ""'),
+    ),
+)
+def test_lockfile_scalar_contract_fails_closed(
+    tmp_path: Path, old: bytes, new: bytes
+) -> None:
+    lockfile = (REPO_ROOT / "uv.lock").read_bytes().replace(old, new, 1)
     bundle = _write_reproducibility_bundle(
-        tmp_path / "boolean-lock-version", lockfile=lockfile
+        tmp_path / "invalid-lock-scalar", lockfile=lockfile
     )
     with pytest.raises(BundleError, match="lock contract"):
         verify_bundle(bundle["root"])

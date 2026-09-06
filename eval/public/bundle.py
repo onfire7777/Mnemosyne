@@ -841,8 +841,10 @@ def _validate_bound_lockfile(raw: bytes) -> None:
     if (
         type(lock.get("version")) is not int
         or lock.get("version") != 1
-        or not isinstance(lock.get("revision"), int)
+        or type(lock.get("revision")) is not int
+        or lock.get("revision") < 1
         or not isinstance(lock.get("requires-python"), str)
+        or not lock.get("requires-python").strip()
         or not isinstance(packages, list)
         or not packages
     ):
