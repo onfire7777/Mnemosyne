@@ -475,6 +475,17 @@ The following packages are complete source history, not runnable work:
   This receipt changes no benchmark result or admission state,
   admits no successor source node, and does not recompute the
   canonical baseline (baseline stays `main@f688c747`).
+- PR #150: ordinary documentation receipt recording the merged PR #118
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-06T02:28:00Z`
+  capture and adds only the PR #118 merged-baseline bullet, the #148
+  MERGED mark, and this structured self-record in this map. Exclusive
+  File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #150 changes no
+  benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review, security,
+  and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
