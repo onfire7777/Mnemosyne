@@ -335,6 +335,33 @@ def test_version_1_verifier_rejects_bundle_directory_replacement(
         verify_bundle(destination)
 
 
+def test_version_1_verifier_rechecks_captured_files_before_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    destination = tmp_path / "v1-final-inventory"
+    runner.run_public_suite("smoke", destination)
+    original_read = public_bundle._read_inventory_file
+    read_count = 0
+
+    def changed_final_read(
+        path: Path, *, allow_hardlinks: bool = False
+    ) -> tuple[bytes, int]:
+        nonlocal read_count
+        payload, size = original_read(path, allow_hardlinks=allow_hardlinks)
+        if path.name == "README.md":
+            read_count += 1
+            if read_count == 2:
+                return payload + b"changed", size + len(b"changed")
+        return payload, size
+
+    monkeypatch.setattr(public_bundle, "_read_inventory_file", changed_final_read)
+    with pytest.raises(BundleError, match="bundle changed after verification"):
+        verify_bundle(destination)
+
+
 @pytest.mark.parametrize(
     ("artifact_name", "replacement", "message"),
     (
@@ -2176,7 +2203,7 @@ def test_ledger_verification_uses_inventory_bound_private_snapshot(
     assert not (root / "ledger.jsonl.lock").exists()
 
 
-def test_semantic_verification_uses_inventory_bound_bytes(
+def test_semantic_verification_rejects_change_after_inventory_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from eval.public import bundle as public_bundle
@@ -2201,10 +2228,11 @@ def test_semantic_verification_uses_inventory_bound_bytes(
         return payloads
 
     monkeypatch.setattr(public_bundle, "_inventory_bytes", mutate_after_snapshot)
-    assert verify_bundle(root)["valid"] is True
+    with pytest.raises(BundleError, match="bundle changed after verification"):
+        verify_bundle(root)
 
 
-def test_manifest_schema_and_inventory_share_one_inode_snapshot(
+def test_manifest_change_after_schema_snapshot_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from eval.public import bundle as public_bundle
@@ -2228,7 +2256,8 @@ def test_manifest_schema_and_inventory_share_one_inode_snapshot(
     monkeypatch.setattr(
         public_bundle, "_inventory_bytes", replace_manifest_after_validation
     )
-    assert verify_bundle(root)["valid"] is True
+    with pytest.raises(BundleError, match="bundle changed after verification"):
+        verify_bundle(root)
 
 
 def test_manifest_bytes_and_inventory_order_are_canonical(tmp_path: Path) -> None:
@@ -3018,7 +3047,7 @@ def test_final_reproduction_comparison_uses_stable_artifact_snapshot(
     monkeypatch.setattr(public_bundle, "_read_inventory_file", read_with_final_mutation)
     monkeypatch.setattr(public_bundle, "_assert_reproduction_checkout", lambda *_: None)
 
-    with pytest.raises(BundleError, match="reproduction mismatch: result.json"):
+    with pytest.raises(BundleError, match="bundle changed after verification"):
         reproduce_bundle(bundle["root"], destination)
     assert temp_result_reads == 2
     assert not destination.exists()
