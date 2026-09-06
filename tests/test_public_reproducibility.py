@@ -309,7 +309,9 @@ def _assert_objects_closed(node: object, path: str = "$") -> None:
             _assert_objects_closed(item, f"{path}[{index}]")
 
 
-def _m02_replay_payload(commit: str) -> dict[str, object]:
+def _m02_replay_payload(
+    commit: str, *, system_seam: str = "public-cli-subprocess"
+) -> dict[str, object]:
     payload = _canonical_replay_payload("wmbs-m01-development")
     fixture_digest = "2" * 64
     payload["suite"] = "wmbs-m02-retrieval-development"
@@ -320,7 +322,7 @@ def _m02_replay_payload(commit: str) -> dict[str, object]:
     manifests["fixture_manifest_sha256"] = fixture_digest
     payload["build"] = {
         "candidate_git_sha": commit,
-        "system_seam": "public-cli-subprocess",
+        "system_seam": system_seam,
     }
     return payload
 
@@ -403,6 +405,7 @@ def _write_reproducibility_bundle(
     traces: bytes | None = None,
     scoring_profile: str = "smoke-hit-at-k-v1",
     suite: str = "smoke",
+    system_seam: str = "public-cli-subprocess",
     lockfile: bytes | None = None,
     ledger_run_id: str | None = None,
     ledger_numeric_alias: bool = False,
@@ -433,7 +436,7 @@ def _write_reproducibility_bundle(
             "dirty": dirty,
             "environment_contract": "uv run --locked",
             "lockfile": "uv.lock",
-            "system_seam": "public-cli-subprocess",
+            "system_seam": system_seam,
             "toolchain": "uv",
             "version": 1,
         }
@@ -461,7 +464,7 @@ def _write_reproducibility_bundle(
         "trace_count": 1,
         "value": _SMOKE_WILSON["point"],
     }
-    replay = _m02_replay_payload(commit)
+    replay = _m02_replay_payload(commit, system_seam=system_seam)
     supporting = {
         "adapter.json": {"id": "smoke", "kind": "adapter"},
         "baseline.json": {"id": "none", "kind": "baseline"},
@@ -2074,6 +2077,15 @@ def test_blank_bound_suite_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "blank-suite", suite=" ")
 
     with pytest.raises(BundleError, match="suite"):
+        verify_bundle(bundle["root"])
+
+
+def test_blank_build_system_seam_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "blank-system-seam", system_seam=" "
+    )
+
+    with pytest.raises(BundleError, match="system seam"):
         verify_bundle(bundle["root"])
 
 
