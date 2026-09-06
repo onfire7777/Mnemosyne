@@ -2076,9 +2076,23 @@ def write_report(
 def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str, Any]:
     report_file, note_file = Path(report_path), Path(report_note)
     for path in (report_file, note_file):
-        if path.is_symlink() or not path.is_file():
+        _reject_reproducibility_link_path(path)
+        if (
+            path.is_symlink()
+            or getattr(path, "is_junction", lambda: False)()
+            or not path.is_file()
+        ):
             raise BundleError("report and report note must be real files, not links")
-    report = _load_json(report_file)
+    report_payload, _ = _read_inventory_file(report_file)
+    note_bytes, _ = _read_inventory_file(note_file)
+    try:
+        report_text = report_payload.decode("utf-8")
+        note = note_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BundleError("report and report note must be UTF-8") from exc
+    report = _parse_bounded_json(report_text, report_file.name)
+    if report_payload != _canonical(report):
+        raise BundleError("report bytes must be canonical")
     if (
         set(report)
         != {
@@ -2160,12 +2174,11 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
         )
     ):
         raise BundleError("report publication flags must remain false")
-    note_bytes = note_file.read_bytes()
-    if note_bytes != _render_report_note(report, _digest(report_file)):
+    report_digest = hashlib.sha256(report_payload).hexdigest()
+    if note_bytes != _render_report_note(report, report_digest):
         raise BundleError("report note binding is not the exact canonical projection")
-    note = note_bytes.decode("utf-8")
     for value in (
-        _digest(report_file),
+        report_digest,
         expected["source_bundle_manifest_sha256"],
         expected["reproduced_bundle_manifest_sha256"],
         report["git_sha"],
@@ -2202,7 +2215,7 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
     return {
         "report": str(report_file.resolve()),
         "report_note": str(note_file.resolve()),
-        "sha256": _digest(report_file),
+        "sha256": report_digest,
         "valid": True,
     }
 

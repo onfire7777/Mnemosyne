@@ -369,6 +369,31 @@ def test_report_publication_never_replaces_racing_note(
     assert not list(tmp_path.glob(".report.*-*"))
 
 
+def test_report_verifier_rejects_hardlinked_report(
+    tmp_path: Path,
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    reproduced = tmp_path / "reproduced"
+    report = tmp_path / "report.json"
+    note = tmp_path / "report.md"
+    runner.run_public_suite("smoke", source)
+    reproduce_bundle(source, reproduced)
+    public_bundle.write_report(source, reproduced, report, note)
+    external = tmp_path / "external-report.json"
+    external.write_bytes(report.read_bytes())
+    report.unlink()
+    try:
+        os.link(external, report)
+    except OSError as exc:
+        pytest.skip(f"hardlink fixture is unavailable: {exc}")
+
+    with pytest.raises(BundleError, match="hardlink"):
+        public_bundle.verify_report(report, note)
+
+
 def test_m15_helpers_are_reused_not_copied() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
     assert canonical_replay_digest(payload) == REPLAY_DIGESTS["wmbs-m01-development"]
