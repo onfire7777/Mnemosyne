@@ -144,8 +144,14 @@ add a **new** deterministic development fixture:
 - Families the spec names for **local Stage A**: queue redelivery, partial
   outage, crash-after-commit, object loss, retry, backup. **PITR scenarios
   are OUT of Stage A** — they require R5 / P32 and pinned services.
+- Freeze residual (NOT CODE-READY): canonical fixture shape — seed/version,
+  top-level and per-scenario schemas, scenario cardinalities, crash-point
+  placement, and expected post-recovery state/fingerprints — must be frozen
+  so two implementers produce byte-identical gold under the same seed, not
+  merely self-consistent `canonical_json(generate_fixture(seed))`.
 - Replay: three crash points per local scenario and two clean restores.
-  Byte-identical under `canonical_json(generate_fixture(seed))`.
+  Byte-identical under `canonical_json(generate_fixture(seed))` after that
+  freeze.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
 - Local fault injection only. P32 / PostgreSQL / object-store / PITR stay
   `DEFERRED` (R5) — do not invent PITR rows in the Stage A fixture.
@@ -166,8 +172,10 @@ add a **new** stdlib-only oracle:
   submitter-selected target cannot certify itself.
 - Freeze residual (keeps NOT CODE-READY): observation/receipt schema,
   denominators, RPO/RTO calculation, audit-continuity rules, malformed-input
-  behavior, aggregation, and pass semantics must be frozen before Stage A
-  implement — metric names alone are not a scorer contract. Closed ABI has no
+  behavior, aggregation, pass semantics, **and canonical metric IDs** for
+  each gate (acknowledged loss, duplicate effects, recovery completeness,
+  RPO/RTO, operator steps — spec L176–180) must be frozen before Stage A
+  implement — prose metric names alone are not a scorer contract. Closed ABI has no
   `health` / `queue_state` / `snapshot` / `restore_snapshot`; Stage A harness
   injection must name how those observations are produced without inventing
   ABI ops here.
@@ -185,6 +193,8 @@ This paragraph does not create those files.
   (spec L1044–1045; U-MODULES license/custody). Pin any later dataset at
   freeze; do not invent one here. P32 / pinned service images stay out
   until R5 is admitted.
+- Generated Stage A fixture license: **`CC0-1.0`** (SPDX) for the synthetic
+  local fixture — required for U-MODULES rights/BOM metadata.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "recovery certified," certified, or governed label. Passing, if it
   ever happens, is operator/internal certification shape for local fault
