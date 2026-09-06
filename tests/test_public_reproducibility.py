@@ -767,6 +767,22 @@ def test_reproducibility_schema_is_closed_draft_2020_12() -> None:
     Draft202012Validator.check_schema(schema)
 
 
+def test_runtime_rejects_semantically_invalid_reproducibility_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "invalid-runtime-schema-bundle")
+    invalid_schema = tmp_path / "invalid-schema.json"
+    _write_json(invalid_schema, {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": 7})
+    monkeypatch.setattr(
+        public_bundle, "REPRODUCIBILITY_BUNDLE_SCHEMA_PATH", invalid_schema
+    )
+
+    with pytest.raises(BundleError, match="schema is invalid"):
+        verify_bundle(bundle["root"])
+
+
 @pytest.mark.parametrize("track_kind", TRACK_KINDS)
 def test_closed_manifest_accepts_separated_track_kinds(
     tmp_path: Path, track_kind: str
