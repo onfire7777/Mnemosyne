@@ -2685,6 +2685,11 @@ def _reject_decoded_secrets(value: object) -> None:
         if isinstance(current, str) and SECRET.search(current):
             raise BundleError("secret-like material detected in decoded artifact")
         if isinstance(current, dict):
+            key_type = current.get("kty")
+            if isinstance(key_type, str) and (
+                "d" in current or (key_type == "oct" and "k" in current)
+            ):
+                raise BundleError("private JWK material detected in decoded artifact")
             pending.extend(current.keys())
             pending.extend(current.values())
         elif isinstance(current, list):
