@@ -1734,38 +1734,56 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     repro = root / REPRODUCIBILITY_MANIFEST_NAME
     if repro.exists() or repro.is_symlink():
         return _verify_reproducibility_bundle(root)
-    if not root.is_dir() or root.is_symlink():
+    _reject_reproducibility_link_path(root)
+    if (
+        not root.is_dir()
+        or root.is_symlink()
+        or getattr(root, "is_junction", lambda: False)()
+    ):
         raise BundleError("bundle must be a real directory, not a link")
-    actual = {entry.name for entry in root.iterdir()}
+    entries: list[Path] = []
+    for entry_number, entry in enumerate(root.iterdir(), start=1):
+        if entry_number > _MAX_REPRO_FILES:
+            raise BundleError("bundle exceeds the closed file-count bound")
+        entries.append(entry)
+    actual = {entry.name for entry in entries}
     payload_files = REQUIRED + (("candidate-manifest.json",) if "candidate-manifest.json" in actual else ())
     expected = {*payload_files, "bundle-manifest.json"}
     if actual != expected:
         raise BundleError("inventory mismatch")
-    for entry in root.iterdir():
-        if entry.is_symlink() or not entry.is_file():
+    payloads: dict[str, bytes] = {}
+    total_size = 0
+    for entry in entries:
+        if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
             raise BundleError(f"links and non-files are forbidden: {entry.name}")
         if entry.resolve().parent != root.resolve():
             raise BundleError(f"path escapes bundle: {entry.name}")
-    raw = b"".join((root / name).read_bytes() for name in sorted(actual))
+        payload, entry_size = _read_inventory_file(entry)
+        total_size += entry_size
+        if total_size > _MAX_REPRO_BUNDLE_BYTES:
+            raise BundleError("bundle exceeds the closed aggregate size bound")
+        payloads[entry.name] = payload
+    raw = b"".join(payloads[name] for name in sorted(actual))
     if SECRET.search(raw.decode("utf-8", errors="replace")):
         raise BundleError("secret-like material detected")
-    manifest = _load_json(root / "bundle-manifest.json")
+    manifest = _load_inventory_json(payloads, "bundle-manifest.json")
     if set(manifest.get("files", {})) != set(payload_files):
         raise BundleError("manifest inventory mismatch")
     for name, expected_digest in manifest["files"].items():
-        if _digest(root / name) != expected_digest:
+        if hashlib.sha256(payloads[name]).hexdigest() != expected_digest:
             raise BundleError(f"digest mismatch: {name}")
     benchmark, config, measured, build = (
-        _load_json(root / "benchmark.json"),
-        _load_json(root / "config.json"),
-        _load_json(root / "metrics.json"),
-        _load_json(root / "build.json"),
+        _load_inventory_json(payloads, "benchmark.json"),
+        _load_inventory_json(payloads, "config.json"),
+        _load_inventory_json(payloads, "metrics.json"),
+        _load_inventory_json(payloads, "build.json"),
     )
-    judge = _load_json(root / "judge.json")
-    traces = [
-        _parse_json(line, "traces.jsonl")
-        for line in (root / "traces.jsonl").read_text().splitlines()
-    ]
+    judge = _load_inventory_json(payloads, "judge.json")
+    try:
+        trace_text = payloads["traces.jsonl"].decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BundleError("invalid UTF-8 in traces.jsonl") from exc
+    traces = [_parse_bounded_json(line, "traces.jsonl") for line in trace_text.splitlines()]
     trace_ids = [_trace_id(trace, family=config.get("family")) for trace in traces]
     if len(trace_ids) != len(set(trace_ids)):
         raise BundleError("duplicate trace IDs")
@@ -1841,7 +1859,15 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
     if measured.get("family") != family:
         raise BundleError("metrics/config family mismatch")
     if family == "qa":
-        _verify_qa_custody(metadata, judge, benchmark.get("data"), traces, root / "candidate-manifest.json", measured, build)
+        _verify_qa_custody(
+            metadata,
+            judge,
+            benchmark.get("data"),
+            traces,
+            payloads["candidate-manifest.json"],
+            measured,
+            build,
+        )
     if profile == "smoke-hit-at-k-v1":
         if measured.get("interval", {}).get("method") != method:
             raise BundleError("wrong interval-family metadata")
@@ -2284,7 +2310,7 @@ def _verify_qa_custody(
     judge: dict[str, Any],
     benchmark: Any,
     traces: list[dict[str, Any]],
-    candidate_path: Path,
+    candidate_payload: bytes,
     measured: dict[str, Any],
     build: dict[str, Any],
 ) -> None:
@@ -2335,7 +2361,11 @@ def _verify_qa_custody(
     if custody.get("transport_retries") != protocol["held_out_policy"]["transport_retries"]:
         raise BundleError("QA transport retry count does not match preregistration")
     _require_sha256(custody.get("candidate_manifest_sha256"), "candidate manifest")
-    candidate = _load_json(candidate_path)
+    try:
+        candidate_text = candidate_payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BundleError("invalid UTF-8 in candidate-manifest.json") from exc
+    candidate = _parse_bounded_json(candidate_text, "candidate-manifest.json")
     if not isinstance(build.get("candidate_git_sha"), str):
         raise BundleError("QA build git SHA is missing")
     if build["candidate_git_sha"] != _git_sha():
@@ -2350,7 +2380,7 @@ def _verify_qa_custody(
         raise BundleError("embedded candidate manifest schema mismatch") from exc
     if candidate.get("git_sha") != custody.get("candidate_git_sha"):
         raise BundleError("candidate, build, and custody git SHA mismatch")
-    if _digest(candidate_path) != custody["candidate_manifest_sha256"]:
+    if hashlib.sha256(candidate_payload).hexdigest() != custody["candidate_manifest_sha256"]:
         raise BundleError("embedded candidate manifest digest mismatch")
     if candidate.get("model_content_sha256") != reader["model_content_sha256"]:
         raise BundleError("candidate manifest model digest mismatch")
