@@ -1260,17 +1260,21 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         for field in ("locale", "timezone")
     ):
         raise BundleError("canonical replay config custody mismatch")
-    if manifest.get("ledger_ref") is not None:
+    ledger_names = (
+        "ledger.jsonl",
+        "ledger.jsonl.head.json",
+        "ledger-public.pem",
+    )
+    present_ledger_names = {name for name in ledger_names if name in payloads}
+    if manifest.get("ledger_ref") is None:
+        if present_ledger_names:
+            raise BundleError("ledger artifacts require a verified ledger_ref")
+    else:
         from leaderboard.ledger import LedgerError
         from leaderboard.ledger import _canonical as ledger_canonical
         from leaderboard.ledger import verify_ledger
 
-        ledger_names = (
-            "ledger.jsonl",
-            "ledger.jsonl.head.json",
-            "ledger-public.pem",
-        )
-        if any(name not in payloads for name in ledger_names):
+        if present_ledger_names != set(ledger_names):
             raise BundleError("missing ledger inclusion receipt")
         # ``verify_ledger`` uses a lock file and therefore cannot safely run
         # against an untrusted, supposedly read-only bundle.  Verify the exact
