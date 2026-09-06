@@ -426,6 +426,35 @@ def test_report_generation_uses_private_bundle_snapshots(
     assert (source / "benchmark.json").read_bytes() != original_benchmark
 
 
+def test_report_verification_uses_private_bundle_snapshots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    reproduced = tmp_path / "reproduced"
+    report = tmp_path / "report.json"
+    note = tmp_path / "report.md"
+    runner.run_public_suite("smoke", source)
+    reproduce_bundle(source, reproduced)
+    public_bundle.write_report(source, reproduced, report, note)
+    original_verify = public_bundle._verify_report
+    calls = 0
+
+    def verify_after_source_mutation(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            (source / "benchmark.json").write_bytes(b"{}\n")
+        return original_verify(*args, **kwargs)
+
+    monkeypatch.setattr(public_bundle, "_verify_report", verify_after_source_mutation)
+
+    assert public_bundle.verify_report(report, note)["valid"] is True
+    assert (source / "benchmark.json").read_bytes() == b"{}\n"
+
+
 def test_m15_helpers_are_reused_not_copied() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
     assert canonical_replay_digest(payload) == REPLAY_DIGESTS["wmbs-m01-development"]
