@@ -33,6 +33,16 @@ REQUIRED = (
     "reproduce.sh",
     "traces.jsonl",
 )
+_LEGACY_README = (
+    b"# PBPP development bundle\n\n"
+    b"This development artifact is non-publishable, not headline eligible, and "
+    b"is not an independent external reproduction. Run `./reproduce.sh DEST`.\n"
+)
+_LEGACY_REPRODUCE_SCRIPT = (
+    b'#!/bin/sh\nset -eu\ntest "$#" -eq 1 || { echo "usage: $0 DEST" >&2; '
+    b'exit 2; }\nuv run --locked mneme eval-public --reproduce-bundle '
+    b'"$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" --out-dir "$1"\n'
+)
 SECRET = re.compile(
     r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|"
     r"glpat-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|"
@@ -1718,16 +1728,8 @@ def write_bundle(
         (temp / "traces.jsonl").write_bytes(
             b"".join(_canonical(trace) for trace in traces)
         )
-        (temp / "README.md").write_text(
-            "# PBPP development bundle\n\nThis development artifact is non-publishable, not headline eligible, and is not an independent external reproduction. Run `./reproduce.sh DEST`.\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        (temp / "reproduce.sh").write_text(
-            '#!/bin/sh\nset -eu\ntest "$#" -eq 1 || { echo "usage: $0 DEST" >&2; exit 2; }\nuv run --locked mneme eval-public --reproduce-bundle "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)" --out-dir "$1"\n',
-            encoding="utf-8",
-            newline="\n",
-        )
+        (temp / "README.md").write_bytes(_LEGACY_README)
+        (temp / "reproduce.sh").write_bytes(_LEGACY_REPRODUCE_SCRIPT)
         os.chmod(temp / "reproduce.sh", 0o755)
         required = REQUIRED + (("candidate-manifest.json",) if metadata["family"] == "qa" else ())
         _write_json(
@@ -1912,6 +1914,10 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
 
 def _validate_legacy_canonical_bytes(payloads: dict[str, bytes]) -> None:
     """Require the exact deterministic JSON encoding emitted by result-v1."""
+    if payloads.get("README.md") != _LEGACY_README:
+        raise BundleError("legacy bundle README bytes do not match result-v1")
+    if payloads.get("reproduce.sh") != _LEGACY_REPRODUCE_SCRIPT:
+        raise BundleError("legacy reproduction script bytes do not match result-v1")
     for name, payload in payloads.items():
         if not (name.endswith(".json") or name.endswith(".jsonl")):
             continue

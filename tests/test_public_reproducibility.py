@@ -311,6 +311,31 @@ def test_version_1_verifier_rejects_noncanonical_json_bytes(tmp_path: Path) -> N
         verify_bundle(destination)
 
 
+@pytest.mark.parametrize(
+    ("artifact_name", "replacement", "message"),
+    (
+        ("reproduce.sh", b"#!/bin/sh\necho compromised\n", "script bytes"),
+        ("README.md", b"# Official publishable benchmark\n", "README bytes"),
+    ),
+)
+def test_version_1_verifier_binds_human_and_executable_surfaces(
+    tmp_path: Path, artifact_name: str, replacement: bytes, message: str
+) -> None:
+    from eval.public import runner
+
+    destination = tmp_path / artifact_name.replace(".", "-")
+    runner.run_public_suite("smoke", destination)
+    artifact = destination / artifact_name
+    artifact.write_bytes(replacement)
+    manifest_path = destination / "bundle-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"][artifact_name] = hashlib.sha256(replacement).hexdigest()
+    manifest_path.write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match=message):
+        verify_bundle(destination)
+
+
 def test_version_1_reproduction_uses_private_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
