@@ -2389,7 +2389,7 @@ def _raptor_node_hit(
     if not text:
         return None
     referenced = raptor_source_cids(metadata)
-    source_cids, hidden_source = _revalidate_source_cids(
+    source_cids, hidden_source, source_reality_classes = _revalidate_source_cids(
         ops,
         referenced,
         tenant_id=tenant_id,
@@ -2427,10 +2427,8 @@ def _raptor_node_hit(
             "memory_type": GLOBAL_SENSEMAKING_MODE,
             "data_only": True,
             "privacy": privacy,
-            # Revalidated readable sources ground this RAPTOR projection so
-            # reality-monitoring / standing do not treat the intended synthesis
-            # surface as unknown/self-generated and hard-abstain every result.
-            "reality_class": "grounded" if source_cids else "unknown",
+            "source_reality_classes": dict(source_reality_classes),
+            "reality_class": _aggregate_raptor_source_reality(source_reality_classes),
         },
     )
 
@@ -2443,9 +2441,10 @@ def _revalidate_source_cids(
     branch: str,
     filt: Mapping[str, Any],
     policy: OperatingPolicy,
-) -> tuple[list[str], bool]:
+) -> tuple[list[str], bool, dict[str, str]]:
     get_evidence = getattr(ops, "get_evidence", None)
     readable: list[str] = []
+    source_reality_classes: dict[str, str] = {}
     hidden = False
     for cid in source_cids:
         if not cid:
@@ -2469,7 +2468,71 @@ def _revalidate_source_cids(
             continue
         if cid not in readable:
             readable.append(cid)
-    return readable, hidden
+            source_reality_classes[cid] = _classify_raptor_source_reality(evidence)
+    return readable, hidden, source_reality_classes
+
+
+def _preserve_source_reality_class(value: Any) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    aliases = {
+        "grounded": "grounded",
+        "evidence_grounded": "grounded",
+        "external_grounded": "grounded",
+        "observed": "grounded",
+        "user_grounded": "grounded",
+        "self_generated": "self_generated",
+        "self": "self_generated",
+        "generated": "self_generated",
+        "assistant_generated": "self_generated",
+        "simulation": "simulated",
+        "simulated": "simulated",
+        "externally_suggested": "externally_suggested",
+        "suggested": "externally_suggested",
+        "external": "externally_suggested",
+        "untrusted_suggestion": "externally_suggested",
+        "unknown": "unknown",
+    }
+    return aliases.get(value.strip().lower().replace("-", "_"))
+
+
+def _classify_raptor_source_reality(item: Any) -> str:
+    metadata = _item_field(item, "metadata") or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    explicit = _preserve_source_reality_class(metadata.get("reality_class"))
+    if explicit:
+        return explicit
+    source_type = str(_item_field(item, "source_type") or "").lower()
+    actor = str(_item_field(item, "actor") or "").lower()
+    if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
+        return "simulated"
+    if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+        return "self_generated"
+    if actor == "assistant":
+        return "self_generated"
+    if actor in {"system", "tool"} and any(
+        marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
+    ):
+        return "self_generated"
+    if actor == "external":
+        return "externally_suggested"
+    return "grounded"
+
+
+def _aggregate_raptor_source_reality(source_reality_classes: Mapping[str, str]) -> str:
+    classes = [item for item in source_reality_classes.values() if item]
+    if not classes:
+        return "unknown"
+    if all(item == "grounded" for item in classes):
+        return "grounded"
+    if "self_generated" in classes:
+        return "self_generated"
+    if "simulated" in classes:
+        return "simulated"
+    if "externally_suggested" in classes:
+        return "externally_suggested"
+    return "unknown"
 
 
 def _reduce_sensemaking_hits(
