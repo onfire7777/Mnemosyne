@@ -38,36 +38,42 @@ its own placement was authorized.
 
 ### 0.2 Why this plan is NOT CODE-READY
 
-All of the following are blocking. None is discharged by writing this file.
+**Source-readiness blockers** (must clear before descriptive Stage A). None
+is discharged by writing this file.
 
 1. Spec WMBS-D (`…standard-design.md:1394–1398`): build M06–M13 only after
    WMBS-B **and** after each product capability exists through a public
    contract. C15 / C16 / CAP-004 is Planned, not a public contract on this
-   base, and is not in the minimal pilot (`…standard-design.md:552`).
-2. Spec M11 resource prerequisite (`…standard-design.md:893`): a measured
-   admission receipt. None exists.
-3. Spec M11 acceptance (`…standard-design.md:888–891`): zero unauthorized
-   reads or writes and zero untrusted retrieved-content tokens entering a
-   system instruction. Authorized utility is reported against the benign
-   control but cannot average away a protected failure. No preregistered
-   attack set or receipt protocol exists on this base. Stage A cannot claim
-   those bounds. Passing is a technical isolation/safety gate, not a
-   security certification.
-4. Spec M11 deferral (`…standard-design.md:896–898`): systems without
-   principal isolation are `unsupported`; no security certification is
-   awarded. Do not emulate auth by inspecting private storage. An
-   unsupported or storage-inspected system is not a pass.
-5. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M11 is not
+   base (same as R2).
+2. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M11 is not
    in the first pilot (`…standard-design.md:901`). Freeze is a later step.
-   This file does not freeze itself.
-6. Native authorization is required for a public security claim
-   (`…standard-design.md:899–900`). OIDC/P32 remains `DEFERRED`
-   (`…standard-design.md:894–895, 901`). This plan does not admit them.
+   This file does not freeze itself. CoS ACCEPT of this Exact 1 is the GoalEx
+   write-slot grant for this path only.
+3. Spec M11 deferral (`…standard-design.md:896–898`): systems without
+   principal isolation are `unsupported`; no security certification is
+   awarded. Do not emulate auth by inspecting private storage.
+4. Advanced principal ops are **not** in closed `wmbs/0.1-draft` (six basic
+   ops only). Stage A needs an explicit freeze residual for how
+   `create_principal` / `grant` / `revoke` / `query_as` reach the SUT
+   (harness-side shim or ABI extension) — see Technical reuse below.
 
-Missing Stage A artifacts are tree state, not a gate. WMBS-D is an implement
-sequencing gate, not a reason to refuse this plan file.
+**Measured / admitted-claim gates** (not Stage A source blockers):
 
-**Verdict: NOT CODE-READY.** Do not implement from this file.
+- R1 — measured admission receipt (`…standard-design.md:893`). Gates measured
+  claims only; does not refuse descriptive Stage A.
+- Spec M11 acceptance (`…standard-design.md:888–891`): zero unauthorized
+  reads/writes and zero untrusted-to-system-instruction. Gates scored-run
+  evidence only; Stage A cannot claim those bounds.
+
+**Public security claim gates (not Stage A):** native authorization (R4);
+OIDC/P32 deferred (R5). Inventory reconcile after merge is a separate GoalEx
+Exact-1 — not this PR.
+
+Missing Stage A artifacts are tree state, not a gate.
+
+**Verdict: NOT CODE-READY.** Do not implement from this file until the
+**source-readiness blockers** above clear. Do not treat R1 or acceptance
+bounds as Stage A source blockers.
 
 ## 1. Module scope (copied from the spec, not rewritten)
 
@@ -126,16 +132,21 @@ or "security certified."
 | G1 | Lease map recomputed; M11 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured admission receipt (spec L893) | Operator | Missing. |
+| R1 | Measured admission receipt (spec L893) | Operator | Missing — measured-claim gate, not Stage A source. |
 | R2 | C15 and C16 exist through a public contract (WMBS-D); CAP-004 | Product | Open. Planned, not in the minimal pilot. |
 | R3 | Principal isolation on the adapter, or an explicit `unsupported` path. No private-storage auth emulation (spec L896–898) | Public-harness | Open. Unsupported or storage-inspected is not a pass. |
 | R4 | Native authorization, required for any public security claim (spec L899–900) | Product | Open. Internal local-principal conformance is the only `PROPOSED` cell. |
 | R5 | OIDC / P32 | Operator | `DEFERRED`. Separate certification variant. Not in this cell. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
-is the closed ABI `wmbs/0.1-draft` and Section 6 `create_principal` / `grant`
-/ `revoke` / `query_as` plus `ingest` / `retrieve` / `answer`. A simpler
-per-scope adapter may participate only if it can create isolated principals.
+is closed ABI `wmbs/0.1-draft` for `ingest` / `retrieve` / `answer` (and the
+other basic ops). `create_principal` / `grant` / `revoke` / `query_as` are
+**not** in `wmbs/0.1-draft` (six basic ops only on this base). Freeze residual
+(NOT CODE-READY): name the harness-side principal shim or ABI extension that
+carries those advanced ops to the SUT before Stage A implement — do not claim
+they are already reusable closed-ABI operations. A simpler per-scope adapter
+may participate only if it can create isolated principals through that named
+path.
 
 ## 3. Fixture contract (prospective, unadmitted)
 
@@ -164,8 +175,13 @@ add a **new** stdlib-only oracle:
   attack persistence, recovery, benign false-positive cost.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   claim zero unauthorized reads/writes or zero untrusted-to-system-instruction
-  as an admission bound (that is R1+R3). Authorized utility cannot average
-  away a protected failure.
+  as an admission bound (scored-run acceptance; R1 does not discharge it).
+  Authorized utility cannot average away a protected failure.
+- Instruction-boundary observability (freeze residual): Stage A must pin an
+  explicit harness-visible signal that untrusted retrieved-content tokens
+  entered (or did not enter) a system instruction — benign answers alone are
+  not proof the zero-token rail held. Do not invent Stage A code here; freeze
+  the signal name/shape before implement.
 - Systems without principal isolation emit `unsupported` and receive no
   security claim. Storage-inspected auth emulation is not a pass.
 - Anti-gaming (spec L1291): no privileged internal isolation signal; gold,
@@ -177,8 +193,11 @@ This paragraph does not create those files.
 ## 5. Custody, licence, and claim constraints
 
 - Deterministic local roles: no external dataset, no network, no provider
-  (spec L894–895; U-MODULES license/custody). Pin any later dataset at freeze;
-  do not invent one here. External OIDC stays out until R5 is admitted.
+  (spec L894–895; U-MODULES license/custody). External OIDC stays out until R5
+  is admitted.
+- Generated Stage A fixture license: `CC0-1.0` (synthetic authorship; same pin
+  as M02/M05/M08). No third-party corpus.
+- Pin any later non-synthetic dataset at freeze; do not invent one here.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "isolation certified," "security certified," certified, or governed
   label. Passing, if it ever happens, is a technical isolation/safety gate
@@ -187,15 +206,17 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-B + C15/C16 public contract (R2) + measured receipt (R1) + G0/G1/G2
+WMBS-B + C15/C16 public contract (R2) + G0/G1/G2
   -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+      -> measured / admitted claims require R1 receipt
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-OIDC / P32 stay behind R5. Native authorization (R4) is required before any
-public security claim. Do not touch PR #116, #117, #118, #119, #120, #121, or
-#122. Do not write GOAL.md, STATE.md, or the lease-map.
+R1 gates measured/admitted claims, not Stage A oracle/fixture/tests. OIDC /
+P32 stay behind R5. Native authorization (R4) is required before any public
+security claim — not before descriptive Stage A. Do not write GOAL.md,
+STATE.md, or the lease-map.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -205,7 +226,8 @@ No path below is writable from this document.
 docs/plans/wmb-m11-security-isolation-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R3), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates measured
+claims only; R4 gates public security claims), not now:
 
 ```text
 eval/public/wmbs_m11.py                                      (new)
