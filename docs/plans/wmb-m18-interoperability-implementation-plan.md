@@ -268,9 +268,11 @@ Do not add a `uv run --suite` line until a registry row exists.
 ### M18 interoperability
 
 PROPOSED for internal single-system round-trip. Public certification is
-DEFERRED until a frozen envelope and a second independently implemented
-adapter exist. All publication flags false. A single-system round-trip is
-an internal result, not a public interoperability claim.
+DEFERRED until a frozen envelope, a second independently implemented
+adapter (**R5**), **and** two-implementation measured receipts (**R1**)
+exist — R5 alone is insufficient. All publication flags false. A
+single-system round-trip is an internal result, not a public
+interoperability claim.
 
 `export` / `import` with a versioned portable envelope. Transport
 conformance uses public adapter schemas. 100% preservation of required
