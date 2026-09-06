@@ -823,6 +823,32 @@ def test_track_kind_and_claim_boundaries_fail_closed(
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize(
+    ("track_kind", "lineage_path"),
+    [
+        ("OFFICIAL-UPSTREAM", ("fidelity", "dataset_digest")),
+        ("ENHANCED-SUCCESSOR", ("parent_construct_digest",)),
+    ],
+)
+def test_result_lineage_must_match_authenticated_manifest(
+    tmp_path: Path, track_kind: str, lineage_path: tuple[str, ...]
+) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / track_kind.lower(),
+        track_kind=track_kind,
+    )
+    root = bundle["root"]
+    manifest = json.loads((root / REPRO_MANIFEST_NAME).read_text(encoding="utf-8"))
+    lineage = manifest["lineage"]
+    for key in lineage_path[:-1]:
+        lineage = lineage[key]
+    lineage[lineage_path[-1]] = "sha256:" + "9" * 64
+    _write_json(root / REPRO_MANIFEST_NAME, manifest)
+
+    with pytest.raises(BundleError, match="result lineage does not match manifest"):
+        verify_bundle(root)
+
+
 def test_one_byte_tamper_and_digest_mismatch_fail_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "tamper")
     traces = bundle["root"] / "traces.jsonl"
