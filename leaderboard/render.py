@@ -14,7 +14,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from leaderboard.validate import _validate_records, validate_record
+from leaderboard.validate import (
+    SCHEMA_VERSION,
+    SCHEMA_VERSION_V2,
+    _validate_records,
+    validate_record,
+    verify_result_digests,
+)
+
+NETWORK_IO = False
+TELEMETRY = False
 
 
 class RenderError(ValueError):
@@ -81,16 +90,23 @@ def _load_results(path: Path) -> list[dict[str, Any]]:
         raise RenderError(
             "result contract invalid: " + ", ".join(collection_errors)
         )
+    versions = {record.get("schema_version") for record in validated}
+    if SCHEMA_VERSION in versions and SCHEMA_VERSION_V2 in versions:
+        raise RenderError("mixed result schema versions")
     return sorted(validated, key=lambda record: record["record_id"])
 
 
-def _load_traces(path: Path) -> list[dict[str, Any]]:
+def _load_traces_from_bytes(raw: bytes, source: Path) -> list[dict[str, Any]]:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise RenderError(f"cannot read input: {source}") from exc
     traces: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for line_number, raw in enumerate(_read(path).split("\n"), 1):
-        if not raw.strip():
+    for line_number, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
             continue
-        trace = _load_json(raw, path)
+        trace = _load_json(line, source)
         if not isinstance(trace, dict):
             raise RenderError(f"invalid JSON trace row at line {line_number}")
         question_id = trace.get("question_id")
@@ -101,6 +117,10 @@ def _load_traces(path: Path) -> list[dict[str, Any]]:
         seen.add(question_id)
         traces.append(trace)
     return sorted(traces, key=lambda trace: trace["question_id"])
+
+
+def _load_traces(path: Path) -> list[dict[str, Any]]:
+    return _load_traces_from_bytes(_read(path).encode("utf-8"), path)
 
 
 def _digest(value: str) -> str:
@@ -159,7 +179,7 @@ def _record_details(record: dict[str, Any]) -> str:
             "trace_index_digest",
         )
     )
-    return (
+    details = (
         f"<p>System: {_escape(record['system'])}</p>"
         f"<p>Track: {_escape(record['track'])}</p>"
         f"<p>Benchmark: {_escape(record['benchmark'])} "
@@ -169,6 +189,27 @@ def _record_details(record: dict[str, Any]) -> str:
         f"disclosed: {_escape(operator['disclosed'])}</p>"
         f"<h2>Metrics</h2><ul>{metrics}</ul>"
         f"<h2>Immutable artifacts</h2><ul>{immutable}</ul>"
+    )
+    if record.get("schema_version") != SCHEMA_VERSION_V2:
+        return details
+    gates = "".join(
+        "<li>"
+        f"{_escape(gate['name'])}: {_escape(gate['status'])}"
+        "</li>"
+        for gate in record.get("safety_gates", [])
+        if isinstance(gate, dict)
+    )
+    return (
+        details
+        + f"<p>Track kind: {_escape(record['track_kind'])}</p>"
+        + f"<p>Admission: {_escape(record['admission_state'])}</p>"
+        + f"<p>Evidence: {_escape(record['evidence_level'])}</p>"
+        + f"<p>Module: {_escape(record['module_id'])}</p>"
+        + f"<p>Capability: {_escape(record['capability'])}</p>"
+        + f"<p>Custody: {_escape(record['custody'])}</p>"
+        + f"<p>Signer role: {_escape(record['signer_role'])}</p>"
+        + f"<p>Trace: {_escape(record['trace_id'])}</p>"
+        + f"<h2>Safety gates</h2><ul>{gates}</ul>"
     )
 
 
@@ -308,10 +349,46 @@ def _publish(pages: dict[Path, str], destination: Path) -> None:
             shutil.rmtree(backup, ignore_errors=True)
 
 
+def _verify_v2_artifacts(
+    records: list[dict[str, Any]],
+    traces: dict[str, str | Path],
+    artifacts: dict[str, dict[str, str | Path]] | None,
+) -> dict[str, bytes]:
+    bound = artifacts or {}
+    snapshots: dict[str, bytes] = {}
+    for record in records:
+        if record.get("schema_version") != SCHEMA_VERSION_V2:
+            continue
+        record_id = str(record["record_id"])
+        files = bound.get(record_id)
+        if not isinstance(files, dict):
+            raise RenderError(f"missing artifact source: {record_id}")
+        for name in ("build", "config", "bundle"):
+            if name in files and "://" in str(files[name]):
+                raise RenderError(f"local artifact required: {name}")
+        if "://" in str(traces[record_id]):
+            raise RenderError("local artifact required: traces")
+        try:
+            payloads = {
+                "build.json": Path(files["build"]).read_bytes(),
+                "config.json": Path(files["config"]).read_bytes(),
+                "bundle-manifest.json": Path(files["bundle"]).read_bytes(),
+                "traces.jsonl": Path(traces[record_id]).read_bytes(),
+            }
+        except (KeyError, OSError) as exc:
+            raise RenderError(f"missing artifact source: {record_id}") from exc
+        errors = verify_result_digests(record, payloads)
+        if errors:
+            raise RenderError("digest mismatch: " + ", ".join(errors))
+        snapshots[record_id] = payloads["traces.jsonl"]
+    return snapshots
+
+
 def render_site(
     results: str | Path,
     traces: dict[str, str | Path],
     destination: str | Path,
+    artifacts: dict[str, dict[str, str | Path]] | None = None,
 ) -> None:
     """Render a complete site, replacing the destination only after validation."""
     records = _load_results(Path(results))
@@ -323,8 +400,13 @@ def render_site(
     unlinked = sorted(trace_ids - record_ids)
     if unlinked:
         raise RenderError("unlinked trace source: " + ", ".join(unlinked))
+    verified_traces = _verify_v2_artifacts(records, traces, artifacts)
     loaded_traces = {
-        record_id: _load_traces(Path(traces[record_id]))
+        record_id: (
+            _load_traces_from_bytes(verified_traces[record_id], Path(traces[record_id]))
+            if record_id in verified_traces
+            else _load_traces(Path(traces[record_id]))
+        )
         for record_id in sorted(record_ids)
     }
     _publish(_render_pages(records, loaded_traces), Path(destination))
