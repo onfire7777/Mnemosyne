@@ -125,7 +125,7 @@ file may flip. This plan never labels a run "media certified."
 | G1 | Lease map recomputed; M19 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured receipt for an admitted profile (spec L1092–1093) | Operator | Missing. No local generative model is assumed. |
+| R1 | Measured receipt for an admitted profile (spec L1092–1093) | Operator | Missing — measured-claim gate, not Stage A source. |
 | R2 | C21 admitted as more than a deferred future requirement (WMBS-E) | Product | Open. Currently deferred. |
 | R3 | Complete redistributable fixture-rights manifest and portable media contract (spec L1098–1100) | Standard owner | Missing. This is why the module is `DEFERRED`. |
 | R4 | Media licensing, download stability, and model cost fixed before any official multimodal variant (spec L1096–1097) | Operator | Open. |
@@ -166,13 +166,15 @@ add a **new** stdlib-only oracle:
   provenance, modality-specific leakage, latency, storage.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   invent a quality-based admission floor. Improvement claims stay unclaimed
-  until a positive paired confidence-interval lower bound exists. Provenance
-  and erasure inherit M05/M09; they are not re-scored here.
+  until a positive paired confidence-interval lower bound exists.
+- Provenance remains an M19 Stage A scored metric (spec L1083–1087). M05/M09
+  contracts may be reused for shared fields, but provenance is not dropped
+  from the M19 scorer.
 - Text-only systems emit `unsupported`, never a fail. Missing R3 yields
   **no multimodal claim**, not a pass.
-- Anti-gaming (spec L1291): no privileged internal media decode; gold,
-  graders, and canaries stay outside the SUT. No host-path or fetch-URL
-  shortcut.
+- Anti-gaming (spec L1267 + L1291): gold and graders stay outside the SUT; no
+  privileged internal media decode; no host-path or entrant-controlled
+  fetch-URL shortcut (M19-specific).
 
 This paragraph does not create those files.
 
@@ -190,15 +192,17 @@ This paragraph does not create those files.
 
 ```text
 WMBS-E + C21 no longer deferred (R2) + fixture-rights + portable media (R3)
-+ measured receipt (R1) + G0/G1/G2
++ G0/G1/G2
   -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+      -> measured / admitted claims require R1 receipt
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-Official multimodal variants stay behind R4/R5. Do not touch PR #116, #117,
-#118, #119, #120, #121, #122, #123, #124, or #125. Do not write GOAL.md,
-STATE.md, or the lease-map. Do not start M16. Do not edit #124 or #125.
+R1 gates measured/admitted claims, not descriptive Stage A. Official
+multimodal variants stay behind R4/R5. Inventory reconcile after merge is a
+separate GoalEx Exact-1 — not this PR. Do not invent M16. Do not write
+GOAL.md, STATE.md, or the lease-map.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -208,7 +212,8 @@ No path below is writable from this document.
 docs/plans/wmb-m19-multimodal-memory-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R3), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2/R3; R1 gates measured
+claims only), not now:
 
 ```text
 eval/public/wmbs_m19.py                                          (new)
