@@ -1759,6 +1759,16 @@ def write_bundle(
 
 
 def verify_bundle(bundle: Path | str) -> dict[str, Any]:
+    """Verify a bundle through a fail-closed public exception boundary."""
+    try:
+        return _verify_bundle(bundle)
+    except BundleError:
+        raise
+    except (OSError, UnicodeError, KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise BundleError("bundle verification failed safely") from exc
+
+
+def _verify_bundle(bundle: Path | str) -> dict[str, Any]:
     root = Path(bundle)
     repro = root / REPRODUCIBILITY_MANIFEST_NAME
     if repro.exists() or repro.is_symlink():
@@ -2226,7 +2236,13 @@ def _write_report_from_snapshots(
 
 
 def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str, Any]:
-    return _verify_report(report_path, report_note)
+    """Verify report custody through a fail-closed public exception boundary."""
+    try:
+        return _verify_report(report_path, report_note)
+    except BundleError:
+        raise
+    except (OSError, UnicodeError, KeyError, IndexError, TypeError, AttributeError) as exc:
+        raise BundleError("report verification failed safely") from exc
 
 
 def _verify_report(

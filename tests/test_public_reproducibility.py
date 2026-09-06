@@ -362,6 +362,36 @@ def test_version_1_verifier_rechecks_captured_files_before_success(
         verify_bundle(destination)
 
 
+def test_bundle_public_boundary_contains_filesystem_race(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    monkeypatch.setattr(
+        public_bundle,
+        "_verify_bundle",
+        lambda _path: (_ for _ in ()).throw(OSError("simulated race")),
+    )
+
+    with pytest.raises(BundleError, match="bundle verification failed safely"):
+        verify_bundle(tmp_path / "bundle")
+
+
+def test_report_public_boundary_contains_malformed_nested_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    monkeypatch.setattr(
+        public_bundle,
+        "_verify_report",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyError("nested")),
+    )
+
+    with pytest.raises(BundleError, match="report verification failed safely"):
+        public_bundle.verify_report(tmp_path / "report.json", tmp_path / "note.md")
+
+
 @pytest.mark.parametrize(
     ("artifact_name", "replacement", "message"),
     (
