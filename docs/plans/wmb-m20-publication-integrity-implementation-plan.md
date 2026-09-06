@@ -43,22 +43,25 @@ its own placement was authorized.
 
 ### 0.2 Why this plan is NOT CODE-READY
 
-All of the following are blocking. None is discharged by writing this file.
+The following list mixes Stage A implementation gates with later publication
+gates. Items 2, 3, 4 (except its public-release clause), and 5 block Stage A;
+item 1 and the public-release clause in item 4 block only Stage B/public
+release. None is discharged merely by writing this file.
 
 1. Spec WMBS-F (`…standard-design.md:1406–1410`): official adapters and
    held-out rounds run only after affected module readiness, PBPP/Register-A
    evidence, and human approval. C22 / GOV-001 / LEAD-001/002/003 is not an
    admitted public-release contract on this base.
-2. Spec M20 resource prerequisite (`…standard-design.md:1121–1123`): a
+2. Spec M20 resource prerequisite (`…standard-design.md:1119–1120`): a
    measured admission receipt. None exists. The 15-minute / 2 GiB RSS /
    1 GiB disk figure is an L16-DEV planning hypothesis, not an asserted
    budget.
-3. Spec M20 acceptance (`…standard-design.md:1116–1118`): 100% acceptance of
+3. Spec M20 acceptance (`…standard-design.md:1115–1118`): 100% acceptance of
    valid bundles, 100% rejection of invalid bundles, exact digest replay,
    and no mutation of prior published history. No preregistered bundle set
    or receipt protocol exists on this base. Stage A cannot claim those
    bounds.
-4. Spec M20 deferral (`…standard-design.md:1126–1130`): v2 admission requires
+4. Spec M20 deferral (`…standard-design.md:1123–1126`): v2 admission requires
    verification of build, config, bundle, and trace-index digests before
    rendering. Mixed v1/v2 rendering remains blocked until schema dispatch
    and cross-version supersession tests pass. Public release also defers
@@ -129,11 +132,11 @@ license to flip it. This plan never labels a run "publication certified."
 | G1 | Lease map recomputed; M20 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Align with owner-landed pilot plan (M20 is in the first reference-harness pilot) | GoalEx | Open. This file is a v2/N12 delta **inside** the authorized pilot (no exclusion). Do not edit the pilots file here. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured admission receipt (spec L1121). L16-DEV numbers are a hypothesis, not a budget | Operator | Missing — measured-claim gate, not Stage A source. |
-| R2 | C22 public-release contract: human approval and PBPP-complete custody (WMBS-F; spec L1129–1130) | Product / publication owner | Open — public-release gate only; not Stage A source. |
-| R3 | Schema dispatch and cross-version supersession tests before any mixed v1/v2 render (spec L1126–1129) | Public-harness | **DISCHARGED** by N12/#139 (`leaderboard/validate.py` result-v2 dispatch). Residual: keep mixed-render fail-closed. |
-| R4 | Verification of build, config, bundle, and trace-index digests before v2 rendering (spec L1126–1127) | Operator | **DISCHARGED** by N12/#139 (`leaderboard/render.py` four-artifact verify). Do not re-implement. |
-| R5 | Explicit version dispatch for any `result-v2` field add (spec L1108–1111) | Standard owner | **DISCHARGED** by N12/#139 for current result-v2 surface. Do not reinterpret signed v1 bytes. |
+| R1 | Measured admission receipt (spec L1119–1120). L16-DEV numbers are a hypothesis, not a budget | Operator | Missing — measured-claim gate, not Stage A source. |
+| R2 | C22 public-release contract: human approval and PBPP-complete custody (WMBS-F; spec L1126) | Product / publication owner | Open — public-release gate only; not Stage A source. |
+| R3 | Schema dispatch and cross-version supersession tests before any mixed v1/v2 render (spec L1123–1125) | Public-harness | **DISCHARGED** by N12/#139 (`leaderboard/validate.py` result-v2 dispatch). Residual: keep mixed-render fail-closed. |
+| R4 | Verification of build, config, bundle, and trace-index digests before v2 rendering (spec L1123–1124) | Operator | **DISCHARGED** by N12/#139 (`leaderboard/render.py` four-artifact verify). Do not re-implement. |
+| R5 | Explicit version dispatch for any `result-v2` field add (spec L1108–1110) | Standard owner | **DISCHARGED** by N12/#139 for current result-v2 surface. Do not reinterpret signed v1 bytes. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
 is the existing v1 substrate (`leaderboard/schema/result-v1.schema.json`,
