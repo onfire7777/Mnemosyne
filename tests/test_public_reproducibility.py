@@ -395,6 +395,7 @@ def _write_reproducibility_bundle(
     scoring_profile: str = "smoke-hit-at-k-v1",
     lockfile: bytes | None = None,
     ledger_run_id: str | None = None,
+    supersede_ledger: bool = False,
 ) -> dict[str, Any]:
     root.mkdir(parents=True)
     commit = run_commit or "0123456789abcdef0123456789abcdef01234567"
@@ -536,6 +537,36 @@ def _write_reproducibility_bundle(
             result=result,
             roster={"synthetic-entrant"},
         )
+        if supersede_ledger:
+            append_entry(
+                ledger_path,
+                private_path,
+                entry_id="repro-001-supersession",
+                timestamp="2026-09-05T00:01:00Z",
+                entrant_id="synthetic-entrant",
+                status="superseded",
+                reason="result receipt withdrawn",
+                supersedes="repro-001-entry",
+                roster={"synthetic-entrant"},
+            )
+            replacement = deepcopy(result)
+            replacement["record_id"] = "synthetic-v2-replacement-001"
+            replacement["trace_id"] = "trace-replacement-001"
+            replacement_identity = replacement["identity"]
+            assert isinstance(replacement_identity, dict)
+            replacement_identity["run_id"] = "run-replacement-001"
+            replacement_identity["attempt_id"] = "attempt-replacement-001"
+            append_entry(
+                ledger_path,
+                private_path,
+                entry_id="repro-001-replacement",
+                timestamp="2026-09-05T00:02:00Z",
+                entrant_id="synthetic-entrant",
+                status="succeeded",
+                run_id="run-replacement-001",
+                result=replacement,
+                roster={"synthetic-entrant"},
+            )
         private_path.unlink()
         written["ledger.jsonl"] = ledger_path.read_bytes()
         written["ledger.jsonl.head.json"] = ledger_path.with_suffix(
@@ -1271,6 +1302,14 @@ def test_signed_ledger_run_id_must_match_result_identity(tmp_path: Path) -> None
         tmp_path / "ledger-run-mismatch", ledger_run_id="different-run"
     )
     with pytest.raises(BundleError, match="ledger run_id does not match"):
+        verify_bundle(bundle["root"])
+
+
+def test_superseded_ledger_entry_cannot_supply_inclusion_receipt(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "superseded-ledger", supersede_ledger=True
+    )
+    with pytest.raises(BundleError, match="inclusion receipt is superseded"):
         verify_bundle(bundle["root"])
 
 
