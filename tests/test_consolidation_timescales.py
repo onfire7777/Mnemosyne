@@ -119,6 +119,24 @@ def _summaries(
     ]
 
 
+def _postgres_case() -> RegressionCase:
+    return RegressionCase(
+        id="case-postgres",
+        signature="fact-sig preferred database",
+        query="preferred database",
+        expected_substring="Postgres",
+        protected=True,
+    )
+
+
+def _active_assertions(engine: LocalMemoryEngine, tenant: str = TENANT) -> list[dict]:
+    return [
+        row
+        for row in engine.export_tenant(tenant)["assertions"]
+        if row.get("status") == "active"
+    ]
+
+
 def test_cadence_tiers_are_allowlisted_fast_medium_slow() -> None:
     assert CONSOLIDATION_CADENCE_TIERS == ("fast", "medium", "slow")
     policy = OperatingPolicy()
@@ -413,3 +431,64 @@ def test_slow_may_consume_derived_rows_but_they_are_not_independent_corroboratio
     )
     assert result.promoted is False
     assert any("fact_external_corroboration" in item for item in result.failed_cases)
+
+
+def test_fast_tier_does_not_extract_or_promote_facts() -> None:
+    engine = _engine()
+    cid_a = _append(engine, "The preferred database is Postgres.")
+    cid_b = _append(
+        engine,
+        "Independent note: preferred database remains Postgres.",
+        source_type="chat",
+    )
+    worker = ConsolidationWorker(engine, [_postgres_case()], consolidation_min_steps=0)
+
+    fast = worker.run_queue_payload(
+        _payload([cid_a, cid_b], cadence_tier="fast", step=0, now=NOW)
+    )
+    names = {item["name"] for item in fast.pass_results}
+
+    assert fast.passes_run == FAST_PASSES
+    assert fast.candidate_results == []
+    assert "extractor" not in names
+    assert "belief_reviser" not in names
+    assert _active_assertions(engine) == []
+
+
+def test_held_cids_are_not_unioned_into_due_candidate_provenance() -> None:
+    engine = _engine()
+    held = _append(engine, "Completely unrelated astronomy fact about nebulae and quasars.")
+    ripe = _append(
+        engine,
+        "Independent confirmation: preferred database remains Postgres.",
+        source_type="chat",
+    )
+    worker = ConsolidationWorker(engine, [_postgres_case()], consolidation_min_steps=0)
+    worker.run_queue_payload(_payload([held], cadence_tier="medium", step=0, now=NOW))
+
+    mixed = worker.run_queue_payload(
+        _payload([held, ripe], cadence_tier="medium", step=5, now=NOW + timedelta(minutes=10))
+    )
+    receipt = _receipt(mixed)
+
+    assert receipt["input_cids"] == [ripe]
+    assert mixed.candidate_results
+    assert all(item.get("promoted") is False for item in mixed.candidate_results)
+    assert _active_assertions(engine) == []
+
+
+def test_implicit_invocations_advance_due_steps_across_not_due_polls() -> None:
+    engine = _engine()
+    cid = _append(engine, "Implicit steps must advance even when a poll is not due.")
+    worker = _worker(engine, consolidation_min_steps=0)
+
+    first = worker.run_queue_payload(_payload([cid], cadence_tier="fast", now=NOW))
+    assert _receipt(first)["due_reason"] == "first_pass"
+
+    for _ in range(4):
+        poll = worker.run_queue_payload(_payload([cid], cadence_tier="fast", now=NOW))
+        assert _receipt(poll)["due_reason"] == "not_due"
+
+    due_again = worker.run_queue_payload(_payload([cid], cadence_tier="fast", now=NOW))
+    assert _receipt(due_again)["due_reason"] == "min_steps_elapsed"
+    assert _receipt(due_again)["input_cids"] == [cid]

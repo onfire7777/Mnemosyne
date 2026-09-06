@@ -415,6 +415,8 @@ class ConsolidationWorker:
                 policy=policy,
             )
             if due_reason == "not_due":
+                if payload.get("consolidation_step", payload.get("step")) is None:
+                    self._tenant_pass_calls[tenant_id] = due_step
                 mutation_budget = self._new_mutation_rail_budget(tenant_id, branch)
                 return ConsolidationRunResult(
                     tenant_id=tenant_id,
@@ -441,7 +443,20 @@ class ConsolidationWorker:
         # may supply an explicit absolute step via `consolidation_step`; otherwise
         # worker invocations count as one observed step.
         if self.consolidation_min_steps > 0:
-            current_step = self._cadence_step(tenant_id, payload)
+            implicit_tier_step = (
+                due_step
+                if cadence_tier is not None
+                and payload.get("consolidation_step", payload.get("step")) is None
+                and due_step is not None
+                else None
+            )
+            if implicit_tier_step is not None:
+                current_step = implicit_tier_step
+                self._tenant_pass_calls[tenant_id] = max(
+                    self._tenant_pass_calls.get(tenant_id, 0), implicit_tier_step
+                )
+            else:
+                current_step = self._cadence_step(tenant_id, payload)
             last_step = self._tenant_last_pass_call.get(tenant_id)
             now = self._parse_datetime(payload.get("now")) or self._clock()
             last_at = self._tenant_last_pass_at.get(tenant_id)
@@ -484,6 +499,9 @@ class ConsolidationWorker:
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             allowed = {"replayer", "forgetter", "embedder", "user_model_updater"}
             passes_run = [name for name in passes_run if name in allowed]
+        run_core_mutation = cadence_tier is None or any(
+            name in passes_run for name in ("extractor", "resolver", "belief_reviser")
+        )
         pass_results: list[PassResult] = []
         skipped: list[str] = list(missing)
         if workspace_advisory is not None:
@@ -524,7 +542,9 @@ class ConsolidationWorker:
         candidates: list[dict[str, Any]] = []
         no_write_data = self._contains_no_write_data(evidence, payload)
 
-        if prediction_gate["gate"] == "low_prediction_error_metadata_only":
+        if not run_core_mutation:
+            skipped.append("core_mutation_not_in_cadence_tier")
+        elif prediction_gate["gate"] == "low_prediction_error_metadata_only":
             skipped.append("low_prediction_error_metadata_only")
             pass_results.append(PassResult("extractor", "skipped", {"reason": prediction_gate["gate"]}))
             pass_results.append(PassResult("resolver", "skipped", {"reason": prediction_gate["gate"]}))
@@ -556,7 +576,7 @@ class ConsolidationWorker:
                         str(cid)
                         for cid in (
                             list(candidate.get("source_evidence_cids") or [])
-                            + list(source_evidence_cids)
+                            + list(work_cids)
                         )
                         if cid
                     ]
@@ -658,6 +678,10 @@ class ConsolidationWorker:
         if cadence_tier is not None:
             recorded_at = due_now or self._parse_datetime(payload.get("now")) or self._clock()
             recorded_step = due_step if due_step is not None else self._peek_cadence_step(tenant_id, payload)
+            if payload.get("consolidation_step", payload.get("step")) is None:
+                self._tenant_pass_calls[tenant_id] = max(
+                    self._tenant_pass_calls.get(tenant_id, 0), recorded_step
+                )
             for cid in work_cids:
                 self._tier_cid_last[(tenant_id, branch, cadence_tier, cid)] = (recorded_step, recorded_at)
         return ConsolidationRunResult(
