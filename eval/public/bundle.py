@@ -1468,7 +1468,8 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
         _write_json(temp / "metrics.json", recomputed)
         _verify_reproducibility_bundle(temp)
         for name in owned:
-            if (temp / name).read_bytes() != (snapshot / name).read_bytes():
+            reproduced, _ = _read_inventory_file(temp / name)
+            if reproduced != payloads[name]:
                 raise BundleError(f"reproduction mismatch: {name}")
         _publish_directory_noreplace(temp, destination)
         return verified
