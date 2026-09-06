@@ -465,7 +465,7 @@ Incomplete output is deleted. A destination collision fails closed.
 | `build` | `build.json` path, lockfile/toolchain, clean `candidate_git_sha`, and `build_fingerprint`. |
 | `environment` | Allowlist, platform/runtime, locale/timezone, optional wheelhouse digest. |
 | `metrics` / `intervals` | Family, name, version, value, unit, numerator/denominator, uncertainty, confidence, low/high, exclusions, and missing/unsupported/failed/aborted/not-measured counts. |
-| `hashes` | Complete file inventory: relative path, size, media type, `raw-bytes` canonicalization, SHA-256. |
+| `hashes` | Complete file inventory in canonical path order: relative path, size, media type, `raw-bytes` canonicalization, SHA-256. |
 | `rights` | Software/data license, source revision, redistribution, PII, consent, takedown, disclosure. |
 | `custody` | Custody class and declaration. Missing declarations fail. |
 | `operator` | Operator identity, role, signer role, and disclosure state. |
@@ -479,6 +479,8 @@ Incomplete output is deleted. A destination collision fails closed.
 Each value hashes the exact stored bytes of the named file. There is no
 parsing, reserialization, newline conversion, or Unicode normalization before
 hashing. Encoding is lowercase hexadecimal SHA-256 with the `sha256:` prefix.
+The reproducibility manifest itself must be canonical compact JSON with one
+trailing LF; alternate whitespace and inventory order fail closed.
 
 - `build_fingerprint = sha256(build.json)`
 - `config_digest = sha256(config.json)`

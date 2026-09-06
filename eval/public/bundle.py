@@ -599,6 +599,8 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
         ):
             raise BundleError("inventory media type or canonicalization mismatch")
         _require_sha256_digest(item.get("sha256"), "inventory digest")
+    if [str(entry["path"]) for entry in hashes] != sorted(seen_paths):
+        raise BundleError("inventory paths must use canonical sorted order")
     metrics = payload.get("metrics")
     if not isinstance(metrics, list) or not metrics:
         raise BundleError("missing metrics")
@@ -709,6 +711,8 @@ def _read_reproducibility_manifest(root: Path) -> tuple[bytes, dict[str, Any]]:
         if isinstance(cause, ValueError) and "duplicate" in str(cause):
             raise BundleError("duplicate JSON key in reproducibility manifest") from exc
         raise
+    if manifest_bytes != _canonical(loaded):
+        raise BundleError("reproducibility manifest bytes must be canonical")
     return manifest_bytes, _validate_reproducibility_manifest(loaded)
 
 
