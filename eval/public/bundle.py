@@ -1050,7 +1050,7 @@ def _recompute_repro_metrics(
     expected_interval = recomputed["interval"]
     if _canonical(measured) != _canonical(recomputed):
         raise BundleError("metrics do not recompute from traces")
-    if not isinstance(manifest_metrics, list) or not manifest_metrics:
+    if not isinstance(manifest_metrics, list):
         raise BundleError("missing metrics")
     measured_interval = measured.get("interval", {})
     if (
@@ -1062,47 +1062,46 @@ def _recompute_repro_metrics(
         )
     ):
         raise BundleError("intervals do not recompute from traces")
-    for declared in manifest_metrics:
-        if not isinstance(declared, dict):
-            raise BundleError("missing metrics")
-        declared_interval = declared.get("interval", {})
-        if (
-            declared.get("family") != "retrieval"
-            or declared.get("name") != "hit_at_k"
-            or declared.get("version") != version
-            or declared.get("unit") != "ratio"
-            or declared.get("uncertainty_method") != "wilson"
-            or declared.get("uncertainty_parameters") != {"z": 1.96}
-            or declared.get("confidence_level") != 0.95
-            or declared.get("exclusions") != []
-            or declared.get("missing_count") != 0
-            or declared.get("unsupported_count") != 0
-            or declared.get("failed_count") != 0
-            or declared.get("aborted_count") != aborts
-            or declared.get("not_measured_count") != 0
-            or declared.get("numerator") != successes
-            or declared.get("denominator") != total
-            or declared.get("sample_count") != total
-            or declared.get("value") != expected_value
-            or not isinstance(declared_interval, dict)
-            or declared_interval.get("low") != expected_interval["low"]
-            or declared_interval.get("high") != expected_interval["high"]
-        ):
-            raise BundleError("metrics do not recompute from traces")
-    if not isinstance(manifest_intervals, list) or not manifest_intervals:
-        raise BundleError("missing intervals")
-    for interval in manifest_intervals:
-        if (
-            not isinstance(interval, dict)
-            or interval.get("metric") != "hit_at_k"
-            or interval.get("low") != expected_interval["low"]
-            or interval.get("high") != expected_interval["high"]
-            or interval.get("method") != expected_interval["method"]
-            or interval.get("confidence_level") != 0.95
-        ):
-            raise BundleError("intervals do not recompute from traces")
-    if len(manifest_metrics) != 1 or len(manifest_intervals) != 1:
+    expected_manifest_metrics = [
+        {
+            "aborted_count": aborts,
+            "confidence_level": 0.95,
+            "denominator": total,
+            "exclusions": [],
+            "failed_count": 0,
+            "family": "retrieval",
+            "interval": {
+                "high": expected_interval["high"],
+                "low": expected_interval["low"],
+            },
+            "missing_count": 0,
+            "name": "hit_at_k",
+            "not_measured_count": 0,
+            "numerator": successes,
+            "sample_count": total,
+            "uncertainty_method": "wilson",
+            "uncertainty_parameters": {"z": 1.96},
+            "unit": "ratio",
+            "unsupported_count": 0,
+            "value": expected_value,
+            "version": version,
+        }
+    ]
+    if _canonical(manifest_metrics) != _canonical(expected_manifest_metrics):
         raise BundleError("metrics do not recompute from traces")
+    if not isinstance(manifest_intervals, list):
+        raise BundleError("missing intervals")
+    expected_manifest_intervals = [
+        {
+            "confidence_level": 0.95,
+            "high": expected_interval["high"],
+            "low": expected_interval["low"],
+            "method": expected_interval["method"],
+            "metric": "hit_at_k",
+        }
+    ]
+    if _canonical(manifest_intervals) != _canonical(expected_manifest_intervals):
+        raise BundleError("intervals do not recompute from traces")
     return recomputed
 
 
@@ -1379,7 +1378,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
             "value": recomputed["value"],
         }
     ]
-    if result.get("metrics") != expected_result_metrics:
+    if _canonical(result.get("metrics")) != _canonical(expected_result_metrics):
         raise BundleError("result metrics do not match recomputed traces")
     _validate_bound_bundle_manifest(payloads)
     publication = manifest["publication"]
