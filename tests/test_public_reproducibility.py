@@ -2266,9 +2266,13 @@ def test_blank_bound_suite_fails_closed(tmp_path: Path) -> None:
         verify_bundle(bundle["root"])
 
 
-def test_blank_build_system_seam_fails_closed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("system_seam", (" ", " UnKnOwN "))
+def test_undisclosed_build_system_seam_fails_closed(
+    tmp_path: Path, system_seam: str
+) -> None:
     bundle = _write_reproducibility_bundle(
-        tmp_path / "blank-system-seam", system_seam=" "
+        tmp_path / hashlib.sha256(system_seam.encode()).hexdigest(),
+        system_seam=system_seam,
     )
 
     with pytest.raises(BundleError, match="system seam"):

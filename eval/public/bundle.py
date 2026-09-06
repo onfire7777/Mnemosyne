@@ -1180,7 +1180,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         )
     ):
         raise BundleError("build declaration does not match bound artifact")
-    _require_nonempty_string(build_payload.get("system_seam"), "system seam")
+    _require_disclosed_string(build_payload.get("system_seam"), "system seam")
     if manifest["rights"]["source_revision"] != manifest["build"]["candidate_git_sha"]:
         raise BundleError("rights source revision does not match bound commit")
     if build_payload.get("lockfile") != "uv.lock":
