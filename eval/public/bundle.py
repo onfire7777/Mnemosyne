@@ -2116,6 +2116,18 @@ def _write_report_from_snapshots(
 
 
 def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str, Any]:
+    return _verify_report(report_path, report_note)
+
+
+def _verify_report(
+    report_path: Path | str,
+    report_note: Path | str,
+    *,
+    source_snapshot: Path | None = None,
+    reproduced_snapshot: Path | None = None,
+    expected_report_payload: bytes | None = None,
+    expected_note_bytes: bytes | None = None,
+) -> dict[str, Any]:
     report_file, note_file = Path(report_path), Path(report_note)
     for path in (report_file, note_file):
         _reject_reproducibility_link_path(path)
@@ -2127,6 +2139,11 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
             raise BundleError("report and report note must be real files, not links")
     report_payload, _ = _read_inventory_file(report_file)
     note_bytes, _ = _read_inventory_file(note_file)
+    if (
+        expected_report_payload is not None
+        and report_payload != expected_report_payload
+    ) or (expected_note_bytes is not None and note_bytes != expected_note_bytes):
+        raise BundleError("report artifacts changed while snapshotting bundles")
     try:
         report_text = report_payload.decode("utf-8")
         note = note_bytes.decode("utf-8")
@@ -2156,10 +2173,36 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
         "0123456789abcdef"
     ):
         raise BundleError("invalid report git SHA")
-    source, reproduced = (
+    source_display, reproduced_display = (
         Path(report["source_bundle"]),
         Path(report["reproduced_bundle"]),
     )
+    if source_snapshot is None or reproduced_snapshot is None:
+        captured_source = Path(tempfile.mkdtemp(prefix="mnemo-verify-source-"))
+        source_identity = _owned_directory_identity(captured_source)
+        try:
+            captured_reproduced = Path(
+                tempfile.mkdtemp(prefix="mnemo-verify-reproduced-")
+            )
+            reproduced_identity = _owned_directory_identity(captured_reproduced)
+        except BaseException:
+            _remove_owned_directory(captured_source, source_identity)
+            raise
+        try:
+            _snapshot_legacy_bundle(source_display, captured_source)
+            _snapshot_legacy_bundle(reproduced_display, captured_reproduced)
+            return _verify_report(
+                report_file,
+                note_file,
+                source_snapshot=captured_source,
+                reproduced_snapshot=captured_reproduced,
+                expected_report_payload=report_payload,
+                expected_note_bytes=note_bytes,
+            )
+        finally:
+            _remove_owned_directory(captured_reproduced, reproduced_identity)
+            _remove_owned_directory(captured_source, source_identity)
+    source, reproduced = source_snapshot, reproduced_snapshot
     source_result, reproduced_result = verify_bundle(source), verify_bundle(reproduced)
     if source_result != reproduced_result or source_result["suite"] != report["suite"]:
         raise BundleError("report suite binding mismatch")
@@ -2187,9 +2230,9 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
         "mneme",
         "eval-public",
         "--write-report",
-        str(source.resolve()),
+        str(source_display.resolve()),
         "--reproduced-bundle",
-        str(reproduced.resolve()),
+        str(reproduced_display.resolve()),
         "--report-output",
         str(report_file.resolve()),
         "--report-note",
@@ -2198,7 +2241,10 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
     if report.get("command") != expected_command:
         raise BundleError("report command provenance mismatch")
     if report.get("evidence") != _report_evidence(
-        source.resolve(), reproduced.resolve()
+        source,
+        reproduced,
+        source_display=source_display,
+        reproduced_display=reproduced_display,
     ):
         raise BundleError("report evidence projection mismatch")
     source_files = _manifest_files(source)
