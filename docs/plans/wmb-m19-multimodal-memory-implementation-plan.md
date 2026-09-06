@@ -196,7 +196,7 @@ This paragraph does not create those files.
 ## 5. Custody, licence, and claim constraints
 
 - Deterministic local roles: no external dataset, no network, no provider
-  until R5 (spec L1094–1095; U-MODULES license/custody). Pin any later
+  until R5 (spec L1092–1093; U-MODULES license/custody). Pin any later
   dataset and rights contract at freeze; do not invent one here.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "media certified," certified, or governed label. The module
@@ -215,9 +215,10 @@ WMBS-E + C21 no longer deferred (R2) + fixture-rights + portable media (R3)
 ```
 
 R1 gates measured/admitted claims, not descriptive Stage A. Official
-multimodal variants stay behind R4/R5. Inventory reconcile after merge is a
-separate GoalEx Exact-1 — not this PR. Do not invent M16. Do not write
-GOAL.md, STATE.md, or the lease-map.
+multimodal variants stay behind R4; EMemBench or provider-backed extraction
+also stays behind R5. Inventory reconcile after merge is a separate GoalEx
+Exact-1 — not this PR. Do not invent M16. Do not write GOAL.md, STATE.md, or
+the lease-map.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -242,9 +243,9 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 
 | Item | After this file | After a future Stage A | After a future Stage B |
 |---|---|---|---|
-| M19 module disposition | `DEFERRED` (R3 open) | `PROPOSED` local deterministic slice (R3 must already be closed per §6/§7) | `PROPOSED` until Stage B; official multimodal variant still `DEFERRED` (R4/R5) |
+| M19 module disposition | `DEFERRED` (R3 open) | `PROPOSED` local deterministic slice (R3 must already be closed per §6/§7) | `PROPOSED` public-harness development slice; official multimodal variant still `DEFERRED` (R4) and EMemBench/provider-backed extraction also requires R5 |
 | Text-only systems | `UNSUPPORTED-BY-SYSTEM` | same | same |
-| Official multimodal variant | `DEFERRED` (R4/R5) | `DEFERRED` | `DEFERRED` until R4/R5 |
+| Official multimodal variant | `DEFERRED` (R4; R5 additionally for EMemBench/provider-backed extraction) | `DEFERRED` | `DEFERRED` until R4; EMemBench/provider-backed extraction also requires R5 |
 | Quality-based admission floor | none | none | none |
 | Improvement claim (paired CI) | `DEFERRED` | `DEFERRED` | `DEFERRED` until powered |
 | Provenance / erasure | inherit M05/M09; not re-specified | same | same |
