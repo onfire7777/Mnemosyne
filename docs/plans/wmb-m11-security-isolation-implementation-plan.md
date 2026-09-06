@@ -184,9 +184,12 @@ add a **new** stdlib-only oracle:
   the signal name/shape before implement.
 - Systems without principal isolation emit `unsupported` and receive no
   security claim. Storage-inspected auth emulation is not a pass.
-- Anti-gaming (spec L1291): no privileged internal isolation signal; gold,
-  graders, and canaries stay outside the SUT. Do not inspect private storage
-  to fake auth.
+- Anti-gaming (spec L1291): no privileged internal isolation signal; expected
+  canary values/digests and grader labels stay harness-side. **Canary
+  payloads must be ingested under the protected principal** so cross-tenant
+  retrieval can reveal isolation failure — outside-SUT-only canaries make
+  zero unauthorized disclosure vacuous. Do not inspect private storage to
+  fake auth.
 
 This paragraph does not create those files.
 
@@ -206,7 +209,8 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-B + C15/C16 public contract (R2) + G0/G1/G2
+WMBS-B + C15/C16 public contract (R2) + G0/G1/G2 + principal isolation
+available (or explicit unsupported path) — R3/deferral gate
   -> freeze this plan (GOAL step 2)
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
       -> measured / admitted claims require R1 receipt
@@ -226,8 +230,8 @@ No path below is writable from this document.
 docs/plans/wmb-m11-security-isolation-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates measured
-claims only; R4 gates public security claims), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2 + principal-isolation/R3;
+R1 gates measured claims only; R4 gates public security claims), not now:
 
 ```text
 eval/public/wmbs_m11.py                                      (new)
