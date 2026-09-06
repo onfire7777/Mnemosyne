@@ -128,9 +128,9 @@ license to flip it. This plan never labels a run "publication certified."
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
 | R1 | Measured admission receipt (spec L1121). L16-DEV numbers are a hypothesis, not a budget | Operator | Missing — measured-claim gate, not Stage A source. |
 | R2 | C22 public-release contract: human approval and PBPP-complete custody (WMBS-F; spec L1129–1130) | Product / publication owner | Open — public-release gate only; not Stage A source. |
-| R3 | Schema dispatch and cross-version supersession tests before any mixed v1/v2 render (spec L1126–1129) | Public-harness | Open. Mixed rendering stays blocked. |
-| R4 | Verification of build, config, bundle, and trace-index digests before v2 rendering (spec L1126–1127) | Operator | Open. |
-| R5 | Explicit version dispatch for any `result-v2` field add (spec L1108–1111) | Standard owner | Open. Do not reinterpret signed v1 bytes. |
+| R3 | Schema dispatch and cross-version supersession tests before any mixed v1/v2 render (spec L1126–1129) | Public-harness | **DISCHARGED** by N12/#139 (`leaderboard/validate.py` result-v2 dispatch). Residual: keep mixed-render fail-closed. |
+| R4 | Verification of build, config, bundle, and trace-index digests before v2 rendering (spec L1126–1127) | Operator | **DISCHARGED** by N12/#139 (`leaderboard/render.py` four-artifact verify). Do not re-implement. |
+| R5 | Explicit version dispatch for any `result-v2` field add (spec L1108–1111) | Standard owner | **DISCHARGED** by N12/#139 for current result-v2 surface. Do not reinterpret signed v1 bytes. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
 is the existing v1 substrate (`leaderboard/schema/result-v1.schema.json`,
@@ -188,18 +188,18 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-G0/G1 + schema dispatch (R3) + digest verification (R4)
-  -> freeze this v2/N12 delta plan
+G0/G1 (R3/R4/R5 schema+digest+v2 dispatch already on tip via N12/#139)
+  -> freeze this v2/N12 delta plan against landed leaderboard surfaces
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1/R2 not required]
       -> measured / admitted claims may use R1
       -> public release / hosting requires R2 (WMBS-F human approval + PBPP)
       -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-WMBS-F / R2 gate **public release and official adapters**, not local Stage A
-development code. R1 is not a Stage A source blocker. Inventory reconcile
-after merge is a separate GoalEx Exact-1. Do not invent M16. Do not write
-GOAL.md, STATE.md, or the lease-map.
+Do **not** treat R3/R4/R5 as open reinvent gates — consume merged N12
+`leaderboard/validate.py` / `render.py`. WMBS-F / R2 still gates public
+release. R1 is not a Stage A source blocker. Inventory reconcile is a
+separate GoalEx Exact-1. Do not invent M16.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -209,8 +209,8 @@ No path below is writable from this document.
 docs/plans/wmb-m20-publication-integrity-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1 + R3/R4; R1/R2 are not Stage A
-source blockers — R2 is public-release), not now:
+Prospective Stage A (after freeze + G0/G1; consume landed N12 R3/R4/R5;
+R1/R2 are not Stage A source blockers — R2 is public-release), not now:
 
 ```text
 eval/public/wmbs_m20.py                                                    (new)
