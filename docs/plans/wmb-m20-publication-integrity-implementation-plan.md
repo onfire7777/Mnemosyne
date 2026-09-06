@@ -10,10 +10,10 @@ Written: 2026-08-15.
 
 ## 0. What this document is, and what it is not
 
-This is the exact implementation contract `U-MODULES` requires before any M20
-code may be admitted: protocol, scorer contract, fixture design, license/custody,
-and dependency placement. It is the GOAL.md step-1 artifact. It is **not**
-an approval, an admission, a freeze, or a write lease.
+This is the **result-v2 / N12 delta** planning artifact for M20 publication
+integrity. The owner-landed pilot plan remains M20's approved exact plan; this
+file does **not** replace it as greenfield GOAL step-1. It is **not** an
+approval, an admission, a freeze, or a write lease.
 
 It is **not**:
 
@@ -27,7 +27,7 @@ It is **not**:
 - a rewrite of M02, M04, M05, M06, M07, M08, M09, M11, M14, M17, M18, or
   M19 plans (M14 stays `NOT CODE-READY`; #124, #125, and #126 are not
   edited);
-- an M16 plan or an M16 implement (M16 is skipped);
+- an M16 plan or an M16 implement (M16 stays `PROPOSED`; no invent M16);
 - a second ledger, a v1-byte reinterpretation, or a history rewrite;
 - a contract for M04 Stage B or any other module's implementation;
 - authority to touch PR #116, #117, #118, #119, #120, #121, #122, #123,
@@ -107,7 +107,7 @@ Per `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
 - **Placement:** mandatory standard infrastructure.
 
 The spec's own exclusion is load-bearing: this contract plans a *successor*
-development cell and does not reopen the first reference-harness pilot.
+development/v2-delta cell under the already-admitted M20 pilot scope.
 
 C22 is standard infrastructure (GOV-001; LEAD-001/002/003), not a score.
 C24 (`…standard-design.md:525`) is a mandatory report dimension, not a
@@ -124,10 +124,10 @@ license to flip it. This plan never labels a run "publication certified."
 |---|---|---|---|
 | G0 | Write slot for this path, or relocate off `docs/plans/` | GoalEx | Open |
 | G1 | Lease map recomputed; M20 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
-| G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
+| G2 | Align with owner-landed pilot plan (M20 is in the first reference-harness pilot) | GoalEx | Open. This file is a v2/N12 delta, not a pilot-exclusion successor. Do not edit the pilots file here. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured admission receipt (spec L1121). L16-DEV numbers are a hypothesis, not a budget | Operator | Missing. |
-| R2 | C22 public-release contract: human approval and PBPP-complete custody (WMBS-F; spec L1129–1130) | Product / publication owner | Open. Public hosting is a separate act. |
+| R1 | Measured admission receipt (spec L1121). L16-DEV numbers are a hypothesis, not a budget | Operator | Missing — measured-claim gate, not Stage A source. |
+| R2 | C22 public-release contract: human approval and PBPP-complete custody (WMBS-F; spec L1129–1130) | Product / publication owner | Open — public-release gate only; not Stage A source. |
 | R3 | Schema dispatch and cross-version supersession tests before any mixed v1/v2 render (spec L1126–1129) | Public-harness | Open. Mixed rendering stays blocked. |
 | R4 | Verification of build, config, bundle, and trace-index digests before v2 rendering (spec L1126–1127) | Operator | Open. |
 | R5 | Explicit version dispatch for any `result-v2` field add (spec L1108–1111) | Standard owner | Open. Do not reinterpret signed v1 bytes. |
@@ -188,16 +188,18 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-F + C22 public-release contract (R2) + measured receipt (R1)
-+ schema dispatch (R3) + digest verification (R4) + G0/G1/G2
-  -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+G0/G1 + schema dispatch (R3) + digest verification (R4)
+  -> freeze this v2/N12 delta plan
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1/R2 not required]
+      -> measured / admitted claims may use R1
+      -> public release / hosting requires R2 (WMBS-F human approval + PBPP)
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-v2 admission stays behind R3/R4/R5. Do not touch PR #116, #117, #118, #119,
-#120, #121, #122, #123, #124, #125, or #126. Do not write GOAL.md, STATE.md,
-or the lease-map. Do not start M16. Do not edit #124, #125, or #126.
+WMBS-F / R2 gate **public release and official adapters**, not local Stage A
+development code. R1 is not a Stage A source blocker. Inventory reconcile
+after merge is a separate GoalEx Exact-1. Do not invent M16. Do not write
+GOAL.md, STATE.md, or the lease-map.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -207,7 +209,8 @@ No path below is writable from this document.
 docs/plans/wmb-m20-publication-integrity-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R3/R4), not now:
+Prospective Stage A (after freeze + G0/G1 + R3/R4; R1/R2 are not Stage A
+source blockers — R2 is public-release), not now:
 
 ```text
 eval/public/wmbs_m20.py                                                    (new)
