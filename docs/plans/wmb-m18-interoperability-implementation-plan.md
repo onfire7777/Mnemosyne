@@ -192,18 +192,18 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-E + C20 public contract (R2) + G0/G1/G2
+WMBS-E + C20 public contract (R2) + G0/G1/G2 + frozen envelope (R4)
   -> freeze this plan (GOAL step 2)
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
-      -> frozen envelope (R4) before public-claim freeze
       -> public interoperability claim requires R1 two-implementation receipts
       -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
+R4 (frozen versioned portable envelope / export-import wire schemas) is a
+**Stage A prerequisite** so fixtures and oracle have a stable wire format.
 R1 (two independent measured receipts) gates **public interoperability
-claims only** — not descriptive Stage A / internal single-system round-trip.
-Public certification stays behind R5. Do not write GOAL.md, STATE.md, or the
-lease-map. Do not invent M16. Do not edit #124.
+claims only** — not descriptive Stage A. Public certification stays behind
+R5. Do not invent M16. Do not write GOAL.md, STATE.md, or the lease-map.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -213,8 +213,8 @@ No path below is writable from this document.
 docs/plans/wmb-m18-interoperability-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates public claims
-only; R4 frozen envelope before public-claim freeze), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2 + R4 frozen envelope;
+R1 gates public claims only), not now:
 
 ```text
 eval/public/wmbs_m18.py                                              (new)
