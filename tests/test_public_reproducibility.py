@@ -1202,6 +1202,23 @@ def test_json_escaped_credentials_fail_closed(tmp_path: Path, location: str) -> 
         verify_bundle(root)
 
 
+@pytest.mark.parametrize(
+    "private_jwk",
+    (
+        {"d": "unrecognized-private-parameter", "e": "AQAB", "kty": "RSA", "n": "public"},
+        {"k": "unrecognized-symmetric-key", "kty": "oct"},
+    ),
+)
+def test_private_jwk_material_fails_closed(private_jwk: dict[str, str]) -> None:
+    from eval.public import bundle as public_bundle
+
+    public_jwk = {"e": "AQAB", "kty": "RSA", "n": "public"}
+    assert public_bundle._parse_bounded_json(json.dumps(public_jwk), "public-jwk") == public_jwk
+
+    with pytest.raises(BundleError, match="private JWK"):
+        public_bundle._parse_bounded_json(json.dumps(private_jwk), "private-jwk")
+
+
 def test_aggregate_bundle_size_is_bounded_before_full_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
