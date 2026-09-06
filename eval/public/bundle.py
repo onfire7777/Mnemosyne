@@ -82,6 +82,9 @@ _CANONICAL_REPLAY_REQUIRED = {
     "volatile",
 }
 REPRODUCIBILITY_BUNDLE_SCHEMA_VERSION = "mnemosyne.reproducibility-bundle/v1"
+REPRODUCIBILITY_BUNDLE_SCHEMA_DIALECT = (
+    "https://json-schema.org/draft/2020-12/schema"
+)
 REPRODUCIBILITY_BUNDLE_SCHEMA_PATH = (
     Path(__file__).resolve().parent / "schema" / "reproducibility-bundle-v1.schema.json"
 )
@@ -467,6 +470,11 @@ def _validate_repro_schema(manifest: object) -> None:
         schema = json.loads(REPRODUCIBILITY_BUNDLE_SCHEMA_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise BundleError("reproducibility schema is invalid") from exc
+    if not isinstance(schema, dict) or (
+        schema.get("$schema") != REPRODUCIBILITY_BUNDLE_SCHEMA_DIALECT
+        or schema.get("$id") != REPRODUCIBILITY_BUNDLE_SCHEMA_VERSION
+    ):
+        raise BundleError("reproducibility schema identity is invalid")
     try:
         Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(manifest)

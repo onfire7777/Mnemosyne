@@ -774,12 +774,49 @@ def test_runtime_rejects_semantically_invalid_reproducibility_schema(
 
     bundle = _write_reproducibility_bundle(tmp_path / "invalid-runtime-schema-bundle")
     invalid_schema = tmp_path / "invalid-schema.json"
-    _write_json(invalid_schema, {"$schema": "https://json-schema.org/draft/2020-12/schema", "type": 7})
+    _write_json(
+        invalid_schema,
+        {
+            "$id": REPRO_SCHEMA_ID,
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": 7,
+        },
+    )
     monkeypatch.setattr(
         public_bundle, "REPRODUCIBILITY_BUNDLE_SCHEMA_PATH", invalid_schema
     )
 
     with pytest.raises(BundleError, match="schema is invalid"):
+        verify_bundle(bundle["root"])
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    (
+        {
+            "$id": "mnemosyne.reproducibility-bundle/other",
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+        },
+        {
+            "$id": REPRO_SCHEMA_ID,
+            "$schema": "http://json-schema.org/draft-07/schema#",
+        },
+    ),
+)
+def test_runtime_pins_reproducibility_schema_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, replacement: dict[str, str]
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    replacement_digest = hashlib.sha256(_canonical(replacement)).hexdigest()
+    bundle = _write_reproducibility_bundle(tmp_path / replacement_digest)
+    replacement_path = tmp_path / f"{replacement_digest}.json"
+    _write_json(replacement_path, replacement)
+    monkeypatch.setattr(
+        public_bundle, "REPRODUCIBILITY_BUNDLE_SCHEMA_PATH", replacement_path
+    )
+
+    with pytest.raises(BundleError, match="schema identity is invalid"):
         verify_bundle(bundle["root"])
 
 
