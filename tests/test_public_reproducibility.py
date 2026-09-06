@@ -812,6 +812,27 @@ def test_runtime_rejects_duplicate_reproducibility_schema_keys(
         verify_bundle(bundle["root"])
 
 
+def test_runtime_accepts_stable_hardlinked_installed_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "hardlinked-schema-bundle")
+    schema_source = tmp_path / "installed-schema-source.json"
+    schema_link = tmp_path / "installed-schema-link.json"
+    schema_source.write_bytes(REPRO_SCHEMA_PATH.read_bytes())
+    try:
+        os.link(schema_source, schema_link)
+    except OSError as exc:
+        pytest.skip(f"hardlink fixture is unavailable: {exc}")
+    assert schema_link.stat().st_nlink >= 2
+    monkeypatch.setattr(
+        public_bundle, "REPRODUCIBILITY_BUNDLE_SCHEMA_PATH", schema_link
+    )
+
+    assert verify_bundle(bundle["root"])["valid"] is True
+
+
 @pytest.mark.parametrize(
     "replacement",
     (
@@ -2591,9 +2612,11 @@ def test_final_reproduction_comparison_uses_stable_artifact_snapshot(
     original_read = public_bundle._read_inventory_file
     temp_result_reads = 0
 
-    def read_with_final_mutation(path: Path) -> tuple[bytes, int]:
+    def read_with_final_mutation(
+        path: Path, *, allow_hardlinks: bool = False
+    ) -> tuple[bytes, int]:
         nonlocal temp_result_reads
-        payload, size = original_read(path)
+        payload, size = original_read(path, allow_hardlinks=allow_hardlinks)
         if (
             path.name == "result.json"
             and path.parent.name.startswith(f".{destination.name}-")
