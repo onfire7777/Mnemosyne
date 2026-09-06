@@ -496,7 +496,6 @@ def _run_global_sensemaking(
     prediction_set_size = ops._prediction_set_size(budgeted, threshold)
     entropy = semantic_entropy([hit.text for hit in budgeted])
     gist_support = gist_support_report(budgeted)
-    gist_only = bool(gist_support["applied"])
     reality_monitoring = ops._reality_monitoring_report(budgeted)
     standing_report = reality_monitoring["standing"]
     ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
@@ -504,8 +503,9 @@ def _run_global_sensemaking(
         raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
     answer_grounding_floor = answer_grounding_floor_report(budgeted, policy)
     answer_grounding_floor_active = bool(answer_grounding_floor["active"])
-    if gist_only:
-        confidence = min(confidence, threshold * 0.95)
+    # RAPTOR consolidation-summary hits are the intended evidence for this
+    # projection. Record gist_support for provenance, but do not treat them as
+    # gist-only hard-abstain or crush confidence for that reason alone.
     if ungrounded_reality_only:
         confidence = min(confidence, threshold * 0.95)
     if answer_grounding_floor_active:
@@ -514,7 +514,6 @@ def _run_global_sensemaking(
         gated = (
             should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
             or insufficient_support
-            or gist_only
             or ungrounded_reality_only
             or answer_grounding_floor_active
         )
@@ -523,16 +522,12 @@ def _run_global_sensemaking(
             confidence < threshold
             or prediction_set_size == 0
             or insufficient_support
-            or gist_only
             or ungrounded_reality_only
             or answer_grounding_floor_active
         )
     gate_reason: str | None = None
     gate_note: str | None = None
-    if gist_only:
-        gate_reason = "gist_only"
-        gate_note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
-    elif ungrounded_reality_only:
+    if ungrounded_reality_only:
         gate_reason = "ungrounded_reality_only"
         gate_note = (
             "Retrieved support has low groundedness or insufficient independent "
