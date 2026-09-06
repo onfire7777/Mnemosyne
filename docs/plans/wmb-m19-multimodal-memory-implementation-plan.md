@@ -149,6 +149,10 @@ add a **new** deterministic development fixture:
   canaries.
 - Replay: at least five seeds. Media files and derived representations
   digest-pinned. Byte-identical under `canonical_json(generate_fixture(seed))`.
+- Media events require non-null `modality_handle` values that resolve, via a
+  harness-owned mechanism, to digest-pinned fixture bytes (not captions or
+  metadata alone). Absent/null handles are not Stage A conforming for
+  image/audio/video cases.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
 - No raw host paths. No entrant-controlled fetch URLs. Text-only systems
   stay `unsupported`, not failed. Official multimodal variants stay
@@ -170,6 +174,10 @@ add a **new** stdlib-only oracle:
 - Provenance remains an M19 Stage A scored metric (spec L1083–1087). M05/M09
   contracts may be reused for shared fields, but provenance is not dropped
   from the M19 scorer.
+- Freeze residual (NOT CODE-READY): trace/input shape, matching rules,
+  denominators, per-modality aggregation, leakage calculation, validation
+  failures, and latency/storage measurement posture must be frozen before
+  Stage A implement — metric names alone are not a scorer contract.
 - Text-only systems emit `unsupported`, never a fail. Missing R3 yields
   **no multimodal claim**, not a pass.
 - Anti-gaming (spec L1267 + L1291): gold and graders stay outside the SUT; no
