@@ -251,6 +251,24 @@ def test_version_1_public_bundle_output_bytes_remain_frozen(tmp_path: Path) -> N
     assert set(manifest["files"]) == set(REQUIRED)
 
 
+def test_version_1_verifier_rejects_hardlinked_inventory_artifact(
+    tmp_path: Path,
+) -> None:
+    destination = tmp_path / "v1-bundle"
+    write_bundle(destination, **_v1_snapshot_bundle_inputs())
+    artifact = destination / "metrics.json"
+    external = tmp_path / "external-metrics.json"
+    external.write_bytes(artifact.read_bytes())
+    artifact.unlink()
+    try:
+        os.link(external, artifact)
+    except OSError as exc:
+        pytest.skip(f"hardlink fixture is unavailable: {exc}")
+
+    with pytest.raises(BundleError, match="hardlink"):
+        verify_bundle(destination)
+
+
 def test_m15_helpers_are_reused_not_copied() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
     assert canonical_replay_digest(payload) == REPLAY_DIGESTS["wmbs-m01-development"]
