@@ -860,6 +860,8 @@ def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]
         question_id = trace.get("question_id")
         hits = trace.get("ranked_retrieved_hits")
         gold = trace.get("gold_references")
+        stored = trace.get("stored_records")
+        answer = trace.get("answer")
         if (
             not isinstance(question_id, str)
             or not question_id.strip()
@@ -879,6 +881,19 @@ def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]
         unique_hits = set(hits)
         if len(hits) != len(unique_hits) or len(gold) != len(set(gold)):
             raise BundleError("duplicate ranked retrieved ids")
+        if (
+            not isinstance(stored, list)
+            or any(not isinstance(item, str) or not item for item in stored)
+            or len(stored) != len(set(stored))
+        ):
+            raise BundleError("stored trace population is malformed")
+        stored_ids = set(stored)
+        if not set(hits) <= stored_ids or not set(gold) <= stored_ids:
+            raise BundleError("retrieval trace references records outside its population")
+        if answer is not None and (
+            not isinstance(answer, str) or answer not in stored_ids
+        ):
+            raise BundleError("retrieval trace answer is outside its population")
         successes += bool(set(hits[:k]) & set(gold))
         total += 1
     if total == 0:

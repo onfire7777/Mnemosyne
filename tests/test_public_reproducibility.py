@@ -1708,6 +1708,37 @@ def test_reproducibility_trace_population_is_well_formed(
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize(
+    ("answer", "gold", "hits", "stored", "message"),
+    [
+        ("d1", ["d1"], ["d1"], ["d1", "d1"], "stored trace population"),
+        ("d1", ["d2"], ["d1"], ["d1"], "outside its population"),
+        ("d2", ["d1"], ["d1"], ["d1"], "answer is outside"),
+    ],
+)
+def test_reproducibility_trace_references_its_stored_population(
+    tmp_path: Path,
+    answer: str,
+    gold: list[str],
+    hits: list[str],
+    stored: list[str],
+    message: str,
+) -> None:
+    traces = _canonical(
+        {
+            "answer": answer,
+            "gold_references": gold,
+            "question_id": "q1",
+            "ranked_retrieved_hits": hits,
+            "scoring_family": "deterministic-retrieval",
+            "stored_records": stored,
+        }
+    )
+    bundle = _write_reproducibility_bundle(tmp_path / message, traces=traces)
+    with pytest.raises(BundleError, match=message):
+        verify_bundle(bundle["root"])
+
+
 def test_missing_canonical_replay_artifact_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "no-replay")
     replay = bundle["root"] / "canonical-replay.json"
