@@ -107,9 +107,10 @@ Per `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
   supersession rather than rewriting history.
 - **Placement:** mandatory standard infrastructure.
 
-M20 is **in** the first reference-harness pilot. This file is a result-v2 /
-N12 **delta** against that already-authorized pilot scope — not a
-pilot-exclusion successor and not outside M20's admitted placement.
+M20 is **in** the first reference-harness pilot (spec L609–613). This file is
+a result-v2 / N12 **delta** inside that authorized pilot scope. There is **no**
+specification exclusion for M20; do not treat this plan as outside or after
+the pilot.
 
 C22 is standard infrastructure (GOV-001; LEAD-001/002/003), not a score.
 C24 (`…standard-design.md:525`) is a mandatory report dimension, not a
@@ -126,7 +127,7 @@ license to flip it. This plan never labels a run "publication certified."
 |---|---|---|---|
 | G0 | Write slot for this path, or relocate off `docs/plans/` | GoalEx | Open |
 | G1 | Lease map recomputed; M20 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
-| G2 | Align with owner-landed pilot plan (M20 is in the first reference-harness pilot) | GoalEx | Open. This file is a v2/N12 delta, not a pilot-exclusion successor. Do not edit the pilots file here. |
+| G2 | Align with owner-landed pilot plan (M20 is in the first reference-harness pilot) | GoalEx | Open. This file is a v2/N12 delta **inside** the authorized pilot (no exclusion). Do not edit the pilots file here. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
 | R1 | Measured admission receipt (spec L1121). L16-DEV numbers are a hypothesis, not a budget | Operator | Missing — measured-claim gate, not Stage A source. |
 | R2 | C22 public-release contract: human approval and PBPP-complete custody (WMBS-F; spec L1129–1130) | Product / publication owner | Open — public-release gate only; not Stage A source. |
