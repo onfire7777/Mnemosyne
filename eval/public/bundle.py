@@ -1309,7 +1309,10 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         result_matches = [
             entry
             for entry in entries
-            if isinstance(entry, dict) and entry.get("result") == result
+            if (
+                isinstance(entry, dict)
+                and _canonical(entry.get("result")) == _canonical(result)
+            )
         ]
         if not result_matches:
             raise BundleError("ledger result reference mismatch")
