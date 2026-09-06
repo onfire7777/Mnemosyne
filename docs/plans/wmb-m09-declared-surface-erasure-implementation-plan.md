@@ -198,6 +198,19 @@ add a **new** stdlib-only oracle:
   pins a fixture/harness public key; entrant-supplied `public_key_path` alone
   is not sufficient (an entrant must not mint a keypair and self-attest). Do
   not invent a parallel receipt crypto path.
+- Surface-inventory bind (NOT CODE-READY freeze): valid-receipt credit
+  requires the receipt's surface set to match the **frozen declared-surface
+  inventory** (or the R1 exact-surface receipt) — internal
+  `policy.required_surfaces`/`surfaces`/`stores` self-agreement alone is not
+  enough.
+- Stdlib oracle seam: `verify_signed_deletion_manifest` pulls non-stdlib
+  `cryptography` via `evidence_signing`. Stage A keeps the **oracle
+  stdlib-only**; signature verification runs in a **trusted harness seam**
+  that supplies an authenticated verify result to the pure scorer — entrants
+  must not self-report validity.
+- Completion SLA freeze residual (NOT CODE-READY): pin clock origin,
+  completion event, measured interval (include/exclude retries, signing,
+  restore), and threshold/status semantics before Stage A implement.
 - An unprobeable declared readable surface, undisclosed backup scope, or
   unexercisable identity authorization yields **no erasure claim**, not a
   pass and not a zero-as-failure substitute.
