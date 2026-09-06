@@ -394,6 +394,7 @@ def _write_reproducibility_bundle(
     traces: bytes | None = None,
     scoring_profile: str = "smoke-hit-at-k-v1",
     lockfile: bytes | None = None,
+    ledger_run_id: str | None = None,
 ) -> dict[str, Any]:
     root.mkdir(parents=True)
     commit = run_commit or "0123456789abcdef0123456789abcdef01234567"
@@ -531,7 +532,7 @@ def _write_reproducibility_bundle(
             timestamp="2026-09-05T00:00:00Z",
             entrant_id="synthetic-entrant",
             status="succeeded",
-            run_id="run-repro-001",
+            run_id=ledger_run_id or str(result["identity"]["run_id"]),
             result=result,
             roster={"synthetic-entrant"},
         )
@@ -1263,6 +1264,14 @@ def test_fabricated_ledger_and_manifest_refs_fail_closed(tmp_path: Path) -> None
     _write_json(adapter["root"] / REPRO_MANIFEST_NAME, payload)
     with pytest.raises(BundleError, match="adapter"):
         verify_bundle(adapter["root"])
+
+
+def test_signed_ledger_run_id_must_match_result_identity(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "ledger-run-mismatch", ledger_run_id="different-run"
+    )
+    with pytest.raises(BundleError, match="ledger run_id does not match"):
+        verify_bundle(bundle["root"])
 
 
 def test_manifest_ref_cannot_bind_a_different_inventory_artifact(tmp_path: Path) -> None:
