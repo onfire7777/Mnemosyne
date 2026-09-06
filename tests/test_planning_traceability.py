@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
+import venv
 from pathlib import Path
 
 
@@ -31,6 +34,18 @@ DEPENDENCY_LEASE_MAP = (
 GOAL = ROOT / "GOAL.md"
 STATE = PLANNING / "STATE.md"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+TOPOLOGY_VERIFIER = ROOT / "infra" / "scripts" / "verify-topology-refresh.py"
+EXPECTED_TOPOLOGY_VERIFIER_OID = "3af5fbb6aec0122e3c078a61832c254d1348d575"
+TOPOLOGY_BOOTSTRAP = """import sys
+
+source = sys.argv.pop(1)
+try:
+    exec(compile(source, "permitted-parent topology verifier", "exec"))
+except SystemExit:
+    raise
+except Exception:
+    raise SystemExit(2)
+"""
 LEASE_BASELINE = re.compile(r"^Baseline: `main@([0-9a-f]{40})`$", re.MULTILINE)
 LEASE_CURRENT_BASELINE_CLAIMS = (
     re.compile(r"recomputed from the new baseline `main@([0-9a-f]{8})`"),
@@ -773,3 +788,974 @@ def test_goalex_round_cleanup_contract_is_behaviorally_reproducible() -> None:
         ).stdout == (
             b"!! ignored/binary.dat\n!! ignored/nested/child.dat\n!! ignored/object\n"
         )
+
+
+def _topology_fixture(
+    tmp_path: Path, verifier_source: str | None = None
+) -> tuple[Path, str, str, str]:
+    repo = tmp_path / "topology"
+    repo.mkdir(parents=True)
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-q")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    for path, text in (
+        (".planning/STATE.md", "anchor state\n"),
+        ("GOAL.md", "anchor goal\n"),
+        (
+            "docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md",
+            "anchor lease\n",
+        ),
+        (
+            "infra/scripts/verify-topology-refresh.py",
+            TOPOLOGY_VERIFIER.read_text(encoding="utf-8")
+            if verifier_source is None
+            else verifier_source,
+        ),
+        ("immutable.txt", "anchor content\n"),
+    ):
+        file = repo / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(text, encoding="utf-8")
+    git("add", ".")
+    git("commit", "-qm", "anchor")
+    anchor = git("rev-parse", "HEAD")
+
+    (repo / ".planning/STATE.md").write_text("parent state\n", encoding="utf-8")
+    git("add", ".planning/STATE.md")
+    git("commit", "-qm", "permitted parent")
+    parent = git("rev-parse", "HEAD")
+    git("commit", "--allow-empty", "-qm", "candidate")
+    return repo, git("rev-parse", "HEAD"), parent, anchor
+
+
+def _verify_topology(repo: Path, *refs: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(TOPOLOGY_VERIFIER), *refs],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _verify_topology_from_parent(
+    repo: Path, candidate: str, parent: str, anchor: str
+) -> subprocess.CompletedProcess[str]:
+    resolved: dict[str, str] = {}
+    for label, ref in (("parent", parent), ("anchor", anchor)):
+        result = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "rev-parse",
+                "--verify",
+                f"{ref}^{{commit}}",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode or result.stdout.strip() != ref:
+            return subprocess.CompletedProcess(
+                result.args,
+                2,
+                stdout="error: cannot authenticate trusted topology verifier\n",
+                stderr="",
+            )
+        resolved[label] = result.stdout.strip()
+
+    for ref in resolved.values():
+        oid = subprocess.run(
+            [
+                "git",
+                "--no-replace-objects",
+                "rev-parse",
+                "--verify",
+                f"{ref}:infra/scripts/verify-topology-refresh.py",
+            ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        if oid.returncode or oid.stdout.strip() != EXPECTED_TOPOLOGY_VERIFIER_OID:
+            return subprocess.CompletedProcess(
+                oid.args,
+                2,
+                stdout="error: cannot authenticate trusted topology verifier\n",
+                stderr="",
+            )
+    source = subprocess.run(
+        [
+            "git",
+            "--no-replace-objects",
+            "show",
+            f"{resolved['parent']}:infra/scripts/verify-topology-refresh.py",
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if source.returncode or not source.stdout:
+        return subprocess.CompletedProcess(
+            source.args,
+            2,
+            stdout="error: cannot authenticate trusted topology verifier\n",
+            stderr="",
+        )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            TOPOLOGY_BOOTSTRAP,
+            source.stdout,
+            candidate,
+            parent,
+            anchor,
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode in (0, 1, 2):
+        return result
+    return subprocess.CompletedProcess(
+        result.args, 2, stdout=result.stdout, stderr=result.stderr
+    )
+
+
+def _topology_module() -> object:
+    spec = importlib.util.spec_from_file_location(
+        "topology_verifier", TOPOLOGY_VERIFIER
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_topology_refresh_verifier_accepts_permitted_lifecycle_only_change(
+    tmp_path: Path,
+) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 0, result.stdout
+    assert not result.stdout
+    trusted = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert trusted.returncode == 0, trusted.stdout
+    assert not trusted.stdout
+
+
+def test_topology_refresh_verifier_accepts_one_commit_divergent_anchor(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, base_anchor = _topology_fixture(tmp_path)
+    anchor_tree = subprocess.run(
+        ["git", "rev-parse", f"{base_anchor}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    anchor = subprocess.run(
+        ["git", "commit-tree", anchor_tree, "-p", base_anchor, "-m", "anchor"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate_tree = subprocess.run(
+        ["git", "rev-parse", f"{parent}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        [
+            "git",
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            parent,
+            "-p",
+            anchor,
+            "-m",
+            "candidate",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 0, result.stdout
+    assert not result.stdout
+
+
+def test_topology_refresh_verifier_rejects_tag_object_ids(tmp_path: Path) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    refs = [candidate, parent, anchor]
+    for index, (label, target) in enumerate(
+        (("candidate", candidate), ("parent", parent), ("anchor", anchor))
+    ):
+        subprocess.run(
+            ["git", "tag", "-a", f"{label}-tag", "-m", label, target],
+            cwd=repo,
+            check=True,
+        )
+        tag_oid = subprocess.run(
+            ["git", "rev-parse", f"refs/tags/{label}-tag"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        tagged = [*refs]
+        tagged[index] = tag_oid
+        direct = _verify_topology(repo, *tagged)
+        assert direct.returncode == 2, label
+        trusted = _verify_topology_from_parent(repo, *tagged)
+        assert trusted.returncode == 2, label
+
+
+def test_topology_refresh_verifier_executes_trusted_parent_bytes(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
+    candidate_verifier = repo / "infra" / "scripts" / "verify-topology-refresh.py"
+    candidate_verifier.write_text("raise SystemExit(0)\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "immutable.txt", str(candidate_verifier.relative_to(repo))],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "tamper with verifier"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    untrusted = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            str(candidate_verifier),
+            candidate,
+            parent,
+            anchor,
+        ],
+        cwd=repo,
+    )
+    assert untrusted.returncode == 0
+    trusted = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert trusted.returncode == 1
+    assert "immutable path differs from anchor: immutable.txt" in trusted.stdout
+
+
+def test_topology_refresh_verifier_requires_trusted_parent_bytes(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, anchor = _topology_fixture(tmp_path)
+    (repo / "infra" / "scripts" / "verify-topology-refresh.py").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "remove verifier"], cwd=repo, check=True)
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert result.returncode == 2
+    assert result.stdout == "error: cannot authenticate trusted topology verifier\n"
+    abbreviated = _verify_topology_from_parent(repo, candidate, parent[:12], anchor)
+    assert abbreviated.returncode == 2
+    assert abbreviated.stdout == result.stdout
+
+    repo, _, _, anchor = _topology_fixture(tmp_path / "empty")
+    (repo / "infra" / "scripts" / "verify-topology-refresh.py").write_text(
+        "", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "empty verifier"], cwd=repo, check=True)
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    empty = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert empty.returncode == 2
+    assert empty.stdout == result.stdout
+
+    repo, candidate, parent, anchor = _topology_fixture(
+        tmp_path / "noop", "# disabled\n"
+    )
+    noop = _verify_topology_from_parent(repo, candidate, parent, anchor)
+    assert noop.returncode == 2
+    assert noop.stdout == result.stdout
+
+
+def test_topology_refresh_verifier_normalizes_malformed_parent_source() -> None:
+    for label, source in (
+        ("syntax", "this is not valid python !!!\n"),
+        ("runtime", "raise RuntimeError\n"),
+        ("unexpected-exit", "raise SystemExit(3)\n"),
+    ):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-c",
+                TOPOLOGY_BOOTSTRAP,
+                source,
+                "a" * 40,
+                "b" * 40,
+                "c" * 40,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        expected = 3 if label == "unexpected-exit" else 2
+        assert result.returncode == expected, label
+        assert not result.stdout
+
+
+def test_topology_refresh_verifier_rejects_non_ancestral_candidate(
+    tmp_path: Path,
+) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    tree = subprocess.run(
+        ["git", "rev-parse", f"{candidate}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    unrelated = subprocess.run(
+        ["git", "commit-tree", tree, "-m", "unrelated candidate"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, unrelated, parent, anchor)
+    assert result.returncode == 1
+    assert result.stdout == "candidate does not descend from permitted parent\n"
+
+    grafts = repo / ".git" / "info" / "grafts"
+    grafts.write_text(f"{unrelated} {parent}\n", encoding="ascii")
+    forged = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", parent, unrelated],
+        cwd=repo,
+    )
+    assert forged.returncode == 0
+    result = _verify_topology(repo, unrelated, parent, anchor)
+    assert result.returncode == 1
+    assert result.stdout == "candidate does not descend from permitted parent\n"
+
+
+def test_topology_refresh_verifier_requires_anchor_ancestry(tmp_path: Path) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    anchor_tree = subprocess.run(
+        ["git", "rev-parse", f"{anchor}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    unrelated_anchor = subprocess.run(
+        ["git", "commit-tree", anchor_tree, "-m", "unrelated anchor"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, unrelated_anchor)
+    assert result.returncode == 1
+    assert result.stdout == "candidate does not descend from immutable anchor\n"
+
+
+def test_topology_refresh_verifier_ignores_git_replacement_refs(tmp_path: Path) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "immutable.txt").write_text("unauthorized\n", encoding="utf-8")
+    subprocess.run(["git", "add", "immutable.txt"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "unauthorized change"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(["git", "replace", anchor, candidate], cwd=repo, check=True)
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert "immutable path differs from anchor: immutable.txt" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_non_lifecycle_drift(
+    tmp_path: Path,
+) -> None:
+    for change, path, content in (
+        ("content", "immutable.txt", "changed\n"),
+        ("addition", "added.txt", "added\n"),
+        ("deletion", "immutable.txt", None),
+        ("rename", "renamed.txt", "anchor content\n"),
+        ("mode", "immutable.txt", None),
+    ):
+        repo, _, parent, anchor = _topology_fixture(tmp_path / change)
+        if change == "deletion":
+            (repo / path).unlink()
+        elif change == "rename":
+            (repo / "immutable.txt").rename(repo / path)
+        elif change != "mode":
+            (repo / path).write_text(content, encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+        if change == "mode":
+            subprocess.run(
+                ["git", "update-index", "--chmod=+x", path],
+                cwd=repo,
+                check=True,
+            )
+        subprocess.run(["git", "commit", "-qm", change], cwd=repo, check=True)
+        candidate = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        result = _verify_topology(repo, candidate, parent, anchor)
+        assert result.returncode == 1, (change, result.stdout)
+        assert f"immutable path differs from anchor: {path}" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_reverted_intermediate_drift(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "secret.txt").write_text(
+        "reachable but absent from tip\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "add", "secret.txt"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "transient drift"], cwd=repo, check=True)
+    (repo / "secret.txt").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "revert drift"], cwd=repo, check=True)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert (
+        result.stdout
+        == "candidate history contains commits outside permitted parent and immutable anchor\n"
+    )
+
+
+def test_topology_refresh_verifier_rejects_reverted_anchor_drift(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, base_anchor = _topology_fixture(tmp_path)
+    base_tree = subprocess.run(
+        ["git", "rev-parse", f"{base_anchor}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    secret_blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"],
+        cwd=repo,
+        input="reachable but absent from anchor tip\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    root_entries = subprocess.run(
+        ["git", "ls-tree", base_anchor],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    secret_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input=root_entries + f"100644 blob {secret_blob}\tsecret.txt\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    transient = subprocess.run(
+        ["git", "commit-tree", secret_tree, "-p", base_anchor, "-m", "transient"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    anchor = subprocess.run(
+        ["git", "commit-tree", base_tree, "-p", transient, "-m", "revert"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate_tree = subprocess.run(
+        ["git", "rev-parse", f"{parent}^{{tree}}"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        [
+            "git",
+            "commit-tree",
+            candidate_tree,
+            "-p",
+            parent,
+            "-p",
+            anchor,
+            "-m",
+            "candidate",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert (
+        result.stdout
+        == "immutable anchor history contains more than one commit outside permitted parent\n"
+    )
+
+
+def test_topology_refresh_verifier_rejects_empty_tree_addition(tmp_path: Path) -> None:
+    repo, candidate, parent, anchor = _topology_fixture(tmp_path)
+    empty_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input="",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    root_entries = subprocess.run(
+        ["git", "ls-tree", candidate],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    root_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input=root_entries + f"040000 tree {empty_tree}\temptydir\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        ["git", "commit-tree", root_tree, "-p", candidate, "-m", "empty tree"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert "immutable path differs from anchor: emptydir" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_lifecycle_tree(tmp_path: Path) -> None:
+    repo, candidate, _, anchor = _topology_fixture(tmp_path)
+    empty_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input="",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    root_entries = subprocess.run(
+        ["git", "ls-tree", candidate],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    root_entries = "".join(
+        line
+        for line in root_entries.splitlines(keepends=True)
+        if not line.endswith("\tGOAL.md\n")
+    )
+    root_tree = subprocess.run(
+        ["git", "mktree"],
+        cwd=repo,
+        input=root_entries + f"040000 tree {empty_tree}\tGOAL.md\n",
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    parent = subprocess.run(
+        ["git", "commit-tree", root_tree, "-p", candidate, "-m", "bad parent"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    candidate = subprocess.run(
+        ["git", "commit-tree", root_tree, "-p", parent, "-m", "bad candidate"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1
+    assert "lifecycle path is not a regular file in candidate: GOAL.md" in result.stdout
+    assert (
+        "lifecycle path is not a regular file in permitted parent: GOAL.md"
+        in result.stdout
+    )
+
+
+def test_topology_refresh_verifier_rejects_lifecycle_missing_or_different(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    (repo / "GOAL.md").unlink()
+    (repo / ".planning/STATE.md").write_text("different\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "bad lifecycle"], cwd=repo, check=True)
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1, result.stdout
+    assert "lifecycle path missing from candidate: GOAL.md" in result.stdout
+    assert (
+        "lifecycle path differs from permitted parent: .planning/STATE.md"
+        in result.stdout
+    )
+
+
+def test_topology_refresh_verifier_rejects_missing_parent_lifecycle_path(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, anchor = _topology_fixture(tmp_path)
+    (repo / "GOAL.md").unlink()
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "commit", "-qm", "parent missing lifecycle"], cwd=repo, check=True
+    )
+    parent = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-qm", "candidate"], cwd=repo, check=True
+    )
+    candidate = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = _verify_topology(repo, candidate, parent, anchor)
+    assert result.returncode == 1, result.stdout
+    assert "lifecycle path missing from permitted parent: GOAL.md" in result.stdout
+
+
+def test_topology_refresh_verifier_rejects_unresolvable_full_sha(
+    tmp_path: Path,
+) -> None:
+    repo, _, parent, anchor = _topology_fixture(tmp_path)
+    result = _verify_topology(repo, "f" * 40, parent, anchor)
+    assert result.returncode == 2
+    assert result.stdout == "error: not an exact commit SHA: " + "f" * 40 + "\n"
+
+
+def test_topology_refresh_verifier_rejects_shallow_history(monkeypatch, capsys) -> None:
+    module = _topology_module()
+
+    def shallow_repo(
+        command: list[str], *args: object, **kwargs: object
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(command, 0, stdout=b"true\n")
+
+    monkeypatch.setattr(module.subprocess, "run", shallow_repo)
+    assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
+    assert (
+        capsys.readouterr().out
+        == "error: repository history is shallow or unreadable\n"
+    )
+
+
+def test_topology_refresh_verifier_rejects_malformed_tree_output(
+    monkeypatch, capsys
+) -> None:
+    module = _topology_module()
+    valid = b"100644 blob " + b"0" * 40 + b"\tvalid"
+    for output in (
+        valid,
+        valid + b"\0\0",
+        b"100644 blob\tvalid\0",
+        b"100600 blob " + b"0" * 40 + b"\tvalid\0",
+        b"100644 commit " + b"0" * 40 + b"\tvalid\0",
+        b"100644 blob " + b"F" * 40 + b"\tvalid\0",
+        b"100644 blob " + b"0" * 40 + b"\t\0",
+        valid + b"\0" + valid + b"\0",
+    ):
+
+        def fake_run(
+            command: list[str], *args: object, output: bytes = output, **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes]:
+            if "--is-shallow-repository" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=b"false\n")
+            if "rev-parse" in command:
+                exact = command[-1].removesuffix("^{commit}").encode("ascii") + b"\n"
+                return subprocess.CompletedProcess(command, 0, stdout=exact)
+            if "merge-base" in command:
+                return subprocess.CompletedProcess(command, 0, stdout=b"")
+            if "rev-list" in command:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=command[3].encode("ascii") + b"\n"
+                )
+            return subprocess.CompletedProcess(command, 0, stdout=output)
+
+        monkeypatch.setattr(
+            module.subprocess,
+            "run",
+            fake_run,
+        )
+        assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
+        assert (
+            capsys.readouterr().out == "error: cannot parse tree for " + "a" * 40 + "\n"
+        )
+
+
+def test_topology_refresh_verifier_escapes_unusual_path_bytes() -> None:
+    assert _topology_module()._path(b"line\n\xff\tname") == r"line\n\xff\tname"
+
+
+def test_topology_refresh_verifier_normalizes_git_launch_error(
+    monkeypatch, capsys
+) -> None:
+    module = _topology_module()
+
+    def cannot_run_git(*args: object, **kwargs: object) -> None:
+        raise OSError("locale-dependent launch detail")
+
+    monkeypatch.setattr(module.subprocess, "run", cannot_run_git)
+    assert module.main(["script", "a" * 40, "b" * 40, "c" * 40]) == 2
+    assert capsys.readouterr().out == "error: cannot run git\n"
+
+
+def test_goal_documents_topology_refresh_verifier_invocation() -> None:
+    goal = GOAL.read_text(encoding="utf-8")
+    assert "obtain and run this block from the\npermitted-parent `GOAL.md` blob" in goal
+    assert "Never use the\ncandidate checkout's copy as the launcher" in goal
+    actual_oid = subprocess.run(
+        ["git", "hash-object", str(TOPOLOGY_VERIFIER)],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert actual_oid == EXPECTED_TOPOLOGY_VERIFIER_OID
+    assert (
+        f"  expected_verifier_oid={EXPECTED_TOPOLOGY_VERIFIER_OID}\n"
+        '  resolved_parent="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$PERMITTED_PARENT_SHA^{commit}" 2>/dev/null\n'
+        '  )" &&\n'
+        '  [ "$resolved_parent" = "$PERMITTED_PARENT_SHA" ] &&\n'
+        '  resolved_anchor="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$IMMUTABLE_ANCHOR_SHA^{commit}" 2>/dev/null\n'
+        '  )" &&\n'
+        '  [ "$resolved_anchor" = "$IMMUTABLE_ANCHOR_SHA" ] &&\n'
+        '  parent_verifier_oid="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
+        "2>/dev/null\n"
+        '  )" &&\n'
+        '  anchor_verifier_oid="$(\n'
+        "    git --no-replace-objects rev-parse --verify \\\n"
+        '      "$resolved_anchor:infra/scripts/verify-topology-refresh.py" '
+        "2>/dev/null\n"
+        '  )" &&\n'
+        '  [ "$parent_verifier_oid" = "$expected_verifier_oid" ] &&\n'
+        '  [ "$anchor_verifier_oid" = "$expected_verifier_oid" ] &&\n'
+        '  topology_verifier="$(\n'
+        "    git --no-replace-objects show \\\n"
+        '      "$resolved_parent:infra/scripts/verify-topology-refresh.py" '
+        "2>/dev/null\n"
+        '  )" &&\n'
+        '  [ -n "$topology_verifier" ] || {\n'
+        "    printf '%s\\n' 'error: cannot authenticate trusted topology verifier'\n"
+        "    exit 2\n"
+        "  }\n"
+        "  if python3 -I -S -c '\n"
+        + TOPOLOGY_BOOTSTRAP
+        + '\' "$topology_verifier" \\\n'
+        '    "$CANDIDATE_SHA" \\\n'
+        '    "$PERMITTED_PARENT_SHA" \\\n'
+        '    "$IMMUTABLE_ANCHOR_SHA"; then\n'
+        "    topology_status=0\n"
+        "  else\n"
+        "    topology_status=$?\n"
+        "  fi\n"
+        '  case "$topology_status" in\n'
+        '    0 | 1 | 2) exit "$topology_status" ;;\n'
+        "    *) exit 2 ;;\n"
+        "  esac"
+    ) in goal
+
+
+def test_goal_topology_bootstrap_normalizes_status_under_errexit(
+    tmp_path: Path,
+) -> None:
+    if os.name == "nt":
+        return
+    tool_dir = tmp_path / "bin"
+    tool_dir.mkdir()
+    python = tool_dir / "python3"
+    python.write_text("#!/bin/sh\nexit 3\n", encoding="utf-8")
+    python.chmod(0o755)
+    goal = GOAL.read_text(encoding="utf-8")
+    command = goal.split("```sh\n", 1)[1].split("\n```", 1)[0]
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = subprocess.run(
+        ["sh", "-e", "-c", command],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{tool_dir}{os.pathsep}{os.environ['PATH']}",
+            "CANDIDATE_SHA": head,
+            "PERMITTED_PARENT_SHA": head,
+            "IMMUTABLE_ANCHOR_SHA": head,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
+
+
+def test_goal_topology_bootstrap_disables_sitecustomize(tmp_path: Path) -> None:
+    if os.name == "nt":
+        return
+    environment = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    python = environment / "bin" / "python3"
+    site_packages = subprocess.run(
+        [
+            str(python),
+            "-I",
+            "-c",
+            "import site; print(site.getsitepackages()[0])",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (Path(site_packages) / "sitecustomize.py").write_text(
+        "import os; os._exit(0)\n", encoding="utf-8"
+    )
+    control = subprocess.run([str(python), "-I", "-c", "raise SystemExit(2)"])
+    assert control.returncode == 0
+
+    goal = GOAL.read_text(encoding="utf-8")
+    command = goal.split("```sh\n", 1)[1].split("\n```", 1)[0]
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result = subprocess.run(
+        ["sh", "-c", command],
+        cwd=ROOT,
+        env={
+            **os.environ,
+            "PATH": f"{environment / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "CANDIDATE_SHA": "f" * 40,
+            "PERMITTED_PARENT_SHA": head,
+            "IMMUTABLE_ANCHOR_SHA": head,
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 2
