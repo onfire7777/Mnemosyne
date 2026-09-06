@@ -833,6 +833,31 @@ def test_runtime_accepts_stable_hardlinked_installed_schema(
     assert verify_bundle(bundle["root"])["valid"] is True
 
 
+def test_stable_file_reader_rejects_same_size_in_place_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    artifact = tmp_path / "same-size.json"
+    artifact.write_bytes(b'"before"\n')
+    original_fstat = public_bundle.os.fstat
+    calls = 0
+
+    def changed_final_stat(descriptor: int) -> os.stat_result:
+        nonlocal calls
+        calls += 1
+        metadata = original_fstat(descriptor)
+        if calls != 2:
+            return metadata
+        values = list(metadata)
+        values[8] += 1
+        return os.stat_result(values)
+
+    monkeypatch.setattr(public_bundle.os, "fstat", changed_final_stat)
+    with pytest.raises(BundleError, match="changed while reading"):
+        public_bundle._read_inventory_file(artifact)
+
+
 @pytest.mark.parametrize(
     "replacement",
     (

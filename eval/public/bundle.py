@@ -802,9 +802,7 @@ def _read_inventory_file(
             if (
                 not stat.S_ISREG(opened_stat.st_mode)
                 or (not allow_hardlinks and opened_stat.st_nlink != 1)
-                or opened_stat.st_size != path_stat.st_size
-                or (opened_stat.st_dev, opened_stat.st_ino)
-                != (path_stat.st_dev, path_stat.st_ino)
+                or _stable_file_state(opened_stat) != _stable_file_state(path_stat)
             ):
                 raise BundleError(f"bundle file changed before reading: {path.name}")
             payload = handle.read(_MAX_REPRO_FILE_BYTES + 1)
@@ -817,12 +815,21 @@ def _read_inventory_file(
     if (
         len(payload) != opened_stat.st_size
         or len(payload) > _MAX_REPRO_FILE_BYTES
-        or final_stat.st_size != opened_stat.st_size
-        or (current_stat.st_dev, current_stat.st_ino)
-        != (opened_stat.st_dev, opened_stat.st_ino)
+        or _stable_file_state(final_stat) != _stable_file_state(opened_stat)
+        or _stable_file_state(current_stat) != _stable_file_state(final_stat)
     ):
         raise BundleError(f"bundle file changed while reading: {path.name}")
     return payload, len(payload)
+
+
+def _stable_file_state(metadata: os.stat_result) -> tuple[int, int, int, int]:
+    """Return identity and same-size mutation signals for one file snapshot."""
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+    )
 
 
 def _read_reproducibility_manifest(root: Path) -> tuple[bytes, dict[str, Any]]:
