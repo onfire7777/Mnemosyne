@@ -1597,6 +1597,29 @@ def test_trace_aborts_are_disclosed_in_result_and_manifest_metrics(tmp_path: Pat
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize("location", ["top-level", "interval"])
+def test_metrics_artifact_rejects_undeclared_fields(
+    tmp_path: Path, location: str
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / f"metrics-extra-{location}")
+    root = bundle["root"]
+    metrics_path = root / "metrics.json"
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    target = metrics if location == "top-level" else metrics["interval"]
+    target["headline_eligible"] = True
+    metrics_bytes = _write_json(metrics_path, metrics)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["hashes"] if item["path"] == "metrics.json")
+    entry["size"] = len(metrics_bytes)
+    entry["sha256"] = _sha256_ref(metrics_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="metrics|intervals"):
+        verify_bundle(root)
+
+
 def test_result_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(
         tmp_path / "result-metric-drift", include_ledger=False
