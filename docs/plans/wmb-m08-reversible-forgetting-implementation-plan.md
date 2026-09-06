@@ -169,8 +169,10 @@ This paragraph does not create those files.
 ## 5. Custody, licence, and claim constraints
 
 - Deterministic local roles: no external dataset, no network, no provider
-  (spec L815; U-MODULES license/custody). Pin any later dataset at freeze;
-  do not invent one here.
+  (spec L815; U-MODULES license/custody).
+- Generated Stage A fixture license: `CC0-1.0` (synthetic authorship; same
+  pin as M02/M05 development fixtures). No third-party corpus.
+- Pin any later non-synthetic dataset at freeze; do not invent one here.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 
 ## 6. Dependency edges
