@@ -1639,13 +1639,16 @@ def write_bundle(
     traces: list[dict[str, Any]],
     candidate_manifest_path: Path | str | None = None,
 ) -> None:
-    destination = destination.resolve()
+    destination = destination.absolute()
+    _reject_reproducibility_link_path(destination)
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    _reject_reproducibility_link_path(destination)
     temp = Path(
         tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent)
     )
+    temp_identity = _owned_directory_identity(temp)
     try:
         _write_json(temp / "benchmark.json", {"data": benchmark, "metadata": metadata})
         build = {
@@ -1684,11 +1687,19 @@ def write_bundle(
             if candidate_manifest_path is None:
                 raise BundleError("QA bundle requires an external candidate manifest path")
             source = Path(candidate_manifest_path)
-            _reject_symlink_path(source)
-            if not source.is_file():
+            _reject_reproducibility_link_path(source)
+            if (
+                not source.is_file()
+                or source.is_symlink()
+                or getattr(source, "is_junction", lambda: False)()
+            ):
                 raise BundleError("candidate manifest path must be a real file")
-            candidate_raw = source.read_bytes()
-            candidate = _parse_json(candidate_raw.decode("utf-8"), "candidate manifest")
+            candidate_raw, _ = _read_inventory_file(source)
+            try:
+                candidate_text = candidate_raw.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise BundleError("candidate manifest is not UTF-8") from exc
+            candidate = _parse_bounded_json(candidate_text, "candidate manifest")
             from eval.public.runner import validate_candidate_manifest
 
             try:
@@ -1723,9 +1734,10 @@ def write_bundle(
             temp / "bundle-manifest.json",
             {"files": {name: _digest(temp / name) for name in required}, "version": 1},
         )
-        temp.rename(destination)
+        _reject_reproducibility_link_path(destination)
+        _publish_directory_noreplace(temp, destination)
     except BaseException:
-        shutil.rmtree(temp, ignore_errors=True)
+        _remove_owned_directory(temp, temp_identity)
         raise
 
 

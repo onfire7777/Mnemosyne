@@ -251,6 +251,29 @@ def test_version_1_public_bundle_output_bytes_remain_frozen(tmp_path: Path) -> N
     assert set(manifest["files"]) == set(REQUIRED)
 
 
+def test_version_1_bundle_publication_never_replaces_racing_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    destination = tmp_path / "v1-racing-destination"
+    original_publish = public_bundle._publish_directory_noreplace
+
+    def publish_after_collision(source: Path, target: Path) -> None:
+        target.mkdir()
+        (target / "marker.txt").write_text("foreign\n", encoding="utf-8")
+        original_publish(source, target)
+
+    monkeypatch.setattr(
+        public_bundle, "_publish_directory_noreplace", publish_after_collision
+    )
+    with pytest.raises(FileExistsError):
+        write_bundle(destination, **_v1_snapshot_bundle_inputs())
+
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "foreign\n"
+    assert not list(tmp_path.glob(f".{destination.name}-*"))
+
+
 def test_version_1_verifier_rejects_hardlinked_inventory_artifact(
     tmp_path: Path,
 ) -> None:
