@@ -153,6 +153,10 @@ add a **new** deterministic development fixture:
 - Families the spec names: identity-linked evidence, derivatives, indexes,
   caches, intentions, working state, unrelated tenant controls, restore
   probes.
+- Same-tenant survivors required: for a selector that targets one
+  subject/source within a tenant, the fixture must include non-selected
+  same-tenant records as gold survivors so whole-tenant wipe cannot pass
+  false-deletion scoring.
 - Replay: three delete-operation IDs; retry after each injected crash
   boundary; one restore pass for every declared readable snapshot.
   Byte-identical under `canonical_json(generate_fixture(seed))`.
@@ -175,9 +179,10 @@ add a **new** stdlib-only oracle:
   acceptance; R1 does not discharge acceptance evidence alone).
 - Signed receipt validity (Local/SQLite): bind to the existing fail-closed
   Ed25519 contract in `docs/ENGINE-CONTRACT.md` via
-  `verify_signed_deletion_manifest` — accepted schema/payload/trusted key and
-  failure states are those of that verifier; do not invent a parallel receipt
-  crypto path in Stage A.
+  `verify_signed_deletion_manifest`. **Trust root is harness-owned** — Stage A
+  pins a fixture/harness public key; entrant-supplied `public_key_path` alone
+  is not sufficient (an entrant must not mint a keypair and self-attest). Do
+  not invent a parallel receipt crypto path.
 - An unprobeable declared readable surface, undisclosed backup scope, or
   unexercisable identity authorization yields **no erasure claim**, not a
   pass and not a zero-as-failure substitute.
@@ -198,7 +203,8 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-B + C11 public contract (R2) + G0/G1/G2
+WMBS-B + C11 public contract (R2) + G0/G1/G2 + R3 (probeable surfaces /
+disclosed backup scope / exercisable identity auth, or explicit no-claim path)
   -> freeze this plan (GOAL step 2)
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
       -> measured / admitted claims require R1 receipt
@@ -220,7 +226,7 @@ No path below is writable from this document.
 docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates measured
+Prospective Stage A (after freeze + G0/G1/G2 + R2 + R3; R1 gates measured
 claims only), not now:
 
 ```text
