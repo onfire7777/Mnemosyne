@@ -121,7 +121,7 @@ certified."
 | G1 | Lease map recomputed; M17 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured local receipt or admitted P32 recovery receipt for the exact claimed surfaces (spec L1042–1043) | Operator | Missing. |
+| R1 | Measured admission receipt | Operator | Missing — after receipt-schema freeze + Stage A; not a freeze/Stage A source blocker. |
 | R2 | C19 capability exists through an admitted public contract (WMBS-E) | Product | Open. |
 | R3 | RPO/RTO tier frozen by the standard before the run. A submitter-selected target cannot certify itself (spec L1038–1041) | Standard owner | Open. |
 | R4 | Retained infrastructure, external custody, and an independently recorded expected fingerprint, required to close any production row (spec L1047–1049) | Operator | Open. Local results cannot close production rows. |
@@ -190,16 +190,17 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-E + C19 public contract (R2) + measured receipt (R1) + frozen RPO/RTO (R3)
-+ G0/G1/G2
+WMBS-E + C19 public contract (R2) + G0/G1/G2
+  -> freeze observation/receipt schema + RPO/RTO definitions (R3 residual)
   -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+      -> measured admission receipt (R1) using the frozen schema
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-P32 recovery stays behind R5. Do not touch PR #116, #117, #118, #119, #120,
-#121, #122, or #123. Do not write GOAL.md, STATE.md, or the lease-map.
-Do not start M16.
+R1 is an execution/admission gate **after** the receipt schema exists — not a
+precondition to freeze or to Stage A. P32 recovery stays behind R5. Do not
+write GOAL.md, STATE.md, or the lease-map. Do not invent M16.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -209,7 +210,7 @@ No path below is writable from this document.
 docs/plans/wmb-m17-custody-recovery-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R3), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2 + receipt-schema freeze; R1 after Stage A), not now:
 
 ```text
 eval/public/wmbs_m17.py                                              (new)
