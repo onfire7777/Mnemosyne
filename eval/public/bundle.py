@@ -949,6 +949,7 @@ def _bound_repro_k(config: object) -> int:
 def _bound_repro_scoring_profile(config: object) -> str:
     if not isinstance(config, dict):
         raise BundleError("unknown scoring profile")
+    _require_nonempty_string(config.get("suite"), "suite")
     profile = config.get("scoring_profile")
     if not isinstance(profile, str) or profile not in _REGISTERED_SCORING_PROFILES:
         raise BundleError("unknown scoring profile")
