@@ -820,6 +820,35 @@ def test_development_reproduction_is_not_headline_or_repro_002(tmp_path: Path) -
     assert "source revision equal to the bound build commit" in readme
 
 
+@pytest.mark.parametrize(
+    ("section", "field"),
+    (
+        ("rights", "software_license"),
+        ("custody", "declaration"),
+        ("operator", "identity"),
+    ),
+)
+def test_unknown_release_declarations_fail_schema_and_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    section: str,
+    field: str,
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / f"unknown-{section}-{field}")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest[section][field] = " UnKnOwN "
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="schema"):
+        verify_bundle(bundle["root"])
+    monkeypatch.setattr(public_bundle, "_validate_repro_schema", lambda _manifest: None)
+    with pytest.raises(BundleError, match="unknown"):
+        verify_bundle(bundle["root"])
+
+
 def test_exact_digest_meanings_hash_named_file_bytes(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "digests")
     root = bundle["root"]

@@ -449,6 +449,13 @@ def _require_nonempty_string(value: object, label: str) -> str:
     return value
 
 
+def _require_disclosed_string(value: object, label: str) -> str:
+    disclosed = _require_nonempty_string(value, label)
+    if disclosed.strip().casefold() == "unknown":
+        raise BundleError(f"unknown {label}")
+    return disclosed
+
+
 def _require_enum(value: object, allowed: tuple[str, ...], label: str) -> str:
     if value not in allowed:
         raise BundleError(f"unknown {label}")
@@ -613,15 +620,24 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
         ),
         "rights",
     )
+    for field in (
+        "software_license",
+        "data_license",
+        "redistribution",
+        "pii",
+        "consent",
+        "takedown",
+    ):
+        _require_disclosed_string(rights.get(field), f"rights {field}")
     custody = _closed_object(payload.get("custody"), ("class", "declaration"), "custody")
     _require_enum(custody.get("class"), _REPRO_CUSTODY_CLASSES, "custody")
-    _require_nonempty_string(custody.get("declaration"), "custody")
+    _require_disclosed_string(custody.get("declaration"), "custody declaration")
     operator = _closed_object(
         payload.get("operator"),
         ("identity", "role", "signer_role", "disclosure_state"),
         "operator",
     )
-    _require_nonempty_string(operator.get("identity"), "operator")
+    _require_disclosed_string(operator.get("identity"), "operator identity")
     _require_enum(operator.get("role"), _REPRO_OPERATOR_ROLES, "operator")
     _require_enum(operator.get("signer_role"), _REPRO_OPERATOR_ROLES, "operator")
     if operator.get("disclosure_state") != "disclosed":
