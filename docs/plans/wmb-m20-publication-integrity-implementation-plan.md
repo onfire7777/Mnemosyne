@@ -227,7 +227,7 @@ Do not add a second ledger. Do not rewrite v1 history.
 |---|---|---|---|
 | v2 `admission_state` | `PROPOSED` | `PROPOSED` | `PROPOSED` |
 | v1 substrate | `IMPLEMENTED`; no implied v2 | same | same |
-| Mixed v1/v2 render | blocked (R3) | blocked | blocked until R3 |
+| Mixed v1/v2 render | blocked (fail-closed residual) | blocked | blocked (fail-closed residual; R3 discharge ≠ enable mixed render) |
 | Public release | `DEFERRED` (R2) | `DEFERRED` | `DEFERRED` until human approval + PBPP |
 | Spec accept/reject / digest / history bounds | `DEFERRED` (R1) | `DEFERRED` | `DEFERRED` until receipt |
 | "Publication certified" | never claimed | never claimed | never claimed |
@@ -272,10 +272,11 @@ defers without human approval and PBPP-complete custody. Mixed v1/v2
 rendering stays blocked.
 
 Reuse `leaderboard.validate` / `ledger` / `render` / `publish` /
-`readiness` without reinterpreting signed v1 bytes. 100% acceptance of
-valid bundles. 100% rejection of invalid bundles. Exact digest replay. No
-mutation of prior published history. Five input orderings, two clean
-renders, one interrupted publication. Historical v1 entries stay
+`readiness` without reinterpreting signed v1 bytes. **Deferred acceptance
+targets** (not achieved Stage-A/B results; bind only after R1 receipt): 100%
+acceptance of valid bundles; 100% rejection of invalid bundles; exact digest
+replay; no mutation of prior published history. Five input orderings, two
+clean renders, one interrupted publication. Historical v1 entries stay
 immutable; a later v2 migration appends a linked supersession.
 
 No registry row exists, so this cell is not runnable.
