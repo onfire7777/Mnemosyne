@@ -1,0 +1,637 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mnemosyne.reproducibility-bundle/v1",
+  "title": "Mnemosyne reproducibility bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_ref",
+    "ledger_ref",
+    "manifests",
+    "traces",
+    "config",
+    "build",
+    "environment",
+    "metrics",
+    "intervals",
+    "hashes",
+    "rights",
+    "custody",
+    "operator",
+    "command",
+    "track_kind",
+    "lineage",
+    "canonical_replay",
+    "publication"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "mnemosyne.reproducibility-bundle/v1"
+    },
+    "result_ref": {
+      "$ref": "#/$defs/named_digest"
+    },
+    "ledger_ref": {
+      "anyOf": [
+        { "$ref": "#/$defs/named_digest" },
+        { "type": "null" }
+      ]
+    },
+    "manifests": {
+      "$ref": "#/$defs/manifest_refs"
+    },
+    "traces": {
+      "$ref": "#/$defs/traces"
+    },
+    "config": {
+      "$ref": "#/$defs/config"
+    },
+    "build": {
+      "$ref": "#/$defs/build"
+    },
+    "environment": {
+      "$ref": "#/$defs/environment"
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/metric"
+      }
+    },
+    "intervals": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/interval"
+      }
+    },
+    "hashes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/inventory_entry"
+      }
+    },
+    "rights": {
+      "$ref": "#/$defs/rights"
+    },
+    "custody": {
+      "$ref": "#/$defs/custody"
+    },
+    "operator": {
+      "$ref": "#/$defs/operator"
+    },
+    "command": {
+      "type": "array",
+      "const": [
+        "uv",
+        "run",
+        "--locked",
+        "mneme",
+        "eval-public",
+        "--reproduce-bundle",
+        "BUNDLE",
+        "--out-dir",
+        "DEST"
+      ]
+    },
+    "track_kind": {
+      "$ref": "#/$defs/track_kind"
+    },
+    "lineage": {
+      "type": "object"
+    },
+    "canonical_replay": {
+      "$ref": "#/$defs/canonical_replay"
+    },
+    "publication": {
+      "$ref": "#/$defs/publication"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "track_kind": { "const": "DEVELOPMENT" }
+        },
+        "required": ["track_kind"]
+      },
+      "then": {
+        "properties": {
+          "lineage": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "publication": {
+            "$ref": "#/$defs/publication"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "track_kind": { "const": "OFFICIAL-UPSTREAM" }
+        },
+        "required": ["track_kind"]
+      },
+      "then": {
+        "properties": {
+          "lineage": {
+            "$ref": "#/$defs/official_lineage"
+          },
+          "manifests": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "benchmark",
+              "dataset_split",
+              "fixture",
+              "generator",
+              "adapter",
+              "scorer",
+              "baseline",
+              "judge",
+              "reader",
+              "model",
+              "prompt",
+              "fidelity",
+              "parent",
+              "difference"
+            ],
+            "properties": {
+              "benchmark": { "$ref": "#/$defs/named_digest" },
+              "dataset_split": { "$ref": "#/$defs/named_digest" },
+              "fixture": { "$ref": "#/$defs/named_digest" },
+              "generator": { "$ref": "#/$defs/named_digest" },
+              "adapter": { "$ref": "#/$defs/named_digest" },
+              "scorer": { "$ref": "#/$defs/named_digest" },
+              "baseline": { "$ref": "#/$defs/named_digest" },
+              "judge": { "$ref": "#/$defs/optional_named_digest" },
+              "reader": { "$ref": "#/$defs/optional_named_digest" },
+              "model": { "$ref": "#/$defs/optional_named_digest" },
+              "prompt": { "$ref": "#/$defs/optional_named_digest" },
+              "fidelity": { "$ref": "#/$defs/named_digest" },
+              "parent": { "type": "null" },
+              "difference": { "type": "null" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "track_kind": { "const": "ENHANCED-SUCCESSOR" }
+        },
+        "required": ["track_kind"]
+      },
+      "then": {
+        "properties": {
+          "lineage": {
+            "$ref": "#/$defs/successor_lineage"
+          },
+          "manifests": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "benchmark",
+              "dataset_split",
+              "fixture",
+              "generator",
+              "adapter",
+              "scorer",
+              "baseline",
+              "judge",
+              "reader",
+              "model",
+              "prompt",
+              "fidelity",
+              "parent",
+              "difference"
+            ],
+            "properties": {
+              "benchmark": { "$ref": "#/$defs/named_digest" },
+              "dataset_split": { "$ref": "#/$defs/named_digest" },
+              "fixture": { "$ref": "#/$defs/named_digest" },
+              "generator": { "$ref": "#/$defs/named_digest" },
+              "adapter": { "$ref": "#/$defs/named_digest" },
+              "scorer": { "$ref": "#/$defs/named_digest" },
+              "baseline": { "$ref": "#/$defs/named_digest" },
+              "judge": { "$ref": "#/$defs/optional_named_digest" },
+              "reader": { "$ref": "#/$defs/optional_named_digest" },
+              "model": { "$ref": "#/$defs/optional_named_digest" },
+              "prompt": { "$ref": "#/$defs/optional_named_digest" },
+              "fidelity": { "type": "null" },
+              "parent": { "$ref": "#/$defs/named_digest" },
+              "difference": { "$ref": "#/$defs/named_digest" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "track_kind": {
+      "enum": [
+        "OFFICIAL-UPSTREAM",
+        "ENHANCED-SUCCESSOR",
+        "DEVELOPMENT"
+      ]
+    },
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "named_digest": {
+      "type": "string",
+      "minLength": 73,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*@sha256:[0-9a-f]{64}$"
+    },
+    "optional_named_digest": {
+      "anyOf": [
+        { "$ref": "#/$defs/named_digest" },
+        { "type": "null" }
+      ]
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "hex_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "nonempty_string": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^(?=.*\\S)[\\s\\S]*$"
+    },
+    "bounded_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "manifest_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "benchmark",
+        "dataset_split",
+        "fixture",
+        "generator",
+        "adapter",
+        "scorer",
+        "baseline",
+        "judge",
+        "reader",
+        "model",
+        "prompt",
+        "fidelity",
+        "parent",
+        "difference"
+      ],
+      "properties": {
+        "benchmark": { "$ref": "#/$defs/named_digest" },
+        "dataset_split": { "$ref": "#/$defs/named_digest" },
+        "fixture": { "$ref": "#/$defs/named_digest" },
+        "generator": { "$ref": "#/$defs/named_digest" },
+        "adapter": { "$ref": "#/$defs/named_digest" },
+        "scorer": { "$ref": "#/$defs/named_digest" },
+        "baseline": { "$ref": "#/$defs/named_digest" },
+        "judge": { "$ref": "#/$defs/optional_named_digest" },
+        "reader": { "$ref": "#/$defs/optional_named_digest" },
+        "model": { "$ref": "#/$defs/optional_named_digest" },
+        "prompt": { "$ref": "#/$defs/optional_named_digest" },
+        "fidelity": { "$ref": "#/$defs/optional_named_digest" },
+        "parent": { "$ref": "#/$defs/optional_named_digest" },
+        "difference": { "$ref": "#/$defs/optional_named_digest" }
+      }
+    },
+    "traces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "trace_index_digest",
+        "seed_records",
+        "retries",
+        "aborts"
+      ],
+      "properties": {
+        "path": { "const": "traces.jsonl" },
+        "trace_index_digest": { "$ref": "#/$defs/sha256_digest" },
+        "seed_records": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/bounded_integer" }
+        },
+        "retries": { "$ref": "#/$defs/bounded_integer" },
+        "aborts": { "$ref": "#/$defs/bounded_integer" }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "config_digest", "locale", "timezone"],
+      "properties": {
+        "path": { "const": "config.json" },
+        "config_digest": { "$ref": "#/$defs/sha256_digest" },
+        "locale": { "const": "C" },
+        "timezone": { "const": "UTC" }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "build_fingerprint",
+        "candidate_git_sha",
+        "dirty",
+        "lockfile",
+        "toolchain",
+        "environment_contract"
+      ],
+      "properties": {
+        "path": { "const": "build.json" },
+        "build_fingerprint": { "$ref": "#/$defs/sha256_digest" },
+        "candidate_git_sha": { "$ref": "#/$defs/hex_commit" },
+        "dirty": { "const": false },
+        "lockfile": { "$ref": "#/$defs/named_digest" },
+        "toolchain": { "$ref": "#/$defs/nonempty_string" },
+        "environment_contract": { "const": "uv run --locked" }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "allowlist",
+        "locale",
+        "timezone",
+        "platform",
+        "runtime",
+        "wheelhouse_digest"
+      ],
+      "properties": {
+        "path": { "const": "environment.json" },
+        "allowlist": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/nonempty_string" }
+        },
+        "locale": { "const": "C" },
+        "timezone": { "const": "UTC" },
+        "platform": { "$ref": "#/$defs/nonempty_string" },
+        "runtime": { "$ref": "#/$defs/nonempty_string" },
+        "wheelhouse_digest": {
+          "anyOf": [
+            { "$ref": "#/$defs/sha256_digest" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "name",
+        "version",
+        "value",
+        "unit",
+        "numerator",
+        "denominator",
+        "sample_count",
+        "uncertainty_method",
+        "uncertainty_parameters",
+        "confidence_level",
+        "interval",
+        "exclusions",
+        "missing_count",
+        "unsupported_count",
+        "failed_count",
+        "aborted_count",
+        "not_measured_count"
+      ],
+      "properties": {
+        "family": {
+          "enum": [
+            "retrieval",
+            "judged_qa",
+            "security",
+            "calibration",
+            "performance",
+            "reproducibility"
+          ]
+        },
+        "name": { "$ref": "#/$defs/nonempty_string" },
+        "version": { "$ref": "#/$defs/nonempty_string" },
+        "value": { "type": "number" },
+        "unit": { "$ref": "#/$defs/nonempty_string" },
+        "numerator": { "type": "number" },
+        "denominator": { "type": "number" },
+        "sample_count": { "$ref": "#/$defs/bounded_integer" },
+        "uncertainty_method": { "$ref": "#/$defs/nonempty_string" },
+        "uncertainty_parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["z"],
+          "properties": {
+            "z": { "type": "number" }
+          }
+        },
+        "confidence_level": { "type": "number" },
+        "interval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["low", "high"],
+          "properties": {
+            "low": { "type": "number" },
+            "high": { "type": "number" }
+          }
+        },
+        "exclusions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": { "$ref": "#/$defs/nonempty_string" }
+        },
+        "missing_count": { "$ref": "#/$defs/bounded_integer" },
+        "unsupported_count": { "$ref": "#/$defs/bounded_integer" },
+        "failed_count": { "$ref": "#/$defs/bounded_integer" },
+        "aborted_count": { "$ref": "#/$defs/bounded_integer" },
+        "not_measured_count": { "$ref": "#/$defs/bounded_integer" }
+      }
+    },
+    "interval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "method", "confidence_level", "low", "high"],
+      "properties": {
+        "metric": { "$ref": "#/$defs/nonempty_string" },
+        "method": { "$ref": "#/$defs/nonempty_string" },
+        "confidence_level": { "type": "number" },
+        "low": { "type": "number" },
+        "high": { "type": "number" }
+      }
+    },
+    "inventory_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size", "media_type", "canonicalization", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/$defs/relative_path" },
+        "size": { "$ref": "#/$defs/bounded_integer" },
+        "media_type": { "$ref": "#/$defs/nonempty_string" },
+        "canonicalization": { "enum": ["raw-bytes"] },
+        "sha256": { "$ref": "#/$defs/sha256_digest" }
+      }
+    },
+    "rights": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "software_license",
+        "data_license",
+        "source_revision",
+        "redistribution",
+        "pii",
+        "consent",
+        "takedown",
+        "disclosure_state"
+      ],
+      "properties": {
+        "software_license": { "$ref": "#/$defs/nonempty_string" },
+        "data_license": { "$ref": "#/$defs/nonempty_string" },
+        "source_revision": { "$ref": "#/$defs/hex_commit" },
+        "redistribution": { "$ref": "#/$defs/nonempty_string" },
+        "pii": { "$ref": "#/$defs/nonempty_string" },
+        "consent": { "$ref": "#/$defs/nonempty_string" },
+        "takedown": { "$ref": "#/$defs/nonempty_string" },
+        "disclosure_state": { "const": "disclosed" }
+      }
+    },
+    "custody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "declaration"],
+      "properties": {
+        "class": {
+          "enum": [
+            "development-public",
+            "operator-held-out",
+            "certification-held-out"
+          ]
+        },
+        "declaration": { "$ref": "#/$defs/nonempty_string" }
+      }
+    },
+    "operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "role", "signer_role", "disclosure_state"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/nonempty_string" },
+        "role": { "enum": ["operator", "independent", "custodian"] },
+        "signer_role": { "enum": ["operator", "independent", "custodian"] },
+        "disclosure_state": { "const": "disclosed" }
+      }
+    },
+    "canonical_replay": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suite", "digest", "seed_records"],
+      "properties": {
+        "suite": { "$ref": "#/$defs/nonempty_string" },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "seed_records": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/bounded_integer" }
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "certified",
+        "headline",
+        "independent",
+        "independent_external_reproduction",
+        "pbpp_headline_eligible",
+        "publishable"
+      ],
+      "properties": {
+        "certified": { "const": false },
+        "headline": { "const": false },
+        "independent": { "const": false },
+        "independent_external_reproduction": { "const": false },
+        "pbpp_headline_eligible": { "const": false },
+        "publishable": { "const": false }
+      }
+    },
+    "official_lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fidelity"],
+      "properties": {
+        "fidelity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "upstream_protocol_digest",
+            "dataset_digest",
+            "split_digest",
+            "preprocessing_digest",
+            "scorer_digest",
+            "environment_digest",
+            "revision_digest"
+          ],
+          "properties": {
+            "upstream_protocol_digest": { "$ref": "#/$defs/sha256_digest" },
+            "dataset_digest": { "$ref": "#/$defs/sha256_digest" },
+            "split_digest": { "$ref": "#/$defs/sha256_digest" },
+            "preprocessing_digest": { "$ref": "#/$defs/sha256_digest" },
+            "scorer_digest": { "$ref": "#/$defs/sha256_digest" },
+            "environment_digest": { "$ref": "#/$defs/sha256_digest" },
+            "revision_digest": { "$ref": "#/$defs/sha256_digest" }
+          }
+        }
+      }
+    },
+    "successor_lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parent_official_record_id",
+        "parent_construct_digest",
+        "difference_manifest_digest"
+      ],
+      "properties": {
+        "parent_official_record_id": { "$ref": "#/$defs/nonempty_string" },
+        "parent_construct_digest": { "$ref": "#/$defs/sha256_digest" },
+        "difference_manifest_digest": { "$ref": "#/$defs/sha256_digest" }
+      }
+    }
+  }
+}
