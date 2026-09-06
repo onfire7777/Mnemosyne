@@ -1162,13 +1162,20 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
                 )
             except LedgerError as exc:
                 raise BundleError("ledger verification failed") from exc
-        matched = [
+        result_matches = [
             entry
             for entry in entries
             if isinstance(entry, dict) and entry.get("result") == result
         ]
-        if not matched:
+        if not result_matches:
             raise BundleError("ledger result reference mismatch")
+        matched = [
+            entry
+            for entry in result_matches
+            if entry.get("run_id") == result_identity.get("run_id")
+        ]
+        if not matched:
+            raise BundleError("ledger run_id does not match result identity")
         if not any(
             manifest["ledger_ref"]
             == f"ledger-entry@sha256:{hashlib.sha256(ledger_canonical(entry)).hexdigest()}"
