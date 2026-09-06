@@ -44,9 +44,6 @@ is discharged by writing this file.
 2. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M08 is not
    in the first pilot (`…standard-design.md:819`). Freeze is a later step.
    This file does not freeze itself.
-3. Systems without a reversible-delete operation are `UNSUPPORTED-BY-SYSTEM`
-   (`…standard-design.md:816–817`). They are not scored zero. No public
-   reversible-delete hook is admitted on this base (same as R3).
 
 **Measured / admitted-claim gates** (not Stage A source blockers; align with
 §6). R1 and the acceptance bounds do **not** refuse descriptive Stage A.
@@ -59,12 +56,21 @@ is discharged by writing this file.
   only (independent of R1); no preregistered canary/restore protocol on this
   base yet.
 
+**Stage B / registration gates** (not Stage A source blockers). Stage A is
+only the descriptive oracle + fixture + tests; public-harness integration is
+Stage B.
+
+- R3 — Public reversible-delete hook, or an explicit `UNSUPPORTED-BY-SYSTEM`
+  path (`…standard-design.md:816–817`). Gates Stage B execution/registration
+  (or selects the unsupported path). Does **not** refuse creation of the
+  Stage A scorer/fixture/tests.
+
 Missing Stage A artifacts are tree state (inventory L56), not a gate. WMBS-D
 is an implement sequencing gate, not a reason to refuse this plan file.
 
 **Verdict: NOT CODE-READY.** Do not implement from this file until the
-**source-readiness blockers** above clear. Do not treat R1 or acceptance
-bounds as Stage A source blockers.
+**source-readiness blockers** above clear. Do not treat R1, acceptance
+bounds, or R3 as Stage A source blockers.
 
 ## 1. Module scope (copied from the spec, not rewritten)
 
@@ -109,7 +115,7 @@ erasure, and must not absorb decay.
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
 | R1 | Measured admission receipt (spec L814) | Operator | Missing. |
 | R2 | C10 capability exists through a public contract (WMBS-D) | Product | Open. |
-| R3 | Public reversible-delete hook, or an explicit `UNSUPPORTED-BY-SYSTEM` path | Public-harness | Open. |
+| R3 | Public reversible-delete hook, or an explicit `UNSUPPORTED-BY-SYSTEM` path | Public-harness | Open — Stage B gate, not Stage A source. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
 is the closed ABI `wmbs/0.1-draft` and Section 6 `delete(selector,
@@ -172,14 +178,16 @@ This paragraph does not create those files.
 ```text
 WMBS-B + C10 public contract (R2) + G0/G1/G2
   -> freeze this plan (GOAL step 2)
-    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1/R3 not required]
       -> measured / admitted claims require R1 receipt
-      -> Stage B  public-harness registration          [unadmitted; G3]
+      -> Stage B  public-harness registration          [unadmitted; G3 + R3]
 ```
 
 R1 (measured admission receipt) gates measured/admitted profile claims, not
 creation of a pure development Stage A oracle. Spec §4 resource receipt is
-not a Stage A source blocker.
+not a Stage A source blocker. R3 (public hook or explicit
+`UNSUPPORTED-BY-SYSTEM`) gates Stage B registration/execution, not Stage A
+oracle/fixture/test creation.
 
 Do not touch PR #115 files, #116, #117, or #118. Do not write GOAL.md,
 STATE.md, or the lease-map.
@@ -193,7 +201,7 @@ docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md   (this file onl
 ```
 
 Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates measured
-claims only; R3 remains the public-hook / UNSUPPORTED path), not now:
+claims only; R3 gates Stage B hook / UNSUPPORTED path, not Stage A), not now:
 
 ```text
 eval/public/wmbs_m08.py                                                 (new)
