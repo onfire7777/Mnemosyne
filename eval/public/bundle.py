@@ -1461,6 +1461,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("result metrics do not match recomputed traces")
     _validate_bound_bundle_manifest(payloads)
     publication = manifest["publication"]
+    _assert_inventory_snapshot(root, payloads)
     _assert_directory_identity(root, root_identity, "bundle")
     return {
         "family": "reproducibility",
@@ -1972,6 +1973,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         )
     ):
         raise BundleError("smoke publication flags must remain false")
+    _assert_inventory_snapshot(root, payloads)
     _assert_directory_identity(root, root_identity, "bundle")
     return {"family": family, "suite": metadata.get("suite"), "valid": True}
 
@@ -1996,6 +1998,23 @@ def _validate_legacy_canonical_bytes(payloads: dict[str, bytes]) -> None:
             canonical = _canonical(_parse_bounded_json(text, name))
         if payload != canonical:
             raise BundleError(f"non-canonical JSON bytes in {name}")
+
+
+def _assert_inventory_snapshot(root: Path, payloads: dict[str, bytes]) -> None:
+    """Require the closed bundle inventory to still match its captured bytes."""
+    names: set[str] = set()
+    total_size = 0
+    for entry_number, entry in enumerate(root.iterdir(), start=1):
+        if entry_number > _MAX_REPRO_FILES:
+            raise BundleError("bundle changed after verification")
+        names.add(entry.name)
+    if names != set(payloads):
+        raise BundleError("bundle changed after verification")
+    for name in sorted(names):
+        current, size = _read_inventory_file(root / name)
+        total_size += size
+        if total_size > _MAX_REPRO_BUNDLE_BYTES or current != payloads[name]:
+            raise BundleError("bundle changed after verification")
 
 
 def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, Any]:
