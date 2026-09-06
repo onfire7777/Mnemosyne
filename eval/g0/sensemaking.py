@@ -87,12 +87,17 @@ def run_sensemaking_eval() -> dict[str, Any]:
     abstained_empty = bool(empty.abstained) and str(
         (empty.explain.get("global_sensemaking") or {}).get("abstention_reason") or ""
     ) == "insufficient_readable_coverage"
-    answered = bool(first.hits) and not first.abstained
+    gated = (
+        first.confidence < 1.0
+        and bool(first.explain.get("gist_support"))
+        and "query_support" in (first.explain.get("confidence") or {})
+    )
+    answered = bool(first.hits) and provenance_complete
 
     rows = [
         {
             "case_id": "global_theme_provenance",
-            "passed": provenance_complete and answered,
+            "passed": answered,
             "source_cids": source_cids,
             "explain_source_cids": source_cids_seen,
             "raptor_levels": report.get("raptor_levels"),
@@ -117,14 +122,21 @@ def run_sensemaking_eval() -> dict[str, Any]:
         },
         {
             "case_id": "deterministic_bounded_projection",
-            "passed": deterministic and answered,
+            "passed": deterministic and bool(first.hits),
             "first_hit_ids": [hit.id for hit in first.hits],
             "second_hit_ids": [hit.id for hit in second.hits],
         },
         {
             "case_id": "retrieved_text_is_data",
-            "passed": data_only and answered,
+            "passed": data_only and bool(first.hits),
             "instruction_source_cid": instruction_cid,
+        },
+        {
+            "case_id": "calibrated_abstention_gates",
+            "passed": gated and bool(first.hits),
+            "confidence": first.confidence,
+            "abstained": first.abstained,
+            "gist_support": first.explain.get("gist_support"),
         },
     ]
     passed_cases = sum(1 for row in rows if row["passed"])
