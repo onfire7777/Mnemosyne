@@ -164,6 +164,33 @@ _REPRO_CUSTODY_CLASSES = (
     "certification-held-out",
 )
 _REPRO_OPERATOR_ROLES = ("operator", "independent", "custodian")
+_REPRO_CONFIG_ARTIFACT_FIELDS = {
+    "family",
+    "interval_method",
+    "k",
+    "locale",
+    "scoring_profile",
+    "suite",
+    "timezone",
+}
+_REPRO_BUILD_ARTIFACT_FIELDS = {
+    "candidate_git_sha",
+    "dirty",
+    "environment_contract",
+    "lockfile",
+    "system_seam",
+    "toolchain",
+    "version",
+}
+_REPRO_ENVIRONMENT_ARTIFACT_FIELDS = {
+    "allowlist",
+    "dependency_versions",
+    "locale",
+    "platform",
+    "runtime",
+    "timezone",
+    "wheelhouse_digest",
+}
 _NAMED_DIGEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*@sha256:[0-9a-f]{64}$")
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -1014,18 +1041,28 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     config_payload = _load_inventory_json(payloads, "config.json")
     build_payload = _load_inventory_json(payloads, "build.json")
     environment_payload = _load_inventory_json(payloads, "environment.json")
-    if not isinstance(config_payload, dict) or any(
-        config_payload.get(field) != manifest["config"][field]
-        for field in ("locale", "timezone")
+    if (
+        not isinstance(config_payload, dict)
+        or bool(set(config_payload) - _REPRO_CONFIG_ARTIFACT_FIELDS)
+        or bool((_REPRO_CONFIG_ARTIFACT_FIELDS - {"k"}) - set(config_payload))
+        or any(
+            config_payload.get(field) != manifest["config"][field]
+            for field in ("locale", "timezone")
+        )
     ):
         raise BundleError("config declaration does not match bound artifact")
-    if not isinstance(build_payload, dict) or any(
-        build_payload.get(field) != manifest["build"][field]
-        for field in (
-            "candidate_git_sha",
-            "dirty",
-            "environment_contract",
-            "toolchain",
+    if (
+        not isinstance(build_payload, dict)
+        or set(build_payload) != _REPRO_BUILD_ARTIFACT_FIELDS
+        or build_payload.get("version") != 1
+        or any(
+            build_payload.get(field) != manifest["build"][field]
+            for field in (
+                "candidate_git_sha",
+                "dirty",
+                "environment_contract",
+                "toolchain",
+            )
         )
     ):
         raise BundleError("build declaration does not match bound artifact")
@@ -1033,15 +1070,20 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("rights source revision does not match bound commit")
     if build_payload.get("lockfile") != "uv.lock":
         raise BundleError("build lockfile declaration does not match bound artifact")
-    if not isinstance(environment_payload, dict) or any(
-        environment_payload.get(field) != manifest["environment"][field]
-        for field in (
-            "allowlist",
-            "locale",
-            "timezone",
-            "platform",
-            "runtime",
-            "wheelhouse_digest",
+    if (
+        not isinstance(environment_payload, dict)
+        or set(environment_payload) != _REPRO_ENVIRONMENT_ARTIFACT_FIELDS
+        or environment_payload.get("dependency_versions") != {"uv": "locked"}
+        or any(
+            environment_payload.get(field) != manifest["environment"][field]
+            for field in (
+                "allowlist",
+                "locale",
+                "timezone",
+                "platform",
+                "runtime",
+                "wheelhouse_digest",
+            )
         )
     ):
         raise BundleError("environment declaration does not match bound artifact")

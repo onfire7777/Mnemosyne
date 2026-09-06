@@ -1495,6 +1495,28 @@ def test_manifest_runtime_declarations_match_inventory_artifacts(
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize("artifact_name", ["config.json", "build.json", "environment.json"])
+def test_runtime_artifacts_reject_undeclared_fields(
+    tmp_path: Path, artifact_name: str
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / f"closed-{artifact_name}")
+    root = bundle["root"]
+    artifact_path = root / artifact_name
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact["headline_eligible"] = True
+    artifact_bytes = _write_json(artifact_path, artifact)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["hashes"] if item["path"] == artifact_name)
+    entry["size"] = len(artifact_bytes)
+    entry["sha256"] = _sha256_ref(artifact_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="declaration does not match"):
+        verify_bundle(root)
+
+
 def test_reproduction_uses_one_inventory_bound_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
