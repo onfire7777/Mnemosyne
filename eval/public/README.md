@@ -458,8 +458,9 @@ manifest declares an environment allowlist and the verifier binds it to the
 environment artifact while freezing locale/timezone to C/UTC; this declaration
 does not scrub the parent process environment. The reproduction entry point
 therefore rejects non-empty credential-shaped variables (tokens, API/access or
-private keys, secrets, passwords, credentials, and database URLs) before it
-creates a destination; variable values are never included in the error.
+private keys, secrets, and passwords) plus known credential files, profiles,
+auth sockets, askpass helpers, and credential-bearing service URLs before it
+creates a destination; variable names and values are never included in the error.
 Incomplete output is deleted. A destination collision fails closed.
 
 ### Manifest fields
