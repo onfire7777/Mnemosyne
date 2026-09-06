@@ -118,9 +118,15 @@ erasure, and must not absorb decay.
 | R3 | Public reversible-delete hook, or an explicit `UNSUPPORTED-BY-SYSTEM` path | Public-harness | Open — Stage B gate, not Stage A source. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
-is the closed ABI `wmbs/0.1-draft` and Section 6 `delete(selector,
-mode=reversible)` plus `retrieve`/`answer`. Optional `restore(delete_receipt)`
-is claimed only when the adapter exposes it.
+is closed ABI `wmbs/0.1-draft` for the six basic lifecycle ops only.
+`delete(selector, mode=reversible)` and optional `restore(delete_receipt)` are
+**not** in `wmbs/0.1-draft` `supported_operations` on this base. Freeze residual
+(NOT CODE-READY; required before Stage B can execute traces against a public
+op): either (a) reserve shared ABI request/receipt/schema/validator changes for
+reversible-delete/restore, or (b) define an explicit **module-local** M08
+contract Stage B consumes without inventing undeclared schema. Stage A may use
+a closed offline trace until that surface freezes. Do not claim delete/restore
+are already reusable closed-ABI operations.
 
 ## 3. Fixture contract (prospective, unadmitted)
 
@@ -211,7 +217,7 @@ eval/public/fixtures/wmbs-m08-reversible-forgetting-development.json    (new)
 tests/test_public_wmbs_m08.py                                           (new)
 ```
 
-Prospective Stage B is not designed here. Do not invent runner/registry rows.
+Prospective Stage B is not designed here. Do not invent runner/registry rows. Stage B must consume the §2 ABI freeze (shared or module-local) — do not invent undeclared selector/receipt/schema/validator changes.
 
 ## 8. Claim boundary
 
