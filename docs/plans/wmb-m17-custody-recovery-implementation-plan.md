@@ -1,8 +1,10 @@
 # WMB M17 — Custody and Recovery Implementation Contract
 
 Status: `PROPOSED` / **PLANNING ARTIFACT ONLY — NOT CODE-READY.**
-This file authorizes no source, fixture, registry, scorer, measurement,
-admission-state, publication change, or GitHub PR beyond this one-file plan.
+This file is **planning-only / non-executable design**. It authorizes no
+source, fixture, registry, scorer, measurement, admission-state, publication
+change, Stage A implement path, or GitHub PR beyond this one-file plan.
+ACCEPT of this document does **not** lease or green-light Stage A code.
 
 Author lane: M17 custody-and-recovery planning lane.
 Verified base: `origin/main@f688c74757365a9d946100687a04288cde12a7fc`.
@@ -48,7 +50,8 @@ All of the following are blocking. None is discharged by writing this file.
    public contract on this base.
 2. Spec M17 resource prerequisite (`…standard-design.md:1042–1043`): a
    measured local receipt or an admitted P32 recovery receipt for the exact
-   claimed surfaces. None exists.
+   claimed surfaces. None exists. Stage A remains **unexecutable** until R1
+   is present; this planning file does not authorize a Stage A implement path.
 3. Spec M17 acceptance (`…standard-design.md:1038–1041`): zero acknowledged
    loss, zero duplicate externally visible effects, complete audit continuity,
    and an RPO/RTO tier frozen by the standard before the run. A
@@ -121,7 +124,7 @@ certified."
 | G1 | Lease map recomputed; M17 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured admission receipt | Operator | Missing — after receipt-schema freeze + Stage A; not a freeze/Stage A source blocker. |
+| R1 | Measured local or admitted P32 recovery receipt for the exact claimed surfaces (spec L1042–1043) | Operator | Missing — **required before any Stage A implement lease**. Planning ACCEPT alone does not authorize Stage A. |
 | R2 | C19 capability exists through an admitted public contract (WMBS-E) | Product | Open. |
 | R3 | RPO/RTO tier frozen by the standard before the run. A submitter-selected target cannot certify itself (spec L1038–1041) | Standard owner | Open. |
 | R4 | Retained infrastructure, external custody, and an independently recorded expected fingerprint, required to close any production row (spec L1047–1049) | Operator | Open. Local results cannot close production rows. |
@@ -192,15 +195,16 @@ This paragraph does not create those files.
 ```text
 WMBS-E + C19 public contract (R2) + G0/G1/G2
   -> freeze observation/receipt schema + RPO/RTO definitions (R3 residual)
-  -> freeze this plan (GOAL step 2)
-    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
-      -> measured admission receipt (R1) using the frozen schema
+  -> freeze this plan (GOAL step 2)   [planning-only; no Stage A lease]
+    -> measured local / admitted P32 recovery receipt (R1) on frozen schema
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 required]
       -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-R1 is an execution/admission gate **after** the receipt schema exists — not a
-precondition to freeze or to Stage A. P32 recovery stays behind R5. Do not
-write GOAL.md, STATE.md, or the lease-map. Do not invent M16.
+Per M17 resource prerequisite (spec L1042–1043), Stage A stays **unexecutable**
+until R1 is present. This planning file never authorizes a Stage A implement
+path. P32 recovery stays behind R5. Do not write GOAL.md, STATE.md, or the
+lease-map. Do not invent M16.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -210,7 +214,7 @@ No path below is writable from this document.
 docs/plans/wmb-m17-custody-recovery-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R2 + receipt-schema freeze; R1 after Stage A), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2 + receipt-schema freeze **and R1**), not now — unleased by this plan:
 
 ```text
 eval/public/wmbs_m17.py                                              (new)
