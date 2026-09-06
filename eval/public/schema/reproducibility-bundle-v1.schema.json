@@ -276,6 +276,16 @@
       "maxLength": 256,
       "pattern": "^(?=.*\\S)[\\s\\S]*$"
     },
+    "disclosed_string": {
+      "allOf": [
+        { "$ref": "#/$defs/nonempty_string" },
+        {
+          "not": {
+            "pattern": "^\\s*[Uu][Nn][Kk][Nn][Oo][Ww][Nn]\\s*$"
+          }
+        }
+      ]
+    },
     "bounded_integer": {
       "type": "integer",
       "minimum": 0,
@@ -530,13 +540,13 @@
         "disclosure_state"
       ],
       "properties": {
-        "software_license": { "$ref": "#/$defs/nonempty_string" },
-        "data_license": { "$ref": "#/$defs/nonempty_string" },
+        "software_license": { "$ref": "#/$defs/disclosed_string" },
+        "data_license": { "$ref": "#/$defs/disclosed_string" },
         "source_revision": { "$ref": "#/$defs/hex_commit" },
-        "redistribution": { "$ref": "#/$defs/nonempty_string" },
-        "pii": { "$ref": "#/$defs/nonempty_string" },
-        "consent": { "$ref": "#/$defs/nonempty_string" },
-        "takedown": { "$ref": "#/$defs/nonempty_string" },
+        "redistribution": { "$ref": "#/$defs/disclosed_string" },
+        "pii": { "$ref": "#/$defs/disclosed_string" },
+        "consent": { "$ref": "#/$defs/disclosed_string" },
+        "takedown": { "$ref": "#/$defs/disclosed_string" },
         "disclosure_state": { "const": "disclosed" }
       }
     },
@@ -552,7 +562,7 @@
             "certification-held-out"
           ]
         },
-        "declaration": { "$ref": "#/$defs/nonempty_string" }
+        "declaration": { "$ref": "#/$defs/disclosed_string" }
       }
     },
     "operator": {
@@ -560,7 +570,7 @@
       "additionalProperties": false,
       "required": ["identity", "role", "signer_role", "disclosure_state"],
       "properties": {
-        "identity": { "$ref": "#/$defs/nonempty_string" },
+        "identity": { "$ref": "#/$defs/disclosed_string" },
         "role": { "enum": ["operator", "independent", "custodian"] },
         "signer_role": { "enum": ["operator", "independent", "custodian"] },
         "disclosure_state": { "const": "disclosed" }
