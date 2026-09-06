@@ -3155,6 +3155,7 @@ def _digest(path: Path) -> str:
 def _atomic_write_noreplace(path: Path, payload: bytes) -> tuple[int, int]:
     """Atomically publish one private temporary file without replacing a path."""
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
+    published_identity: tuple[int, int] | None = None
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(payload)
@@ -3168,11 +3169,19 @@ def _atomic_write_noreplace(path: Path, payload: bytes) -> tuple[int, int]:
             Path(temporary).rename(path)
         else:
             os.link(temporary, path)
+            published_identity = identity
             Path(temporary).unlink()
         return identity
     except BaseException:
-        Path(temporary).unlink(missing_ok=True)
+        if published_identity is not None:
+            _remove_owned_file(path, published_identity)
+        try:
+            Path(temporary).unlink(missing_ok=True)
+        except OSError:
+            pass
         raise
+
+
 def _remove_owned_file(path: Path, identity: tuple[int, int]) -> None:
     """Remove a report only while its original inode is still named."""
     try:
@@ -3184,7 +3193,10 @@ def _remove_owned_file(path: Path, identity: tuple[int, int]) -> None:
         and not path.is_symlink()
         and (metadata.st_dev, metadata.st_ino) == identity
     ):
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _git_sha() -> str:
