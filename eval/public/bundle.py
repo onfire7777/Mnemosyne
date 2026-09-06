@@ -2512,12 +2512,26 @@ def _verify_report(
     ):
         if projection not in note:
             raise BundleError("report note evidence projection mismatch")
+    _assert_report_snapshot(report_file, report_payload, note_file, note_bytes)
     return {
         "report": str(_absolute_normalized_path(report_file)),
         "report_note": str(_absolute_normalized_path(note_file)),
         "sha256": report_digest,
         "valid": True,
     }
+
+
+def _assert_report_snapshot(
+    report_file: Path,
+    report_payload: bytes,
+    note_file: Path,
+    note_bytes: bytes,
+) -> None:
+    """Require both report artifacts to retain their captured identities and bytes."""
+    current_report, _ = _read_inventory_file(report_file)
+    current_note, _ = _read_inventory_file(note_file)
+    if current_report != report_payload or current_note != note_bytes:
+        raise BundleError("report artifacts changed during verification")
 
 
 def _report_evidence(

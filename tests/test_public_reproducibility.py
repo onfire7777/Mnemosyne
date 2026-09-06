@@ -771,6 +771,31 @@ def test_report_verification_uses_private_bundle_snapshots(
     assert (source / "benchmark.json").read_bytes() == b"{}\n"
 
 
+def test_report_verifier_rechecks_artifacts_before_return(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    reproduced = tmp_path / "reproduced"
+    report = tmp_path / "report.json"
+    note = tmp_path / "report.md"
+    runner.run_public_suite("smoke", source)
+    reproduce_bundle(source, reproduced)
+    public_bundle.write_report(source, reproduced, report, note)
+    original_render = public_bundle._render_report_note
+
+    def render_then_mutate(*args: Any, **kwargs: Any) -> bytes:
+        rendered = original_render(*args, **kwargs)
+        report.write_bytes(b"changed\n")
+        return rendered
+
+    monkeypatch.setattr(public_bundle, "_render_report_note", render_then_mutate)
+    with pytest.raises(BundleError, match="report artifacts changed during verification"):
+        public_bundle.verify_report(report, note)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     (
