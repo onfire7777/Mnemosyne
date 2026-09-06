@@ -274,6 +274,31 @@ def test_version_1_bundle_publication_never_replaces_racing_destination(
     assert not list(tmp_path.glob(f".{destination.name}-*"))
 
 
+def test_version_1_bundle_rechecks_staging_identity_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    destination = tmp_path / "v1-staging-identity"
+    original_identity = public_bundle._owned_directory_identity
+    calls = 0
+
+    def replaced_staging_identity(path: Path) -> tuple[int, int]:
+        nonlocal calls
+        calls += 1
+        identity = original_identity(path)
+        return identity if calls == 1 else (identity[0], identity[1] + 1)
+
+    monkeypatch.setattr(
+        public_bundle, "_owned_directory_identity", replaced_staging_identity
+    )
+    with pytest.raises(BundleError, match="staged bundle directory changed"):
+        write_bundle(destination, **_v1_snapshot_bundle_inputs())
+
+    assert not destination.exists()
+    assert not list(tmp_path.glob(f".{destination.name}-*"))
+
+
 def test_version_1_bundle_normalizes_dot_segments_before_parent_creation(
     tmp_path: Path,
 ) -> None:

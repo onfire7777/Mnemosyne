@@ -1650,6 +1650,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
             reproduced, _ = _read_inventory_file(temp / name)
             if reproduced != payloads[name]:
                 raise BundleError(f"reproduction mismatch: {name}")
+        _assert_directory_identity(temp, temp_identity, "staged bundle")
         _reject_reproducibility_link_path(destination)
         _publish_directory_noreplace(temp, destination)
         return verified
@@ -1756,6 +1757,7 @@ def write_bundle(
             temp / "bundle-manifest.json",
             {"files": {name: _digest(temp / name) for name in required}, "version": 1},
         )
+        _assert_directory_identity(temp, temp_identity, "staged bundle")
         _reject_reproducibility_link_path(destination)
         _publish_directory_noreplace(temp, destination)
     except BaseException:
