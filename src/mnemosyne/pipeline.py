@@ -43,6 +43,8 @@ from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_ab
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
+    GLOBAL_SENSEMAKING_CHANNEL,
+    GLOBAL_SENSEMAKING_MODE,
     QUERY_SUPPORT_THRESHOLD,
     PROSPECTIVE_MEMORY_CHANNEL,
     RetrievalAdapters,
@@ -52,8 +54,11 @@ from mnemosyne.retrieval import (
     apply_activation_scores,
     apply_workspace_retrieval_advisory,
     gist_support_report,
+    global_sensemaking_projection,
+    query_mode_from_filter,
     query_support,
     prospective_memory_hits,
+    require_supported_query_mode,
     schema_fast_path_rerank,
     semantic_entropy,
     strip_workspace_broadcast_filter,
@@ -424,6 +429,86 @@ class RetrievalPipelineOps(Protocol):
     ) -> dict[str, Any]: ...
 
 
+def _run_global_sensemaking(
+    ops: RetrievalPipelineOps,
+    *,
+    query: str,
+    tenant_id: str,
+    branch: str,
+    deep: bool,
+    effective_filter: dict[str, Any],
+    policy: OperatingPolicy,
+    record_access: bool,
+) -> RetrievalResult:
+    """Project readable RAPTOR nodes through the shared retrieve seam."""
+
+    hits, report = global_sensemaking_projection(
+        ops,
+        query=query,
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=effective_filter,
+        policy=policy,
+        deep=deep,
+    )
+    budgeted, used = ops._fit_budget(hits, policy.token_budget)
+    kept_ids = {hit.id for hit in budgeted}
+    for hit in hits:
+        if hit.id not in kept_ids:
+            report["exclusions"].append({"cid": hit.id, "reason": "token_budget"})
+    report["exclusions"] = sorted(report["exclusions"], key=lambda item: (item["cid"], item["reason"]))
+    report["reduce_count"] = len(budgeted)
+    report["budget"]["used_nodes"] = len(budgeted)
+    report["budget"]["used_tokens"] = used
+    if report["map_count"] == 0:
+        report["abstention_reason"] = "insufficient_readable_coverage"
+        note = "Readable RAPTOR coverage is insufficient for global sensemaking."
+    elif report["reduce_count"] == 0:
+        report["abstention_reason"] = "budget_exhausted"
+        note = "Global sensemaking exceeded the token or node budget before a projection could be emitted."
+    else:
+        report["abstention_reason"] = None
+        note = None
+    budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    read_marks = (
+        {"assertions": 0, "evidence": 0}
+        if not record_access
+        else ops._record_retrieval_access(budgeted)
+    )
+    abstained = report["abstention_reason"] is not None
+    explain = {
+        "query_mode": GLOBAL_SENSEMAKING_MODE,
+        "global_sensemaking": report,
+        "channels": {GLOBAL_SENSEMAKING_CHANNEL: len(budgeted)},
+        "source_cids": list(report["source_cids"]),
+        "raptor_levels": list(report["raptor_levels"]),
+        "map_count": report["map_count"],
+        "reduce_count": report["reduce_count"],
+        "exclusions": list(report["exclusions"]),
+        "budget": dict(report["budget"]),
+        "abstention_reason": report["abstention_reason"],
+        "read_marks": read_marks,
+        "adapters": {
+            "embedding": ops.adapters.embedding.name,
+            "embedding_dims": ops.adapters.embedding.dims,
+            "reranker": ops.adapters.reranker.name,
+            "lexical_backend": ops.adapters.lexical_backend,
+            "graph_backend": ops.adapters.graph_backend,
+        },
+        "rails": policy.immutable_rails,
+    }
+    return RetrievalResult(
+        query=query,
+        hits=budgeted,
+        confidence=0.0 if abstained else 1.0,
+        abstained=abstained,
+        uncertainty_note=note,
+        token_budget=policy.token_budget,
+        used_tokens=used,
+        explain=explain,
+    )
+
+
 def run_retrieval_pipeline(
     ops: RetrievalPipelineOps,
     *,
@@ -440,6 +525,7 @@ def run_retrieval_pipeline(
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
+    query_mode = require_supported_query_mode(query_mode_from_filter(effective_filter))
     retrieval_instant = (
         parse_dt(effective_filter.get("as_of"))
         or parse_dt(effective_filter.get("evaluated_at"))
@@ -472,6 +558,35 @@ def run_retrieval_pipeline(
             )
             cached.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=True, stored=False)
             return cached
+    if query_mode == GLOBAL_SENSEMAKING_MODE:
+        result = _run_global_sensemaking(
+            ops,
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=deep,
+            effective_filter=effective_filter,
+            policy=policy,
+            record_access=record_access,
+        )
+        if cache_key is not None:
+            current_cache_key = _result_cache_key(
+                ops,
+                query=query,
+                tenant_id=tenant_id,
+                branch=branch,
+                deep=deep,
+                effective_filter=effective_filter,
+                workspace_broadcast=workspace_broadcast,
+                k=k,
+                graph_k=graph_k,
+                policy=policy,
+            )
+            stored = current_cache_key == cache_key
+            result.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=False, stored=stored)
+            if stored:
+                _result_cache_put(cache_key, result)
+        return result
     if parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=5) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
