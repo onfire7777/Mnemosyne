@@ -26,7 +26,8 @@ It is **not**:
   certified/governed claim;
 - a rewrite of M02, M04, M05, M06, M07, M08, M09, M11, M14, or M17 plans
   (M14 stays `NOT CODE-READY`; #124 is not edited);
-- an M16 plan or an M16 implement (M16 is skipped);
+- an M16 plan or an M16 implement (M16 stays `PROPOSED` under the governing
+  standard for Local/SQLite/local-MCP; this lane does not invent M16);
 - a contract for M04 Stage B or any other module's implementation;
 - authority to touch PR #116, #117, #118, #119, #120, #121, #122, #123,
   #124, or any `eval/public/*` path.
@@ -47,8 +48,9 @@ All of the following are blocking. None is discharged by writing this file.
    hardware/custody gates are admitted. C20 / BENCH-001/006 is not an
    admitted public contract on this base.
 2. Spec M18 resource prerequisite (`…standard-design.md:1065–1066`): measured
-   receipts from at least two independent implementations for a public
-   interoperability claim. None exist.
+   receipts from at least two independent implementations — required for a
+   **public interoperability claim only**, not for descriptive Stage A /
+   internal single-system round-trip. None exist yet.
 3. Spec M18 acceptance (`…standard-design.md:1060–1062`): 100% preservation
    of required fields and 100% rejection of unknown critical fields.
    Semantic delta remains diagnostic until an equivalence margin is
@@ -101,7 +103,8 @@ The spec's own exclusion is load-bearing: this contract plans a *successor*
 development cell and does not reopen the first reference-harness pilot.
 
 C20 is scoped conformance shared with M16 (BENCH-001/006; RAIL-001). This
-plan does not absorb M16/C18 (backend parity; M16 is skipped), M17/C19,
+plan does not absorb M16/C18 (backend/transport parity — M16 remains
+  `PROPOSED` elsewhere; no invent M16 here), M17/C19,
 M15/C17, M20, or M02 retrieval. A single-system round-trip must not be
 treated as public interoperability certification.
 
@@ -117,8 +120,8 @@ run "interop certified."
 | G1 | Lease map recomputed; M18 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured receipts from at least two independent implementations (spec L1065–1066) | Operator | Missing. |
-| R2 | C20 capability exists through an admitted public contract (WMBS-E) | Product | Open. Shared with M16; M16 is skipped and not absorbed. |
+| R1 | Measured receipts from at least two independent implementations (spec L1065–1066) | Operator | Missing — public-claim gate only, not Stage A source. |
+| R2 | C20 capability exists through an admitted public contract (WMBS-E) | Product | Open. Shared with M16; M16 stays `PROPOSED` elsewhere and is not absorbed or invented here. |
 | R3 | Equivalence margin calibrated and powered before semantic delta leaves diagnostic (spec L1060–1062) | Standard owner | Open. |
 | R4 | Frozen versioned portable envelope | Standard owner | Open. |
 | R5 | Second independently implemented adapter, required for any public certification (spec L1067–1071) | Product | Open. Single-system round-trip is internal only. |
@@ -141,6 +144,10 @@ add a **new** deterministic development fixture:
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
 - Internal single-system round-trip only. A second adapter and public
   certification stay `DEFERRED`.
+- Freeze residual (NOT CODE-READY): case schema, fixed seeds/cases, the three
+  precise export orderings, round-trip transitions, and gold observations must
+  be frozen before Stage A implement — family names alone are not a fixture
+  design.
 
 This paragraph does not create those files.
 
@@ -155,8 +162,13 @@ add a **new** stdlib-only oracle:
   disclosure.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   claim 100% required-field preservation or 100% unknown-critical rejection
-  as an admission bound (that is R1+R4). Semantic delta stays diagnostic
-  until R3.
+  as an admission bound. Semantic delta stays diagnostic until R3.
+- Freeze residual (NOT CODE-READY): which envelope fields count, denominators,
+  malformed-input behavior, aggregation, and pass semantics must be frozen
+  before Stage A implement — metric names alone are not a scorer contract.
+- Wire freeze residual (NOT CODE-READY): concrete export/import request,
+  response, receipt, envelope-version, and error/idempotency schemas must be
+  frozen before Stage A or a second adapter — do not invent them here.
 - A single-system round-trip is an internal result. Missing a second
   independently implemented adapter yields **no public interoperability
   claim**, not a pass.
@@ -168,8 +180,10 @@ This paragraph does not create those files.
 ## 5. Custody, licence, and claim constraints
 
 - Deterministic local roles: no external dataset, no network, no provider
-  (U-MODULES license/custody). Pin any later dataset at freeze; do not
-  invent one here. A second adapter stays out until R5 is admitted.
+  (U-MODULES license/custody). A second adapter stays out until R5 is admitted.
+- Generated Stage A fixture license: `CC0-1.0` (synthetic; same pin as
+  M02/M05/M08). Pin any later non-synthetic dataset at freeze; do not invent
+  one here.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "interop certified," certified, or governed label. Passing, if it ever
   happens, is an internal single-system round-trip only. Public
@@ -178,16 +192,18 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-E + C20 public contract (R2) + frozen envelope (R4) + measured receipt (R1)
-+ G0/G1/G2
+WMBS-E + C20 public contract (R2) + G0/G1/G2
   -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+      -> frozen envelope (R4) before public-claim freeze
+      -> public interoperability claim requires R1 two-implementation receipts
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
-Public certification stays behind R5. Do not touch PR #116, #117, #118,
-#119, #120, #121, #122, #123, or #124. Do not write GOAL.md, STATE.md, or
-the lease-map. Do not start M16. Do not edit #124.
+R1 (two independent measured receipts) gates **public interoperability
+claims only** — not descriptive Stage A / internal single-system round-trip.
+Public certification stays behind R5. Do not write GOAL.md, STATE.md, or the
+lease-map. Do not invent M16. Do not edit #124.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -197,7 +213,8 @@ No path below is writable from this document.
 docs/plans/wmb-m18-interoperability-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R4), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates public claims
+only; R4 frozen envelope before public-claim freeze), not now:
 
 ```text
 eval/public/wmbs_m18.py                                              (new)
