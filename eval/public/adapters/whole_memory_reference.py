@@ -135,6 +135,633 @@ def run_m10_development(
     )
 
 
+
+
+def _m02_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 240 is the published corpus scale, not a test floor."""
+    from eval.public import wmbs_m02 as m02
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M02 retrieval development requires a fixture mapping")
+    corpus = benchmark.get("corpus")
+    questions = benchmark.get("questions")
+    if not isinstance(corpus, list) or not corpus:
+        raise ValueError("M02 retrieval development requires a non-empty corpus")
+    if not isinstance(questions, list) or not questions:
+        raise ValueError("M02 retrieval development requires a non-empty question list")
+    identities = {
+        "fixture_id": m02.FIXTURE_ID,
+        "schema_id": m02.FIXTURE_SCHEMA_ID,
+        "generator_id": m02.GENERATOR_ID,
+        "generator_version": m02.GENERATOR_VERSION,
+    }
+    for field, expected in identities.items():
+        if field in benchmark and benchmark[field] != expected:
+            raise ValueError(f"M02 fixture {field} does not match {expected!r}")
+    declared = benchmark.get("fixture_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m02.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "fixture_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M02 fixture_sha256 does not bind the fixture bytes")
+    if len(corpus) == m02.CORPUS_SIZE:
+        return dict(m02.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def run_m02_retrieval_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M02 retrieval cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M02 retrieval development requires a live MnemoCLI")
+    fixture = _m02_bind_fixture(benchmark)
+    tenant = "wmbs-m02-development"
+    user = "reference-harness"
+    corpus = list(fixture["corpus"])
+    content_by_id = {doc["stable_item_id"]: doc["content"] for doc in corpus}
+    corpus_ids = set(content_by_id)
+
+    for document in corpus:
+        cli.capture(
+            tenant,
+            user,
+            document["content"],
+            source_identity=document["stable_item_id"],
+        )
+
+    traces: list[dict[str, Any]] = []
+    context = {"tenant_id": tenant}
+    for question in fixture["questions"]:
+        question_id = question["question_id"]
+        search_result = cli.search(tenant, question["text"])
+        ranked_ids = _m02_ranked_ids(search_result, corpus_ids, content_by_id)
+        payload = cli.answer(question["text"], context) or {}
+        traces.append(_m02_trace_from_cli(question_id, ranked_ids, payload))
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
+def _m02_trace_from_cli(
+    question_id: str, ranked_ids: list[str], payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Record the CLI payload. Never invent gold answers or forced abstention."""
+    answer = payload.get("answer")
+    if not isinstance(answer, str) or not answer:
+        answer = payload.get("answer_text")
+    if not isinstance(answer, str) or not answer:
+        answer = None
+    abstained = payload.get("abstained")
+    if type(abstained) is not bool:
+        abstained = False
+    return {
+        "answer": answer,
+        "abstained": abstained,
+        "case_id": question_id,
+        "question_id": question_id,
+        "ranked_hits": [
+            {"rank": rank, "stable_item_id": item_id}
+            for rank, item_id in enumerate(ranked_ids, 1)
+        ],
+    }
+
+
+def _m02_ranked_ids(
+    search_result: object,
+    corpus_ids: set[str],
+    content_by_id: Mapping[str, str],
+) -> list[str]:
+    hits: list[str] = []
+    raw: object = []
+    if isinstance(search_result, Mapping):
+        raw = (
+            search_result.get("hits")
+            or search_result.get("results")
+            or search_result.get("items")
+            or []
+        )
+        blob = json.dumps(search_result, sort_keys=True)
+    else:
+        blob = ""
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, Mapping):
+                candidate = (
+                    item.get("stable_item_id")
+                    or item.get("id")
+                    or item.get("source_identity")
+                )
+                if isinstance(candidate, str):
+                    hits.append(candidate)
+            elif isinstance(item, str):
+                hits.append(item)
+    for item_id, content in content_by_id.items():
+        if item_id not in hits and content and content in blob:
+            hits.append(item_id)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for item_id in hits:
+        if item_id in corpus_ids and item_id not in seen:
+            seen.add(item_id)
+            ordered.append(item_id)
+    return ordered
+
+
+def _m04_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 140 is the published case count, not a test floor."""
+    from eval.public import wmbs_m04 as m04
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M04 conflict development requires a fixture mapping")
+    cases = benchmark.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("M04 conflict development requires a non-empty case list")
+    identities = {
+        "fixture_id": m04.FIXTURE_ID,
+        "schema_id": m04.FIXTURE_SCHEMA_ID,
+        "generator_id": m04.GENERATOR_ID,
+        "generator_version": m04.GENERATOR_VERSION,
+    }
+    for field, expected in identities.items():
+        if field in benchmark and benchmark[field] != expected:
+            raise ValueError(f"M04 fixture {field} does not match {expected!r}")
+    declared = benchmark.get("fixture_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m04.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "fixture_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M04 fixture_sha256 does not bind the fixture bytes")
+    if len(cases) == 140:
+        return dict(m04.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def _m04_fact(event: Mapping[str, Any], case_id: str) -> tuple[str, str, str]:
+    """Parse subject/predicate/value. Keep the full gold string after value=."""
+    content = event.get("content")
+    if not isinstance(content, str) or "value=" not in content:
+        raise ValueError("M04 event content does not declare a value")
+    prefix, value = content.split("value=", 1)
+    value = value.strip()
+    if not value:
+        raise ValueError("M04 event content does not declare a value")
+    subject = case_id
+    predicate = "value"
+    match = re.search(r"subject=(\S+)", prefix)
+    if match:
+        subject = match.group(1)
+    match = re.search(r"predicate=(\S+)", prefix)
+    if match:
+        predicate = match.group(1)
+    return subject, predicate, value
+
+
+def _m04_asserted_value(event: Mapping[str, Any], case_id: str = "") -> str:
+    """Extract the scorer-compared value. Never truncate a multi-word gold string."""
+    return _m04_fact(event, case_id or str(event.get("event_id") or ""))[2]
+
+
+def _m04_evidence_cids(
+    cli: MnemoCLI, tenant: str, actor: str, event: Mapping[str, Any]
+) -> tuple[str, ...]:
+    captured = cli.capture(
+        tenant,
+        actor,
+        event["content"],
+        source_identity=str(event.get("event_id") or actor),
+    ) or {}
+    cid = captured.get("cid") if isinstance(captured, Mapping) else None
+    if isinstance(cid, str) and cid.strip():
+        return (cid,)
+    digest = event.get("content_sha256")
+    if isinstance(digest, str) and digest:
+        return (digest,)
+    return ()
+
+
+def _m04_ingest(cli: MnemoCLI, tenant: str, case_id: str, events: list[dict[str, Any]]) -> None:
+    for event in events:
+        actor = event.get("actor_label")
+        if not isinstance(actor, str) or not actor.strip():
+            raise ValueError("M04 event is missing actor_label")
+        subject, predicate, value = _m04_fact(event, case_id)
+        cli.assert_fact(
+            tenant,
+            subject,
+            predicate,
+            value,
+            user=actor,
+            valid_from=event["valid_from"],
+            evidence_cids=_m04_evidence_cids(cli, tenant, actor, event),
+        )
+
+
+def _m04_values_as_of(events: list[dict[str, Any]], as_of: str, case_id: str = "") -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for event in events:
+        start = event.get("valid_from")
+        end = event.get("valid_to")
+        if not isinstance(start, str) or start > as_of:
+            continue
+        if isinstance(end, str) and end <= as_of:
+            continue
+        value = _m04_asserted_value(event, case_id)
+        if value not in seen:
+            seen.add(value)
+            values.append(value)
+    return values
+
+
+def _m04_monotonic_violation(
+    events: list[dict[str, Any]],
+    current_objects: list[str],
+    historical_objects: list[str],
+    gold: Mapping[str, Any],
+    case_id: str,
+) -> bool:
+    """Gold-kept in-force values must appear. Gold-perfect conflict drops do not."""
+    required_current = set(_m04_values_as_of(events, gold["current_as_of"], case_id)) & set(
+        gold["current_objects"]
+    )
+    required_historical = set(
+        _m04_values_as_of(events, gold["historical_as_of"], case_id)
+    ) & set(gold["historical_objects"])
+    return not (
+        required_current <= set(current_objects)
+        and required_historical <= set(historical_objects)
+    )
+
+
+def _m04_answer(cli: MnemoCLI, question: str, context: Mapping[str, Any]) -> Mapping[str, Any]:
+    """cmd_answer aborts unless --evaluation-read-only is on the parent CLI."""
+    flags = list(getattr(cli, "global_flags", []) or [])
+    if "--evaluation-read-only" not in flags:
+        flags.append("--evaluation-read-only")
+    try:
+        answer_cli = replace(cli, global_flags=flags)
+    except TypeError:
+        answer_cli = cli
+    return answer_cli.answer(question, context) or {}
+
+
+def _m04_as_of(
+    cli: MnemoCLI, tenant: str, facts: list[tuple[str, str, str]], as_of: str
+) -> list[str]:
+    objects: list[str] = []
+    seen: set[str] = set()
+    queried: set[tuple[str, str]] = set()
+    for subject, predicate, _value in facts:
+        key = (subject, predicate)
+        if key in queried:
+            continue
+        queried.add(key)
+        payload = cli.graph_as_of(tenant, subject, predicate, as_of) or {}
+        assertions = payload.get("assertions") if isinstance(payload, Mapping) else None
+        if not isinstance(assertions, list):
+            continue
+        for item in assertions:
+            if not isinstance(item, Mapping):
+                continue
+            obj = item.get("object")
+            if isinstance(obj, str) and obj not in seen:
+                seen.add(obj)
+                objects.append(obj)
+    return objects
+
+
+def _m04_answer_envelope(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Record the CLI payload. Never invent gold answers or forced abstention."""
+    text = payload.get("answer")
+    if not isinstance(text, str) or not any(not ch.isspace() for ch in text):
+        text = payload.get("answer_text")
+    if not isinstance(text, str) or not any(not ch.isspace() for ch in text):
+        text = None
+    abstained = payload.get("abstained")
+    if type(abstained) is not bool:
+        abstained = text is None
+    if abstained:
+        text = None
+    elif text is None:
+        abstained = True
+    return {
+        "answer_text": text,
+        "abstained": abstained,
+        "evidence_handles": [],
+        "action_handles": [],
+        "adapter_metadata": {},
+    }
+
+
+def _m04_question(case_id: str, as_of: str, facts: list[tuple[str, str, str]]) -> str:
+    subjects: list[str] = []
+    objects: list[str] = []
+    seen_s: set[str] = set()
+    seen_o: set[str] = set()
+    for subject, _predicate, value in facts:
+        if subject not in seen_s:
+            seen_s.add(subject)
+            subjects.append(subject)
+        if value not in seen_o:
+            seen_o.add(value)
+            objects.append(value)
+    return (
+        f"current as of {as_of} case {case_id} "
+        f"subjects={' '.join(subjects)} objects={' '.join(objects)}"
+    )
+
+
+def run_m04_conflict_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M04 conflict cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M04 conflict development requires a live MnemoCLI")
+    fixture = _m04_bind_fixture(benchmark)
+    traces: list[dict[str, Any]] = []
+    for case in fixture["cases"]:
+        gold = case["gold"]
+        case_id = case["case_id"]
+        for perm, events in case["events_by_permutation"].items():
+            tenant = f"wmbs-m04-{case_id}-{perm}"
+            facts = [_m04_fact(event, case_id) for event in events]
+            _m04_ingest(cli, tenant, case_id, events)
+            current_objects = _m04_as_of(cli, tenant, facts, gold["current_as_of"])
+            historical_objects = _m04_as_of(
+                cli, tenant, facts, gold["historical_as_of"]
+            )
+            payload = _m04_answer(
+                cli,
+                _m04_question(case_id, gold["current_as_of"], facts),
+                {"tenant_id": tenant},
+            )
+            traces.append(
+                {
+                    "case_id": case_id,
+                    "permutation": perm,
+                    "current": {
+                        "objects": current_objects,
+                        "as_of": gold["current_as_of"],
+                    },
+                    "historical": {
+                        "objects": historical_objects,
+                        "as_of": gold["historical_as_of"],
+                    },
+                    "answer": _m04_answer_envelope(payload),
+                    "monotonic_violation": _m04_monotonic_violation(
+                        events,
+                        current_objects,
+                        historical_objects,
+                        gold,
+                        case_id,
+                    ),
+                }
+            )
+            for source_id in gold["ablation_objects"]:
+                ab_tenant = f"{tenant}-ab-{source_id}"
+                kept = [event for event in events if event["source_id"] != source_id]
+                if kept:
+                    _m04_ingest(cli, ab_tenant, case_id, kept)
+                traces.append(
+                    {
+                        "case_id": case_id,
+                        "permutation": perm,
+                        "source_id": source_id,
+                        "current": {
+                            "objects": _m04_as_of(
+                                cli,
+                                ab_tenant,
+                                [_m04_fact(event, case_id) for event in kept],
+                                gold["current_as_of"],
+                            ),
+                            "as_of": gold["current_as_of"],
+                        },
+                    }
+                )
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
+def _m05_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. 100 is the published case count, not a test floor."""
+    from eval.public import wmbs_m05 as m05
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M05 provenance development requires a fixture mapping")
+    slices = benchmark.get("slices")
+    if not isinstance(slices, list) or not slices:
+        raise ValueError("M05 provenance development requires a non-empty slice list")
+    identities = {
+        "fixture_id": m05.FIXTURE_ID,
+        "schema_id": m05.FIXTURE_SCHEMA_ID,
+        "generator_id": m05.GENERATOR_ID,
+        "generator_version": m05.GENERATOR_VERSION,
+    }
+    for field_name, expected in identities.items():
+        if field_name in benchmark and benchmark[field_name] != expected:
+            raise ValueError(f"M05 fixture {field_name} does not match {expected!r}")
+    declared = benchmark.get("dataset_sha256")
+    if isinstance(declared, str) and len(declared) == 64:
+        bound = m05.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "dataset_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M05 dataset_sha256 does not bind the fixture bytes")
+    full_matrix = (
+        tuple(slice_.get("slice_id") for slice_ in slices) == m05.SLICE_IDS
+        and all(
+            isinstance(slice_, Mapping) and len(slice_.get("cases") or []) == 20
+            for slice_ in slices
+        )
+    )
+    if full_matrix:
+        return dict(m05.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def _m05_scored_cases(fixture: Mapping[str, Any]) -> list[dict[str, Any]]:
+    cases: list[dict[str, Any]] = []
+    for slice_ in fixture.get("slices") or []:
+        if not isinstance(slice_, Mapping):
+            continue
+        for case in slice_.get("cases") or []:
+            if isinstance(case, Mapping) and case.get("scored") is not False:
+                cases.append(dict(case))
+    if not cases:
+        raise ValueError("M05 provenance development requires a scored case list")
+    return cases
+
+
+def _m05_evidence_cids(
+    cli: MnemoCLI, tenant: str, actor: str, event: Mapping[str, Any]
+) -> tuple[str, ...]:
+    captured = cli.capture(
+        tenant,
+        actor,
+        event["content"],
+        source_identity=str(event.get("event_id") or actor),
+    ) or {}
+    cid = captured.get("cid") if isinstance(captured, Mapping) else None
+    if isinstance(cid, str) and cid.strip():
+        return (cid,)
+    return ()
+
+
+def _m05_identifier_handles(payload: object) -> list[str]:
+    handles: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        if (
+            isinstance(value, str)
+            and value not in seen
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", value)
+        ):
+            seen.add(value)
+            handles.append(value)
+
+    if isinstance(payload, Mapping):
+        for key in ("cid", "evidence_cid", "id", "source_identity"):
+            add(payload.get(key))
+        for key in (
+            "cids",
+            "evidence_handles",
+            "source_evidence_cids",
+            "hits",
+            "items",
+            "results",
+            "events",
+            "rows",
+        ):
+            raw = payload.get(key)
+            if isinstance(raw, list):
+                for item in raw:
+                    if isinstance(item, Mapping):
+                        for nested in (
+                            "cid",
+                            "evidence_cid",
+                            "id",
+                            "stable_item_id",
+                            "source_identity",
+                        ):
+                            add(item.get(nested))
+                    else:
+                        add(item)
+    elif isinstance(payload, list):
+        for item in payload:
+            handles.extend(_m05_identifier_handles(item))
+    return handles
+
+
+def _m05_stages(payload: object) -> list[str]:
+    from eval.public import wmbs_m05 as m05
+
+    raw: object = []
+    if isinstance(payload, Mapping):
+        raw = payload.get("stages") or payload.get("retrieval_stages") or []
+    stages: list[str] = []
+    if isinstance(raw, list):
+        for stage in raw:
+            if stage in m05.RETRIEVAL_STAGE_IDS and stage not in stages:
+                stages.append(stage)
+    if not stages:
+        stages = ["lexical"]
+    return stages
+
+
+def _m05_provenance_status(*payloads: object) -> str:
+    for payload in payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        status = payload.get("provenance_status")
+        if status in {"verified", "unverified", "unavailable"}:
+            return status
+    return "unavailable"
+
+
+def _m05_trace_from_cli(
+    case_id: str,
+    *payloads: object,
+) -> dict[str, Any]:
+    """Record CLI payloads. Never invent gold answers or gold evidence CIDs."""
+    explained: list[str] = []
+    seen: set[str] = set()
+    for payload in payloads:
+        for handle in _m05_identifier_handles(payload):
+            if handle not in seen:
+                seen.add(handle)
+                explained.append(handle)
+    stages: list[str] = []
+    for payload in payloads:
+        for stage in _m05_stages(payload):
+            if stage not in stages:
+                stages.append(stage)
+    if not stages:
+        stages = ["lexical"]
+    return {
+        "case_id": case_id,
+        "answer_envelope": {
+            "answer_text": None,
+            "abstained": True,
+            "evidence_handles": [],
+            "action_handles": [],
+            "adapter_metadata": {},
+        },
+        "explanation": {
+            "source_evidence_cids": explained,
+            "stages": stages,
+        },
+        "provenance_status": _m05_provenance_status(*payloads),
+        "scoring_family": "whole-memory-development",
+    }
+
+
+def run_m05_provenance_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M05 provenance cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M05 provenance development requires a live MnemoCLI")
+    fixture = _m05_bind_fixture(benchmark)
+    traces: list[dict[str, Any]] = []
+    for case in _m05_scored_cases(fixture):
+        case_id = str(case["case_id"])
+        tenant = f"wmbs-m05-{case_id}"
+        captured: list[object] = []
+        for event in case.get("source_events") or []:
+            if not isinstance(event, Mapping):
+                raise ValueError("M05 source event must be a mapping")
+            actor = event.get("actor_label")
+            if not isinstance(actor, str) or not actor.strip():
+                raise ValueError("M05 event is missing actor_label")
+            subject = str(event["event_id"])
+            evidence = _m05_evidence_cids(cli, tenant, actor, event)
+            captured.append({"cid": evidence[0]} if evidence else {})
+            cli.assert_fact(
+                tenant,
+                subject,
+                "source",
+                str(event["content"]),
+                user=actor,
+                evidence_cids=evidence,
+            )
+        claim = case.get("claim")
+        query = claim if isinstance(claim, str) and claim.strip() else case_id
+        search_payload = cli.search(tenant, query) or {}
+        explain_payload = cli.explain(tenant, query) or {}
+        export_payload = cli.export(tenant) or {}
+        traces.append(
+            _m05_trace_from_cli(
+                case_id,
+                *captured,
+                search_payload,
+                explain_payload,
+                export_payload,
+            )
+        )
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
 def run_m03_valid_time_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
