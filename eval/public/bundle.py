@@ -1019,6 +1019,8 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("result digest mismatch")
     if result.get("track_kind") != manifest["track_kind"]:
         raise BundleError("track_kind mismatch")
+    if result.get("lineage") != manifest["lineage"]:
+        raise BundleError("result lineage does not match manifest")
     if result.get("run_commit") != manifest["build"]["candidate_git_sha"]:
         raise BundleError("result run_commit does not match bound commit")
     if "canonical-replay.json" not in payloads:
