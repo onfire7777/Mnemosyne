@@ -1176,6 +1176,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or getattr(root, "is_junction", lambda: False)()
     ):
         raise BundleError("bundle must be a real directory, not a link")
+    root_identity = _owned_directory_identity(root)
     if not REPRODUCIBILITY_BUNDLE_SCHEMA_PATH.is_file():
         raise BundleError("reproducibility schema is missing")
     manifest_bytes, manifest = _read_reproducibility_manifest(root)
@@ -1460,6 +1461,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("result metrics do not match recomputed traces")
     _validate_bound_bundle_manifest(payloads)
     publication = manifest["publication"]
+    _assert_directory_identity(root, root_identity, "bundle")
     return {
         "family": "reproducibility",
         "headline_eligible": False,
@@ -1538,6 +1540,18 @@ def _owned_directory_identity(path: Path) -> tuple[int, int]:
     ):
         raise BundleError("private reproduction path is not a directory")
     return metadata.st_dev, metadata.st_ino
+
+
+def _assert_directory_identity(
+    path: Path, identity: tuple[int, int], label: str
+) -> None:
+    """Require an inspected directory to remain bound to its original inode."""
+    try:
+        current = _owned_directory_identity(path)
+    except (OSError, BundleError) as exc:
+        raise BundleError(f"{label} directory changed while reading") from exc
+    if current != identity:
+        raise BundleError(f"{label} directory changed while reading")
 
 
 def _remove_owned_directory(path: Path, identity: tuple[int, int]) -> None:
@@ -1755,6 +1769,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         or getattr(root, "is_junction", lambda: False)()
     ):
         raise BundleError("bundle must be a real directory, not a link")
+    root_identity = _owned_directory_identity(root)
     entries: list[Path] = []
     for entry_number, entry in enumerate(root.iterdir(), start=1):
         if entry_number > _MAX_REPRO_FILES:
@@ -1957,6 +1972,7 @@ def verify_bundle(bundle: Path | str) -> dict[str, Any]:
         )
     ):
         raise BundleError("smoke publication flags must remain false")
+    _assert_directory_identity(root, root_identity, "bundle")
     return {"family": family, "suite": metadata.get("suite"), "valid": True}
 
 
@@ -2040,6 +2056,7 @@ def _snapshot_legacy_bundle(source: Path, snapshot: Path) -> None:
         or getattr(source, "is_junction", lambda: False)()
     ):
         raise BundleError("bundle must be a real directory, not a link")
+    source_identity = _owned_directory_identity(source)
     total_size = 0
     names: set[str] = set()
     for entry_number, entry in enumerate(source.iterdir(), start=1):
@@ -2057,6 +2074,7 @@ def _snapshot_legacy_bundle(source: Path, snapshot: Path) -> None:
         names.add(entry.name)
     if names != {entry.name for entry in source.iterdir()}:
         raise BundleError("bundle inventory changed while snapshotting")
+    _assert_directory_identity(source, source_identity, "bundle")
 
 
 def write_report(

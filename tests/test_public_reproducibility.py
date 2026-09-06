@@ -311,6 +311,30 @@ def test_version_1_verifier_rejects_noncanonical_json_bytes(tmp_path: Path) -> N
         verify_bundle(destination)
 
 
+def test_version_1_verifier_rejects_bundle_directory_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    destination = tmp_path / "v1-directory-identity"
+    runner.run_public_suite("smoke", destination)
+    original_identity = public_bundle._owned_directory_identity
+    calls = 0
+
+    def changed_final_identity(path: Path) -> tuple[int, int]:
+        nonlocal calls
+        calls += 1
+        identity = original_identity(path)
+        return identity if calls == 1 else (identity[0], identity[1] + 1)
+
+    monkeypatch.setattr(
+        public_bundle, "_owned_directory_identity", changed_final_identity
+    )
+    with pytest.raises(BundleError, match="bundle directory changed while reading"):
+        verify_bundle(destination)
+
+
 @pytest.mark.parametrize(
     ("artifact_name", "replacement", "message"),
     (
