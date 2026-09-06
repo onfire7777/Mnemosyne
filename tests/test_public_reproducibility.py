@@ -609,6 +609,35 @@ def test_legacy_snapshot_bounds_final_inventory_rescan(
     assert source_scans == 2
 
 
+def test_legacy_reproduction_rechecks_complete_destination_before_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    destination = tmp_path / "destination"
+    runner.run_public_suite("smoke", source)
+    original_assert = public_bundle._assert_directory_identity
+
+    def mutate_after_destination_identity(
+        path: Path, expected: tuple[int, int], label: str
+    ) -> None:
+        original_assert(path, expected, label)
+        if label == "reproduced bundle":
+            (path / "README.md").write_bytes(b"changed\n")
+
+    monkeypatch.setattr(
+        public_bundle,
+        "_assert_directory_identity",
+        mutate_after_destination_identity,
+    )
+    with pytest.raises(BundleError, match="bundle changed after verification"):
+        reproduce_bundle(source, destination)
+
+    assert not destination.exists()
+
+
 def test_version_1_reproduction_failure_preserves_unowned_destination(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
