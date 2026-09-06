@@ -413,13 +413,45 @@ The following packages are complete source history, not runnable work:
   changes no benchmark result or admission state and does not
   recompute the canonical baseline (baseline stays `main@f688c747`).
 - PR #146: ordinary documentation receipt recording the merged PR #144
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-05T22:55:00Z`
-  capture and adds only the PR #144 merged-baseline bullet, the #145
+  lease-map lapse. It is **MERGED** at tip
+  `6a8399b344fbc365643aadbf0505289bbd2c06ba`. It adds only the PR #144
+  merged-baseline bullet, the #145 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #146 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `6a8399b344fbc365643aadbf0505289bbd2c06ba`.
+- PR #147: Exact 3 P15-S2/15-01-01 cadence-tier files
+  `src/mnemosyne/policy.py`, `src/mnemosyne/consolidation.py`,
+  `tests/test_consolidation_timescales.py`
+  (title: feat(consolidation): P15-S2 15-01-01 deterministic
+  fast|medium|slow cadence tiers)
+  from exact head `27c22840905888fadb247c6b6bb783b2a7fac24b`; all
+  required exact-head checks passed in run `34000600922`; merge
+  `72f3d94b87b46f379d9c93a3a029c4d121ecd111` at `2026-09-06T00:39:38Z`.
+  Prior tip was `6a8399b344fbc365643aadbf0505289bbd2c06ba` (PR #146).
+  Post-main Unit+drift may fail solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #147 was absent from this lease-map; this receipt repairs
+  that bookkeeping, and that lapse is expected until THIS receipt
+  lands. Exclusive File Set (Exact 3):
+  `src/mnemosyne/policy.py`, `src/mnemosyne/consolidation.py`,
+  `tests/test_consolidation_timescales.py`.
+  Purpose: P15-S2 CAP-007/008 first slice — deterministic
+  fast|medium|slow cadence tiers; docs-only privacy for THIS receipt
+  PR (the recorded #147 was code). Persist-history engine storage
+  remains lease-OUT / deferred (not admitted by #147). Hold 15-01-02
+  remains serialized after this. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and does
+  not recompute the canonical baseline (baseline stays `main@f688c747`).
+- PR #148: ordinary documentation receipt recording the merged PR #147
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-06T00:42:00Z`
+  capture and adds only the PR #147 merged-baseline bullet, the #146
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #146 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #148 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
