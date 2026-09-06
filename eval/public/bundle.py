@@ -1094,13 +1094,28 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     traces = [_parse_bounded_json(line, "traces.jsonl") for line in trace_lines if line]
     if "metrics.json" not in payloads:
         raise BundleError("missing metrics")
-    _recompute_repro_metrics(
+    recomputed = _recompute_repro_metrics(
         traces,
         _load_inventory_json(payloads, "metrics.json"),
         manifest.get("metrics"),
         manifest.get("intervals"),
         config=_load_inventory_json(payloads, "config.json"),
     )
+    interval = recomputed["interval"]
+    expected_result_metrics = [
+        {
+            "confidence_interval": {
+                "high": interval["high"],
+                "low": interval["low"],
+            },
+            "family": "retrieval",
+            "name": "hit_at_k",
+            "unit": "ratio",
+            "value": recomputed["value"],
+        }
+    ]
+    if result.get("metrics") != expected_result_metrics:
+        raise BundleError("result metrics do not match recomputed traces")
     publication = manifest["publication"]
     return {
         "family": "reproducibility",
