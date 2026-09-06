@@ -369,7 +369,7 @@
         "candidate_git_sha": { "$ref": "#/$defs/hex_commit" },
         "dirty": { "const": false },
         "lockfile": { "$ref": "#/$defs/named_digest" },
-        "toolchain": { "$ref": "#/$defs/nonempty_string" },
+        "toolchain": { "const": "uv" },
         "environment_contract": { "const": "uv run --locked" }
       }
     },
