@@ -2246,11 +2246,13 @@ def test_result_ledger_and_m15_cross_reference_mismatches_fail_closed(
         ("build", "candidate_git_sha", "f" * 40),
         ("build", "system_seam", "different-seam"),
         ("build", "toolchain", "pip"),
+        ("build", "version", True),
         ("config", "scoring_profile", "different-profile"),
+        ("config", "k", True),
     ),
 )
 def test_canonical_replay_run_custody_matches_bound_artifacts(
-    tmp_path: Path, section: str, field: str, replacement: str
+    tmp_path: Path, section: str, field: str, replacement: object
 ) -> None:
     bundle = _write_reproducibility_bundle(
         tmp_path / f"replay-custody-{section}-{field}"
