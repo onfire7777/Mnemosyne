@@ -138,13 +138,14 @@ When — and only when — a later freeze and write lease exist, Stage A would
 add a **new** deterministic development fixture:
 
 - Path (prospective): `eval/public/fixtures/wmbs-m17-custody-recovery-development.json`
-- Families the spec names: queue redelivery, partial outage,
-  crash-after-commit, object loss, retry, backup, PITR scenarios.
-- Replay: three crash points per scenario and two clean restores.
+- Families the spec names for **local Stage A**: queue redelivery, partial
+  outage, crash-after-commit, object loss, retry, backup. **PITR scenarios
+  are OUT of Stage A** — they require R5 / P32 and pinned services.
+- Replay: three crash points per local scenario and two clean restores.
   Byte-identical under `canonical_json(generate_fixture(seed))`.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
 - Local fault injection only. P32 / PostgreSQL / object-store / PITR stay
-  `DEFERRED`.
+  `DEFERRED` (R5) — do not invent PITR rows in the Stage A fixture.
 
 This paragraph does not create those files.
 
@@ -158,8 +159,15 @@ add a **new** stdlib-only oracle:
   recovery completeness, RPO/RTO, audit continuity, operator steps.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   claim zero acknowledged loss, zero duplicate external effects, complete
-  audit continuity, or a frozen RPO/RTO tier as an admission bound (that is
-  R1+R3). A submitter-selected target cannot certify itself.
+  audit continuity, or a frozen RPO/RTO tier as an admission bound. A
+  submitter-selected target cannot certify itself.
+- Freeze residual (keeps NOT CODE-READY): observation/receipt schema,
+  denominators, RPO/RTO calculation, audit-continuity rules, malformed-input
+  behavior, aggregation, and pass semantics must be frozen before Stage A
+  implement — metric names alone are not a scorer contract. Closed ABI has no
+  `health` / `queue_state` / `snapshot` / `restore_snapshot`; Stage A harness
+  injection must name how those observations are produced without inventing
+  ABI ops here.
 - Local results cannot close production rows. Missing retained
   infrastructure, external custody, or an independently recorded expected
   fingerprint yields **no production claim**, not a pass.
