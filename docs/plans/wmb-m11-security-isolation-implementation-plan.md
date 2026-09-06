@@ -146,7 +146,11 @@ other basic ops). `create_principal` / `grant` / `revoke` / `query_as` are
 carries those advanced ops to the SUT before Stage A implement — do not claim
 they are already reusable closed-ABI operations. A simpler per-scope adapter
 may participate only if it can create isolated principals through that named
-path.
+path. The residual must also pin **authenticated caller semantics**: who may
+invoke `query_as`, who is authorized to `grant`/`revoke`, how forged
+credentials fail, actor authentication/session binding (not caller-supplied
+`tenant_id`/`principal_id` alone), and grant subject/object authorization —
+asserted identity without actor auth is not conforming.
 
 ## 3. Fixture contract (prospective, unadmitted)
 
@@ -177,6 +181,10 @@ add a **new** stdlib-only oracle:
   claim zero unauthorized reads/writes or zero untrusted-to-system-instruction
   as an admission bound (scored-run acceptance; R1 does not discharge it).
   Authorized utility cannot average away a protected failure.
+- Unauthorized-write observations: after every denied `ingest` / `grant` /
+  `revoke` attempt, Stage A must probe under the protected principal and
+  compare exact expected state — response-code-only scoring (e.g. `UNAUTHORIZED`
+  with write-through) is not conforming.
 - Instruction-boundary observability (freeze residual): Stage A must pin an
   explicit harness-visible signal that untrusted retrieved-content tokens
   entered (or did not enter) a system instruction — benign answers alone are
