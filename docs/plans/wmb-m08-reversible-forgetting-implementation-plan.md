@@ -231,7 +231,12 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows. St
 
 ## 9. Non-goals
 
-- No edit to `GOAL.md`, `.planning/STATE.md`, the lease map, or T8 inventory.
+- No edit to `GOAL.md`, `.planning/STATE.md`, the lease map, or T8 /
+  completeness inventory **in this PR**. Inventory reconcile for the M08 row
+  (`docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`) is a
+  **separate GoalEx Exact-1** after this plan merges — required before treating
+  the one-file step as fully landed (row must stop saying the plan is absent /
+  using an M14 witness).
 - No edit to M02/M04/M05/M06/M07/M14 plans.
 - No `eval/public/*` write, including PR #115 files
   (`registry.json`, `runner.py`, `scoring.py`, `adapters/whole_memory_reference.py`,
@@ -242,10 +247,12 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows. St
 
 ## 10. How to tell this step is done
 
-This step is done when this file exists on GitHub as a one-file PR with
+This one-file plan PR is mergeable when it exists on GitHub as Exact 1 with
 `PROPOSED` / `NOT CODE-READY` and a reviewer can re-check §1 against spec
 L801–820 without trusting this prose. It is **not** done by flipping Status
-or writing any other path.
+or writing any other path in this PR. **Landing is incomplete** until GoalEx
+reconciles the M08 inventory row (separate Exact-1) so the backlog no longer
+claims this plan is absent from the tree.
 
 ## 11. Locked public-harness cell (do not write README from this PR)
 
