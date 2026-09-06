@@ -336,6 +336,39 @@ def test_version_1_reproduction_failure_preserves_unowned_destination(
     assert not list(tmp_path.glob(f".{destination.name}-source-*"))
 
 
+def test_report_publication_never_replaces_racing_note(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    reproduced = tmp_path / "reproduced"
+    report = tmp_path / "report.json"
+    note = tmp_path / "report.md"
+    runner.run_public_suite("smoke", source)
+    reproduce_bundle(source, reproduced)
+    original_write = public_bundle._atomic_write_noreplace
+    writes = 0
+
+    def write_after_note_collision(path: Path, payload: bytes) -> tuple[int, int]:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            note.write_text("foreign\n", encoding="utf-8")
+        return original_write(path, payload)
+
+    monkeypatch.setattr(
+        public_bundle, "_atomic_write_noreplace", write_after_note_collision
+    )
+    with pytest.raises(FileExistsError):
+        public_bundle.write_report(source, reproduced, report, note)
+
+    assert not report.exists()
+    assert note.read_text(encoding="utf-8") == "foreign\n"
+    assert not list(tmp_path.glob(".report.*-*"))
+
+
 def test_m15_helpers_are_reused_not_copied() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
     assert canonical_replay_digest(payload) == REPLAY_DIGESTS["wmbs-m01-development"]

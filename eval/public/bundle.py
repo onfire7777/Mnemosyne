@@ -2006,7 +2006,9 @@ def write_report(
     for name in source_files:
         if (source_root / name).read_bytes() != (reproduced_root / name).read_bytes():
             raise BundleError(f"source and reproduced bundle mismatch: {name}")
-    output, note = Path(report_output), Path(report_note)
+    output, note = Path(report_output).absolute(), Path(report_note).absolute()
+    _reject_reproducibility_link_path(output)
+    _reject_reproducibility_link_path(note)
     if output.exists() or note.exists():
         raise FileExistsError("refusing to overwrite report output or note")
     git_sha = _git_sha()
@@ -2052,13 +2054,16 @@ def write_report(
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     note.parent.mkdir(parents=True, exist_ok=True)
-    _atomic_write(output, _canonical(report))
-    report_digest = _digest(output)
+    _reject_reproducibility_link_path(output)
+    _reject_reproducibility_link_path(note)
+    output_identity = _atomic_write_noreplace(output, _canonical(report))
+    report_payload, _ = _read_inventory_file(output)
+    report_digest = hashlib.sha256(report_payload).hexdigest()
     markdown = _render_report_note(report, report_digest)
     try:
-        _atomic_write(note, markdown)
+        _atomic_write_noreplace(note, markdown)
     except BaseException:
-        output.unlink(missing_ok=True)
+        _remove_owned_file(output, output_identity)
         raise
     return {
         "report": str(output.resolve()),
@@ -2872,17 +2877,39 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _atomic_write(path: Path, payload: bytes) -> None:
+def _atomic_write_noreplace(path: Path, payload: bytes) -> tuple[int, int]:
+    """Atomically publish one private temporary file without replacing a path."""
     descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+            metadata = os.fstat(handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise BundleError("private report path is not a regular file")
+            identity = metadata.st_dev, metadata.st_ino
+        if os.name == "nt":
+            Path(temporary).rename(path)
+        else:
+            os.link(temporary, path)
+            Path(temporary).unlink()
+        return identity
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
         raise
+def _remove_owned_file(path: Path, identity: tuple[int, int]) -> None:
+    """Remove a report only while its original inode is still named."""
+    try:
+        metadata = path.stat(follow_symlinks=False)
+    except (FileNotFoundError, OSError):
+        return
+    if (
+        stat.S_ISREG(metadata.st_mode)
+        and not path.is_symlink()
+        and (metadata.st_dev, metadata.st_ino) == identity
+    ):
+        path.unlink(missing_ok=True)
 
 
 def _git_sha() -> str:
