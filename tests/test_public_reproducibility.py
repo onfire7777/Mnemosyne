@@ -634,6 +634,40 @@ def test_report_publication_never_replaces_racing_note(
     assert not list(tmp_path.glob(".report.*-*"))
 
 
+def test_report_publication_verifies_written_pair_and_rolls_back_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+    from eval.public import runner
+
+    source = tmp_path / "source"
+    reproduced = tmp_path / "reproduced"
+    report = tmp_path / "report.json"
+    note = tmp_path / "report.md"
+    runner.run_public_suite("smoke", source)
+    reproduce_bundle(source, reproduced)
+    original_write = public_bundle._atomic_write_noreplace
+    writes = 0
+
+    def mutate_report_after_pair_write(path: Path, payload: bytes) -> tuple[int, int]:
+        nonlocal writes
+        identity = original_write(path, payload)
+        writes += 1
+        if writes == 2:
+            report.write_bytes(b"changed\n")
+        return identity
+
+    monkeypatch.setattr(
+        public_bundle, "_atomic_write_noreplace", mutate_report_after_pair_write
+    )
+    with pytest.raises(BundleError, match="changed while snapshotting bundles"):
+        public_bundle.write_report(source, reproduced, report, note)
+
+    assert writes == 2
+    assert not report.exists()
+    assert not note.exists()
+
+
 def test_report_file_rollback_preserves_replacement_identity(tmp_path: Path) -> None:
     from eval.public import bundle as public_bundle
 

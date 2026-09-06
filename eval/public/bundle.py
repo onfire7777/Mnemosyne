@@ -2271,13 +2271,25 @@ def _write_report_from_snapshots(
     note.parent.mkdir(parents=True, exist_ok=True)
     _reject_reproducibility_link_path(output)
     _reject_reproducibility_link_path(note)
-    output_identity = _atomic_write_noreplace(output, _canonical(report))
-    report_payload, _ = _read_inventory_file(output)
-    report_digest = hashlib.sha256(report_payload).hexdigest()
-    markdown = _render_report_note(report, report_digest)
+    expected_report_payload = _canonical(report)
+    output_identity = _atomic_write_noreplace(output, expected_report_payload)
+    note_identity: tuple[int, int] | None = None
     try:
-        _atomic_write_noreplace(note, markdown)
+        report_payload, _ = _read_inventory_file(output)
+        report_digest = hashlib.sha256(report_payload).hexdigest()
+        markdown = _render_report_note(report, report_digest)
+        note_identity = _atomic_write_noreplace(note, markdown)
+        _verify_report(
+            output,
+            note,
+            source_snapshot=source_root,
+            reproduced_snapshot=reproduced_root,
+            expected_report_payload=expected_report_payload,
+            expected_note_bytes=markdown,
+        )
     except BaseException:
+        if note_identity is not None:
+            _remove_owned_file(note, note_identity)
         _remove_owned_file(output, output_identity)
         raise
     return {
