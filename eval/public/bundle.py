@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError
+from jsonschema.exceptions import SchemaError, ValidationError
 
 from eval.harness.metrics import wilson_interval
 
@@ -468,7 +468,10 @@ def _validate_repro_schema(manifest: object) -> None:
     except (OSError, json.JSONDecodeError) as exc:
         raise BundleError("reproducibility schema is invalid") from exc
     try:
+        Draft202012Validator.check_schema(schema)
         Draft202012Validator(schema).validate(manifest)
+    except SchemaError as exc:
+        raise BundleError("reproducibility schema is invalid") from exc
     except ValidationError as exc:
         path = "/".join(str(part) for part in exc.absolute_path)
         detail = f"{path}: {exc.message}" if path else exc.message
