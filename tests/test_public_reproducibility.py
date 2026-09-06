@@ -823,14 +823,23 @@ def test_exact_digest_meanings_hash_named_file_bytes(tmp_path: Path) -> None:
     assert manifest["traces"]["trace_index_digest"] == result["trace_index_digest"]
 
 
-def test_nested_bundle_manifest_inventory_is_semantically_verified(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [("digest", "digest"), ("boolean-version", "inventory")],
+)
+def test_nested_bundle_manifest_inventory_is_semantically_verified(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
     bundle = _write_reproducibility_bundle(
         tmp_path / "nested-manifest", include_ledger=False
     )
     root = bundle["root"]
     nested_path = root / "bundle-manifest.json"
     nested = json.loads(nested_path.read_text(encoding="utf-8"))
-    nested["files"]["adapter.json"] = "9" * 64
+    if mutation == "digest":
+        nested["files"]["adapter.json"] = "9" * 64
+    else:
+        nested["version"] = True
     nested_bytes = _write_json(nested_path, nested)
 
     result_path = root / "result.json"
@@ -850,7 +859,7 @@ def test_nested_bundle_manifest_inventory_is_semantically_verified(tmp_path: Pat
         entry["sha256"] = _sha256_ref(payload)
     _write_json(manifest_path, manifest)
 
-    with pytest.raises(BundleError, match="bound bundle manifest digest"):
+    with pytest.raises(BundleError, match=f"bound bundle manifest {message}"):
         verify_bundle(root)
 
 
@@ -1551,6 +1560,24 @@ def test_runtime_artifacts_reject_undeclared_fields(
         verify_bundle(root)
 
 
+def test_build_artifact_boolean_version_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "boolean-build-version")
+    root = bundle["root"]
+    build_path = root / "build.json"
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    build["version"] = True
+    build_bytes = _write_json(build_path, build)
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["hashes"] if item["path"] == "build.json")
+    entry["size"] = len(build_bytes)
+    entry["sha256"] = _sha256_ref(build_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="build declaration"):
+        verify_bundle(root)
+
+
 def test_environment_allowlist_rejects_credential_variables(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "credential-environment")
     root = bundle["root"]
@@ -1696,6 +1723,24 @@ def test_metrics_artifact_rejects_undeclared_fields(
     _write_json(manifest_path, manifest)
 
     with pytest.raises(BundleError, match="metrics|intervals"):
+        verify_bundle(root)
+
+
+def test_metrics_artifact_rejects_boolean_count_alias(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "boolean-metric-count")
+    root = bundle["root"]
+    metrics_path = root / "metrics.json"
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics["successes"] = True
+    metrics_bytes = _write_json(metrics_path, metrics)
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["hashes"] if item["path"] == "metrics.json")
+    entry["size"] = len(metrics_bytes)
+    entry["sha256"] = _sha256_ref(metrics_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="metrics do not recompute"):
         verify_bundle(root)
 
 
@@ -2053,6 +2098,17 @@ def test_digest_consistent_malformed_lockfile_fails_closed(tmp_path: Path) -> No
     _write_json(manifest_path, manifest)
     with pytest.raises(BundleError, match="uv.lock is invalid"):
         verify_bundle(root)
+
+
+def test_lockfile_boolean_version_fails_closed(tmp_path: Path) -> None:
+    lockfile = (REPO_ROOT / "uv.lock").read_bytes().replace(
+        b"version = 1", b"version = true", 1
+    )
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "boolean-lock-version", lockfile=lockfile
+    )
+    with pytest.raises(BundleError, match="lock contract"):
+        verify_bundle(bundle["root"])
 
 
 def _clone_clean_checkout(tmp_path: Path) -> Path:
