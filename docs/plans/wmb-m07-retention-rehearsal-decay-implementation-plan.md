@@ -212,10 +212,16 @@ or writing any other path.
 
 ## 11. Locked public-harness cell (do not write README from this PR)
 
-The block below is the only allowed future `eval/public/README.md` cell for
-this module. Place it as a peer of the M03 valid-time cell and the M02
-retrieval cell, not under the M02/M04/M05 Stage-A oracles heading. This PR
-does not write `eval/public/README.md`.
+The block below is the only allowed future **Stage-A** `eval/public/README.md`
+cell for this module. Insert it immediately before
+`### M02 retrieval development` under
+`## Whole-memory common ABI (development draft)`, as an H3 peer of the
+existing M02/M04/M05 H3 cells. Do **not** require an M03 heading peer or an
+M02/M04/M05 Stage-A-oracles container — neither exists in the current README
+(M03 is unheaded prose). After Stage B registration, the public-harness
+integration owner may replace the "No registry row" / "not runnable" lines
+with the registered CLI command; this Stage-A block is not permanent
+registered text. This PR does not write `eval/public/README.md`.
 
 Do not add a `uv run --suite` line until a registry row exists.
 
