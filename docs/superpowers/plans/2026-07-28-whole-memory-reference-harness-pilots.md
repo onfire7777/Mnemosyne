@@ -98,9 +98,13 @@ and Task 8 unit contracts only; the M12/M13 gap-disclosure paragraphs in
 `eval/public/README.md` and the tests pinning them were delivered separately by
 PR #90 at `main@061c2e1c` (exact-head CI `30679262270`, post-merge CI
 `30680201900`), which closes Tasks 7 and 8 on canonical main. Full
-transaction-time M03 remains deferred, M15 requires
-the admitted M03 cell, and result-v2 remains blocked by the protected
-signed-publication lease. PR #83 later delivered that bounded M03 cell and
+transaction-time M03 remains deferred, and M15 requires
+the admitted M03 cell. The result-v2 lease blocker recorded at that checkpoint
+was released in PR #135's 2026-09-05 owner-confirmation receipt: the old Mac
+and its files are unavailable, so its reservation is retired without claiming
+inspection or recovery. N12 is ready for single-owner admission after that
+receipt lands, subject to the current lease map and result-v1 compatibility
+checks; implementation remains outstanding. PR #83 later delivered that bounded M03 cell and
 PR #84 delivered the dependent M15 development slice, as recorded below.
 
 ## M12/M13 delivery checkpoint
@@ -180,8 +184,11 @@ focused tests, and Ruff passed. PR #83 then merged the bounded M03 valid-time
 development slice at `main@7f60d8ba`; exact-head CI run `30532543366` was
 green. PR #84 then merged M15 canonical replay and the composed M01→M03→M10
 development slice at `main@e0dd4159`. The result-v2 schema and RED
-compatibility/ledger fixtures remain blocked by the protected
-signed-publication lease. The sandbox branch stays quarantined until real OCI,
+compatibility/ledger fixtures remain unimplemented. PR #135's 2026-09-05
+owner-confirmation receipt retires the unavailable Mac's signed-publication
+reservation; N12 is ready for single-owner admission after that receipt lands,
+with a fresh main/lease check and result-v1 golden baseline before source edits.
+The sandbox branch stays quarantined until real OCI,
 filesystem, network, and write-boundary enforcement exists.
 
 **Files:**
@@ -668,6 +675,14 @@ projection, or clean-process reproduction remains non-publishable and cannot
 earn M15.
 
 ### Task 10: Complete local result-v2 without mutating result-v1
+
+**Admission checkpoint (2026-09-05):** PR #135 records the owner's confirmation
+that the old Mac and its files are unavailable and releases that obsolete
+signed-publication reservation. Its lease-release prerequisite is satisfied
+when the receipt lands. Task 10 is not implemented or automatically started:
+one result-v2 owner must take the current N12 lease and establish the unchanged
+result-v1 golden baseline before editing. The implementation steps and evidence
+requirements below remain the approved contract.
 
 **Files:**
 

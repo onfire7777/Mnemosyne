@@ -27,6 +27,31 @@ uv run --locked mneme eval-public --verify-bundle /tmp/mneme-pm-bench
 uv run --locked mneme eval-public --reproduce-bundle /tmp/mneme-pm-bench --out-dir /tmp/mneme-pm-bench-reproduced
 ```
 
+Every profile produces a deterministic development bundle with its exact
+operating point, action traces, null reader/judge fields, registry revision and
+dataset digest, and false publication/headline flags. None is an official
+PM-Bench, TriggerBench, or Working Memory reproduction.
+
+This is deterministic synthetic/development eval only: no official
+dataset/model download, no benchmark run against protected/upstream data, and no
+publication or headline claim. The authenticated action lane descends from A1
+`t_5163502e` → P5 `t_8c72180a` → I0R `t_63a207ee`; downstream R1/R2/F0 remain
+future work.
+
+### M12 prospective action
+
+**PROPOSED.**
+
+`pm-bench-development` and `triggerbench-development` remain
+`split_role: development` and carry `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+
+```
+uv run --locked mneme eval-public --suite pm-bench-development --out-dir /tmp/mneme-pm-bench
+uv run --locked mneme eval-public --suite triggerbench-development --out-dir /tmp/mneme-triggerbench
+```
+
 `pm-bench-development` and `triggerbench-development` translate their
 repository-authored fixtures into authenticated `intention-schedule`,
 `intention-update`, `intention-cancel`, and `intention-evaluate` subprocess
@@ -36,14 +61,6 @@ the evaluator-side intersection of the production evaluator's fired data-only
 action IDs with the available opaque IDs; the harness never executes or exposes
 an action payload or fixture gold, and it fails closed on missing auth, scope
 mismatch, gold leakage, payload execution, or unsupported semantics.
-`working-memory-action-development` drives the authenticated
-`capture`/`working-seed`/`working-query`/`working-expire` commands under the
-same signed-session seam.
-
-Every profile produces a deterministic development bundle with its exact
-operating point, action traces, null reader/judge fields, registry revision and
-dataset digest, and false publication/headline flags. None is an official
-PM-Bench, TriggerBench, or Working Memory reproduction.
 
 The M12 fixtures are deliberately small: `pm-bench-development` has one seed
 (`7`), one case, five tasks, and seven steps; `triggerbench-development` has
@@ -54,17 +71,28 @@ which is zero on both committed fixtures because they are easy rather than
 because the counter is inert; neither suite measures lateness magnitude or
 cost.
 
+### M13 working memory
+
+**PROPOSED.**
+
+`working-memory-action-development` remains `split_role: development`
+and carries `publishable: false`, `pbpp_headline_eligible: false`,
+`headline_eligible: false`, `upstream_comparable: false`, and
+`independent_external_reproduction: false`.
+
+```
+uv run --locked mneme eval-public --suite working-memory-action-development --out-dir /tmp/mneme-working-action
+```
+
+`working-memory-action-development` drives the authenticated
+`capture`/`working-seed`/`working-query`/`working-expire` commands under the
+same signed-session seam.
+
 The M13 working-memory fixture has one seed (`94125`) and six cases, one for
 each declared item category. Its operating point has no capacity parameter,
 and the fixture contains no promotion-versus-no-promotion control. These are
 development gap disclosures, not evidence of capacity scaling or promotion
 utility.
-
-This is deterministic synthetic/development eval only: no official
-dataset/model download, no benchmark run against protected/upstream data, and no
-publication or headline claim. The authenticated action lane descends from A1
-`t_5163502e` → P5 `t_8c72180a` → I0R `t_63a207ee`; downstream R1/R2/F0 remain
-future work.
 
 ## Frozen Phase 12 QA protocol
 
@@ -236,6 +264,10 @@ timelines (`ordered-events`, `late-event`, `retroactive-correction`,
 
 **PROPOSED.**
 
+`wmbs_m02.py` declares `ADMISSION_STATE = "PROPOSED"` and
+`license: "CC0-1.0"`. M02's scorer reports `latency`, `tokens`,
+`calls`, and `storage` literally as `unsupported`.
+
 The M02 retrieval cell is registry-reachable through the same public CLI
 subprocess seam.
 
@@ -269,41 +301,36 @@ canonical-replay-seed row for `wmbs-m02-retrieval-v1` because
 `bundle.py` is outside this lease; Stage B scores through
 `score_profile` instead.
 
-### M04/M05 Stage-A development oracles (unregistered)
+### M04 conflict development
 
-`wmbs_m04.py` and `wmbs_m05.py` are Stage-A development oracles.
-Each runs no system and observes no SUT: the module generates a deterministic
-synthetic fixture and scores harness-supplied observations, so a green run
-evidences generator and scorer determinism over that exact finite fixture and
-nothing whatsoever about any memory system.
-`wmbs_m02.py` is registered as `wmbs-m02-retrieval-development` under
-`### M02 retrieval development` and is not an unregistered Stage-A oracle.
+**PROPOSED.**
 
-M04 and M05 remain **unregistered**. Neither has a `registry.json` entry, an adapter, a
-runner route, or a scoring-profile registration, so neither can be selected with
-`mneme eval-public --suite`, neither produces a bundle, and neither produces a
-benchmark result. Every one of them is admission state `PROPOSED`: M04
-declares `ADMISSION_STATE = "PROPOSED"` directly, and M05 carries
-`admission_state: "PROPOSED"` in both its labels and its committed fixture. M04's
-score envelope and M05's labels and fixture record `publishable: false` and
-`pbpp_headline_eligible: false`. M02's registry row carries the same false
-publication flags; it does not omit them. M02 and M04 declare `ADMISSION_STATE = "PROPOSED"`
-directly. M02 and M05 declare `license: "CC0-1.0"`;
-M04 declares no license field at all, which is itself a disclosed Stage-A gap
-rather than a permissive grant.
+`wmbs_m04.py` declares `ADMISSION_STATE = "PROPOSED"`. M04 declares no
+license field at all, which is itself a disclosed Stage-A gap rather than
+a permissive grant. M04 emits no latency, token, call, or storage metric;
+treat those as unsupported for this module.
 
-None of the three measures cost or resources. M02's scorer reports `latency`,
-`tokens`, `calls`, and `storage` literally as `unsupported`; M04 and M05 emit no
-latency, token, call, or storage metric of any kind. Treat all four classes as
-unsupported for every one of these modules.
+The M04 conflict/correction cell is registry-reachable through the same public CLI
+subprocess seam.
 
-**M04 (`wmbs-m04-development`).** The committed fixture is generated from seed
-`20260801` and holds 140 cases over five per-case seeds (`11`, `23`, `37`, `53`,
-`71`), three orderings (`as_authored`, `reversed`, `interleaved`), and seven
-source classes (`independent`, `duplicated`, `low_quality`, `high_quality`,
-`malicious`, `unresolved`, `later_resolved`). Numeric confidence calibration is
-`unsupported`: the unresolved-calibration metric scores only abstention
-behavior. Its declared disclosures also record `branch_merge` as
+```bash
+uv run --locked mneme eval-public --suite wmbs-m04-development --out-dir /tmp/wmbs-m04
+```
+
+`wmbs-m04-development` is `PROPOSED`, `DEVELOPMENT`,
+`split_role: development`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+Registration is a reachability fix only. It advances no admission state and
+supports no publication, comparability, or superiority claim.
+
+**M04 corpus (registered, still `PROPOSED`).** The committed fixture is generated
+from seed `20260801` and holds 140 cases over five per-case seeds (`11`, `23`,
+`37`, `53`, `71`), three orderings (`as_authored`, `reversed`, `interleaved`),
+and seven source classes (`independent`, `duplicated`, `low_quality`,
+`high_quality`, `malicious`, `unresolved`, `later_resolved`). Numeric confidence
+calibration is `unsupported`: the unresolved-calibration metric scores only
+abstention behavior. Its declared disclosures also record `branch_merge` as
 `UNSUPPORTED-BY-SYSTEM`, `transaction_time` as `unsupported`, `update_hook` as
 `emulated`, and the `sqlite` and `postgresql` backends as `DEFERRED`. M04's
 fixture events deliberately depart from the closed `portable_event` ABI: they
@@ -311,7 +338,39 @@ reuse the portable-event key vocabulary but carry an additional load-bearing
 `source_id` that keys the ablation gold. That reuse is a shape-vocabulary
 borrowing for a Stage-A ablation task and is never an ABI conformance claim.
 
-**M05 (`wmbs-m05-provenance-development`).** The committed fixture is generated
+Bundle metadata names the backend the public CLI actually exercised
+(`backend`; `MnemoCLI` defaults to `local`). A missing or fabricated
+backend fails `test_m04_bundle_declares_backend_explicitly`. That is a
+store disclosure, including an omitted PostgreSQL path, not a
+portability claim. `verify_bundle` still has no `allowed_profile` or
+canonical-replay-seed row for `wmbs-m04-v1` because
+`bundle.py` is outside this lease; Stage B scores through
+`score_profile` instead. The runner passes the fixture as scoring labels
+because `bundle._scoring_labels` rejects this case-based schema.
+
+
+### M05 provenance development
+
+**PROPOSED.**
+
+The M05 provenance/explanation cell is registry-reachable through the same public CLI
+subprocess seam. Stage B — harness integration for M05 — is delivered. The
+quarantines named below remain open.
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m05-development --out-dir /tmp/wmbs-m05-development
+```
+
+`wmbs-m05-development` is `PROPOSED`, `ENHANCED-SUCCESSOR`,
+`split_role: development`, adapter `wmbs-m05-reference`, scoring profile
+`wmbs-m05-v1`, fixture `fixtures/wmbs-m05-provenance-development.json`,
+`system_seam: public-cli-subprocess`, and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+Registration is a reachability fix only. It advances no admission state and
+supports no publication, comparability, or superiority claim.
+
+**M05 corpus (registered, still `PROPOSED`).** The committed fixture is generated
 from seed `13`, declares the five seeds `13`, `29`, `41`, `59`, `73`, and holds
 five slices of twenty cases each (`protected-grounding`, `distractor-sources`,
 `tampered-lineage`, `unsupported-claim`, `derived-claims`). The module declares
@@ -329,12 +388,127 @@ and ignored `provenance_status`, Q4 evidence handles not digest-bound, Q7 replay
 hashes needing real artifact binding, Q9 model-backed grounded answering, Q10
 unwired `HowProvenance`, and Q12 missing artifacts failing rather than skipping.
 
-Stage B — harness integration for M04 and M05 — is **not delivered**. It
-remains gated on the public-harness integration owner's lease and on the
-quarantines named in
-[`docs/plans/wmb-m02-retrieval-organization-implementation-plan.md`](../../docs/plans/wmb-m02-retrieval-organization-implementation-plan.md),
-[`docs/plans/wmb-m04-conflict-correction-implementation-plan.md`](../../docs/plans/wmb-m04-conflict-correction-implementation-plan.md),
-and
+The adapter `run_m05_provenance_development` drives the supplied `MnemoCLI`
+(`capture`, `assert_fact`, `search`, `explain`, `export`). It raises if
+`cli is None`. It does not call `query_with_evidence` (Q1: that hook is
+absent from the frozen ABI). It does not treat `mnemo answer` as a
+model-free grounded-answer path (Q9). Traces record CLI payloads only; they
+do not substitute fixture gold.
+
+`wmbs_m05.py` remains the Stage-A development oracle for generator and scorer
+determinism over that exact finite fixture. A green local oracle run
+evidences that determinism and nothing whatsoever about any memory system.
+
+M05 carries `admission_state: "PROPOSED"` in both its labels and its committed
+fixture, and its labels, fixture, and registry cell record `publishable: false`
+and `pbpp_headline_eligible: false`. The module `LICENSE`, committed fixture,
+and registry cell carry `license: CC0-1.0`. M05 emits no latency,
+token, call, or storage metric; treat those as unsupported for this module.
+
+Bundle metadata names the backend the public CLI actually exercised
+(`backend`; `MnemoCLI` defaults to `local`). Canonical replay seeds for
+`wmbs-m05-provenance-development` are `13`, `29`, `41`, `59`, `73`.
+
+Stage B does not close Q1, Q2, Q3, Q4, Q7, Q9, Q10, or Q12. Those
+quarantines remain recorded in
 [`docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`](../../docs/plans/wmb-m05-provenance-explanation-implementation-plan.md).
 Nothing here is a publication, comparability, ranking, superiority, or
 upstream-equivalence claim.
+
+## Neutral reproducibility bundle (REPRO-001)
+
+REPRO-001 freezes an opt-in closed `mnemosyne.reproducibility-bundle/v1`
+manifest. It does not change result-v1 schema bytes, the version-1
+`bundle-manifest.json` write/verify/reproduce path, the signed ledger, or any
+publication renderer. Existing result-v1 records remain valid. The additive
+path consumes merged result-v2 through explicit version dispatch.
+
+One repository-root command from a clean detached checkout of the bound commit
+verifies the source bundle, reruns the bound hit@k scorer (first `k` retrieved
+hits only; `k` comes from `config.json`), recomputes every metric value and
+Wilson interval from raw traces, binds metric metadata (family, unit,
+uncertainty, confidence, exclusions, and status counts) to that measurement,
+and byte-compares manifest-owned output. Matching fabricated declarations
+fail. The scorer rewrite of `metrics.json` is required; copy-only success is
+not reproduction. If `k` or traces cannot be scored, the command fails closed.
+`config.scoring_profile` must be a registered profile and is recomputed only
+through its canonical scorer (`smoke-hit-at-k-v1` for this standard). Unknown
+profiles and duplicate `ranked_retrieved_hits` IDs fail closed:
+
+```
+uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
+```
+
+`BUNDLE` and `DEST` are the only placeholders. The command is argv-only: no
+shell string, no bundle-provided executable, and no execution from inside the
+untrusted bundle directory. Dependency acquisition, if any, is a separately
+disclosed preparation step. The reproduction command itself has no network.
+The invoking checkout must be clean, match `build.candidate_git_sha`, honor
+`uv.lock`, and use only the declared environment allowlist with UTC/C locale.
+Incomplete output is deleted. A destination collision fails closed.
+
+### Manifest fields
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Closed const `mnemosyne.reproducibility-bundle/v1`. Verify runs the Draft 2020-12 schema against the manifest; a present schema file is not enough. |
+| `result_ref` | Canonical `result-v2@sha256:…` binding of the atomic result. |
+| `ledger_ref` | Optional signed-ledger inclusion receipt; absence is not neutrality. |
+| `manifests` | Digest-bound benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge/reader/model/prompt, plus official fidelity or successor parent/difference. |
+| `traces` | Raw `traces.jsonl` path, seed records, retries/aborts, and `trace_index_digest`. |
+| `config` | Canonical `config.json` path, locale `C`, timezone `UTC`, and `config_digest`. |
+| `build` | `build.json` path, lockfile/toolchain, clean `candidate_git_sha`, and `build_fingerprint`. |
+| `environment` | Allowlist, platform/runtime, locale/timezone, optional wheelhouse digest. |
+| `metrics` / `intervals` | Family, name, version, value, unit, numerator/denominator, uncertainty, confidence, low/high, exclusions, and missing/unsupported/failed/aborted/not-measured counts. |
+| `hashes` | Complete file inventory: relative path, size, media type, `raw-bytes` canonicalization, SHA-256. |
+| `rights` | Software/data license, source revision, redistribution, PII, consent, takedown, disclosure. |
+| `custody` | Custody class and declaration. Missing declarations fail. |
+| `operator` | Operator identity, role, signer role, and disclosure state. |
+| `command` | The exact argv above. |
+| `track_kind` / `lineage` | Exact result-v2 `OFFICIAL-UPSTREAM`, `ENHANCED-SUCCESSOR`, or `DEVELOPMENT` values. |
+| `canonical_replay` | Merged M15 digest; not an alias of the four result-v2 lineage digests. |
+| `publication` | Always non-publishable, non-headline, non-independent, non-certified on this standard. |
+
+### Digest meanings
+
+Each value hashes the exact stored bytes of the named file. There is no
+parsing, reserialization, newline conversion, or Unicode normalization before
+hashing. Encoding is lowercase hexadecimal SHA-256 with the `sha256:` prefix.
+
+- `build_fingerprint = sha256(build.json)`
+- `config_digest = sha256(config.json)`
+- `bundle_digest = sha256(bundle-manifest.json)`
+- `trace_index_digest = sha256(traces.jsonl)`
+
+Result, ledger, M15 replay, inventory-entry, and environment/wheelhouse
+digests remain separate cross-references.
+
+### Official vs successor vs development
+
+`track_kind` stays one of the result-v2 values. Official-upstream records
+require their frozen fidelity manifest. Enhanced-successor records require
+parent and difference manifests. Development records are non-publishable and
+non-headline. Official, successor, and development records must not be blended
+into one certified projection, rank, or headline.
+
+### Custody, license, and operator duties
+
+Producers must declare software and data licenses, source revision,
+redistribution rights, PII/consent, takedown, custody class, and operator
+identity/role/signer. Missing or unknown fields fail closed. Tests and
+development fixtures use only synthetic public inputs. Secret-like material,
+symlinks, absolute or escaping paths, duplicate normalized paths, and
+inventory drift are rejected before execution.
+
+### Result-v1 compatibility and REPRO-002
+
+Version-1 bundles keep their previous bytes and branches. result-v1
+schema/validator/ledger behavior is unchanged. A successful development
+reproduction is not headline eligibility, not independent or neutral
+certified evidence, and not REPRO-002. REPRO-002 remains open and blocked
+until a headline-eligible pinned official result exists with a complete public
+bundle, operator/custody approval, and human approval. Independent third-party
+reproduction is an optional separately signed receipt; its absence does not
+block an otherwise operator-run claim, and its presence does not relabel the
+operator or imply certification.
+
