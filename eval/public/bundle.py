@@ -1624,9 +1624,14 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
                 raise BundleError(f"links and non-files are forbidden: {name}")
             shutil.copyfile(src, temp / name, follow_symlinks=False)
         config = _load_json(temp / "config.json")
+        trace_payload, _ = _read_inventory_file(temp / "traces.jsonl")
+        try:
+            trace_text = trace_payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise BundleError("invalid UTF-8 in traces.jsonl") from exc
         traces = [
             _parse_bounded_json(line, "traces.jsonl")
-            for line in (temp / "traces.jsonl").read_text(encoding="utf-8").splitlines()
+            for line in trace_text.splitlines()
             if line
         ]
         successes, total = _score_repro_traces(traces, _bound_repro_k(config))
@@ -2161,7 +2166,9 @@ def _write_report_from_snapshots(
     if source_files != _manifest_files(reproduced_root):
         raise BundleError("source and reproduced bundle inventory mismatch")
     for name in source_files:
-        if (source_root / name).read_bytes() != (reproduced_root / name).read_bytes():
+        source_payload, _ = _read_inventory_file(source_root / name)
+        reproduced_payload, _ = _read_inventory_file(reproduced_root / name)
+        if source_payload != reproduced_payload:
             raise BundleError(f"source and reproduced bundle mismatch: {name}")
     output = _absolute_normalized_path(Path(report_output))
     note = _absolute_normalized_path(Path(report_note))
@@ -2397,7 +2404,9 @@ def _verify_report(
     if source_files != _manifest_files(reproduced):
         raise BundleError("reported reproduction inventory mismatch")
     for name in source_files:
-        if (source / name).read_bytes() != (reproduced / name).read_bytes():
+        source_payload, _ = _read_inventory_file(source / name)
+        reproduced_payload, _ = _read_inventory_file(reproduced / name)
+        if source_payload != reproduced_payload:
             raise BundleError(f"reported reproduction mismatch: {name}")
     if any(
         report.get("publication", {}).get(flag) is not False
@@ -3059,7 +3068,12 @@ def _canonical(value: Any) -> bytes:
 
 
 def _load_json(path: Path) -> Any:
-    return _parse_json(path.read_text(encoding="utf-8"), path.name)
+    payload, _ = _read_inventory_file(path)
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise BundleError(f"invalid UTF-8 in {path.name}") from exc
+    return _parse_bounded_json(text, path.name)
 
 
 def _load_inventory_json(payloads: dict[str, bytes], name: str) -> Any:
@@ -3134,7 +3148,8 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def _digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    payload, _ = _read_inventory_file(path)
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _atomic_write_noreplace(path: Path, payload: bytes) -> tuple[int, int]:
