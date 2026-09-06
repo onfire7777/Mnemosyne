@@ -853,18 +853,31 @@ def _score_repro_traces(traces: list[dict[str, Any]], k: int) -> tuple[int, int]
         raise BundleError("bound k is unavailable")
     successes = 0
     total = 0
+    question_ids: set[str] = set()
     for trace in traces:
         if not isinstance(trace, dict):
             raise BundleError("metrics do not recompute from traces")
+        question_id = trace.get("question_id")
         hits = trace.get("ranked_retrieved_hits")
         gold = trace.get("gold_references")
-        if not isinstance(hits, list) or not isinstance(gold, list):
-            raise BundleError("metrics do not recompute from traces")
-        try:
-            unique_hits = set(hits)
-        except TypeError as exc:
-            raise BundleError("ranked retrieved hits are malformed") from exc
-        if len(hits) != len(unique_hits):
+        if (
+            not isinstance(question_id, str)
+            or not question_id.strip()
+            or question_id in question_ids
+        ):
+            raise BundleError("trace question IDs must be unique nonempty strings")
+        question_ids.add(question_id)
+        if trace.get("scoring_family") != "deterministic-retrieval":
+            raise BundleError("trace scoring family does not match the bound scorer")
+        if (
+            not isinstance(hits, list)
+            or not isinstance(gold, list)
+            or not gold
+            or any(not isinstance(item, str) or not item for item in [*hits, *gold])
+        ):
+            raise BundleError("retrieval trace identifiers are malformed")
+        unique_hits = set(hits)
+        if len(hits) != len(unique_hits) or len(gold) != len(set(gold)):
             raise BundleError("duplicate ranked retrieved ids")
         successes += bool(set(hits[:k]) & set(gold))
         total += 1

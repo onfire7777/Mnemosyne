@@ -1671,6 +1671,43 @@ def test_duplicate_ranked_retrieved_ids_fail_closed(tmp_path: Path) -> None:
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize(
+    ("traces", "message"),
+    [
+        (
+            b'{"answer":"d1","gold_references":["d1"],"question_id":"q1",'
+            b'"ranked_retrieved_hits":["d1"],"scoring_family":"other",'
+            b'"stored_records":["d1"]}\n',
+            "scoring family",
+        ),
+        (
+            b'{"answer":"d1","gold_references":[["d1"]],"question_id":"q1",'
+            b'"ranked_retrieved_hits":["d1"],'
+            b'"scoring_family":"deterministic-retrieval",'
+            b'"stored_records":["d1"]}\n',
+            "identifiers are malformed",
+        ),
+        (
+            b'{"answer":"d1","gold_references":["d1"],"question_id":"q1",'
+            b'"ranked_retrieved_hits":["d1"],'
+            b'"scoring_family":"deterministic-retrieval",'
+            b'"stored_records":["d1"]}\n'
+            b'{"answer":"d1","gold_references":["d1"],"question_id":"q1",'
+            b'"ranked_retrieved_hits":["d1"],'
+            b'"scoring_family":"deterministic-retrieval",'
+            b'"stored_records":["d1"]}\n',
+            "question IDs",
+        ),
+    ],
+)
+def test_reproducibility_trace_population_is_well_formed(
+    tmp_path: Path, traces: bytes, message: str
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / message, traces=traces)
+    with pytest.raises(BundleError, match=message):
+        verify_bundle(bundle["root"])
+
+
 def test_missing_canonical_replay_artifact_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "no-replay")
     replay = bundle["root"] / "canonical-replay.json"
