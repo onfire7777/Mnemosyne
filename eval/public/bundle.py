@@ -134,6 +134,22 @@ _REPRO_MANIFEST_REF_KEYS = (
     "parent",
     "difference",
 )
+_REPRO_MANIFEST_ARTIFACTS = {
+    "adapter": ("adapter", "adapter.json"),
+    "baseline": ("baseline", "baseline.json"),
+    "benchmark": ("benchmark", "benchmark-ref.json"),
+    "dataset_split": ("dataset-split", "dataset-split.json"),
+    "difference": ("difference", "difference.json"),
+    "fidelity": ("fidelity", "fidelity.json"),
+    "fixture": ("fixture", "fixture-ref.json"),
+    "generator": ("generator", "generator.json"),
+    "judge": ("judge", "judge-ref.json"),
+    "model": ("model", "model-ref.json"),
+    "parent": ("parent", "parent.json"),
+    "prompt": ("prompt", "prompt-ref.json"),
+    "reader": ("reader", "reader-ref.json"),
+    "scorer": ("scorer", "scorer.json"),
+}
 _REPRO_PUBLICATION_FLAGS = (
     "certified",
     "headline",
@@ -397,8 +413,14 @@ def _named_digest_hex(value: object, label: str) -> str:
 
 def _require_bound_digest(value: object, label: str, payloads: dict[str, bytes]) -> str:
     digest = _named_digest_hex(value, label)
-    if not any(hashlib.sha256(payload).hexdigest() == digest for payload in payloads.values()):
-        raise BundleError(f"{label} digest is not bound to an inventory file")
+    expected_name, expected_path = _REPRO_MANIFEST_ARTIFACTS[label]
+    if (
+        not isinstance(value, str)
+        or value.split("@sha256:", 1)[0] != expected_name
+        or expected_path not in payloads
+        or hashlib.sha256(payloads[expected_path]).hexdigest() != digest
+    ):
+        raise BundleError(f"{label} digest is not bound to its named artifact")
     return digest
 
 
