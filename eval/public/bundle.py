@@ -926,6 +926,7 @@ def _recompute_repro_metrics(
     manifest_intervals: object,
     *,
     config: object,
+    aborts: int,
 ) -> dict[str, Any]:
     if not isinstance(measured, dict):
         raise BundleError("missing metrics")
@@ -960,7 +961,7 @@ def _recompute_repro_metrics(
             or declared.get("missing_count") != 0
             or declared.get("unsupported_count") != 0
             or declared.get("failed_count") != 0
-            or declared.get("aborted_count") != 0
+            or declared.get("aborted_count") != aborts
             or declared.get("not_measured_count") != 0
             or declared.get("numerator") != successes
             or declared.get("denominator") != total
@@ -1203,6 +1204,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         manifest.get("metrics"),
         manifest.get("intervals"),
         config=_load_inventory_json(payloads, "config.json"),
+        aborts=manifest["traces"]["aborts"],
     )
     interval = recomputed["interval"]
     expected_result_metrics = [
@@ -1337,6 +1339,7 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
             source_manifest.get("metrics"),
             source_manifest.get("intervals"),
             config=config,
+            aborts=source_manifest["traces"]["aborts"],
         )
         _write_json(temp / "metrics.json", recomputed)
         _verify_reproducibility_bundle(temp)
