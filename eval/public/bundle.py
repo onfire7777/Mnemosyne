@@ -293,7 +293,7 @@ def canonical_replay_projection(payload: object) -> object:
     if config.get("timezone") != "UTC":
         raise BundleError("timezone must be frozen to UTC")
 
-    def project(value: object) -> object:
+    def project(value: object, *, strip_volatile_fields: bool = False) -> object:
         if isinstance(value, float) and not math.isfinite(value):
             raise BundleError("non-finite numbers are forbidden")
         if isinstance(value, dict):
@@ -302,7 +302,10 @@ def canonical_replay_projection(payload: object) -> object:
             return {
                 key: project(item)
                 for key, item in value.items()
-                if key not in CANONICAL_REPLAY_VOLATILE_FIELDS
+                if not (
+                    strip_volatile_fields
+                    and key in CANONICAL_REPLAY_VOLATILE_FIELDS
+                )
             }
         if isinstance(value, list):
             return [project(item) for item in value]
@@ -311,7 +314,10 @@ def canonical_replay_projection(payload: object) -> object:
         raise BundleError(f"canonical replay contains ambiguous value: {type(value).__name__}")
 
     try:
-        projection = project(payload)
+        projection = {
+            key: project(item, strip_volatile_fields=key == "volatile")
+            for key, item in payload.items()
+        }
         _canonical(projection)
     except BundleError:
         raise

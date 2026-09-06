@@ -259,6 +259,15 @@ def test_m15_helpers_are_reused_not_copied() -> None:
     assert "_canonical_replay_payload" in source
 
 
+def test_canonical_replay_digest_preserves_semantic_volatile_named_fields() -> None:
+    payload = _canonical_replay_payload("wmbs-m01-development")
+    changed = deepcopy(payload)
+    payload["sut_outputs"] = {"signature": "accepted-result"}
+    changed["sut_outputs"] = {"signature": "tampered-result"}
+
+    assert canonical_replay_digest(payload) != canonical_replay_digest(changed)
+
+
 def test_existing_version_1_verify_does_not_import_new_names() -> None:
     from eval.public import bundle as public_bundle
 
