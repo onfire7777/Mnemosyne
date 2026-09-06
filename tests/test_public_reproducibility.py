@@ -325,6 +325,31 @@ def test_version_1_bundle_revalidates_staged_bytes_before_publication(
     assert not list(tmp_path.glob(f".{destination.name}-*"))
 
 
+def test_version_1_bundle_revalidates_after_staging_identity_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    destination = tmp_path / "v1-post-identity-mutation"
+    original_assert = public_bundle._assert_directory_identity
+
+    def mutate_after_identity_check(
+        path: Path, expected: tuple[int, int], label: str
+    ) -> None:
+        original_assert(path, expected, label)
+        if label == "staged bundle":
+            (path / "README.md").write_bytes(b"changed\n")
+
+    monkeypatch.setattr(
+        public_bundle, "_assert_directory_identity", mutate_after_identity_check
+    )
+    with pytest.raises(BundleError, match="README bytes|digest mismatch"):
+        write_bundle(destination, **_v1_snapshot_bundle_inputs())
+
+    assert not destination.exists()
+    assert not list(tmp_path.glob(f".{destination.name}-*"))
+
+
 def test_version_1_bundle_normalizes_dot_segments_before_parent_creation(
     tmp_path: Path,
 ) -> None:
@@ -3161,6 +3186,33 @@ def test_final_reproduction_comparison_uses_stable_artifact_snapshot(
         reproduce_bundle(bundle["root"], destination)
     assert temp_result_reads == 2
     assert not destination.exists()
+
+
+def test_reproduction_revalidates_bytes_after_staging_identity_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "post-identity-source")
+    destination = tmp_path / "post-identity-destination"
+    original_assert = public_bundle._assert_directory_identity
+
+    def mutate_after_identity_check(
+        path: Path, expected: tuple[int, int], label: str
+    ) -> None:
+        original_assert(path, expected, label)
+        if label == "staged bundle":
+            (path / "result.json").write_bytes(b"changed\n")
+
+    monkeypatch.setattr(
+        public_bundle, "_assert_directory_identity", mutate_after_identity_check
+    )
+    monkeypatch.setattr(public_bundle, "_assert_reproduction_checkout", lambda *_: None)
+
+    with pytest.raises(BundleError, match="bundle changed after verification"):
+        reproduce_bundle(bundle["root"], destination)
+    assert not destination.exists()
+    assert not list(tmp_path.glob(f".{destination.name}-*"))
 
 
 def test_reproduction_rechecks_destination_ancestry_before_publication(
