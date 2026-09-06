@@ -1176,6 +1176,14 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         ]
         if not matched:
             raise BundleError("ledger run_id does not match result identity")
+        superseded_ids = {
+            entry.get("supersedes")
+            for entry in entries
+            if isinstance(entry, dict) and entry.get("status") == "superseded"
+        }
+        matched = [entry for entry in matched if entry.get("entry_id") not in superseded_ids]
+        if not matched:
+            raise BundleError("ledger result inclusion receipt is superseded")
         if not any(
             manifest["ledger_ref"]
             == f"ledger-entry@sha256:{hashlib.sha256(ledger_canonical(entry)).hexdigest()}"
