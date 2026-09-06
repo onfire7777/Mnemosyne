@@ -333,6 +333,12 @@ def _result_for_track(
     record["run_commit"] = run_commit
     for field, name in DIGEST_PAYLOAD_NAMES.items():
         record[field] = _sha256_ref(artifacts[name])
+    identity = record["identity"]
+    assert isinstance(identity, dict)
+    identity["seed"] = 20260801
+    run_profile = record["run_profile"]
+    assert isinstance(run_profile, dict)
+    run_profile["seeds"] = [20260801]
     record["metrics"] = [
         {
             "confidence_interval": {
@@ -858,6 +864,40 @@ def test_result_lineage_must_match_authenticated_manifest(
     _write_json(root / REPRO_MANIFEST_NAME, manifest)
 
     with pytest.raises(BundleError, match="result lineage does not match manifest"):
+        verify_bundle(root)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("seeds", [20260802]),
+        ("retries", 1),
+        ("aborts", 1),
+    ],
+)
+def test_result_run_profile_must_match_trace_custody(
+    tmp_path: Path, field: str, replacement: object
+) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / f"run-profile-{field}", include_ledger=False
+    )
+    root = bundle["root"]
+    result_path = root / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["run_profile"][field] = replacement
+    if field == "seeds":
+        result["identity"]["seed"] = replacement[0]
+    result_bytes = _write_json(result_path, result)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["result_ref"] = _named_ref("result-v2", result_bytes)
+    entry = next(item for item in manifest["hashes"] if item["path"] == "result.json")
+    entry["size"] = len(result_bytes)
+    entry["sha256"] = _sha256_ref(result_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="run profile does not match trace custody"):
         verify_bundle(root)
 
 
