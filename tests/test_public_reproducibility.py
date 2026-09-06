@@ -1874,6 +1874,24 @@ def test_reproduce_cleanup_does_not_delete_replacement_temp_directory(
     assert displaced.is_dir()
 
 
+def test_private_reproduction_identity_rejects_junction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    private = tmp_path / "private"
+    private.mkdir()
+    original = Path.is_junction
+    monkeypatch.setattr(
+        Path,
+        "is_junction",
+        lambda path: path == private or original(path),
+    )
+
+    with pytest.raises(BundleError, match="private reproduction path"):
+        public_bundle._owned_directory_identity(private)
+
+
 def test_atomic_publication_never_replaces_existing_destination(tmp_path: Path) -> None:
     from eval.public.bundle import _publish_directory_noreplace
 

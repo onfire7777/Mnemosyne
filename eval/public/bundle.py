@@ -1472,7 +1472,11 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
 def _owned_directory_identity(path: Path) -> tuple[int, int]:
     """Capture the filesystem identity of one process-created directory."""
     metadata = path.stat(follow_symlinks=False)
-    if not stat.S_ISDIR(metadata.st_mode):
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or path.is_symlink()
+        or getattr(path, "is_junction", lambda: False)()
+    ):
         raise BundleError("private reproduction path is not a directory")
     return metadata.st_dev, metadata.st_ino
 
@@ -1487,6 +1491,8 @@ def _remove_owned_directory(path: Path, identity: tuple[int, int]) -> None:
         return
     if (
         stat.S_ISDIR(metadata.st_mode)
+        and not path.is_symlink()
+        and not getattr(path, "is_junction", lambda: False)()
         and (metadata.st_dev, metadata.st_ino) == identity
     ):
         shutil.rmtree(path, ignore_errors=True)
