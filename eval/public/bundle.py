@@ -876,6 +876,7 @@ def _recompute_repro_metrics(
 
 
 def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
+    _reject_reproducibility_link_path(root)
     if (
         not root.is_dir()
         or root.is_symlink()
@@ -1092,7 +1093,8 @@ def _publish_directory_noreplace(source: Path, destination: Path) -> None:
 
 
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
-    destination = destination.resolve()
+    destination = destination.absolute()
+    _reject_reproducibility_link_path(destination)
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -2079,6 +2081,26 @@ def _reject_symlink_path(path: Path) -> None:
         current /= part
         if current.is_symlink():
             raise BundleError("candidate manifest path components must not be symlinks")
+
+
+def _reject_reproducibility_link_path(path: Path) -> None:
+    """Reject symlinks or junctions in every existing path component."""
+    absolute = path.absolute()
+    current = Path(absolute.anchor)
+    parts = absolute.parts[1:] if absolute.anchor else absolute.parts
+    try:
+        for part in parts:
+            current /= part
+            if current.is_symlink() or getattr(
+                current, "is_junction", lambda: False
+            )():
+                raise BundleError(
+                    "reproducibility paths must not contain links or junctions"
+                )
+    except BundleError:
+        raise
+    except OSError as exc:
+        raise BundleError("reproducibility path components cannot be inspected") from exc
 
 
 def _require_sha256(value: Any, label: str) -> None:
