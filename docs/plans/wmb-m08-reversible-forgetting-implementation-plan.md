@@ -119,6 +119,10 @@ add a **new** deterministic development fixture:
 - Seeds: at least five. Two delete/re-ingest cycles. Canonical canary digests.
   Byte-identical under `canonical_json(generate_fixture(seed))`.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
+- Freeze residual (keeps this plan NOT CODE-READY): closed case schema,
+  selector targets, operation/probe ordering, gold observations, canary
+  construction, restore/re-ingestion transitions, and seed→fixture mapping
+  must be frozen before Stage A implement — not invented from this paragraph.
 
 This paragraph does not create those files.
 
@@ -135,6 +139,10 @@ add a **new** stdlib-only oracle:
 - Adapters without the hook emit `unsupported`, never a zero.
 - Anti-gaming (spec L1291): no privileged internal undelete signal; canaries
   stay outside the SUT.
+- Freeze residual (keeps this plan NOT CODE-READY): operational formulas,
+  denominators, answer normalization, semantic-match definition, false-removal
+  / contamination attribution, and result/interval shape must be frozen before
+  Stage A implement — metric names alone are not a scorer contract.
 
 This paragraph does not create those files.
 
@@ -148,11 +156,16 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-B + C10 public contract (R2) + measured receipt (R1) + G0/G1/G2
+WMBS-B + C10 public contract (R2) + G0/G1/G2
   -> freeze this plan (GOAL step 2)
-    -> Stage A  new oracle + fixture + tests     [unadmitted]
-      -> Stage B  public-harness registration    [unadmitted; G3]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
+      -> measured / admitted claims require R1 receipt
+      -> Stage B  public-harness registration          [unadmitted; G3]
 ```
+
+R1 (measured admission receipt) gates measured/admitted profile claims, not
+creation of a pure development Stage A oracle. Spec §4 resource receipt is
+not a Stage A source blocker.
 
 Do not touch PR #115 files, #116, #117, or #118. Do not write GOAL.md,
 STATE.md, or the lease-map.
@@ -165,7 +178,8 @@ No path below is writable from this document.
 docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R1/R2/R3), not now:
+Prospective Stage A (after freeze + G0/G1/G2 + R2; R1 gates measured
+claims only; R3 remains the public-hook / UNSUPPORTED path), not now:
 
 ```text
 eval/public/wmbs_m08.py                                                 (new)
