@@ -1185,6 +1185,8 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     if manifest["traces"]["trace_index_digest"] != _sha256_ref(payloads["traces.jsonl"]):
         raise BundleError("trace_index_digest digest mismatch")
     result = _load_inventory_json(payloads, "result.json")
+    if payloads["result.json"] != _canonical(result):
+        raise BundleError("result.json bytes must be canonical")
     if manifest["result_ref"] != f"result-v2@sha256:{hashlib.sha256(payloads['result.json']).hexdigest()}":
         raise BundleError("result digest mismatch")
     if "uv.lock" not in payloads:
