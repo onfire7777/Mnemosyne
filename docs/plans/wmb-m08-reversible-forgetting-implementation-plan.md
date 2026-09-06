@@ -135,10 +135,16 @@ add a **new** stdlib-only oracle:
 - Metrics the spec names: direct leakage, semantic leakage, false removal,
   unrelated utility loss, restore correctness, re-ingestion contamination.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
-  claim the 0 / 1% / 0.5pp / 100% acceptance bounds (that is R1).
+  claim the 0 / 1% / 0.5pp / 100% acceptance bounds. Those bounds stay
+  `DEFERRED` until a scored M08 run measures them; R1 (resource receipt) is
+  independent and does not discharge leakage/restore acceptance evidence
+  (spec keeps admission state separate from measured results).
 - Adapters without the hook emit `unsupported`, never a zero.
-- Anti-gaming (spec L1291): no privileged internal undelete signal; canaries
-  stay outside the SUT.
+- Anti-gaming (spec L1291): no privileged internal undelete signal. Gold
+  values, digests, and the scorer stay harness-side; the canary-bearing
+  memory **must enter the SUT** before `delete(selector, mode=reversible)`
+  so post-delete probes measure actual forgetting (outside-SUT canaries
+  make exact-canary leakage vacuously zero).
 - Freeze residual (keeps this plan NOT CODE-READY): operational formulas,
   denominators, answer normalization, semantic-match definition, false-removal
   / contamination attribution, and result/interval shape must be frozen before
@@ -194,7 +200,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Item | After this file | After a future Stage A | After a future Stage B |
 |---|---|---|---|
 | M08 disposition | `PROPOSED` or `UNSUPPORTED-BY-SYSTEM` | same | same |
-| Spec leakage / restore bounds | `DEFERRED` (R1) | `DEFERRED` | `DEFERRED` until receipt |
+| Spec leakage / restore bounds | `DEFERRED` (scored run) | `DEFERRED` | `DEFERRED` until scored run; R1 ≠ acceptance |
 | Retain, forget, erase (spec L1252–1259) | `DEFERRED` until M07+M08+M09 are all admitted | `DEFERRED` | `DEFERRED` |
 | Publishable / headline | `false` | `false` | `false` |
 | Code lease | none | only if freeze + G1 admit it | G3 |
