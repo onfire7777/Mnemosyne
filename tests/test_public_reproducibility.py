@@ -912,6 +912,30 @@ def test_common_credential_families_fail_closed(tmp_path: Path, secret: str) -> 
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize("location", ("artifact-value", "artifact-key", "manifest"))
+def test_json_escaped_credentials_fail_closed(tmp_path: Path, location: str) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / f"escaped-{location}")
+    root = bundle["root"]
+    if location == "manifest":
+        path = root / REPRO_MANIFEST_NAME
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["operator"]["identity"] = "github_pat_" + ("M" * 24)
+    else:
+        path = root / "environment.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        secret = "github_pat_" + ("E" * 24)
+        if location == "artifact-key":
+            payload[secret] = "value"
+        else:
+            payload["credential"] = secret
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    encoded = encoded.replace("github_pat_", r"github\u005fpat_")
+    assert "github_pat_" not in encoded
+    path.write_text(encoded, encoding="utf-8", newline="\n")
+    with pytest.raises(BundleError, match="decoded artifact"):
+        verify_bundle(root)
+
+
 def test_aggregate_bundle_size_is_bounded_before_full_allocation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -951,6 +975,17 @@ def test_inventory_json_depth_is_bounded(tmp_path: Path) -> None:
     entry["sha256"] = _sha256_ref(artifact_bytes)
     _write_json(manifest_path, manifest)
     with pytest.raises(BundleError, match="nesting"):
+        verify_bundle(bundle["root"])
+
+
+def test_inventory_media_type_matches_core_artifact_content(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "media-type")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["hashes"] if item["path"] == "adapter.json")
+    entry["media_type"] = "text/plain"
+    _write_json(manifest_path, manifest)
+    with pytest.raises(BundleError, match="media type"):
         verify_bundle(bundle["root"])
 
 

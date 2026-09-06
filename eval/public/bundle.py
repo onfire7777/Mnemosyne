@@ -575,6 +575,25 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
         if path in seen_paths:
             raise BundleError("duplicate normalized path")
         seen_paths.add(path)
+        expected_media_type = (
+            "application/jsonl"
+            if path.endswith(".jsonl")
+            else "application/x-pem-file"
+            if path.endswith(".pem")
+            else "text/plain"
+            if path == "uv.lock"
+            else "application/json"
+            if path.endswith(".json")
+            else None
+        )
+        if (
+            item.get("canonicalization") != "raw-bytes"
+            or (
+                expected_media_type is not None
+                and item.get("media_type") != expected_media_type
+            )
+        ):
+            raise BundleError("inventory media type or canonicalization mismatch")
         _require_sha256_digest(item.get("sha256"), "inventory digest")
     metrics = payload.get("metrics")
     if not isinstance(metrics, list) or not metrics:
@@ -676,7 +695,7 @@ def _read_reproducibility_manifest(root: Path) -> tuple[bytes, dict[str, Any]]:
     manifest_path = root / REPRODUCIBILITY_MANIFEST_NAME
     try:
         manifest_bytes, _ = _read_inventory_file(manifest_path)
-        loaded = _parse_json(
+        loaded = _parse_bounded_json(
             manifest_bytes.decode("utf-8"), REPRODUCIBILITY_MANIFEST_NAME
         )
     except UnicodeDecodeError as exc:
@@ -2246,7 +2265,22 @@ def _load_inventory_json(payloads: dict[str, bytes], name: str) -> Any:
 def _parse_bounded_json(raw: str, label: str) -> Any:
     value = _parse_json(raw, label)
     _json_depth(value)
+    _reject_decoded_secrets(value)
     return value
+
+
+def _reject_decoded_secrets(value: object) -> None:
+    """Reject secret patterns after JSON escape decoding, including keys."""
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str) and SECRET.search(current):
+            raise BundleError("secret-like material detected in decoded artifact")
+        if isinstance(current, dict):
+            pending.extend(current.keys())
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
 
 
 def _parse_json(raw: str, label: str) -> Any:
