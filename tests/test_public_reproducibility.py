@@ -404,6 +404,7 @@ def _write_reproducibility_bundle(
     scoring_profile: str = "smoke-hit-at-k-v1",
     lockfile: bytes | None = None,
     ledger_run_id: str | None = None,
+    ledger_numeric_alias: bool = False,
     supersede_ledger: bool = False,
     trace_aborts: int = 0,
 ) -> dict[str, Any]:
@@ -537,6 +538,12 @@ def _write_reproducibility_bundle(
             )
         )
         ledger_path = root / "ledger.jsonl"
+        ledger_result = deepcopy(result)
+        if ledger_numeric_alias:
+            ledger_metrics = ledger_result["metrics"]
+            assert isinstance(ledger_metrics, list)
+            assert isinstance(ledger_metrics[0], dict)
+            ledger_metrics[0]["value"] = 1
         entry = append_entry(
             ledger_path,
             private_path,
@@ -545,7 +552,7 @@ def _write_reproducibility_bundle(
             entrant_id="synthetic-entrant",
             status="succeeded",
             run_id=ledger_run_id or str(result["identity"]["run_id"]),
-            result=result,
+            result=ledger_result,
             roster={"synthetic-entrant"},
         )
         if supersede_ledger:
@@ -1361,6 +1368,15 @@ def test_signed_ledger_run_id_must_match_result_identity(tmp_path: Path) -> None
         tmp_path / "ledger-run-mismatch", ledger_run_id="different-run"
     )
     with pytest.raises(BundleError, match="ledger run_id does not match"):
+        verify_bundle(bundle["root"])
+
+
+def test_signed_ledger_result_requires_canonical_type_exact_match(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "ledger-numeric-alias", ledger_numeric_alias=True
+    )
+
+    with pytest.raises(BundleError, match="ledger result reference mismatch"):
         verify_bundle(bundle["root"])
 
 
