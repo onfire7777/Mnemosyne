@@ -402,6 +402,7 @@ def _write_reproducibility_bundle(
     k: int | None = 1,
     traces: bytes | None = None,
     scoring_profile: str = "smoke-hit-at-k-v1",
+    suite: str = "smoke",
     lockfile: bytes | None = None,
     ledger_run_id: str | None = None,
     ledger_numeric_alias: bool = False,
@@ -421,7 +422,7 @@ def _write_reproducibility_bundle(
             "interval_method": "wilson",
             "locale": "C",
             "scoring_profile": scoring_profile,
-            "suite": "smoke",
+            "suite": suite,
             "timezone": "UTC",
             **({"k": k} if k is not None else {}),
         }
@@ -464,7 +465,7 @@ def _write_reproducibility_bundle(
     supporting = {
         "adapter.json": {"id": "smoke", "kind": "adapter"},
         "baseline.json": {"id": "none", "kind": "baseline"},
-        "benchmark-ref.json": {"id": "smoke", "kind": "benchmark"},
+        "benchmark-ref.json": {"id": suite, "kind": "benchmark"},
         "dataset-split.json": {"id": "development-self-test", "kind": "dataset-split"},
         "fixture-ref.json": {"id": "smoke", "kind": "fixture"},
         "generator.json": {"id": "registry", "kind": "generator"},
@@ -2066,6 +2067,13 @@ def test_unregistered_scoring_profile_fails_closed(tmp_path: Path) -> None:
         scoring_profile="unregistered-hit-at-k-v9",
     )
     with pytest.raises(BundleError, match="scoring profile"):
+        verify_bundle(bundle["root"])
+
+
+def test_blank_bound_suite_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "blank-suite", suite=" ")
+
+    with pytest.raises(BundleError, match="suite"):
         verify_bundle(bundle["root"])
 
 
