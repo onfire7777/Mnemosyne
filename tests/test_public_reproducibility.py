@@ -300,7 +300,7 @@ def _assert_objects_closed(node: object, path: str = "$") -> None:
             _assert_objects_closed(item, f"{path}[{index}]")
 
 
-def _m02_replay_payload() -> dict[str, object]:
+def _m02_replay_payload(commit: str) -> dict[str, object]:
     payload = _canonical_replay_payload("wmbs-m01-development")
     fixture_digest = "2" * 64
     payload["suite"] = "wmbs-m02-retrieval-development"
@@ -309,6 +309,10 @@ def _m02_replay_payload() -> dict[str, object]:
     manifests = payload["manifests"]
     assert isinstance(manifests, dict)
     manifests["fixture_manifest_sha256"] = fixture_digest
+    payload["build"] = {
+        "candidate_git_sha": commit,
+        "system_seam": "public-cli-subprocess",
+    }
     return payload
 
 
@@ -425,7 +429,7 @@ def _write_reproducibility_bundle(
         "trace_count": 1,
         "value": _SMOKE_WILSON["point"],
     }
-    replay = _m02_replay_payload()
+    replay = _m02_replay_payload(commit)
     supporting = {
         "adapter.json": {"id": "smoke", "kind": "adapter"},
         "baseline.json": {"id": "none", "kind": "baseline"},
@@ -1494,6 +1498,37 @@ def test_result_ledger_and_m15_cross_reference_mismatches_fail_closed(
     _write_json(replay_mismatch["root"] / REPRO_MANIFEST_NAME, payload)
     with pytest.raises(BundleError, match="replay|digest"):
         verify_bundle(replay_mismatch["root"])
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "replacement"),
+    (
+        ("build", "candidate_git_sha", "f" * 40),
+        ("build", "system_seam", "different-seam"),
+    ),
+)
+def test_canonical_replay_run_custody_matches_bound_artifacts(
+    tmp_path: Path, section: str, field: str, replacement: str
+) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / f"replay-custody-{section}-{field}"
+    )
+    root = bundle["root"]
+    replay_path = root / "canonical-replay.json"
+    replay = json.loads(replay_path.read_text(encoding="utf-8"))
+    replay[section][field] = replacement
+    replay_bytes = _write_json(replay_path, replay)
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["canonical_replay"]["digest"] = canonical_replay_digest(replay)
+    entry = next(
+        item for item in manifest["hashes"] if item["path"] == "canonical-replay.json"
+    )
+    entry["size"] = len(replay_bytes)
+    entry["sha256"] = _sha256_ref(replay_bytes)
+    _write_json(manifest_path, manifest)
+    with pytest.raises(BundleError, match="replay (?:build|config) custody mismatch"):
+        verify_bundle(root)
 
 
 def test_reproduce_deletes_incomplete_output_and_does_not_use_shell(
