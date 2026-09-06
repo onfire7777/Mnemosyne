@@ -8,7 +8,7 @@ import re
 import secrets
 import subprocess
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
@@ -185,7 +185,7 @@ def build_sleep_payload(
     """Bind the exact 15-01-02 sleep job fields plus a deterministic fingerprint."""
 
     tier = validate_cadence_tier(requested_tier)
-    cids = [str(cid) for cid in source_evidence_cids if cid]
+    cids = _canonicalize_sleep_cids(source_evidence_cids)
     payload: dict[str, Any] = {
         "tenant_id": str(tenant_id),
         "branch": str(branch),
@@ -201,6 +201,26 @@ def build_sleep_payload(
         payload["now"] = _sleep_dt_json(now)
     payload["idempotency_fingerprint"] = sleep_job_fingerprint(payload)
     return payload
+
+
+def _canonicalize_sleep_cids(cids: Sequence[Any]) -> list[str]:
+    unique: list[str] = []
+    seen: set[str] = set()
+    for raw in cids:
+        cid = str(raw)
+        if cid and cid not in seen:
+            seen.add(cid)
+            unique.append(cid)
+    return sorted(unique)
+
+
+def _policy_max_sensitivity(policy: Any) -> int:
+    if policy is None or not hasattr(policy, "max_sensitivity"):
+        return 3
+    raw = getattr(policy, "max_sensitivity")
+    if raw is None:
+        return 3
+    return int(raw)
 
 
 def _access_policy_expired_at(access_policy: Mapping[str, Any] | None, now: datetime) -> bool:
@@ -441,7 +461,7 @@ class ConsolidationWorker:
         self._tenant_last_pass_at: dict[str, datetime] = {}
         self._tier_cid_last: dict[tuple[str, str, str, str], tuple[int, datetime]] = {}
         self._sleep_memo: dict[str, ConsolidationRunResult] = {}
-        self._sleep_last_now: datetime | None = None
+        self._sleep_last_now: dict[str, datetime] = {}
         # §23.3 / §7 #17: fact promote floor is policy.min_external_corroboration_for_fact
         # (Standing independent external count). Optional min_corroboration may only
         # raise the floor, never lower it below policy.
@@ -576,16 +596,28 @@ class ConsolidationWorker:
         evidence_seen = len(evidence)
         if cadence_tier is not None:
             passes_run = [str(name) for name in policy.consolidation_cadence_tier_passes[cadence_tier]]
+        elif payload.get("sleep_bound_passes"):
+            raw_passes = payload.get("passes")
+            passes_run = [str(name) for name in raw_passes] if isinstance(raw_passes, list) else []
         else:
             passes_run = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
         if prediction_gate["gate"] == "low_prediction_error_metadata_only":
             allowed = {"replayer", "forgetter", "embedder", "user_model_updater"}
             passes_run = [name for name in passes_run if name in allowed]
-        run_core_mutation = cadence_tier is None or any(
-            name in passes_run for name in ("extractor", "resolver", "belief_reviser")
-        )
+        core_names = ("extractor", "resolver", "belief_reviser")
+        if payload.get("sleep_bound_passes"):
+            run_core_mutation = any(name in passes_run for name in core_names)
+        else:
+            run_core_mutation = cadence_tier is None or any(name in passes_run for name in core_names)
         pass_results: list[PassResult] = []
         skipped: list[str] = list(missing)
+        sleep_deadline: datetime | None = None
+        raw_deadline = payload.get("sleep_deadline")
+        if raw_deadline:
+            sleep_deadline = datetime.fromisoformat(str(raw_deadline))
+        if sleep_deadline is not None and self._clock() >= sleep_deadline:
+            skipped.append("runtime_limit")
+            run_core_mutation = False
         if workspace_advisory is not None:
             if (
                 workspace_advisory.status == "complete"
@@ -693,6 +725,11 @@ class ConsolidationWorker:
 
         for pass_name in passes_run:
             if pass_name in {"replayer", "extractor", "resolver", "belief_reviser"}:
+                continue
+            if sleep_deadline is not None and self._clock() >= sleep_deadline:
+                if "runtime_limit" not in skipped:
+                    skipped.append("runtime_limit")
+                pass_results.append(PassResult(pass_name, "skipped", {"reason": "runtime_limit"}))
                 continue
             if no_write_data and pass_name in {"summarizer", "user_model_updater"}:
                 skipped.append(f"{pass_name}_source_marked_data_only")
@@ -803,7 +840,7 @@ class ConsolidationWorker:
 
         tenant_id = str(payload["tenant_id"])
         branch = str(payload.get("branch", "main"))
-        source_evidence_cids = [str(cid) for cid in payload.get("source_evidence_cids", []) if cid]
+        source_evidence_cids = _canonicalize_sleep_cids(payload.get("source_evidence_cids", []))
         if not source_evidence_cids:
             raise ValueError("sleep payload requires source_evidence_cids")
         requested_tier = validate_cadence_tier(payload.get("requested_tier"))
@@ -819,9 +856,8 @@ class ConsolidationWorker:
         if fingerprint != sleep_job_fingerprint(payload):
             raise RuntimeError("sleep job stale identity: idempotency fingerprint mismatch")
 
-        if now < enqueued_at or (
-            self._sleep_last_now is not None and now < self._sleep_last_now
-        ):
+        last_now = self._sleep_last_now.get(tenant_id)
+        if now < enqueued_at or (last_now is not None and now < last_now):
             raise RuntimeError("sleep consolidation refused: clock rollback")
         if now >= not_after:
             raise RuntimeError("sleep job stale: now is at or after not_after")
@@ -837,7 +873,7 @@ class ConsolidationWorker:
                 "not_after": _sleep_dt_json(not_after),
             },
         )
-        self._sleep_last_now = now
+        self._sleep_last_now[tenant_id] = now
 
         started = self._clock()
         policy = self.policy if isinstance(self.policy, OperatingPolicy) else OperatingPolicy()
@@ -878,7 +914,9 @@ class ConsolidationWorker:
 
         tier_passes = [str(name) for name in policy.consolidation_cadence_tier_passes[requested_tier]]
         bounded_passes = tier_passes[:pass_limit]
-        if not selected:
+        if not selected or not bounded_passes:
+            if not bounded_passes and "runtime_limit" not in skipped_reasons:
+                skipped_reasons.append("pass_limit")
             return ConsolidationRunResult(
                 tenant_id=tenant_id,
                 branch=branch,
@@ -912,8 +950,12 @@ class ConsolidationWorker:
                 "source_evidence_cids": selected,
                 "passes": bounded_passes,
                 "now": _sleep_dt_json(now),
+                "sleep_bound_passes": True,
+                "sleep_deadline": _sleep_dt_json(started + timedelta(seconds=runtime_limit_seconds)),
             }
         )
+        if "runtime_limit" in result.skipped and "runtime_limit" not in skipped_reasons:
+            skipped_reasons.append("runtime_limit")
         result.sleep_receipt = self._sleep_receipt(
             requested_tier=requested_tier,
             input_cids=selected,
@@ -1014,20 +1056,33 @@ class ConsolidationWorker:
             sensitivity=int(item.sensitivity),
             access_policy=read_policy,
             context={"tenant_id": tenant_id, "role": "consolidator"},
-            policy_max_sensitivity=int(getattr(self.policy, "max_sensitivity", 3) or 3),
+            policy_max_sensitivity=_policy_max_sensitivity(self.policy),
             erased=bool(item.erased),
         )
-        if not decision.allowed:
+        if not decision.allowed or decision.redacted:
             return "unauthorized"
         sourced = [
             row
             for row in assertions
             if cid in {str(value) for value in row.get("source_evidence_cids", []) if value}
         ]
-        if any(str(row.get("status") or "") == "superseded" for row in sourced):
-            return "superseded"
-        if any(_valid_to_expired_at(row.get("valid_to"), now) for row in sourced):
-            return "valid_to_expired"
+        live_support = False
+        saw_superseded = False
+        saw_valid_to_expired = False
+        for row in sourced:
+            if str(row.get("status") or "") == "superseded":
+                saw_superseded = True
+                continue
+            if _valid_to_expired_at(row.get("valid_to"), now):
+                saw_valid_to_expired = True
+                continue
+            live_support = True
+            break
+        if not live_support:
+            if saw_superseded:
+                return "superseded"
+            if saw_valid_to_expired:
+                return "valid_to_expired"
         return None
 
     @staticmethod
