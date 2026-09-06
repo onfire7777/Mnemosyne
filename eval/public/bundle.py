@@ -1992,8 +1992,45 @@ def write_report(
     report_output: Path | str,
     report_note: Path | str,
 ) -> dict[str, Any]:
-    """Write a deterministic evidence report only for a matching reproduction."""
-    source_root, reproduced_root = Path(source).resolve(), Path(reproduced).resolve()
+    """Write a report from private snapshots of two matching legacy bundles."""
+    source_display = Path(source).absolute()
+    reproduced_display = Path(reproduced).absolute()
+    source_snapshot = Path(tempfile.mkdtemp(prefix="mnemo-report-source-"))
+    source_identity = _owned_directory_identity(source_snapshot)
+    try:
+        reproduced_snapshot = Path(
+            tempfile.mkdtemp(prefix="mnemo-report-reproduced-")
+        )
+        reproduced_identity = _owned_directory_identity(reproduced_snapshot)
+    except BaseException:
+        _remove_owned_directory(source_snapshot, source_identity)
+        raise
+    try:
+        _snapshot_legacy_bundle(source_display, source_snapshot)
+        _snapshot_legacy_bundle(reproduced_display, reproduced_snapshot)
+        return _write_report_from_snapshots(
+            source_snapshot,
+            reproduced_snapshot,
+            report_output,
+            report_note,
+            source_display=source_display,
+            reproduced_display=reproduced_display,
+        )
+    finally:
+        _remove_owned_directory(reproduced_snapshot, reproduced_identity)
+        _remove_owned_directory(source_snapshot, source_identity)
+
+
+def _write_report_from_snapshots(
+    source_root: Path,
+    reproduced_root: Path,
+    report_output: Path | str,
+    report_note: Path | str,
+    *,
+    source_display: Path,
+    reproduced_display: Path,
+) -> dict[str, Any]:
+    """Write one report from already private bundle snapshots."""
     source_result, reproduced_result = (
         verify_bundle(source_root),
         verify_bundle(reproduced_root),
@@ -2013,7 +2050,12 @@ def write_report(
         raise FileExistsError("refusing to overwrite report output or note")
     git_sha = _git_sha()
     generated_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    evidence = _report_evidence(source_root, reproduced_root)
+    evidence = _report_evidence(
+        source_root,
+        reproduced_root,
+        source_display=source_display,
+        reproduced_display=reproduced_display,
+    )
     report = {
         "bindings": {
             "reproduced_bundle_manifest_sha256": _digest(
@@ -2034,9 +2076,9 @@ def write_report(
             "mneme",
             "eval-public",
             "--write-report",
-            str(source_root),
+            str(source_display.resolve()),
             "--reproduced-bundle",
-            str(reproduced_root),
+            str(reproduced_display.resolve()),
             "--report-output",
             str(output.resolve()),
             "--report-note",
@@ -2047,8 +2089,8 @@ def write_report(
             "pbpp_headline_eligible": False,
             "publishable": False,
         },
-        "reproduced_bundle": str(reproduced_root),
-        "source_bundle": str(source_root),
+        "reproduced_bundle": str(reproduced_display.resolve()),
+        "source_bundle": str(source_display.resolve()),
         "suite": source_result["suite"],
         "version": 1,
     }
@@ -2220,7 +2262,15 @@ def verify_report(report_path: Path | str, report_note: Path | str) -> dict[str,
     }
 
 
-def _report_evidence(source: Path, reproduced: Path) -> dict[str, Any]:
+def _report_evidence(
+    source: Path,
+    reproduced: Path,
+    *,
+    source_display: Path | None = None,
+    reproduced_display: Path | None = None,
+) -> dict[str, Any]:
+    source_display = source if source_display is None else source_display
+    reproduced_display = reproduced if reproduced_display is None else reproduced_display
     benchmark = _load_json(source / "benchmark.json")
     build = _load_json(source / "build.json")
     metrics = _load_json(source / "metrics.json")
@@ -2253,12 +2303,12 @@ def _report_evidence(source: Path, reproduced: Path) -> dict[str, Any]:
         "metrics": metrics,
         "provenance": {
             "build": build,
-            "source_bundle": str(source.resolve()),
+            "source_bundle": str(source_display.resolve()),
             "system_seam": build.get("system_seam"),
         },
         "reproduction": {
             "matched_files": list(_manifest_files(source)),
-            "reproduced_bundle": str(reproduced.resolve()),
+            "reproduced_bundle": str(reproduced_display.resolve()),
             "verified": True,
         },
     }
