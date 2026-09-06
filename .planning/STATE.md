@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the serial operator-measurement critical path at `main@6801fbd0`; PR #109 merged from audited topology head `cb44f21296fc22cf92f847b8201a6881e915400c` after exact-head CI `31865413163` passed, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at `2026-08-15T05:24:36Z`. It raced the lifecycle amendment and is recorded as a sequencing deviation; post-main CI `31866875258` succeeded at `2026-08-15T05:51:12Z`, and no later edge opened before that gate closed. Ruleset `19157561` requires strict up-to-date status checks; T10 therefore reserves immutable non-lifecycle content anchors with topology-only refreshes. PRs #110-#112 remain drafts, byte-identical to their approved content anchors outside the three lifecycle files, and strictly ordered. This amendment must land before #110. Current-main ancestry, exact lifecycle-parent equality, exact-head required/native CI, security review, head equality, cleared threads, and successful post-main CI remain mandatory at every edge. Production Postgres/PPR parity, runtime readiness, grounded-reader development QA, exact external candidate/runtime custody, host admission, canonical mTLS inputs, the protected attempt, and held-out evidence remain open. Phase 14-15 remain dependency/evidence gated and Phase 16 launch remains gated."
-last_updated: "2026-08-15T05:54:05Z"
-last_activity: 2026-08-15
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path at `main@f688c747`; later merged receipts are recorded in the lease map. PR #117 is merged and owns no active lifecycle writer. PR #135 discharges P13-C, closes BENCH-007, and retires the unavailable Mac signed-publication reservation. N12 is ready for single-owner admission after this receipt lands and a fresh main/lease check; no implementation writer starts here. Phase 14 still requires N12 implementation, and official benchmark, protected, hardware, custody, and publication gates remain open."
+last_updated: "2026-09-05T01:13:00Z"
+last_activity: 2026-09-05
 progress:
   total_phases: 7
   completed_phases: 2
@@ -39,7 +39,13 @@ See: .planning/PROJECT.md (updated 2026-06-19)
 Phase: 12 of 16 — Grounded Multi-Hop Answer Synthesis
 Plan: 4 of 4
 Status: Plan 12-04's full lease sweep is **delivered to `main`**. **12-04-01** preserved. **12-04-02** landed via PR #46. Residual Leases **A, C, D, E, F** via PRs #47–#51; **Lease G / G-wire / G-consol** external corroboration via #52–#54; Blueprint §7 **#19a, #19a.1, #19b** counterfactual fidelity via #55–#57; **#18** multi-signal `calibrated_confidence` fuse via #58; **#12** per-example conformal via #59; **#13** AGM contraction + ATMS labels via #60; **#14** `must_keep` + pointer-to-original via #61. All sixteen merged on green required CI, ending at `main@34effb4b`; the `.planning/STATE.md` reconcile followed as PR #62 (`main@e1b02221`). Delivery was verified by content, not commit count: every product tree was byte-identical between `main` and the retired staging branch. Blueprint §7 items **#12, #13, #14, #18, #19** are now marked closed in `BLUEPRINT-PARITY-MATRIX.md` with their merge SHAs — each re-verified as genuinely wired in `src/` before marking, including `counterfactual_replay_score()`, which is no longer dead. CAP-003/BENCH-005 remain **Partial** until measured EM/F1 ≥ 0.85 — no benchmark or headline claim changed. **12-04-03** and production VM/Vault/W4–W5/headline stay Blocked. W3 memory planes + CAP-012/013 Complete history via PR #39 `main@0784340` unchanged.
-Last activity: 2026-08-02 — PR #86 merged the two-file bounded scheduled
+Last activity: 2026-09-05 — PR #135 records successful scheduled run
+`30807305055`, closes BENCH-007, and releases the obsolete signed-publication
+reservation after the owner confirmed the old Mac and its files are no longer
+available. N12 is ready for one owner's admission after this receipt lands;
+no source writer starts here. Phase/plan progress counters remain unchanged.
+
+Historical activity: 2026-08-02 — PR #86 merged the two-file bounded scheduled
 development-regression workflow at `main@661343ce`; input-free manual run
 `30561430522` passed the fixed four-test contract job. PR #87 then merged the
 canonical truth reconciliation at `main@2ba4ed80` (post-merge CI
@@ -140,18 +146,12 @@ Windows job.
 Fresh cumulative security scan `e95df6b0-da9d-4688-a2a0-4378be4973d1`
 covers all 32 refreshed-stack files with zero findings and proves the binary
 diff hash matches the approved cumulative stack.
-PR #109 is **MERGED** from exact head
-`cb44f21296fc22cf92f847b8201a6881e915400c`, with exact-head CI
-`31865413163` green, as `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4`
-at `2026-08-15T05:24:36Z`. It raced this amendment and is recorded as a
-sequencing deviation; post-main run `31866875258` succeeded. PRs #110-#112
-remain drafts and no later edge is open until this amendment lands. Their
-lifecycle blobs are parent-exact: #110 equals
-current `main`, #111 equals #110, and #112 equals #111.
-Controller amendment PR #114 is **OPEN/DRAFT**, changes only the three
-lifecycle authorities, and grants no implementation scope. Its self-record
-changes its head, so no exact PR #114 head, merge SHA/time, or post-main CI is
-claimed. PR #114 must pass and merge before #110.
+PR #109's sequencing deviation remains recorded in the lease map. PR #114 then
+delivered the topology amendment, and PRs #110, #111, and #112 merged in the
+required serialized order with exact-head and post-main CI green at every edge,
+ending at `main@61f55b94`. Their lifecycle blobs were parent-exact and their
+non-lifecycle bytes matched the immutable anchors; no Windows stack writer
+remains open.
 One controller owns every serialized `.github/workflows/ci.yml` integration
 edge. Exact-head required/native CI, fresh security review, local/remote/hosted
 head equality, cleared review threads, current-main ancestry, and successful
@@ -172,11 +172,13 @@ PR #91 replaced it; Tasks 7 and 8 are closed on `main` by PR #90. Fifteen
 of those records (r17, r19-r21, r23-r31, r34, r35) still carry unchecked
 task boxes: those boxes record the plan as written at the time and are not a
 delivery signal, because each round's merged receipts are recorded in this
-file and in the lease map rather than back-filled into the round record. The
-first actual scheduled-cadence receipt is still open: the
-workflow cron is `23 7 * * 1` and the first eligible real `schedule` event is
-2026-08-03, so the existing manual dispatch is not a substitute. No benchmark,
-measurement, or publication claim changed in PRs #87-#92. Official
+file and in the lease map rather than back-filled into the round record. P13-C's
+first actual scheduled-cadence receipt is discharged: `schedule` run
+`30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd`, started
+`2026-08-03T10:52:57Z`, with successful job `91665545558` and fixed
+public-contract test step. GitHub metadata was verified on 2026-09-05 and is
+retained in the lease map; this is real cron evidence, not the manual dispatch.
+No benchmark, measurement, or publication claim changed in PRs #87-#92. Official
 MemoryAgentBench/BEAM execution and all benchmark/publication claims remain
 open. The earlier Phase 12 lease sweep remains delivered and its operator-only
 measurement boundary is unchanged.
@@ -200,12 +202,27 @@ weekly/manual development-regression workflow through PR #86 with no dispatch
 inputs, secrets, artifacts, providers, official assets, or claim outputs.
 Exact post-merge main CI run `30561266140` passed on `main@661343ce`.
 BENCH-006 remains Partial behind official/upstream rights, disclosure,
-operator, and execution evidence. BENCH-007 remains Partial until the first
-actual scheduled-cadence receipt is retained; the passing manual run proves
-only development operability.
+operator, and execution evidence. The P13-C scheduled-cadence subgate is
+discharged by retained run `30807305055`; the passing manual run proves only
+development operability. BENCH-007 is Complete in the requirement, roadmap,
+and Phase 13 summary records. Phase/plan progress counters do not change:
+the source plan was already complete, while Phase 13 remains open for
+BENCH-006. This does not establish official benchmark evidence.
 
 Phase 14 has one frozen plan. REPRO-001 implementation is blocked on additive
-result-v2 dispatch and release of the protected signed-publication lease;
+result-v2 dispatch; the obsolete signed-publication reservation is released
+by the owner-confirmed unavailability disposition recorded on 2026-09-05.
+PR #69's source merge `a4e80b5a67b0437d3a864af0fe347febfe32e58b` and PR #70's
+delivery-receipt merge `eeb8765ea1f4cc924002ad8234df50326e227aed` are verified
+ancestors of inspected `origin/main@3281e61ed6b3d077628e3fd03ce0ec8de22cde18`.
+The owner confirmed that the old Mac and its files are no longer available.
+The reservation for `/Users/admin/Mnemosyne.codex-phase16-signed-publication`
+is retired; this does not claim its files were inspected, recovered, or deleted.
+Any subsequently recovered work requires a fresh handoff and review.
+Current open PRs and local worktrees do not overlap N12's exact source paths,
+so N12 is READY FOR ADMISSION after this receipt lands, with one result-v2
+integration owner and a fresh main/lease check at assignment.
+No N12 or downstream source writer is admitted by this receipt.
 REPRO-002 additionally requires a headline-eligible pinned official result.
 Phase 15 has four ordered frozen plans. S2 depends on Phase 14; S3-S5 then
 serialize behind S2, with hardware, scale, protected, licensed, and operator
@@ -242,7 +259,7 @@ reported as implemented evidence.
 
 ### Decisions
 
-- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 merged bounded M12/M13 evidence to `main@7e9cd01feb2a31cbba96252943697245a4edd024`; PR #83 merged bounded M03 valid-time source head `3189cc24c570f12be06e3d04252a06f48c71f971` to `main@7f60d8ba8274a8ac8036a80737467654f862008f`; PR #84 merged M15 canonical replay and the composed M01→M03→M10 cassette to `main@e0dd41594cec890f598718160f919c13eee1e552`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, M15 remains development-only, and all results remain non-publishable. The next package requires fresh dependency/write-lease admission; result-v2 and sandbox retain their stated blockers.
+- [Whole-memory benchmark]: PR #81 merged exact M01/M10 source head `98b83e4be373cf0acd5411769b80b98dfd1a8caa` to `main@392b1fc173f454893e1b133ff3a727462586a8b0`; PR #82 merged bounded M12/M13 evidence to `main@7e9cd01feb2a31cbba96252943697245a4edd024`; PR #83 merged bounded M03 valid-time source head `3189cc24c570f12be06e3d04252a06f48c71f971` to `main@7f60d8ba8274a8ac8036a80737467654f862008f`; PR #84 merged M15 canonical replay and the composed M01→M03→M10 cassette to `main@e0dd41594cec890f598718160f919c13eee1e552`. M01/M10 remain `PILOT-READY-DEV`, M03/M12/M13 remain `PROPOSED`, M15 remains development-only, and all results remain non-publishable. The next package requires fresh dependency/write-lease admission; the obsolete result-v2 reservation is released by the 2026-09-05 owner confirmation, making N12 ready for admission after PR #135 lands. Sandbox retains its enforcement-evidence blocker.
 - [Phase 12]: W1 local development is complete through the baseline, Fix A, and Fix B receipts, but it does not close CAP-003, BENCH-005, or Plan 12-04 without production-Postgres parity, runtime readiness, grounded-reader development QA, and the protected attempt.
 - [W3]: The full prospective-memory + working-memory plane is merged across Local/Postgres/Sqlite through PR #39 as `main@0784340` (Phase 1 hardening had landed earlier via PR #37 `7a1db210`). CAP-012/CAP-013 are Complete and test-pinned by `tests/test_planning_traceability.py`; the W2 D5 signed deletion manifest and the I0R signed-session public-action evaluator landed in the same merge. The I0R action suites are development-split and `publishable:false`, so they add no public/headline benchmark claim. Remaining W3 retrieval/rails/benchmark integration beyond those development suites, and the W4/W5 external-adapter GATEs, stay operator-gated and are not claimed complete.
 - [Operations]: The local/full verification and Graphify/CBM/gbrain refresh were hardware-admitted and completed at `main@7a1db210`. VM/Vault restart, runtime-readiness repair, R3/R4 live rotation, grounded-reader development QA, the protected attempt, and W1 production parity remain operator-gated and must not be reported as failures or silently run while the production stack is intentionally stopped.
@@ -434,10 +451,12 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 after exact-head CI `31865413163` passed, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@6801fbd0`. Node `T10` now reserves only the
-remaining content-anchored stack #110 -> #111 -> #112 under the rolling strict-
-check contract recorded in the lease map; successful post-main CI must separate
-their merge commits. PR #90 is
+current canonical baseline is `main@f688c747`. Node `T10` is delivered through
+PR #112. PR #115 merged M02 Stage-B at this baseline, but its reproduced review
+defects remain open and require a serialized corrective successor. PR #117
+delivered the coupled lifecycle reconciliation and topology-verifier remediation
+as merge `d11ffe5e61511269efcf38ccd2ad064564580109` on 2026-08-31; it owns no
+active writer. PR #90 is
 development-source
 documentation and tests only, PRs #91-#92 are lifecycle documentation only,
 and `T5` is discharged as PR #94; `T6` is discharged as PR #95;
