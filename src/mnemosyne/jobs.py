@@ -11,6 +11,7 @@ from typing import Any
 from mnemosyne.calibration import CalibrationSet, calibration_examples_from_rows, conformal_threshold, should_abstain, tune_calibration_set
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
+    CONSOLIDATE_SLEEP_JOB,
     DEFAULT_CONSOLIDATION_PASSES,
     CandidateExtractor,
     ConsolidationWorker,
@@ -89,6 +90,7 @@ class RuntimeJobHandlers:
     def handlers(self) -> dict[str, Any]:
         return {
             CONSOLIDATE_EVIDENCE_JOB: self.consolidator.run_queue_payload,
+            CONSOLIDATE_SLEEP_JOB: self.consolidator.run_sleep_payload,
             CALIBRATE_JOB: self.run_calibration,
             LIFECYCLE_SWEEP_JOB: self.run_lifecycle_sweep,
             EVAL_SUITE_JOB: self.run_eval_suite,

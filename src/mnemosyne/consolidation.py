@@ -13,7 +13,7 @@ from hashlib import sha256
 from typing import Any, Callable, Mapping, Protocol, Sequence
 from uuid import NAMESPACE_URL, uuid5
 
-from mnemosyne.access_policy import merge_access_policies, validate_access_policy
+from mnemosyne.access_policy import expiry_deadline, may_read_item, merge_access_policies, validate_access_policy
 from mnemosyne.command_line import split_command
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import (
@@ -25,7 +25,7 @@ from mnemosyne.gate import (
 )
 from mnemosyne.learning import Lesson, Procedure
 from mnemosyne.lifecycle import FidelityTier, LifecycleState, apply_rehearsal_schedule, demotion_decision
-from mnemosyne.models import Assertion, Evidence, Relation, utc_now
+from mnemosyne.models import Assertion, Evidence, Relation, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy, validate_cadence_tier
 from mnemosyne.privacy import detect_pii_tags, redact_pii_text
 from mnemosyne.retrieval import HashingEmbeddingProvider, is_retired_summary_metadata
@@ -35,6 +35,7 @@ from mnemosyne.text import hashing_embedding
 from mnemosyne.user_model import LatentUserProfile, UserModel
 
 CONSOLIDATE_EVIDENCE_JOB = "consolidate_evidence"
+CONSOLIDATE_SLEEP_JOB = "consolidate_sleep"
 DEFAULT_CONSOLIDATION_PASSES = [
     "replayer",
     "extractor",
@@ -143,6 +144,84 @@ def _non_negative_int(value: object, *, default: int = 0) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(0, parsed)
+
+
+def _sleep_dt_json(value: datetime) -> str:
+    aware = value.astimezone(UTC) if value.tzinfo else value.replace(tzinfo=UTC)
+    return aware.isoformat()
+
+
+def sleep_job_fingerprint(payload: Mapping[str, Any]) -> str:
+    """Deterministic idempotency digest for an explicit sleep job."""
+
+    cids = [str(cid) for cid in payload.get("source_evidence_cids", []) if cid]
+    body = {
+        "branch": str(payload.get("branch", "main")),
+        "enqueued_at": str(payload.get("enqueued_at", "")),
+        "item_limit": int(payload.get("item_limit", 0)),
+        "not_after": str(payload.get("not_after", "")),
+        "pass_limit": int(payload.get("pass_limit", 0)),
+        "requested_tier": str(payload.get("requested_tier", "")),
+        "runtime_limit_seconds": float(payload.get("runtime_limit_seconds", 0.0)),
+        "source_evidence_cids": sorted(set(cids)),
+        "tenant_id": str(payload.get("tenant_id", "")),
+    }
+    return sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def build_sleep_payload(
+    *,
+    tenant_id: str,
+    source_evidence_cids: Sequence[str],
+    requested_tier: str,
+    enqueued_at: datetime,
+    not_after: datetime,
+    item_limit: int,
+    pass_limit: int,
+    runtime_limit_seconds: float,
+    branch: str = "main",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Bind the exact 15-01-02 sleep job fields plus a deterministic fingerprint."""
+
+    tier = validate_cadence_tier(requested_tier)
+    cids = [str(cid) for cid in source_evidence_cids if cid]
+    payload: dict[str, Any] = {
+        "tenant_id": str(tenant_id),
+        "branch": str(branch),
+        "source_evidence_cids": cids,
+        "requested_tier": tier,
+        "enqueued_at": _sleep_dt_json(enqueued_at),
+        "not_after": _sleep_dt_json(not_after),
+        "item_limit": max(0, int(item_limit)),
+        "pass_limit": max(0, int(pass_limit)),
+        "runtime_limit_seconds": max(0.0, float(runtime_limit_seconds)),
+    }
+    if now is not None:
+        payload["now"] = _sleep_dt_json(now)
+    payload["idempotency_fingerprint"] = sleep_job_fingerprint(payload)
+    return payload
+
+
+def _access_policy_expired_at(access_policy: Mapping[str, Any] | None, now: datetime) -> bool:
+    raw = None if access_policy is None else access_policy.get("expires_at")
+    if not raw:
+        return False
+    deadline = expiry_deadline(raw)
+    if deadline is None:
+        return True
+    return now >= deadline
+
+
+def _valid_to_expired_at(valid_to: datetime | str | None, now: datetime) -> bool:
+    if valid_to is None or valid_to == "":
+        return False
+    end = valid_to if isinstance(valid_to, datetime) else parse_dt(valid_to)
+    if end is None:
+        return True
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    return now >= end.astimezone(UTC)
 
 
 @dataclass(slots=True)
@@ -278,6 +357,7 @@ class ConsolidationRunResult:
     skipped: list[str]
     role_pipeline: dict[str, Any]
     cadence_receipt: dict[str, Any] | None = None
+    sleep_receipt: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -360,6 +440,8 @@ class ConsolidationWorker:
         self._tenant_last_pass_call: dict[str, int] = {}
         self._tenant_last_pass_at: dict[str, datetime] = {}
         self._tier_cid_last: dict[tuple[str, str, str, str], tuple[int, datetime]] = {}
+        self._sleep_memo: dict[str, ConsolidationRunResult] = {}
+        self._sleep_last_now: datetime | None = None
         # §23.3 / §7 #17: fact promote floor is policy.min_external_corroboration_for_fact
         # (Standing independent external count). Optional min_corroboration may only
         # raise the floor, never lower it below policy.
@@ -707,6 +789,278 @@ class ConsolidationWorker:
                 else None
             ),
         )
+
+    def run_sleep_payload(self, payload: dict[str, Any]) -> ConsolidationRunResult:
+        decision = self.security.authorize_write(
+            operation="run_consolidation_passes",
+            role="consolidator",
+            source_trust_tier=0,
+            destructive=False,
+            target_sink="memory",
+        )
+        if not decision.allowed:
+            raise PermissionError(decision.reason)
+
+        tenant_id = str(payload["tenant_id"])
+        branch = str(payload.get("branch", "main"))
+        source_evidence_cids = [str(cid) for cid in payload.get("source_evidence_cids", []) if cid]
+        if not source_evidence_cids:
+            raise ValueError("sleep payload requires source_evidence_cids")
+        requested_tier = validate_cadence_tier(payload.get("requested_tier"))
+        item_limit = max(0, int(payload.get("item_limit", 0)))
+        pass_limit = max(0, int(payload.get("pass_limit", 0)))
+        runtime_limit_seconds = max(0.0, float(payload.get("runtime_limit_seconds", 0.0)))
+        enqueued_at = self._parse_datetime(payload.get("enqueued_at"))
+        not_after = self._parse_datetime(payload.get("not_after"))
+        if enqueued_at is None or not_after is None:
+            raise ValueError("sleep payload requires enqueued_at and not_after")
+        now = self._parse_datetime(payload.get("now")) or self._clock()
+        fingerprint = str(payload.get("idempotency_fingerprint") or sleep_job_fingerprint(payload))
+        if fingerprint != sleep_job_fingerprint(payload):
+            raise RuntimeError("sleep job stale identity: idempotency fingerprint mismatch")
+
+        if now < enqueued_at or (
+            self._sleep_last_now is not None and now < self._sleep_last_now
+        ):
+            raise RuntimeError("sleep consolidation refused: clock rollback")
+        if now >= not_after:
+            raise RuntimeError("sleep job stale: now is at or after not_after")
+
+        self._audit_sleep(
+            tenant_id,
+            fingerprint,
+            {
+                "branch": branch,
+                "source_evidence_cids": source_evidence_cids,
+                "requested_tier": requested_tier,
+                "enqueued_at": _sleep_dt_json(enqueued_at),
+                "not_after": _sleep_dt_json(not_after),
+            },
+        )
+        self._sleep_last_now = now
+
+        started = self._clock()
+        policy = self.policy if isinstance(self.policy, OperatingPolicy) else OperatingPolicy()
+        selected, exclusions, fail_closed = self._select_sleep_cids(
+            tenant_id,
+            branch,
+            source_evidence_cids,
+            now=now,
+        )
+        if fail_closed is not None:
+            raise RuntimeError(fail_closed)
+
+        memo = self._sleep_memo.get(fingerprint)
+        if memo is not None:
+            receipt = dict(memo.sleep_receipt or {})
+            receipt["memo_hit"] = True
+            return ConsolidationRunResult(
+                tenant_id=memo.tenant_id,
+                branch=memo.branch,
+                source_evidence_cids=list(memo.source_evidence_cids),
+                passes_run=list(memo.passes_run),
+                pass_results=list(memo.pass_results),
+                evidence_seen=memo.evidence_seen,
+                candidate_results=list(memo.candidate_results),
+                skipped=list(memo.skipped),
+                role_pipeline=dict(memo.role_pipeline),
+                cadence_receipt=memo.cadence_receipt,
+                sleep_receipt=receipt,
+            )
+
+        skipped_reasons: list[str] = []
+        elapsed = (self._clock() - started).total_seconds()
+        if elapsed >= runtime_limit_seconds:
+            skipped_reasons.append("runtime_limit")
+            selected = []
+        else:
+            selected = selected[:item_limit]
+
+        tier_passes = [str(name) for name in policy.consolidation_cadence_tier_passes[requested_tier]]
+        bounded_passes = tier_passes[:pass_limit]
+        if not selected:
+            return ConsolidationRunResult(
+                tenant_id=tenant_id,
+                branch=branch,
+                source_evidence_cids=source_evidence_cids,
+                passes_run=[],
+                pass_results=[],
+                evidence_seen=0,
+                candidate_results=[],
+                skipped=list(skipped_reasons),
+                role_pipeline={},
+                sleep_receipt=self._sleep_receipt(
+                    requested_tier=requested_tier,
+                    input_cids=[],
+                    exclusions=exclusions,
+                    item_limit=item_limit,
+                    pass_limit=pass_limit,
+                    runtime_limit_seconds=runtime_limit_seconds,
+                    enqueued_at=enqueued_at,
+                    not_after=not_after,
+                    fingerprint=fingerprint,
+                    memo_hit=False,
+                    skipped_reasons=skipped_reasons,
+                    policy=policy,
+                ),
+            )
+
+        result = self.run_queue_payload(
+            {
+                "tenant_id": tenant_id,
+                "branch": branch,
+                "source_evidence_cids": selected,
+                "passes": bounded_passes,
+                "now": _sleep_dt_json(now),
+            }
+        )
+        result.sleep_receipt = self._sleep_receipt(
+            requested_tier=requested_tier,
+            input_cids=selected,
+            exclusions=exclusions,
+            item_limit=item_limit,
+            pass_limit=pass_limit,
+            runtime_limit_seconds=runtime_limit_seconds,
+            enqueued_at=enqueued_at,
+            not_after=not_after,
+            fingerprint=fingerprint,
+            memo_hit=False,
+            skipped_reasons=skipped_reasons,
+            policy=policy,
+        )
+        self._sleep_memo[fingerprint] = result
+        return result
+
+    def _audit_sleep(self, tenant_id: str, fingerprint: str, diff: dict[str, Any]) -> None:
+        audit = getattr(self.engine, "_audit", None)
+        if not callable(audit):
+            raise RuntimeError("sleep consolidation audit unavailable")
+        try:
+            audit(
+                tenant_id,
+                "consolidator",
+                "sleep_consolidation",
+                fingerprint,
+                diff,
+                source="consolidation",
+            )
+        except Exception as exc:
+            raise RuntimeError("sleep consolidation audit failed") from exc
+
+    def _select_sleep_cids(
+        self,
+        tenant_id: str,
+        branch: str,
+        source_evidence_cids: list[str],
+        *,
+        now: datetime,
+    ) -> tuple[list[str], dict[str, str], str | None]:
+        snapshot = self._export_snapshot(tenant_id)
+        assertions = [
+            row
+            for row in snapshot.get("assertions", [])
+            if isinstance(row, dict) and row.get("branch", "main") == branch
+        ]
+        selected: list[str] = []
+        exclusions: dict[str, str] = {}
+        fail_closed: str | None = None
+        for cid in source_evidence_cids:
+            reason = self._sleep_cid_reason(
+                tenant_id,
+                branch,
+                cid,
+                assertions=assertions,
+                now=now,
+            )
+            if reason is None:
+                selected.append(cid)
+                continue
+            exclusions[cid] = reason
+            if reason == "erased":
+                fail_closed = "sleep consolidation refused: erased source cannot be distilled"
+            elif reason == "unauthorized":
+                fail_closed = "sleep consolidation refused: unauthorized source"
+            elif reason == "superseded":
+                fail_closed = "sleep consolidation refused: superseded source cannot be revived"
+            elif reason in {"access_policy_expired", "valid_to_expired"} and fail_closed is None:
+                fail_closed = "sleep consolidation refused: expired or stale source"
+        if selected:
+            return selected, exclusions, None
+        return [], exclusions, fail_closed or "sleep consolidation refused: no admissible source"
+
+    def _sleep_cid_reason(
+        self,
+        tenant_id: str,
+        branch: str,
+        cid: str,
+        *,
+        assertions: list[dict[str, Any]],
+        now: datetime,
+    ) -> str | None:
+        erased_probe = getattr(self.engine, "evidence_is_erased", None)
+        if callable(erased_probe) and erased_probe(tenant_id, cid, branch):
+            return "erased"
+        evidence, missing = self._load_evidence(tenant_id, [cid], branch)
+        if missing or not evidence:
+            return "erased" if callable(erased_probe) else "missing"
+        item = evidence[0]
+        policy = dict(item.access_policy or {})
+        if _access_policy_expired_at(policy, now):
+            return "access_policy_expired"
+        read_policy = dict(policy)
+        read_policy.pop("expires_at", None)
+        decision = may_read_item(
+            item_tenant_id=item.tenant_id,
+            sensitivity=int(item.sensitivity),
+            access_policy=read_policy,
+            context={"tenant_id": tenant_id, "role": "consolidator"},
+            policy_max_sensitivity=int(getattr(self.policy, "max_sensitivity", 3) or 3),
+            erased=bool(item.erased),
+        )
+        if not decision.allowed:
+            return "unauthorized"
+        sourced = [
+            row
+            for row in assertions
+            if cid in {str(value) for value in row.get("source_evidence_cids", []) if value}
+        ]
+        if any(str(row.get("status") or "") == "superseded" for row in sourced):
+            return "superseded"
+        if any(_valid_to_expired_at(row.get("valid_to"), now) for row in sourced):
+            return "valid_to_expired"
+        return None
+
+    @staticmethod
+    def _sleep_receipt(
+        *,
+        requested_tier: str,
+        input_cids: list[str],
+        exclusions: dict[str, str],
+        item_limit: int,
+        pass_limit: int,
+        runtime_limit_seconds: float,
+        enqueued_at: datetime,
+        not_after: datetime,
+        fingerprint: str,
+        memo_hit: bool,
+        skipped_reasons: list[str],
+        policy: OperatingPolicy,
+    ) -> dict[str, Any]:
+        return {
+            "requested_tier": requested_tier,
+            "input_cids": list(input_cids),
+            "excluded_cids": [cid for cid in exclusions if cid not in set(input_cids)],
+            "exclusions": dict(exclusions),
+            "item_limit": item_limit,
+            "pass_limit": pass_limit,
+            "runtime_limit_seconds": runtime_limit_seconds,
+            "enqueued_at": _sleep_dt_json(enqueued_at),
+            "not_after": _sleep_dt_json(not_after),
+            "idempotency_fingerprint": fingerprint,
+            "memo_hit": memo_hit,
+            "skipped_reasons": list(skipped_reasons),
+            "policy_fingerprint": policy.cadence_policy_fingerprint(),
+        }
 
     def _load_evidence(self, tenant_id: str, source_evidence_cids: list[str], branch: str) -> tuple[list[Evidence], list[str]]:
         get_evidence = getattr(self.engine, "get_evidence", None)
