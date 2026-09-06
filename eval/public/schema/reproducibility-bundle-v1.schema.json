@@ -420,8 +420,8 @@
         },
         "locale": { "const": "C" },
         "timezone": { "const": "UTC" },
-        "platform": { "$ref": "#/$defs/nonempty_string" },
-        "runtime": { "$ref": "#/$defs/nonempty_string" },
+        "platform": { "$ref": "#/$defs/disclosed_string" },
+        "runtime": { "$ref": "#/$defs/disclosed_string" },
         "wheelhouse_digest": {
           "anyOf": [
             { "$ref": "#/$defs/sha256_digest" },

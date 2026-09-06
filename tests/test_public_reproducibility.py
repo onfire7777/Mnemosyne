@@ -826,6 +826,7 @@ def test_development_reproduction_is_not_headline_or_repro_002(tmp_path: Path) -
         ("rights", "software_license"),
         ("custody", "declaration"),
         ("operator", "identity"),
+        ("environment", "platform"),
     ),
 )
 def test_unknown_release_declarations_fail_schema_and_runtime(
@@ -846,6 +847,24 @@ def test_unknown_release_declarations_fail_schema_and_runtime(
         verify_bundle(bundle["root"])
     monkeypatch.setattr(public_bundle, "_validate_repro_schema", lambda _manifest: None)
     with pytest.raises(BundleError, match="unknown"):
+        verify_bundle(bundle["root"])
+
+
+def test_wheelhouse_digest_fails_schema_and_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "invalid-wheelhouse-digest")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["environment"]["wheelhouse_digest"] = "sha256:not-a-digest"
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="schema"):
+        verify_bundle(bundle["root"])
+    monkeypatch.setattr(public_bundle, "_validate_repro_schema", lambda _manifest: None)
+    with pytest.raises(BundleError, match="wheelhouse_digest"):
         verify_bundle(bundle["root"])
 
 

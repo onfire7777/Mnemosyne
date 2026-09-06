@@ -598,6 +598,12 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
         raise BundleError("environment path must be environment.json")
     if environment.get("locale") != "C" or environment.get("timezone") != "UTC":
         raise BundleError("locale and timezone must be frozen to C/UTC")
+    _require_disclosed_string(environment.get("platform"), "environment platform")
+    _require_disclosed_string(environment.get("runtime"), "environment runtime")
+    if environment.get("wheelhouse_digest") is not None:
+        _require_sha256_digest(
+            environment.get("wheelhouse_digest"), "wheelhouse_digest"
+        )
     publication = _closed_object(
         payload.get("publication"), _REPRO_PUBLICATION_FLAGS, "publication"
     )
