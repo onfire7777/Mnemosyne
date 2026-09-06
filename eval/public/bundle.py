@@ -936,13 +936,20 @@ def _recompute_repro_metrics(
     recomputed = _measured_from_repro_score(successes, total)
     expected_value = recomputed["value"]
     expected_interval = recomputed["interval"]
-    if any(measured.get(key) != recomputed[key] for key in recomputed if key != "interval"):
+    if set(measured) != set(recomputed) or any(
+        measured.get(key) != recomputed[key] for key in recomputed if key != "interval"
+    ):
         raise BundleError("metrics do not recompute from traces")
     if not isinstance(manifest_metrics, list) or not manifest_metrics:
         raise BundleError("missing metrics")
     measured_interval = measured.get("interval", {})
-    if not isinstance(measured_interval, dict) or any(
-        measured_interval.get(key) != expected_interval[key] for key in expected_interval
+    if (
+        not isinstance(measured_interval, dict)
+        or set(measured_interval) != set(expected_interval)
+        or any(
+            measured_interval.get(key) != expected_interval[key]
+            for key in expected_interval
+        )
     ):
         raise BundleError("intervals do not recompute from traces")
     for declared in manifest_metrics:
