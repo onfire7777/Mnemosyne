@@ -558,6 +558,23 @@ def test_report_publication_never_replaces_racing_note(
     assert not list(tmp_path.glob(".report.*-*"))
 
 
+def test_report_file_rollback_preserves_replacement_identity(tmp_path: Path) -> None:
+    from eval.public import bundle as public_bundle
+
+    report = tmp_path / "report.json"
+    moved = tmp_path / "owned-report.json"
+    report.write_text("owned\n", encoding="utf-8")
+    metadata = report.stat(follow_symlinks=False)
+    identity = metadata.st_dev, metadata.st_ino
+    report.rename(moved)
+    report.write_text("foreign\n", encoding="utf-8")
+
+    public_bundle._remove_owned_file(report, identity)
+
+    assert report.read_text(encoding="utf-8") == "foreign\n"
+    assert moved.read_text(encoding="utf-8") == "owned\n"
+
+
 def test_report_verifier_rejects_hardlinked_report(
     tmp_path: Path,
 ) -> None:
