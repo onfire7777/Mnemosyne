@@ -1471,6 +1471,50 @@ def test_unreferenced_named_manifest_artifact_fails_closed(tmp_path: Path) -> No
         verify_bundle(root)
 
 
+def test_opaque_inventory_artifact_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "opaque-artifact", include_ledger=False
+    )
+    root = bundle["root"]
+    opaque = b"opaque-binary-artifact\x00\xff"
+    (root / "payload.bin").write_bytes(opaque)
+
+    nested_path = root / "bundle-manifest.json"
+    nested = json.loads(nested_path.read_text(encoding="utf-8"))
+    nested["files"]["payload.bin"] = _sha256_hex(opaque)
+    nested_bytes = _write_json(nested_path, nested)
+
+    result_path = root / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["bundle_digest"] = _sha256_ref(nested_bytes)
+    result_bytes = _write_json(result_path, result)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["result_ref"] = _named_ref("result-v2", result_bytes)
+    manifest["hashes"].append(
+        {
+            "canonicalization": "raw-bytes",
+            "media_type": "application/octet-stream",
+            "path": "payload.bin",
+            "sha256": _sha256_ref(opaque),
+            "size": len(opaque),
+        }
+    )
+    manifest["hashes"].sort(key=lambda item: item["path"])
+    for name, payload in (
+        ("bundle-manifest.json", nested_bytes),
+        ("result.json", result_bytes),
+    ):
+        entry = next(item for item in manifest["hashes"] if item["path"] == name)
+        entry["size"] = len(payload)
+        entry["sha256"] = _sha256_ref(payload)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="inventory media type"):
+        verify_bundle(root)
+
+
 def test_ledger_verification_uses_inventory_bound_private_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
