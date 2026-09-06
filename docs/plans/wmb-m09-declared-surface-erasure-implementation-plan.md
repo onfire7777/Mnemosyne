@@ -98,8 +98,9 @@ Per `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
   a legal-compliance opinion.
 - **Repeat/replay:** three delete-operation IDs; retry at the three pinned
   crash windows (before side-effect; after side-effect/before checkpoint;
-  after checkpoint/before response); restore a **pre-erasure** snapshot and
-  re-check residue/survivors.
+  after checkpoint/before response); attempt restore of a **pre-erasure**
+  snapshot (fail-closed rejection OK); on successful restore re-check
+  residue/survivors/**semantic leakage**.
 - **Resource prerequisite:** measured local or P32 receipt for the exact
   declared surfaces.
 - **External dependencies:** Docker/P32 only for production replicas, object
@@ -174,9 +175,16 @@ add a **new** deterministic development fixture:
   before response. Harmless pre-call-only crashes do not satisfy replay.
 - Snapshot ordering: for every declared readable snapshot surface, create
   the snapshot **after ingest and before deletion**, run the delete/retry
-  sequence, restore that pre-erasure snapshot, then re-run target-residue
-  and survivor checks on the restored state (a post-delete-only snapshot
-  does not satisfy restore probes).
+  sequence, then attempt restore of that pre-erasure snapshot. A
+  **fail-closed restore rejection** (snapshot deleted, or stale restore
+  refused by the deletion fence — matching reference
+  `test_deletion_residue` mutable-backup-removed / retained-snapshot-rejected
+  behavior) is a **valid restore-probe outcome**; do not require a successful
+  restore that would resurrect erased state. When restore **succeeds** (or a
+  sanitized restore path is claimed), re-run **target-residue, survivor, and
+  semantic-leakage** probes on the restored state so resurrection leakage
+  cannot hide behind pre-restore clean scores. A post-delete-only snapshot
+  does not satisfy restore probes.
 - Byte-identical under `canonical_json(generate_fixture(seed))`.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
   Advanced delete/snapshot/restore hooks stay behind the §2 freeze residual
