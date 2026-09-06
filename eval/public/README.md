@@ -433,7 +433,11 @@ fail. The scorer rewrite of `metrics.json` is required; copy-only success is
 not reproduction. If `k` or traces cannot be scored, the command fails closed.
 `config.scoring_profile` must be a registered profile and is recomputed only
 through its canonical scorer (`smoke-hit-at-k-v1` for this standard). Unknown
-profiles and duplicate `ranked_retrieved_hits` IDs fail closed:
+profiles fail closed. Trace question IDs must be unique, retrieval/gold/answer
+IDs must belong to each trace's authenticated `stored_records` population, and
+duplicate or malformed identifiers fail closed. The recomputed metric and
+Wilson interval must also equal the metric in the bound result-v2 record;
+result seeds, retries, and aborts must equal trace and canonical-replay custody:
 
 ```
 uv run --locked mneme eval-public --reproduce-bundle BUNDLE --out-dir DEST
@@ -448,9 +452,12 @@ Set `UV_OFFLINE=1` after preparing the locked cache, or use an externally
 network-isolated runner. Without one of those controls, do not describe the
 overall command as offline.
 
-The invoking checkout must be clean, match `build.candidate_git_sha`, honor
-`uv.lock`, and use only the declared environment allowlist with UTC/C locale.
-Incomplete output is deleted. A destination collision fails closed.
+The invoking checkout must be clean, match `build.candidate_git_sha`, and use
+the bundle's exact `uv.lock` under the fixed `uv run --locked` toolchain. The
+manifest declares an environment allowlist and the verifier binds it to the
+environment artifact while freezing locale/timezone to C/UTC; this declaration
+does not scrub the parent process environment. Incomplete output is deleted. A
+destination collision fails closed.
 
 ### Manifest fields
 
@@ -458,19 +465,19 @@ Incomplete output is deleted. A destination collision fails closed.
 | --- | --- |
 | `schema_version` | Closed const `mnemosyne.reproducibility-bundle/v1`. Verify runs the Draft 2020-12 schema against the manifest; a present schema file is not enough. |
 | `result_ref` | Canonical `result-v2@sha256:…` binding of the atomic result. |
-| `ledger_ref` | Optional signed-ledger inclusion receipt; absence is not neutrality. |
-| `manifests` | Digest-bound benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge/reader/model/prompt, plus official fidelity or successor parent/difference. |
+| `ledger_ref` | Optional signed-ledger inclusion receipt. A present receipt must bind the result's run ID and be active and unsuperseded; absence is not neutrality. |
+| `manifests` | Digest-bound benchmark, dataset/split, fixture, generator, adapter, scorer, baseline, judge/reader/model/prompt, plus official fidelity or successor parent/difference. Every reference binds its exact named file and semantic role; scorer and benchmark IDs bind the configured profile and suite. |
 | `traces` | Raw `traces.jsonl` path, seed records, retries/aborts, and `trace_index_digest`. |
 | `config` | Canonical `config.json` path, locale `C`, timezone `UTC`, and `config_digest`. |
-| `build` | `build.json` path, lockfile/toolchain, clean `candidate_git_sha`, and `build_fingerprint`. |
+| `build` | `build.json` path, exact `uv` lockfile/toolchain contract, clean `candidate_git_sha`, and `build_fingerprint`. |
 | `environment` | Allowlist, platform/runtime, locale/timezone, optional wheelhouse digest. |
 | `metrics` / `intervals` | Family, name, version, value, unit, numerator/denominator, uncertainty, confidence, low/high, exclusions, and missing/unsupported/failed/aborted/not-measured counts. |
 | `hashes` | Complete file inventory in canonical path order: relative path, size, media type, `raw-bytes` canonicalization, SHA-256. |
-| `rights` | Software/data license, source revision, redistribution, PII, consent, takedown, disclosure. |
+| `rights` | Software/data license, source revision equal to the bound build commit, redistribution, PII, consent, takedown, disclosure. |
 | `custody` | Custody class and declaration. Missing declarations fail. |
 | `operator` | Operator identity, role, signer role, and disclosure state. |
 | `command` | The exact argv above. |
-| `track_kind` / `lineage` | Exact result-v2 `OFFICIAL-UPSTREAM`, `ENHANCED-SUCCESSOR`, or `DEVELOPMENT` values. |
+| `track_kind` / `lineage` | Exact result-v2 `OFFICIAL-UPSTREAM`, `ENHANCED-SUCCESSOR`, or `DEVELOPMENT` values. Official protocol and successor parent artifacts must agree with that lineage. |
 | `canonical_replay` | Merged M15 digest; not an alias of the four result-v2 lineage digests. |
 | `publication` | Always non-publishable, non-headline, non-independent, non-certified on this standard. |
 

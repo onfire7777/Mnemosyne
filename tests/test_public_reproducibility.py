@@ -788,6 +788,10 @@ def test_development_reproduction_is_not_headline_or_repro_002(tmp_path: Path) -
     assert "official" in readme
     assert "successor" in readme
     assert "development" in readme
+    assert "active and unsuperseded" in readme
+    assert "exact named file and semantic role" in readme
+    assert "does not scrub the parent process environment" in readme
+    assert "source revision equal to the bound build commit" in readme
 
 
 def test_exact_digest_meanings_hash_named_file_bytes(tmp_path: Path) -> None:
