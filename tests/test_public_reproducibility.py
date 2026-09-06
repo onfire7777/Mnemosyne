@@ -2093,6 +2093,38 @@ def test_mutated_command_or_lock_fails_before_destination(tmp_path: Path) -> Non
     assert not destination.exists()
 
 
+def test_final_reproduction_comparison_uses_stable_artifact_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "stable-final-source")
+    destination = tmp_path / "stable-final-destination"
+    original_read = public_bundle._read_inventory_file
+    temp_result_reads = 0
+
+    def read_with_final_mutation(path: Path) -> tuple[bytes, int]:
+        nonlocal temp_result_reads
+        payload, size = original_read(path)
+        if (
+            path.name == "result.json"
+            and path.parent.name.startswith(f".{destination.name}-")
+            and "-source-" not in path.parent.name
+        ):
+            temp_result_reads += 1
+            if temp_result_reads == 2:
+                return b"transient-mutation", len(b"transient-mutation")
+        return payload, size
+
+    monkeypatch.setattr(public_bundle, "_read_inventory_file", read_with_final_mutation)
+    monkeypatch.setattr(public_bundle, "_assert_reproduction_checkout", lambda *_: None)
+
+    with pytest.raises(BundleError, match="reproduction mismatch: result.json"):
+        reproduce_bundle(bundle["root"], destination)
+    assert temp_result_reads == 2
+    assert not destination.exists()
+
+
 def test_digest_consistent_malformed_lockfile_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "malformed-lock")
     root = bundle["root"]
