@@ -2001,6 +2001,17 @@ def test_null_custody_and_operator_values_fail_closed(tmp_path: Path) -> None:
         verify_bundle(operator["root"])
 
 
+def test_ledger_artifacts_without_reference_fail_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "unreferenced-ledger")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["ledger_ref"] = None
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="ledger artifacts require"):
+        verify_bundle(bundle["root"])
+
+
 def test_result_ledger_and_m15_cross_reference_mismatches_fail_closed(
     tmp_path: Path,
 ) -> None:
