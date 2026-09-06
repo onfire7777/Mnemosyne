@@ -1387,6 +1387,28 @@ def test_signed_ledger_result_requires_canonical_type_exact_match(tmp_path: Path
         verify_bundle(bundle["root"])
 
 
+def test_signed_ledger_requires_canonical_result_artifact_bytes(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "noncanonical-result")
+    root = bundle["root"]
+    result_path = root / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result_bytes = (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+    result_path.write_bytes(result_bytes)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["result_ref"] = _named_ref("result-v2", result_bytes)
+    entry = next(
+        item for item in manifest["hashes"] if item["path"] == "result.json"
+    )
+    entry["size"] = len(result_bytes)
+    entry["sha256"] = _sha256_ref(result_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="result.json bytes must be canonical"):
+        verify_bundle(root)
+
+
 def test_superseded_ledger_entry_cannot_supply_inclusion_receipt(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(
         tmp_path / "superseded-ledger", supersede_ledger=True
