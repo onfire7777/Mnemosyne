@@ -506,6 +506,8 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
     if build.get("dirty") is not False:
         raise BundleError("dirty checkout is forbidden")
     _require_named_digest(build.get("lockfile"), "lockfile")
+    if build.get("toolchain") != "uv":
+        raise BundleError("toolchain must be uv")
     if build.get("environment_contract") != "uv run --locked":
         raise BundleError("environment contract must be uv run --locked")
     environment = _closed_object(
@@ -991,6 +993,8 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         )
     ):
         raise BundleError("build declaration does not match bound artifact")
+    if manifest["rights"]["source_revision"] != manifest["build"]["candidate_git_sha"]:
+        raise BundleError("rights source revision does not match bound commit")
     if build_payload.get("lockfile") != "uv.lock":
         raise BundleError("build lockfile declaration does not match bound artifact")
     if not isinstance(environment_payload, dict) or any(

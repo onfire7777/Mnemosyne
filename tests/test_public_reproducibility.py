@@ -798,6 +798,29 @@ def test_unknown_field_and_missing_declaration_fail_closed(tmp_path: Path) -> No
         verify_bundle(missing["root"])
 
 
+def test_rights_source_revision_must_match_bound_build(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "rights-revision")
+    root = bundle["root"]
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["rights"]["source_revision"] = "f" * 40
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="rights source revision"):
+        verify_bundle(root)
+
+
+def test_reproducibility_toolchain_is_exactly_uv(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "wrong-toolchain")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["build"]["toolchain"] = "pip"
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="toolchain|schema"):
+        verify_bundle(bundle["root"])
+
+
 @pytest.mark.parametrize(
     ("label", "mutate"),
     [
@@ -1364,7 +1387,7 @@ def test_manifest_runtime_declarations_match_inventory_artifacts(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest[section][field] = replacement
     _write_json(manifest_path, manifest)
-    with pytest.raises(BundleError, match="declaration does not match"):
+    with pytest.raises(BundleError, match="declaration does not match|schema"):
         verify_bundle(bundle["root"])
 
 
