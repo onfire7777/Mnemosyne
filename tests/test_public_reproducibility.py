@@ -2128,6 +2128,27 @@ def test_lockfile_scalar_contract_fails_closed(
         verify_bundle(bundle["root"])
 
 
+def test_lockfile_requires_resolved_verifier_packages(tmp_path: Path) -> None:
+    lockfile = b'''version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "mnemosyne-memory"
+source = { editable = "." }
+dependencies = [
+    { name = "cryptography" },
+    { name = "jsonschema" },
+]
+'''
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "unresolved-verifier-dependencies", lockfile=lockfile
+    )
+
+    with pytest.raises(BundleError, match="resolved verifier packages"):
+        verify_bundle(bundle["root"])
+
+
 def _clone_clean_checkout(tmp_path: Path) -> Path:
     clone = tmp_path / "checkout"
     subprocess.run(
