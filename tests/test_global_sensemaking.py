@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -80,6 +81,55 @@ def _report(result: Any) -> dict[str, Any]:
     return report
 
 
+def _disclosed_ids(result: Any) -> set[str]:
+    report = _report(result)
+    disclosed: set[str] = {hit.id for hit in result.hits}
+    disclosed.update(str(cid) for cid in report.get("source_cids") or [] if cid)
+    disclosed.update(str(cid) for cid in report.get("mapped_node_cids") or [] if cid)
+    for hit in result.hits:
+        disclosed.update(str(cid) for cid in hit.provenance if cid)
+        sources = hit.metadata.get("source_evidence_cids") if isinstance(hit.metadata, dict) else None
+        if isinstance(sources, list):
+            disclosed.update(str(cid) for cid in sources if cid)
+    for item in report.get("exclusions") or []:
+        if isinstance(item, dict) and item.get("cid"):
+            disclosed.add(str(item["cid"]))
+    return disclosed
+
+
+def _append_raptor_summary(
+    engine: LocalMemoryEngine,
+    tenant: str,
+    content: str,
+    *,
+    source_cids: list[str],
+    level: int = 2,
+    child_summary_cids: list[str] | None = None,
+) -> str:
+    summary: dict[str, Any] = {
+        "kind": "abstractive_gist",
+        "status": "active",
+        "raptor_level": level,
+        "source_evidence_cids": list(source_cids),
+        "confabulation_risk": True,
+    }
+    if child_summary_cids:
+        summary["child_summary_cids"] = list(child_summary_cids)
+        summary["source_summary_cids"] = list(child_summary_cids)
+    return engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="user-raptor",
+            actor="system",
+            source_type="consolidation-summary",
+            content=content,
+            trust_tier=2,
+            access_policy={"tenant": tenant},
+            metadata={"summary": summary, "source_evidence_cids": list(source_cids)},
+        )
+    )
+
+
 def test_global_sensemaking_projects_readable_raptor_nodes_with_provenance() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-readable"
@@ -89,8 +139,7 @@ def test_global_sensemaking_projects_readable_raptor_nodes_with_provenance() -> 
     report = _report(result)
 
     assert result.explain["query_mode"] == SENSEMAKING_QUERY_MODE
-    assert result.abstained is False
-    assert report["abstention_reason"] is None
+    assert result.hits
     assert report["map_count"] >= 3
     assert report["reduce_count"] >= 1
     assert report["reduce_count"] <= report["map_count"]
@@ -100,8 +149,6 @@ def test_global_sensemaking_projects_readable_raptor_nodes_with_provenance() -> 
     assert report["budget"]["used_nodes"] == report["reduce_count"]
     assert report["budget"]["used_tokens"] == result.used_tokens
     assert result.used_tokens <= result.token_budget
-    levels = [int(hit.metadata.get("raptor_level") or 0) for hit in result.hits]
-    assert levels == sorted(levels, reverse=True)
 
 
 def test_global_sensemaking_is_deterministic_and_bounded() -> None:
@@ -141,19 +188,16 @@ def test_global_sensemaking_excludes_expired_hidden_and_foreign_nodes() -> None:
 
     result = _sensemaking(engine, tenant, role="reader")
     report = _report(result)
-    hit_ids = {hit.id for hit in result.hits}
-    exclusion_cids = {str(item["cid"]) for item in report["exclusions"]}
-    exclusion_reasons = {item["cid"]: item["reason"] for item in report["exclusions"]}
+    disclosed = _disclosed_ids(result)
 
-    assert expired_cid in exclusion_cids
-    assert hidden_cid in exclusion_cids
-    assert exclusion_reasons[expired_cid] == "expired_access_policy"
-    assert exclusion_reasons[hidden_cid] in {"sensitivity_ceiling", "hidden"}
-    assert expired_cid not in hit_ids
-    assert hidden_cid not in hit_ids
-    assert not hit_ids.intersection(foreign_tree["summary_cids"])
-    assert tree["root_cid"] not in exclusion_cids
-    assert set(report["source_cids"]).isdisjoint(foreign_tree["source_cids"])
+    assert expired_cid not in disclosed
+    assert hidden_cid not in disclosed
+    assert not disclosed.intersection(foreign_tree["summary_cids"])
+    assert not disclosed.intersection(foreign_tree["source_cids"])
+    assert all("cid" not in item or not item.get("cid") for item in report["exclusions"] if item.get("reason") != "node_budget" and item.get("reason") != "token_budget")
+    policy_denied = [item for item in report["exclusions"] if item.get("reason") == "policy_denied"]
+    assert policy_denied
+    assert int(policy_denied[0]["count"]) >= 2
 
 
 def test_global_sensemaking_never_treats_retrieved_text_as_instructions() -> None:
@@ -236,6 +280,144 @@ def test_global_sensemaking_routes_through_the_shared_engine_seam() -> None:
     assert via_engine.explain["global_sensemaking"]["map_count"] == via_pipeline.explain[
         "global_sensemaking"
     ]["map_count"]
+
+
+def test_global_sensemaking_policy_denials_are_existence_silent() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-silent"
+    tree = _build_raptor(engine, tenant, "user-silent")
+    hidden_cid = tree["leaf_cids"][0]
+    hidden = engine.evidence[engine._evidence_key(tenant, "main", hidden_cid)]
+    hidden.sensitivity = 2
+
+    result = _sensemaking(engine, tenant, role="reader")
+    report = _report(result)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert hidden_cid not in blob
+    assert hidden_cid not in _disclosed_ids(result)
+    assert all(item.get("reason") != "sensitivity_ceiling" for item in report["exclusions"])
+    assert any(item.get("reason") == "policy_denied" and int(item.get("count") or 0) >= 1 for item in report["exclusions"])
+
+
+def test_global_sensemaking_ranks_query_before_node_budget() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-query-rank"
+    alpha_source = _append_theme(engine, tenant, "user-rank", "Alpha harvest ledger notes stay on the warehouse clipboard.")
+    orchard_source = _append_theme(engine, tenant, "user-rank", "Zebra quantum orchard harvest crates are tagged at dusk.")
+    alpha_cid = _append_raptor_summary(
+        engine,
+        tenant,
+        "Alpha harvest ledger notes stay on the warehouse clipboard.",
+        source_cids=[alpha_source],
+    )
+    orchard_cid = _append_raptor_summary(
+        engine,
+        tenant,
+        "Zebra quantum orchard harvest crates are tagged at dusk.",
+        source_cids=[orchard_source],
+    )
+    first_by_cid, later_by_cid = sorted([alpha_cid, orchard_cid])
+    query = (
+        "zebra quantum orchard harvest crates"
+        if later_by_cid == orchard_cid
+        else "alpha harvest ledger clipboard"
+    )
+    expected = later_by_cid
+    dropped_if_cid_sorted = first_by_cid
+
+    result = _sensemaking(engine, tenant, query, sensemaking_node_budget=1)
+    hit_ids = [hit.id for hit in result.hits]
+
+    assert expected in hit_ids
+    assert dropped_if_cid_sorted not in hit_ids
+
+
+def test_global_sensemaking_preserves_confidence_and_abstention_gates() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-gates"
+    _build_raptor(engine, tenant, "user-gates")
+
+    theme = _sensemaking(engine, tenant)
+    weak = _sensemaking(engine, tenant, "unrelated pineapple taxonomy without lighthouse terms")
+    theme_report = _report(theme)
+
+    assert theme.hits
+    assert theme.confidence < 1.0
+    assert theme.explain["gist_support"]["applied"] is True
+    assert "query_support" in theme.explain["confidence"]
+    assert "reality_monitoring" in theme.explain
+    assert "answer_grounding_floor" in theme.explain
+    assert theme.abstained is True
+    assert theme_report["abstention_reason"] in {
+        None,
+        "gist_only",
+        "insufficient_query_support",
+        "ungrounded_reality_only",
+        "answer_grounding_floor",
+    }
+    assert weak.abstained is True
+    assert weak.confidence < 1.0
+    assert weak.confidence <= theme.confidence
+
+
+def test_global_sensemaking_revalidates_hidden_source_cids() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-hidden-source"
+    tree = _build_raptor(engine, tenant, "user-hidden-source")
+    hidden_source = tree["source_cids"][0]
+    source = engine.evidence[engine._evidence_key(tenant, "main", hidden_source)]
+    source.metadata = {**dict(source.metadata), "quarantine_reason": "source-withheld-after-summary"}
+    source.sensitivity = 4
+
+    result = _sensemaking(engine, tenant)
+    disclosed = _disclosed_ids(result)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert hidden_source not in disclosed
+    assert hidden_source not in blob
+    for hit in result.hits:
+        assert hidden_source not in hit.provenance
+        assert hidden_source not in (hit.metadata.get("source_evidence_cids") or [])
+
+
+def test_global_sensemaking_preserves_coverage_across_roots() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-roots"
+    amber_source = _append_theme(engine, tenant, "user-roots", "Amber lighthouse dusk board posts harbor delays.")
+    orchard_source = _append_theme(engine, tenant, "user-roots", "Zebra quantum orchard harvest crates are counted nightly.")
+    amber_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse dusk board posts harbor delays.",
+        source_cids=[amber_source],
+    )
+    orchard_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Zebra quantum orchard harvest crates are counted nightly.",
+        source_cids=[orchard_source],
+    )
+
+    covered = _sensemaking(
+        engine,
+        tenant,
+        "What global themes appear across lighthouse and orchard notes?",
+        sensemaking_node_budget=2,
+    )
+    covered_ids = {hit.id for hit in covered.hits}
+    assert amber_root in covered_ids
+    assert orchard_root in covered_ids
+
+    partial = _sensemaking(
+        engine,
+        tenant,
+        "What global themes appear across lighthouse and orchard notes?",
+        sensemaking_node_budget=1,
+    )
+    assert partial.abstained is True
+    assert _report(partial)["abstention_reason"] == "incomplete_theme_coverage"
+    assert partial.confidence < 1.0
 
 
 def test_g0_sensemaking_regression_cell_passes() -> None:

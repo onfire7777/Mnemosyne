@@ -456,26 +456,103 @@ def _run_global_sensemaking(
     for hit in hits:
         if hit.id not in kept_ids:
             report["exclusions"].append({"cid": hit.id, "reason": "token_budget"})
-    report["exclusions"] = sorted(report["exclusions"], key=lambda item: (item["cid"], item["reason"]))
+    report["exclusions"] = sorted(
+        report["exclusions"],
+        key=lambda item: (str(item.get("reason") or ""), str(item.get("cid") or ""), int(item.get("count") or 0)),
+    )
     report["reduce_count"] = len(budgeted)
     report["budget"]["used_nodes"] = len(budgeted)
     report["budget"]["used_tokens"] = used
+    kept_roots = {
+        str(hit.metadata.get("theme_root_cid") or hit.id)
+        for hit in budgeted
+        if hit.metadata.get("theme_root_cid") or hit.id
+    }
+    mapped_roots = {str(root) for root in report.get("theme_root_cids") or [] if root}
+    if mapped_roots and kept_roots != mapped_roots:
+        report["incomplete_theme_coverage"] = True
+    coverage_reason: str | None = None
+    coverage_note: str | None = None
     if report["map_count"] == 0:
-        report["abstention_reason"] = "insufficient_readable_coverage"
-        note = "Readable RAPTOR coverage is insufficient for global sensemaking."
+        coverage_reason = "insufficient_readable_coverage"
+        coverage_note = "Readable RAPTOR coverage is insufficient for global sensemaking."
     elif report["reduce_count"] == 0:
-        report["abstention_reason"] = "budget_exhausted"
-        note = "Global sensemaking exceeded the token or node budget before a projection could be emitted."
-    else:
-        report["abstention_reason"] = None
-        note = None
+        coverage_reason = "budget_exhausted"
+        coverage_note = "Global sensemaking exceeded the token or node budget before a projection could be emitted."
+    elif report.get("incomplete_theme_coverage"):
+        coverage_reason = "incomplete_theme_coverage"
+        coverage_note = "Global sensemaking omitted at least one RAPTOR theme root under the node budget."
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access
         else ops._record_retrieval_access(budgeted)
     )
-    abstained = report["abstention_reason"] is not None
+    calibration = ops._calibration_for(tenant_id, "fact")
+    threshold = conformal_threshold(calibration) if calibration else policy.abstention_threshold
+    support_report = query_support(query, budgeted)
+    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
+    confidence = ops._confidence(query, budgeted, support_score=support_report["score"]) if budgeted else 0.0
+    prediction_set_size = ops._prediction_set_size(budgeted, threshold)
+    entropy = semantic_entropy([hit.text for hit in budgeted])
+    gist_support = gist_support_report(budgeted)
+    gist_only = bool(gist_support["applied"])
+    reality_monitoring = ops._reality_monitoring_report(budgeted)
+    standing_report = reality_monitoring["standing"]
+    ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
+    if ungrounded_reality_only != bool(reality_monitoring["ungrounded_only"]):
+        raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
+    answer_grounding_floor = answer_grounding_floor_report(budgeted, policy)
+    answer_grounding_floor_active = bool(answer_grounding_floor["active"])
+    if gist_only:
+        confidence = min(confidence, threshold * 0.95)
+    if ungrounded_reality_only:
+        confidence = min(confidence, threshold * 0.95)
+    if answer_grounding_floor_active:
+        confidence = min(confidence, threshold * 0.95)
+    if calibration:
+        gated = (
+            should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
+            or insufficient_support
+            or gist_only
+            or ungrounded_reality_only
+            or answer_grounding_floor_active
+        )
+    else:
+        gated = (
+            confidence < threshold
+            or prediction_set_size == 0
+            or insufficient_support
+            or gist_only
+            or ungrounded_reality_only
+            or answer_grounding_floor_active
+        )
+    gate_reason: str | None = None
+    gate_note: str | None = None
+    if gist_only:
+        gate_reason = "gist_only"
+        gate_note = "Only gist-tier memory support was retrieved; inspect source evidence before answering."
+    elif ungrounded_reality_only:
+        gate_reason = "ungrounded_reality_only"
+        gate_note = (
+            "Retrieved support has low groundedness or insufficient independent "
+            "external support; abstaining until grounded evidence is available."
+        )
+    elif answer_grounding_floor_active:
+        gate_reason = "answer_grounding_floor"
+        gate_note = (
+            "Retrieved support is dominated by low-grounded self-generated content; "
+            "flagging as hypothesis and abstaining until grounded support is available."
+        )
+    elif insufficient_support:
+        gate_reason = "insufficient_query_support"
+        gate_note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
+    elif gated:
+        gate_reason = "calibrated_uncertainty"
+        gate_note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
+    abstention_reason = coverage_reason or gate_reason
+    note = coverage_note or gate_note
+    report["abstention_reason"] = abstention_reason
     explain = {
         "query_mode": GLOBAL_SENSEMAKING_MODE,
         "global_sensemaking": report,
@@ -486,7 +563,21 @@ def _run_global_sensemaking(
         "reduce_count": report["reduce_count"],
         "exclusions": list(report["exclusions"]),
         "budget": dict(report["budget"]),
-        "abstention_reason": report["abstention_reason"],
+        "abstention_reason": abstention_reason,
+        "gist_support": gist_support,
+        "reality_monitoring": reality_monitoring,
+        "standing": standing_report,
+        "answer_grounding_floor": answer_grounding_floor,
+        "semantic_entropy": entropy,
+        "calibration": ops._calibration_explain(calibration, threshold),
+        "confidence": {
+            "score": confidence,
+            "answer_score": confidence,
+            "prediction_set_size": prediction_set_size,
+            "threshold": threshold,
+            "source": "conformal" if calibration else "evidence_quality",
+            "query_support": support_report,
+        },
         "read_marks": read_marks,
         "adapters": {
             "embedding": ops.adapters.embedding.name,
@@ -500,8 +591,8 @@ def _run_global_sensemaking(
     return RetrievalResult(
         query=query,
         hits=budgeted,
-        confidence=0.0 if abstained else 1.0,
-        abstained=abstained,
+        confidence=confidence,
+        abstained=abstention_reason is not None,
         uncertainty_note=note,
         token_budget=policy.token_budget,
         used_tokens=used,
