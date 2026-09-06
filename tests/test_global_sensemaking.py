@@ -130,6 +130,36 @@ def _append_raptor_summary(
     )
 
 
+def test_global_sensemaking_does_not_relabel_ungrounded_sources_as_grounded() -> None:
+    engine = LocalMemoryEngine()
+    query = "What amber lighthouse dusk board posts harbor delays?"
+    text = "Amber lighthouse dusk board posts harbor delays every evening."
+    for reality_class in ("simulated", "self_generated", "externally_suggested", "unknown"):
+        tenant = f"sensemaking-ungrounded-{reality_class}"
+        source = engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="user-ungrounded",
+                actor="user",
+                source_type="chat",
+                content=text,
+                trust_tier=0,
+                access_policy={"tenant": tenant},
+                metadata={"reality_class": reality_class},
+            )
+        )
+        root = _append_raptor_summary(engine, tenant, text, source_cids=[source])
+
+        result = _sensemaking(engine, tenant, query)
+        hit = next(hit for hit in result.hits if hit.id == root)
+
+        assert hit.metadata.get("reality_class") == reality_class
+        assert hit.metadata.get("source_reality_classes") == {source: reality_class}
+        assert result.abstained is True
+        assert _report(result)["abstention_reason"] == "ungrounded_reality_only"
+        assert result.explain["reality_monitoring"]["ungrounded_only"] is True
+
+
 def test_global_sensemaking_returns_usable_synthesis_when_support_is_sufficient() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-usable"
