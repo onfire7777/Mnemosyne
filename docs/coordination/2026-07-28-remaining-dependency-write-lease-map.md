@@ -507,13 +507,42 @@ The following packages are complete source history, not runnable work:
   does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #151: ordinary documentation receipt recording the merged PR #149
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-06T03:58:00Z`
-  capture and adds only the PR #149 merged-baseline bullet, the #150
+  lease-map lapse. It is **MERGED** at tip
+  `7429b8221501cd1f52bda2d5e590a4ba38863850`. It was **OPEN/READY** at
+  the `2026-09-06T03:58:00Z` capture and adds only the PR #149
+  merged-baseline bullet, the #150 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #151 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `7429b8221501cd1f52bda2d5e590a4ba38863850`.
+- PR #152: Exact 1 M01/M03/M10 peer public README cells
+  `eval/public/README.md`
+  (title: docs(eval): promote M01/M03/M10 to peer public README cells)
+  from exact head `88f184373de7ea4a6f188931c1bc102f7c3ce0a7`; all
+  required exact-head checks passed in run `34011817634`; merge
+  `5fc5eb80bbeaedb38a37e905147be69dc944a80c` at `2026-09-06T05:04:23Z`.
+  Prior tip was `7429b8221501cd1f52bda2d5e590a4ba38863850` (PR #151).
+  Post-main tip Unit+drift proving on CI `34013065647`
+  because PR #152 was absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping like
+  prior Exact-1 receipts. Exclusive File Set (Exact 1):
+  `eval/public/README.md`.
+  Purpose: promote M01/M03/M10 to peer public README cells;
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #152 was documentation). This receipt does not
+  invent modules; the M14 freeze is unchanged. This receipt
+  changes no benchmark result or admission state, admits no
+  successor source node, and does not recompute the canonical
+  baseline (baseline stays `main@f688c747`).
+- PR #154: ordinary documentation receipt recording the merged PR #152
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-06T05:07:00Z`
+  capture and adds only the PR #152 merged-baseline bullet, the #151
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #151 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #154 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
