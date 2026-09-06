@@ -2427,6 +2427,10 @@ def _raptor_node_hit(
             "memory_type": GLOBAL_SENSEMAKING_MODE,
             "data_only": True,
             "privacy": privacy,
+            # Revalidated readable sources ground this RAPTOR projection so
+            # reality-monitoring / standing do not treat the intended synthesis
+            # surface as unknown/self-generated and hard-abstain every result.
+            "reality_class": "grounded" if source_cids else "unknown",
         },
     )
 
