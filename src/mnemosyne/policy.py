@@ -2,8 +2,37 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
+from hashlib import sha256
 from typing import Any
+
+CONSOLIDATION_CADENCE_TIERS = ("fast", "medium", "slow")
+_DEFAULT_CADENCE_TIER_PASSES: dict[str, tuple[str, ...]] = {
+    "fast": ("replayer", "summarizer", "embedder"),
+    "medium": ("replayer", "extractor", "resolver", "belief_reviser", "promotion_gate"),
+    "slow": (
+        "replayer",
+        "lesson_distiller",
+        "skill_inducer",
+        "forgetter",
+        "user_model_updater",
+    ),
+}
+_DEFAULT_CADENCE_TIER_MIN_STEPS: dict[str, int] = {
+    "fast": 5,
+    "medium": 15,
+    "slow": 60,
+}
+
+
+def validate_cadence_tier(value: object) -> str:
+    """Return an allowlisted cadence tier or fail closed."""
+
+    tier = str(value).strip()
+    if tier not in CONSOLIDATION_CADENCE_TIERS:
+        raise ValueError("cadence_tier must be one of fast|medium|slow")
+    return tier
 
 
 @dataclass(slots=True)
@@ -103,6 +132,17 @@ class OperatingPolicy:
         }
     )
     write_priority_debias_max_weight: float = 20.0
+    # P15-S2 CAP-007: deterministic fast|medium|slow pass routing. Defaults
+    # select existing worker passes only; omitting a tier request keeps the
+    # historical DEFAULT_CONSOLIDATION_PASSES path.
+    consolidation_cadence_tier_passes: dict[str, list[str]] = field(
+        default_factory=lambda: {
+            name: list(passes) for name, passes in _DEFAULT_CADENCE_TIER_PASSES.items()
+        }
+    )
+    consolidation_cadence_tier_min_steps: dict[str, int] = field(
+        default_factory=lambda: dict(_DEFAULT_CADENCE_TIER_MIN_STEPS)
+    )
     # §31 / FR-17 / OQ2 immutable rail gate, default off. Kept outside
     # immutable_rails so the all-true rail map remains byte-stable.
     cold_loop_counterfactual_trusted: bool = False
@@ -126,6 +166,28 @@ class OperatingPolicy:
             "erasure_propagates_to_derived_indexes": True,
         }
     )
+
+    def cadence_policy_fingerprint(self) -> str:
+        """Stable digest of cadence routing plus mutation-rail bounds."""
+
+        payload = {
+            "consolidation_cadence_tier_min_steps": {
+                tier: int(self.consolidation_cadence_tier_min_steps[tier])
+                for tier in CONSOLIDATION_CADENCE_TIERS
+            },
+            "consolidation_cadence_tier_passes": {
+                tier: list(self.consolidation_cadence_tier_passes[tier])
+                for tier in CONSOLIDATION_CADENCE_TIERS
+            },
+            "max_prune_fraction_per_pass": float(self.max_prune_fraction_per_pass),
+            "max_supersession_rate": float(self.max_supersession_rate),
+            "min_external_corroboration_for_fact": int(
+                self.min_external_corroboration_for_fact
+            ),
+        }
+        return sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
