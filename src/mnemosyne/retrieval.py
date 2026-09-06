@@ -2169,6 +2169,25 @@ def classify_raptor_node(
 ) -> tuple[bool, str]:
     """Return whether a RAPTOR node is readable in the caller scope, plus a deny reason."""
 
+    return classify_scoped_evidence(
+        item,
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=filt,
+        policy=policy,
+    )
+
+
+def classify_scoped_evidence(
+    item: Any,
+    *,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
+) -> tuple[bool, str]:
+    """Return whether an evidence row is readable in the caller scope."""
+
     item_tenant = str(_item_field(item, "tenant_id") or "")
     item_branch = str(_item_field(item, "branch") or "main")
     if item_tenant != tenant_id:
@@ -2238,51 +2257,72 @@ def global_sensemaking_projection(
 
     node_budget = _sensemaking_node_budget(filt, policy, deep=deep)
     items = iter_raptor_summary_items(ops, tenant_id, branch)
-    mapped: list[Hit] = []
-    exclusions: list[dict[str, str]] = []
-    source_cids: list[str] = []
-    levels: set[int] = set()
+    readable_items: list[Any] = []
+    policy_denied = 0
+    hidden_source_dropped = 0
+    denied_cids: set[str] = set()
     for item in items:
         cid = str(_item_field(item, "cid") or "")
-        allowed, reason = classify_raptor_node(
+        if not cid:
+            continue
+        allowed, _reason = classify_raptor_node(
             item,
             tenant_id=tenant_id,
             branch=branch,
             filt=filt,
             policy=policy,
         )
-        if not cid:
-            continue
         if not allowed:
-            exclusions.append({"cid": cid, "reason": reason})
+            policy_denied += 1
+            denied_cids.add(cid)
             continue
-        hit = _raptor_node_hit(item, filt=filt, policy=policy)
+        readable_items.append(item)
+    readable_summary_ids = {
+        str(_item_field(item, "cid") or "") for item in readable_items if _item_field(item, "cid")
+    }
+
+    mapped: list[Hit] = []
+    source_cids: list[str] = []
+    levels: set[int] = set()
+    for item in readable_items:
+        hit = _raptor_node_hit(
+            item,
+            ops=ops,
+            filt=filt,
+            policy=policy,
+            query=query,
+            readable_summary_ids=readable_summary_ids,
+            denied_cids=denied_cids,
+        )
         if hit is None:
-            exclusions.append({"cid": cid, "reason": "hidden"})
+            hidden_source_dropped += 1
             continue
         mapped.append(hit)
         level = int(hit.metadata.get("raptor_level") or 0)
         if level:
             levels.add(level)
-        for source_cid in hit.provenance:
+        for source_cid in hit.metadata.get("source_evidence_cids") or []:
             if source_cid and source_cid not in source_cids:
                 source_cids.append(source_cid)
 
-    mapped.sort(key=lambda hit: (-int(hit.metadata.get("raptor_level") or 0), hit.id))
-    reduced: list[Hit] = []
+    reduced, theme_roots, incomplete = _reduce_sensemaking_hits(mapped, node_budget=node_budget, query=query)
+    exclusions: list[dict[str, Any]] = []
+    if policy_denied:
+        exclusions.append({"reason": "policy_denied", "count": policy_denied})
+    if hidden_source_dropped:
+        exclusions.append({"reason": "hidden_source", "count": hidden_source_dropped})
+    kept_ids = {hit.id for hit in reduced}
     for hit in mapped:
-        if len(reduced) >= node_budget:
+        if hit.id not in kept_ids:
             exclusions.append({"cid": hit.id, "reason": "node_budget"})
-            continue
-        reduced.append(hit)
-    exclusions.sort(key=lambda item: (item["cid"], item["reason"]))
-    mapped_node_cids = [hit.id for hit in mapped]
+    exclusions.sort(key=lambda item: (str(item.get("reason") or ""), str(item.get("cid") or ""), int(item.get("count") or 0)))
     report = {
         "version": GLOBAL_SENSEMAKING_VERSION,
         "query_mode": GLOBAL_SENSEMAKING_MODE,
         "data_only": True,
         "source_cids": source_cids,
-        "mapped_node_cids": mapped_node_cids,
+        "mapped_node_cids": [hit.id for hit in mapped],
+        "theme_root_cids": theme_roots,
         "raptor_levels": sorted(levels),
         "map_count": len(mapped),
         "reduce_count": len(reduced),
@@ -2293,7 +2333,8 @@ def global_sensemaking_projection(
             "node_budget": node_budget,
             "used_nodes": len(reduced),
         },
-        "abstention_reason": None,
+        "incomplete_theme_coverage": incomplete,
+        "abstention_reason": "incomplete_theme_coverage" if incomplete else None,
         "query": query,
     }
     return reduced, report
@@ -2309,7 +2350,16 @@ def _sensemaking_node_budget(filt: Mapping[str, Any], policy: OperatingPolicy, *
         return max(1, int(policy.deep_top_k if deep else policy.top_k))
 
 
-def _raptor_node_hit(item: Any, *, filt: Mapping[str, Any], policy: OperatingPolicy) -> Hit | None:
+def _raptor_node_hit(
+    item: Any,
+    *,
+    ops: Any,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
+    query: str,
+    readable_summary_ids: set[str],
+    denied_cids: set[str],
+) -> Hit | None:
     cid = str(_item_field(item, "cid") or "")
     tenant_id = str(_item_field(item, "tenant_id") or "")
     branch = str(_item_field(item, "branch") or "main")
@@ -2335,19 +2385,35 @@ def _raptor_node_hit(item: Any, *, filt: Mapping[str, Any], policy: OperatingPol
     text, privacy = apply_text_redactions(content, access_policy, decision)
     if not text:
         return None
-    source_cids = raptor_source_cids(metadata)
-    provenance = [cid]
-    for source_cid in source_cids:
-        if source_cid not in provenance:
-            provenance.append(source_cid)
+    text = _redact_denied_cids(text, denied_cids)
+    if not text:
+        return None
+    referenced = raptor_source_cids(metadata)
+    source_cids, hidden_source = _revalidate_source_cids(
+        ops,
+        referenced,
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=filt,
+        policy=policy,
+    )
+    if hidden_source:
+        return None
+    text = _redact_denied_cids(text, set(referenced) - set(source_cids))
     summary = dict(metadata["summary"]) if isinstance(metadata.get("summary"), dict) else {}
+    for key in ("child_summary_cids", "source_summary_cids"):
+        raw_children = summary.get(key)
+        if isinstance(raw_children, list):
+            summary[key] = [str(child) for child in raw_children if str(child) in readable_summary_ids]
+    summary["source_evidence_cids"] = list(source_cids)
+    provenance = [cid, *source_cids]
     return Hit(
         id=cid,
         kind="evidence",
         tenant_id=tenant_id,
         branch=branch,
         text=text,
-        score=float(level),
+        score=float(lexical_score(query, text)),
         channel=GLOBAL_SENSEMAKING_CHANNEL,
         provenance=provenance,
         trust_tier=int(_item_field(item, "trust_tier") or 0),
@@ -2356,13 +2422,128 @@ def _raptor_node_hit(item: Any, *, filt: Mapping[str, Any], policy: OperatingPol
             "source_type": str(_item_field(item, "source_type") or "consolidation-summary"),
             "summary": summary,
             "raptor_level": level,
-            "source_evidence_cids": source_cids,
+            "source_evidence_cids": list(source_cids),
             "query_mode": GLOBAL_SENSEMAKING_MODE,
             "memory_type": GLOBAL_SENSEMAKING_MODE,
             "data_only": True,
             "privacy": privacy,
         },
     )
+
+
+def _revalidate_source_cids(
+    ops: Any,
+    source_cids: Sequence[str],
+    *,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
+) -> tuple[list[str], bool]:
+    get_evidence = getattr(ops, "get_evidence", None)
+    readable: list[str] = []
+    hidden = False
+    for cid in source_cids:
+        if not cid:
+            continue
+        if not callable(get_evidence):
+            hidden = True
+            continue
+        evidence = get_evidence(tenant_id, cid, branch)
+        if evidence is None:
+            hidden = True
+            continue
+        allowed, _reason = classify_scoped_evidence(
+            evidence,
+            tenant_id=tenant_id,
+            branch=branch,
+            filt=filt,
+            policy=policy,
+        )
+        if not allowed:
+            hidden = True
+            continue
+        if cid not in readable:
+            readable.append(cid)
+    return readable, hidden
+
+
+def _reduce_sensemaking_hits(
+    mapped: list[Hit],
+    *,
+    node_budget: int,
+    query: str,
+) -> tuple[list[Hit], list[str], bool]:
+    if not mapped:
+        return [], [], False
+    for hit in mapped:
+        hit.score = float(lexical_score(query, hit.text))
+    child_to_parent = _sensemaking_child_to_parent(mapped)
+    groups: dict[str, list[Hit]] = {}
+    for hit in mapped:
+        root_id = _sensemaking_theme_root(hit.id, child_to_parent)
+        hit.metadata["theme_root_cid"] = root_id
+        groups.setdefault(root_id, []).append(hit)
+    for members in groups.values():
+        members.sort(key=lambda item: (-item.score, -int(item.metadata.get("raptor_level") or 0), item.id))
+    group_order = sorted(
+        groups,
+        key=lambda root_id: (-groups[root_id][0].score, root_id),
+    )
+    incomplete = node_budget < len(groups)
+    selected_roots = group_order[: min(node_budget, len(group_order))]
+    reduced: list[Hit] = []
+    for root_id in selected_roots:
+        if len(reduced) >= node_budget:
+            break
+        reduced.append(groups[root_id][0])
+    if len(reduced) < node_budget:
+        taken = {hit.id for hit in reduced}
+        leftover = [
+            hit
+            for root_id in selected_roots
+            for hit in groups[root_id]
+            if hit.id not in taken
+        ]
+        leftover.sort(key=lambda item: (-item.score, -int(item.metadata.get("raptor_level") or 0), item.id))
+        for hit in leftover:
+            if len(reduced) >= node_budget:
+                break
+            reduced.append(hit)
+    reduced.sort(key=lambda item: (-item.score, -int(item.metadata.get("raptor_level") or 0), item.id))
+    return reduced, selected_roots if incomplete else group_order, incomplete
+
+
+def _sensemaking_child_to_parent(hits: Sequence[Hit]) -> dict[str, str]:
+    known = {hit.id for hit in hits}
+    mapping: dict[str, str] = {}
+    for hit in hits:
+        summary = hit.metadata.get("summary") if isinstance(hit.metadata, dict) else {}
+        if not isinstance(summary, Mapping):
+            continue
+        children = list(summary.get("child_summary_cids") or []) + list(summary.get("source_summary_cids") or [])
+        for child in children:
+            child_id = str(child)
+            if child_id in known:
+                mapping[child_id] = hit.id
+    return mapping
+
+
+def _sensemaking_theme_root(node_id: str, child_to_parent: Mapping[str, str]) -> str:
+    current = node_id
+    seen: set[str] = set()
+    while current in child_to_parent and current not in seen:
+        seen.add(current)
+        current = child_to_parent[current]
+    return current
+
+
+def _redact_denied_cids(text: str, denied_cids: set[str]) -> str:
+    redacted = text
+    for cid in sorted(denied_cids, key=len, reverse=True):
+        if cid:
+            redacted = redacted.replace(cid, "[redacted]")
+    return redacted
 
 
 def _item_field(item: Any, name: str, default: Any = None) -> Any:
