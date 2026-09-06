@@ -5,7 +5,8 @@ This file authorizes no source, fixture, registry, scorer, measurement,
 admission-state, publication change, or GitHub PR beyond this one-file plan.
 
 Author lane: M20 publication-integrity planning lane.
-Verified base: `origin/main@f688c74757365a9d946100687a04288cde12a7fc`.
+Verified base (plan-authored): `origin/main@f688c74757365a9d946100687a04288cde12a7fc`.
+Tip-state discharge notes (R3/R4/R5 via N12/#139) are relative to later tip, not that snapshot.
 Written: 2026-08-15.
 
 ## 0. What this document is, and what it is not
@@ -120,7 +121,7 @@ license to flip it. This plan never labels a run "publication certified."
 
 ## 2. Prerequisites (not discharged)
 
-| ID | Gate | Owner | Status on `f688c747` |
+| ID | Gate | Owner | Status (plan-authored base `f688c747`; tip-discharged notes where marked) |
 |---|---|---|---|
 | G0 | Write slot for this path, or relocate off `docs/plans/` | GoalEx | Open |
 | G1 | Lease map recomputed; M20 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
@@ -152,7 +153,8 @@ add a **new** deterministic development fixture:
   publication. Byte-identical under `canonical_json(generate_fixture(seed))`.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
 - Local signing keys only. Public hosting stays a separate act. Mixed
-  v1/v2 rendering stays blocked until R3.
+  v1/v2 rendering stays **blocked (fail-closed residual)** — R3 discharge
+  does not enable mixed render.
 
 This paragraph does not create those files.
 
@@ -166,7 +168,9 @@ add a **new** stdlib-only oracle:
   replay, non-destructive history, verifier exit status.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   claim 100% valid acceptance, 100% invalid rejection, exact digest replay,
-  or non-mutation of published history as an admission bound (that is R1).
+  or non-mutation of published history as an admission bound. R1 is the
+  resource-admission receipt only; behavioral bounds need a distinct
+  scored-run / acceptance evidence gate (not R1 alone).
 - v1 `IMPLEMENTED` is not v2 admission. Missing R2/R3/R4 yields **no public
   release and no v2 admission**, not a pass.
 - Anti-gaming (spec L1291): no privileged internal ledger rewrite; gold,
@@ -188,9 +192,9 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-G0/G1 (R3/R4/R5 schema+digest+v2 dispatch already on tip via N12/#139)
+G0/G1/G2 (R3/R4/R5 schema+digest+v2 dispatch already on tip via N12/#139)
   -> freeze this v2/N12 delta plan against landed leaderboard surfaces
-    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1/R2 not required]
+    -> Stage A  descriptive oracle + fixture + tests   [unadmitted; needs G2; R1/R2 not required]
       -> measured / admitted claims may use R1
       -> public release / hosting requires R2 (WMBS-F human approval + PBPP)
       -> Stage B  public-harness registration          [unadmitted; G3]
@@ -209,7 +213,7 @@ No path below is writable from this document.
 docs/plans/wmb-m20-publication-integrity-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1; consume landed N12 R3/R4/R5;
+Prospective Stage A (after freeze + G0/G1/G2; consume landed N12 R3/R4/R5;
 R1/R2 are not Stage A source blockers — R2 is public-release), not now:
 
 ```text
@@ -273,11 +277,15 @@ rendering stays blocked.
 
 Reuse `leaderboard.validate` / `ledger` / `render` / `publish` /
 `readiness` without reinterpreting signed v1 bytes. **Deferred acceptance
-targets** (not achieved Stage-A/B results; bind only after R1 receipt): 100%
+targets** (not achieved Stage-A/B results; bind only after a distinct
+scored-run acceptance evidence gate — R1 resource receipt alone is not
+enough): 100%
 acceptance of valid bundles; 100% rejection of invalid bundles; exact digest
 replay; no mutation of prior published history. Five input orderings, two
 clean renders, one interrupted publication. Historical v1 entries stay
 immutable; a later v2 migration appends a linked supersession.
 
-No registry row exists, so this cell is not runnable.
+Stage A: no registry row exists, so this cell is not runnable. Stage B
+integration owner may replace this sentence after registration with the
+live suite/registry fact.
 ```
