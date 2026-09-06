@@ -130,6 +130,41 @@ def _append_raptor_summary(
     )
 
 
+def test_global_sensemaking_returns_usable_synthesis_when_support_is_sufficient() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-usable"
+    source = _append_theme(
+        engine,
+        tenant,
+        "user-usable",
+        "Amber lighthouse dusk board posts harbor delays every evening.",
+    )
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse dusk board posts harbor delays every evening.",
+        source_cids=[source],
+    )
+
+    result = _sensemaking(
+        engine,
+        tenant,
+        "What amber lighthouse dusk board posts harbor delays?",
+    )
+    report = _report(result)
+
+    assert result.hits
+    assert root in {hit.id for hit in result.hits}
+    assert source in set(report["source_cids"])
+    assert result.abstained is False
+    assert report["abstention_reason"] is None
+    assert result.uncertainty_note is None
+    assert 0.0 < result.confidence <= 1.0
+    assert result.explain["gist_support"]["applied"] is True
+    assert "query_support" in result.explain["confidence"]
+    assert result.explain["confidence"]["query_support"]["score"] >= 2.0 / 3.0
+
+
 def test_global_sensemaking_projects_readable_raptor_nodes_with_provenance() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-readable"
@@ -338,24 +373,24 @@ def test_global_sensemaking_preserves_confidence_and_abstention_gates() -> None:
     tenant = "sensemaking-gates"
     _build_raptor(engine, tenant, "user-gates")
 
-    theme = _sensemaking(engine, tenant)
+    theme = _sensemaking(
+        engine,
+        tenant,
+        "What amber lighthouse theme records dusk weather and harbor delays?",
+    )
     weak = _sensemaking(engine, tenant, "unrelated pineapple taxonomy without lighthouse terms")
     theme_report = _report(theme)
 
     assert theme.hits
-    assert theme.confidence < 1.0
+    assert theme.abstained is False
+    assert theme_report["abstention_reason"] is None
+    assert 0.0 < theme.confidence <= 1.0
     assert theme.explain["gist_support"]["applied"] is True
     assert "query_support" in theme.explain["confidence"]
+    assert theme.explain["confidence"]["query_support"]["score"] >= 2.0 / 3.0
     assert "reality_monitoring" in theme.explain
     assert "answer_grounding_floor" in theme.explain
-    assert theme.abstained is True
-    assert theme_report["abstention_reason"] in {
-        None,
-        "gist_only",
-        "insufficient_query_support",
-        "ungrounded_reality_only",
-        "answer_grounding_floor",
-    }
+    assert theme_report["abstention_reason"] != "gist_only"
     assert weak.abstained is True
     assert weak.confidence < 1.0
     assert weak.confidence <= theme.confidence

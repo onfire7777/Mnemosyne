@@ -55,8 +55,8 @@ def run_sensemaking_eval() -> dict[str, Any]:
     )
     foreign_hierarchy = _build_raptor(engine, foreign_tenant, foreign_cids)
 
-    first = _retrieve(engine, tenant, "What global themes appear across the amber lighthouse notes?")
-    second = _retrieve(engine, tenant, "What global themes appear across the amber lighthouse notes?")
+    first = _retrieve(engine, tenant, "What amber lighthouse keepers record dusk weather and shipping delays?")
+    second = _retrieve(engine, tenant, "What amber lighthouse keepers record dusk weather and shipping delays?")
     empty = _retrieve(
         LocalMemoryEngine(),
         "g0-sensemaking-empty",
@@ -88,11 +88,12 @@ def run_sensemaking_eval() -> dict[str, Any]:
         (empty.explain.get("global_sensemaking") or {}).get("abstention_reason") or ""
     ) == "insufficient_readable_coverage"
     gated = (
-        first.confidence < 1.0
+        0.0 < first.confidence <= 1.0
         and bool(first.explain.get("gist_support"))
         and "query_support" in (first.explain.get("confidence") or {})
+        and not first.abstained
     )
-    answered = bool(first.hits) and provenance_complete
+    answered = bool(first.hits) and provenance_complete and not first.abstained
 
     rows = [
         {
