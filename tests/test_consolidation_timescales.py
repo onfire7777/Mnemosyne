@@ -68,6 +68,7 @@ def _append(
     branch: str = "main",
     source_type: str = "episode",
     access_policy: dict[str, object] | None = None,
+    sensitivity: int = 0,
 ) -> str:
     return engine.append_evidence(
         Evidence(
@@ -77,6 +78,7 @@ def _append(
             source_type=source_type,
             content=content,
             trust_tier=0,
+            sensitivity=sensitivity,
             access_policy=access_policy or {"tenant": tenant},
         ),
         branch=branch,
@@ -635,7 +637,7 @@ def test_sleep_payload_binds_required_fields_and_deterministic_fingerprint() -> 
     assert required <= set(left)
     assert left["tenant_id"] == TENANT
     assert left["branch"] == "main"
-    assert left["source_evidence_cids"] == ["cid-b", "cid-a"]
+    assert left["source_evidence_cids"] == ["cid-a", "cid-b"]
     assert right["source_evidence_cids"] == ["cid-a", "cid-b"]
     assert left["requested_tier"] == "slow"
     assert left["enqueued_at"] == SLEEP_ENQUEUED.isoformat()
@@ -694,7 +696,7 @@ def test_sleep_selection_honors_item_pass_and_runtime_limits() -> None:
     )
 
     item_receipt = _sleep_receipt(limited_items)
-    assert item_receipt["input_cids"] == cids[:2]
+    assert item_receipt["input_cids"] == sorted(cids)[:2]
     assert item_receipt["item_limit"] == 2
     assert len(_summaries(engine)) == 1
 
@@ -961,3 +963,167 @@ def test_sleep_cannot_revive_erased_superseded_unauthorized_or_stale_data() -> N
         if row.get("cid")
     )
     assert _active_assertions_for(engine) == []
+
+
+def test_sleep_preserves_explicit_zero_sensitivity_ceiling() -> None:
+    engine = _engine()
+    engine.policy.max_sensitivity = 0
+    cid = _append(
+        engine,
+        "S1 secret must stay above an explicit zero ceiling.",
+        sensitivity=1,
+    )
+    worker = _worker(engine, consolidation_min_steps=0)
+    with pytest.raises(RuntimeError, match="unauthor"):
+        worker.run_sleep_payload(_sleep_payload([cid], now=NOW))
+    assert _summaries(engine) == []
+
+
+def test_sleep_rejects_redaction_only_access_decisions() -> None:
+    engine = _engine()
+    secret = "ssn=123-45-6789 must not reach raw sleep distillation."
+    cid = _append(
+        engine,
+        secret,
+        access_policy={
+            "tenant": TENANT,
+            "min_role_for_raw": "operator",
+            "redact_fields": ["content"],
+        },
+    )
+    worker = _worker(engine, consolidation_min_steps=0)
+    with pytest.raises(RuntimeError, match="unauthor|redact"):
+        worker.run_sleep_payload(_sleep_payload([cid], now=NOW))
+    summaries = _summaries(engine)
+    assert summaries == []
+    assert all(
+        secret not in str(row.get("content") or "") or str(row.get("cid") or "") == cid
+        for row in engine.export_tenant(TENANT)["evidence"]
+    )
+
+
+def test_sleep_pass_limit_blocks_core_mutations_outside_requested_prefix() -> None:
+    engine = _engine()
+    cid = _append(engine, "The preferred database is Postgres.")
+    worker = ConsolidationWorker(engine, [_postgres_case()], consolidation_min_steps=0)
+
+    replay_only = worker.run_sleep_payload(
+        _sleep_payload([cid], requested_tier="medium", pass_limit=1, now=NOW)
+    )
+    empty_bound = worker.run_sleep_payload(
+        _sleep_payload(
+            [cid],
+            requested_tier="medium",
+            pass_limit=0,
+            now=NOW + timedelta(minutes=1),
+        )
+    )
+
+    assert replay_only.passes_run == ["replayer"]
+    assert {item["name"] for item in replay_only.pass_results} <= {
+        "replayer",
+        "mutation_rails",
+        "prediction_error_gate",
+    }
+    assert empty_bound.passes_run == []
+    assert empty_bound.candidate_results == []
+    assert _active_assertions_for(engine) == []
+
+
+def test_sleep_runtime_deadline_stops_work_during_consolidation() -> None:
+    engine = _engine()
+    cid = _append(engine, "A slow later pass must stop once the sleep deadline is crossed.")
+    ticks = {"n": 0}
+
+    def late_during_run() -> datetime:
+        ticks["n"] += 1
+        if ticks["n"] <= 2:
+            return NOW
+        return NOW + timedelta(seconds=30)
+
+    worker = ConsolidationWorker(
+        engine, gate_cases=[], consolidation_min_steps=0, clock=late_during_run
+    )
+    result = worker.run_sleep_payload(
+        _sleep_payload([cid], pass_limit=8, runtime_limit_seconds=5.0, now=NOW)
+    )
+    names = {item["name"] for item in result.pass_results}
+    assert "runtime_limit" in _sleep_receipt(result)["skipped_reasons"]
+    assert "summarizer" not in names or next(
+        item for item in result.pass_results if item["name"] == "summarizer"
+    )["status"] != "complete"
+    assert _summaries(engine) == []
+
+
+def test_sleep_fingerprint_aliases_canonicalize_item_limit_selection() -> None:
+    engine = _engine()
+    first = _append(engine, "Canonical first eligible sleep item.")
+    second = _append(engine, "Canonical second eligible sleep item.")
+    worker = _worker(engine, consolidation_min_steps=0)
+    left = _sleep_payload([second, first], item_limit=1, now=NOW)
+    right = _sleep_payload([first, second], item_limit=1, now=NOW)
+
+    assert left["source_evidence_cids"] == sorted([first, second])
+    assert left["idempotency_fingerprint"] == right["idempotency_fingerprint"]
+    first_run = worker.run_sleep_payload(left)
+    second_run = worker.run_sleep_payload(right)
+    expected = [sorted([first, second])[0]]
+    assert _sleep_receipt(first_run)["input_cids"] == expected
+    assert _sleep_receipt(second_run)["memo_hit"] is True
+    assert _sleep_receipt(second_run)["input_cids"] == expected
+
+
+def test_sleep_clock_watermark_is_tenant_scoped() -> None:
+    engine = _engine()
+    other = OTHER_TENANT
+    future_cid = _append(engine, "Future-dated tenant A job must not poison tenant B.")
+    other_cid = _append(
+        engine,
+        "Tenant B remains eligible after tenant A sees a future clock.",
+        tenant=other,
+    )
+    worker = _worker(engine, consolidation_min_steps=0)
+    worker.run_sleep_payload(
+        _sleep_payload([future_cid], now=NOW + timedelta(hours=2))
+    )
+    other_run = worker.run_sleep_payload(
+        _sleep_payload([other_cid], tenant=other, now=NOW)
+    )
+    assert _sleep_receipt(other_run)["input_cids"] == [other_cid]
+
+
+def test_sleep_keeps_cid_when_another_assertion_still_supports_it() -> None:
+    engine = _engine()
+    cid = _append(engine, "Shared source still has an active supporting assertion.")
+    other = _append(engine, "Replacement object uses the same source CID.")
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="preferred database",
+            predicate="is",
+            object="MySQL",
+            valid_from=NOW - timedelta(hours=2),
+            valid_to=NOW - timedelta(hours=1),
+            status="active",
+            source_evidence_cids=[cid],
+            access_policy={"tenant": TENANT},
+        )
+    )
+    engine.upsert_assertion(
+        Assertion(
+            tenant_id=TENANT,
+            user_id=USER,
+            subject="preferred database",
+            predicate="is",
+            object="Postgres",
+            valid_from=NOW - timedelta(minutes=30),
+            status="active",
+            source_evidence_cids=[cid, other],
+            access_policy={"tenant": TENANT},
+        )
+    )
+    worker = _worker(engine, consolidation_min_steps=0)
+    result = worker.run_sleep_payload(_sleep_payload([cid], now=NOW))
+    assert _sleep_receipt(result)["input_cids"] == [cid]
+    assert cid not in _sleep_receipt(result).get("excluded_cids", [])
