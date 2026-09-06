@@ -1023,6 +1023,17 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("result lineage does not match manifest")
     if result.get("run_commit") != manifest["build"]["candidate_git_sha"]:
         raise BundleError("result run_commit does not match bound commit")
+    result_profile = result.get("run_profile")
+    result_identity = result.get("identity")
+    if (
+        not isinstance(result_profile, dict)
+        or result_profile.get("seeds") != manifest["traces"]["seed_records"]
+        or result_profile.get("retries") != manifest["traces"]["retries"]
+        or result_profile.get("aborts") != manifest["traces"]["aborts"]
+        or not isinstance(result_identity, dict)
+        or result_identity.get("seed") not in manifest["traces"]["seed_records"]
+    ):
+        raise BundleError("result run profile does not match trace custody")
     if "canonical-replay.json" not in payloads:
         raise BundleError("canonical replay artifact is missing")
     replay = _load_inventory_json(payloads, "canonical-replay.json")
@@ -1032,6 +1043,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or expected.get("digest") != canonical_replay_digest(replay)
         or expected.get("suite") != replay.get("suite")
         or expected.get("seed_records") != replay.get("seed_records")
+        or expected.get("seed_records") != manifest["traces"]["seed_records"]
     ):
         raise BundleError("canonical replay digest mismatch")
     replay_build = replay.get("build") if isinstance(replay, dict) else None
