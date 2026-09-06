@@ -1057,6 +1057,18 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("track_kind mismatch")
     if result.get("lineage") != manifest["lineage"]:
         raise BundleError("result lineage does not match manifest")
+    if manifest["track_kind"] == "OFFICIAL-UPSTREAM":
+        fidelity_artifact = _load_inventory_json(payloads, "fidelity.json")
+        if fidelity_artifact.get("upstream_protocol_digest") != manifest["lineage"][
+            "fidelity"
+        ]["upstream_protocol_digest"]:
+            raise BundleError("fidelity artifact does not match result lineage")
+    elif manifest["track_kind"] == "ENHANCED-SUCCESSOR":
+        parent_artifact = _load_inventory_json(payloads, "parent.json")
+        if parent_artifact.get("record_id") != manifest["lineage"][
+            "parent_official_record_id"
+        ]:
+            raise BundleError("parent artifact does not match result lineage")
     if result.get("run_commit") != manifest["build"]["candidate_git_sha"]:
         raise BundleError("result run_commit does not match bound commit")
     result_profile = result.get("run_profile")
