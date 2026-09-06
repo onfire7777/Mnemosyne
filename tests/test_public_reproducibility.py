@@ -396,6 +396,7 @@ def _write_reproducibility_bundle(
     lockfile: bytes | None = None,
     ledger_run_id: str | None = None,
     supersede_ledger: bool = False,
+    trace_aborts: int = 0,
 ) -> dict[str, Any]:
     root.mkdir(parents=True)
     commit = run_commit or "0123456789abcdef0123456789abcdef01234567"
@@ -504,6 +505,7 @@ def _write_reproducibility_bundle(
         "traces.jsonl": written["traces.jsonl"],
     }
     result = _result_for_track(track_kind, artifacts=artifacts, run_commit=commit)
+    result["run_profile"]["aborts"] = trace_aborts
     result_bytes = _write_json(root / "result.json", result)
     written["result.json"] = result_bytes
 
@@ -627,6 +629,7 @@ def _write_reproducibility_bundle(
         "scorer": _named_ref("scorer", written["scorer.json"]),
     }
     metric = _metric_record(version=scoring_profile)
+    metric["aborted_count"] = trace_aborts
     publication = {
         "certified": False,
         "headline": False,
@@ -651,7 +654,7 @@ def _write_reproducibility_bundle(
             "trace_index_digest": _sha256_ref(traces),
             "seed_records": [20260801],
             "retries": 0,
-            "aborts": 0,
+            "aborts": trace_aborts,
         },
         "config": {
             "path": "config.json",
@@ -1573,6 +1576,23 @@ def test_manifest_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) ->
     payload["metrics"][0]["value"] = 0.0
     payload["metrics"][0]["numerator"] = 0
     _write_json(bundle["root"] / REPRO_MANIFEST_NAME, payload)
+    with pytest.raises(BundleError, match="metrics"):
+        verify_bundle(bundle["root"])
+
+
+def test_trace_aborts_are_disclosed_in_result_and_manifest_metrics(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "disclosed-abort", trace_aborts=1
+    )
+    verified = verify_bundle(bundle["root"])
+    assert verified["valid"] is True
+    assert bundle["result"]["run_profile"]["aborts"] == 1
+    assert bundle["manifest"]["metrics"][0]["aborted_count"] == 1
+
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"][0]["aborted_count"] = 0
+    _write_json(manifest_path, manifest)
     with pytest.raises(BundleError, match="metrics"):
         verify_bundle(bundle["root"])
 
