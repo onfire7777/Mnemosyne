@@ -728,6 +728,8 @@ def test_development_reproduction_is_not_headline_or_repro_002(tmp_path: Path) -
     assert "operator" in readme
     assert "result-v1" in readme
     assert "result-v2" in readme
+    assert "Set `UV_OFFLINE=1`" in readme
+    assert "overall command as offline" in readme
     assert "official" in readme
     assert "successor" in readme
     assert "development" in readme
