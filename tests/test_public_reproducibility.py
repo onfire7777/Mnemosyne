@@ -741,6 +741,9 @@ def test_reproducibility_schema_is_closed_draft_2020_12() -> None:
     assert set(schema["$defs"]["metric"]["required"]) == set(REQUIRED_METRIC_FIELDS)
     assert set(schema["$defs"]["rights"]["required"]) == set(REQUIRED_RIGHTS_FIELDS)
     assert set(schema["$defs"]["inventory_entry"]["required"]) == set(REQUIRED_HASH_FIELDS)
+    assert "OPENAI_API_KEY" not in schema["$defs"]["environment"]["properties"][
+        "allowlist"
+    ]["items"]["enum"]
     Draft202012Validator.check_schema(schema)
 
 
@@ -1514,6 +1517,29 @@ def test_runtime_artifacts_reject_undeclared_fields(
     _write_json(manifest_path, manifest)
 
     with pytest.raises(BundleError, match="declaration does not match"):
+        verify_bundle(root)
+
+
+def test_environment_allowlist_rejects_credential_variables(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "credential-environment")
+    root = bundle["root"]
+    environment_path = root / "environment.json"
+    environment = json.loads(environment_path.read_text(encoding="utf-8"))
+    environment["allowlist"].append("OPENAI_API_KEY")
+    environment["allowlist"].sort()
+    environment_bytes = _write_json(environment_path, environment)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["environment"]["allowlist"] = environment["allowlist"]
+    entry = next(
+        item for item in manifest["hashes"] if item["path"] == "environment.json"
+    )
+    entry["size"] = len(environment_bytes)
+    entry["sha256"] = _sha256_ref(environment_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="allowlist|schema"):
         verify_bundle(root)
 
 

@@ -191,6 +191,19 @@ _REPRO_ENVIRONMENT_ARTIFACT_FIELDS = {
     "timezone",
     "wheelhouse_digest",
 }
+_REPRO_ENVIRONMENT_VARIABLES = {
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "SystemRoot",
+    "TEMP",
+    "TMP",
+    "TZ",
+    "UV_CACHE_DIR",
+    "UV_OFFLINE",
+    "WINDIR",
+}
 _NAMED_DIGEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*@sha256:[0-9a-f]{64}$")
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _RELATIVE_PATH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -1087,6 +1100,13 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         )
     ):
         raise BundleError("environment declaration does not match bound artifact")
+    environment_allowlist = environment_payload["allowlist"]
+    if (
+        not isinstance(environment_allowlist, list)
+        or environment_allowlist != sorted(environment_allowlist)
+        or any(name not in _REPRO_ENVIRONMENT_VARIABLES for name in environment_allowlist)
+    ):
+        raise BundleError("environment allowlist is not closed and canonical")
     if manifest["build"]["build_fingerprint"] != _sha256_ref(payloads["build.json"]):
         raise BundleError("build_fingerprint digest mismatch")
     if manifest["config"]["config_digest"] != _sha256_ref(payloads["config.json"]):
