@@ -124,7 +124,7 @@ run "interop certified."
 | R2 | C20 capability exists through an admitted public contract (WMBS-E) | Product | Open. Shared with M16; M16 stays `PROPOSED` elsewhere and is not absorbed or invented here. |
 | R3 | Equivalence margin calibrated and powered before semantic delta leaves diagnostic (spec L1060–1062) | Standard owner | Open. |
 | R4 | Frozen versioned portable envelope | Standard owner | Open. |
-| R5 | Second independently implemented adapter, required for any public certification (spec L1067–1071) | Product | Open. Single-system round-trip is internal only. |
+| R5 | Second independently implemented adapter (spec L1067–1071) | Product | Open. Public certification requires **R1+R5** together; R5 alone is insufficient. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
 is the closed ABI `wmbs/0.1-draft` and Section 6 `export` / `import` with a
@@ -195,7 +195,7 @@ This paragraph does not create those files.
 WMBS-E + C20 public contract (R2) + G0/G1/G2 + frozen envelope (R4)
   -> freeze this plan (GOAL step 2)
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
-      -> public interoperability claim requires R1 two-implementation receipts
+      -> public interoperability claim / certification requires R1 receipts + R5 second adapter
       -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
@@ -229,7 +229,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Item | After this file | After a future Stage A | After a future Stage B |
 |---|---|---|---|
 | M18 single-system round-trip | `PROPOSED` | `PROPOSED` | `PROPOSED` |
-| Public interoperability certification | `DEFERRED` | `DEFERRED` | `DEFERRED` until R5 |
+| Public interoperability certification | `DEFERRED` | `DEFERRED` | `DEFERRED` until R1+R5 |
 | Spec required-field / unknown-critical bounds | `DEFERRED` (R1/R4) | `DEFERRED` | `DEFERRED` until receipt |
 | Semantic delta as admission | `DEFERRED` (R3) | `DEFERRED` | `DEFERRED` until calibrated |
 | "Interop certified" | never claimed | never claimed | never claimed |
