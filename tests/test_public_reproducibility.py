@@ -891,6 +891,55 @@ def test_result_lineage_must_match_authenticated_manifest(
 
 
 @pytest.mark.parametrize(
+    ("track_kind", "artifact_name", "field", "replacement", "message"),
+    [
+        (
+            "OFFICIAL-UPSTREAM",
+            "fidelity.json",
+            "upstream_protocol_digest",
+            "sha256:" + "9" * 64,
+            "fidelity artifact",
+        ),
+        (
+            "ENHANCED-SUCCESSOR",
+            "parent.json",
+            "record_id",
+            "different-official-record",
+            "parent artifact",
+        ),
+    ],
+)
+def test_lineage_artifacts_must_match_result_lineage(
+    tmp_path: Path,
+    track_kind: str,
+    artifact_name: str,
+    field: str,
+    replacement: str,
+    message: str,
+) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / track_kind.lower(), track_kind=track_kind
+    )
+    root = bundle["root"]
+    artifact_path = root / artifact_name
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact[field] = replacement
+    artifact_bytes = _write_json(artifact_path, artifact)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    ref_name = artifact_name.removesuffix(".json")
+    manifest["manifests"][ref_name] = _named_ref(ref_name, artifact_bytes)
+    entry = next(item for item in manifest["hashes"] if item["path"] == artifact_name)
+    entry["size"] = len(artifact_bytes)
+    entry["sha256"] = _sha256_ref(artifact_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match=f"{message}.*result lineage"):
+        verify_bundle(root)
+
+
+@pytest.mark.parametrize(
     ("field", "replacement"),
     [
         ("seeds", [20260802]),
