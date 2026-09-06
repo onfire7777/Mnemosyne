@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tomllib
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -762,6 +763,40 @@ def _inventory_bytes(
     return payloads
 
 
+def _validate_bound_lockfile(raw: bytes) -> None:
+    """Require a parseable uv lock that contains this verifier's runtime deps."""
+    try:
+        lock = tomllib.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise BundleError("bound uv.lock is invalid") from exc
+    packages = lock.get("package")
+    if (
+        lock.get("version") != 1
+        or not isinstance(lock.get("revision"), int)
+        or not isinstance(lock.get("requires-python"), str)
+        or not isinstance(packages, list)
+        or not packages
+    ):
+        raise BundleError("bound uv.lock contract is invalid")
+    projects = [
+        package
+        for package in packages
+        if isinstance(package, dict) and package.get("name") == "mnemosyne-memory"
+    ]
+    if len(projects) != 1 or projects[0].get("source") != {"editable": "."}:
+        raise BundleError("bound uv.lock does not identify the Mnemosyne project")
+    dependencies = projects[0].get("dependencies")
+    if not isinstance(dependencies, list):
+        raise BundleError("bound uv.lock project dependencies are invalid")
+    dependency_names = {
+        dependency.get("name")
+        for dependency in dependencies
+        if isinstance(dependency, dict)
+    }
+    if not {"cryptography", "jsonschema"} <= dependency_names:
+        raise BundleError("bound uv.lock omits verifier runtime dependencies")
+
+
 def _bound_repro_k(config: object) -> int:
     if not isinstance(config, dict):
         raise BundleError("bound k is unavailable")
@@ -957,6 +992,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         raise BundleError("missing lockfile")
     if manifest["build"]["lockfile"] != f"uv.lock@sha256:{hashlib.sha256(payloads['uv.lock']).hexdigest()}":
         raise BundleError("lockfile digest mismatch")
+    _validate_bound_lockfile(payloads["uv.lock"])
     refs = manifest["manifests"]
     for key, ref in refs.items():
         if ref is not None:

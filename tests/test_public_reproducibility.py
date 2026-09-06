@@ -460,7 +460,7 @@ def _write_reproducibility_bundle(
     (root / "traces.jsonl").write_bytes(traces)
     (root / "config.json").write_bytes(config)
     (root / "build.json").write_bytes(build)
-    (root / "uv.lock").write_bytes(lockfile or b"locked-wheelhouse\n")
+    (root / "uv.lock").write_bytes(lockfile or (REPO_ROOT / "uv.lock").read_bytes())
     written["uv.lock"] = (root / "uv.lock").read_bytes()
 
     inventory_files = {
@@ -1514,6 +1514,22 @@ def test_mutated_command_or_lock_fails_before_destination(tmp_path: Path) -> Non
     with pytest.raises(BundleError):
         reproduce_bundle(bundle["root"], destination)
     assert not destination.exists()
+
+
+def test_digest_consistent_malformed_lockfile_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "malformed-lock")
+    root = bundle["root"]
+    invalid_lock = b"not = [valid toml\n"
+    (root / "uv.lock").write_bytes(invalid_lock)
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["build"]["lockfile"] = _named_ref("uv.lock", invalid_lock)
+    entry = next(item for item in manifest["hashes"] if item["path"] == "uv.lock")
+    entry["size"] = len(invalid_lock)
+    entry["sha256"] = _sha256_ref(invalid_lock)
+    _write_json(manifest_path, manifest)
+    with pytest.raises(BundleError, match="uv.lock is invalid"):
+        verify_bundle(root)
 
 
 def _clone_clean_checkout(tmp_path: Path) -> Path:
