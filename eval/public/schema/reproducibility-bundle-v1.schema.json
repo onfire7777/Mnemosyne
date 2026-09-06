@@ -392,7 +392,21 @@
           "minItems": 1,
           "maxItems": 64,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/nonempty_string" }
+          "items": {
+            "enum": [
+              "HOME",
+              "LANG",
+              "LC_ALL",
+              "PATH",
+              "SystemRoot",
+              "TEMP",
+              "TMP",
+              "TZ",
+              "UV_CACHE_DIR",
+              "UV_OFFLINE",
+              "WINDIR"
+            ]
+          }
         },
         "locale": { "const": "C" },
         "timezone": { "const": "UTC" },
