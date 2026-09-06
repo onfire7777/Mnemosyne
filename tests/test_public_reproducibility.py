@@ -269,6 +269,50 @@ def test_version_1_verifier_rejects_hardlinked_inventory_artifact(
         verify_bundle(destination)
 
 
+def test_version_1_reproduction_uses_private_source_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    source = tmp_path / "v1-source"
+    destination = tmp_path / "v1-destination"
+    runner.run_public_suite("smoke", source)
+    original_benchmark = (source / "benchmark.json").read_bytes()
+    original_run = runner.run_public_suite
+
+    def run_after_source_mutation(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        (source / "benchmark.json").write_bytes(b"{}\n")
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "run_public_suite", run_after_source_mutation)
+    reproduce_bundle(source, destination)
+
+    assert (destination / "benchmark.json").read_bytes() == original_benchmark
+    assert (source / "benchmark.json").read_bytes() != original_benchmark
+
+
+def test_version_1_reproduction_failure_preserves_unowned_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    source = tmp_path / "v1-source"
+    destination = tmp_path / "foreign-destination"
+    runner.run_public_suite("smoke", source)
+
+    def fail_after_foreign_destination(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        destination.mkdir()
+        (destination / "marker.txt").write_text("foreign\n", encoding="utf-8")
+        raise RuntimeError("runner failed")
+
+    monkeypatch.setattr(runner, "run_public_suite", fail_after_foreign_destination)
+    with pytest.raises(RuntimeError, match="runner failed"):
+        reproduce_bundle(source, destination)
+
+    assert (destination / "marker.txt").read_text(encoding="utf-8") == "foreign\n"
+    assert not list(tmp_path.glob(f".{destination.name}-source-*"))
+
+
 def test_m15_helpers_are_reused_not_copied() -> None:
     payload = _canonical_replay_payload("wmbs-m01-development")
     assert canonical_replay_digest(payload) == REPLAY_DIGESTS["wmbs-m01-development"]

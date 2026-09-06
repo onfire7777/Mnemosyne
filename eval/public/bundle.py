@@ -1902,29 +1902,76 @@ def reproduce_bundle(source: Path | str, destination: Path | str) -> dict[str, A
     repro = source_root / REPRODUCIBILITY_MANIFEST_NAME
     if repro.exists() or repro.is_symlink():
         return _reproduce_reproducibility_bundle(source_root, Path(destination))
-    verify_bundle(source)
-    custody = _load_json(Path(source) / "benchmark.json")
     from eval.public.runner import run_public_suite
 
-    destination = Path(destination)
+    destination = Path(destination).absolute()
+    _reject_reproducibility_link_path(destination)
     if destination.exists():
         raise FileExistsError(f"refusing to overwrite bundle: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    _reject_reproducibility_link_path(destination)
+    snapshot = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}-source-", dir=destination.parent)
+    )
+    snapshot_identity = _owned_directory_identity(snapshot)
+    destination_identity: tuple[int, int] | None = None
     try:
+        _snapshot_legacy_bundle(source_root, snapshot)
+        verify_bundle(snapshot)
+        benchmark_payload, _ = _read_inventory_file(snapshot / "benchmark.json")
+        custody = _load_inventory_json(
+            {"benchmark.json": benchmark_payload}, "benchmark.json"
+        )
         result = run_public_suite(
             custody["metadata"]["suite"],
             destination,
             benchmark_override=custody["data"],
-            candidate_manifest_path=(Path(source) / "candidate-manifest.json") if custody["metadata"]["family"] == "qa" else None,
+            candidate_manifest_path=(snapshot / "candidate-manifest.json")
+            if custody["metadata"]["family"] == "qa"
+            else None,
         )
+        destination_identity = _owned_directory_identity(destination)
         verify_bundle(destination)
-        for name in _manifest_files(Path(source)):
-            if (Path(source) / name).read_bytes() != (destination / name).read_bytes():
+        for name in _manifest_files(snapshot):
+            expected, _ = _read_inventory_file(snapshot / name)
+            reproduced, _ = _read_inventory_file(destination / name)
+            if expected != reproduced:
                 raise BundleError(f"reproduction mismatch: {name}")
         return result
     except BaseException:
-        if destination.is_dir():
-            shutil.rmtree(destination)
+        if destination_identity is not None:
+            _remove_owned_directory(destination, destination_identity)
         raise
+    finally:
+        _remove_owned_directory(snapshot, snapshot_identity)
+
+
+def _snapshot_legacy_bundle(source: Path, snapshot: Path) -> None:
+    """Copy one closed legacy bundle into a private stable-byte snapshot."""
+    _reject_reproducibility_link_path(source)
+    if (
+        not source.is_dir()
+        or source.is_symlink()
+        or getattr(source, "is_junction", lambda: False)()
+    ):
+        raise BundleError("bundle must be a real directory, not a link")
+    total_size = 0
+    names: set[str] = set()
+    for entry_number, entry in enumerate(source.iterdir(), start=1):
+        if entry_number > _MAX_REPRO_FILES:
+            raise BundleError("bundle exceeds the closed file-count bound")
+        if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
+            raise BundleError(f"links and non-files are forbidden: {entry.name}")
+        if entry.resolve().parent != source.resolve():
+            raise BundleError(f"path escapes bundle: {entry.name}")
+        payload, entry_size = _read_inventory_file(entry)
+        total_size += entry_size
+        if total_size > _MAX_REPRO_BUNDLE_BYTES:
+            raise BundleError("bundle exceeds the closed aggregate size bound")
+        (snapshot / entry.name).write_bytes(payload)
+        names.add(entry.name)
+    if names != {entry.name for entry in source.iterdir()}:
+        raise BundleError("bundle inventory changed while snapshotting")
 
 
 def write_report(
