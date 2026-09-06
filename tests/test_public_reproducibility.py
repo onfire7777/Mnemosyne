@@ -1739,6 +1739,25 @@ def test_build_artifact_boolean_version_fails_closed(tmp_path: Path) -> None:
         verify_bundle(root)
 
 
+def test_build_artifact_numeric_dirty_alias_fails_closed(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "numeric-build-dirty")
+    root = bundle["root"]
+    build_path = root / "build.json"
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    assert build["dirty"] is False
+    build["dirty"] = 0
+    build_bytes = _write_json(build_path, build)
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entry = next(item for item in manifest["hashes"] if item["path"] == "build.json")
+    entry["size"] = len(build_bytes)
+    entry["sha256"] = _sha256_ref(build_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="build declaration"):
+        verify_bundle(root)
+
+
 def test_environment_allowlist_rejects_credential_variables(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "credential-environment")
     root = bundle["root"]

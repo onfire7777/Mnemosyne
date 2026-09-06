@@ -1132,7 +1132,8 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or bool(set(config_payload) - _REPRO_CONFIG_ARTIFACT_FIELDS)
         or bool((_REPRO_CONFIG_ARTIFACT_FIELDS - {"k"}) - set(config_payload))
         or any(
-            config_payload.get(field) != manifest["config"][field]
+            _canonical(config_payload.get(field))
+            != _canonical(manifest["config"][field])
             for field in ("locale", "timezone")
         )
     ):
@@ -1143,7 +1144,8 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or type(build_payload.get("version")) is not int
         or build_payload.get("version") != 1
         or any(
-            build_payload.get(field) != manifest["build"][field]
+            _canonical(build_payload.get(field))
+            != _canonical(manifest["build"][field])
             for field in (
                 "candidate_git_sha",
                 "dirty",
@@ -1163,7 +1165,8 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or set(environment_payload) != _REPRO_ENVIRONMENT_ARTIFACT_FIELDS
         or environment_payload.get("dependency_versions") != {"uv": "locked"}
         or any(
-            environment_payload.get(field) != manifest["environment"][field]
+            _canonical(environment_payload.get(field))
+            != _canonical(manifest["environment"][field])
             for field in (
                 "allowlist",
                 "locale",
