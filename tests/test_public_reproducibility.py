@@ -2638,6 +2638,23 @@ def test_environment_allowlist_rejects_credential_variables(tmp_path: Path) -> N
         verify_bundle(root)
 
 
+def test_reproduction_rejects_inherited_credentials_before_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "credential-source")
+    destination = tmp_path / "credential-destination"
+    marker = "synthetic-test-credential-value"
+    monkeypatch.setenv("OPENAI_API_KEY", marker)
+
+    with pytest.raises(BundleError) as captured:
+        reproduce_bundle(bundle["root"], destination)
+
+    assert "credential variables" in str(captured.value)
+    assert "OPENAI_API_KEY" not in str(captured.value)
+    assert marker not in str(captured.value)
+    assert not destination.exists()
+
+
 def test_reproduction_uses_one_inventory_bound_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
