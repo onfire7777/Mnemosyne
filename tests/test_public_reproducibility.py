@@ -371,6 +371,7 @@ def _write_reproducibility_bundle(
     k: int | None = 1,
     traces: bytes | None = None,
     scoring_profile: str = "smoke-hit-at-k-v1",
+    lockfile: bytes | None = None,
 ) -> dict[str, Any]:
     root.mkdir(parents=True)
     commit = run_commit or "0123456789abcdef0123456789abcdef01234567"
@@ -459,7 +460,7 @@ def _write_reproducibility_bundle(
     (root / "traces.jsonl").write_bytes(traces)
     (root / "config.json").write_bytes(config)
     (root / "build.json").write_bytes(build)
-    (root / "uv.lock").write_text("locked-wheelhouse\n", encoding="utf-8")
+    (root / "uv.lock").write_bytes(lockfile or b"locked-wheelhouse\n")
     written["uv.lock"] = (root / "uv.lock").read_bytes()
 
     inventory_files = {
@@ -1065,7 +1066,7 @@ def test_unhashed_lock_named_file_is_not_copied_on_reproduce(
 ) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "lock-copy")
     monkeypatch.setattr(
-        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha, _lock: None
     )
     extra = bundle["root"] / "sidecar.jsonl.lock"
     extra.write_text("not-a-secret\n", encoding="utf-8")
@@ -1235,7 +1236,9 @@ def test_reproduction_uses_one_inventory_bound_source_snapshot(
         return payloads
 
     monkeypatch.setattr(public_bundle, "_inventory_bytes", mutate_source_after_snapshot)
-    monkeypatch.setattr(public_bundle, "_assert_reproduction_checkout", lambda _sha: None)
+    monkeypatch.setattr(
+        public_bundle, "_assert_reproduction_checkout", lambda _sha, _lock: None
+    )
     destination = tmp_path / "reproduction-destination"
     assert reproduce_bundle(root, destination)["valid"] is True
     assert (destination / "result.json").read_bytes() == expected_result
@@ -1249,7 +1252,7 @@ def test_reproduce_cleanup_does_not_delete_foreign_destination(
 
     bundle = _write_reproducibility_bundle(tmp_path / "foreign-source")
     monkeypatch.setattr(
-        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha, _lock: None
     )
     destination = tmp_path / "foreign-dest"
 
@@ -1390,7 +1393,7 @@ def test_reproduce_reruns_scorer_and_fails_closed_without_k(
 ) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "no-k", k=None)
     monkeypatch.setattr(
-        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha, _lock: None
     )
     destination = tmp_path / "no-k-dest"
     with pytest.raises(BundleError, match="k"):
@@ -1477,7 +1480,7 @@ def test_reproduce_deletes_incomplete_output_and_does_not_use_shell(
 ) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "source")
     monkeypatch.setattr(
-        "eval.public.bundle._assert_reproduction_checkout", lambda _sha: None
+        "eval.public.bundle._assert_reproduction_checkout", lambda _sha, _lock: None
     )
     destination = tmp_path / "dest"
     reproduced = reproduce_bundle(bundle["root"], destination)
@@ -1522,6 +1525,8 @@ def _clone_clean_checkout(tmp_path: Path) -> Path:
         text=True,
     )
     leased = (
+        Path("pyproject.toml"),
+        Path("uv.lock"),
         Path("eval/public/schema/reproducibility-bundle-v1.schema.json"),
         Path("eval/public/bundle.py"),
         Path("eval/public/README.md"),
@@ -1576,7 +1581,11 @@ def test_clean_checkout_runs_exact_documented_argv(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     ).stdout.strip()
-    bundle = _write_reproducibility_bundle(tmp_path / "clean-source", run_commit=sha)
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "clean-source",
+        run_commit=sha,
+        lockfile=(clone / "uv.lock").read_bytes(),
+    )
     destination = tmp_path / "clean-dest"
     env = {
         "HOME": str(tmp_path / "home"),
@@ -1640,7 +1649,7 @@ def test_reproduction_checkout_rejects_attached_branch(
     ).stdout.strip()
     monkeypatch.chdir(clone)
     with pytest.raises(BundleError, match="detached"):
-        _assert_reproduction_checkout(sha)
+        _assert_reproduction_checkout(sha, (clone / "uv.lock").read_bytes())
 
 
 def test_reproduction_checkout_accepts_clean_detached_exact_commit(
@@ -1657,7 +1666,25 @@ def test_reproduction_checkout_accepts_clean_detached_exact_commit(
         text=True,
     ).stdout.strip()
     monkeypatch.chdir(clone)
-    _assert_reproduction_checkout(sha)
+    _assert_reproduction_checkout(sha, (clone / "uv.lock").read_bytes())
+
+
+def test_reproduction_checkout_rejects_bundle_lockfile_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public.bundle import _assert_reproduction_checkout
+
+    clone = _clone_clean_checkout(tmp_path)
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    monkeypatch.chdir(clone)
+    with pytest.raises(BundleError, match="lockfile does not match"):
+        _assert_reproduction_checkout(sha, b"different-lockfile\n")
 
 
 @pytest.mark.parametrize(
@@ -1679,9 +1706,14 @@ def test_clean_checkout_denials_emit_no_partial_destination(
         bundle = _write_reproducibility_bundle(
             tmp_path / "deny-source",
             run_commit="0" * 40,
+            lockfile=(clone / "uv.lock").read_bytes(),
         )
     else:
-        bundle = _write_reproducibility_bundle(tmp_path / "deny-source", run_commit=sha)
+        bundle = _write_reproducibility_bundle(
+            tmp_path / "deny-source",
+            run_commit=sha,
+            lockfile=(clone / "uv.lock").read_bytes(),
+        )
     destination = tmp_path / "deny-dest"
     if mutation == "dirty":
         (clone / "extra-untracked.txt").write_text("dirty\n", encoding="utf-8")

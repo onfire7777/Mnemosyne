@@ -272,7 +272,7 @@ def _sha256_ref(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
 
-def _assert_reproduction_checkout(expected_sha: str) -> None:
+def _assert_reproduction_checkout(expected_sha: str, expected_lockfile: bytes) -> None:
     """Require a detached, clean checkout at the exact bundle-bound commit."""
     if not isinstance(expected_sha, str) or _HEX_COMMIT.fullmatch(expected_sha) is None:
         raise BundleError("bound commit is unavailable")
@@ -319,6 +319,9 @@ def _assert_reproduction_checkout(expected_sha: str) -> None:
     dirty = run_git("status", "--porcelain=v1", "--untracked-files=all")
     if dirty.returncode != 0 or dirty.stdout:
         raise BundleError("reproduction checkout is dirty")
+    checkout_lockfile, _ = _read_inventory_file(Path.cwd() / "uv.lock")
+    if checkout_lockfile != expected_lockfile:
+        raise BundleError("reproduction checkout lockfile does not match bundle")
 
 
 def _json_depth(value: object, depth: int = 0) -> int:
@@ -1131,7 +1134,9 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
             (snapshot / name).write_bytes(payload)
 
         verified = _verify_reproducibility_bundle(snapshot)
-        _assert_reproduction_checkout(str(verified["run_commit"]))
+        _assert_reproduction_checkout(
+            str(verified["run_commit"]), payloads["uv.lock"]
+        )
         owned = [
             str(entry["path"])
             for entry in source_manifest["hashes"]
