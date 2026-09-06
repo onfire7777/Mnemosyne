@@ -1283,7 +1283,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         != manifest["build"]["candidate_git_sha"]
         or replay_build.get("system_seam") != build_payload.get("system_seam")
         or any(
-            replay_build[field] != build_payload[field]
+            _canonical(replay_build[field]) != _canonical(build_payload[field])
             for field in set(replay_build) & set(build_payload)
         )
     ):
@@ -1295,7 +1295,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
             for field in ("locale", "timezone")
         )
         or any(
-            replay_config[field] != config_payload[field]
+            _canonical(replay_config[field]) != _canonical(config_payload[field])
             for field in set(replay_config) & set(config_payload)
         )
     ):
