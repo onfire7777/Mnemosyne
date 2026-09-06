@@ -1757,6 +1757,7 @@ def write_bundle(
             temp / "bundle-manifest.json",
             {"files": {name: _digest(temp / name) for name in required}, "version": 1},
         )
+        _validate_legacy_publish_inventory(temp, required)
         _assert_directory_identity(temp, temp_identity, "staged bundle")
         _reject_reproducibility_link_path(destination)
         _publish_directory_noreplace(temp, destination)
@@ -1815,24 +1816,8 @@ def _verify_bundle(bundle: Path | str) -> dict[str, Any]:
         raise BundleError("secret-like material detected")
     _validate_legacy_canonical_bytes(payloads)
     manifest = _load_inventory_json(payloads, "bundle-manifest.json")
-    if (
-        not isinstance(manifest, dict)
-        or set(manifest) != {"files", "version"}
-        or type(manifest.get("version")) is not int
-        or manifest["version"] != 1
-        or not isinstance(manifest.get("files"), dict)
-        or any(
-            not isinstance(digest, str)
-            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
-            for digest in manifest["files"].values()
-        )
-    ):
-        raise BundleError("invalid legacy bundle manifest schema")
-    if set(manifest.get("files", {})) != set(payload_files):
-        raise BundleError("manifest inventory mismatch")
-    for name, expected_digest in manifest["files"].items():
-        if hashlib.sha256(payloads[name]).hexdigest() != expected_digest:
-            raise BundleError(f"digest mismatch: {name}")
+    _validate_legacy_manifest(manifest, payload_files, payloads)
+
     benchmark, config, measured, build = (
         _load_inventory_json(payloads, "benchmark.json"),
         _load_inventory_json(payloads, "config.json"),
@@ -2015,6 +2000,63 @@ def _validate_legacy_canonical_bytes(payloads: dict[str, bytes]) -> None:
             canonical = _canonical(_parse_bounded_json(text, name))
         if payload != canonical:
             raise BundleError(f"non-canonical JSON bytes in {name}")
+
+
+def _validate_legacy_manifest(
+    manifest: Any,
+    payload_files: tuple[str, ...],
+    payloads: dict[str, bytes],
+) -> None:
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"files", "version"}
+        or type(manifest.get("version")) is not int
+        or manifest["version"] != 1
+        or not isinstance(manifest.get("files"), dict)
+        or any(
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            for digest in manifest["files"].values()
+        )
+    ):
+        raise BundleError("invalid legacy bundle manifest schema")
+    if set(manifest["files"]) != set(payload_files):
+        raise BundleError("manifest inventory mismatch")
+    for name, expected_digest in manifest["files"].items():
+        if hashlib.sha256(payloads[name]).hexdigest() != expected_digest:
+            raise BundleError(f"digest mismatch: {name}")
+
+
+def _validate_legacy_publish_inventory(
+    root: Path, payload_files: tuple[str, ...]
+) -> None:
+    expected = {*payload_files, "bundle-manifest.json"}
+    entries: list[Path] = []
+    for entry_number, entry in enumerate(root.iterdir(), start=1):
+        if entry_number > _MAX_REPRO_FILES:
+            raise BundleError("bundle exceeds the closed file-count bound")
+        entries.append(entry)
+    if {entry.name for entry in entries} != expected:
+        raise BundleError("inventory mismatch")
+
+    payloads: dict[str, bytes] = {}
+    total_size = 0
+    resolved_root = root.resolve()
+    for entry in entries:
+        if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
+            raise BundleError(f"links and non-files are forbidden: {entry.name}")
+        if entry.resolve().parent != resolved_root:
+            raise BundleError(f"path escapes bundle: {entry.name}")
+        payload, entry_size = _read_inventory_file(entry)
+        total_size += entry_size
+        if total_size > _MAX_REPRO_BUNDLE_BYTES:
+            raise BundleError("bundle exceeds the closed aggregate size bound")
+        payloads[entry.name] = payload
+
+    _validate_legacy_canonical_bytes(payloads)
+    manifest = _load_inventory_json(payloads, "bundle-manifest.json")
+    _validate_legacy_manifest(manifest, payload_files, payloads)
+    _assert_inventory_snapshot(root, payloads)
 
 
 def _assert_inventory_snapshot(root: Path, payloads: dict[str, bytes]) -> None:

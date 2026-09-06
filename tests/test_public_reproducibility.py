@@ -299,6 +299,32 @@ def test_version_1_bundle_rechecks_staging_identity_before_publication(
     assert not list(tmp_path.glob(f".{destination.name}-*"))
 
 
+def test_version_1_bundle_revalidates_staged_bytes_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    destination = tmp_path / "v1-mutated-staging"
+    original_digest = public_bundle._digest
+    mutated = False
+
+    def digest_then_mutate(path: Path) -> str:
+        nonlocal mutated
+        digest = original_digest(path)
+        if path.name == "README.md" and not mutated:
+            mutated = True
+            path.write_bytes(b"changed\n")
+        return digest
+
+    monkeypatch.setattr(public_bundle, "_digest", digest_then_mutate)
+    with pytest.raises(BundleError, match="README bytes|digest mismatch"):
+        write_bundle(destination, **_v1_snapshot_bundle_inputs())
+
+    assert mutated
+    assert not destination.exists()
+    assert not list(tmp_path.glob(f".{destination.name}-*"))
+
+
 def test_version_1_bundle_normalizes_dot_segments_before_parent_creation(
     tmp_path: Path,
 ) -> None:
