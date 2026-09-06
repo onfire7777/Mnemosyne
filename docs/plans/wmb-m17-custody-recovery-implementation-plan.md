@@ -104,7 +104,10 @@ Per `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
 The spec's own exclusion is load-bearing: this contract plans a *successor*
 development cell and does not reopen the first reference-harness pilot.
 
-C19 is an advanced operational gate (RAIL-001), not a score.
+C19 is an advanced operational gate (RAIL-001), not a score. M17 also owns
+C02 durable persistence and replayable projections (spec L503), so its
+REPRO-001 and RAIL-001 dependencies are part of this module's scope. REPRO-001
+is still planned and is not discharged by this document.
 `M-AUDIT-COMPLETE` (`…standard-design.md:598`) stays a rail: every write has
 a complete audit record. C24 (`…standard-design.md:525`) is a mandatory
 report dimension, not a second module. This plan does not absorb M16/C18
@@ -129,6 +132,7 @@ certified."
 | R3 | RPO/RTO tier frozen by the standard before the run. A submitter-selected target cannot certify itself (spec L1038–1041) | Standard owner | Open. |
 | R4 | Retained infrastructure, external custody, and an independently recorded expected fingerprint, required to close any production row (spec L1047–1049) | Operator | Open. Local results cannot close production rows. |
 | R5 | P32 recovery / PostgreSQL / object-store / PITR | Operator | `DEFERRED`. Requires P32 and pinned service images. Not in this cell. |
+| R6 | C02 durable persistence and replayable projections, including REPRO-001 and RAIL-001 (spec L503) | Standard / reproducibility owner | Open. REPRO-001 remains planned; Stage A cannot claim C02 conformance until it is admitted. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
 is the closed ABI `wmbs/0.1-draft` and Section 6 `health` / `queue_state` /
@@ -174,7 +178,7 @@ add a **new** stdlib-only oracle:
   denominators, RPO/RTO calculation, audit-continuity rules, malformed-input
   behavior, aggregation, pass semantics, **and canonical metric IDs** for
   each gate (acknowledged loss, duplicate effects, recovery completeness,
-  RPO/RTO, operator steps — spec L176–180) must be frozen before Stage A
+  RPO/RTO, `M-AUDIT-COMPLETE`, operator steps — spec L176–180 and L598) must be frozen before Stage A
   implement — prose metric names alone are not a scorer contract. Closed ABI has no
   `health` / `queue_state` / `snapshot` / `restore_snapshot`; Stage A harness
   injection must name how those observations are produced without inventing
@@ -203,7 +207,7 @@ This paragraph does not create those files.
 ## 6. Dependency edges
 
 ```text
-WMBS-E + C19 public contract (R2) + G0/G1/G2
+WMBS-E + C19 public contract (R2) + C02/REPRO-001 contract (R6) + G0/G1/G2
   -> freeze observation/receipt schema + RPO/RTO definitions (R3 residual)
   -> freeze this plan (GOAL step 2)   [planning-only; no Stage A lease]
     -> measured local / admitted P32 recovery receipt (R1) on frozen schema
@@ -246,7 +250,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Authorized future action (spec L1252–1259) | `DEFERRED` until M11+M12+M17 are all admitted | `DEFERRED` | `DEFERRED` |
 | Recoverable public evidence (spec L1252–1259) | `DEFERRED` until M15+M16+M17+M20 are all admitted | `DEFERRED` | `DEFERRED` |
 | Publishable / headline | `false` | `false` | `false` |
-| Code lease | none | only if freeze + G1 admit it | G3 |
+| Code lease | none | only if freeze + G1 + R1 admit it | G3 |
 
 ## 9. Non-goals
 
