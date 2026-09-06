@@ -1190,6 +1190,27 @@ def test_manifest_schema_and_inventory_share_one_inode_snapshot(
     assert verify_bundle(root)["valid"] is True
 
 
+def test_manifest_bytes_and_inventory_order_are_canonical(tmp_path: Path) -> None:
+    pretty = _write_reproducibility_bundle(tmp_path / "pretty-manifest")
+    pretty_path = pretty["root"] / REPRO_MANIFEST_NAME
+    payload = json.loads(pretty_path.read_text(encoding="utf-8"))
+    pretty_path.write_text(
+        json.dumps(payload, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    with pytest.raises(BundleError, match="manifest bytes must be canonical"):
+        verify_bundle(pretty["root"])
+
+    unordered = _write_reproducibility_bundle(tmp_path / "unordered-inventory")
+    unordered_path = unordered["root"] / REPRO_MANIFEST_NAME
+    payload = json.loads(unordered_path.read_text(encoding="utf-8"))
+    payload["hashes"] = list(reversed(payload["hashes"]))
+    _write_json(unordered_path, payload)
+    with pytest.raises(BundleError, match="canonical sorted order"):
+        verify_bundle(unordered["root"])
+
+
 @pytest.mark.parametrize(
     ("section", "field", "replacement"),
     (
