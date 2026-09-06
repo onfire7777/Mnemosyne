@@ -1892,6 +1892,32 @@ def test_private_reproduction_identity_rejects_junction(
         public_bundle._owned_directory_identity(private)
 
 
+def test_second_private_directory_failure_cleans_source_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "allocation-failure-source")
+    destination = tmp_path / "allocation-failure-dest"
+    original = public_bundle.tempfile.mkdtemp
+    calls = 0
+
+    def fail_second_allocation(*args: object, **kwargs: object) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("simulated private-directory allocation failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(public_bundle.tempfile, "mkdtemp", fail_second_allocation)
+    with pytest.raises(OSError, match="allocation failure"):
+        reproduce_bundle(bundle["root"], destination)
+
+    snapshot_prefix = f".{destination.name}-source-"
+    assert not any(path.name.startswith(snapshot_prefix) for path in tmp_path.iterdir())
+    assert not destination.exists()
+
+
 def test_atomic_publication_never_replaces_existing_destination(tmp_path: Path) -> None:
     from eval.public.bundle import _publish_directory_noreplace
 
