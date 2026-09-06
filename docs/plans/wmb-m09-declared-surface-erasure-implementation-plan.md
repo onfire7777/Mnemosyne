@@ -192,12 +192,20 @@ add a **new** stdlib-only oracle:
   claim zero residue, zero unrelated mutation, 100% receipt validity, or zero
   attributable semantic leakage as an admission bound (that is R1 + scored
   acceptance; R1 does not discharge acceptance evidence alone).
-- Signed receipt validity (Local/SQLite): bind to the existing fail-closed
-  Ed25519 contract in `docs/ENGINE-CONTRACT.md` via
-  `verify_signed_deletion_manifest`. **Trust root is harness-owned** — Stage A
-  pins a fixture/harness public key; entrant-supplied `public_key_path` alone
-  is not sufficient (an entrant must not mint a keypair and self-attest). Do
-  not invent a parallel receipt crypto path.
+- Signed receipt validity (Local/SQLite): **cryptographic** path stays the
+  fail-closed Ed25519 contract in `docs/ENGINE-CONTRACT.md` with a
+  **harness-owned** trust root (fixture/harness public key; entrant-supplied
+  `public_key_path` alone is not enough — no self-attest). Do not invent a
+  parallel receipt crypto path.
+- Reference vs portable semantics (NOT CODE-READY freeze): Mnemosyne's
+  reference `DeletionCoordinator` may keep using
+  `verify_signed_deletion_manifest` / `mnemosyne.deletion_manifest.v1`
+  product checks. **Non-Mnemosyne Local/SQLite entrants** must not be forced
+  through those product-specific fields (`hard_delete_legal` / role `legal` /
+  policy `w2` / `backend == "synthetic"`). Freeze **portable receipt
+  semantics** (or an adapter-equivalent validator) for other entrants before
+  Stage A so a correct `declared_surface_erasure` hook + valid signed receipt
+  can satisfy the receipt gate without Mnemosyne-only schema.
 - Surface-inventory bind (NOT CODE-READY freeze): valid-receipt credit
   requires the receipt's surface set to match the **frozen declared-surface
   inventory** (or the R1 exact-surface receipt) — internal
