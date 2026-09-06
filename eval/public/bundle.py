@@ -873,12 +873,19 @@ def _validate_bound_lockfile(raw: bytes) -> None:
     runtime_dependencies = {"cryptography", "jsonschema"}
     if not runtime_dependencies <= dependency_names:
         raise BundleError("bound uv.lock omits verifier runtime dependencies")
-    resolved_packages = {
+    resolved_dependencies = {
         package.get("name")
         for package in packages
-        if isinstance(package, dict) and isinstance(package.get("name"), str)
+        if (
+            isinstance(package, dict)
+            and package.get("name") in runtime_dependencies
+            and isinstance(package.get("version"), str)
+            and bool(package["version"].strip())
+            and isinstance(package.get("source"), dict)
+            and bool(package["source"])
+        )
     }
-    if not runtime_dependencies <= resolved_packages:
+    if not runtime_dependencies <= resolved_dependencies:
         raise BundleError("bound uv.lock omits resolved verifier packages")
 
 

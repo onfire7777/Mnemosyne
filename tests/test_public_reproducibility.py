@@ -2149,6 +2149,44 @@ dependencies = [
         verify_bundle(bundle["root"])
 
 
+@pytest.mark.parametrize(
+    "stub",
+    (
+        b'name = "cryptography"\nsource = { registry = "https://pypi.org/simple" }',
+        b'name = "cryptography"\nversion = "50.0.0"',
+    ),
+)
+def test_lockfile_rejects_incomplete_resolved_package_records(
+    tmp_path: Path, stub: bytes
+) -> None:
+    lockfile = b'''version = 1
+revision = 3
+requires-python = ">=3.12"
+
+[[package]]
+name = "mnemosyne-memory"
+source = { editable = "." }
+dependencies = [
+    { name = "cryptography" },
+    { name = "jsonschema" },
+]
+
+[[package]]
+''' + stub + b'''
+
+[[package]]
+name = "jsonschema"
+version = "4.26.0"
+source = { registry = "https://pypi.org/simple" }
+'''
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "incomplete-verifier-package", lockfile=lockfile
+    )
+
+    with pytest.raises(BundleError, match="resolved verifier packages"):
+        verify_bundle(bundle["root"])
+
+
 def _clone_clean_checkout(tmp_path: Path) -> Path:
     clone = tmp_path / "checkout"
     subprocess.run(
