@@ -445,16 +445,36 @@ The following packages are complete source history, not runnable work:
   result or admission state, admits no successor source node, and does
   not recompute the canonical baseline (baseline stays `main@f688c747`).
 - PR #148: ordinary documentation receipt recording the merged PR #147
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-06T00:42:00Z`
-  capture and adds only the PR #147 merged-baseline bullet, the #146
-  MERGED mark, and this structured self-record in this map. Exclusive
-  File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `bc954737fa0daf9196e012a5237feac398c09cdd`. It was **OPEN/READY** at
+  the `2026-09-06T00:42:00Z` capture and adds only the PR #147
+  merged-baseline bullet, the #146 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #148 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #148 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `bc954737fa0daf9196e012a5237feac398c09cdd`.
+- PR #118: Exact 1 M07 retention plan
+  `docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md`
+  (title: docs: PROPOSED M07 retention plan (not code-ready) — CoS
+  ACCEPT merged)
+  from exact head `d0afa6f69d24e4c240d81f2a0b5cc9a23df1168d`; all
+  required exact-head checks passed in run `34004284333`; merge
+  `543b4167ba1e0c4d37e0a5270389df904c2e4de8` at `2026-09-06T02:04:19Z`.
+  Prior tip was `bc954737fa0daf9196e012a5237feac398c09cdd` (PR #148).
+  Post-main Unit+drift FAILED CI `34005513700` solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #118 was absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping.
+  Exclusive File Set (Exact 1):
+  `docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md`.
+  Purpose: ACCEPT M07 retention/rehearsal/decay implementation plan
+  (PROPOSED / NOT CODE-READY); docs-only privacy for THIS receipt
+  PR (the recorded #118 was documentation). This receipt does not
+  admit Stage A code or invent M16; the M14 freeze is unchanged.
+  This receipt changes no benchmark result or admission state,
+  admits no successor source node, and does not recompute the
+  canonical baseline (baseline stays `main@f688c747`).
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
