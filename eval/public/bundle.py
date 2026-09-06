@@ -2153,7 +2153,8 @@ def _verify_report(
     if report_payload != _canonical(report):
         raise BundleError("report bytes must be canonical")
     if (
-        set(report)
+        not isinstance(report, dict)
+        or set(report)
         != {
             "bindings",
             "command",
@@ -2166,10 +2167,28 @@ def _verify_report(
             "suite",
             "version",
         }
+        or type(report["version"]) is not int
         or report["version"] != 1
+        or not isinstance(report["bindings"], dict)
+        or not isinstance(report["command"], list)
+        or not isinstance(report["evidence"], dict)
+        or not isinstance(report["publication"], dict)
+        or not isinstance(report["suite"], str)
+        or not report["suite"].strip()
+        or any(
+            not isinstance(report[field], str)
+            or not report[field].strip()
+            or "\x00" in report[field]
+            for field in (
+                "generated_at",
+                "git_sha",
+                "reproduced_bundle",
+                "source_bundle",
+            )
+        )
     ):
         raise BundleError("invalid report schema")
-    if len(report.get("git_sha", "")) != 40 or set(report["git_sha"]) - set(
+    if len(report["git_sha"]) != 40 or set(report["git_sha"]) - set(
         "0123456789abcdef"
     ):
         raise BundleError("invalid report git SHA")
