@@ -1923,6 +1923,39 @@ def test_result_metrics_must_match_recomputed_trace_metrics(tmp_path: Path) -> N
         verify_bundle(root)
 
 
+def test_manifest_metrics_require_canonical_numeric_types(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "manifest-metric-alias")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["metrics"][0]["value"] = 1
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="metrics do not recompute"):
+        verify_bundle(bundle["root"])
+
+
+def test_result_metrics_require_canonical_numeric_types(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "result-metric-alias", include_ledger=False
+    )
+    root = bundle["root"]
+    result_path = root / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["metrics"][0]["value"] = 1
+    result_bytes = _write_json(result_path, result)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["result_ref"] = _named_ref("result-v2", result_bytes)
+    entry = next(item for item in manifest["hashes"] if item["path"] == "result.json")
+    entry["size"] = len(result_bytes)
+    entry["sha256"] = _sha256_ref(result_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="result metrics do not match"):
+        verify_bundle(root)
+
+
 def _rewrite_metrics_and_manifest(
     root: Path,
     *,
