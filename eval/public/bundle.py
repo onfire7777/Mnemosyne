@@ -629,6 +629,8 @@ def _validate_reproducibility_manifest(manifest: object) -> dict[str, Any]:
         "takedown",
     ):
         _require_disclosed_string(rights.get(field), f"rights {field}")
+    if rights.get("disclosure_state") != "disclosed":
+        raise BundleError("missing rights disclosure")
     custody = _closed_object(payload.get("custody"), ("class", "declaration"), "custody")
     _require_enum(custody.get("class"), _REPRO_CUSTODY_CLASSES, "custody")
     _require_disclosed_string(custody.get("declaration"), "custody declaration")

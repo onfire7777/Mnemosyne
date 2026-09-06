@@ -849,6 +849,24 @@ def test_unknown_release_declarations_fail_schema_and_runtime(
         verify_bundle(bundle["root"])
 
 
+def test_rights_disclosure_fails_schema_and_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import bundle as public_bundle
+
+    bundle = _write_reproducibility_bundle(tmp_path / "undisclosed-rights")
+    manifest_path = bundle["root"] / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["rights"]["disclosure_state"] = "undisclosed"
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="schema"):
+        verify_bundle(bundle["root"])
+    monkeypatch.setattr(public_bundle, "_validate_repro_schema", lambda _manifest: None)
+    with pytest.raises(BundleError, match="rights disclosure"):
+        verify_bundle(bundle["root"])
+
+
 def test_exact_digest_meanings_hash_named_file_bytes(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "digests")
     root = bundle["root"]
