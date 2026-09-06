@@ -259,9 +259,12 @@ Do not add a `uv run --suite` line until a registry row exists.
 PROPOSED if the adapter exposes reversible delete, else UNSUPPORTED-BY-SYSTEM
 (not scored zero). All publication flags false.
 
-`delete(selector, mode=reversible)`. `restore` only if claimed. Zero
-exact-canary leakage. Semantic leakage at most 1%. Unrelated utility loss at
-most 0.5 percentage points. At least five seeds. Two delete/re-ingest cycles.
+`delete(selector, mode=reversible)`. `restore` only if claimed. At least five
+seeds. Two delete/re-ingest cycles.
+
+Acceptance targets (DEFERRED until a scored M08 run — not Stage-A results):
+zero exact-canary leakage; semantic leakage ≤1%; unrelated utility loss
+≤0.5pp; 100% restore correctness when restore is claimed.
 
 No registry row exists, so this cell is not runnable. A missing hook is
 `unsupported`, never a zero.
