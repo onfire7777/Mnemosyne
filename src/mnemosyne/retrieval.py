@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
-from mnemosyne.access_policy import apply_text_redactions, may_read_item
+from mnemosyne.access_policy import apply_text_redactions, effective_max_sensitivity, may_read_item
 from mnemosyne.command_line import split_command
 from mnemosyne.evidence_redaction import redaction_findings
 from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit, validate_byte_limit
@@ -34,6 +34,10 @@ from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 QUERY_SUPPORT_THRESHOLD = 2.0 / 3.0
 PROSPECTIVE_MEMORY_CHANNEL = "prospective_memory"
 WORKING_MEMORY_CHANNEL = "working_memory"
+GLOBAL_SENSEMAKING_MODE = "global_sensemaking"
+GLOBAL_SENSEMAKING_CHANNEL = "global_sensemaking"
+GLOBAL_SENSEMAKING_VERSION = "global-sensemaking.v1"
+SUPPORTED_QUERY_MODES = frozenset({GLOBAL_SENSEMAKING_MODE})
 WORKSPACE_BROADCAST_MAX_ITEMS = 4
 WORKSPACE_BROADCAST_MAX_CONTENT_CHARS = 160
 WORKSPACE_BROADCAST_FILTER_KEYS = ("workspace_broadcast", "workspace_focus")
@@ -2056,6 +2060,315 @@ def is_retired_summary_metadata(metadata: object) -> bool:
     return status in {"retired", "superseded", "stale"} or bool(
         summary.get("retired_at") or summary.get("superseded_by")
     )
+
+
+def query_mode_from_filter(filt: Mapping[str, Any] | None) -> str | None:
+    """Return a requested retrieve query_mode, or None for the default path."""
+
+    if not isinstance(filt, Mapping):
+        return None
+    raw = filt.get("query_mode")
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError(f"unsupported query_mode: {raw!r}")
+    mode = raw.strip()
+    return mode or None
+
+
+def require_supported_query_mode(mode: str | None) -> str | None:
+    """Deny unknown retrieve modes; missing/blank mode stays on the default path."""
+
+    if mode is None:
+        return None
+    if mode not in SUPPORTED_QUERY_MODES:
+        raise ValueError(f"unsupported query_mode: {mode}")
+    return mode
+
+
+def is_raptor_summary_item(item: Any) -> bool:
+    return is_raptor_summary_metadata(_item_field(item, "source_type"), _item_field(item, "metadata"))
+
+
+def is_raptor_summary_metadata(source_type: object, metadata: object) -> bool:
+    if str(source_type or "") != "consolidation-summary":
+        return False
+    return raptor_level_of(metadata) is not None
+
+
+def raptor_level_of(metadata: object) -> int | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    summary = metadata.get("summary")
+    raw: object = None
+    if isinstance(summary, Mapping) and summary.get("raptor_level") is not None:
+        raw = summary.get("raptor_level")
+    elif metadata.get("raptor_level") is not None:
+        raw = metadata.get("raptor_level")
+    if raw is None:
+        return None
+    try:
+        level = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return level if level > 0 else None
+
+
+def raptor_source_cids(metadata: object) -> list[str]:
+    if not isinstance(metadata, Mapping):
+        return []
+    cids: list[str] = []
+
+    def add(values: object) -> None:
+        if not isinstance(values, list):
+            return
+        for value in values:
+            cid = str(value)
+            if cid and cid not in cids:
+                cids.append(cid)
+
+    summary = metadata.get("summary") if isinstance(metadata.get("summary"), Mapping) else {}
+    add(summary.get("source_evidence_cids") if isinstance(summary, Mapping) else None)
+    add(metadata.get("source_evidence_cids"))
+    return cids
+
+
+def iter_raptor_summary_items(ops: Any, tenant_id: str, branch: str) -> list[Any]:
+    """Load RAPTOR nodes from the engine seam, then fall back to tenant export."""
+
+    list_fn = getattr(ops, "list_raptor_summaries", None)
+    if callable(list_fn):
+        items = [item for item in list(list_fn(tenant_id, branch) or []) if is_raptor_summary_item(item)]
+        return sorted(items, key=lambda item: str(_item_field(item, "cid") or ""))
+    export_fn = getattr(ops, "export_tenant", None)
+    if not callable(export_fn):
+        return []
+    snapshot = export_fn(tenant_id)
+    evidence = snapshot.get("evidence") if isinstance(snapshot, Mapping) else None
+    rows: list[Any] = []
+    for item in evidence or []:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("branch") or "main") != branch:
+            continue
+        if item.get("erased"):
+            continue
+        if not is_raptor_summary_item(item):
+            continue
+        rows.append(item)
+    return sorted(rows, key=lambda item: str(item.get("cid") or ""))
+
+
+def classify_raptor_node(
+    item: Any,
+    *,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
+) -> tuple[bool, str]:
+    """Return whether a RAPTOR node is readable in the caller scope, plus a deny reason."""
+
+    item_tenant = str(_item_field(item, "tenant_id") or "")
+    item_branch = str(_item_field(item, "branch") or "main")
+    if item_tenant != tenant_id:
+        return False, "foreign_tenant"
+    if item_branch != branch:
+        return False, "foreign_branch"
+    if bool(_item_field(item, "erased")):
+        return False, "erased"
+    metadata = _item_field(item, "metadata") or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    if is_retired_summary_metadata(metadata):
+        return False, "retired_or_superseded"
+    if metadata.get("quarantine_reason") and not filt.get("include_quarantined"):
+        return False, "quarantined"
+    try:
+        trust_tier = int(_item_field(item, "trust_tier") or 0)
+        sensitivity = int(_item_field(item, "sensitivity") or 0)
+    except (TypeError, ValueError):
+        return False, "hidden"
+    include_quarantined = bool(filt.get("include_quarantined", False))
+    default_max_trust = int(policy.max_trust_tier)
+    if include_quarantined:
+        default_max_trust = max(default_max_trust, 5)
+    try:
+        max_trust = int(filt.get("max_trust_tier", filt.get("min_trust_tier", default_max_trust)))
+    except (TypeError, ValueError):
+        max_trust = default_max_trust
+    if trust_tier > max_trust:
+        return False, "trust_ceiling"
+    max_sensitivity = effective_max_sensitivity(filt, policy.max_sensitivity)
+    if sensitivity > max_sensitivity:
+        return False, "sensitivity_ceiling"
+    access_policy = _item_field(item, "access_policy") or {}
+    if not isinstance(access_policy, Mapping):
+        access_policy = {}
+    decision = may_read_item(
+        item_tenant_id=item_tenant,
+        sensitivity=sensitivity,
+        access_policy=access_policy,
+        context=filt,
+        policy_max_sensitivity=policy.max_sensitivity,
+        status="active",
+        erased=bool(_item_field(item, "erased")),
+    )
+    if not decision.allowed:
+        reason = str(decision.reason or "hidden")
+        if reason == "s4_raw_not_retrievable":
+            return False, "sensitivity_ceiling"
+        if reason in {"tenant_mismatch", "policy_tenant_mismatch"}:
+            return False, "foreign_tenant"
+        return False, reason
+    return True, ""
+
+
+def global_sensemaking_projection(
+    ops: Any,
+    *,
+    query: str,
+    tenant_id: str,
+    branch: str,
+    filt: Mapping[str, Any],
+    policy: OperatingPolicy,
+    deep: bool = False,
+) -> tuple[list[Hit], dict[str, Any]]:
+    """Map readable RAPTOR nodes and reduce them under a stable node budget."""
+
+    node_budget = _sensemaking_node_budget(filt, policy, deep=deep)
+    items = iter_raptor_summary_items(ops, tenant_id, branch)
+    mapped: list[Hit] = []
+    exclusions: list[dict[str, str]] = []
+    source_cids: list[str] = []
+    levels: set[int] = set()
+    for item in items:
+        cid = str(_item_field(item, "cid") or "")
+        allowed, reason = classify_raptor_node(
+            item,
+            tenant_id=tenant_id,
+            branch=branch,
+            filt=filt,
+            policy=policy,
+        )
+        if not cid:
+            continue
+        if not allowed:
+            exclusions.append({"cid": cid, "reason": reason})
+            continue
+        hit = _raptor_node_hit(item, filt=filt, policy=policy)
+        if hit is None:
+            exclusions.append({"cid": cid, "reason": "hidden"})
+            continue
+        mapped.append(hit)
+        level = int(hit.metadata.get("raptor_level") or 0)
+        if level:
+            levels.add(level)
+        for source_cid in hit.provenance:
+            if source_cid and source_cid not in source_cids:
+                source_cids.append(source_cid)
+
+    mapped.sort(key=lambda hit: (-int(hit.metadata.get("raptor_level") or 0), hit.id))
+    reduced: list[Hit] = []
+    for hit in mapped:
+        if len(reduced) >= node_budget:
+            exclusions.append({"cid": hit.id, "reason": "node_budget"})
+            continue
+        reduced.append(hit)
+    exclusions.sort(key=lambda item: (item["cid"], item["reason"]))
+    mapped_node_cids = [hit.id for hit in mapped]
+    report = {
+        "version": GLOBAL_SENSEMAKING_VERSION,
+        "query_mode": GLOBAL_SENSEMAKING_MODE,
+        "data_only": True,
+        "source_cids": source_cids,
+        "mapped_node_cids": mapped_node_cids,
+        "raptor_levels": sorted(levels),
+        "map_count": len(mapped),
+        "reduce_count": len(reduced),
+        "exclusions": exclusions,
+        "budget": {
+            "token_budget": int(policy.token_budget),
+            "used_tokens": 0,
+            "node_budget": node_budget,
+            "used_nodes": len(reduced),
+        },
+        "abstention_reason": None,
+        "query": query,
+    }
+    return reduced, report
+
+
+def _sensemaking_node_budget(filt: Mapping[str, Any], policy: OperatingPolicy, *, deep: bool) -> int:
+    raw = filt.get("sensemaking_node_budget")
+    if raw is None:
+        return max(1, int(policy.deep_top_k if deep else policy.top_k))
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return max(1, int(policy.deep_top_k if deep else policy.top_k))
+
+
+def _raptor_node_hit(item: Any, *, filt: Mapping[str, Any], policy: OperatingPolicy) -> Hit | None:
+    cid = str(_item_field(item, "cid") or "")
+    tenant_id = str(_item_field(item, "tenant_id") or "")
+    branch = str(_item_field(item, "branch") or "main")
+    metadata = _item_field(item, "metadata") or {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    level = raptor_level_of(metadata)
+    if not cid or level is None:
+        return None
+    access_policy = _item_field(item, "access_policy") or {}
+    if not isinstance(access_policy, Mapping):
+        access_policy = {}
+    decision = may_read_item(
+        item_tenant_id=tenant_id,
+        sensitivity=int(_item_field(item, "sensitivity") or 0),
+        access_policy=access_policy,
+        context=filt,
+        policy_max_sensitivity=policy.max_sensitivity,
+        status="active",
+        erased=bool(_item_field(item, "erased")),
+    )
+    content = str(_item_field(item, "content") or "")
+    text, privacy = apply_text_redactions(content, access_policy, decision)
+    if not text:
+        return None
+    source_cids = raptor_source_cids(metadata)
+    provenance = [cid]
+    for source_cid in source_cids:
+        if source_cid not in provenance:
+            provenance.append(source_cid)
+    summary = dict(metadata["summary"]) if isinstance(metadata.get("summary"), dict) else {}
+    return Hit(
+        id=cid,
+        kind="evidence",
+        tenant_id=tenant_id,
+        branch=branch,
+        text=text,
+        score=float(level),
+        channel=GLOBAL_SENSEMAKING_CHANNEL,
+        provenance=provenance,
+        trust_tier=int(_item_field(item, "trust_tier") or 0),
+        sensitivity=int(_item_field(item, "sensitivity") or 0),
+        metadata={
+            "source_type": str(_item_field(item, "source_type") or "consolidation-summary"),
+            "summary": summary,
+            "raptor_level": level,
+            "source_evidence_cids": source_cids,
+            "query_mode": GLOBAL_SENSEMAKING_MODE,
+            "memory_type": GLOBAL_SENSEMAKING_MODE,
+            "data_only": True,
+            "privacy": privacy,
+        },
+    )
+
+
+def _item_field(item: Any, name: str, default: Any = None) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(name, default)
+    return getattr(item, name, default)
 
 
 def apply_activation_scores(hits: Sequence[Hit], policy: OperatingPolicy, *, now: datetime | None = None) -> list[Hit]:
