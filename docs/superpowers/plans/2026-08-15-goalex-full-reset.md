@@ -43,7 +43,14 @@ Run read-only receipts for canonical Git state, old GoalEx worktree status, RFX 
 install -d -m 700 /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z
 ```
 
-- [ ] **Step 3: Create branch recovery artifacts**
+- [ ] **Step 3: Quiesce writers, then create branch recovery artifacts**
+
+Record the branch tip, use `launchctl bootout` on the four exact Mnemosyne
+GoalEx plist paths named in Task 2, and wait until every corresponding label
+and complete process tree is absent. Only after that quiescence may the bundle
+and patch below be created. Re-read the branch tip immediately before and after
+artifact creation; if it changes, discard those newly created artifacts,
+re-prove quiescence, and regenerate them from the stable post-quiescence tip.
 
 ```bash
 git -C /Users/admin/Mnemosyne bundle create /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goalex-branch.bundle codex/goalex-whole-memory-pilot
@@ -53,7 +60,7 @@ chmod 600 /Users/admin/.config/rfx/resets/mnemosyne-goalex-20260815T164908Z/goal
 
 - [ ] **Step 4: Archive exact runtime/config paths**
 
-Create a `mktemp -d` staging directory and copy the four immutable plist definitions into it first. Then `launchctl bootout` the four exact labels, wait until their complete process trees are absent, and only after that quiescence copy the mutable `.goalex`, `.ralphex`, RFX, Hermes, and matching `/tmp` state with `ditto`. Create `goalex-reset-state.tar.gz`, verify it, then remove only the temporary staging directory. If any writer survives, do not archive or remove its mutable source.
+Create a `mktemp -d` staging directory and copy the four immutable plist definitions into it first. Reconfirm the Step 3 quiescence with `launchctl print` and process-tree checks; if any writer has returned, stop and repeat the Step 3 bootout/stability procedure before creating any archive. With all writers still absent, copy the mutable `.goalex`, `.ralphex`, RFX, Hermes, and matching `/tmp` state with `ditto`. Create `goalex-reset-state.tar.gz`, verify it, then remove only the temporary staging directory. If any writer survives, do not archive or remove its mutable source.
 
 - [ ] **Step 5: Verify recovery artifacts before cleanup**
 
