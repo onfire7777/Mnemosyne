@@ -2638,19 +2638,29 @@ def test_environment_allowlist_rejects_credential_variables(tmp_path: Path) -> N
         verify_bundle(root)
 
 
+@pytest.mark.parametrize(
+    "variable_name",
+    (
+        "OPENAI_API_KEY",
+        "PGPASSWORD",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "SSH_AUTH_SOCK",
+        "DATABASE_URL",
+    ),
+)
 def test_reproduction_rejects_inherited_credentials_before_destination(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variable_name: str
 ) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "credential-source")
     destination = tmp_path / "credential-destination"
     marker = "synthetic-test-credential-value"
-    monkeypatch.setenv("OPENAI_API_KEY", marker)
+    monkeypatch.setenv(variable_name, marker)
 
     with pytest.raises(BundleError) as captured:
         reproduce_bundle(bundle["root"], destination)
 
     assert "credential variables" in str(captured.value)
-    assert "OPENAI_API_KEY" not in str(captured.value)
+    assert variable_name not in str(captured.value)
     assert marker not in str(captured.value)
     assert not destination.exists()
 

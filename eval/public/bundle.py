@@ -243,6 +243,26 @@ _CREDENTIAL_ENVIRONMENT_NAME = re.compile(
     r"(?:^|_)(?:ACCESS_KEY|API_KEY|CREDENTIALS?|PASSWORD|PASSWD|PRIVATE_KEY|SECRET|TOKEN)(?:$|_)",
     re.IGNORECASE,
 )
+_CREDENTIAL_ENVIRONMENT_NAMES = frozenset(
+    {
+        "AMQP_URL",
+        "AWS_PROFILE",
+        "AWS_SHARED_CREDENTIALS_FILE",
+        "DATABASE_URL",
+        "DOCKER_CONFIG",
+        "GIT_ASKPASS",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "KUBECONFIG",
+        "MONGODB_URI",
+        "MYSQL_PWD",
+        "NETRC",
+        "PGPASSFILE",
+        "PGPASSWORD",
+        "REDIS_URL",
+        "SSH_ASKPASS",
+        "SSH_AUTH_SOCK",
+    }
+)
 _MAX_REPRO_JSON_DEPTH = 64
 _MAX_REPRO_FILE_BYTES = 16 * 1024 * 1024
 _MAX_REPRO_BUNDLE_BYTES = 1024 * 1024 * 1024
@@ -428,7 +448,7 @@ def _reject_inherited_credentials() -> None:
         value
         and (
             _CREDENTIAL_ENVIRONMENT_NAME.search(name) is not None
-            or name.upper() in {"DATABASE_URL", "GH_TOKEN", "GITHUB_TOKEN"}
+            or name.upper() in _CREDENTIAL_ENVIRONMENT_NAMES
         )
         for name, value in os.environ.items()
     )
