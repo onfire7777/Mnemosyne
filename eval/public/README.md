@@ -488,6 +488,11 @@ parsing, reserialization, newline conversion, or Unicode normalization before
 hashing. Encoding is lowercase hexadecimal SHA-256 with the `sha256:` prefix.
 The reproducibility manifest itself must be canonical compact JSON with one
 trailing LF; alternate whitespace and inventory order fail closed.
+`result.json` must use the same canonical byte encoding. The remaining
+inventory digests intentionally bind exact stored bytes, while duplicated
+config, build, environment, replay, metric, and lineage declarations are
+compared by their JSON value and type, so numeric/boolean aliases do not satisfy
+custody.
 
 - `build_fingerprint = sha256(build.json)`
 - `config_digest = sha256(config.json)`
@@ -512,7 +517,11 @@ redistribution rights, PII/consent, takedown, custody class, and operator
 identity/role/signer. Missing or unknown fields fail closed. Tests and
 development fixtures use only synthetic public inputs. Secret-like material,
 symlinks, absolute or escaping paths, duplicate normalized paths, and
-inventory drift are rejected before execution.
+inventory drift are rejected before execution. The file namespace is closed to
+the required core artifacts, exactly the named optional manifests, and the
+complete signed-ledger trio when `ledger_ref` is present. Unreferenced manifest
+or ledger files, partial ledger custody, opaque binary media, and mismatched
+declared media types fail closed.
 
 ### Result-v1 compatibility and REPRO-002
 
