@@ -148,7 +148,12 @@ is closed ABI `wmbs/0.1-draft` for the six basic ops (`negotiate`, `create_run`,
 either (a) freeze advanced-hook request/receipt schemas + write surface for
 those ops, or (b) define a closed offline deletion/restore **trace** contract
 Stage A consumes without live advanced ABI calls. Do not claim they are
-already reusable closed-ABI operations.
+already reusable closed-ABI operations. **Also freeze** versioned,
+harness-collected **trusted per-surface probe observations** for every surface
+in the frozen inventory (indexes, caches, intentions, working state, etc.) with
+fail-closed unavailable/error semantics — `retrieve`/`answer` alone (or an
+entrant self-report of absence) cannot prove residue removal under the
+offline-trace option.
 
 ## 3. Fixture contract (prospective, unadmitted)
 
@@ -211,6 +216,12 @@ add a **new** stdlib-only oracle:
   inventory** (or the R1 exact-surface receipt) — internal
   `policy.required_surfaces`/`surfaces`/`stores` self-agreement alone is not
   enough.
+- Per-delete-op receipt bind (NOT CODE-READY freeze): the expected receipt
+  denominator is **one current-run receipt per required delete-operation ID**
+  (including crash-retry IDs the fixture schedules). Each receipt must bind
+  identity to that run, selector, and operation ID — cryptographic validity of
+  a single reused receipt over a subset does not yield 100% validity; missing
+  receipts are explicit failures.
 - Stdlib oracle seam: `verify_signed_deletion_manifest` pulls non-stdlib
   `cryptography` via `evidence_signing`. Stage A keeps the **oracle
   stdlib-only**; signature verification runs in a **trusted harness seam**
