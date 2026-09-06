@@ -1515,9 +1515,15 @@ def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[s
     snapshot = Path(
         tempfile.mkdtemp(prefix=f".{destination.name}-source-", dir=destination.parent)
     )
-    temp = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
     snapshot_identity = _owned_directory_identity(snapshot)
-    temp_identity = _owned_directory_identity(temp)
+    try:
+        temp = Path(
+            tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent)
+        )
+        temp_identity = _owned_directory_identity(temp)
+    except BaseException:
+        _remove_owned_directory(snapshot, snapshot_identity)
+        raise
     try:
         manifest_bytes, source_manifest = _read_reproducibility_manifest(source)
         payloads = _inventory_bytes(
