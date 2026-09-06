@@ -1206,6 +1206,46 @@ def test_manifest_ref_cannot_bind_a_different_inventory_artifact(tmp_path: Path)
         verify_bundle(root)
 
 
+@pytest.mark.parametrize(
+    ("artifact_name", "field", "replacement", "message"),
+    [
+        ("adapter.json", "kind", "scorer", "adapter artifact kind"),
+        ("scorer.json", "id", "different-profile", "scorer artifact"),
+        ("benchmark-ref.json", "id", "different-suite", "benchmark artifact"),
+    ],
+)
+def test_manifest_artifact_semantics_match_their_declared_roles(
+    tmp_path: Path,
+    artifact_name: str,
+    field: str,
+    replacement: str,
+    message: str,
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / artifact_name)
+    root = bundle["root"]
+    artifact_path = root / artifact_name
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact[field] = replacement
+    artifact_bytes = _write_json(artifact_path, artifact)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    ref_key = {
+        "adapter.json": "adapter",
+        "benchmark-ref.json": "benchmark",
+        "scorer.json": "scorer",
+    }[artifact_name]
+    ref_name = "benchmark" if ref_key == "benchmark" else ref_key
+    manifest["manifests"][ref_key] = _named_ref(ref_name, artifact_bytes)
+    entry = next(item for item in manifest["hashes"] if item["path"] == artifact_name)
+    entry["size"] = len(artifact_bytes)
+    entry["sha256"] = _sha256_ref(artifact_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match=message):
+        verify_bundle(root)
+
+
 def test_ledger_verification_uses_inventory_bound_private_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1023,6 +1023,16 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     for key, ref in refs.items():
         if ref is not None:
             _require_bound_digest(ref, key, payloads)
+            expected_kind, artifact_path = _REPRO_MANIFEST_ARTIFACTS[key]
+            artifact = _load_inventory_json(payloads, artifact_path)
+            if not isinstance(artifact, dict) or artifact.get("kind") != expected_kind:
+                raise BundleError(f"{key} artifact kind does not match its manifest role")
+    scorer_artifact = _load_inventory_json(payloads, "scorer.json")
+    benchmark_artifact = _load_inventory_json(payloads, "benchmark-ref.json")
+    if scorer_artifact.get("id") != config_payload.get("scoring_profile"):
+        raise BundleError("scorer artifact does not match bound scoring profile")
+    if benchmark_artifact.get("id") != config_payload.get("suite"):
+        raise BundleError("benchmark artifact does not match bound suite")
     from leaderboard.validate import validate_record, verify_result_digests
 
     errors = validate_record(result)
