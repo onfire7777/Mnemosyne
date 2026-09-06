@@ -864,6 +864,23 @@ def test_symlink_absolute_and_escaping_paths_fail_closed(tmp_path: Path) -> None
         verify_bundle(absolute["root"])
 
 
+def test_symlinked_bundle_ancestor_fails_closed(tmp_path: Path) -> None:
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    bundle = _write_reproducibility_bundle(real_parent / "bundle")
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(real_parent, target_is_directory=True)
+    except OSError as exc:
+        if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
+    with pytest.raises(BundleError, match="links or junctions"):
+        verify_bundle(alias / bundle["root"].name)
+    with pytest.raises(BundleError, match="links or junctions"):
+        reproduce_bundle(bundle["root"], alias / "destination")
+
+
 def test_secret_like_material_fails_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "secret")
     leaked = bundle["root"] / "environment.json"
