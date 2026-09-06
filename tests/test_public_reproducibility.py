@@ -274,6 +274,18 @@ def test_version_1_bundle_publication_never_replaces_racing_destination(
     assert not list(tmp_path.glob(f".{destination.name}-*"))
 
 
+def test_version_1_bundle_normalizes_dot_segments_before_parent_creation(
+    tmp_path: Path,
+) -> None:
+    unused = tmp_path / "unused"
+    destination = unused / ".." / "v1-normalized"
+
+    write_bundle(destination, **_v1_snapshot_bundle_inputs())
+
+    assert (tmp_path / "v1-normalized").is_dir()
+    assert not unused.exists()
+
+
 def test_version_1_verifier_rejects_hardlinked_inventory_artifact(
     tmp_path: Path,
 ) -> None:
