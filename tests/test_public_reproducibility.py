@@ -292,6 +292,25 @@ def test_version_1_verifier_rejects_hardlinked_inventory_artifact(
         verify_bundle(destination)
 
 
+def test_version_1_verifier_rejects_noncanonical_json_bytes(tmp_path: Path) -> None:
+    from eval.public import runner
+
+    destination = tmp_path / "v1-noncanonical"
+    runner.run_public_suite("smoke", destination)
+    metrics_path = destination / "metrics.json"
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    metrics_path.write_text(json.dumps(metrics, indent=2) + "\n", encoding="utf-8")
+    manifest_path = destination / "bundle-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"]["metrics.json"] = hashlib.sha256(
+        metrics_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_bytes(_canonical(manifest))
+
+    with pytest.raises(BundleError, match="non-canonical JSON bytes in metrics.json"):
+        verify_bundle(destination)
+
+
 def test_version_1_reproduction_uses_private_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
