@@ -96,8 +96,10 @@ Per `docs/superpowers/specs/2026-07-26-whole-memory-benchmark-standard-design.md
   semantic leakage where the gold can objectively tie the leaked fact to the
   erased subject. Passing is technical conformance for declared surfaces, not
   a legal-compliance opinion.
-- **Repeat/replay:** three delete-operation IDs, retry after each injected
-  crash boundary, and one restore pass for every declared readable snapshot.
+- **Repeat/replay:** three delete-operation IDs; retry at the three pinned
+  crash windows (before side-effect; after side-effect/before checkpoint;
+  after checkpoint/before response); restore a **pre-erasure** snapshot and
+  re-check residue/survivors.
 - **Resource prerequisite:** measured local or P32 receipt for the exact
   declared surfaces.
 - **External dependencies:** Docker/P32 only for production replicas, object
@@ -139,10 +141,14 @@ claim this file may make. This plan never labels a run "erasure certified."
 | R4 | P32 / object storage / PITR surfaces | Operator | `DEFERRED`. Not in this cell. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
-is the closed ABI `wmbs/0.1-draft` and Section 6
-`delete(selector, mode=declared_surface_erasure)` plus `retrieve`/`answer`
-and declared `snapshot`/`restore_snapshot` surfaces. Crash-retry replay uses
-three delete-operation IDs and retries after each injected crash boundary.
+is closed ABI `wmbs/0.1-draft` for the six basic ops (`negotiate`, `create_run`,
+`ingest`, `retrieve`, `answer`, `finalize`). `delete` / `snapshot` /
+`restore_snapshot` are **not** in `wmbs/0.1-draft` on this base —
+`ProtocolValidator` rejects unknown ops. Freeze residual (NOT CODE-READY):
+either (a) freeze advanced-hook request/receipt schemas + write surface for
+those ops, or (b) define a closed offline deletion/restore **trace** contract
+Stage A consumes without live advanced ABI calls. Do not claim they are
+already reusable closed-ABI operations.
 
 ## 3. Fixture contract (prospective, unadmitted)
 
@@ -157,10 +163,19 @@ add a **new** deterministic development fixture:
   subject/source within a tenant, the fixture must include non-selected
   same-tenant records as gold survivors so whole-tenant wipe cannot pass
   false-deletion scoring.
-- Replay: three delete-operation IDs; retry after each injected crash
-  boundary; one restore pass for every declared readable snapshot.
-  Byte-identical under `canonical_json(generate_fixture(seed))`.
+- Replay: three delete-operation IDs; retry after each **pinned** crash
+  boundary (mandatory per relevant surface): (1) before side-effect,
+  (2) after side-effect / before durable checkpoint, (3) after checkpoint /
+  before response. Harmless pre-call-only crashes do not satisfy replay.
+- Snapshot ordering: for every declared readable snapshot surface, create
+  the snapshot **after ingest and before deletion**, run the delete/retry
+  sequence, restore that pre-erasure snapshot, then re-run target-residue
+  and survivor checks on the restored state (a post-delete-only snapshot
+  does not satisfy restore probes).
+- Byte-identical under `canonical_json(generate_fixture(seed))`.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
+  Advanced delete/snapshot/restore hooks stay behind the §2 freeze residual
+  (or offline-trace alternative).
 - Local/SQLite declared surfaces only. P32 / object / PITR stay `DEFERRED`.
 
 This paragraph does not create those files.
