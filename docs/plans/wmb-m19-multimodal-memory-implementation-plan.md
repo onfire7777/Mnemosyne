@@ -50,7 +50,7 @@ All of the following are blocking. None is discharged by writing this file.
    no complete redistributable fixture-rights manifest and portable media
    contract have been admitted. Text-only systems are
    `UNSUPPORTED-BY-SYSTEM`. M19 is not in the first pilot.
-3. Spec M19 resource prerequisite (`…standard-design.md:1092–1093`): a
+3. Spec M19 resource prerequisite (`…standard-design.md:1090–1091`): a
    measured receipt for an admitted profile. None exists. No local
    generative model is assumed.
 4. Spec M19 acceptance (`…standard-design.md:1086–1089`): public comparison
@@ -58,14 +58,14 @@ All of the following are blocking. None is discharged by writing this file.
    positive paired confidence-interval lower bound; provenance and erasure
    claims inherit M05/M09 gates unchanged. No preregistered paired-CI
    protocol exists on this base. Stage A cannot claim those bounds.
-5. Spec M19 deferral (`…standard-design.md:1096–1098`): official multimodal
+5. Spec M19 deferral (`…standard-design.md:1094–1096`): official multimodal
    variants defer when media licensing, download stability, or model cost is
    not fixed. Text-only systems are `unsupported`, not failed.
 6. G0 / G1 / G2: path not lease-clean; lease map not recomputed; M19 is not
    in the first pilot. Freeze is a later step. This file does not freeze
    itself.
 7. Official EMemBench or provider-backed media extraction is eligible only
-   after pinned data/model and rights contracts (`…standard-design.md:1094–1095`).
+   after pinned data/model and rights contracts (`…standard-design.md:1092–1093`).
    None are pinned. Raw host paths and entrant-controlled fetch URLs are
    forbidden (`…standard-design.md:1078–1079`).
 
@@ -125,11 +125,11 @@ file may flip. This plan never labels a run "media certified."
 | G1 | Lease map recomputed; M19 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Pilot-plan exclusion amended, or this file approved as successor | GoalEx | Open. Do not edit the pilots file in this artifact. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
-| R1 | Measured receipt for an admitted profile (spec L1092–1093) | Operator | Missing — measured-claim gate, not Stage A source. |
+| R1 | Measured receipt for an admitted profile (spec L1090–1091) | Operator | Missing — measured-claim gate, not Stage A source. |
 | R2 | C21 admitted as more than a deferred future requirement (WMBS-E) | Product | Open. Currently deferred. |
 | R3 | Complete redistributable fixture-rights manifest and portable media contract (spec L1098–1100) | Standard owner | Missing. This is why the module is `DEFERRED`. |
-| R4 | Media licensing, download stability, and model cost fixed before any official multimodal variant (spec L1096–1097) | Operator | Open. |
-| R5 | Pinned data/model and rights contracts before EMemBench or provider-backed extraction (spec L1094–1095) | Operator | Open. |
+| R4 | Media licensing, download stability, and model cost fixed before any official multimodal variant (spec L1094–1095) | Operator | Open. |
+| R5 | Pinned data/model and rights contracts before EMemBench or provider-backed extraction (spec L1092–1093) | Operator | Open. |
 
 Technical reuse that a later Stage A may consume, once the gates above close,
 is the closed ABI `wmbs/0.1-draft` and universal `ingest` / `retrieve` /
@@ -153,6 +153,13 @@ add a **new** deterministic development fixture:
   harness-owned mechanism, to digest-pinned fixture bytes (not captions or
   metadata alone). Absent/null handles are not Stage A conforming for
   image/audio/video cases.
+- Media-type-aware validation (NOT CODE-READY freeze; required before any
+  conformance result): reject `null`, unresolved, metadata-only, raw path, and
+  URL substitutions for image/audio/video events even if
+  `$defs.portable_event` permits a null handle. Text-only systems return
+  `unsupported` with **no** multimodal claim. Matching rules + validation
+  failure shapes must be frozen with the scorer residual — not deferred past
+  Stage A implement.
 - Closed ABI `$defs.portable_event` where the later lease claims conformance.
 - No raw host paths. No entrant-controlled fetch URLs. Text-only systems
   stay `unsupported`, not failed. Official multimodal variants stay
@@ -235,7 +242,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 
 | Item | After this file | After a future Stage A | After a future Stage B |
 |---|---|---|---|
-| M19 module disposition | `DEFERRED` | `DEFERRED` until R3 | `DEFERRED` until R3 |
+| M19 module disposition | `DEFERRED` (R3 open) | `PROPOSED` local deterministic slice (R3 must already be closed per §6/§7) | `PROPOSED` until Stage B; official multimodal variant still `DEFERRED` (R4/R5) |
 | Text-only systems | `UNSUPPORTED-BY-SYSTEM` | same | same |
 | Official multimodal variant | `DEFERRED` (R4/R5) | `DEFERRED` | `DEFERRED` until R4/R5 |
 | Quality-based admission floor | none | none | none |
