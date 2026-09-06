@@ -1282,11 +1282,22 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
         or replay_build.get("candidate_git_sha")
         != manifest["build"]["candidate_git_sha"]
         or replay_build.get("system_seam") != build_payload.get("system_seam")
+        or any(
+            replay_build[field] != build_payload[field]
+            for field in set(replay_build) & set(build_payload)
+        )
     ):
         raise BundleError("canonical replay build custody mismatch")
-    if not isinstance(replay_config, dict) or any(
-        replay_config.get(field) != manifest["config"][field]
-        for field in ("locale", "timezone")
+    if (
+        not isinstance(replay_config, dict)
+        or any(
+            replay_config.get(field) != manifest["config"][field]
+            for field in ("locale", "timezone")
+        )
+        or any(
+            replay_config[field] != config_payload[field]
+            for field in set(replay_config) & set(config_payload)
+        )
     ):
         raise BundleError("canonical replay config custody mismatch")
     ledger_names = tuple(sorted(_REPRO_LEDGER_ARTIFACTS))

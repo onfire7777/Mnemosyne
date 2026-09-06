@@ -2245,6 +2245,8 @@ def test_result_ledger_and_m15_cross_reference_mismatches_fail_closed(
     (
         ("build", "candidate_git_sha", "f" * 40),
         ("build", "system_seam", "different-seam"),
+        ("build", "toolchain", "pip"),
+        ("config", "scoring_profile", "different-profile"),
     ),
 )
 def test_canonical_replay_run_custody_matches_bound_artifacts(
