@@ -263,6 +263,27 @@ _CREDENTIAL_ENVIRONMENT_NAMES = frozenset(
         "SSH_AUTH_SOCK",
     }
 )
+_REPRODUCTION_CONTROL_ENVIRONMENT_NAMES = frozenset(
+    {
+        "DYLD_INSERT_LIBRARIES",
+        "LD_PRELOAD",
+        "PIP_CONFIG_FILE",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_INDEX_URL",
+        "PIP_TRUSTED_HOST",
+        "PYTHONHOME",
+        "PYTHONINSPECT",
+        "PYTHONPATH",
+        "PYTHONSTARTUP",
+        "UV_CONFIG_FILE",
+        "UV_DEFAULT_INDEX",
+        "UV_EXTRA_INDEX_URL",
+        "UV_FIND_LINKS",
+        "UV_INDEX",
+        "UV_INDEX_URL",
+        "UV_INSECURE_HOST",
+    }
+)
 _MAX_REPRO_JSON_DEPTH = 64
 _MAX_REPRO_FILE_BYTES = 16 * 1024 * 1024
 _MAX_REPRO_BUNDLE_BYTES = 1024 * 1024 * 1024
@@ -454,6 +475,15 @@ def _reject_inherited_credentials() -> None:
     )
     if forbidden:
         raise BundleError("reproduction environment contains credential variables")
+
+
+def _reject_reproduction_control_environment() -> None:
+    """Reject inherited interpreter, loader, and package-source controls."""
+    if any(
+        value and name.upper() in _REPRODUCTION_CONTROL_ENVIRONMENT_NAMES
+        for name, value in os.environ.items()
+    ):
+        raise BundleError("reproduction environment contains execution-control variables")
 
 
 def _json_depth(value: object, depth: int = 0) -> int:
@@ -1612,6 +1642,7 @@ def _remove_owned_directory(path: Path, identity: tuple[int, int]) -> None:
 
 def _reproduce_reproducibility_bundle(source: Path, destination: Path) -> dict[str, Any]:
     _reject_inherited_credentials()
+    _reject_reproduction_control_environment()
     _reject_reproducibility_link_path(source)
     if (
         not source.is_dir()

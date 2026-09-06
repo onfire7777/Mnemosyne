@@ -2665,6 +2665,27 @@ def test_reproduction_rejects_inherited_credentials_before_destination(
     assert not destination.exists()
 
 
+@pytest.mark.parametrize(
+    "variable_name",
+    ("PYTHONPATH", "PIP_CONFIG_FILE", "UV_INDEX_URL", "LD_PRELOAD"),
+)
+def test_reproduction_rejects_execution_control_environment_before_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variable_name: str
+) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "control-source")
+    destination = tmp_path / "control-destination"
+    marker = "synthetic-test-control-value"
+    monkeypatch.setenv(variable_name, marker)
+
+    with pytest.raises(BundleError) as captured:
+        reproduce_bundle(bundle["root"], destination)
+
+    assert "execution-control variables" in str(captured.value)
+    assert variable_name not in str(captured.value)
+    assert marker not in str(captured.value)
+    assert not destination.exists()
+
+
 def test_reproduction_uses_one_inventory_bound_source_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

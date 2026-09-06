@@ -460,8 +460,12 @@ does not scrub the parent process environment. The reproduction entry point
 therefore rejects non-empty credential-shaped variables (tokens, API/access or
 private keys, secrets, and passwords) plus known credential files, profiles,
 auth sockets, askpass helpers, and credential-bearing service URLs before it
-creates a destination; variable names and values are never included in the error.
-Incomplete output is deleted. A destination collision fails closed.
+creates a destination. It also rejects inherited Python path/startup controls,
+loader preloads, and pip/uv package-source or configuration overrides.
+`UV_PROJECT_ENVIRONMENT` remains the explicit pre-provisioned-environment seam
+used by the clean-checkout contract; `uv run` manages `VIRTUAL_ENV` itself.
+Failure messages expose neither variable names nor values. Incomplete output is
+deleted. A destination collision fails closed.
 
 ### Manifest fields
 
