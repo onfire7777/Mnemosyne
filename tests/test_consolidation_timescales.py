@@ -19,6 +19,7 @@ from mnemosyne.consolidation import (
 )
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
+from mnemosyne.ids import evidence_cid
 from mnemosyne.models import Evidence
 from mnemosyne.policy import CONSOLIDATION_CADENCE_TIERS, OperatingPolicy
 
@@ -492,3 +493,39 @@ def test_implicit_invocations_advance_due_steps_across_not_due_polls() -> None:
     due_again = worker.run_queue_payload(_payload([cid], cadence_tier="fast", now=NOW))
     assert _receipt(due_again)["due_reason"] == "min_steps_elapsed"
     assert _receipt(due_again)["input_cids"] == [cid]
+
+
+def test_missing_due_cids_remain_retryable_after_they_arrive() -> None:
+    engine = _engine()
+    content = "Late-arriving evidence must still be due for the requested tier."
+    cid = evidence_cid(
+        content,
+        tenant_id=TENANT,
+        user_id=USER,
+        source_type="episode",
+        content_pointer=None,
+        modality="text",
+        sensitivity=0,
+    )
+    worker = _worker(engine, consolidation_min_steps=0)
+
+    missing = worker.run_queue_payload(_payload([cid], cadence_tier="fast", step=0, now=NOW))
+    assert missing.evidence_seen == 0
+    assert cid in missing.skipped
+
+    written = _append(engine, content)
+    assert written == cid
+    retry = worker.run_queue_payload(_payload([cid], cadence_tier="fast", step=0, now=NOW))
+    assert _receipt(retry)["due_reason"] == "first_pass"
+    assert _receipt(retry)["input_cids"] == [cid]
+    assert retry.evidence_seen == 1
+
+
+def test_requested_tier_ignores_caller_pass_override() -> None:
+    engine = _engine()
+    cid = _append(engine, "A slow receipt must not run only a caller summarizer override.")
+    result = _worker(engine, consolidation_min_steps=0).run_queue_payload(
+        _payload([cid], cadence_tier="slow", step=0, now=NOW, passes=["summarizer"])
+    )
+    assert result.passes_run == SLOW_PASSES
+    assert _receipt(result)["tier"] == "slow"

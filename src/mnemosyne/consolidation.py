@@ -492,7 +492,7 @@ class ConsolidationWorker:
         replay_rows = self._prioritize_replay(evidence, effective_payload)
         evidence = [row["evidence"] for row in replay_rows]
         evidence_seen = len(evidence)
-        if cadence_tier is not None and not payload.get("passes"):
+        if cadence_tier is not None:
             passes_run = [str(name) for name in policy.consolidation_cadence_tier_passes[cadence_tier]]
         else:
             passes_run = [str(name) for name in payload.get("passes") or DEFAULT_CONSOLIDATION_PASSES]
@@ -682,7 +682,8 @@ class ConsolidationWorker:
                 self._tenant_pass_calls[tenant_id] = max(
                     self._tenant_pass_calls.get(tenant_id, 0), recorded_step
                 )
-            for cid in work_cids:
+            processed_cids = [cid for cid in work_cids if cid not in missing]
+            for cid in processed_cids:
                 self._tier_cid_last[(tenant_id, branch, cadence_tier, cid)] = (recorded_step, recorded_at)
         return ConsolidationRunResult(
             tenant_id=tenant_id,
@@ -698,7 +699,7 @@ class ConsolidationWorker:
                 self._cadence_receipt(
                     tier=cadence_tier,
                     due_reason=due_reason or "first_pass",
-                    input_cids=work_cids,
+                    input_cids=processed_cids,
                     policy=policy,
                     mutation_rail=mutation_budget.to_dict(),
                 )
