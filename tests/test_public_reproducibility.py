@@ -1214,6 +1214,8 @@ def test_private_jwk_material_fails_closed(private_jwk: dict[str, str]) -> None:
 
     public_jwk = {"e": "AQAB", "kty": "RSA", "n": "public"}
     assert public_bundle._parse_bounded_json(json.dumps(public_jwk), "public-jwk") == public_jwk
+    non_jwk = {"d": "distance", "kty": "measurement"}
+    assert public_bundle._parse_bounded_json(json.dumps(non_jwk), "non-jwk") == non_jwk
 
     with pytest.raises(BundleError, match="private JWK"):
         public_bundle._parse_bounded_json(json.dumps(private_jwk), "private-jwk")

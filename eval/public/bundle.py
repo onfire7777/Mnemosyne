@@ -2687,7 +2687,8 @@ def _reject_decoded_secrets(value: object) -> None:
         if isinstance(current, dict):
             key_type = current.get("kty")
             if isinstance(key_type, str) and (
-                "d" in current or (key_type == "oct" and "k" in current)
+                (key_type in {"EC", "OKP", "RSA"} and "d" in current)
+                or (key_type == "oct" and "k" in current)
             ):
                 raise BundleError("private JWK material detected in decoded artifact")
             pending.extend(current.keys())
