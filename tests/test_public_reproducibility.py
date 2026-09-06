@@ -1193,6 +1193,19 @@ def test_fabricated_ledger_and_manifest_refs_fail_closed(tmp_path: Path) -> None
         verify_bundle(adapter["root"])
 
 
+def test_manifest_ref_cannot_bind_a_different_inventory_artifact(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(tmp_path / "cross-bound-adapter")
+    root = bundle["root"]
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    scorer_bytes = (root / "scorer.json").read_bytes()
+    manifest["manifests"]["adapter"] = _named_ref("adapter", scorer_bytes)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="adapter.*named artifact"):
+        verify_bundle(root)
+
+
 def test_ledger_verification_uses_inventory_bound_private_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
