@@ -823,6 +823,37 @@ def test_exact_digest_meanings_hash_named_file_bytes(tmp_path: Path) -> None:
     assert manifest["traces"]["trace_index_digest"] == result["trace_index_digest"]
 
 
+def test_nested_bundle_manifest_inventory_is_semantically_verified(tmp_path: Path) -> None:
+    bundle = _write_reproducibility_bundle(
+        tmp_path / "nested-manifest", include_ledger=False
+    )
+    root = bundle["root"]
+    nested_path = root / "bundle-manifest.json"
+    nested = json.loads(nested_path.read_text(encoding="utf-8"))
+    nested["files"]["adapter.json"] = "9" * 64
+    nested_bytes = _write_json(nested_path, nested)
+
+    result_path = root / "result.json"
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    result["bundle_digest"] = _sha256_ref(nested_bytes)
+    result_bytes = _write_json(result_path, result)
+
+    manifest_path = root / REPRO_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["result_ref"] = _named_ref("result-v2", result_bytes)
+    for name, payload in (
+        ("bundle-manifest.json", nested_bytes),
+        ("result.json", result_bytes),
+    ):
+        entry = next(item for item in manifest["hashes"] if item["path"] == name)
+        entry["size"] = len(payload)
+        entry["sha256"] = _sha256_ref(payload)
+    _write_json(manifest_path, manifest)
+
+    with pytest.raises(BundleError, match="bound bundle manifest digest"):
+        verify_bundle(root)
+
+
 def test_unknown_field_and_missing_declaration_fail_closed(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "unknown")
     root = bundle["root"]

@@ -865,6 +865,32 @@ def _validate_bound_lockfile(raw: bytes) -> None:
         raise BundleError("bound uv.lock omits verifier runtime dependencies")
 
 
+def _validate_bound_bundle_manifest(payloads: dict[str, bytes]) -> None:
+    """Validate the nested v1 inventory against authenticated source artifacts."""
+    manifest = _load_inventory_json(payloads, "bundle-manifest.json")
+    if not isinstance(manifest, dict) or set(manifest) != {"files", "version"}:
+        raise BundleError("bound bundle manifest is invalid")
+    files = manifest.get("files")
+    excluded = {
+        REPRODUCIBILITY_MANIFEST_NAME,
+        "bundle-manifest.json",
+        "ledger.jsonl",
+        "ledger.jsonl.head.json",
+        "ledger-public.pem",
+        "result.json",
+    }
+    expected = set(payloads) - excluded
+    if manifest.get("version") != 1 or not isinstance(files, dict) or set(files) != expected:
+        raise BundleError("bound bundle manifest inventory mismatch")
+    for name, digest in files.items():
+        if (
+            not isinstance(digest, str)
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or hashlib.sha256(payloads[name]).hexdigest() != digest
+        ):
+            raise BundleError(f"bound bundle manifest digest mismatch: {name}")
+
+
 def _bound_repro_k(config: object) -> int:
     if not isinstance(config, dict):
         raise BundleError("bound k is unavailable")
@@ -1290,6 +1316,7 @@ def _verify_reproducibility_bundle(root: Path) -> dict[str, Any]:
     ]
     if result.get("metrics") != expected_result_metrics:
         raise BundleError("result metrics do not match recomputed traces")
+    _validate_bound_bundle_manifest(payloads)
     publication = manifest["publication"]
     return {
         "family": "reproducibility",
