@@ -393,7 +393,7 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 after all required/native checks passed in run `31865413163`, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@f688c747`. `T5` and `T6` are discharged.
+current canonical baseline is `main@b6a8e392`. `T5` and `T6` are discharged.
 PR #115 is merged at that baseline, but its reproduced M02 Stage-B review
 defects are not waived; a serialized corrective successor remains mandatory
 before M02 can be treated as clean or publishable. PR #117 delivered the
@@ -828,6 +828,7 @@ git merge-base --is-ancestor 6241984b15e85171bc036100fa5e20e05588bd81 main
 git merge-base --is-ancestor f95aabaca85ed6cbfbda66c0ceea12df22bfdd00 main
 git merge-base --is-ancestor 61f55b94a6f878973437d075adfcecf2cb684ae6 main
 git merge-base --is-ancestor f688c74757365a9d946100687a04288cde12a7fc main
+git merge-base --is-ancestor b6a8e39212445f41b22a922ddbcdbfce46980785 main
 # Exact canonical baseline. Ancestry alone also passes when `main` carries later,
 # unrecorded merges, which is precisely the condition under which the Authority
 # carve-out lapses. This equality is the lapse detector: if it fails, `main` has
@@ -841,7 +842,7 @@ git merge-base --is-ancestor f688c74757365a9d946100687a04288cde12a7fc main
 # permanently red. The suite enforces the same invariant in the form that
 # survives its own merge — `tests/test_planning_traceability.py` fails if any PR
 # merged into `main` after the recorded baseline is absent from the lease map.
-test "$(git rev-parse main)" = "f688c74757365a9d946100687a04288cde12a7fc"
+test "$(git rev-parse main)" = "b6a8e39212445f41b22a922ddbcdbfce46980785"
 test -f .planning/STATE.md
 test -f .planning/ROADMAP.md
 test -f .planning/REQUIREMENTS.md
