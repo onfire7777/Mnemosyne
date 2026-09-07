@@ -2396,6 +2396,8 @@ def _raptor_node_hit(
         status="active",
         erased=bool(_item_field(item, "erased")),
     )
+    if not decision.allowed:
+        return None
     content = str(_item_field(item, "content") or "")
     text, privacy = apply_text_redactions(content, access_policy, decision)
     if not text:

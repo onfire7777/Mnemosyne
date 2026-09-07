@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
+import mnemosyne.retrieval as retrieval_module
 from eval.g0.sensemaking import SENSEMAKING_FILT, SENSEMAKING_QUERY_MODE, run_sensemaking_eval
+from mnemosyne.access_policy import AccessDecision
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
@@ -485,6 +487,39 @@ def test_global_sensemaking_does_not_cache_past_source_expiry(monkeypatch: Any) 
 
     assert root not in {hit.id for hit in second.hits}
     assert second.abstained is True
+
+
+def test_global_sensemaking_rejects_summary_denied_during_second_policy_check(
+    monkeypatch: Any,
+) -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-policy-race"
+    source = _append_theme(engine, tenant, "user-policy-race", "Amber lighthouse policy race.")
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse policy race.",
+        source_cids=[source],
+    )
+    engine.evidence[engine._evidence_key(tenant, "main", root)].sensitivity = 1
+    original = retrieval_module.may_read_item
+    summary_checks = 0
+
+    def deny_second_summary_check(**kwargs: Any) -> AccessDecision:
+        nonlocal summary_checks
+        decision = original(**kwargs)
+        if kwargs.get("sensitivity") == 1:
+            summary_checks += 1
+            if summary_checks == 2:
+                return AccessDecision(False, "expired_access_policy", decision.role, decision.ceiling)
+        return decision
+
+    monkeypatch.setattr(retrieval_module, "may_read_item", deny_second_summary_check)
+    result = _sensemaking(engine, tenant, "amber lighthouse policy race")
+
+    assert summary_checks >= 2
+    assert root not in {hit.id for hit in result.hits}
+    assert result.abstained is True
 
 
 def test_global_sensemaking_routes_through_the_shared_engine_seam() -> None:
