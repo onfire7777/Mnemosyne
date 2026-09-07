@@ -502,6 +502,24 @@ def test_global_sensemaking_revalidates_hidden_source_cids() -> None:
         assert hidden_source not in (hit.metadata.get("source_evidence_cids") or [])
 
 
+def test_global_sensemaking_drops_parent_when_child_summary_is_hidden() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-hidden-child"
+    tree = _build_raptor(engine, tenant, "user-hidden-child")
+    hidden_child = tree["leaf_cids"][0]
+    child = engine.evidence[engine._evidence_key(tenant, "main", hidden_child)]
+    child.sensitivity = 4
+
+    result = _sensemaking(engine, tenant, role="reader")
+    disclosed = _disclosed_ids(result)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert hidden_child not in disclosed
+    assert hidden_child not in blob
+    assert tree["root_cid"] not in disclosed
+    assert tree["root_cid"] not in blob
+
+
 def test_global_sensemaking_preserves_coverage_across_roots() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-roots"
