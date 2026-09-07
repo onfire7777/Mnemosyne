@@ -14,6 +14,7 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
+from mnemosyne.sqlite_engine import SqliteEngine
 
 
 SENSEMAKING_QUERY = "What global themes appear across the amber lighthouse notes?"
@@ -385,6 +386,21 @@ def test_global_sensemaking_routes_through_the_shared_engine_seam() -> None:
     assert via_engine.explain["global_sensemaking"]["map_count"] == via_pipeline.explain[
         "global_sensemaking"
     ]["map_count"]
+
+
+def test_sqlite_global_sensemaking_uses_direct_raptor_query(tmp_path: Any) -> None:
+    engine = SqliteEngine(root_dir=tmp_path)
+    tenant = "sensemaking-sqlite-direct"
+    _build_raptor(engine, tenant, "user-sqlite-direct")
+
+    def fail_export(_tenant_id: str) -> dict[str, Any]:
+        raise AssertionError("global sensemaking must not materialize the tenant export")
+
+    engine.export_tenant = fail_export  # type: ignore[method-assign]
+    result = _sensemaking(engine, tenant)
+
+    assert result.hits
+    assert _report(result)["map_count"] >= 1
 
 
 def test_global_sensemaking_policy_denials_are_existence_silent() -> None:
