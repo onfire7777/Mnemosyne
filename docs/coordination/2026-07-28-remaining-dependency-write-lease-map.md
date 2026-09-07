@@ -1,7 +1,7 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-09-05 (P13-C discharge and obsolete signed-publication lease release)
-Baseline: `main@f688c74757365a9d946100687a04288cde12a7fc`
+Updated: 2026-09-06 (PR #119 receipt and canonical-baseline recomputation)
+Baseline: `main@b6a8e39212445f41b22a922ddbcdbfce46980785`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
 benchmark program. It supersedes the runtime snapshot in the original
@@ -546,6 +546,15 @@ The following packages are complete source history, not runnable work:
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
+- PR #119: `docs: PROPOSED M08 reversible-forgetting plan (not code-ready)`.
+  Delivered from exact head `08b521dbbb6e1872ad39c954ea4a1b983ee904fc`
+  after all required checks passed in run `34016028705`; merged as
+  `b6a8e39212445f41b22a922ddbcdbfce46980785` at
+  `2026-09-06T23:56:22Z`. Exclusive File Set (Exact 1):
+  `docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md`.
+  Documentation only: the module remains `PROPOSED` and not code-ready. This
+  receipt recomputes the canonical lifecycle baseline to the PR #119 merge and
+  admits no implementation, publication, or successor source node.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.

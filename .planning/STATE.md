@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: Public Benchmark and Memory Leadership
 status: executing
-stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path at `main@f688c747`; later merged receipts are recorded in the lease map. PR #117 is merged and owns no active lifecycle writer. PR #135 discharges P13-C, closes BENCH-007, and retires the unavailable Mac signed-publication reservation. N12 is ready for single-owner admission after this receipt lands and a fresh main/lease check; no implementation writer starts here. Phase 14 still requires N12 implementation, and official benchmark, protected, hardware, custody, and publication gates remain open."
-last_updated: "2026-09-05T01:13:00Z"
-last_activity: 2026-09-05
+stopped_at: "Phase 12 CAP-003/BENCH-005 remains the operator-measurement critical path at `main@b6a8e392`; later merged receipts are recorded in the lease map. PR #117 is merged and owns no active lifecycle writer. PR #135 discharges P13-C, closes BENCH-007, and retires the unavailable Mac signed-publication reservation. N12 is ready for single-owner admission after this receipt lands and a fresh main/lease check; no implementation writer starts here. Phase 14 still requires N12 implementation, and official benchmark, protected, hardware, custody, and publication gates remain open."
+last_updated: "2026-09-06T23:56:22Z"
+last_activity: 2026-09-06
 progress:
   total_phases: 7
   completed_phases: 2
@@ -451,7 +451,7 @@ at `2026-08-15T04:22:14Z`, and successful post-merge run `31864254074`. PR
 after exact-head CI `31865413163` passed, as
 `6801fbd0b34565dc3dbe915e8d1f6e04455cb9e4` at
 `2026-08-15T05:24:36Z`; post-main run `31866875258` succeeded. The
-current canonical baseline is `main@f688c747`. Node `T10` is delivered through
+current canonical baseline is `main@b6a8e392`. Node `T10` is delivered through
 PR #112. PR #115 merged M02 Stage-B at this baseline, but its reproduced review
 defects remain open and require a serialized corrective successor. PR #117
 delivered the coupled lifecycle reconciliation and topology-verifier remediation
