@@ -451,11 +451,17 @@ def _run_global_sensemaking(
         policy=policy,
         deep=deep,
     )
-    budgeted, used = ops._fit_budget(hits, policy.token_budget)
+    token_fitted, _ = ops._fit_budget(hits, policy.token_budget)
+    node_budget = int(report["budget"]["node_budget"])
+    budgeted = token_fitted[:node_budget]
+    budgeted, used = ops._fit_budget(budgeted, policy.token_budget)
+    token_fitted_ids = {hit.id for hit in token_fitted}
     kept_ids = {hit.id for hit in budgeted}
     for hit in hits:
-        if hit.id not in kept_ids:
+        if hit.id not in token_fitted_ids:
             report["exclusions"].append({"cid": hit.id, "reason": "token_budget"})
+        elif hit.id not in kept_ids:
+            report["exclusions"].append({"cid": hit.id, "reason": "node_budget"})
     report["exclusions"] = sorted(
         report["exclusions"],
         key=lambda item: (str(item.get("reason") or ""), str(item.get("cid") or ""), int(item.get("count") or 0)),
@@ -622,17 +628,21 @@ def run_retrieval_pipeline(
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
-    cache_key = _result_cache_key(
-        ops,
-        query=query,
-        tenant_id=tenant_id,
-        branch=branch,
-        deep=deep,
-        effective_filter=effective_filter,
-        workspace_broadcast=workspace_broadcast,
-        k=k,
-        graph_k=graph_k,
-        policy=policy,
+    cache_key = (
+        None
+        if query_mode == GLOBAL_SENSEMAKING_MODE
+        else _result_cache_key(
+            ops,
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=deep,
+            effective_filter=effective_filter,
+            workspace_broadcast=workspace_broadcast,
+            k=k,
+            graph_k=graph_k,
+            policy=policy,
+        )
     )
     if cache_key is not None:
         cached = _result_cache_get(cache_key)
