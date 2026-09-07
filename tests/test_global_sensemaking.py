@@ -323,6 +323,41 @@ def test_global_sensemaking_preserves_theme_roots_after_token_packing() -> None:
     assert _report(result)["incomplete_theme_coverage"] is False
 
 
+def test_global_sensemaking_packs_compact_theme_representatives_first() -> None:
+    engine = LocalMemoryEngine(policy=OperatingPolicy(token_budget=32, top_k=2))
+    tenant = "sensemaking-compact-root-packing"
+    alpha_source = _append_theme(engine, tenant, "user-compact-pack", "alpha beta theme source")
+    alpha_leaf = _append_raptor_summary(
+        engine,
+        tenant,
+        "alpha beta " + "ranked " * 14,
+        source_cids=[alpha_source],
+        level=1,
+    )
+    alpha_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "alpha compact",
+        source_cids=[alpha_source],
+        level=2,
+        child_summary_cids=[alpha_leaf],
+    )
+    beta_source = _append_theme(engine, tenant, "user-compact-pack", "beta theme source")
+    beta_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "beta " + "compact " * 4,
+        source_cids=[beta_source],
+        level=2,
+    )
+
+    result = _sensemaking(engine, tenant, "alpha beta")
+    roots = {hit.metadata.get("theme_root_cid") for hit in result.hits}
+
+    assert roots == {alpha_root, beta_root}
+    assert _report(result)["incomplete_theme_coverage"] is False
+
+
 def test_global_sensemaking_excludes_expired_hidden_and_foreign_nodes() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-scope"
