@@ -43,6 +43,8 @@ from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_ab
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
+    GLOBAL_SENSEMAKING_CHANNEL,
+    GLOBAL_SENSEMAKING_MODE,
     QUERY_SUPPORT_THRESHOLD,
     PROSPECTIVE_MEMORY_CHANNEL,
     RetrievalAdapters,
@@ -52,8 +54,11 @@ from mnemosyne.retrieval import (
     apply_activation_scores,
     apply_workspace_retrieval_advisory,
     gist_support_report,
+    global_sensemaking_projection,
+    query_mode_from_filter,
     query_support,
     prospective_memory_hits,
+    require_supported_query_mode,
     schema_fast_path_rerank,
     semantic_entropy,
     strip_workspace_broadcast_filter,
@@ -424,6 +429,172 @@ class RetrievalPipelineOps(Protocol):
     ) -> dict[str, Any]: ...
 
 
+def _run_global_sensemaking(
+    ops: RetrievalPipelineOps,
+    *,
+    query: str,
+    tenant_id: str,
+    branch: str,
+    deep: bool,
+    effective_filter: dict[str, Any],
+    policy: OperatingPolicy,
+    record_access: bool,
+) -> RetrievalResult:
+    """Project readable RAPTOR nodes through the shared retrieve seam."""
+
+    hits, report = global_sensemaking_projection(
+        ops,
+        query=query,
+        tenant_id=tenant_id,
+        branch=branch,
+        filt=effective_filter,
+        policy=policy,
+        deep=deep,
+    )
+    budgeted, used = ops._fit_budget(hits, policy.token_budget)
+    kept_ids = {hit.id for hit in budgeted}
+    for hit in hits:
+        if hit.id not in kept_ids:
+            report["exclusions"].append({"cid": hit.id, "reason": "token_budget"})
+    report["exclusions"] = sorted(
+        report["exclusions"],
+        key=lambda item: (str(item.get("reason") or ""), str(item.get("cid") or ""), int(item.get("count") or 0)),
+    )
+    report["reduce_count"] = len(budgeted)
+    report["budget"]["used_nodes"] = len(budgeted)
+    report["budget"]["used_tokens"] = used
+    kept_roots = {
+        str(hit.metadata.get("theme_root_cid") or hit.id)
+        for hit in budgeted
+        if hit.metadata.get("theme_root_cid") or hit.id
+    }
+    mapped_roots = {str(root) for root in report.get("theme_root_cids") or [] if root}
+    if mapped_roots and kept_roots != mapped_roots:
+        report["incomplete_theme_coverage"] = True
+    coverage_reason: str | None = None
+    coverage_note: str | None = None
+    if report["map_count"] == 0:
+        coverage_reason = "insufficient_readable_coverage"
+        coverage_note = "Readable RAPTOR coverage is insufficient for global sensemaking."
+    elif report["reduce_count"] == 0:
+        coverage_reason = "budget_exhausted"
+        coverage_note = "Global sensemaking exceeded the token or node budget before a projection could be emitted."
+    elif report.get("incomplete_theme_coverage"):
+        coverage_reason = "incomplete_theme_coverage"
+        coverage_note = "Global sensemaking omitted at least one RAPTOR theme root under the node budget."
+    budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    read_marks = (
+        {"assertions": 0, "evidence": 0}
+        if not record_access
+        else ops._record_retrieval_access(budgeted)
+    )
+    calibration = ops._calibration_for(tenant_id, "fact")
+    threshold = conformal_threshold(calibration) if calibration else policy.abstention_threshold
+    support_report = query_support(query, budgeted)
+    insufficient_support = support_report["score"] < QUERY_SUPPORT_THRESHOLD
+    confidence = ops._confidence(query, budgeted, support_score=support_report["score"]) if budgeted else 0.0
+    prediction_set_size = ops._prediction_set_size(budgeted, threshold)
+    entropy = semantic_entropy([hit.text for hit in budgeted])
+    gist_support = gist_support_report(budgeted)
+    reality_monitoring = ops._reality_monitoring_report(budgeted)
+    standing_report = reality_monitoring["standing"]
+    ungrounded_reality_only = bool(standing_report["abstention_gate"]["active"])
+    if ungrounded_reality_only != bool(reality_monitoring["ungrounded_only"]):
+        raise AssertionError("Standing P1 mirror diverged from reality-monitoring abstention gate")
+    answer_grounding_floor = answer_grounding_floor_report(budgeted, policy)
+    answer_grounding_floor_active = bool(answer_grounding_floor["active"])
+    # RAPTOR consolidation-summary hits are the intended evidence for this
+    # projection. Record gist_support for provenance, but do not treat them as
+    # gist-only hard-abstain or crush confidence for that reason alone.
+    if ungrounded_reality_only:
+        confidence = min(confidence, threshold * 0.95)
+    if answer_grounding_floor_active:
+        confidence = min(confidence, threshold * 0.95)
+    if calibration:
+        gated = (
+            should_abstain(confidence, calibration, prediction_set_size=prediction_set_size)
+            or insufficient_support
+            or ungrounded_reality_only
+            or answer_grounding_floor_active
+        )
+    else:
+        gated = (
+            confidence < threshold
+            or prediction_set_size == 0
+            or insufficient_support
+            or ungrounded_reality_only
+            or answer_grounding_floor_active
+        )
+    gate_reason: str | None = None
+    gate_note: str | None = None
+    if ungrounded_reality_only:
+        gate_reason = "ungrounded_reality_only"
+        gate_note = (
+            "Retrieved support has low groundedness or insufficient independent "
+            "external support; abstaining until grounded evidence is available."
+        )
+    elif answer_grounding_floor_active:
+        gate_reason = "answer_grounding_floor"
+        gate_note = (
+            "Retrieved support is dominated by low-grounded self-generated content; "
+            "flagging as hypothesis and abstaining until grounded support is available."
+        )
+    elif insufficient_support:
+        gate_reason = "insufficient_query_support"
+        gate_note = "Retrieved evidence did not cover enough query terms; abstaining until stronger support is available."
+    elif gated:
+        gate_reason = "calibrated_uncertainty"
+        gate_note = "Evidence is too thin, low-trust, or conflicting for a confident answer."
+    abstention_reason = coverage_reason or gate_reason
+    note = coverage_note or gate_note
+    report["abstention_reason"] = abstention_reason
+    explain = {
+        "query_mode": GLOBAL_SENSEMAKING_MODE,
+        "global_sensemaking": report,
+        "channels": {GLOBAL_SENSEMAKING_CHANNEL: len(budgeted)},
+        "source_cids": list(report["source_cids"]),
+        "raptor_levels": list(report["raptor_levels"]),
+        "map_count": report["map_count"],
+        "reduce_count": report["reduce_count"],
+        "exclusions": list(report["exclusions"]),
+        "budget": dict(report["budget"]),
+        "abstention_reason": abstention_reason,
+        "gist_support": gist_support,
+        "reality_monitoring": reality_monitoring,
+        "standing": standing_report,
+        "answer_grounding_floor": answer_grounding_floor,
+        "semantic_entropy": entropy,
+        "calibration": ops._calibration_explain(calibration, threshold),
+        "confidence": {
+            "score": confidence,
+            "answer_score": confidence,
+            "prediction_set_size": prediction_set_size,
+            "threshold": threshold,
+            "source": "conformal" if calibration else "evidence_quality",
+            "query_support": support_report,
+        },
+        "read_marks": read_marks,
+        "adapters": {
+            "embedding": ops.adapters.embedding.name,
+            "embedding_dims": ops.adapters.embedding.dims,
+            "reranker": ops.adapters.reranker.name,
+            "lexical_backend": ops.adapters.lexical_backend,
+            "graph_backend": ops.adapters.graph_backend,
+        },
+        "rails": policy.immutable_rails,
+    }
+    return RetrievalResult(
+        query=query,
+        hits=budgeted,
+        confidence=confidence,
+        abstained=abstention_reason is not None,
+        uncertainty_note=note,
+        token_budget=policy.token_budget,
+        used_tokens=used,
+        explain=explain,
+    )
+
+
 def run_retrieval_pipeline(
     ops: RetrievalPipelineOps,
     *,
@@ -440,6 +611,7 @@ def run_retrieval_pipeline(
     workspace_broadcast = workspace_broadcast_from_context(filt)
     effective_filter = strip_workspace_broadcast_filter(filt)
     effective_filter.update({"tenant_id": tenant_id, "branch": branch, "_retrieval_deep": deep})
+    query_mode = require_supported_query_mode(query_mode_from_filter(effective_filter))
     retrieval_instant = (
         parse_dt(effective_filter.get("as_of"))
         or parse_dt(effective_filter.get("evaluated_at"))
@@ -472,6 +644,35 @@ def run_retrieval_pipeline(
             )
             cached.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=True, stored=False)
             return cached
+    if query_mode == GLOBAL_SENSEMAKING_MODE:
+        result = _run_global_sensemaking(
+            ops,
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=deep,
+            effective_filter=effective_filter,
+            policy=policy,
+            record_access=record_access,
+        )
+        if cache_key is not None:
+            current_cache_key = _result_cache_key(
+                ops,
+                query=query,
+                tenant_id=tenant_id,
+                branch=branch,
+                deep=deep,
+                effective_filter=effective_filter,
+                workspace_broadcast=workspace_broadcast,
+                k=k,
+                graph_k=graph_k,
+                policy=policy,
+            )
+            stored = current_cache_key == cache_key
+            result.explain[_RESULT_CACHE_EXPLAIN_KEY] = _result_cache_explain(hit=False, stored=stored)
+            if stored:
+                _result_cache_put(cache_key, result)
+        return result
     if parallel_channels_enabled():
         with ThreadPoolExecutor(max_workers=5) as pool:
             dense_future = pool.submit(ops.vector_search, query, policy.rerank_width, effective_filter)
