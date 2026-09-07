@@ -2404,7 +2404,10 @@ def _raptor_node_hit(
     for key in ("child_summary_cids", "source_summary_cids"):
         raw_children = summary.get(key)
         if isinstance(raw_children, list):
-            summary[key] = [str(child) for child in raw_children if str(child) in readable_summary_ids]
+            children = [str(child) for child in raw_children if str(child)]
+            if any(child not in readable_summary_ids for child in children):
+                return None
+            summary[key] = children
     summary["source_evidence_cids"] = list(source_cids)
     provenance = [cid, *source_cids]
     return Hit(
