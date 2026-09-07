@@ -582,7 +582,8 @@ def test_postgres_lists_only_live_raptor_summaries_in_requested_branch() -> None
                 trust_tier=2,
                 access_policy={"tenant": tenant},
                 metadata={"summary": {"raptor_level": 1, "source_evidence_cids": []}},
-            )
+            ),
+            branch=branch,
         )
 
     main_cid = append_summary("Main RAPTOR summary")
