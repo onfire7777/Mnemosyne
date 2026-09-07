@@ -451,16 +451,30 @@ def _run_global_sensemaking(
         policy=policy,
         deep=deep,
     )
-    token_fitted, _ = ops._fit_budget(hits, policy.token_budget)
     node_budget = int(report["budget"]["node_budget"])
-    budgeted: list[Hit] = []
-    represented_roots: set[str] = set()
+    candidate_costs: dict[str, int] = {}
+    token_fitted: list[Hit] = []
+    for hit in hits:
+        individually_fitted, cost = ops._fit_budget([hit], policy.token_budget)
+        if individually_fitted:
+            token_fitted.append(hit)
+            candidate_costs[hit.id] = cost
+    root_groups: dict[str, list[Hit]] = {}
     for hit in token_fitted:
         root = str(hit.metadata.get("theme_root_cid") or hit.id)
-        if root in represented_roots:
+        root_groups.setdefault(root, []).append(hit)
+    budgeted: list[Hit] = []
+    used = 0
+    for members in root_groups.values():
+        representative = min(
+            members,
+            key=lambda hit: (candidate_costs[hit.id], -hit.score, hit.id),
+        )
+        fitted, cost = ops._fit_budget([representative], policy.token_budget - used)
+        if not fitted:
             continue
-        budgeted.append(hit)
-        represented_roots.add(root)
+        budgeted.append(representative)
+        used += cost
         if len(budgeted) >= node_budget:
             break
     if len(budgeted) < node_budget:
@@ -468,11 +482,14 @@ def _run_global_sensemaking(
         for hit in token_fitted:
             if hit.id in selected_ids:
                 continue
+            fitted, cost = ops._fit_budget([hit], policy.token_budget - used)
+            if not fitted:
+                continue
             budgeted.append(hit)
             selected_ids.add(hit.id)
+            used += cost
             if len(budgeted) >= node_budget:
                 break
-    budgeted, used = ops._fit_budget(budgeted, policy.token_budget)
     token_fitted_ids = {hit.id for hit in token_fitted}
     kept_ids = {hit.id for hit in budgeted}
     for hit in hits:
