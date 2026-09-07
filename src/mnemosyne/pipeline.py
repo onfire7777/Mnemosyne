@@ -453,7 +453,25 @@ def _run_global_sensemaking(
     )
     token_fitted, _ = ops._fit_budget(hits, policy.token_budget)
     node_budget = int(report["budget"]["node_budget"])
-    budgeted = token_fitted[:node_budget]
+    budgeted: list[Hit] = []
+    represented_roots: set[str] = set()
+    for hit in token_fitted:
+        root = str(hit.metadata.get("theme_root_cid") or hit.id)
+        if root in represented_roots:
+            continue
+        budgeted.append(hit)
+        represented_roots.add(root)
+        if len(budgeted) >= node_budget:
+            break
+    if len(budgeted) < node_budget:
+        selected_ids = {hit.id for hit in budgeted}
+        for hit in token_fitted:
+            if hit.id in selected_ids:
+                continue
+            budgeted.append(hit)
+            selected_ids.add(hit.id)
+            if len(budgeted) >= node_budget:
+                break
     budgeted, used = ops._fit_budget(budgeted, policy.token_budget)
     token_fitted_ids = {hit.id for hit in token_fitted}
     kept_ids = {hit.id for hit in budgeted}

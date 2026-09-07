@@ -297,6 +297,32 @@ def test_global_sensemaking_refills_node_budget_after_oversized_hit() -> None:
     assert report["abstention_reason"] != "budget_exhausted"
 
 
+def test_global_sensemaking_preserves_theme_roots_after_token_packing() -> None:
+    engine = LocalMemoryEngine(policy=OperatingPolicy(token_budget=256, top_k=2))
+    tenant = "sensemaking-root-aware-packing"
+    alpha_source = _append_theme(engine, tenant, "user-root-pack", "alpha orchard ledger bright")
+    alpha_leaf = _append_raptor_summary(
+        engine, tenant, "alpha orchard ledger bright", source_cids=[alpha_source], level=1
+    )
+    alpha_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "alpha orchard ledger bright",
+        source_cids=[alpha_source],
+        level=2,
+        child_summary_cids=[alpha_leaf],
+    )
+    beta_source = _append_theme(engine, tenant, "user-root-pack", "beta harbor note")
+    beta_root = _append_raptor_summary(
+        engine, tenant, "beta harbor note", source_cids=[beta_source], level=2
+    )
+
+    result = _sensemaking(engine, tenant, "alpha orchard ledger bright beta")
+
+    assert {alpha_root, beta_root}.issubset({hit.metadata.get("theme_root_cid") for hit in result.hits})
+    assert _report(result)["incomplete_theme_coverage"] is False
+
+
 def test_global_sensemaking_excludes_expired_hidden_and_foreign_nodes() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-scope"
@@ -566,6 +592,30 @@ def test_global_sensemaking_revalidates_hidden_source_cids() -> None:
     for hit in result.hits:
         assert hidden_source not in hit.provenance
         assert hidden_source not in (hit.metadata.get("source_evidence_cids") or [])
+
+
+def test_global_sensemaking_drops_summary_when_source_now_requires_redaction() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-redacted-source"
+    source = _append_theme(engine, tenant, "user-redacted-source", "secret: amber harbor code")
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "secret: amber harbor code",
+        source_cids=[source],
+    )
+    evidence = engine.evidence[engine._evidence_key(tenant, "main", source)]
+    evidence.access_policy = {
+        **dict(evidence.access_policy),
+        "redact_fields": ["secret"],
+        "min_role_for_raw": "admin",
+    }
+
+    result = _sensemaking(engine, tenant, "amber harbor code", role="reader")
+
+    assert root not in {hit.id for hit in result.hits}
+    assert all("amber harbor code" not in hit.text for hit in result.hits)
+    assert result.abstained is True
 
 
 def test_global_sensemaking_drops_parent_when_child_summary_is_hidden() -> None:
