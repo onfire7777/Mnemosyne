@@ -2484,6 +2484,21 @@ def _revalidate_source_cids(
         if not allowed:
             hidden = True
             continue
+        access_policy = _item_field(evidence, "access_policy") or {}
+        if not isinstance(access_policy, Mapping):
+            access_policy = {}
+        decision = may_read_item(
+            item_tenant_id=tenant_id,
+            sensitivity=int(_item_field(evidence, "sensitivity") or 0),
+            access_policy=access_policy,
+            context=filt,
+            policy_max_sensitivity=policy.max_sensitivity,
+            status="active",
+            erased=bool(_item_field(evidence, "erased")),
+        )
+        if decision.redacted:
+            hidden = True
+            continue
         if cid not in readable:
             readable.append(cid)
             source_reality_classes[cid] = _classify_raptor_source_reality(evidence)
