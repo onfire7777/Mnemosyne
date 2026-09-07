@@ -2501,23 +2501,25 @@ def _classify_raptor_source_reality(item: Any) -> str:
     if not isinstance(metadata, dict):
         metadata = {}
     explicit = _preserve_source_reality_class(metadata.get("reality_class"))
-    if explicit:
-        return explicit
     source_type = str(_item_field(item, "source_type") or "").lower()
     actor = str(_item_field(item, "actor") or "").lower()
     if any(marker in source_type for marker in ("simulation", "synthetic", "generated", "hypothesis")):
-        return "simulated"
-    if any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
-        return "self_generated"
-    if actor == "assistant":
-        return "self_generated"
-    if actor in {"system", "tool"} and any(
+        base_class = "simulated"
+    elif any(marker in source_type for marker in ("summary", "trace", "analysis", "consolidation")):
+        base_class = "self_generated"
+    elif actor == "assistant":
+        base_class = "self_generated"
+    elif actor in {"system", "tool"} and any(
         marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
     ):
-        return "self_generated"
-    if actor == "external":
-        return "externally_suggested"
-    return "grounded"
+        base_class = "self_generated"
+    elif actor == "external" or int(_item_field(item, "trust_tier") or 0) >= 2:
+        base_class = "externally_suggested"
+    else:
+        base_class = "grounded"
+    if explicit == "grounded" and base_class != "grounded":
+        return "unknown"
+    return explicit or base_class
 
 
 def _aggregate_raptor_source_reality(source_reality_classes: Mapping[str, str]) -> str:
