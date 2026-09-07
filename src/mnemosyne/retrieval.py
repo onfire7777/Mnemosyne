@@ -2277,25 +2277,34 @@ def global_sensemaking_projection(
             denied_cids.add(cid)
             continue
         readable_items.append(item)
-    readable_summary_ids = {
-        str(_item_field(item, "cid") or "") for item in readable_items if _item_field(item, "cid")
-    }
-
-    mapped: list[Hit] = []
-    source_cids: list[str] = []
-    levels: set[int] = set()
-    for item in readable_items:
+    validated_hits: dict[str, Hit] = {}
+    validated_summary_ids: set[str] = set()
+    for item in sorted(
+        readable_items,
+        key=lambda row: (raptor_level_of(_item_field(row, "metadata") or {}) or 0, str(_item_field(row, "cid") or "")),
+    ):
+        cid = str(_item_field(item, "cid") or "")
         hit = _raptor_node_hit(
             item,
             ops=ops,
             filt=filt,
             policy=policy,
             query=query,
-            readable_summary_ids=readable_summary_ids,
+            readable_summary_ids=validated_summary_ids,
             denied_cids=denied_cids,
         )
         if hit is None:
             hidden_source_dropped += 1
+            continue
+        validated_hits[cid] = hit
+        validated_summary_ids.add(cid)
+
+    mapped: list[Hit] = []
+    source_cids: list[str] = []
+    levels: set[int] = set()
+    for item in readable_items:
+        hit = validated_hits.get(str(_item_field(item, "cid") or ""))
+        if hit is None:
             continue
         mapped.append(hit)
         level = int(hit.metadata.get("raptor_level") or 0)

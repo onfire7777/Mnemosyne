@@ -520,6 +520,39 @@ def test_global_sensemaking_drops_parent_when_child_summary_is_hidden() -> None:
     assert tree["root_cid"] not in blob
 
 
+def test_global_sensemaking_propagates_hidden_descendants_to_every_ancestor() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-hidden-descendant"
+    source = _append_theme(engine, tenant, "user-hidden-descendant", "Amber lighthouse theme source.")
+    leaf = _append_raptor_summary(engine, tenant, "Leaf amber theme.", source_cids=[source], level=1)
+    parent = _append_raptor_summary(
+        engine,
+        tenant,
+        "Parent amber theme.",
+        source_cids=[source],
+        level=2,
+        child_summary_cids=[leaf],
+    )
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Root amber theme.",
+        source_cids=[source],
+        level=3,
+        child_summary_cids=[parent],
+    )
+    engine.evidence[engine._evidence_key(tenant, "main", leaf)].sensitivity = 4
+
+    result = _sensemaking(engine, tenant, role="reader")
+    disclosed = _disclosed_ids(result)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert not {leaf, parent, root}.intersection(disclosed)
+    assert leaf not in blob
+    assert parent not in blob
+    assert root not in blob
+
+
 def test_global_sensemaking_preserves_coverage_across_roots() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-roots"
