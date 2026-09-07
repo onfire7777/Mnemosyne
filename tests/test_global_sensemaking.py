@@ -276,6 +276,27 @@ def test_global_sensemaking_is_deterministic_and_bounded() -> None:
     assert report["reduce_count"] <= 2
 
 
+def test_global_sensemaking_refills_node_budget_after_oversized_hit() -> None:
+    engine = LocalMemoryEngine(policy=OperatingPolicy(token_budget=12, top_k=1))
+    tenant = "sensemaking-token-refill"
+    large_source = _append_theme(engine, tenant, "user-token-refill", "zebra quantum orchard " * 40)
+    small_source = _append_theme(engine, tenant, "user-token-refill", "zebra note")
+    large = _append_raptor_summary(
+        engine,
+        tenant,
+        "zebra quantum orchard " * 40,
+        source_cids=[large_source],
+    )
+    small = _append_raptor_summary(engine, tenant, "zebra note", source_cids=[small_source])
+
+    result = _sensemaking(engine, tenant, "zebra quantum orchard")
+    report = _report(result)
+
+    assert [hit.id for hit in result.hits] == [small]
+    assert any(item.get("cid") == large and item.get("reason") == "token_budget" for item in report["exclusions"])
+    assert report["abstention_reason"] != "budget_exhausted"
+
+
 def test_global_sensemaking_excludes_expired_hidden_and_foreign_nodes() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-scope"
@@ -358,6 +379,51 @@ def test_global_sensemaking_denies_unsupported_query_modes() -> None:
         engine.retrieve(SENSEMAKING_QUERY, tenant, filt={"query_mode": "graph_community"})
     with pytest.raises(ValueError, match="unsupported query_mode"):
         engine.retrieve(SENSEMAKING_QUERY, tenant, filt={"query_mode": "local"})
+
+
+def test_global_sensemaking_does_not_cache_past_source_expiry(monkeypatch: Any) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-cache-expiry"
+    source = _append_theme(engine, tenant, "user-cache-expiry", "Amber lighthouse expiry evidence.")
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse expiry evidence.",
+        source_cids=[source],
+    )
+    evidence = engine.evidence[engine._evidence_key(tenant, "main", source)]
+    evidence.access_policy = {
+        **dict(evidence.access_policy),
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=1)).isoformat(),
+    }
+
+    first = run_retrieval_pipeline(
+        engine,
+        query="amber lighthouse expiry evidence",
+        tenant_id=tenant,
+        branch="main",
+        deep=False,
+        filt=dict(SENSEMAKING_FILT),
+        policy=engine.policy,
+        record_access=False,
+    )
+    assert root in {hit.id for hit in first.hits}
+
+    evidence.access_policy["expires_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    second = run_retrieval_pipeline(
+        engine,
+        query="amber lighthouse expiry evidence",
+        tenant_id=tenant,
+        branch="main",
+        deep=False,
+        filt=dict(SENSEMAKING_FILT),
+        policy=engine.policy,
+        record_access=False,
+    )
+
+    assert root not in {hit.id for hit in second.hits}
+    assert second.abstained is True
 
 
 def test_global_sensemaking_routes_through_the_shared_engine_seam() -> None:

@@ -2314,7 +2314,13 @@ def global_sensemaking_projection(
             if source_cid and source_cid not in source_cids:
                 source_cids.append(source_cid)
 
-    reduced, theme_roots, incomplete = _reduce_sensemaking_hits(mapped, node_budget=node_budget, query=query)
+    # Return the complete ranked candidate set so the shared pipeline can pack
+    # tokens first and then fill the node budget from smaller surviving nodes.
+    reduced, theme_roots, incomplete = _reduce_sensemaking_hits(
+        mapped,
+        node_budget=max(node_budget, len(mapped)),
+        query=query,
+    )
     exclusions: list[dict[str, Any]] = []
     if policy_denied:
         exclusions.append({"reason": "policy_denied", "count": policy_denied})
