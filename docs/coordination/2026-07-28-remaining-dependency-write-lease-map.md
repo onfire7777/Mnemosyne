@@ -626,7 +626,7 @@ successful post-main CI. The cumulative diff retained binary hash
 exactly three unique Windows jobs and the five PR #112 filesystem nodes landed.
 The Windows stack is delivered and no implementation writer remains open.
 
-This map is recomputed from the new baseline `main@f688c747`, which the
+This map is recomputed from the new baseline `main@b6a8e392`, which the
 controller branch has fully merged into it — no commit on `main` is absent from
 the controller branch. **The GoalEx lifecycle backlog is delivered except for
 its own merge receipts.** PR #91
