@@ -137,6 +137,7 @@ from mnemosyne.retrieval import (
     LocalSimilarityReranker,
     RetrievalAdapters,
     embed_query,
+    is_raptor_summary_item,
     validate_adapter_hit_scope,
 )
 from mnemosyne.security import TrustTier
@@ -1692,6 +1693,25 @@ class SqliteEngine:
                     capability_tags=ev.capability_tags,
                 )
             return True
+
+    def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
+        """Return RAPTOR rows without materializing the tenant export."""
+
+        conn = self._connect(tenant_id)
+        with self._lock:
+            rows = [
+                _evidence_from_row(row)
+                for row in conn.execute(
+                    """
+                    SELECT * FROM evidence
+                    WHERE tenant_id = ? AND branch = ? AND erased = 0
+                      AND source_type = 'consolidation-summary'
+                    ORDER BY cid
+                    """,
+                    (tenant_id, branch),
+                )
+            ]
+        return [row for row in rows if is_raptor_summary_item(row)]
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         conn = self._connect(tenant_id)
