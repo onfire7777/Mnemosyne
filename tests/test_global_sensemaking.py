@@ -160,6 +160,46 @@ def test_global_sensemaking_does_not_relabel_ungrounded_sources_as_grounded() ->
         assert result.explain["reality_monitoring"]["ungrounded_only"] is True
 
 
+@pytest.mark.parametrize(
+    ("actor", "source_type", "trust_tier"),
+    [
+        ("assistant", "chat", 0),
+        ("user", "generated-analysis", 0),
+        ("external", "chat", 0),
+        ("user", "chat", 2),
+    ],
+)
+def test_global_sensemaking_rejects_conflicting_grounded_source_labels(
+    actor: str,
+    source_type: str,
+    trust_tier: int,
+) -> None:
+    engine = LocalMemoryEngine()
+    tenant = f"sensemaking-conflicting-grounded-{actor}-{source_type}-{trust_tier}"
+    text = "Amber lighthouse dusk board posts harbor delays every evening."
+    source = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="user-conflicting-grounded",
+            actor=actor,
+            source_type=source_type,
+            content=text,
+            trust_tier=trust_tier,
+            access_policy={"tenant": tenant},
+            metadata={"reality_class": "grounded"},
+        )
+    )
+    root = _append_raptor_summary(engine, tenant, text, source_cids=[source])
+
+    result = _sensemaking(engine, tenant, "What amber lighthouse dusk board posts harbor delays?")
+    hit = next(hit for hit in result.hits if hit.id == root)
+
+    assert hit.metadata.get("reality_class") == "unknown"
+    assert hit.metadata.get("source_reality_classes") == {source: "unknown"}
+    assert result.abstained is True
+    assert _report(result)["abstention_reason"] == "ungrounded_reality_only"
+
+
 def test_global_sensemaking_returns_usable_synthesis_when_support_is_sufficient() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-usable"
