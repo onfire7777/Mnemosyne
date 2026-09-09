@@ -57,12 +57,14 @@ def _run_case(
         if row["name"] == "extractor" and row["status"] == "complete"
     )
     actual_core_mutation_eligible = extracted_candidates > 0
+    promoted_candidates = sum(row.get("promoted") is True for row in result.candidate_results)
     return {
         "case_id": case_id,
         "extracted_candidates": extracted_candidates,
+        "promoted_candidates": promoted_candidates,
         "expected_core_mutation_eligible": expected_core_mutation_eligible,
         "actual_core_mutation_eligible": actual_core_mutation_eligible,
-        "passed": actual_core_mutation_eligible == expected_core_mutation_eligible,
+        "passed": actual_core_mutation_eligible == expected_core_mutation_eligible and promoted_candidates == 0,
         "prediction_error": dict(job.payload["prediction_error"]),
         "write_priority": dict(job.payload["write_priority"]),
         "skipped": sorted(skipped),
@@ -129,6 +131,7 @@ def run_write_gating_eval() -> dict[str, Any]:
         "total_cases": len(rows),
         "passed_cases": passed_cases,
         "passed": passed_cases == len(rows),
+        "promotion_rails_passed": all(row["promoted_candidates"] == 0 for row in rows),
         "confusion_counts": confusion_counts,
         "decision_boundary": "candidate_extraction",
         "precision": {
