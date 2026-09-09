@@ -1373,19 +1373,15 @@ class ConsolidationWorker:
         threshold = max(0.0, min(1.0, float(getattr(self.policy, "prediction_error_threshold", 0.35))))
         scores: list[float] = []
         payload_error = payload.get("prediction_error")
-        if isinstance(payload_error, dict):
-            try:
-                scores.append(float(payload_error.get("score")))
-            except (TypeError, ValueError):
-                pass
+        if "prediction_error" in payload:
+            value = payload_error.get("score") if isinstance(payload_error, dict) else None
+            scores.append(value if type(value) in (int, float) and 0.0 <= value <= 1.0 else 0.0)
         for item in evidence:
             metadata = item.metadata if isinstance(item.metadata, dict) else {}
             consolidation = metadata.get("consolidation")
-            if isinstance(consolidation, dict):
-                try:
-                    scores.append(float(consolidation.get("prediction_error")))
-                except (TypeError, ValueError):
-                    pass
+            if isinstance(consolidation, dict) and "prediction_error" in consolidation:
+                value = consolidation["prediction_error"]
+                scores.append(value if type(value) in (int, float) and 0.0 <= value <= 1.0 else 0.0)
         score = max((max(0.0, min(1.0, value)) for value in scores if value == value), default=1.0)
         return {
             "score": round(score, 6),
