@@ -7,6 +7,8 @@ by a genuine build/verify/probe result; nothing is fabricated.
 
 from __future__ import annotations
 
+import os
+
 from mnemosyne.audit_chain import LOCAL_HMAC_PROVIDER, VAULT_HMAC_PROVIDER, local_hmac_provider
 from mnemosyne.audit_retention import (
     audit_evidence_complete,
@@ -181,7 +183,11 @@ def test_ops_report_cli_emits_audit_section(tmp_path) -> None:
             "--audit-worm-command", f"{sys.executable} {worm_script}",
         ],
         check=False, text=True, capture_output=True,
-        env={"PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"), "PATH": __import__("os").environ.get("PATH", "")},
+        env={
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+            "PATH": os.environ.get("PATH", ""),
+            **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if os.name == "nt" and "SYSTEMROOT" in os.environ else {}),
+        },
     )
     assert result.returncode == 0, result.stderr
     payload = _json.loads(result.stdout)
