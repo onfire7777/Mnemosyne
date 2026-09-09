@@ -70,6 +70,10 @@ MFA_RULE = {
 }
 
 
+def native_command(argv: tuple[str, ...]) -> str:
+    return subprocess.list2cmdline(argv) if sys.platform == "win32" else shlex.join(argv)
+
+
 def make_session_token(
     *,
     tenant: str = TENANT,
@@ -399,7 +403,7 @@ def fake_retrieval_command(tmp_path: Path, *, name: str = "retrieval-provider") 
         encoding="utf-8",
     )
     script.chmod(0o755)
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state))), state
+    return native_command((sys.executable, str(script), str(state))), state
 
 
 def start_streamable_http_server(tmp_path: Path) -> tuple[object, threading.Thread, str]:
@@ -986,7 +990,7 @@ def test_cli_session_secret_command_verifies_existing_session(tmp_path: Path) ->
 def test_cli_session_secret_command_fails_closed_on_bad_response(tmp_path: Path) -> None:
     script = tmp_path / "bad-session-secret.py"
     script.write_text("print('not json')\n", encoding="utf-8")
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
     jwks, idp_token = make_oidc_token(oidc_payload())
     jwks_file = tmp_path / "jwks.json"
     jwks_file.write_text(json.dumps(jwks), encoding="utf-8")
@@ -1049,7 +1053,7 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    command = native_command((sys.executable, str(script), str(state)))
     return command, state
 
 
@@ -1074,7 +1078,7 @@ def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, 
         ),
         encoding="utf-8",
     )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(response_file)))
+    return native_command((sys.executable, str(script), str(response_file)))
 
 
 def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
@@ -1103,7 +1107,7 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    command = native_command((sys.executable, str(script), str(state)))
     return command, state
 
 
@@ -1120,7 +1124,7 @@ def fake_broken_parametric_command(tmp_path: Path, output: str) -> str:
         ),
         encoding="utf-8",
     )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(tmp_path / "broken-state.json")))
+    return native_command((sys.executable, str(script), str(tmp_path / "broken-state.json")))
 
 
 def test_cli_backend_selection_requires_postgres_dsn(tmp_path: Path, monkeypatch) -> None:
@@ -1790,7 +1794,7 @@ def test_cli_provider_check_fails_closed_on_bad_command_retrieval_adapter(tmp_pa
         encoding="utf-8",
     )
     script.chmod(0o755)
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         tmp_path / "mnemosyne.json",
@@ -3074,23 +3078,23 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                     },
                     "candidate_extractor": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(candidate_extractor))),
+                        "command": native_command((sys.executable, str(candidate_extractor))),
                     },
                     "summarizer": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(summarizer))),
+                        "command": native_command((sys.executable, str(summarizer))),
                     },
                     "entity_resolver": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(resolver))),
+                        "command": native_command((sys.executable, str(resolver))),
                     },
                     "lesson_distiller": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(lesson_distiller))),
+                        "command": native_command((sys.executable, str(lesson_distiller))),
                     },
                     "skill_inducer": {
                         "provider": "command",
-                        "command": " ".join(shlex.quote(item) for item in (sys.executable, str(skill_inducer))),
+                        "command": native_command((sys.executable, str(skill_inducer))),
                     },
                 },
             }
@@ -5306,7 +5310,7 @@ def test_cli_ingest_can_run_one_consolidation_worker_cycle(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    resolver_command = " ".join(shlex.quote(item) for item in (sys.executable, str(resolver_script), str(resolver_state)))
+    resolver_command = native_command((sys.executable, str(resolver_script), str(resolver_state)))
     run_cli(
         store,
         "gate-case-add",
@@ -5551,8 +5555,8 @@ def test_cli_consolidation_uses_command_extractor_and_summarizer(tmp_path: Path)
         ),
         encoding="utf-8",
     )
-    extractor_command = " ".join(shlex.quote(item) for item in (sys.executable, str(extractor)))
-    summarizer_command = " ".join(shlex.quote(item) for item in (sys.executable, str(summarizer)))
+    extractor_command = native_command((sys.executable, str(extractor)))
+    summarizer_command = native_command((sys.executable, str(summarizer)))
     run_cli(
         store,
         "gate-case-add",
@@ -14295,7 +14299,7 @@ def test_cli_provider_check_fails_closed_on_bad_command_key_provider(tmp_path: P
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
     result = run_raw_cli(
         store,
         "--object-store",
@@ -14357,7 +14361,7 @@ def test_cli_provider_check_fails_closed_when_command_key_provider_retains_shred
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    command = native_command((sys.executable, str(script), str(state)))
     result = run_raw_cli(
         store,
         "--object-store",
@@ -14633,7 +14637,7 @@ def test_cli_provider_check_fails_closed_on_bad_entity_resolver(tmp_path: Path) 
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14664,7 +14668,7 @@ def test_cli_provider_check_fails_closed_on_bad_candidate_extractor(tmp_path: Pa
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14695,7 +14699,7 @@ def test_cli_provider_check_fails_closed_on_bad_summarizer(tmp_path: Path) -> No
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14726,7 +14730,7 @@ def test_cli_provider_check_fails_closed_on_bad_lesson_distiller(tmp_path: Path)
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
@@ -14757,7 +14761,7 @@ def test_cli_provider_check_fails_closed_on_bad_skill_inducer(tmp_path: Path) ->
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script)))
+    command = native_command((sys.executable, str(script)))
 
     result = run_raw_cli(
         store,
