@@ -638,7 +638,7 @@ def test_command_media_embedding_provider_validates_json_contract(tmp_path: Path
     )
     embedder.chmod(0o755)
 
-    vector = CommandMediaEmbeddingProvider(str(embedder), dims=3).embed_media(
+    vector = CommandMediaEmbeddingProvider([sys.executable, str(embedder)], dims=3).embed_media(
         b"media-bytes",
         media_type="image/png",
         modality="image",
