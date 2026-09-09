@@ -6,6 +6,8 @@ import json
 import subprocess
 import sys
 
+import pytest
+
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -23,7 +25,8 @@ class _UnavailablePredictionEngine(LocalMemoryEngine):
         raise RuntimeError("prediction lookup unavailable")
 
 
-def test_unmeasured_prediction_error_cannot_raise_consolidation_authority() -> None:
+@pytest.mark.parametrize("metadata", [{}, {"consolidation": {"prediction_error": 1.0, "prediction_error_gate": "promote_to_consolidation"}}])
+def test_unmeasured_prediction_error_cannot_raise_consolidation_authority(metadata: dict) -> None:
     """A failed prediction lookup must remain metadata-only through consolidation."""
 
     engine = _UnavailablePredictionEngine()
@@ -37,6 +40,7 @@ def test_unmeasured_prediction_error_cannot_raise_consolidation_authority() -> N
             actor="user",
             source_type="chat",
             content="A prediction lookup failure must not make this write surprising.",
+            metadata=metadata,
         )
     )
     job = queue.lease("consolidate_evidence")
