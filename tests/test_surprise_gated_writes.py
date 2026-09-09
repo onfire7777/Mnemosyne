@@ -18,6 +18,29 @@ TENANT = "surprise-gated-writes"
 USER = "surprise-gated-user"
 
 
+@pytest.mark.parametrize("support", [float("nan"), float("inf"), -float("inf"), -0.1, 1.1, True, "invalid"])
+def test_invalid_prediction_support_stays_metadata_only(monkeypatch, support) -> None:
+    engine = LocalMemoryEngine()
+    original_retrieve = engine.retrieve
+
+    def invalid_support(*args, **kwargs):
+        result = original_retrieve(*args, **kwargs)
+        result.explain["confidence"] = {"query_support": {"score": support}}
+        return result
+
+    monkeypatch.setattr(engine, "retrieve", invalid_support)
+    queue = InProcessQueue()
+    IngestionPipeline(engine, queue=queue).ingest(IngestRequest(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type="chat",
+        content="Malformed support cannot authorize extraction.",
+    ))
+    job = queue.lease("consolidate_evidence")
+    assert job is not None
+    assert job.payload["prediction_error"]["score"] == 0.0
+    result = ConsolidationWorker(engine, [], consolidation_min_steps=0).run_queue_payload(job.payload)
+    assert "low_prediction_error_metadata_only" in result.skipped
+
+
 class _UnavailablePredictionEngine(LocalMemoryEngine):
     """Exercise the real pipeline when its prediction lookup is unavailable."""
 
