@@ -132,4 +132,6 @@ def test_write_gating_regression_reports_reproducible_confusion_counts() -> None
     assert report["precision"] == {"numerator": 1, "denominator": 1, "value": 1.0}
     assert report["recall"] == {"numerator": 1, "denominator": 1, "value": 1.0}
     assert report["decision_boundary"] == "candidate_extraction"
+    assert [row["promoted_candidates"] for row in report["rows"]] == [0, 0, 0]
+    assert report["promotion_rails_passed"] is True
     assert report["confusion_counts"] == {"false_negative": 0, "false_positive": 0, "true_negative": 2, "true_positive": 1}
