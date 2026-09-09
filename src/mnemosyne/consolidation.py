@@ -1523,6 +1523,10 @@ class ConsolidationWorker:
         if name == "surprise":
             fallback = consolidation.get("prediction_error", fallback)
         raw = cid_scores.get(name, consolidation.get(name, fallback))
+        if name == "surprise" and (
+            type(raw) not in (int, float) or not 0.0 <= raw <= 1.0
+        ):
+            return 0.0
         try:
             value = float(raw)
         except (TypeError, ValueError):

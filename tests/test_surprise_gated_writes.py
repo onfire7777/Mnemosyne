@@ -20,6 +20,24 @@ USER = "surprise-gated-user"
 
 
 @pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
+def test_invalid_surprise_cannot_increase_replay_priority(signal) -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type="chat",
+        content="The preferred database is Postgres.", trust_tier=0,
+        access_policy={"tenant": TENANT},
+    ))
+    result = ConsolidationWorker(engine, [], consolidation_min_steps=0).run_queue_payload({
+        "tenant_id": TENANT, "source_evidence_cids": [cid],
+        "prediction_error": {"score": 0.0},
+        "replay_scores": {cid: {"surprise": signal}},
+    })
+    replay = next(row for row in result.pass_results if row["name"] == "replayer")
+    assert replay["details"]["scores"][0]["surprise"] == 0.0
+    assert replay["details"]["scores"][0]["score"] == 0.0
+
+
+@pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
 def test_worker_rejects_explicit_invalid_prediction_signal(signal) -> None:
     engine = LocalMemoryEngine()
     cid = engine.append_evidence(Evidence(
