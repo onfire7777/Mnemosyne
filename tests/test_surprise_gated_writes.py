@@ -20,6 +20,19 @@ USER = "surprise-gated-user"
 
 
 @pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
+def test_invalid_ingestion_surprise_does_not_boost_queue_priority(signal) -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    IngestionPipeline(engine, queue=queue).ingest(IngestRequest(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type="chat",
+        content="The preferred database is Postgres.", metadata={"surprise": signal},
+    ))
+    job = queue.lease("consolidate_evidence")
+    assert job is not None
+    assert job.payload["write_priority"]["components"]["surprise"] == 0.0
+
+
+@pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
 def test_invalid_surprise_cannot_increase_replay_priority(signal) -> None:
     engine = LocalMemoryEngine()
     cid = engine.append_evidence(Evidence(
