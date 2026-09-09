@@ -129,7 +129,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
         },
     }
     artifacts = {
-        str(path.relative_to(output)): path.read_bytes()
+        path.relative_to(output).as_posix(): path.read_bytes()
         for path in output.rglob("*")
         if path.is_file()
     }
@@ -139,7 +139,7 @@ def test_graph_baseline_cli_retains_artifacts_and_refuses_overwrite(tmp_path: Pa
     assert second.returncode != 0
     assert "baseline output must not already exist" in second.stderr
     assert {
-        str(path.relative_to(output)): path.read_bytes()
+        path.relative_to(output).as_posix(): path.read_bytes()
         for path in output.rglob("*")
         if path.is_file()
     } == artifacts
