@@ -656,7 +656,10 @@ class ConsolidationWorker:
         candidates: list[dict[str, Any]] = []
         no_write_data = self._contains_no_write_data(evidence, payload)
 
-        if not run_core_mutation:
+        if missing:
+            skipped.append("source_evidence_unavailable")
+            pass_results.append(PassResult("extractor", "skipped", {"reason": "source_evidence_unavailable"}))
+        elif not run_core_mutation:
             skipped.append("core_mutation_not_in_cadence_tier")
         elif prediction_gate["gate"] == "low_prediction_error_metadata_only":
             skipped.append("low_prediction_error_metadata_only")
