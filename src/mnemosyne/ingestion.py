@@ -509,7 +509,12 @@ class IngestionPipeline:
         metadata = request.metadata if isinstance(request.metadata, dict) else {}
         importance = _bounded_signal(metadata.get("importance"), default=0.65 if request.correction else 0.45)
         novelty = 0.0 if already_present else _bounded_signal(metadata.get("novelty"), default=0.65)
-        surprise = _bounded_signal(metadata.get("surprise"), default=float(prediction_error.get("score", 0.0)))
+        raw_surprise = metadata.get("surprise", prediction_error.get("score", 0.0))
+        surprise = (
+            float(raw_surprise)
+            if type(raw_surprise) in (int, float) and 0.0 <= raw_surprise <= 1.0
+            else 0.0
+        )
         raw_reward = _bounded_signal(metadata.get("reward"), default=0.5 if request.actor == "user" else 0.25)
         reward = raw_reward if trust_tier <= int(TrustTier.AUTHENTICATED) else min(raw_reward, 0.25)
         if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
