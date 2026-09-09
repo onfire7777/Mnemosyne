@@ -10,6 +10,7 @@ import pytest
 
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.models import Evidence
@@ -17,6 +18,45 @@ from mnemosyne.models import Evidence
 
 TENANT = "surprise-gated-writes"
 USER = "surprise-gated-user"
+
+
+@pytest.mark.parametrize("tag", [None, "data-only", "no-write-authority", "sanitize-as-data", "quarantined"])
+@pytest.mark.parametrize("location", ["payload", "evidence"])
+def test_high_surprise_cannot_override_batch_capability_restrictions(tag, location) -> None:
+    """Removing either source or payload capability checks must permit a forbidden write."""
+    engine = LocalMemoryEngine()
+    cids = []
+    for index, content in enumerate([
+        "The preferred database is Postgres.",
+        "Independent confirmation: preferred database remains Postgres.",
+    ]):
+        cids.append(engine.append_evidence(Evidence(
+            tenant_id=TENANT, user_id=USER, actor="user",
+            source_type="chat" if index else "episode", content=content,
+            trust_tier=0, access_policy={"tenant": TENANT},
+            capability_tags=[tag] if tag and location == "evidence" and index == 1 else [],
+        )))
+    payload = {
+        "tenant_id": TENANT, "source_evidence_cids": cids,
+        "prediction_error": {"score": 1.0}, "surprise": 1.0,
+        "signature": "preferred database", "query": "preferred database",
+        "candidate_subject": "preferred database", "candidate_predicate": "is",
+        "candidate_object": "Postgres",
+        "capability_tags": [tag] if tag and location == "payload" else [],
+    }
+    cases = [RegressionCase(
+        id="preferred-database", signature="preferred database", query="preferred database",
+        expected_substring="Postgres", protected=True,
+    )]
+    result = ConsolidationWorker(engine, cases, consolidation_min_steps=0).run_queue_payload(payload)
+    if tag is None:
+        assert result.candidate_results
+        assert all(row["promoted"] for row in result.candidate_results), result.candidate_results
+    else:
+        assert "source_marked_data_only" in result.skipped
+        assert result.candidate_results == []
+    for cid in cids:
+        assert engine.get_evidence(TENANT, cid) is not None
 
 
 def test_erased_source_cannot_reenter_extraction_from_queued_candidate() -> None:
