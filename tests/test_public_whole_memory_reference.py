@@ -3464,7 +3464,7 @@ def test_m02_registry_revision_matches_fixture_bytes() -> None:
     ).stdout.strip()
     assert suite["revision"] == revision
     shown = subprocess.run(
-        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT).as_posix()}"],
         capture_output=True,
         check=True,
         cwd=REPO_ROOT,
@@ -3832,7 +3832,7 @@ def test_m04_registry_revision_matches_fixture_bytes() -> None:
     ).stdout.strip()
     assert suite["revision"] == revision
     shown = subprocess.run(
-        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT).as_posix()}"],
         capture_output=True,
         check=True,
         cwd=REPO_ROOT,
@@ -4163,7 +4163,7 @@ def test_m05_registry_revision_matches_fixture_bytes() -> None:
     ).stdout.strip()
     assert suite["revision"] == revision
     shown = subprocess.run(
-        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT)}"],
+        ["git", "show", f"{revision}:{fixture.relative_to(REPO_ROOT).as_posix()}"],
         capture_output=True,
         check=True,
         cwd=REPO_ROOT,
