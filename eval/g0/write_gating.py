@@ -1,8 +1,8 @@
 """G0 deterministic regression cell for surprise-gated write authority.
 
-This synthetic development helper checks only whether the existing ingestion and
-consolidation rails classify a write as eligible for core mutation.  It is not
-a benchmark, promotion receipt, or evidence of model quality.
+This synthetic development helper reports extraction eligibility and a separate
+promotion-safety matrix through the real consolidation gates. It is not a
+benchmark, production promotion receipt, or evidence of model quality.
 """
 
 from __future__ import annotations
@@ -13,9 +13,10 @@ from typing import Any
 
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
+from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.queue import InProcessQueue
-from mnemosyne.models import Evidence
+from mnemosyne.models import Assertion, Evidence
 
 
 class _UnavailablePredictionEngine(LocalMemoryEngine):
@@ -84,6 +85,83 @@ def _run_case(
     }
 
 
+def _promotion_boundary_eval() -> dict[str, Any]:
+    """Exercise real promotion decisions; labels remain outside worker inputs."""
+    rows = []
+    tenant = "g0-promotion-gating"
+    for scenario in ["valid", "corroboration", "capability", "protected_check", "mutation_budget", "erasure"]:
+        engine = LocalMemoryEngine()
+        cids = [engine.append_evidence(Evidence(
+            tenant_id=tenant, user_id="user", actor="user", source_type=source,
+            content=content, trust_tier=0, access_policy={"tenant": tenant},
+        )) for source, content in [
+            ("episode", "The preferred database is Postgres."),
+            ("chat", "Independent confirmation: preferred database remains Postgres."),
+        ][:1 if scenario == "corroboration" else 2]]
+        if scenario == "mutation_budget":
+            engine.upsert_assertion(Assertion(
+                tenant_id=tenant, subject="preferred database", predicate="is",
+                object="old-value", trust_tier=2, status="active",
+                access_policy={"tenant": tenant},
+            ))
+        if scenario == "erasure":
+            engine.forget(tenant, cids[0], branch="main")
+        cases = [RegressionCase(
+            id="protected-database", signature="preferred database", query="preferred database",
+            expected_substring="SQLite" if scenario == "protected_check" else "Postgres", protected=True,
+        )]
+        result = ConsolidationWorker(
+            engine, cases, consolidation_min_steps=0,
+            max_supersession_rate=0.0 if scenario == "mutation_budget" else 0.05,
+        ).run_queue_payload({
+            "tenant_id": tenant, "source_evidence_cids": cids, "trust_tier": 0,
+            "prediction_error": {"score": 1.0}, "surprise": 1.0,
+            "signature": "preferred database", "query": "preferred database",
+            "candidate_subject": "preferred database", "candidate_predicate": "is",
+            "candidate_object": "Postgres",
+            "capability_tags": ["no-write-authority"] if scenario == "capability" else [],
+            "passes": ["extractor", "resolver", "belief_reviser", "promotion_gate"],
+        })
+        actual = any(row["promoted"] for row in result.candidate_results)
+        failures = [failure for row in result.candidate_results for failure in row["failed_cases"]]
+        failure_class = None
+        if "source_evidence_unavailable" in result.skipped:
+            failure_class = "erasure"
+        elif "source_marked_data_only" in result.skipped:
+            failure_class = "capability"
+        elif any("fact_external_corroboration" in failure for failure in failures):
+            failure_class = "corroboration"
+        elif "protected-database" in failures:
+            failure_class = "protected_check"
+        elif any("max_supersession_rate" in failure for failure in failures):
+            failure_class = "mutation_budget"
+        expected = scenario == "valid"
+        source_preserved = all(
+            (engine.get_evidence(tenant, cid) is None) == (scenario == "erasure" and index == 0)
+            for index, cid in enumerate(cids)
+        )
+        rows.append({
+            "case_id": scenario, "expected_promoted": expected, "actual_promoted": actual,
+            "failure_class": failure_class, "source_state_preserved": source_preserved,
+            "passed": actual == expected and failure_class == (None if expected else scenario) and source_preserved,
+        })
+    counts = {
+        "true_positive": sum(row["expected_promoted"] and row["actual_promoted"] for row in rows),
+        "true_negative": sum(not row["expected_promoted"] and not row["actual_promoted"] for row in rows),
+        "false_positive": sum(not row["expected_promoted"] and row["actual_promoted"] for row in rows),
+        "false_negative": sum(row["expected_promoted"] and not row["actual_promoted"] for row in rows),
+    }
+    tp = counts["true_positive"]
+    def fraction(denominator: int) -> dict[str, Any]:
+        return {"numerator": tp, "denominator": denominator, "value": tp / denominator if denominator else None}
+    return {
+        "decision_boundary": "candidate_promotion", "total_cases": len(rows),
+        "passed_cases": sum(row["passed"] for row in rows), "passed": all(row["passed"] for row in rows),
+        "confusion_counts": counts, "precision": fraction(tp + counts["false_positive"]),
+        "recall": fraction(tp + counts["false_negative"]), "rows": rows,
+    }
+
+
 def run_write_gating_eval() -> dict[str, Any]:
     """Run fixed synthetic cases and return confusion counts without labels in ingestion."""
 
@@ -133,6 +211,7 @@ def run_write_gating_eval() -> dict[str, Any]:
             for row in rows
         ),
     }
+    promotion_boundary = _promotion_boundary_eval()
     passed_cases = sum(bool(row["passed"]) for row in rows)
     true_positive = confusion_counts["true_positive"]
     precision_denominator = true_positive + confusion_counts["false_positive"]
@@ -146,7 +225,8 @@ def run_write_gating_eval() -> dict[str, Any]:
         ),
         "total_cases": len(rows),
         "passed_cases": passed_cases,
-        "passed": passed_cases == len(rows),
+        "passed": passed_cases == len(rows) and promotion_boundary["passed"],
+        "promotion_boundary": promotion_boundary,
         "promotion_rails_passed": all(row["promoted_candidates"] == 0 for row in rows),
         "confusion_counts": confusion_counts,
         "decision_boundary": "candidate_extraction",

@@ -309,6 +309,23 @@ def test_write_gating_regression_reports_reproducible_confusion_counts() -> None
     assert completed.returncode == 0, completed.stderr
     report = json.loads(completed.stdout)
     assert report["schema_version"] == "g0.write-gating.v1"
+    promotion = report["promotion_boundary"]
+    assert promotion["total_cases"] == 6
+    assert promotion["passed_cases"] == 6
+    assert [row["actual_promoted"] for row in promotion["rows"]] == [True, False, False, False, False, False]
+    assert promotion["confusion_counts"] == {
+        "true_positive": 1, "true_negative": 5, "false_positive": 0, "false_negative": 0,
+    }
+    assert promotion["precision"] == {"numerator": 1, "denominator": 1, "value": 1.0}
+    assert promotion["recall"] == {"numerator": 1, "denominator": 1, "value": 1.0}
+    assert [row["failure_class"] for row in promotion["rows"]] == [
+        None, "corroboration", "capability", "protected_check", "mutation_budget", "erasure",
+    ]
+    repeated = subprocess.run(
+        [sys.executable, "-m", "eval.g0.write_gating", "--print-json"],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(repeated.stdout)["promotion_boundary"] == promotion
     assert report["total_cases"] == 4
     assert report["passed_cases"] == 4
     assert [row["extracted_candidates"] for row in report["rows"]] == [1, 0, 0, 0]
