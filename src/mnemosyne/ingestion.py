@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -471,6 +472,17 @@ class IngestionPipeline:
                 "hit_count": 0,
             }
         support = result.explain.get("confidence", {}).get("query_support", {}).get("score")
+        if support is not None and (
+            type(support) not in (int, float)
+            or not math.isfinite(support)
+            or not 0.0 <= support <= 1.0
+        ):
+            return {
+                "score": 0.0,
+                "support": 0.0,
+                "gate": "unmeasured_fail_closed_metadata_only",
+                "hit_count": len(result.hits),
+            }
         try:
             support_score = float(support)
         except (TypeError, ValueError):
