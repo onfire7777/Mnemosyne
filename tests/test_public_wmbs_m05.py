@@ -631,7 +631,7 @@ def test_trace_enforces_frozen_evidence_handle_bounds(handles) -> None:
         (False, None, False),
         (False, "", False),
         (False, "   ", False),
-        (False, "x" * 65537, False),
+        pytest.param(False, "x" * 65537, False, id="oversized-answer"),
         (True, "contradictory answer", False),
     ],
 )
