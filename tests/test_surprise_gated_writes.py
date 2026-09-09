@@ -18,14 +18,19 @@ TENANT = "surprise-gated-writes"
 USER = "surprise-gated-user"
 
 
-@pytest.mark.parametrize("support", [float("nan"), float("inf"), -float("inf"), -0.1, 1.1, True, "invalid"])
-def test_invalid_prediction_support_stays_metadata_only(monkeypatch, support) -> None:
+@pytest.mark.parametrize("support", [None, float("nan"), float("inf"), -float("inf"), -0.1, 1.1, True, "invalid"])
+@pytest.mark.parametrize("shape", ["score", "confidence", "query_support"])
+def test_invalid_prediction_support_stays_metadata_only(monkeypatch, support, shape) -> None:
     engine = LocalMemoryEngine()
     original_retrieve = engine.retrieve
 
     def invalid_support(*args, **kwargs):
         result = original_retrieve(*args, **kwargs)
         result.explain["confidence"] = {"query_support": {"score": support}}
+        if shape == "confidence":
+            result.explain["confidence"] = support
+        elif shape == "query_support":
+            result.explain["confidence"]["query_support"] = support
         return result
 
     monkeypatch.setattr(engine, "retrieve", invalid_support)

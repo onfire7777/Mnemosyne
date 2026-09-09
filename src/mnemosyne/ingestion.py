@@ -471,8 +471,11 @@ class IngestionPipeline:
                 "gate": "unmeasured_fail_closed_metadata_only",
                 "hit_count": 0,
             }
-        support = result.explain.get("confidence", {}).get("query_support", {}).get("score")
-        if support is not None and (
+        explanation = result.explain if isinstance(result.explain, dict) else {}
+        confidence = explanation.get("confidence")
+        query_support = confidence.get("query_support") if isinstance(confidence, dict) else None
+        support = query_support.get("score") if isinstance(query_support, dict) else None
+        if (
             type(support) not in (int, float)
             or not math.isfinite(support)
             or not 0.0 <= support <= 1.0
@@ -483,10 +486,7 @@ class IngestionPipeline:
                 "gate": "unmeasured_fail_closed_metadata_only",
                 "hit_count": len(result.hits),
             }
-        try:
-            support_score = float(support)
-        except (TypeError, ValueError):
-            support_score = 0.0 if not result.hits else 0.5
+        support_score = float(support)
         score = max(0.0, min(1.0, 1.0 - support_score))
         threshold = max(0.0, min(1.0, float(getattr(self.engine.policy, "prediction_error_threshold", 0.35))))
         return {
