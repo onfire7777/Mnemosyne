@@ -9447,6 +9447,9 @@ def test_cli_production_evidence_verify_rejects_missing_referenced_executable_to
     preflight_path = bundle_dir / "preflight.json"
     preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
     tool = Path(preflight["executable_tool_references"][0]["snapshot_path"])
+    # This synthetic tampering case must remove the read-only snapshot on Windows too.
+    if sys.platform == "win32":
+        tool.chmod(stat.S_IREAD | stat.S_IWRITE)
     tool.unlink()
     preflight_path.write_text(json.dumps(preflight, indent=2, sort_keys=True), encoding="utf-8")
     rewrite_production_redaction_scan(bundle_dir)
