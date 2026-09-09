@@ -464,7 +464,12 @@ class IngestionPipeline:
         try:
             result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch)
         except Exception:
-            return {"score": 1.0, "support": 0.0, "gate": "unmeasured_fail_open_to_review", "hit_count": 0}
+            return {
+                "score": 0.0,
+                "support": 0.0,
+                "gate": "unmeasured_fail_closed_metadata_only",
+                "hit_count": 0,
+            }
         support = result.explain.get("confidence", {}).get("query_support", {}).get("score")
         try:
             support_score = float(support)
