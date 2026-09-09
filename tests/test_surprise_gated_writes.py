@@ -174,12 +174,13 @@ def test_write_gating_regression_reports_reproducible_confusion_counts() -> None
     assert completed.returncode == 0, completed.stderr
     report = json.loads(completed.stdout)
     assert report["schema_version"] == "g0.write-gating.v1"
-    assert report["total_cases"] == 3
-    assert report["passed_cases"] == 3
-    assert [row["extracted_candidates"] for row in report["rows"]] == [1, 0, 0]
+    assert report["total_cases"] == 4
+    assert report["passed_cases"] == 4
+    assert [row["extracted_candidates"] for row in report["rows"]] == [1, 0, 0, 0]
     assert report["precision"] == {"numerator": 1, "denominator": 1, "value": 1.0}
     assert report["recall"] == {"numerator": 1, "denominator": 1, "value": 1.0}
     assert report["decision_boundary"] == "candidate_extraction"
-    assert [row["promoted_candidates"] for row in report["rows"]] == [0, 0, 0]
+    assert [row["promoted_candidates"] for row in report["rows"]] == [0, 0, 0, 0]
+    assert all(row["source_preserved"] for row in report["rows"])
     assert report["promotion_rails_passed"] is True
-    assert report["confusion_counts"] == {"false_negative": 0, "false_positive": 0, "true_negative": 2, "true_positive": 1}
+    assert report["confusion_counts"] == {"false_negative": 0, "false_positive": 0, "true_negative": 3, "true_positive": 1}

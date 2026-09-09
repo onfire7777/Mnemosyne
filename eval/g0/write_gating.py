@@ -15,6 +15,7 @@ from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.queue import InProcessQueue
+from mnemosyne.models import Evidence
 
 
 class _UnavailablePredictionEngine(LocalMemoryEngine):
@@ -31,11 +32,19 @@ def _run_case(
     source_type: str,
     metadata: dict[str, object],
     prediction_available: bool = True,
+    prior_support: bool = False,
     expected_core_mutation_eligible: bool,
 ) -> dict[str, Any]:
     engine = LocalMemoryEngine() if prediction_available else _UnavailablePredictionEngine()
     queue = InProcessQueue()
     pipeline = IngestionPipeline(engine, queue=queue)
+    if prior_support:
+        engine.append_evidence(Evidence(
+            tenant_id="g0-write-gating", user_id="g0-write-gating-user",
+            actor="user", source_type="note", trust_tier=0,
+            content="The preferred database is Postgres.",
+            access_policy={"tenant": "g0-write-gating"},
+        ))
     ingested = pipeline.ingest(
         IngestRequest(
             tenant_id="g0-write-gating",
@@ -58,13 +67,16 @@ def _run_case(
     )
     actual_core_mutation_eligible = extracted_candidates > 0
     promoted_candidates = sum(row.get("promoted") is True for row in result.candidate_results)
+    stored = engine.get_evidence("g0-write-gating", ingested.cid)
+    source_preserved = stored is not None and stored.content == "The preferred database is Postgres."
     return {
         "case_id": case_id,
         "extracted_candidates": extracted_candidates,
         "promoted_candidates": promoted_candidates,
+        "source_preserved": source_preserved,
         "expected_core_mutation_eligible": expected_core_mutation_eligible,
         "actual_core_mutation_eligible": actual_core_mutation_eligible,
-        "passed": actual_core_mutation_eligible == expected_core_mutation_eligible and promoted_candidates == 0,
+        "passed": actual_core_mutation_eligible == expected_core_mutation_eligible and promoted_candidates == 0 and source_preserved,
         "prediction_error": dict(job.payload["prediction_error"]),
         "write_priority": dict(job.payload["write_priority"]),
         "skipped": sorted(skipped),
@@ -97,6 +109,10 @@ def run_write_gating_eval() -> dict[str, Any]:
             metadata={},
             prediction_available=False,
             expected_core_mutation_eligible=False,
+        ),
+        _run_case(
+            case_id="supported-low-surprise", actor="user", source_type="chat",
+            metadata={}, prior_support=True, expected_core_mutation_eligible=False,
         ),
     ]
     confusion_counts = {
