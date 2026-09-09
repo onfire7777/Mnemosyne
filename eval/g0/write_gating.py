@@ -89,7 +89,7 @@ def _promotion_boundary_eval() -> dict[str, Any]:
     """Exercise real promotion decisions; labels remain outside worker inputs."""
     rows = []
     tenant = "g0-promotion-gating"
-    for scenario in ["valid", "corroboration", "capability", "protected_check", "mutation_budget", "erasure"]:
+    for scenario in ["valid", "corroboration", "capability", "protected_check", "mutation_budget", "erasure", "security"]:
         engine = LocalMemoryEngine()
         cids = [engine.append_evidence(Evidence(
             tenant_id=tenant, user_id="user", actor="user", source_type=source,
@@ -119,6 +119,7 @@ def _promotion_boundary_eval() -> dict[str, Any]:
             "signature": "preferred database", "query": "preferred database",
             "candidate_subject": "preferred database", "candidate_predicate": "is",
             "candidate_object": "Postgres",
+            "access_policy": {"tenant": "another-tenant" if scenario == "security" else tenant},
             "capability_tags": ["no-write-authority"] if scenario == "capability" else [],
             "passes": ["extractor", "resolver", "belief_reviser", "promotion_gate"],
         })
@@ -135,6 +136,8 @@ def _promotion_boundary_eval() -> dict[str, Any]:
             failure_class = "protected_check"
         elif any("max_supersession_rate" in failure for failure in failures):
             failure_class = "mutation_budget"
+        elif any("tenant does not match row tenant" in failure for failure in failures):
+            failure_class = "security"
         expected = scenario == "valid"
         source_preserved = all(
             (engine.get_evidence(tenant, cid) is None) == (scenario == "erasure" and index == 0)
