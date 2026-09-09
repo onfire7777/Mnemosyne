@@ -61,9 +61,8 @@ def _command(tmp_path: Path, role: str, state: Path) -> str:
         ),
         encoding="utf-8",
     )
-    return " ".join(
-        shlex.quote(item) for item in (sys.executable, str(script), role, str(state))
-    )
+    argv = (sys.executable, str(script), role, str(state))
+    return subprocess.list2cmdline(argv) if sys.platform == "win32" else shlex.join(argv)
 
 
 def test_provider_manifest_runs_http_retrieval_and_all_consolidation_role_checks(
