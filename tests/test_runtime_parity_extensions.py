@@ -4,11 +4,13 @@ import base64
 import os
 import json
 import shlex
+import subprocess
 import sys
 from hashlib import sha256
 from uuid import uuid4
 
 import pytest
+
 
 from mnemosyne.consolidation import (
     CONSOLIDATE_EVIDENCE_JOB,
@@ -64,6 +66,11 @@ from mnemosyne.user_model import (
 
 TENANT = "tenant-runtime-extensions"
 USER = "user-runtime-extensions"
+
+
+def _python_command(script) -> str:
+    argv = [sys.executable, str(script)]
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
 def test_a11_hosted_mcp_local_readiness_commands_are_registered() -> None:
@@ -603,15 +610,15 @@ def test_c2pa_tool_verifier_trusts_configured_issuer_and_quarantines_failures(tm
     invalid_stub.write_text("#!/usr/bin/env python3\nprint('not json')\n", encoding="utf-8")
     invalid_stub.chmod(0o755)
 
-    trusted = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-a",)).verify(
+    trusted = C2paToolVerifier(tool_path=_python_command(verifier_stub), trusted_issuers=("issuer-a",)).verify(
         payload, {"asset_path": str(asset)}
     )
-    untrusted = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-b",)).verify(
+    untrusted = C2paToolVerifier(tool_path=_python_command(verifier_stub), trusted_issuers=("issuer-b",)).verify(
         payload, {"asset_path": str(asset)}
     )
-    unconfigured = C2paToolVerifier(tool_path=str(verifier_stub)).verify(payload, {"asset_path": str(asset)})
-    failed = C2paToolVerifier(tool_path=str(failing_stub)).verify(payload, {"asset_path": str(asset)})
-    invalid = C2paToolVerifier(tool_path=str(invalid_stub)).verify(payload, {"asset_path": str(asset)})
+    unconfigured = C2paToolVerifier(tool_path=_python_command(verifier_stub)).verify(payload, {"asset_path": str(asset)})
+    failed = C2paToolVerifier(tool_path=_python_command(failing_stub)).verify(payload, {"asset_path": str(asset)})
+    invalid = C2paToolVerifier(tool_path=_python_command(invalid_stub)).verify(payload, {"asset_path": str(asset)})
 
     assert trusted.valid is True
     assert trusted.trusted is True
@@ -657,7 +664,7 @@ def test_c2pa_tool_verifier_enforces_required_trusted_issuer_policy(tmp_path) ->
     verifier_stub.chmod(0o755)
     trust_policy = ProvenanceTrustPolicy(trusted_issuers=("issuer-a",), require_trusted_issuer=True)
 
-    decision = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=trust_policy).verify(
+    decision = C2paToolVerifier(tool_path=_python_command(verifier_stub), trust_policy=trust_policy).verify(
         payload, {"asset_path": str(asset)}
     )
 
@@ -709,10 +716,10 @@ def test_c2pa_tool_verifier_enforces_certificate_root_policy(tmp_path) -> None:
         require_trusted_issuer=True,
     )
 
-    trusted = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=trusted_policy).verify(
+    trusted = C2paToolVerifier(tool_path=_python_command(verifier_stub), trust_policy=trusted_policy).verify(
         payload, {"asset_path": str(asset)}
     )
-    rejected = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=rejected_policy).verify(
+    rejected = C2paToolVerifier(tool_path=_python_command(verifier_stub), trust_policy=rejected_policy).verify(
         payload, {"asset_path": str(asset)}
     )
 
@@ -753,10 +760,10 @@ def test_c2pa_tool_verifier_requires_explicit_root_only_policy(tmp_path) -> None
         require_trusted_root=True,
     )
 
-    implicit = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=implicit_policy).verify(
+    implicit = C2paToolVerifier(tool_path=_python_command(verifier_stub), trust_policy=implicit_policy).verify(
         payload, {"asset_path": str(asset)}
     )
-    explicit = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=explicit_root_only_policy).verify(
+    explicit = C2paToolVerifier(tool_path=_python_command(verifier_stub), trust_policy=explicit_root_only_policy).verify(
         payload, {"asset_path": str(asset)}
     )
 
@@ -798,7 +805,7 @@ def test_c2pa_tool_verifier_enforces_scoped_trust_policy(tmp_path) -> None:
             ]
         }
     )
-    verifier = C2paToolVerifier(tool_path=str(verifier_stub), trust_policy=trust_policy)
+    verifier = C2paToolVerifier(tool_path=_python_command(verifier_stub), trust_policy=trust_policy)
 
     trusted = verifier.verify(
         payload,
@@ -869,7 +876,7 @@ def test_c2pa_tool_verifier_quarantines_asset_hash_mismatch(tmp_path) -> None:
     )
     verifier_stub.chmod(0o755)
 
-    decision = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-a",)).verify(
+    decision = C2paToolVerifier(tool_path=_python_command(verifier_stub), trusted_issuers=("issuer-a",)).verify(
         payload, {"asset_path": str(asset)}
     )
 
@@ -899,7 +906,7 @@ def test_c2pa_tool_verifier_quarantines_unbound_reports(tmp_path) -> None:
     )
     verifier_stub.chmod(0o755)
 
-    decision = C2paToolVerifier(tool_path=str(verifier_stub), trusted_issuers=("issuer-a",)).verify(
+    decision = C2paToolVerifier(tool_path=_python_command(verifier_stub), trusted_issuers=("issuer-a",)).verify(
         payload, {"asset_path": str(asset)}
     )
 
@@ -2128,8 +2135,8 @@ def test_consolidation_worker_uses_command_lesson_and_skill_providers(tmp_path) 
         ),
         encoding="utf-8",
     )
-    lesson_command = " ".join(shlex.quote(item) for item in (sys.executable, str(lesson_script)))
-    procedure_command = " ".join(shlex.quote(item) for item in (sys.executable, str(procedure_script)))
+    lesson_command = _python_command(lesson_script)
+    procedure_command = _python_command(procedure_script)
     worker = QueueWorker(
         queue,
         {
