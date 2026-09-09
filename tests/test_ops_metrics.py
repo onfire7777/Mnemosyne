@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -116,7 +117,10 @@ def test_cli_ops_metrics_push_requires_metrics_url(tmp_path) -> None:
         ],
         text=True,
         capture_output=True,
-        env={"PATH": "/usr/bin:/bin"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            **({"SYSTEMROOT": os.environ["SYSTEMROOT"]} if os.name == "nt" and "SYSTEMROOT" in os.environ else {}),
+        },
     )
     assert result.returncode != 0
     assert "MNEMOSYNE_OPS_METRICS_URL" in result.stderr
