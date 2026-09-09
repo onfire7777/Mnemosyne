@@ -12,10 +12,27 @@ from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.queue import InProcessQueue
+from mnemosyne.models import Evidence
 
 
 TENANT = "surprise-gated-writes"
 USER = "surprise-gated-user"
+
+
+@pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
+def test_worker_rejects_explicit_invalid_prediction_signal(signal) -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type="chat",
+        content="The preferred database is Postgres.", trust_tier=0,
+        access_policy={"tenant": TENANT},
+    ))
+    result = ConsolidationWorker(engine, [], consolidation_min_steps=0).run_queue_payload({
+        "tenant_id": TENANT, "source_evidence_cids": [cid],
+        "prediction_error": {"score": signal},
+    })
+    assert "low_prediction_error_metadata_only" in result.skipped
+    assert result.candidate_results == []
 
 
 @pytest.mark.parametrize("support", [None, float("nan"), float("inf"), -float("inf"), -0.1, 1.1, True, "invalid"])
