@@ -1447,11 +1447,10 @@ def test_topology_refresh_verifier_rejects_lifecycle_tree(tmp_path: Path) -> Non
     root_tree = subprocess.run(
         ["git", "mktree"],
         cwd=repo,
-        input=root_entries + f"040000 tree {empty_tree}\tGOAL.md\n",
+        input=(root_entries + f"040000 tree {empty_tree}\tGOAL.md\n").encode("utf-8"),
         check=True,
         capture_output=True,
-        text=True,
-    ).stdout.strip()
+    ).stdout.decode("ascii").strip()
     parent = subprocess.run(
         ["git", "commit-tree", root_tree, "-p", candidate, "-m", "bad parent"],
         cwd=repo,
