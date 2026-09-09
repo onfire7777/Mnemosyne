@@ -1285,6 +1285,8 @@ def test_clean_checkout_runs_exact_documented_argv(tmp_path: Path) -> None:
     bundle = _write_reproducibility_bundle(tmp_path / "clean-source", run_commit=sha)
     destination = tmp_path / "clean-dest"
     env = {
+        **({key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+            if key in os.environ} if os.name == "nt" else {}),
         "HOME": str(tmp_path / "home"),
         "LANG": "C",
         "LC_ALL": "C",
@@ -1363,6 +1365,8 @@ def test_clean_checkout_denials_emit_no_partial_destination(
         command[-1] = str(tmp_path / "other-dest")
         command.insert(-2, "--unexpected")
     env = {
+        **({key: os.environ[key] for key in ("SYSTEMROOT", "WINDIR", "TEMP", "TMP")
+            if key in os.environ} if os.name == "nt" else {}),
         "HOME": str(tmp_path / "home"),
         "LANG": "C",
         "LC_ALL": "C",
