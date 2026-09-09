@@ -272,9 +272,9 @@ class IngestionPipeline:
             already_present=already_present,
         )
         consolidation_metadata = dict(metadata.get("consolidation") or {})
-        consolidation_metadata.setdefault("prediction_error", prediction_error["score"])
-        consolidation_metadata.setdefault("prediction_error_gate", prediction_error["gate"])
-        consolidation_metadata.setdefault("write_priority", write_priority)
+        consolidation_metadata["prediction_error"] = prediction_error["score"]
+        consolidation_metadata["prediction_error_gate"] = prediction_error["gate"]
+        consolidation_metadata["write_priority"] = write_priority
         metadata["consolidation"] = consolidation_metadata
         metadata["write_priority"] = write_priority
 
