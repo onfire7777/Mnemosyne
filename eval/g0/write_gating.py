@@ -116,6 +116,9 @@ def run_write_gating_eval() -> dict[str, Any]:
         ),
     }
     passed_cases = sum(bool(row["passed"]) for row in rows)
+    true_positive = confusion_counts["true_positive"]
+    precision_denominator = true_positive + confusion_counts["false_positive"]
+    recall_denominator = true_positive + confusion_counts["false_negative"]
     return {
         "schema_version": "g0.write-gating.v1",
         "metric": "synthetic_write_gating_regression",
@@ -127,6 +130,17 @@ def run_write_gating_eval() -> dict[str, Any]:
         "passed_cases": passed_cases,
         "passed": passed_cases == len(rows),
         "confusion_counts": confusion_counts,
+        "decision_boundary": "candidate_extraction",
+        "precision": {
+            "numerator": true_positive,
+            "denominator": precision_denominator,
+            "value": true_positive / precision_denominator if precision_denominator else None,
+        },
+        "recall": {
+            "numerator": true_positive,
+            "denominator": recall_denominator,
+            "value": true_positive / recall_denominator if recall_denominator else None,
+        },
         "rows": rows,
     }
 
