@@ -128,4 +128,5 @@ def test_write_gating_regression_reports_reproducible_confusion_counts() -> None
     assert report["schema_version"] == "g0.write-gating.v1"
     assert report["total_cases"] == 3
     assert report["passed_cases"] == 3
+    assert [row["extracted_candidates"] for row in report["rows"]] == [1, 0, 0]
     assert report["confusion_counts"] == {"false_negative": 0, "false_positive": 0, "true_negative": 2, "true_positive": 1}
