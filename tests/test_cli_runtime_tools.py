@@ -329,7 +329,7 @@ def seed_legacy_evidence(
 
 
 def run_packaged_cli(store: Path, *args: str) -> dict:
-    entrypoint = Path(sys.executable).with_name("mneme")
+    entrypoint = Path(sys.executable).with_name("mneme.exe" if sys.platform == "win32" else "mneme")
     assert entrypoint.exists(), (
         f"missing packaged entrypoint at {entrypoint}; run `python -m pip install -e .`"
     )
