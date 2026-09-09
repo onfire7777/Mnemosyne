@@ -79,6 +79,36 @@ def test_erased_source_cannot_reenter_extraction_from_queued_candidate() -> None
     assert engine.get_evidence(TENANT, cid) is None
 
 
+@pytest.mark.parametrize("expected_answer, promoted", [("Postgres", True), ("SQLite", False)])
+def test_high_surprise_does_not_bypass_failing_protected_case(expected_answer, promoted) -> None:
+    """Bypassing the real regression gate would promote the failing SQLite case."""
+    engine = LocalMemoryEngine()
+    cids = [engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type=source,
+        content=content, trust_tier=0, access_policy={"tenant": TENANT},
+    )) for source, content in [
+        ("episode", "The preferred database is Postgres."),
+        ("chat", "Independent confirmation: preferred database remains Postgres."),
+    ]]
+    cases = [RegressionCase(
+        id="protected-database-answer", signature="preferred database",
+        query="preferred database", expected_substring=expected_answer, protected=True,
+    )]
+    result = ConsolidationWorker(engine, cases, consolidation_min_steps=0).run_queue_payload({
+        "tenant_id": TENANT, "source_evidence_cids": cids,
+        "prediction_error": {"score": 1.0}, "surprise": 1.0,
+        "signature": "preferred database", "query": "preferred database",
+        "candidate_subject": "preferred database", "candidate_predicate": "is",
+        "candidate_object": "Postgres",
+    })
+    assert len(result.candidate_results) == 1
+    decision = result.candidate_results[0]
+    assert decision["promoted"] is promoted
+    assert decision["failed_cases"] == ([] if promoted else ["protected-database-answer"])
+    for cid in cids:
+        assert engine.get_evidence(TENANT, cid) is not None
+
+
 @pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
 def test_invalid_ingestion_surprise_does_not_boost_queue_priority(signal) -> None:
     engine = LocalMemoryEngine()
