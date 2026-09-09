@@ -13,11 +13,56 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.queue import InProcessQueue
-from mnemosyne.models import Evidence
+from mnemosyne.models import Assertion, Evidence
 
 
 TENANT = "surprise-gated-writes"
 USER = "surprise-gated-user"
+
+
+@pytest.mark.parametrize("rate, allowed", [(0.0, False), (0.05, True)])
+def test_high_surprise_respects_supersession_budget(rate, allowed) -> None:
+    """Bypassing the pre-merge budget would replace a fact despite a zero limit."""
+    engine = LocalMemoryEngine()
+    original_ids = []
+    for index in range(20):
+        assertion = Assertion(
+            tenant_id=TENANT, subject="preferred database" if index == 0 else f"unrelated-{index}",
+            predicate="is", object="old-value", confidence=0.7,
+            trust_tier=2, status="active", access_policy={"tenant": TENANT},
+        )
+        engine.upsert_assertion(assertion)
+        original_ids.append(assertion.id)
+    cids = [engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type=source,
+        content=content, trust_tier=0, access_policy={"tenant": TENANT},
+    )) for source, content in [
+        ("episode", "The preferred database is Postgres."),
+        ("chat", "Independent confirmation: preferred database remains Postgres."),
+    ]]
+    cases = [RegressionCase(
+        id="database", signature="preferred database", query="preferred database",
+        expected_substring="Postgres", protected=True,
+    )]
+    result = ConsolidationWorker(
+        engine, cases, consolidation_min_steps=0, max_supersession_rate=rate,
+    ).run_queue_payload({
+        "tenant_id": TENANT, "source_evidence_cids": cids, "trust_tier": 0,
+        "prediction_error": {"score": 1.0}, "surprise": 1.0,
+        "signature": "preferred database", "query": "preferred database",
+        "candidate_subject": "preferred database", "candidate_predicate": "is",
+        "candidate_object": "Postgres",
+        "passes": ["extractor", "resolver", "belief_reviser", "promotion_gate"],
+    })
+    assert len(result.candidate_results) == 1
+    assert result.candidate_results[0]["promoted"] is allowed
+    active_ids = {row.id for row in engine.assertions.values()
+                  if row.branch == "main" and row.status in {"active", "contested"}}
+    assert len(set(original_ids) - active_ids) == int(allowed)
+    rail = next(row["details"] for row in result.pass_results if row["name"] == "mutation_rails")
+    assert rail["supersessions_used"] == int(allowed)
+    if not allowed:
+        assert any(row["rail"] == "max_supersession_rate" for row in rail["violations"])
 
 
 @pytest.mark.parametrize("tag", [None, "data-only", "no-write-authority", "sanitize-as-data", "quarantined"])
