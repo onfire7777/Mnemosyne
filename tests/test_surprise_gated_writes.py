@@ -19,6 +19,26 @@ TENANT = "surprise-gated-writes"
 USER = "surprise-gated-user"
 
 
+def test_erased_source_cannot_reenter_extraction_from_queued_candidate() -> None:
+    engine = LocalMemoryEngine()
+    cid = engine.append_evidence(Evidence(
+        tenant_id=TENANT, user_id=USER, actor="user", source_type="chat",
+        content="The preferred database is Postgres.", trust_tier=0,
+        access_policy={"tenant": TENANT},
+    ))
+    payload = {
+        "tenant_id": TENANT, "source_evidence_cids": [cid],
+        "prediction_error": {"score": 1.0},
+        "signature": "preferred database", "query": "preferred database",
+        "candidate_subject": "preferred database", "candidate_predicate": "is",
+        "candidate_object": "Postgres",
+    }
+    engine.forget(TENANT, cid, branch="main")
+    result = ConsolidationWorker(engine, [], consolidation_min_steps=0).run_queue_payload(payload)
+    assert result.candidate_results == []
+    assert engine.get_evidence(TENANT, cid) is None
+
+
 @pytest.mark.parametrize("signal", [None, True, "bad", float("nan"), float("inf"), -1.0, 2.0])
 def test_invalid_ingestion_surprise_does_not_boost_queue_priority(signal) -> None:
     engine = LocalMemoryEngine()
