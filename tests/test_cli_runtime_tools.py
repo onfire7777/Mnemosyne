@@ -1713,11 +1713,11 @@ def test_cli_provider_check_exercises_http_and_media_contracts(tmp_path: Path) -
             "--reranker-api-key",
             "rank-secret",
             "--media-extractor-command",
-            str(extractor),
+            native_command((sys.executable, str(extractor))),
             "--media-embedding-provider",
             "command",
             "--media-embedding-command",
-            str(embedder),
+            native_command((sys.executable, str(embedder))),
             "--media-embedding-dims",
             "3",
             "provider-check",
@@ -3062,8 +3062,8 @@ def test_cli_provider_check_uses_deployment_manifest(tmp_path: Path, monkeypatch
                         "graph_backend": "apache-age",
                     },
                     "media": {
-                        "extractor": {"command": str(extractor)},
-                        "embedding": {"provider": "command", "command": str(embedder), "dims": 3},
+                        "extractor": {"command": native_command((sys.executable, str(extractor)))},
+                        "embedding": {"provider": "command", "command": native_command((sys.executable, str(embedder))), "dims": 3},
                     },
                     "object_key": {
                         "required": True,
@@ -4148,7 +4148,7 @@ def test_cli_ingests_binary_file_with_c2pa_verifier(tmp_path: Path) -> None:
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        native_command((sys.executable, str(verifier_stub))),
         "--trusted-provenance-issuer",
         "issuer-a",
         "ingest",
@@ -4379,7 +4379,7 @@ def test_cli_ingest_c2pa_trust_policy_quarantines_untrusted_signer(tmp_path: Pat
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        native_command((sys.executable, str(verifier_stub))),
         "--provenance-trust-policy",
         str(trust_policy),
         "ingest",
@@ -4445,7 +4445,7 @@ def test_cli_ingest_c2pa_without_trust_anchor_quarantines(tmp_path: Path) -> Non
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        native_command((sys.executable, str(verifier_stub))),
         "ingest",
         "--tenant",
         TENANT,
@@ -4505,7 +4505,7 @@ def test_cli_c2pa_verifier_uses_actual_file_over_manifest_asset_path(tmp_path: P
     ingested = run_cli(
         store,
         "--c2pa-tool",
-        str(verifier_stub),
+        native_command((sys.executable, str(verifier_stub))),
         "--trusted-provenance-issuer",
         "issuer-a",
         "--trusted-provenance-root",
@@ -4575,7 +4575,7 @@ def test_cli_provenance_trust_check_validates_c2pa_roots(tmp_path: Path) -> None
         json.dumps(
             {
                 "name": "production-c2pa",
-                "tool": str(verifier_stub),
+                "tool": native_command((sys.executable, str(verifier_stub))),
                 "trusted_issuers": ["issuer-a"],
                 "trusted_roots": [trusted_root],
                 "trust_policy": {
@@ -4655,7 +4655,7 @@ def test_cli_provenance_trust_check_rejects_untrusted_root(tmp_path: Path) -> No
         json.dumps(
             {
                 "name": "production-c2pa",
-                "tool": str(verifier_stub),
+                "tool": native_command((sys.executable, str(verifier_stub))),
                 "trusted_issuers": ["issuer-a"],
                 "trusted_roots": [trusted_root],
                 "trust_policy": {
@@ -5216,7 +5216,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "--object-store",
         str(objects),
         "--media-extractor-command",
-        str(extractor),
+        native_command((sys.executable, str(extractor))),
         "ingest",
         "--tenant",
         TENANT,
@@ -5238,7 +5238,7 @@ def test_cli_drains_media_extraction_job_with_command_provider(tmp_path: Path) -
         "--object-store",
         str(objects),
         "--media-extractor-command",
-        str(extractor),
+        native_command((sys.executable, str(extractor))),
         "queue-drain",
         "--limit",
         "1",
