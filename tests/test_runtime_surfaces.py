@@ -295,7 +295,8 @@ def fake_session_secret_command(tmp_path: Path, response: dict[str, object], *, 
         ),
         encoding="utf-8",
     )
-    return " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(response_file)))
+    argv = [sys.executable, str(script), str(response_file)]
+    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
 
 
 def stop_mcp_http_server(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
@@ -372,7 +373,8 @@ def fake_kms_command(tmp_path: Path) -> tuple[str, Path]:
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    argv = [sys.executable, str(script), str(state)]
+    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
     return command, state
 
 
@@ -402,7 +404,8 @@ def fake_parametric_command(tmp_path: Path) -> tuple[str, Path]:
         ),
         encoding="utf-8",
     )
-    command = " ".join(shlex.quote(item) for item in (sys.executable, str(script), str(state)))
+    argv = [sys.executable, str(script), str(state)]
+    command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
     return command, state
 
 
