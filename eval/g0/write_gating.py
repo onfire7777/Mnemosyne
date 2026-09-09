@@ -42,7 +42,7 @@ def _run_case(
             user_id="g0-write-gating-user",
             actor=actor,
             source_type=source_type,
-            content=f"Synthetic write-gating regression case: {case_id}.",
+            content="The preferred database is Postgres.",
             metadata=metadata,
         )
     )
@@ -51,13 +51,15 @@ def _run_case(
         raise RuntimeError("ingestion did not enqueue consolidation")
     result = ConsolidationWorker(engine, [], consolidation_min_steps=0).run_queue_payload(job.payload)
     skipped = set(result.skipped)
-    actual_core_mutation_eligible = (
-        job.payload["prediction_error"]["gate"] == "promote_to_consolidation"
-        and "source_marked_data_only" not in skipped
-        and "low_prediction_error_metadata_only" not in skipped
+    extracted_candidates = sum(
+        int(row["details"].get("candidate_count", 0))
+        for row in result.pass_results
+        if row["name"] == "extractor" and row["status"] == "complete"
     )
+    actual_core_mutation_eligible = extracted_candidates > 0
     return {
         "case_id": case_id,
+        "extracted_candidates": extracted_candidates,
         "expected_core_mutation_eligible": expected_core_mutation_eligible,
         "actual_core_mutation_eligible": actual_core_mutation_eligible,
         "passed": actual_core_mutation_eligible == expected_core_mutation_eligible,
