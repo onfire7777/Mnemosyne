@@ -36,7 +36,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-import stat
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -102,13 +103,8 @@ def _write_stub_tool(tmp_path: Path, report: dict) -> str:
         "import json, sys\nprint(json.dumps(%r))\n" % report,
         encoding="utf-8",
     )
-    tool = tmp_path / "c2patool-stub.sh"
-    tool.write_text(
-        "#!/usr/bin/env bash\nexec %s %s\n" % (sys.executable, payload),
-        encoding="utf-8",
-    )
-    tool.chmod(tool.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    return str(tool)
+    argv = (sys.executable, str(payload))
+    return subprocess.list2cmdline(argv) if sys.platform == "win32" else shlex.join(argv)
 
 
 def _build_report(asset_path: str, sha: str, *, root_fpr: str = ROOT_FPR) -> dict:
