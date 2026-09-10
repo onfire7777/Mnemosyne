@@ -2498,7 +2498,7 @@ def _revalidate_source_cids(
             status="active",
             erased=bool(_item_field(evidence, "erased")),
         )
-        if decision.redacted:
+        if not decision.allowed or decision.redacted:
             hidden = True
             continue
         if cid not in readable:

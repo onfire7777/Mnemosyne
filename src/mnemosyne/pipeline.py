@@ -467,8 +467,7 @@ def _run_global_sensemaking(
     used = 0
     for members in root_groups.values():
         representative = min(
-            members,
-            key=lambda hit: (candidate_costs[hit.id], -hit.score, hit.id),
+            members, key=lambda hit: (candidate_costs[hit.id], -hit.score, hit.id)
         )
         fitted, cost = ops._fit_budget([representative], policy.token_budget - used)
         if not fitted:
@@ -477,6 +476,19 @@ def _run_global_sensemaking(
         used += cost
         if len(budgeted) >= node_budget:
             break
+    # Coverage is reserved with compact representatives first. Spend the
+    # remaining shared budget upgrading each occupied theme slot by relevance.
+    for index, representative in enumerate(list(budgeted)):
+        root = str(representative.metadata.get("theme_root_cid") or representative.id)
+        available = policy.token_budget - used + candidate_costs[representative.id]
+        for candidate in sorted(
+            root_groups[root],
+            key=lambda hit: (-hit.score, candidate_costs[hit.id], hit.id),
+        ):
+            if candidate_costs[candidate.id] <= available:
+                budgeted[index] = candidate
+                used += candidate_costs[candidate.id] - candidate_costs[representative.id]
+                break
     if len(budgeted) < node_budget:
         selected_ids = {hit.id for hit in budgeted}
         for hit in token_fitted:

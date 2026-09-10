@@ -332,7 +332,7 @@ def test_global_sensemaking_packs_compact_theme_representatives_first() -> None:
     alpha_leaf = _append_raptor_summary(
         engine,
         tenant,
-        "alpha beta " + "ranked " * 14,
+        "alpha beta " + "ranked " * 6,
         source_cids=[alpha_source],
         level=1,
     )
@@ -353,10 +353,11 @@ def test_global_sensemaking_packs_compact_theme_representatives_first() -> None:
         level=2,
     )
 
-    result = _sensemaking(engine, tenant, "alpha beta")
+    result = _sensemaking(engine, tenant, "ranked beta")
     roots = {hit.metadata.get("theme_root_cid") for hit in result.hits}
 
     assert roots == {alpha_root, beta_root}
+    assert alpha_leaf in {hit.id for hit in result.hits}
     assert _report(result)["incomplete_theme_coverage"] is False
 
 
@@ -518,6 +519,34 @@ def test_global_sensemaking_rejects_summary_denied_during_second_policy_check(
     result = _sensemaking(engine, tenant, "amber lighthouse policy race")
 
     assert summary_checks >= 2
+    assert root not in {hit.id for hit in result.hits}
+    assert result.abstained is True
+
+
+def test_global_sensemaking_rejects_source_denied_during_second_policy_check(
+    monkeypatch: Any,
+) -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-source-policy-race"
+    source = _append_theme(engine, tenant, "user-policy-race", "Amber source policy race.")
+    root = _append_raptor_summary(engine, tenant, "Amber source policy race.", source_cids=[source])
+    engine.evidence[engine._evidence_key(tenant, "main", source)].sensitivity = 1
+    original = retrieval_module.may_read_item
+    source_checks = 0
+
+    def deny_second_source_check(**kwargs: Any) -> AccessDecision:
+        nonlocal source_checks
+        decision = original(**kwargs)
+        if kwargs.get("sensitivity") == 1:
+            source_checks += 1
+            if source_checks == 2:
+                return AccessDecision(False, "expired_access_policy", decision.role, decision.ceiling)
+        return decision
+
+    monkeypatch.setattr(retrieval_module, "may_read_item", deny_second_source_check)
+    result = _sensemaking(engine, tenant, "amber source policy race")
+
+    assert source_checks >= 2
     assert root not in {hit.id for hit in result.hits}
     assert result.abstained is True
 
