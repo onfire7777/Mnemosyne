@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 import pytest
+from mnemosyne.parametric import ParametricArtifactStore
 
 from mnemosyne.cli import (
     PRODUCTION_RELEASE_REQUIRED_COMMANDS,
@@ -14456,8 +14457,8 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
         "lora-command-adapter",
     )
     artifact = run_cli(store, *provider_args, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
-    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact_store = ParametricArtifactStore(store.with_suffix(store.suffix + ".parametric"))
+    proposal_record = artifact_store.read(artifact["artifact_uri"])
     evaluated = run_cli(
         store,
         *provider_args,
@@ -14478,7 +14479,7 @@ def test_cli_parametric_tier_can_use_command_provider(tmp_path: Path) -> None:
         "provider rollback smoke",
         *PARAMETRIC_AUTH,
     )
-    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rollback_record = artifact_store.read(artifact["artifact_uri"])
     calls = json.loads(provider_state.read_text(encoding="utf-8"))["calls"]
 
     assert artifact["adapter_kind"] == "lora-command-adapter"
@@ -15285,10 +15286,10 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "--protected",
     )
     artifact = run_cli(store, "parametric-propose", "--tenant", TENANT, *PARAMETRIC_AUTH)
-    artifact_path = store.with_suffix(store.suffix + ".parametric") / TENANT / f"{artifact['id']}.json"
-    proposal_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    artifact_store = ParametricArtifactStore(store.with_suffix(store.suffix + ".parametric"))
+    proposal_record = artifact_store.read(artifact["artifact_uri"])
     evaluated_artifact = run_cli(store, "parametric-evaluate", "--artifact-uri", artifact["artifact_uri"], *PARAMETRIC_AUTH)
-    evaluated_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    evaluated_record = artifact_store.read(artifact["artifact_uri"])
     rolled_back_artifact = run_cli(
         store,
         "parametric-rollback",
@@ -15298,7 +15299,7 @@ def test_cli_profile_graph_learning_and_parametric_flows_persist(tmp_path: Path)
         "protected regression after deploy",
         *PARAMETRIC_AUTH,
     )
-    rollback_record = json.loads(artifact_path.read_text(encoding="utf-8"))
+    rollback_record = artifact_store.read(artifact["artifact_uri"])
     promoted_procedure = run_cli(store, "procedure-promote", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     rolled_back = run_cli(store, "procedure-rollback", "--procedure-id", procedure["id"], *PARAMETRIC_AUTH)
     rolled_back_search = run_cli(store, "procedure-search", "--tenant", TENANT, "--query", "date-math-deploy", "--status", "rolled_back")
