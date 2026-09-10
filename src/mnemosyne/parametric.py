@@ -317,11 +317,11 @@ class ParametricTier:
         self.required_rails = self.rails.labels()
 
     def propose_from_lessons(self, tenant_id: str, lessons: list[Lesson], procedures: list[Procedure]) -> ParametricArtifact:
-        active_lessons = [lesson.id for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
-        active_procedures = [procedure.id for procedure in procedures if procedure.tenant_id == tenant_id and procedure.status in {"active", "validated"}]
+        active_lessons = [lesson for lesson in lessons if lesson.tenant_id == tenant_id and lesson.status == "active"]
+        active_procedures = [procedure for procedure in procedures if procedure.tenant_id == tenant_id and procedure.status in {"active", "validated"}]
         artifact = ParametricArtifact(
             tenant_id=tenant_id,
-            source_ids=active_lessons + active_procedures,
+            source_ids=[lesson.id for lesson in active_lessons] + [procedure.id for procedure in active_procedures],
             adapter_kind=self.trainer.adapter_kind if self.trainer else "local-shadow-adapter",
             immutable_rails=list(self.required_rails),
         )
@@ -330,8 +330,8 @@ class ParametricTier:
         if self.trainer and artifact.source_ids:
             provider = self.trainer.propose(
                 tenant_id,
-                lessons,
-                procedures,
+                active_lessons,
+                active_procedures,
                 artifact.source_ids,
                 artifact.immutable_rails,
             )
