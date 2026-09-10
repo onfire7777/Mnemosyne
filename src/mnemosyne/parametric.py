@@ -472,7 +472,22 @@ class ParametricArtifactStore:
     def read(self, artifact_uri: str) -> dict[str, Any]:
         tenant_id, artifact_id = self._parse_uri(artifact_uri)
         path = self._io_path(self._path_for(tenant_id, artifact_id))
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            # Legacy artifacts are read-only here: never migrate or overwrite
+            # an aliased legacy path as a side effect of loading or updating.
+            legacy = self._io_path(self._path_for(tenant_id, artifact_id, legacy=True))
+            raw = legacy.read_text(encoding="utf-8")
+        body = json.loads(raw)
+        identity = body.get("artifact") if isinstance(body, dict) else None
+        if (
+            not isinstance(identity, dict)
+            or identity.get("tenant_id") != tenant_id
+            or identity.get("id") != artifact_id
+        ):
+            raise ValueError("parametric artifact identity does not match URI")
+        return body
 
     def load_artifact(self, artifact_uri: str) -> ParametricArtifact:
         return ParametricArtifact.from_dict(self.read(artifact_uri)["artifact"])
@@ -490,10 +505,18 @@ class ParametricArtifactStore:
             return Path("\\\\?\\UNC\\" + value[2:])
         return Path("\\\\?\\" + value)
 
-    def _path_for(self, tenant_id: str, artifact_id: str) -> Path:
+    def _path_for(self, tenant_id: str, artifact_id: str, *, legacy: bool = False) -> Path:
         self._validate_segment(tenant_id, "tenant")
         self._validate_segment(artifact_id, "artifact")
-        path = (self.root / tenant_id / f"{artifact_id}.json").resolve()
+        if legacy:
+            path = self.root / tenant_id / f"{artifact_id}.json"
+        else:
+            # Logical IDs remain case-sensitive even on case-insensitive
+            # filesystems. Version the layout without changing public URIs.
+            tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()
+            artifact_key = hashlib.sha256(artifact_id.encode("utf-8")).hexdigest()
+            path = self.root / ".mnemosyne-v2" / tenant_key / f"{artifact_key}.json"
+        path = path.resolve()
         try:
             path.relative_to(self.root)
         except ValueError as exc:
