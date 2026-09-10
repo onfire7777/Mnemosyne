@@ -513,7 +513,9 @@ class ParametricArtifactStore:
 
     @staticmethod
     def _validate_segment(value: str, label: str) -> None:
-        if not value or value in {".", ".."} or "/" in value or "\\" in value or ".." in value:
+        # A colon selects an NTFS alternate stream, not an ordinary artifact.
+        # Reject on every host so stored IDs retain the same meaning on replay.
+        if not value or value in {".", ".."} or "/" in value or "\\" in value or ":" in value or ".." in value:
             raise ValueError(f"invalid parametric {label} id")
 
 
