@@ -555,6 +555,14 @@ The following packages are complete source history, not runnable work:
   Documentation only: the module remains `PROPOSED` and not code-ready. This
   receipt recomputes the canonical lifecycle baseline to the PR #119 merge and
   admits no implementation, publication, or successor source node.
+- PR #155: `chore: complete outstanding AI memory pull requests`. Pre-merge
+  self-record for the consolidation of PRs #120, #122, #123, #124, #125, #126,
+  #127, and #153. Because this record changes the branch head, no exact final
+  head, merge SHA/time, or post-main CI is claimed here. This entry prevents
+  the consolidation merge itself from becoming an unrecorded post-baseline
+  change; it does not recompute the canonical baseline or change any benchmark,
+  publication, or admission claim. Fresh exact-head review and required CI
+  remain mandatory before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
