@@ -2398,6 +2398,8 @@ def _raptor_node_hit(
     )
     if not decision.allowed:
         return None
+    if decision.redacted:
+        return None
     content = str(_item_field(item, "content") or "")
     text, privacy = apply_text_redactions(content, access_policy, decision)
     if not text:

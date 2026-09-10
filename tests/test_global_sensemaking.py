@@ -735,6 +735,36 @@ def test_global_sensemaking_drops_parent_when_child_summary_is_hidden() -> None:
     assert tree["root_cid"] not in blob
 
 
+def test_global_sensemaking_drops_parent_when_child_summary_is_redacted() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-redacted-child"
+    source = _append_theme(engine, tenant, "user-redacted-child", "Amber source.")
+    child = _append_raptor_summary(
+        engine, tenant, "secret: amber child code", source_cids=[source], level=1
+    )
+    parent = _append_raptor_summary(
+        engine,
+        tenant,
+        "Parent synthesized from amber child code.",
+        source_cids=[source],
+        level=2,
+        child_summary_cids=[child],
+    )
+    child_item = engine.evidence[engine._evidence_key(tenant, "main", child)]
+    child_item.access_policy = {
+        **dict(child_item.access_policy),
+        "redact_fields": ["secret"],
+        "min_role_for_raw": "admin",
+    }
+
+    result = _sensemaking(engine, tenant, "amber child code", role="reader")
+    disclosed = _disclosed_ids(result)
+
+    assert child not in disclosed
+    assert parent not in disclosed
+    assert result.abstained is True
+
+
 def test_global_sensemaking_propagates_hidden_descendants_to_every_ancestor() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-hidden-descendant"
