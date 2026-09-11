@@ -27,7 +27,7 @@ from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit,
 from mnemosyne.models import Hit, parse_dt, utc_now
 from mnemosyne.network_safety import safe_urlopen, validate_fetch_url
 from mnemosyne.policy import OperatingPolicy
-from mnemosyne.security import sanitize_retrieved_text, trust_weight
+from mnemosyne.security import TrustTier, sanitize_retrieved_text, trust_weight
 from mnemosyne.text import cosine, hashing_embedding, lexical_score, tokenize
 
 
@@ -2133,6 +2133,24 @@ def raptor_source_cids(metadata: object) -> list[str]:
     return cids
 
 
+def _raptor_child_summary_cids(metadata: object) -> list[str]:
+    if not isinstance(metadata, Mapping):
+        return []
+    cids: list[str] = []
+    summary = metadata.get("summary") if isinstance(metadata.get("summary"), Mapping) else {}
+    if not isinstance(summary, Mapping):
+        return []
+    for key in ("child_summary_cids", "source_summary_cids"):
+        raw = summary.get(key)
+        if not isinstance(raw, list):
+            continue
+        for value in raw:
+            cid = str(value)
+            if cid and cid not in cids:
+                cids.append(cid)
+    return cids
+
+
 def iter_raptor_summary_items(ops: Any, tenant_id: str, branch: str) -> list[Any]:
     """Load RAPTOR nodes from the engine seam, then fall back to tenant export."""
 
@@ -2385,7 +2403,10 @@ def _raptor_node_hit(
     text, privacy = apply_text_redactions(content, access_policy, decision)
     if not text:
         return None
-    text = _redact_denied_cids(text, denied_cids)
+    unavailable_child_cids = {
+        child for child in _raptor_child_summary_cids(metadata) if child not in readable_summary_ids
+    }
+    text = _redact_denied_cids(text, denied_cids | unavailable_child_cids)
     if not text:
         return None
     referenced = raptor_source_cids(metadata)
@@ -2513,7 +2534,7 @@ def _classify_raptor_source_reality(item: Any) -> str:
         marker in source_type for marker in ("scratchpad", "workspace", "thought", "reflection")
     ):
         base_class = "self_generated"
-    elif actor == "external" or int(_item_field(item, "trust_tier") or 0) >= 2:
+    elif actor == "external" or int(_item_field(item, "trust_tier") or 0) >= int(TrustTier.LOW):
         base_class = "externally_suggested"
     else:
         base_class = "grounded"

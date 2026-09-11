@@ -14,6 +14,8 @@ from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
 from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
+from mnemosyne.retrieval import _classify_raptor_source_reality
+from mnemosyne.security import TrustTier
 from mnemosyne.sqlite_engine import SqliteEngine
 
 
@@ -167,7 +169,7 @@ def test_global_sensemaking_does_not_relabel_ungrounded_sources_as_grounded() ->
         ("assistant", "chat", 0),
         ("user", "generated-analysis", 0),
         ("external", "chat", 0),
-        ("user", "chat", 2),
+        ("user", "chat", int(TrustTier.LOW)),
     ],
 )
 def test_global_sensemaking_rejects_conflicting_grounded_source_labels(
@@ -199,6 +201,123 @@ def test_global_sensemaking_rejects_conflicting_grounded_source_labels(
     assert hit.metadata.get("source_reality_classes") == {source: "unknown"}
     assert result.abstained is True
     assert _report(result)["abstention_reason"] == "ungrounded_reality_only"
+
+
+@pytest.mark.parametrize(
+    ("actor", "source_type", "trust_tier", "metadata"),
+    [
+        ("assistant", "chat", 0, {"reality_class": "grounded"}),
+        ("user", "generated-analysis", 0, {"reality_class": "grounded"}),
+        ("external", "chat", 0, {"reality_class": "grounded"}),
+        ("user", "chat", int(TrustTier.AUTHENTICATED), {}),
+        ("user", "chat", int(TrustTier.NORMAL), {}),
+        ("user", "chat", int(TrustTier.LOW), {"reality_class": "grounded"}),
+        ("user", "chat", int(TrustTier.AUTHENTICATED), {"reality_class": "grounded"}),
+        ("user", "chat", int(TrustTier.NORMAL), {"reality_class": "grounded"}),
+    ],
+)
+def test_raptor_source_reality_matches_engine_classifier(
+    actor: str,
+    source_type: str,
+    trust_tier: int,
+    metadata: dict[str, Any],
+) -> None:
+    evidence = Evidence(
+        tenant_id="sensemaking-classifier-parity",
+        user_id="user-classifier-parity",
+        actor=actor,
+        source_type=source_type,
+        content="Amber lighthouse dusk board posts harbor delays every evening.",
+        trust_tier=trust_tier,
+        access_policy={"tenant": "sensemaking-classifier-parity"},
+        metadata=metadata,
+    )
+
+    assert _classify_raptor_source_reality(evidence) == LocalMemoryEngine._classify_evidence_reality(
+        evidence
+    )
+
+
+@pytest.mark.parametrize("trust_tier", [int(TrustTier.AUTHENTICATED), int(TrustTier.NORMAL)])
+def test_global_sensemaking_treats_authenticated_and_normal_sources_as_grounded(
+    trust_tier: int,
+) -> None:
+    engine = LocalMemoryEngine()
+    tenant = f"sensemaking-trust-tier-{trust_tier}"
+    text = "Amber lighthouse dusk board posts harbor delays every evening."
+    source = engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="user-trust-tier",
+            actor="user",
+            source_type="chat",
+            content=text,
+            trust_tier=trust_tier,
+            access_policy={"tenant": tenant},
+        )
+    )
+    root = _append_raptor_summary(engine, tenant, text, source_cids=[source])
+
+    result = _sensemaking(engine, tenant, "What amber lighthouse dusk board posts harbor delays?")
+    hit = next(hit for hit in result.hits if hit.id == root)
+
+    assert hit.metadata.get("reality_class") == "grounded"
+    assert hit.metadata.get("source_reality_classes") == {source: "grounded"}
+    assert result.abstained is False
+    assert _report(result)["abstention_reason"] is None
+    assert result.explain["reality_monitoring"]["ungrounded_only"] is False
+
+
+def _erase_child_keep_ancestor(engine: Any, tenant: str, child_cid: str, ancestor_cid: str) -> None:
+    forgotten = engine.forget(tenant, child_cid)
+    assert forgotten.get("erased") is True
+    ancestor = engine.get_evidence(tenant, ancestor_cid)
+    assert ancestor is not None
+    assert ancestor.erased is False
+
+
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+def test_global_sensemaking_redacts_erased_child_summary_cids(backend: str, tmp_path: Any) -> None:
+    engine: Any = LocalMemoryEngine() if backend == "local" else SqliteEngine(root_dir=tmp_path)
+    tenant = f"sensemaking-erased-child-{backend}"
+    query = "What amber lighthouse dusk board posts harbor delays?"
+    source = _append_theme(
+        engine,
+        tenant,
+        "user-erased-child",
+        "Amber lighthouse dusk board posts harbor delays every evening.",
+    )
+    child = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse leaf notes dusk weather and harbor delays.",
+        source_cids=[source],
+        level=1,
+    )
+    ancestor = _append_raptor_summary(
+        engine,
+        tenant,
+        (
+            "Amber lighthouse dusk board posts harbor delays every evening.\n"
+            f"Source summary CIDs: {child}"
+        ),
+        source_cids=[source],
+        level=2,
+        child_summary_cids=[child],
+    )
+    _erase_child_keep_ancestor(engine, tenant, child, ancestor)
+
+    result = _sensemaking(engine, tenant, query)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+    ancestor_hit = next(hit for hit in result.hits if hit.id == ancestor)
+
+    assert ancestor in {hit.id for hit in result.hits}
+    assert child not in ancestor_hit.text
+    assert f"Source summary CIDs: {child}" not in ancestor_hit.text
+    assert child not in blob
+    assert child not in _disclosed_ids(result)
+    assert child not in (ancestor_hit.metadata.get("summary") or {}).get("child_summary_cids", [])
+    assert child not in (ancestor_hit.metadata.get("summary") or {}).get("source_summary_cids", [])
 
 
 def test_global_sensemaking_returns_usable_synthesis_when_support_is_sufficient() -> None:
