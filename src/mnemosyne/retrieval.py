@@ -2406,7 +2406,9 @@ def _raptor_node_hit(
     unavailable_child_cids = {
         child for child in _raptor_child_summary_cids(metadata) if child not in readable_summary_ids
     }
-    text = _redact_denied_cids(text, denied_cids | unavailable_child_cids)
+    if unavailable_child_cids:
+        return None
+    text = _redact_denied_cids(text, denied_cids)
     if not text:
         return None
     referenced = raptor_source_cids(metadata)

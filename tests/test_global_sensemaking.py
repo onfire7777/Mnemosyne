@@ -309,15 +309,58 @@ def test_global_sensemaking_redacts_erased_child_summary_cids(backend: str, tmp_
 
     result = _sensemaking(engine, tenant, query)
     blob = json.dumps(result.to_dict(), sort_keys=True)
-    ancestor_hit = next(hit for hit in result.hits if hit.id == ancestor)
 
-    assert ancestor in {hit.id for hit in result.hits}
-    assert child not in ancestor_hit.text
-    assert f"Source summary CIDs: {child}" not in ancestor_hit.text
+    assert ancestor not in {hit.id for hit in result.hits}
+    assert ancestor not in blob
     assert child not in blob
     assert child not in _disclosed_ids(result)
-    assert child not in (ancestor_hit.metadata.get("summary") or {}).get("child_summary_cids", [])
-    assert child not in (ancestor_hit.metadata.get("summary") or {}).get("source_summary_cids", [])
+    for hit in result.hits:
+        assert child not in hit.text
+        assert f"Source summary CIDs: {child}" not in hit.text
+
+
+def test_global_sensemaking_sqlite_excludes_ancestor_prose_from_erased_child(tmp_path: Any) -> None:
+    engine = SqliteEngine(root_dir=tmp_path)
+    tenant = "sensemaking-erased-child-secret"
+    query = "What amber lighthouse dusk board posts harbor delays?"
+    secret = "PROJECT_NIGHTFALL_DOCK_CODE_7741"
+    source = _append_theme(
+        engine,
+        tenant,
+        "user-erased-child-secret",
+        "Amber lighthouse dusk board posts harbor delays every evening.",
+    )
+    child = _append_raptor_summary(
+        engine,
+        tenant,
+        f"Amber lighthouse leaf notes record {secret} beside the dusk board.",
+        source_cids=[source],
+        level=1,
+    )
+    ancestor = _append_raptor_summary(
+        engine,
+        tenant,
+        (
+            f"Harbor clerks synthesized the dusk board including {secret}.\n"
+            f"Source summary CIDs: {child}"
+        ),
+        source_cids=[source],
+        level=2,
+        child_summary_cids=[child],
+    )
+    _erase_child_keep_ancestor(engine, tenant, child, ancestor)
+
+    result = _sensemaking(engine, tenant, query)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert ancestor not in {hit.id for hit in result.hits}
+    assert ancestor not in blob
+    assert secret not in blob
+    assert child not in blob
+    assert child not in _disclosed_ids(result)
+    for hit in result.hits:
+        assert secret not in hit.text
+        assert child not in hit.text
 
 
 def test_global_sensemaking_returns_usable_synthesis_when_support_is_sufficient() -> None:
