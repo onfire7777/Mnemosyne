@@ -536,13 +536,45 @@ The following packages are complete source history, not runnable work:
   successor source node, and does not recompute the canonical
   baseline (baseline stays `main@f688c747`).
 - PR #154: ordinary documentation receipt recording the merged PR #152
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-06T05:07:00Z`
-  capture and adds only the PR #152 merged-baseline bullet, the #151
+  lease-map lapse. It is **MERGED** at tip
+  `4574830cc428192b1b824ccd0f76a482c583d8e4`. It was **OPEN/READY** at
+  the `2026-09-06T05:07:00Z` capture and adds only the PR #152
+  merged-baseline bullet, the #151 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #154 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `4574830cc428192b1b824ccd0f76a482c583d8e4`.
+- PR #119: Exact 1 M08 reversible-forgetting plan
+  `docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md`
+  (title: docs: PROPOSED M08 reversible-forgetting plan (not
+  code-ready))
+  from exact head `08b521dbbb6e1872ad39c954ea4a1b983ee904fc`; all
+  required exact-head checks passed in run `34016028705`; merge
+  `b6a8e39212445f41b22a922ddbcdbfce46980785` at `2026-09-06T23:56:22Z`.
+  Prior tip was `4574830cc428192b1b824ccd0f76a482c583d8e4` (PR #154).
+  Post-main Unit+drift FAILED CI `34068262456` (and later scheduled
+  nightly `34593641592`) solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #119 was absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping.
+  Exclusive File Set (Exact 1):
+  `docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md`.
+  Purpose: ACCEPT M08 reversible-forgetting implementation plan
+  (PROPOSED / NOT CODE-READY); docs-only privacy for THIS receipt
+  PR (the recorded #119 was documentation). This receipt does not
+  admit Stage A code or invent M16; the M14 freeze is unchanged.
+  This receipt changes no benchmark result or admission state,
+  admits no successor source node, and does not recompute the
+  canonical baseline (baseline stays `main@f688c747`).
+- PR #156: ordinary documentation receipt recording the merged PR #119
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-11T21:42:00Z`
+  capture and adds only the PR #119 merged-baseline bullet, the #154
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #154 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #156 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
