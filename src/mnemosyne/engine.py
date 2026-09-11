@@ -58,14 +58,17 @@ from mnemosyne.pipeline import run_retrieval_pipeline
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.retrieval import (
+    GLOBAL_SENSEMAKING_MODE,
     MEMORY_CHANNELS,
     HashingEmbeddingProvider,
     LocalSimilarityReranker,
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     embed_query,
+    is_raptor_summary_item,
     is_retired_summary_metadata,
     marginal_gain_cutoff,
+    query_mode_from_filter,
     query_support,
     scored_channel_for_hit,
     validate_adapter_hit_scope,
@@ -2833,6 +2836,20 @@ class LocalMemoryEngine:
                 return copy.deepcopy(ev)
             return None
 
+    def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
+        """Return unerased RAPTOR summary rows in the caller's tenant/branch."""
+
+        with self._lock:
+            rows = [
+                copy.deepcopy(ev)
+                for ev in self.evidence.values()
+                if ev.tenant_id == tenant_id
+                and ev.branch == branch
+                and not ev.erased
+                and is_raptor_summary_item(ev)
+            ]
+        return sorted(rows, key=lambda item: item.cid or "")
+
     def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
 
@@ -3661,7 +3678,12 @@ class LocalMemoryEngine:
             if count:
                 channels[name] = count
         # §22.4 residual #9: opt-in ACT-R expected-marginal-gain assembly.
-        if isinstance(filt, dict) and filt.get("assembly") == "marginal_gain":
+        # Global sensemaking is a bounded RAPTOR projection, not ranked assembly.
+        if (
+            query_mode_from_filter(filt) != GLOBAL_SENSEMAKING_MODE
+            and isinstance(filt, dict)
+            and filt.get("assembly") == "marginal_gain"
+        ):
             selected, used = marginal_gain_cutoff(
                 result.hits,
                 token_budget=int(self.policy.token_budget),

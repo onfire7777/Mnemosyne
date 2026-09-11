@@ -91,6 +91,7 @@ from mnemosyne.retrieval import (
     QUERY_SUPPORT_THRESHOLD,
     RetrievalAdapters,
     embed_query,
+    is_raptor_summary_item,
     is_retired_summary_metadata,
     query_support,
     validate_adapter_hit_scope,
@@ -5118,6 +5119,27 @@ class PostgresEngine:
                     capability_tags=list(evidence_row["capability_tags"] or []),
                 )
         return {"erased": True, "cid": cid, "erasure_mode": mode.value, "propagated": propagated}
+
+    def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
+        """Return RAPTOR rows without materializing the tenant export."""
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor(row_factory=self._psycopg.rows.dict_row) as cur:
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT e.*, t.name AS tenant_name
+                    FROM evidence e
+                    JOIN tenants t ON t.id = e.tenant_id
+                    WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
+                      AND e.source_type = 'consolidation-summary'
+                    ORDER BY e.cid
+                    """,
+                    (db_tenant_id, branch),
+                )
+                rows = [_row_to_evidence(row, _bytes_to_cid(row["cid"])) for row in cur.fetchall()]
+        return [row for row in rows if is_raptor_summary_item(row)]
 
     def export_tenant(self, tenant_id: str) -> dict[str, Any]:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
