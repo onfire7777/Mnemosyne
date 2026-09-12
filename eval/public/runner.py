@@ -29,6 +29,7 @@ from eval.public.assets import AssetSpec, load_asset_set
 from eval.public.action_cli import _EVAL_THRESHOLD, ActionCLI
 from eval.public.bundle import _canonical, _scoring_labels, write_bundle
 from eval.public.runtime_custody import grounded_runtime_environment
+from eval.public.scoring import score_profile
 from mnemosyne.providers.grounded_protocol import (
     ANCHOR_NORMALIZER_SPEC,
     READER_SCHEMA_SPEC,
@@ -507,22 +508,16 @@ def run_public_suite(
                 f"{suite_name}: fixture operating point threshold diverges from "
                 "the authenticated evaluation seam"
             )
-        from eval.public.scoring import score_profile
-
         measured = score_profile(
             suite["scoring_profile"], _scoring_labels(benchmark), traces
         )
     elif suite["family"] == "whole-memory-development":
-        from eval.public.scoring import score_profile
-
         if suite_name == "wmbs-m04-development":
             labels = [{"fixture": benchmark}]
         else:
             labels = _scoring_labels(benchmark)
         measured = score_profile(suite["scoring_profile"], labels, traces)
     elif suite["family"] == "security-calibration-development":
-        from eval.public.scoring import score_profile
-
         _validate_security_calibration_suite(suite_name, suite)
         measured = score_profile(
             suite["scoring_profile"], [{"fixture": benchmark}], traces
