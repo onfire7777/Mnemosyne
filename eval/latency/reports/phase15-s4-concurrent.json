@@ -1,0 +1,803 @@
+{
+  "schema": "mnemosyne.cap006.latency-receipt/v1",
+  "receipt_class": "synthetic-development",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "claim_status": "synthetic-development-receipt-only",
+  "identity": {
+    "repository_sha": "c871fc10b2470dcca39d602fb7624f2177fa9289",
+    "clean_tree": true,
+    "command": [
+      "/workspace/.venv/bin/python3",
+      "eval/latency/bench_concurrent.py"
+    ],
+    "arguments": {
+      "declared_concurrency": 3,
+      "warmup_count": 1,
+      "timeout_seconds": 1.0,
+      "executor_workers": 3,
+      "workload": "phase15-s4-synthetic-dev-v1"
+    },
+    "utc_start": "2026-09-12T19:56:36.716016+00:00",
+    "utc_end": "2026-09-12T19:56:36.722475+00:00",
+    "monotonic_start": 2382.309595294,
+    "monotonic_end": 2382.316050324,
+    "host": {
+      "os": "Linux",
+      "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 11 16:06:03 UTC 2026",
+      "kernel": "6.12.94+",
+      "architecture": "x86_64",
+      "cpu_flags": [
+        "fpu",
+        "vme",
+        "de",
+        "pse",
+        "tsc",
+        "msr",
+        "pae",
+        "mce",
+        "cx8",
+        "apic",
+        "sep",
+        "mtrr",
+        "pge",
+        "mca",
+        "cmov",
+        "pat",
+        "pse36",
+        "clflush",
+        "dts",
+        "mmx",
+        "fxsr",
+        "sse",
+        "sse2",
+        "ss",
+        "ht",
+        "syscall",
+        "nx",
+        "pdpe1gb",
+        "rdtscp",
+        "lm",
+        "constant_tsc",
+        "pebs",
+        "bts",
+        "rep_good",
+        "nopl",
+        "xtopology",
+        "nonstop_tsc",
+        "cpuid",
+        "tsc_known_freq",
+        "pni",
+        "pclmulqdq",
+        "dtes64",
+        "vmx",
+        "ssse3",
+        "fma",
+        "cx16",
+        "pcid",
+        "sse4_1",
+        "sse4_2",
+        "x2apic",
+        "movbe",
+        "popcnt",
+        "tsc_deadline_timer",
+        "aes",
+        "xsave",
+        "avx",
+        "f16c",
+        "rdrand",
+        "hypervisor",
+        "lahf_lm",
+        "abm",
+        "3dnowprefetch",
+        "cpuid_fault",
+        "ssbd",
+        "ibrs",
+        "ibpb",
+        "stibp",
+        "ibrs_enhanced",
+        "tpr_shadow",
+        "flexpriority",
+        "ept",
+        "vpid",
+        "ept_ad",
+        "fsgsbase",
+        "tsc_adjust",
+        "bmi1",
+        "avx2",
+        "smep",
+        "bmi2",
+        "erms",
+        "invpcid",
+        "avx512f",
+        "avx512dq",
+        "rdseed",
+        "adx",
+        "smap",
+        "avx512ifma",
+        "clflushopt",
+        "clwb",
+        "avx512cd",
+        "sha_ni",
+        "avx512bw",
+        "avx512vl",
+        "xsaveopt",
+        "xsavec",
+        "xgetbv1",
+        "xsaves",
+        "avx_vnni",
+        "avx512_bf16",
+        "wbnoinvd",
+        "arat",
+        "vnmi",
+        "avx512vbmi",
+        "umip",
+        "pku",
+        "ospke",
+        "avx512_vbmi2",
+        "gfni",
+        "vaes",
+        "vpclmulqdq",
+        "avx512_vnni",
+        "avx512_bitalg",
+        "avx512_vpopcntdq",
+        "rdpid",
+        "bus_lock_detect",
+        "cldemote",
+        "movdiri",
+        "movdir64b",
+        "fsrm",
+        "md_clear",
+        "serialize",
+        "tsxldtrk",
+        "amx_bf16",
+        "avx512_fp16",
+        "amx_tile",
+        "amx_int8",
+        "flush_l1d",
+        "arch_capabilities"
+      ],
+      "accelerator": "none",
+      "runtime_versions": {
+        "python": "3.12.3"
+      }
+    },
+    "digests": {
+      "dataset": "sha256:07506b1ed6e026af62736a728e0ced93766a591398bcab313f3a6d33d3b66437",
+      "fixture": "sha256:3d64f0d85fa329f075805c9c3eba1e07759889527b09041d76cc0ce9305315ec",
+      "config": "sha256:11bc9cff365a07108159675aef5602962347af0a0a9d752bea8d362f8f6b37e4",
+      "model": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "tokenizer": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "provider": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "container_image": "sha256:30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+      "schema": "sha256:5f388e88eccb0115bba56a0c5491e163cb429185db195aa1f68cdb2639140f68",
+      "result_contract": "sha256:729adcff8b76b376ecb216e4c6f6b196b3496286ac0b2c9f25fd3565d78931b7"
+    }
+  },
+  "sut_boundary": {
+    "included_processes": [
+      "synthetic-dev-harness"
+    ],
+    "containers": [],
+    "databases": [],
+    "proxies": [],
+    "caches": [],
+    "indexes": [],
+    "filesystems": [
+      "workspace"
+    ],
+    "background_workers": [],
+    "benchmark_process_count": 1,
+    "host_workload_count": 1
+  },
+  "workload": {
+    "order": [
+      "q_capital_france",
+      "q_capital_germany",
+      "q_capital_japan",
+      "q_db_pref",
+      "q_lang_pref",
+      "q_meeting_day",
+      "q_budget",
+      "q_oncall",
+      "q_seine"
+    ],
+    "order_digest": "sha256:a8a98d106c8aab84aa4bec703e6403e252ece5c4a213274bc92e5fa8280958bb",
+    "operations": [
+      {
+        "op_id": "q_capital_france",
+        "kind": "synthetic-dev-retrieve",
+        "query": "What is the capital of France?"
+      },
+      {
+        "op_id": "q_capital_germany",
+        "kind": "synthetic-dev-retrieve",
+        "query": "capital city of Germany"
+      },
+      {
+        "op_id": "q_capital_japan",
+        "kind": "synthetic-dev-retrieve",
+        "query": "Japan capital most populous"
+      },
+      {
+        "op_id": "q_db_pref",
+        "kind": "synthetic-dev-retrieve",
+        "query": "which database does the user prefer for production"
+      },
+      {
+        "op_id": "q_lang_pref",
+        "kind": "synthetic-dev-retrieve",
+        "query": "what programming language does the user use"
+      },
+      {
+        "op_id": "q_meeting_day",
+        "kind": "synthetic-dev-retrieve",
+        "query": "when was the planning meeting rescheduled to"
+      },
+      {
+        "op_id": "q_budget",
+        "kind": "synthetic-dev-retrieve",
+        "query": "what is next quarter infrastructure budget cap"
+      },
+      {
+        "op_id": "q_oncall",
+        "kind": "synthetic-dev-retrieve",
+        "query": "when does the on-call rotation change"
+      },
+      {
+        "op_id": "q_seine",
+        "kind": "synthetic-dev-retrieve",
+        "query": "how long is the river Seine"
+      }
+    ],
+    "warmup": {
+      "explicit": true,
+      "count": 1,
+      "operation_ids": [
+        "q_capital_france"
+      ],
+      "excluded_from_distribution": true
+    },
+    "repetitions": 1,
+    "timeouts_seconds": 1.0,
+    "retries": 0,
+    "cold_warm_state": "warm"
+  },
+  "concurrency": {
+    "declared_max_in_flight": 3,
+    "observed_max_in_flight": 3,
+    "declared_overlap": true,
+    "observed_overlap": true,
+    "overlap_evidence": [
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_capital_germany"
+        ],
+        "overlap_monotonic": 0.0017996249998759595
+      },
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_capital_japan"
+        ],
+        "overlap_monotonic": 0.0009774010000000999
+      },
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_db_pref"
+        ],
+        "overlap_monotonic": 0.0011265220000495901
+      },
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_lang_pref"
+        ],
+        "overlap_monotonic": 0.0003059430000575958
+      },
+      {
+        "op_ids": [
+          "q_capital_germany",
+          "q_capital_japan"
+        ],
+        "overlap_monotonic": 0.001140484000188735
+      },
+      {
+        "op_ids": [
+          "q_capital_germany",
+          "q_db_pref"
+        ],
+        "overlap_monotonic": 0.0008028920001379447
+      },
+      {
+        "op_ids": [
+          "q_db_pref",
+          "q_lang_pref"
+        ],
+        "overlap_monotonic": 0.0003855250001834065
+      },
+      {
+        "op_ids": [
+          "q_db_pref",
+          "q_meeting_day"
+        ],
+        "overlap_monotonic": 6.247300007089507e-05
+      },
+      {
+        "op_ids": [
+          "q_lang_pref",
+          "q_meeting_day"
+        ],
+        "overlap_monotonic": 0.0006768809998902725
+      },
+      {
+        "op_ids": [
+          "q_lang_pref",
+          "q_budget"
+        ],
+        "overlap_monotonic": 0.0005897060000279453
+      },
+      {
+        "op_ids": [
+          "q_meeting_day",
+          "q_budget"
+        ],
+        "overlap_monotonic": 0.0007271190002029471
+      },
+      {
+        "op_ids": [
+          "q_meeting_day",
+          "q_oncall"
+        ],
+        "overlap_monotonic": 0.00011091599981227773
+      },
+      {
+        "op_ids": [
+          "q_budget",
+          "q_oncall"
+        ],
+        "overlap_monotonic": 0.0002584199996817915
+      },
+      {
+        "op_ids": [
+          "q_budget",
+          "q_seine"
+        ],
+        "overlap_monotonic": 0.00011483299977044226
+      },
+      {
+        "op_ids": [
+          "q_oncall",
+          "q_seine"
+        ],
+        "overlap_monotonic": 0.0005535079999390291
+      }
+    ],
+    "worker_count": 3,
+    "total_model_request_count": 0,
+    "matches_declaration": true
+  },
+  "resources": {
+    "before": {
+      "sampled_monotonic": 2382.309693442,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6076932096,
+      "available_memory_bytes": 7270232064,
+      "swap_bytes": 0,
+      "process_rss_bytes": 39550976,
+      "process_pss_or_working_set_bytes": 17296384,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.17236328125,
+        0.1123046875,
+        0.03173828125
+      ],
+      "cpu_seconds": 0.06487899999999999
+    },
+    "during": [
+      {
+        "sampled_monotonic": 2382.310736263,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17304576,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.06600299999999999
+      },
+      {
+        "sampled_monotonic": 2382.312212091,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17447936,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.067746
+      },
+      {
+        "sampled_monotonic": 2382.312353439,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17456128,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.06791699999999999
+      },
+      {
+        "sampled_monotonic": 2382.312403394,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17456128,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.06811
+      },
+      {
+        "sampled_monotonic": 2382.313181125,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17624064,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.069372
+      },
+      {
+        "sampled_monotonic": 2382.313297977,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17722368,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.069552
+      },
+      {
+        "sampled_monotonic": 2382.314053081,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17951744,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.070552
+      },
+      {
+        "sampled_monotonic": 2382.314454393,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17943552,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.071074
+      },
+      {
+        "sampled_monotonic": 2382.314565995,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17947648,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.07120599999999999
+      },
+      {
+        "sampled_monotonic": 2382.315301685,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 18004992,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.072355
+      },
+      {
+        "sampled_monotonic": 2382.315390305,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 18004992,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.07245099999999999
+      }
+    ],
+    "after": {
+      "sampled_monotonic": 2382.315902388,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6076932096,
+      "available_memory_bytes": 7270232064,
+      "swap_bytes": 0,
+      "process_rss_bytes": 39550976,
+      "process_pss_or_working_set_bytes": 17968128,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.17236328125,
+        0.1123046875,
+        0.03173828125
+      ],
+      "cpu_seconds": 0.07328499999999999
+    },
+    "memory_pressure": 0.43295949161819847,
+    "swap_pagefile_delta": 0,
+    "disk_index_growth": 0,
+    "network_bytes": 0,
+    "first_abort": null
+  },
+  "observations": [
+    {
+      "op_id": "q_capital_france",
+      "issue_monotonic": 2382.309835174,
+      "start_monotonic": 2382.30984067,
+      "end_monotonic": 2382.310213344,
+      "issue_utc": "2026-09-12T19:56:36.716265+00:00",
+      "start_utc": "2026-09-12T19:56:36.716270+00:00",
+      "end_utc": "2026-09-12T19:56:36.716643+00:00",
+      "latency_ms": 0.37267400011842255,
+      "outcome": "success",
+      "error": null,
+      "excluded": true,
+      "excluded_reason": "warmup"
+    },
+    {
+      "op_id": "q_capital_france",
+      "issue_monotonic": 2382.311519265,
+      "start_monotonic": 2382.312123391,
+      "end_monotonic": 2382.314246646,
+      "issue_utc": "2026-09-12T19:56:36.717949+00:00",
+      "start_utc": "2026-09-12T19:56:36.718553+00:00",
+      "end_utc": "2026-09-12T19:56:36.720676+00:00",
+      "latency_ms": 2.123254999787605,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_capital_germany",
+      "issue_monotonic": 2382.311648736,
+      "start_monotonic": 2382.311960308,
+      "end_monotonic": 2382.313923016,
+      "issue_utc": "2026-09-12T19:56:36.718078+00:00",
+      "start_utc": "2026-09-12T19:56:36.718391+00:00",
+      "end_utc": "2026-09-12T19:56:36.720353+00:00",
+      "latency_ms": 1.9627080000645947,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_capital_japan",
+      "issue_monotonic": 2382.311738215,
+      "start_monotonic": 2382.311845311,
+      "end_monotonic": 2382.313100792,
+      "issue_utc": "2026-09-12T19:56:36.718167+00:00",
+      "start_utc": "2026-09-12T19:56:36.718276+00:00",
+      "end_utc": "2026-09-12T19:56:36.719531+00:00",
+      "latency_ms": 1.255481000043801,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_db_pref",
+      "issue_monotonic": 2382.311897766,
+      "start_monotonic": 2382.313120124,
+      "end_monotonic": 2382.314326228,
+      "issue_utc": "2026-09-12T19:56:36.718327+00:00",
+      "start_utc": "2026-09-12T19:56:36.719549+00:00",
+      "end_utc": "2026-09-12T19:56:36.720757+00:00",
+      "latency_ms": 1.2061040001754009,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_lang_pref",
+      "issue_monotonic": 2382.311909957,
+      "start_monotonic": 2382.313940703,
+      "end_monotonic": 2382.314940636,
+      "issue_utc": "2026-09-12T19:56:36.718339+00:00",
+      "start_utc": "2026-09-12T19:56:36.720370+00:00",
+      "end_utc": "2026-09-12T19:56:36.721371+00:00",
+      "latency_ms": 0.999933000002784,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_meeting_day",
+      "issue_monotonic": 2382.311916168,
+      "start_monotonic": 2382.314263755,
+      "end_monotonic": 2382.315078049,
+      "issue_utc": "2026-09-12T19:56:36.718345+00:00",
+      "start_utc": "2026-09-12T19:56:36.720693+00:00",
+      "end_utc": "2026-09-12T19:56:36.721510+00:00",
+      "latency_ms": 0.8142940000652743,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_budget",
+      "issue_monotonic": 2382.311923267,
+      "start_monotonic": 2382.31435093,
+      "end_monotonic": 2382.315225553,
+      "issue_utc": "2026-09-12T19:56:36.718352+00:00",
+      "start_utc": "2026-09-12T19:56:36.720780+00:00",
+      "end_utc": "2026-09-12T19:56:36.721655+00:00",
+      "latency_ms": 0.8746230000724609,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_oncall",
+      "issue_monotonic": 2382.311928335,
+      "start_monotonic": 2382.314967133,
+      "end_monotonic": 2382.315664228,
+      "issue_utc": "2026-09-12T19:56:36.718357+00:00",
+      "start_utc": "2026-09-12T19:56:36.721396+00:00",
+      "end_utc": "2026-09-12T19:56:36.722094+00:00",
+      "latency_ms": 0.6970949998503784,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_seine",
+      "issue_monotonic": 2382.311934777,
+      "start_monotonic": 2382.31511072,
+      "end_monotonic": 2382.315691908,
+      "issue_utc": "2026-09-12T19:56:36.718364+00:00",
+      "start_utc": "2026-09-12T19:56:36.721540+00:00",
+      "end_utc": "2026-09-12T19:56:36.722122+00:00",
+      "latency_ms": 0.5811880000692327,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    }
+  ],
+  "denominators": {
+    "issued": 10,
+    "successes": 10,
+    "timeouts": 0,
+    "errors": 0,
+    "failed_remain_in_denominator": true,
+    "excluded": 1,
+    "slow_samples_retained": true
+  },
+  "distributions": [
+    {
+      "name": "concurrent",
+      "sample_count": 9,
+      "p50_ms": 0.999933000002784,
+      "p95_ms": 2.059036199898401,
+      "p99_ms": 2.110411239809764,
+      "throughput_qps": 1614.7868544952828,
+      "confidence_interval": {
+        "point": 2.059,
+        "ci_low": 1.2061,
+        "ci_high": 2.1233,
+        "ci_method": "bootstrap-pctl"
+      },
+      "official_claim": false,
+      "asserted": false
+    }
+  ],
+  "validity": {
+    "valid": true,
+    "invalid_reasons": []
+  },
+  "raw_artifacts": {
+    "observations_sha256": "sha256:5ed6633abfc0e3ab4cb4a05747eb6ef5a15c849cd35939b524dc2804c9114ab2",
+    "workload_sha256": "sha256:e754c2c989ce55bd1acd1c1fcab9925f21b0e4c26f5cd47454fd5740ecfdd8c7",
+    "result_digest": "sha256:c6b125b6283164cbfe3703b0c0f57d1328a672a41dddd4407be904509a491086"
+  }
+}
