@@ -54,18 +54,22 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
+import platform
+import resource as resource_mod
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 HERE = Path(__file__).resolve()
 EVAL_DIR = HERE.parents[1]              # .../eval
@@ -89,6 +93,574 @@ from harness import metrics  # noqa: E402  (path set above)
 # 400 ms bound (and also show the tighter 300 ms) so "pass" is the generous read.
 BUDGET_P95_MS_LOOSE = 400.0
 BUDGET_P95_MS_TIGHT = 300.0
+
+RECEIPT_SCHEMA = "mnemosyne.cap006.latency-receipt/v1"
+DISTRIBUTION_WARM_SERIAL = "warm-serial"
+DISTRIBUTION_CONCURRENT = "concurrent"
+RECEIPT_CLASS_SYNTHETIC_DEV = "synthetic-development"
+CLAIM_STATUS_SYNTHETIC_DEV = "synthetic-development-receipt-only"
+SYNTHETIC_WORKLOAD_ID = "phase15-s4-synthetic-dev-v1"
+PHASE15_S4_WARM_REPORT = REPORTS_DIR / "phase15-s4-warm.json"
+PHASE15_S4_CONCURRENT_REPORT = REPORTS_DIR / "phase15-s4-concurrent.json"
+
+
+def _canonical_json(payload: object) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sha256_canonical(payload: object) -> str:
+    return _sha256_text(_canonical_json(payload))
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _git_identity() -> tuple[str, bool]:
+    sha = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        text=True,
+    ).strip()
+    porcelain = subprocess.check_output(
+        ["git", "status", "--porcelain"],
+        cwd=REPO_ROOT,
+        text=True,
+    )
+    return sha, porcelain.strip() == ""
+
+
+def _cpu_flags() -> list[str]:
+    cpuinfo = Path("/proc/cpuinfo")
+    if not cpuinfo.exists():
+        return []
+    for line in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("flags") or line.startswith("Features"):
+            return line.split(":", 1)[1].split()
+    return []
+
+
+def _host_identity() -> dict[str, Any]:
+    uname = platform.uname()
+    return {
+        "os": uname.system,
+        "os_release": uname.version,
+        "kernel": uname.release,
+        "architecture": uname.machine,
+        "cpu_flags": _cpu_flags(),
+        "accelerator": "none",
+        "runtime_versions": {"python": platform.python_version()},
+    }
+
+
+def _pss_or_working_set_bytes(rss_bytes: int) -> int:
+    rollup = Path("/proc/self/smaps_rollup")
+    if rollup.exists():
+        for line in rollup.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("Pss:"):
+                parts = line.split()
+                return int(parts[1]) * 1024
+    return rss_bytes
+
+
+def _meminfo_bytes() -> dict[str, int]:
+    parsed: dict[str, int] = {}
+    meminfo = Path("/proc/meminfo")
+    if not meminfo.exists():
+        return parsed
+    for line in meminfo.read_text(encoding="utf-8", errors="replace").splitlines():
+        name, _, rest = line.partition(":")
+        token = rest.strip().split()
+        if not token:
+            continue
+        try:
+            parsed[name] = int(token[0]) * 1024
+        except ValueError:
+            continue
+    return parsed
+
+
+def sample_resources() -> dict[str, Any]:
+    mem = _meminfo_bytes()
+    usage = resource_mod.getrusage(resource_mod.RUSAGE_SELF)
+    rss_bytes = int(usage.ru_maxrss) * 1024
+    load = list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
+    swap_used = max(0, mem.get("SwapTotal", 0) - mem.get("SwapFree", 0))
+    return {
+        "sampled_monotonic": time.perf_counter(),
+        "total_memory_bytes": mem.get("MemTotal", 0),
+        "free_memory_bytes": mem.get("MemFree", 0),
+        "available_memory_bytes": mem.get("MemAvailable", 0),
+        "swap_bytes": swap_used,
+        "process_rss_bytes": rss_bytes,
+        "process_pss_or_working_set_bytes": _pss_or_working_set_bytes(rss_bytes),
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": load,
+        "cpu_seconds": usage.ru_utime + usage.ru_stime,
+    }
+
+
+def pinned_workload(dataset: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = dataset if dataset is not None else json.loads(DATASET.read_text(encoding="utf-8"))
+    operations: list[dict[str, str]] = []
+    for query in data["queries"]:
+        if not query.get("answerable", True):
+            continue
+        operations.append(
+            {
+                "op_id": str(query["qid"]),
+                "kind": "synthetic-dev-retrieve",
+                "query": str(query["query"]),
+            }
+        )
+    order = [op["op_id"] for op in operations]
+    return {
+        "dataset_id": str(data.get("dataset_id", "retrieval_curated_v1")),
+        "operations": operations,
+        "order": order,
+        "order_digest": f"sha256:{_sha256_canonical(order)}",
+    }
+
+
+def _synthetic_execute(
+    op: dict[str, str],
+    *,
+    inject_outcomes: dict[str, str],
+    timeout_seconds: float,
+) -> None:
+    injected = inject_outcomes.get(op["op_id"])
+    if injected == "timeout":
+        time.sleep(timeout_seconds + 0.005)
+        raise TimeoutError("injected timeout")
+    if injected == "error":
+        raise RuntimeError("injected error")
+    if injected is not None:
+        raise ValueError(f"unsupported injected outcome: {injected}")
+    payload = (op["query"] * 2048).encode("utf-8")
+    hashlib.sha256(payload).hexdigest()
+
+
+def _execute_with_deadline(
+    execute: Callable[[dict[str, str]], None],
+    op: dict[str, str],
+    timeout_seconds: float,
+) -> None:
+    future: concurrent.futures.Future[None] = concurrent.futures.Future()
+
+    def _runner() -> None:
+        if not future.set_running_or_notify_cancel():
+            return
+        try:
+            execute(op)
+        except BaseException as exc:
+            future.set_exception(exc)
+        else:
+            future.set_result(None)
+
+    worker = threading.Thread(
+        target=_runner,
+        name=f"cap006-execute-{op.get('op_id', 'op')}",
+        daemon=True,
+    )
+    worker.start()
+    try:
+        future.result(timeout=timeout_seconds)
+    except concurrent.futures.TimeoutError as exc:
+        raise TimeoutError(
+            f"callback exceeded timeout_seconds={timeout_seconds}"
+        ) from exc
+
+
+def _run_one_observation(
+    op: dict[str, str],
+    *,
+    execute: Callable[[dict[str, str]], None],
+    timeout_seconds: float,
+    excluded: bool,
+    excluded_reason: str | None,
+    issue_monotonic: float,
+    issue_utc: str,
+    before_start: Callable[[], None] | None = None,
+    during_samples: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    if before_start is not None:
+        before_start()
+    start_monotonic = time.perf_counter()
+    start_utc = datetime.now(timezone.utc).isoformat()
+    if during_samples is not None and not excluded:
+        during_samples.append(sample_resources())
+    error: str | None = None
+    outcome = "success"
+    try:
+        _execute_with_deadline(execute, op, timeout_seconds)
+        if time.perf_counter() - start_monotonic > timeout_seconds:
+            outcome = "timeout"
+    except TimeoutError as exc:
+        outcome = "timeout"
+        error = f"{type(exc).__name__}: {exc}"
+    except Exception as exc:  # noqa: BLE001 - measurement must retain failures
+        outcome = "error"
+        error = f"{type(exc).__name__}: {exc}"
+    end_monotonic = time.perf_counter()
+    return {
+        "op_id": op["op_id"],
+        "issue_monotonic": issue_monotonic,
+        "start_monotonic": start_monotonic,
+        "end_monotonic": end_monotonic,
+        "issue_utc": issue_utc,
+        "start_utc": start_utc,
+        "end_utc": datetime.now(timezone.utc).isoformat(),
+        "latency_ms": (end_monotonic - start_monotonic) * 1000.0,
+        "outcome": outcome,
+        "error": error,
+        "excluded": excluded,
+        "excluded_reason": excluded_reason,
+    }
+
+
+def _overlap_evidence(observations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    measured = [obs for obs in observations if not obs["excluded"]]
+    evidence: list[dict[str, Any]] = []
+    for index, left in enumerate(measured):
+        for right in measured[index + 1 :]:
+            start = max(left["start_monotonic"], right["start_monotonic"])
+            end = min(left["end_monotonic"], right["end_monotonic"])
+            if start < end:
+                evidence.append(
+                    {
+                        "op_ids": [left["op_id"], right["op_id"]],
+                        "overlap_monotonic": end - start,
+                    }
+                )
+    return evidence
+
+
+def _observed_max_in_flight(observations: list[dict[str, Any]]) -> int:
+    measured = [obs for obs in observations if not obs["excluded"]]
+    events: list[tuple[float, int]] = []
+    for obs in measured:
+        events.append((obs["start_monotonic"], 1))
+        events.append((obs["end_monotonic"], -1))
+    events.sort(key=lambda item: (item[0], item[1]))
+    current = 0
+    peak = 0
+    for _, delta in events:
+        current += delta
+        if current > peak:
+            peak = current
+    return peak
+
+
+def _apply_concurrency_validity(receipt: dict[str, Any]) -> None:
+    concurrency = receipt["concurrency"]
+    reasons: list[str] = []
+    if concurrency["declared_max_in_flight"] != concurrency["observed_max_in_flight"]:
+        reasons.append("observed_max_in_flight_mismatch")
+    if concurrency["declared_overlap"] != concurrency["observed_overlap"]:
+        reasons.append("observed_overlap_mismatch")
+    concurrency["matches_declaration"] = not reasons
+    receipt["validity"] = {"valid": not reasons, "invalid_reasons": reasons}
+
+
+def _payload_for_result_digest(receipt: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(_canonical_json(receipt))
+    artifacts = payload.get("raw_artifacts")
+    if isinstance(artifacts, dict):
+        artifacts.pop("result_digest", None)
+    return payload
+
+
+def _bind_raw_artifacts(receipt: dict[str, Any]) -> None:
+    receipt["raw_artifacts"] = {
+        "observations_sha256": f"sha256:{_sha256_canonical(receipt['observations'])}",
+        "workload_sha256": f"sha256:{_sha256_canonical(receipt['workload'])}",
+    }
+    receipt["raw_artifacts"]["result_digest"] = (
+        f"sha256:{_sha256_canonical(_payload_for_result_digest(receipt))}"
+    )
+
+
+def write_phase15_s4_receipt(receipt: dict[str, Any], path: Path) -> Path:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def execute_pinned_workload(
+    *,
+    distribution: str,
+    declared_concurrency: int,
+    warmup_count: int,
+    timeout_seconds: float,
+    inject_outcomes: dict[str, str] | None = None,
+    executor_workers: int | None = None,
+    execute: Callable[[dict[str, str]], None] | None = None,
+    command: list[str] | None = None,
+    arguments: dict[str, Any] | None = None,
+    model_request_count: int | None = None,
+) -> dict[str, Any]:
+    if distribution not in {DISTRIBUTION_WARM_SERIAL, DISTRIBUTION_CONCURRENT}:
+        raise ValueError(f"unsupported distribution: {distribution}")
+    if declared_concurrency < 1:
+        raise ValueError("declared_concurrency must be >= 1")
+    if warmup_count < 1:
+        raise ValueError("warmup_count must be >= 1")
+    if distribution == DISTRIBUTION_WARM_SERIAL and declared_concurrency != 1:
+        raise ValueError("warm-serial receipts declare concurrency 1")
+
+    pinned = pinned_workload()
+    if warmup_count > len(pinned["operations"]):
+        raise ValueError("warmup_count exceeds pinned workload size")
+    injected = dict(inject_outcomes or {})
+    workers = declared_concurrency if executor_workers is None else executor_workers
+    if workers < 1:
+        raise ValueError("executor_workers must be >= 1")
+    declared_overlap = distribution == DISTRIBUTION_CONCURRENT
+    assemble_gate = threading.Event()
+    assembled = 0
+    assemble_lock = threading.Lock()
+
+    def _assemble_declared_concurrency() -> None:
+        nonlocal assembled
+        if declared_concurrency <= 1 or workers <= 1:
+            return
+        with assemble_lock:
+            assembled += 1
+            if assembled >= declared_concurrency:
+                assemble_gate.set()
+        assemble_gate.wait(timeout=1.0)
+
+    def _execute_op(op: dict[str, str]) -> None:
+        if execute is not None:
+            execute(op)
+            return
+        _synthetic_execute(
+            op,
+            inject_outcomes=injected,
+            timeout_seconds=timeout_seconds,
+        )
+
+    invocation = list(command) if command is not None else [sys.executable, "eval/latency/bench.py"]
+    invocation_arguments = (
+        dict(arguments)
+        if arguments is not None
+        else {
+            "distribution": distribution,
+            "declared_concurrency": declared_concurrency,
+            "warmup_count": warmup_count,
+            "timeout_seconds": timeout_seconds,
+            "executor_workers": workers,
+            "workload": SYNTHETIC_WORKLOAD_ID,
+        }
+    )
+    repository_sha, clean_tree = _git_identity()
+    utc_start = datetime.now(timezone.utc).isoformat()
+    monotonic_start = time.perf_counter()
+    before = sample_resources()
+
+    warmup_ops = pinned["operations"][:warmup_count]
+    warmup_observations: list[dict[str, Any]] = []
+    for op in warmup_ops:
+        issue_monotonic = time.perf_counter()
+        warmup_observations.append(
+            _run_one_observation(
+                op,
+                execute=_execute_op,
+                timeout_seconds=timeout_seconds,
+                excluded=True,
+                excluded_reason="warmup",
+                issue_monotonic=issue_monotonic,
+                issue_utc=datetime.now(timezone.utc).isoformat(),
+            )
+        )
+
+    during_samples: list[dict[str, Any]] = []
+    stop_sampler = threading.Event()
+
+    def _sample_during() -> None:
+        while not stop_sampler.is_set():
+            during_samples.append(sample_resources())
+            stop_sampler.wait(0.002)
+
+    sampler = threading.Thread(target=_sample_during, name="cap006-resource-sampler", daemon=True)
+    measured_observations: list[dict[str, Any]] = []
+    wall0 = time.perf_counter()
+    sampler.start()
+    try:
+        if workers <= 1:
+            for op in pinned["operations"]:
+                issue_monotonic = time.perf_counter()
+                measured_observations.append(
+                    _run_one_observation(
+                        op,
+                        execute=_execute_op,
+                        timeout_seconds=timeout_seconds,
+                        excluded=False,
+                        excluded_reason=None,
+                        issue_monotonic=issue_monotonic,
+                        issue_utc=datetime.now(timezone.utc).isoformat(),
+                        during_samples=during_samples,
+                    )
+                )
+        else:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+            try:
+                futures: list[concurrent.futures.Future[dict[str, Any]]] = []
+                for op in pinned["operations"]:
+                    issue_monotonic = time.perf_counter()
+                    issue_utc = datetime.now(timezone.utc).isoformat()
+                    futures.append(
+                        pool.submit(
+                            _run_one_observation,
+                            op,
+                            execute=_execute_op,
+                            timeout_seconds=timeout_seconds,
+                            excluded=False,
+                            excluded_reason=None,
+                            issue_monotonic=issue_monotonic,
+                            issue_utc=issue_utc,
+                            before_start=_assemble_declared_concurrency,
+                            during_samples=during_samples,
+                        )
+                    )
+                measured_observations = [
+                    future.result(timeout=timeout_seconds + 1.0) for future in futures
+                ]
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
+    finally:
+        stop_sampler.set()
+        sampler.join(timeout=1.0)
+    wall_s = time.perf_counter() - wall0
+    after = sample_resources()
+    utc_end = datetime.now(timezone.utc).isoformat()
+    monotonic_end = time.perf_counter()
+
+    observations = warmup_observations + measured_observations
+    overlap = _overlap_evidence(observations)
+    observed_max = _observed_max_in_flight(observations)
+    successes = sum(1 for obs in observations if obs["outcome"] == "success")
+    timeouts = sum(1 for obs in observations if obs["outcome"] == "timeout")
+    errors = sum(1 for obs in observations if obs["outcome"] == "error")
+    measured = [obs for obs in observations if not obs["excluded"]]
+    samples = [obs["latency_ms"] for obs in measured]
+    summary = metrics.latency_summary(samples)
+    p95_ci = metrics.bootstrap_percentile_interval(samples, 0.95)
+    throughput = (len(measured) / wall_s) if wall_s > 0 else 0.0
+    workload = {
+        "order": pinned["order"],
+        "order_digest": pinned["order_digest"],
+        "operations": pinned["operations"],
+        "warmup": {
+            "explicit": True,
+            "count": warmup_count,
+            "operation_ids": [op["op_id"] for op in warmup_ops],
+            "excluded_from_distribution": True,
+        },
+        "repetitions": 1,
+        "timeouts_seconds": timeout_seconds,
+        "retries": 0,
+        "cold_warm_state": "warm",
+    }
+    digests = {
+        "dataset": f"sha256:{_sha256_file(DATASET)}",
+        "fixture": f"sha256:{_sha256_canonical({'workload': SYNTHETIC_WORKLOAD_ID})}",
+        "config": f"sha256:{_sha256_canonical(invocation_arguments)}",
+        "model": f"sha256:{_sha256_canonical('synthetic-dev-none')}",
+        "tokenizer": f"sha256:{_sha256_canonical('synthetic-dev-none')}",
+        "provider": f"sha256:{_sha256_canonical('synthetic-dev-none')}",
+        "container_image": f"sha256:{_sha256_canonical('none')}",
+        "schema": f"sha256:{_sha256_canonical(RECEIPT_SCHEMA)}",
+        "result_contract": f"sha256:{_sha256_canonical('cap006-latency-receipt-v1-synthetic')}",
+    }
+    receipt: dict[str, Any] = {
+        "schema": RECEIPT_SCHEMA,
+        "receipt_class": RECEIPT_CLASS_SYNTHETIC_DEV,
+        "official_claim": False,
+        "admitted_measurement": False,
+        "claim_status": CLAIM_STATUS_SYNTHETIC_DEV,
+        "identity": {
+            "repository_sha": repository_sha,
+            "clean_tree": clean_tree,
+            "command": invocation,
+            "arguments": invocation_arguments,
+            "utc_start": utc_start,
+            "utc_end": utc_end,
+            "monotonic_start": monotonic_start,
+            "monotonic_end": monotonic_end,
+            "host": _host_identity(),
+            "digests": digests,
+        },
+        "sut_boundary": {
+            "included_processes": ["synthetic-dev-harness"],
+            "containers": [],
+            "databases": [],
+            "proxies": [],
+            "caches": [],
+            "indexes": [],
+            "filesystems": ["workspace"],
+            "background_workers": [],
+            "benchmark_process_count": 1,
+            "host_workload_count": 1,
+        },
+        "workload": workload,
+        "concurrency": {
+            "declared_max_in_flight": declared_concurrency,
+            "observed_max_in_flight": observed_max,
+            "declared_overlap": declared_overlap,
+            "observed_overlap": bool(overlap),
+            "overlap_evidence": overlap,
+            "worker_count": workers,
+            "total_model_request_count": 0 if model_request_count is None else model_request_count,
+        },
+        "resources": {
+            "before": before,
+            "during": during_samples or [sample_resources()],
+            "after": after,
+            "memory_pressure": (
+                "none"
+                if after["available_memory_bytes"] == 0
+                else after["available_memory_bytes"] / max(after["total_memory_bytes"], 1)
+            ),
+            "swap_pagefile_delta": after["swap_bytes"] - before["swap_bytes"],
+            "disk_index_growth": 0,
+            "network_bytes": 0,
+            "first_abort": None,
+        },
+        "observations": observations,
+        "denominators": {
+            "issued": len(observations),
+            "successes": successes,
+            "timeouts": timeouts,
+            "errors": errors,
+            "failed_remain_in_denominator": True,
+            "excluded": sum(1 for obs in observations if obs["excluded"]),
+            "slow_samples_retained": True,
+        },
+        "distributions": [
+            {
+                "name": distribution,
+                "sample_count": len(measured),
+                "p50_ms": summary.p50,
+                "p95_ms": summary.p95,
+                "p99_ms": summary.p99,
+                "throughput_qps": throughput,
+                "confidence_interval": p95_ci.as_dict(),
+                "official_claim": False,
+                "asserted": False,
+            }
+        ],
+    }
+    _apply_concurrency_validity(receipt)
+    _bind_raw_artifacts(receipt)
+    return receipt
 
 
 # --------------------------------------------------------------------------- #
@@ -127,6 +699,7 @@ class WarmEmbeddingService:
         self.base_url = reuse_url.rstrip("/") if reuse_url else f"http://127.0.0.1:{self.port}"
         self.health: dict[str, Any] = {}
         self.started_here = False
+        self._local_counters: dict[str, int] = {}
 
     @property
     def embed_url(self) -> str:
@@ -156,29 +729,41 @@ class WarmEmbeddingService:
         # .venv-eval). Fall back to plain app.py (stdlib server) if that import
         # path is unavailable.
         py = str(VENV_EVAL_PY) if VENV_EVAL_PY.exists() else sys.executable
-        launcher = SERVICE_APP if SERVICE_APP.exists() else SERVICE_APP_PLAIN
-        self.proc = subprocess.Popen(
-            [py, str(launcher)],
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        self.started_here = True
+        launchers = []
+        if SERVICE_APP.exists():
+            launchers.append(SERVICE_APP)
+        if SERVICE_APP_PLAIN.exists() and SERVICE_APP_PLAIN not in launchers:
+            launchers.append(SERVICE_APP_PLAIN)
+        if not launchers:
+            raise RuntimeError("no embedding service launcher is available")
 
-        # Poll /health until the (real) models finish loading. The first health
-        # call triggers model construction in app.Backend.info().
-        deadline = time.time() + model_load_timeout
         last_err: str = "no response"
-        while time.time() < deadline:
-            if self.proc.poll() is not None:
-                raise RuntimeError(f"embedding service exited early (rc={self.proc.returncode})")
-            h = _http_get_json(f"{self.base_url}/health", timeout=10.0)
-            if h and h.get("status") == "ok":
-                self.health = h
-                return
-            last_err = "health not ok yet"
-            time.sleep(1.0)
-        raise RuntimeError(f"embedding service did not become healthy in {model_load_timeout}s ({last_err})")
+        for index, launcher in enumerate(launchers):
+            self.proc = subprocess.Popen(
+                [py, str(launcher)],
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.started_here = True
+            deadline = time.time() + model_load_timeout
+            while time.time() < deadline:
+                if self.proc.poll() is not None:
+                    last_err = f"{launcher.name} exited early (rc={self.proc.returncode})"
+                    if index + 1 < len(launchers):
+                        break
+                    raise RuntimeError(f"embedding service exited early (rc={self.proc.returncode})")
+                h = _http_get_json(f"{self.base_url}/health", timeout=10.0)
+                if h and h.get("status") == "ok":
+                    self.health = h
+                    return
+                last_err = "health not ok yet"
+                time.sleep(1.0)
+            else:
+                raise RuntimeError(
+                    f"embedding service did not become healthy in {model_load_timeout}s ({last_err})"
+                )
+        raise RuntimeError(f"embedding service did not become healthy ({last_err})")
 
     def warm(self, sample_texts: list[str]) -> None:
         """Fire warm-up embed calls so the first measured call is not cold."""
@@ -187,9 +772,12 @@ class WarmEmbeddingService:
                 data = json.dumps({"input": t}).encode("utf-8")
                 req = urllib.request.Request(self.embed_url, data=data, headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=60.0):  # noqa: S310 local only
-                    pass
+                    self.note_request("POST /embed")
             except (urllib.error.URLError, OSError, TimeoutError):
                 pass
+
+    def note_request(self, key: str) -> None:
+        self._local_counters[key] = int(self._local_counters.get(key, 0)) + 1
 
     def backend_kind(self) -> str:
         emb = (self.health or {}).get("embedding", {})
@@ -198,11 +786,15 @@ class WarmEmbeddingService:
     def counters(self) -> dict[str, int]:
         if self.counter_file.exists():
             try:
-                return json.loads(self.counter_file.read_text())
+                file_counts = json.loads(self.counter_file.read_text())
+                if file_counts:
+                    return file_counts
             except (json.JSONDecodeError, OSError):
-                return {}
-        c = _http_get_json(f"{self.base_url}/_counters")
-        return c or {}
+                pass
+        http_counts = _http_get_json(f"{self.base_url}/_counters")
+        if http_counts:
+            return http_counts
+        return dict(self._local_counters)
 
     def stop(self) -> None:
         if self.proc and self.started_here:
@@ -253,8 +845,9 @@ def build_engine_pool(n: int, dataset: dict[str, Any]) -> list[Any]:
     """
     pool: list[Any] = []
     base = Path(tempfile.gettempdir())
+    run_token = f"{os.getpid()}_{time.time_ns()}"
     for i in range(n):
-        store = base / f"mnemo_latency_{os.getpid()}_w{i}.json"
+        store = base / f"mnemo_latency_{run_token}_w{i}.json"
         # Clean any stale state so each engine is fresh.
         for suffix in ("", ".runtime.json", ".runtime.json.tmp"):
             try:
@@ -322,6 +915,7 @@ def run_bench(args: argparse.Namespace) -> dict[str, Any]:
     for idx, q in enumerate(queries[: max(1, args.clients)]):
         try:
             embedder.embed(q)
+            svc.note_request("POST /embed")
         except Exception:  # noqa: BLE001 - warm-up is best-effort
             pass
         engine_pool[idx % len(engine_pool)].search(tenant_id=tenant, query=q)
@@ -346,6 +940,7 @@ def run_bench(args: argparse.Namespace) -> dict[str, Any]:
         try:
             embedder.embed(query)
             e_ms = (time.perf_counter() - e0) * 1000.0
+            svc.note_request("POST /embed")
         except Exception as exc:  # noqa: BLE001
             e_ms = (time.perf_counter() - e0) * 1000.0
             err = f"embed: {type(exc).__name__}: {exc}"

@@ -79,6 +79,7 @@ HERE = Path(__file__).resolve()
 LATENCY_WARM_DIR = HERE.parent                       # .../eval/latency_warm
 EVAL_DIR = HERE.parents[1]                            # .../eval
 REPO_ROOT = HERE.parents[2]                           # .../Mnemosyne-completion
+LATENCY_DIR = EVAL_DIR / "latency"
 SRC = REPO_ROOT / "src"
 SERVICE_INSTRUMENTED = REPO_ROOT / "services" / "embedding" / "serve_instrumented.py"
 SERVICE_PLAIN = REPO_ROOT / "services" / "embedding" / "app.py"
@@ -87,11 +88,12 @@ REPORTS_DIR = LATENCY_WARM_DIR / "reports"
 VENV_EVAL_PY = REPO_ROOT / ".venv-eval" / "bin" / "python"
 
 # Make the in-repo package + the Wave-1 harness importable without an install.
-for p in (str(SRC), str(EVAL_DIR)):
+for p in (str(SRC), str(EVAL_DIR), str(LATENCY_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
 from harness import metrics  # noqa: E402  (path set above)
+import bench as latency_bench  # noqa: E402  shared CAP-006 ABI
 
 # §15 fast-path NFR / §16 SLO: P95 <= ~300-400 ms. We report against both the
 # tight (300 ms) and loose (400 ms) bounds so "pass" is the generous read.
@@ -99,6 +101,29 @@ BUDGET_P95_MS_LOOSE = 400.0
 BUDGET_P95_MS_TIGHT = 300.0
 
 DEFAULT_DSN = "postgresql://mnemosyne:mnemosyne-local-dev@127.0.0.1:54329/mnemosyne"
+
+
+def run_warm_serial_receipt(
+    *,
+    warmup_count: int = 2,
+    timeout_seconds: float = 1.0,
+    inject_outcomes: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Emit a schema-stable CAP-006 warm-serial synthetic development receipt."""
+    return latency_bench.execute_pinned_workload(
+        distribution=latency_bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=warmup_count,
+        timeout_seconds=timeout_seconds,
+        inject_outcomes=inject_outcomes,
+        command=[sys.executable, str(HERE.relative_to(REPO_ROOT))],
+        arguments={
+            "warmup_count": warmup_count,
+            "timeout_seconds": timeout_seconds,
+            "workload": latency_bench.SYNTHETIC_WORKLOAD_ID,
+        },
+        model_request_count=0,
+    )
 
 
 # --------------------------------------------------------------------------- #

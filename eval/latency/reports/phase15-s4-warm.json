@@ -1,0 +1,712 @@
+{
+  "schema": "mnemosyne.cap006.latency-receipt/v1",
+  "receipt_class": "synthetic-development",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "claim_status": "synthetic-development-receipt-only",
+  "identity": {
+    "repository_sha": "c871fc10b2470dcca39d602fb7624f2177fa9289",
+    "clean_tree": true,
+    "command": [
+      "/workspace/.venv/bin/python3",
+      "eval/latency/bench.py"
+    ],
+    "arguments": {
+      "distribution": "warm-serial",
+      "declared_concurrency": 1,
+      "warmup_count": 2,
+      "timeout_seconds": 1.0,
+      "workload": "phase15-s4-synthetic-dev-v1"
+    },
+    "utc_start": "2026-09-12T19:56:36.697980+00:00",
+    "utc_end": "2026-09-12T19:56:36.704150+00:00",
+    "monotonic_start": 2382.291563224,
+    "monotonic_end": 2382.297723867,
+    "host": {
+      "os": "Linux",
+      "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 11 16:06:03 UTC 2026",
+      "kernel": "6.12.94+",
+      "architecture": "x86_64",
+      "cpu_flags": [
+        "fpu",
+        "vme",
+        "de",
+        "pse",
+        "tsc",
+        "msr",
+        "pae",
+        "mce",
+        "cx8",
+        "apic",
+        "sep",
+        "mtrr",
+        "pge",
+        "mca",
+        "cmov",
+        "pat",
+        "pse36",
+        "clflush",
+        "dts",
+        "mmx",
+        "fxsr",
+        "sse",
+        "sse2",
+        "ss",
+        "ht",
+        "syscall",
+        "nx",
+        "pdpe1gb",
+        "rdtscp",
+        "lm",
+        "constant_tsc",
+        "pebs",
+        "bts",
+        "rep_good",
+        "nopl",
+        "xtopology",
+        "nonstop_tsc",
+        "cpuid",
+        "tsc_known_freq",
+        "pni",
+        "pclmulqdq",
+        "dtes64",
+        "vmx",
+        "ssse3",
+        "fma",
+        "cx16",
+        "pcid",
+        "sse4_1",
+        "sse4_2",
+        "x2apic",
+        "movbe",
+        "popcnt",
+        "tsc_deadline_timer",
+        "aes",
+        "xsave",
+        "avx",
+        "f16c",
+        "rdrand",
+        "hypervisor",
+        "lahf_lm",
+        "abm",
+        "3dnowprefetch",
+        "cpuid_fault",
+        "ssbd",
+        "ibrs",
+        "ibpb",
+        "stibp",
+        "ibrs_enhanced",
+        "tpr_shadow",
+        "flexpriority",
+        "ept",
+        "vpid",
+        "ept_ad",
+        "fsgsbase",
+        "tsc_adjust",
+        "bmi1",
+        "avx2",
+        "smep",
+        "bmi2",
+        "erms",
+        "invpcid",
+        "avx512f",
+        "avx512dq",
+        "rdseed",
+        "adx",
+        "smap",
+        "avx512ifma",
+        "clflushopt",
+        "clwb",
+        "avx512cd",
+        "sha_ni",
+        "avx512bw",
+        "avx512vl",
+        "xsaveopt",
+        "xsavec",
+        "xgetbv1",
+        "xsaves",
+        "avx_vnni",
+        "avx512_bf16",
+        "wbnoinvd",
+        "arat",
+        "vnmi",
+        "avx512vbmi",
+        "umip",
+        "pku",
+        "ospke",
+        "avx512_vbmi2",
+        "gfni",
+        "vaes",
+        "vpclmulqdq",
+        "avx512_vnni",
+        "avx512_bitalg",
+        "avx512_vpopcntdq",
+        "rdpid",
+        "bus_lock_detect",
+        "cldemote",
+        "movdiri",
+        "movdir64b",
+        "fsrm",
+        "md_clear",
+        "serialize",
+        "tsxldtrk",
+        "amx_bf16",
+        "avx512_fp16",
+        "amx_tile",
+        "amx_int8",
+        "flush_l1d",
+        "arch_capabilities"
+      ],
+      "accelerator": "none",
+      "runtime_versions": {
+        "python": "3.12.3"
+      }
+    },
+    "digests": {
+      "dataset": "sha256:07506b1ed6e026af62736a728e0ced93766a591398bcab313f3a6d33d3b66437",
+      "fixture": "sha256:3d64f0d85fa329f075805c9c3eba1e07759889527b09041d76cc0ce9305315ec",
+      "config": "sha256:dbde7e715648a464c3c6c7bc5c2833c8497dcc3287c3f98e3298d833a0258a6d",
+      "model": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "tokenizer": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "provider": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "container_image": "sha256:30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+      "schema": "sha256:5f388e88eccb0115bba56a0c5491e163cb429185db195aa1f68cdb2639140f68",
+      "result_contract": "sha256:729adcff8b76b376ecb216e4c6f6b196b3496286ac0b2c9f25fd3565d78931b7"
+    }
+  },
+  "sut_boundary": {
+    "included_processes": [
+      "synthetic-dev-harness"
+    ],
+    "containers": [],
+    "databases": [],
+    "proxies": [],
+    "caches": [],
+    "indexes": [],
+    "filesystems": [
+      "workspace"
+    ],
+    "background_workers": [],
+    "benchmark_process_count": 1,
+    "host_workload_count": 1
+  },
+  "workload": {
+    "order": [
+      "q_capital_france",
+      "q_capital_germany",
+      "q_capital_japan",
+      "q_db_pref",
+      "q_lang_pref",
+      "q_meeting_day",
+      "q_budget",
+      "q_oncall",
+      "q_seine"
+    ],
+    "order_digest": "sha256:a8a98d106c8aab84aa4bec703e6403e252ece5c4a213274bc92e5fa8280958bb",
+    "operations": [
+      {
+        "op_id": "q_capital_france",
+        "kind": "synthetic-dev-retrieve",
+        "query": "What is the capital of France?"
+      },
+      {
+        "op_id": "q_capital_germany",
+        "kind": "synthetic-dev-retrieve",
+        "query": "capital city of Germany"
+      },
+      {
+        "op_id": "q_capital_japan",
+        "kind": "synthetic-dev-retrieve",
+        "query": "Japan capital most populous"
+      },
+      {
+        "op_id": "q_db_pref",
+        "kind": "synthetic-dev-retrieve",
+        "query": "which database does the user prefer for production"
+      },
+      {
+        "op_id": "q_lang_pref",
+        "kind": "synthetic-dev-retrieve",
+        "query": "what programming language does the user use"
+      },
+      {
+        "op_id": "q_meeting_day",
+        "kind": "synthetic-dev-retrieve",
+        "query": "when was the planning meeting rescheduled to"
+      },
+      {
+        "op_id": "q_budget",
+        "kind": "synthetic-dev-retrieve",
+        "query": "what is next quarter infrastructure budget cap"
+      },
+      {
+        "op_id": "q_oncall",
+        "kind": "synthetic-dev-retrieve",
+        "query": "when does the on-call rotation change"
+      },
+      {
+        "op_id": "q_seine",
+        "kind": "synthetic-dev-retrieve",
+        "query": "how long is the river Seine"
+      }
+    ],
+    "warmup": {
+      "explicit": true,
+      "count": 2,
+      "operation_ids": [
+        "q_capital_france",
+        "q_capital_germany"
+      ],
+      "excluded_from_distribution": true
+    },
+    "repetitions": 1,
+    "timeouts_seconds": 1.0,
+    "retries": 0,
+    "cold_warm_state": "warm"
+  },
+  "concurrency": {
+    "declared_max_in_flight": 1,
+    "observed_max_in_flight": 1,
+    "declared_overlap": false,
+    "observed_overlap": false,
+    "overlap_evidence": [],
+    "worker_count": 1,
+    "total_model_request_count": 0,
+    "matches_declaration": true
+  },
+  "resources": {
+    "before": {
+      "sampled_monotonic": 2382.291702542,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6076932096,
+      "available_memory_bytes": 7270232064,
+      "swap_bytes": 0,
+      "process_rss_bytes": 39550976,
+      "process_pss_or_working_set_bytes": 16811008,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.17236328125,
+        0.1123046875,
+        0.03173828125
+      ],
+      "cpu_seconds": 0.052275
+    },
+    "during": [
+      {
+        "sampled_monotonic": 2382.293361167,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 16968704,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.05377699999999999
+      },
+      {
+        "sampled_monotonic": 2382.2931885,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17107968,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.053586999999999996
+      },
+      {
+        "sampled_monotonic": 2382.294194333,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17107968,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.054589
+      },
+      {
+        "sampled_monotonic": 2382.294898978,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17107968,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.055517
+      },
+      {
+        "sampled_monotonic": 2382.29520411,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17107968,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.05584599999999999
+      },
+      {
+        "sampled_monotonic": 2382.29554478,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17189888,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.05620599999999999
+      },
+      {
+        "sampled_monotonic": 2382.295807212,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17193984,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.056488
+      },
+      {
+        "sampled_monotonic": 2382.29607025,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17193984,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.056781
+      },
+      {
+        "sampled_monotonic": 2382.296598584,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17193984,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.057405
+      },
+      {
+        "sampled_monotonic": 2382.296674329,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17193984,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.057457999999999995
+      },
+      {
+        "sampled_monotonic": 2382.297134959,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6076932096,
+        "available_memory_bytes": 7270232064,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39550976,
+        "process_pss_or_working_set_bytes": 17193984,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.17236328125,
+          0.1123046875,
+          0.03173828125
+        ],
+        "cpu_seconds": 0.05824599999999999
+      }
+    ],
+    "after": {
+      "sampled_monotonic": 2382.297623169,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6076932096,
+      "available_memory_bytes": 7270232064,
+      "swap_bytes": 0,
+      "process_rss_bytes": 39550976,
+      "process_pss_or_working_set_bytes": 17189888,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.17236328125,
+        0.1123046875,
+        0.03173828125
+      ],
+      "cpu_seconds": 0.058767999999999994
+    },
+    "memory_pressure": 0.43295949161819847,
+    "swap_pagefile_delta": 0,
+    "disk_index_growth": 0,
+    "network_bytes": 0,
+    "first_abort": null
+  },
+  "observations": [
+    {
+      "op_id": "q_capital_france",
+      "issue_monotonic": 2382.291903839,
+      "start_monotonic": 2382.291910734,
+      "end_monotonic": 2382.292366724,
+      "issue_utc": "2026-09-12T19:56:36.698334+00:00",
+      "start_utc": "2026-09-12T19:56:36.698340+00:00",
+      "end_utc": "2026-09-12T19:56:36.698798+00:00",
+      "latency_ms": 0.45599000031870673,
+      "outcome": "success",
+      "error": null,
+      "excluded": true,
+      "excluded_reason": "warmup"
+    },
+    {
+      "op_id": "q_capital_germany",
+      "issue_monotonic": 2382.292379054,
+      "start_monotonic": 2382.292382412,
+      "end_monotonic": 2382.29279656,
+      "issue_utc": "2026-09-12T19:56:36.698809+00:00",
+      "start_utc": "2026-09-12T19:56:36.698812+00:00",
+      "end_utc": "2026-09-12T19:56:36.699227+00:00",
+      "latency_ms": 0.41414800034544896,
+      "outcome": "success",
+      "error": null,
+      "excluded": true,
+      "excluded_reason": "warmup"
+    },
+    {
+      "op_id": "q_capital_france",
+      "issue_monotonic": 2382.293221613,
+      "start_monotonic": 2382.293234542,
+      "end_monotonic": 2382.293981617,
+      "issue_utc": "2026-09-12T19:56:36.699654+00:00",
+      "start_utc": "2026-09-12T19:56:36.699664+00:00",
+      "end_utc": "2026-09-12T19:56:36.700412+00:00",
+      "latency_ms": 0.7470750001630222,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_capital_germany",
+      "issue_monotonic": 2382.29401063,
+      "start_monotonic": 2382.294015568,
+      "end_monotonic": 2382.29480853,
+      "issue_utc": "2026-09-12T19:56:36.700441+00:00",
+      "start_utc": "2026-09-12T19:56:36.700445+00:00",
+      "end_utc": "2026-09-12T19:56:36.701239+00:00",
+      "latency_ms": 0.7929620001050353,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_capital_japan",
+      "issue_monotonic": 2382.294817522,
+      "start_monotonic": 2382.294820062,
+      "end_monotonic": 2382.295143282,
+      "issue_utc": "2026-09-12T19:56:36.701247+00:00",
+      "start_utc": "2026-09-12T19:56:36.701249+00:00",
+      "end_utc": "2026-09-12T19:56:36.701573+00:00",
+      "latency_ms": 0.32322000015483354,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_db_pref",
+      "issue_monotonic": 2382.295147961,
+      "start_monotonic": 2382.295149491,
+      "end_monotonic": 2382.295488209,
+      "issue_utc": "2026-09-12T19:56:36.701577+00:00",
+      "start_utc": "2026-09-12T19:56:36.701578+00:00",
+      "end_utc": "2026-09-12T19:56:36.701918+00:00",
+      "latency_ms": 0.33871799996632035,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_lang_pref",
+      "issue_monotonic": 2382.295492974,
+      "start_monotonic": 2382.295494652,
+      "end_monotonic": 2382.29574391,
+      "issue_utc": "2026-09-12T19:56:36.701922+00:00",
+      "start_utc": "2026-09-12T19:56:36.701924+00:00",
+      "end_utc": "2026-09-12T19:56:36.702173+00:00",
+      "latency_ms": 0.24925800016717403,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_meeting_day",
+      "issue_monotonic": 2382.295747713,
+      "start_monotonic": 2382.295749075,
+      "end_monotonic": 2382.29601973,
+      "issue_utc": "2026-09-12T19:56:36.702177+00:00",
+      "start_utc": "2026-09-12T19:56:36.702178+00:00",
+      "end_utc": "2026-09-12T19:56:36.702449+00:00",
+      "latency_ms": 0.2706549998947594,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_budget",
+      "issue_monotonic": 2382.296023856,
+      "start_monotonic": 2382.296025128,
+      "end_monotonic": 2382.296509048,
+      "issue_utc": "2026-09-12T19:56:36.702453+00:00",
+      "start_utc": "2026-09-12T19:56:36.702454+00:00",
+      "end_utc": "2026-09-12T19:56:36.702938+00:00",
+      "latency_ms": 0.4839200000787969,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_oncall",
+      "issue_monotonic": 2382.296512916,
+      "start_monotonic": 2382.296514279,
+      "end_monotonic": 2382.297078029,
+      "issue_utc": "2026-09-12T19:56:36.702942+00:00",
+      "start_utc": "2026-09-12T19:56:36.702943+00:00",
+      "end_utc": "2026-09-12T19:56:36.703507+00:00",
+      "latency_ms": 0.5637500003103924,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_seine",
+      "issue_monotonic": 2382.29708194,
+      "start_monotonic": 2382.297083294,
+      "end_monotonic": 2382.297511664,
+      "issue_utc": "2026-09-12T19:56:36.703511+00:00",
+      "start_utc": "2026-09-12T19:56:36.703512+00:00",
+      "end_utc": "2026-09-12T19:56:36.703941+00:00",
+      "latency_ms": 0.4283700000087265,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    }
+  ],
+  "denominators": {
+    "issued": 11,
+    "successes": 11,
+    "timeouts": 0,
+    "errors": 0,
+    "failed_remain_in_denominator": true,
+    "excluded": 2,
+    "slow_samples_retained": true
+  },
+  "distributions": [
+    {
+      "name": "warm-serial",
+      "sample_count": 9,
+      "p50_ms": 0.4283700000087265,
+      "p95_ms": 0.77460720012823,
+      "p99_ms": 0.7892910401096742,
+      "throughput_qps": 1898.753004553622,
+      "confidence_interval": {
+        "point": 0.7746,
+        "ci_low": 0.4839,
+        "ci_high": 0.793,
+        "ci_method": "bootstrap-pctl"
+      },
+      "official_claim": false,
+      "asserted": false
+    }
+  ],
+  "validity": {
+    "valid": true,
+    "invalid_reasons": []
+  },
+  "raw_artifacts": {
+    "observations_sha256": "sha256:03f77d805b4145b3bc9cfba85d3453e2062ed0258bbf204a6f2f2500589acdf2",
+    "workload_sha256": "sha256:7f7df3b8681d1e977ce28fa6786dae630900e9c0a6217d50e23f411d38c1b92c",
+    "result_digest": "sha256:d76715a5fa43a32a8e0fa084a86cb119c3580bb241fae94a5776d77f19a5fbc4"
+  }
+}
