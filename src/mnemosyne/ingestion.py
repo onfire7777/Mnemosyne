@@ -30,6 +30,16 @@ from mnemosyne.storage import LocalObjectStore
 
 Modality = Literal["text", "image", "audio", "video", "binary", "multimodal"]
 
+# Reserved eval-only names. Generic caller keys such as should_write,
+# held_out, and failure_class are preserved on IngestRequest.metadata.
+_HELD_OUT_WRITE_GATE_KEYS = frozenset(
+    {
+        "held_out_label",
+        "write_gate_label",
+        "eval_label",
+    }
+)
+
 
 def residency_policy_report(
     *,
@@ -179,7 +189,7 @@ class IngestionPipeline:
         elif provenance.valid:
             capability_tags.append("provenance-untrusted")
         metadata = {
-            **request.metadata,
+            **_without_held_out_write_gate_labels(request.metadata if isinstance(request.metadata, dict) else {}),
             "media_type": request.media_type,
             "provenance_decision": provenance.to_dict(),
             "ingest_classification": classification,
@@ -271,9 +281,13 @@ class IngestionPipeline:
             prediction_error=prediction_error,
             already_present=already_present,
         )
-        consolidation_metadata = dict(metadata.get("consolidation") or {})
-        consolidation_metadata.setdefault("prediction_error", prediction_error["score"])
-        consolidation_metadata.setdefault("prediction_error_gate", prediction_error["gate"])
+        consolidation_metadata = _without_held_out_write_gate_labels(
+            metadata.get("consolidation") if isinstance(metadata.get("consolidation"), dict) else {}
+        )
+        # Computed prediction-error is the only gate signal. Client-supplied
+        # consolidation.prediction_error cannot raise or suppress authority.
+        consolidation_metadata["prediction_error"] = prediction_error["score"]
+        consolidation_metadata["prediction_error_gate"] = prediction_error["gate"]
         consolidation_metadata.setdefault("write_priority", write_priority)
         metadata["consolidation"] = consolidation_metadata
         metadata["write_priority"] = write_priority
@@ -492,7 +506,11 @@ class IngestionPipeline:
         metadata = request.metadata if isinstance(request.metadata, dict) else {}
         importance = _bounded_signal(metadata.get("importance"), default=0.65 if request.correction else 0.45)
         novelty = 0.0 if already_present else _bounded_signal(metadata.get("novelty"), default=0.65)
-        surprise = _bounded_signal(metadata.get("surprise"), default=float(prediction_error.get("score", 0.0)))
+        computed_surprise = float(prediction_error.get("score", 0.0))
+        if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
+            surprise = _bounded_signal(computed_surprise, default=0.0)
+        else:
+            surprise = _bounded_signal(metadata.get("surprise"), default=computed_surprise)
         raw_reward = _bounded_signal(metadata.get("reward"), default=0.5 if request.actor == "user" else 0.25)
         reward = raw_reward if trust_tier <= int(TrustTier.AUTHENTICATED) else min(raw_reward, 0.25)
         if trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL):
@@ -559,7 +577,9 @@ class IngestionPipeline:
                 "source_trust_tier": trust_tier,
                 "sensitivity": sensitivity,
                 "capability_tags": list(capability_tags),
-                "metadata": dict(request.metadata),
+                "metadata": _without_held_out_write_gate_labels(
+                    request.metadata if isinstance(request.metadata, dict) else {}
+                ),
             },
         )
 
@@ -585,6 +605,16 @@ def classify_request(request: IngestRequest, payload: bytes) -> dict[str, Any]:
         "sanitize_as_data": "sanitize-as-data" in capability_tags or trust_tier >= int(TrustTier.UNTRUSTED_EXTERNAL),
         "pii_detected": sorted(pii_tags),
     }
+
+
+def _without_held_out_write_gate_labels(metadata: dict[str, Any]) -> dict[str, Any]:
+    cleaned = {key: value for key, value in metadata.items() if key not in _HELD_OUT_WRITE_GATE_KEYS}
+    consolidation = cleaned.get("consolidation")
+    if isinstance(consolidation, dict):
+        cleaned["consolidation"] = {
+            key: value for key, value in consolidation.items() if key not in _HELD_OUT_WRITE_GATE_KEYS
+        }
+    return cleaned
 
 
 def _bounded_signal(value: object, *, default: float) -> float:

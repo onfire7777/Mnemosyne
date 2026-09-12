@@ -133,9 +133,19 @@ def _bounded_unit(value: object, *, default: float = 0.0) -> float:
         parsed = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         parsed = default
-    if parsed != parsed:
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
         parsed = default
     return round(max(0.0, min(1.0, parsed)), 6)
+
+
+def _parse_unit_score(value: object) -> float | None:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    if parsed != parsed or parsed in {float("inf"), float("-inf")}:
+        return None
+    return max(0.0, min(1.0, parsed))
 
 
 def _non_negative_int(value: object, *, default: int = 0) -> int:
@@ -1372,21 +1382,34 @@ class ConsolidationWorker:
     def _prediction_error_gate(self, payload: dict[str, Any], evidence: list[Evidence]) -> dict[str, Any]:
         threshold = max(0.0, min(1.0, float(getattr(self.policy, "prediction_error_threshold", 0.35))))
         scores: list[float] = []
-        payload_error = payload.get("prediction_error")
-        if isinstance(payload_error, dict):
-            try:
-                scores.append(float(payload_error.get("score")))
-            except (TypeError, ValueError):
-                pass
+        explicit_invalid = False
+        if "prediction_error" in payload:
+            raw_error = payload.get("prediction_error")
+            if not isinstance(raw_error, dict):
+                explicit_invalid = True
+            else:
+                parsed = _parse_unit_score(raw_error.get("score"))
+                if parsed is None:
+                    explicit_invalid = True
+                else:
+                    scores.append(parsed)
         for item in evidence:
             metadata = item.metadata if isinstance(item.metadata, dict) else {}
             consolidation = metadata.get("consolidation")
-            if isinstance(consolidation, dict):
-                try:
-                    scores.append(float(consolidation.get("prediction_error")))
-                except (TypeError, ValueError):
-                    pass
-        score = max((max(0.0, min(1.0, value)) for value in scores if value == value), default=1.0)
+            if isinstance(consolidation, dict) and "prediction_error" in consolidation:
+                parsed = _parse_unit_score(consolidation.get("prediction_error"))
+                if parsed is None:
+                    explicit_invalid = True
+                else:
+                    scores.append(parsed)
+        if scores:
+            score = max(scores)
+        elif explicit_invalid:
+            # Absent unmeasured jobs still fail open; malformed/non-finite
+            # surprise must not raise write authority.
+            score = 0.0
+        else:
+            score = 1.0
         return {
             "score": round(score, 6),
             "threshold": threshold,
@@ -1527,11 +1550,13 @@ class ConsolidationWorker:
         if name == "surprise":
             fallback = consolidation.get("prediction_error", fallback)
         raw = cid_scores.get(name, consolidation.get(name, fallback))
-        try:
-            value = float(raw)
-        except (TypeError, ValueError):
-            value = 1.0
-        return _bounded_unit(value, default=1.0)
+        explicit = name in cid_scores or name in consolidation or name in metadata
+        parsed = _parse_unit_score(raw)
+        if parsed is None:
+            if name == "surprise" and explicit:
+                return 0.0
+            return _bounded_unit(raw, default=1.0)
+        return _bounded_unit(parsed, default=1.0)
 
     def _apply_workspace_advisory(
         self,
