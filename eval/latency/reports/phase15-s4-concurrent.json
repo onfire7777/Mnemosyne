@@ -1,0 +1,621 @@
+{
+  "schema": "mnemosyne.cap006.latency-receipt/v1",
+  "receipt_class": "synthetic-development",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "claim_status": "synthetic-development-receipt-only",
+  "identity": {
+    "repository_sha": "c3a16b7e0d1e593f6957a291f2ae61cd469a7359",
+    "clean_tree": false,
+    "command": [
+      "eval/latency/bench.py",
+      "cap006-synthetic"
+    ],
+    "arguments": {
+      "distribution": "concurrent",
+      "declared_concurrency": 3,
+      "warmup_count": 1,
+      "timeout_seconds": 1.0,
+      "executor_workers": 3,
+      "workload": "phase15-s4-synthetic-dev-v1"
+    },
+    "utc_start": "2026-09-12T19:23:31.398239+00:00",
+    "utc_end": "2026-09-12T19:23:31.462016+00:00",
+    "monotonic_start": 396.991819474,
+    "monotonic_end": 397.05559457,
+    "host": {
+      "os": "Linux",
+      "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 11 16:06:03 UTC 2026",
+      "kernel": "6.12.94+",
+      "architecture": "x86_64",
+      "cpu_flags": [
+        "fpu",
+        "vme",
+        "de",
+        "pse",
+        "tsc",
+        "msr",
+        "pae",
+        "mce",
+        "cx8",
+        "apic",
+        "sep",
+        "mtrr",
+        "pge",
+        "mca",
+        "cmov",
+        "pat",
+        "pse36",
+        "clflush",
+        "dts",
+        "mmx",
+        "fxsr",
+        "sse",
+        "sse2",
+        "ss",
+        "ht",
+        "syscall",
+        "nx",
+        "pdpe1gb",
+        "rdtscp",
+        "lm",
+        "constant_tsc",
+        "pebs",
+        "bts",
+        "rep_good",
+        "nopl",
+        "xtopology",
+        "nonstop_tsc",
+        "cpuid",
+        "tsc_known_freq",
+        "pni",
+        "pclmulqdq",
+        "dtes64",
+        "vmx",
+        "ssse3",
+        "fma",
+        "cx16",
+        "pcid",
+        "sse4_1",
+        "sse4_2",
+        "x2apic",
+        "movbe",
+        "popcnt",
+        "tsc_deadline_timer",
+        "aes",
+        "xsave",
+        "avx",
+        "f16c",
+        "rdrand",
+        "hypervisor",
+        "lahf_lm",
+        "abm",
+        "3dnowprefetch",
+        "cpuid_fault",
+        "ssbd",
+        "ibrs",
+        "ibpb",
+        "stibp",
+        "ibrs_enhanced",
+        "tpr_shadow",
+        "flexpriority",
+        "ept",
+        "vpid",
+        "ept_ad",
+        "fsgsbase",
+        "tsc_adjust",
+        "bmi1",
+        "avx2",
+        "smep",
+        "bmi2",
+        "erms",
+        "invpcid",
+        "avx512f",
+        "avx512dq",
+        "rdseed",
+        "adx",
+        "smap",
+        "avx512ifma",
+        "clflushopt",
+        "clwb",
+        "avx512cd",
+        "sha_ni",
+        "avx512bw",
+        "avx512vl",
+        "xsaveopt",
+        "xsavec",
+        "xgetbv1",
+        "xsaves",
+        "avx_vnni",
+        "avx512_bf16",
+        "wbnoinvd",
+        "arat",
+        "vnmi",
+        "avx512vbmi",
+        "umip",
+        "pku",
+        "ospke",
+        "avx512_vbmi2",
+        "gfni",
+        "vaes",
+        "vpclmulqdq",
+        "avx512_vnni",
+        "avx512_bitalg",
+        "avx512_vpopcntdq",
+        "rdpid",
+        "bus_lock_detect",
+        "cldemote",
+        "movdiri",
+        "movdir64b",
+        "fsrm",
+        "md_clear",
+        "serialize",
+        "tsxldtrk",
+        "amx_bf16",
+        "avx512_fp16",
+        "amx_tile",
+        "amx_int8",
+        "flush_l1d",
+        "arch_capabilities"
+      ],
+      "accelerator": "none",
+      "runtime_versions": {
+        "python": "3.12.3"
+      }
+    },
+    "digests": {
+      "dataset": "sha256:07506b1ed6e026af62736a728e0ced93766a591398bcab313f3a6d33d3b66437",
+      "fixture": "sha256:3d64f0d85fa329f075805c9c3eba1e07759889527b09041d76cc0ce9305315ec",
+      "config": "sha256:8fda7e91c0894139f55963898120e031c2ef55a6f1734c1f88616ca3f3d83755",
+      "model": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "tokenizer": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "provider": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "container_image": "sha256:30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+      "schema": "sha256:5f388e88eccb0115bba56a0c5491e163cb429185db195aa1f68cdb2639140f68",
+      "result_contract": "sha256:729adcff8b76b376ecb216e4c6f6b196b3496286ac0b2c9f25fd3565d78931b7"
+    }
+  },
+  "sut_boundary": {
+    "included_processes": [
+      "synthetic-dev-harness"
+    ],
+    "containers": [],
+    "databases": [],
+    "proxies": [],
+    "caches": [],
+    "indexes": [],
+    "filesystems": [
+      "workspace"
+    ],
+    "background_workers": [],
+    "benchmark_process_count": 1,
+    "host_workload_count": 1
+  },
+  "workload": {
+    "order": [
+      "q_capital_france",
+      "q_capital_germany",
+      "q_capital_japan",
+      "q_db_pref",
+      "q_lang_pref",
+      "q_meeting_day",
+      "q_budget",
+      "q_oncall",
+      "q_seine"
+    ],
+    "order_digest": "sha256:a8a98d106c8aab84aa4bec703e6403e252ece5c4a213274bc92e5fa8280958bb",
+    "operations": [
+      {
+        "op_id": "q_capital_france",
+        "kind": "synthetic-dev-retrieve",
+        "query": "What is the capital of France?"
+      },
+      {
+        "op_id": "q_capital_germany",
+        "kind": "synthetic-dev-retrieve",
+        "query": "capital city of Germany"
+      },
+      {
+        "op_id": "q_capital_japan",
+        "kind": "synthetic-dev-retrieve",
+        "query": "Japan capital most populous"
+      },
+      {
+        "op_id": "q_db_pref",
+        "kind": "synthetic-dev-retrieve",
+        "query": "which database does the user prefer for production"
+      },
+      {
+        "op_id": "q_lang_pref",
+        "kind": "synthetic-dev-retrieve",
+        "query": "what programming language does the user use"
+      },
+      {
+        "op_id": "q_meeting_day",
+        "kind": "synthetic-dev-retrieve",
+        "query": "when was the planning meeting rescheduled to"
+      },
+      {
+        "op_id": "q_budget",
+        "kind": "synthetic-dev-retrieve",
+        "query": "what is next quarter infrastructure budget cap"
+      },
+      {
+        "op_id": "q_oncall",
+        "kind": "synthetic-dev-retrieve",
+        "query": "when does the on-call rotation change"
+      },
+      {
+        "op_id": "q_seine",
+        "kind": "synthetic-dev-retrieve",
+        "query": "how long is the river Seine"
+      }
+    ],
+    "warmup": {
+      "explicit": true,
+      "count": 1,
+      "operation_ids": [
+        "q_capital_france"
+      ],
+      "excluded_from_distribution": true
+    },
+    "repetitions": 1,
+    "timeouts_seconds": 1.0,
+    "retries": 0,
+    "cold_warm_state": "warm"
+  },
+  "concurrency": {
+    "declared_max_in_flight": 3,
+    "observed_max_in_flight": 3,
+    "declared_overlap": true,
+    "observed_overlap": true,
+    "overlap_evidence": [
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_capital_germany"
+        ],
+        "overlap_monotonic": 0.020584494999980052
+      },
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_capital_japan"
+        ],
+        "overlap_monotonic": 0.020118183000022327
+      },
+      {
+        "op_ids": [
+          "q_capital_france",
+          "q_db_pref"
+        ],
+        "overlap_monotonic": 0.0001496399999609821
+      },
+      {
+        "op_ids": [
+          "q_capital_germany",
+          "q_capital_japan"
+        ],
+        "overlap_monotonic": 0.020118183000022327
+      },
+      {
+        "op_ids": [
+          "q_capital_germany",
+          "q_db_pref"
+        ],
+        "overlap_monotonic": 0.00025603500000670465
+      },
+      {
+        "op_ids": [
+          "q_capital_germany",
+          "q_lang_pref"
+        ],
+        "overlap_monotonic": 7.160400002703682e-05
+      },
+      {
+        "op_ids": [
+          "q_db_pref",
+          "q_lang_pref"
+        ],
+        "overlap_monotonic": 0.019971946999987722
+      },
+      {
+        "op_ids": [
+          "q_db_pref",
+          "q_meeting_day"
+        ],
+        "overlap_monotonic": 0.019875302999992073
+      },
+      {
+        "op_ids": [
+          "q_lang_pref",
+          "q_meeting_day"
+        ],
+        "overlap_monotonic": 0.020012700999984645
+      },
+      {
+        "op_ids": [
+          "q_lang_pref",
+          "q_budget"
+        ],
+        "overlap_monotonic": 0.00010641000000077838
+      },
+      {
+        "op_ids": [
+          "q_meeting_day",
+          "q_budget"
+        ],
+        "overlap_monotonic": 0.00022446200000558747
+      },
+      {
+        "op_ids": [
+          "q_meeting_day",
+          "q_oncall"
+        ],
+        "overlap_monotonic": 8.91139999907864e-05
+      },
+      {
+        "op_ids": [
+          "q_budget",
+          "q_oncall"
+        ],
+        "overlap_monotonic": 0.02000436999998101
+      },
+      {
+        "op_ids": [
+          "q_budget",
+          "q_seine"
+        ],
+        "overlap_monotonic": 0.01988692799994851
+      },
+      {
+        "op_ids": [
+          "q_oncall",
+          "q_seine"
+        ],
+        "overlap_monotonic": 0.01999192999994648
+      }
+    ],
+    "worker_count": 3,
+    "total_model_request_count": 9,
+    "matches_declaration": true
+  },
+  "resources": {
+    "before": {
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6164500480,
+      "available_memory_bytes": 7273369600,
+      "swap_bytes": 0,
+      "process_rss_bytes": 39276544,
+      "process_pss_or_working_set_bytes": 16863232,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.04248046875,
+        0.0791015625,
+        0.025390625
+      ],
+      "cpu_seconds": 0.056924999999999996
+    },
+    "during": [
+      {
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6164500480,
+        "available_memory_bytes": 7273369600,
+        "swap_bytes": 0,
+        "process_rss_bytes": 39276544,
+        "process_pss_or_working_set_bytes": 16863232,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.04248046875,
+          0.0791015625,
+          0.025390625
+        ],
+        "cpu_seconds": 0.057171999999999994
+      }
+    ],
+    "after": {
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6164414464,
+      "available_memory_bytes": 7273295872,
+      "swap_bytes": 0,
+      "process_rss_bytes": 39276544,
+      "process_pss_or_working_set_bytes": 17020928,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.04248046875,
+        0.0791015625,
+        0.025390625
+      ],
+      "cpu_seconds": 0.06038299999999999
+    },
+    "memory_pressure": 0.4331419486212788,
+    "swap_pagefile_delta": 0,
+    "disk_index_growth": 0,
+    "network_bytes": 0,
+    "first_abort": null
+  },
+  "observations": [
+    {
+      "op_id": "q_capital_france",
+      "issue_monotonic": 396.992086485,
+      "start_monotonic": 396.992094592,
+      "end_monotonic": 396.992105943,
+      "issue_utc": "2026-09-12T19:23:31.398516+00:00",
+      "start_utc": "2026-09-12T19:23:31.398524+00:00",
+      "end_utc": "2026-09-12T19:23:31.398536+00:00",
+      "latency_ms": 0.011351000011927681,
+      "outcome": "success",
+      "error": null,
+      "excluded": true,
+      "excluded_reason": "warmup"
+    },
+    {
+      "op_id": "q_capital_france",
+      "issue_monotonic": 396.993215798,
+      "start_monotonic": 396.993588122,
+      "end_monotonic": 397.01449088,
+      "issue_utc": "2026-09-12T19:23:31.399646+00:00",
+      "start_utc": "2026-09-12T19:23:31.400020+00:00",
+      "end_utc": "2026-09-12T19:23:31.420922+00:00",
+      "latency_ms": 20.902757999976984,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_capital_germany",
+      "issue_monotonic": 396.993637295,
+      "start_monotonic": 396.993906385,
+      "end_monotonic": 397.014597275,
+      "issue_utc": "2026-09-12T19:23:31.400068+00:00",
+      "start_utc": "2026-09-12T19:23:31.400337+00:00",
+      "end_utc": "2026-09-12T19:23:31.421028+00:00",
+      "latency_ms": 20.690890000025774,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_capital_japan",
+      "issue_monotonic": 396.993939132,
+      "start_monotonic": 396.994194044,
+      "end_monotonic": 397.014312227,
+      "issue_utc": "2026-09-12T19:23:31.400369+00:00",
+      "start_utc": "2026-09-12T19:23:31.400625+00:00",
+      "end_utc": "2026-09-12T19:23:31.420744+00:00",
+      "latency_ms": 20.118183000022327,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_db_pref",
+      "issue_monotonic": 396.994225389,
+      "start_monotonic": 397.01434124,
+      "end_monotonic": 397.034497618,
+      "issue_utc": "2026-09-12T19:23:31.400655+00:00",
+      "start_utc": "2026-09-12T19:23:31.420770+00:00",
+      "end_utc": "2026-09-12T19:23:31.440928+00:00",
+      "latency_ms": 20.15637799996739,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_lang_pref",
+      "issue_monotonic": 396.994238008,
+      "start_monotonic": 397.014525671,
+      "end_monotonic": 397.034635016,
+      "issue_utc": "2026-09-12T19:23:31.400667+00:00",
+      "start_utc": "2026-09-12T19:23:31.420955+00:00",
+      "end_utc": "2026-09-12T19:23:31.441066+00:00",
+      "latency_ms": 20.109344999980294,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_meeting_day",
+      "issue_monotonic": 396.994244889,
+      "start_monotonic": 397.014622315,
+      "end_monotonic": 397.034753068,
+      "issue_utc": "2026-09-12T19:23:31.400674+00:00",
+      "start_utc": "2026-09-12T19:23:31.421051+00:00",
+      "end_utc": "2026-09-12T19:23:31.441184+00:00",
+      "latency_ms": 20.130752999989454,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_budget",
+      "issue_monotonic": 396.994252299,
+      "start_monotonic": 397.034528606,
+      "end_monotonic": 397.054668324,
+      "issue_utc": "2026-09-12T19:23:31.400681+00:00",
+      "start_utc": "2026-09-12T19:23:31.440958+00:00",
+      "end_utc": "2026-09-12T19:23:31.461099+00:00",
+      "latency_ms": 20.13971799999581,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_oncall",
+      "issue_monotonic": 396.994258899,
+      "start_monotonic": 397.034663954,
+      "end_monotonic": 397.054773326,
+      "issue_utc": "2026-09-12T19:23:31.400688+00:00",
+      "start_utc": "2026-09-12T19:23:31.441093+00:00",
+      "end_utc": "2026-09-12T19:23:31.461204+00:00",
+      "latency_ms": 20.109371999978976,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    },
+    {
+      "op_id": "q_seine",
+      "issue_monotonic": 396.994264991,
+      "start_monotonic": 397.034781396,
+      "end_monotonic": 397.05498962,
+      "issue_utc": "2026-09-12T19:23:31.400694+00:00",
+      "start_utc": "2026-09-12T19:23:31.441210+00:00",
+      "end_utc": "2026-09-12T19:23:31.461421+00:00",
+      "latency_ms": 20.208223999986785,
+      "outcome": "success",
+      "error": null,
+      "excluded": false,
+      "excluded_reason": null
+    }
+  ],
+  "denominators": {
+    "issued": 10,
+    "successes": 10,
+    "timeouts": 0,
+    "errors": 0,
+    "failed_remain_in_denominator": true,
+    "excluded": 1,
+    "slow_samples_retained": true
+  },
+  "distributions": [
+    {
+      "name": "concurrent",
+      "sample_count": 9,
+      "p50_ms": 20.13971799999581,
+      "p95_ms": 20.8180107999965,
+      "p99_ms": 20.885808559980887,
+      "throughput_qps": 142.7068159502403,
+      "confidence_interval": {
+        "point": 20.818,
+        "ci_low": 20.1564,
+        "ci_high": 20.9028,
+        "ci_method": "bootstrap-pctl"
+      },
+      "official_claim": false,
+      "asserted": false
+    }
+  ],
+  "validity": {
+    "valid": true,
+    "invalid_reasons": []
+  },
+  "raw_artifacts": {
+    "observations_sha256": "sha256:76cb4be8aaf16c4e298f709cd2289d9151cb7cbc73ef386bcffb787df4b1f4f2",
+    "workload_sha256": "sha256:e754c2c989ce55bd1acd1c1fcab9925f21b0e4c26f5cd47454fd5740ecfdd8c7",
+    "result_digest": "sha256:203ae16c9cbd95f0e58a1e30deb158aa63e9079ff493006f2f30947020c2c821"
+  }
+}
