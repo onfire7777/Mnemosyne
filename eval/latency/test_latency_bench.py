@@ -340,6 +340,49 @@ def test_failures_remain_in_denominator_and_slow_samples_are_kept():
     assert receipt["denominators"]["slow_samples_retained"] is True
 
 
+def test_late_callback_is_timeout_observation_not_runner_hang():
+    block_s = 1.0
+    timeout_s = 0.03
+
+    def _block(_op: dict) -> None:
+        time.sleep(block_s)
+
+    started = time.perf_counter()
+    serial = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=1,
+        timeout_seconds=timeout_s,
+        execute=_block,
+    )
+    serial_elapsed = time.perf_counter() - started
+    assert serial_elapsed < block_s, (
+        f"serial runner waited for late callback ({serial_elapsed:.3f}s >= {block_s}s)"
+    )
+    measured = [obs for obs in serial["observations"] if not obs["excluded"]]
+    assert measured
+    assert all(obs["outcome"] == "timeout" for obs in measured)
+    assert serial["denominators"]["timeouts"] >= len(measured)
+    assert all((obs["end_monotonic"] - obs["start_monotonic"]) < block_s for obs in measured)
+
+    started = time.perf_counter()
+    concurrent = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_CONCURRENT,
+        declared_concurrency=3,
+        warmup_count=1,
+        timeout_seconds=timeout_s,
+        execute=_block,
+    )
+    concurrent_elapsed = time.perf_counter() - started
+    assert concurrent_elapsed < block_s, (
+        f"concurrent runner waited for late callback ({concurrent_elapsed:.3f}s >= {block_s}s)"
+    )
+    concurrent_measured = [obs for obs in concurrent["observations"] if not obs["excluded"]]
+    assert concurrent_measured
+    assert all(obs["outcome"] == "timeout" for obs in concurrent_measured)
+    assert concurrent["denominators"]["timeouts"] >= len(concurrent_measured)
+
+
 def test_warm_driver_emits_the_same_serial_abi():
     import bench_warm
 
@@ -487,6 +530,7 @@ def test_phase15_reports_are_separate_synthetic_receipts():
             text=True,
         )
         assert "execute_pinned_workload" in tree
+        assert "_execute_with_deadline" in tree
 
 
 def test_phase15_write_does_not_relabel_historical_latest():

@@ -246,6 +246,34 @@ def _synthetic_execute(
     hashlib.sha256(payload).hexdigest()
 
 
+def _execute_with_deadline(
+    execute: Callable[[dict[str, str]], None],
+    op: dict[str, str],
+    timeout_seconds: float,
+) -> None:
+    error: list[BaseException] = []
+    finished = threading.Event()
+
+    def _runner() -> None:
+        try:
+            execute(op)
+        except BaseException as exc:
+            error.append(exc)
+        finally:
+            finished.set()
+
+    worker = threading.Thread(
+        target=_runner,
+        name=f"cap006-execute-{op.get('op_id', 'op')}",
+        daemon=True,
+    )
+    worker.start()
+    if not finished.wait(timeout=timeout_seconds):
+        raise TimeoutError(f"callback exceeded timeout_seconds={timeout_seconds}")
+    if error:
+        raise error[0]
+
+
 def _run_one_observation(
     op: dict[str, str],
     *,
@@ -267,7 +295,7 @@ def _run_one_observation(
     error: str | None = None
     outcome = "success"
     try:
-        execute(op)
+        _execute_with_deadline(execute, op, timeout_seconds)
         if time.perf_counter() - start_monotonic > timeout_seconds:
             outcome = "timeout"
     except TimeoutError as exc:
