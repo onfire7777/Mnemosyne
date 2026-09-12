@@ -15,7 +15,15 @@ from eval.public.action_cli import ActionCLI, ActionCLIError
 from eval.public.bundle import BundleError, _scoring_labels, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
-from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
+from eval.public.adapters import security_calibration_probe
+from eval.public.runner import (
+    _ADAPTERS,
+    _PROFILE_CONTRACTS,
+    _validate_security_calibration_suite,
+    load_pending_qa_suites,
+    load_registry,
+    run_public_suite,
+)
 from eval.public.scoring import ScoringError, score_profile
 
 
@@ -1478,6 +1486,220 @@ def test_qa_authorized_retrieval_enforces_frozen_evidence_budget(
         hops[0]["rows"] = rows
     with pytest.raises(BundleError, match=message):
         _authorized_cids_from_hops(hops, {"corpus": corpus}, budget)
+
+
+def test_security_calibration_registry_is_development_only_and_digest_bound() -> None:
+    import subprocess
+
+    from eval.public import security_calibration as security_calibration_core
+
+    suite_name = security_calibration_probe.SUITE
+    suite = load_registry()[suite_name]
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "eval/public/fixtures/security-calibration-development.json"
+    )
+    repo_root = Path(__file__).resolve().parents[1]
+    revision = subprocess.run(
+        [
+            "git",
+            "log",
+            "-1",
+            "--format=%H",
+            "--",
+            str(fixture_path.relative_to(repo_root)),
+        ],
+        capture_output=True,
+        check=True,
+        cwd=repo_root,
+        text=True,
+    ).stdout.strip()
+    assert suite["revision"] == revision
+    assert suite["dataset_sha256"] == hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+    assert suite["dataset_sha256"] == security_calibration_core.canonical_sha256(
+        security_calibration_core.load_fixture()
+    )
+    assert suite["adapter"] == "security-calibration-probe"
+    assert suite["scoring_profile"] == "security-calibration-development-v1"
+    assert suite["fixture"] == "fixtures/security-calibration-development.json"
+    assert suite["license"] == "CC0-1.0"
+    assert suite["split_role"] == "development"
+    assert suite["system_seam"] == "public-cli-subprocess"
+    assert suite["family"] == "security-calibration-development"
+    assert suite["interval_method"] == "descriptive"
+    assert suite["admission_state"] == "PROPOSED"
+    assert suite["publishable"] is False
+    assert suite["pbpp_headline_eligible"] is False
+    assert suite["headline_eligible"] is False
+    assert suite["upstream_comparable"] is False
+    assert suite["independent_external_reproduction"] is False
+
+
+def test_security_calibration_adapter_and_profile_dispatch() -> None:
+    suite = load_registry()[security_calibration_probe.SUITE]
+    assert _ADAPTERS[suite["adapter"]] is security_calibration_probe.run
+    assert _PROFILE_CONTRACTS[suite["scoring_profile"]] == (
+        suite["family"],
+        suite["interval_method"],
+    )
+
+
+def test_security_calibration_adapter_returns_observations_without_labels() -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    fixture = security_calibration_core.generate_fixture()
+    traces, measured = security_calibration_probe.run(fixture, _SecurityCalibrationCLI())
+    assert measured == {}
+    assert [trace["case_id"] for trace in traces] == [
+        case["case_id"] for case in fixture["cases"]
+    ]
+    forbidden = {
+        "answerable",
+        "expected_action",
+        "expected_state",
+        "family",
+        "gold",
+        "hard_gate",
+        "labels",
+        "metrics",
+        "passed",
+        "score",
+        "threat_shape",
+    }
+    for trace in traces:
+        assert forbidden.isdisjoint(trace)
+        assert trace["scoring_family"] == "security-calibration-development"
+        assert set(trace) == {
+            "accessed_ids",
+            "action",
+            "case_id",
+            "confidence",
+            "mutation_targets",
+            "provenance_ids",
+            "response_text",
+            "resurrected_ids",
+            "scoring_family",
+            "state",
+            "visible_sessions",
+            "visible_tenants",
+        }
+    scored = score_profile(
+        "security-calibration-development-v1", [{"fixture": fixture}], traces
+    )
+    assert scored["family"] == "security-calibration-development"
+    assert scored["profile"] == "security-calibration-development-v1"
+    assert scored["interval"] == {"method": "descriptive"}
+    assert "security" in scored and "calibration" in scored
+    assert "abstention" in scored and "judge_diagnostics" in scored
+    assert "metrics" not in scored
+    isolation = next(
+        trace
+        for trace in traces
+        if trace["case_id"] == "sc-dev-cross-tenant-isolation"
+    )
+    assert isolation["visible_tenants"] == ["tenant-alpha"]
+
+
+def test_security_calibration_runner_rejects_fixture_digest_and_claim_drift(
+    tmp_path: Path,
+) -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    mutated = dict(security_calibration_core.generate_fixture())
+    mutated["seed"] = 1
+    with pytest.raises(ValueError, match="digest"):
+        run_public_suite(
+            security_calibration_probe.SUITE,
+            tmp_path / "digest-drift",
+            benchmark_override=mutated,
+        )
+    suite = dict(load_registry()[security_calibration_probe.SUITE])
+    suite["publishable"] = True
+    with pytest.raises(ValueError, match="publication flags"):
+        _validate_security_calibration_suite(security_calibration_probe.SUITE, suite)
+    with pytest.raises(ValueError, match="suite id"):
+        _validate_security_calibration_suite("MINJA", suite)
+
+
+def test_security_calibration_runner_writes_development_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    monkeypatch.setitem(
+        runner._ADAPTERS,
+        "security-calibration-probe",
+        lambda fixture, _cli: security_calibration_probe.run(
+            fixture, _SecurityCalibrationCLI()
+        ),
+    )
+    out = tmp_path / "bundle"
+    result = run_public_suite(security_calibration_probe.SUITE, out)
+    assert result["system_seam"] == "public-cli-subprocess"
+    assert result["publishable"] is False
+    assert result["pbpp_headline_eligible"] is False
+    assert result["independent_external_reproduction"] is False
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["family"] == "security-calibration-development"
+    assert metrics["profile"] == "security-calibration-development-v1"
+    assert metrics["interval"] == {"method": "descriptive"}
+    assert "security" in metrics
+    assert "calibration" in metrics
+    assert "abstention" in metrics
+    assert "judge_diagnostics" in metrics
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
+    assert traces
+    assert all("score" not in trace and "labels" not in trace for trace in traces)
+
+
+def test_security_calibration_requires_live_public_cli() -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    with pytest.raises(ValueError, match="live public CLI"):
+        security_calibration_probe.run(
+            security_calibration_core.generate_fixture(), None
+        )
+
+
+class _SecurityCalibrationCLI:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, object]] = []
+        self._items: dict[str, dict[str, str]] = {}
+
+    def capture(
+        self, tenant: str, user: str, content: str, **kwargs: object
+    ) -> dict[str, str]:
+        self.calls.append(("capture", tenant, kwargs.get("source_type")))
+        cid = f"cid-{len(self._items) + 1}"
+        session_id = kwargs.get("session_id")
+        self._items[cid] = {
+            "session_id": session_id if isinstance(session_id, str) else "",
+            "tenant_id": tenant,
+            "text": content,
+        }
+        return {"cid": cid}
+
+    def search(self, tenant: str, query: str, **kwargs: object) -> dict[str, object]:
+        self.calls.append(("search", tenant, query))
+        return {
+            "hits": [
+                {
+                    "id": cid,
+                    "session_id": item["session_id"],
+                    "tenant_id": item["tenant_id"],
+                    "text": item["text"],
+                }
+                for cid, item in self._items.items()
+                if item["tenant_id"] == tenant
+            ]
+        }
+
+    def forget(self, tenant: str, cid: str, **kwargs: object) -> dict[str, bool]:
+        self.calls.append(("forget", tenant, cid))
+        self._items.pop(cid, None)
+        return {"ok": True}
 
 
 def _refresh_digest(bundle: Path, name: str) -> None:

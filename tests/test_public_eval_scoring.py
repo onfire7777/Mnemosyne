@@ -1,7 +1,14 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
+from eval.public import security_calibration as security_calibration_core
+from eval.public.adapters.security_calibration_probe import SCORING_FAMILY
+from eval.public.bundle import BundleError, write_bundle, verify_bundle
+from eval.public.runner import load_registry
 from eval.public.scoring import ScoringError, normalize_answer, score_profile
 
 
@@ -98,3 +105,165 @@ def test_working_action_dispatch_preserves_categories_safety_and_metadata() -> N
     assert scored["interval"]["method"] == "bootstrap"
     assert [row["category"] for row in scored["category_rows"]] == list(categories)
     assert not any(scored["hard_gate_violations"].values())
+
+
+def _security_calibration_observations(
+    fixture: dict,
+    *,
+    case_id: str | None = None,
+    observation: dict | None = None,
+) -> list[dict]:
+    rows = []
+    for case in fixture["cases"]:
+        label = fixture["labels"][case["case_id"]]
+        if label["expected_state"] == "abstained":
+            row = {
+                "accessed_ids": [],
+                "action": "abstain",
+                "case_id": case["case_id"],
+                "confidence": 1.0,
+                "mutation_targets": [],
+                "provenance_ids": [],
+                "response_text": None,
+                "resurrected_ids": [],
+                "scoring_family": SCORING_FAMILY,
+                "state": "abstained",
+                "visible_sessions": [case["session_id"]],
+                "visible_tenants": [case["tenant_id"]],
+            }
+        else:
+            row = {
+                "accessed_ids": [],
+                "action": label["expected_action"],
+                "case_id": case["case_id"],
+                "confidence": 1.0,
+                "mutation_targets": [],
+                "provenance_ids": [],
+                "response_text": label["correct_response"],
+                "resurrected_ids": [],
+                "scoring_family": SCORING_FAMILY,
+                "state": "answered",
+                "visible_sessions": [case["session_id"]],
+                "visible_tenants": [case["tenant_id"]],
+            }
+        if case_id is not None and case["case_id"] == case_id and observation:
+            row.update(observation)
+        rows.append(row)
+    return rows
+
+
+def test_security_calibration_profile_dispatches_without_metric_family_blending() -> None:
+    fixture = security_calibration_core.generate_fixture()
+    traces = _security_calibration_observations(fixture)
+    expected = security_calibration_core.score(
+        fixture, [{key: row[key] for key in security_calibration_core._OBSERVATION_KEYS} for row in traces]
+    )
+    scored = score_profile(
+        "security-calibration-development-v1", [{"fixture": fixture}], traces
+    )
+    for key in ("security", "calibration", "abstention", "judge_diagnostics"):
+        assert scored[key] == expected[key]
+    assert scored["family"] == SCORING_FAMILY
+    assert scored["profile"] == "security-calibration-development-v1"
+    assert scored["interval"] == {"method": "descriptive"}
+    assert scored["passed"] is True
+    assert scored["hard_gate_failed"] is False
+    assert "metrics" not in scored
+    assert scored["security"]["families"]
+    assert "ece" in scored["calibration"]
+    assert "coverage" in scored["abstention"]
+    assert "invocation_count" in scored["judge_diagnostics"]
+
+
+def test_security_calibration_profile_rejects_self_scoring_and_blending() -> None:
+    fixture = security_calibration_core.generate_fixture()
+    traces = _security_calibration_observations(fixture)
+    leaked = dict(traces[0])
+    leaked["passed"] = True
+    leaked["score"] = 1.0
+    with pytest.raises(ScoringError, match="self-scoring"):
+        score_profile(
+            "security-calibration-development-v1",
+            [{"fixture": fixture}],
+            [leaked, *traces[1:]],
+        )
+    blended = dict(traces[0])
+    blended["scoring_family"] = "qa"
+    with pytest.raises(ScoringError, match="blended"):
+        score_profile(
+            "security-calibration-development-v1",
+            [{"fixture": fixture}],
+            [blended, *traces[1:]],
+        )
+
+
+def test_security_calibration_profile_rejects_claim_drift_and_official_relabeling() -> None:
+    fixture = security_calibration_core.generate_fixture()
+    traces = _security_calibration_observations(fixture)
+    drifted = dict(fixture)
+    drifted["publishable"] = True
+    with pytest.raises(ScoringError, match="claim state"):
+        score_profile(
+            "security-calibration-development-v1", [{"fixture": drifted}], traces
+        )
+    relabeled = dict(fixture)
+    relabeled["suite"] = "MINJA"
+    with pytest.raises(ScoringError, match="official or upstream"):
+        score_profile(
+            "security-calibration-development-v1", [{"fixture": relabeled}], traces
+        )
+
+
+def test_security_calibration_hard_gate_is_not_offset_by_other_families() -> None:
+    fixture = security_calibration_core.generate_fixture()
+    traces = _security_calibration_observations(
+        fixture,
+        case_id="sc-dev-cross-tenant-isolation",
+        observation={"visible_tenants": ["tenant-alpha", "tenant-beta"]},
+    )
+    scored = score_profile(
+        "security-calibration-development-v1", [{"fixture": fixture}], traces
+    )
+    assert scored["hard_gate_failed"] is True
+    assert scored["passed"] is False
+    assert scored["hard_failures"]
+    assert scored["calibration"]["ece"] == 0.0
+    assert scored["security"]["families"]["cross_tenant_isolation"]["successful_attacks"] == 1
+
+
+def test_security_calibration_bundle_verify_rejects_family_blending(
+    tmp_path: Path,
+) -> None:
+    fixture = security_calibration_core.generate_fixture()
+    traces = _security_calibration_observations(fixture)
+    suite = load_registry()["security-calibration-style-development-v1"]
+    measured = score_profile(
+        "security-calibration-development-v1", [{"fixture": fixture}], traces
+    )
+    source = tmp_path / "source"
+    write_bundle(
+        source,
+        benchmark=fixture,
+        metadata={**suite, "suite": "security-calibration-style-development-v1"},
+        metrics=measured,
+        traces=traces,
+    )
+    traces[0]["scoring_family"] = "qa"
+    (source / "traces.jsonl").write_text(
+        "".join(
+            json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+            for row in traces
+        )
+    )
+    manifest = json.loads((source / "bundle-manifest.json").read_text())
+    import hashlib
+
+    manifest["files"]["traces.jsonl"] = hashlib.sha256(
+        (source / "traces.jsonl").read_bytes()
+    ).hexdigest()
+    (source / "bundle-manifest.json").write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+    )
+    with pytest.raises(BundleError, match="blended"):
+        verify_bundle(source)
+
