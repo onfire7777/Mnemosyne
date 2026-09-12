@@ -14,17 +14,26 @@ Run:
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
 EVAL_DIR = HERE.parents[1]
 REPO_ROOT = HERE.parents[2]
-for p in (str(HERE.parent), str(REPO_ROOT / "src"), str(EVAL_DIR)):
+LATENCY_WARM_DIR = EVAL_DIR / "latency_warm"
+for p in (str(HERE.parent), str(LATENCY_WARM_DIR), str(REPO_ROOT / "src"), str(EVAL_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
 import bench  # noqa: E402  the module under test
+
+CAP006_SCHEMA = "mnemosyne.cap006.latency-receipt/v1"
+WARM_REPORT = HERE.parent / "reports" / "phase15-s4-warm.json"
+CONCURRENT_REPORT = HERE.parent / "reports" / "phase15-s4-concurrent.json"
+LATEST_JSON = HERE.parent / "reports" / "latency_bench_latest.json"
+WARM_LATEST_JSON = LATENCY_WARM_DIR / "reports" / "warm_latency_latest.json"
 
 
 def _args(**over) -> argparse.Namespace:
@@ -109,6 +118,312 @@ def test_markdown_renders():
     assert "Long-Lived-Server Fast-Path P95 Latency Bench" in md
     assert "fast_path_total" in md
     assert "what would close the gap" in md.lower()
+
+
+def _sha256_canonical(payload: object) -> str:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _assert_receipt_abi(receipt: dict, *, distribution: str, declared_concurrency: int) -> None:
+    assert receipt["schema"] == CAP006_SCHEMA
+    assert receipt["receipt_class"] == "synthetic-development"
+    assert receipt["official_claim"] is False
+    assert receipt["admitted_measurement"] is False
+    assert receipt["claim_status"] == "synthetic-development-receipt-only"
+    identity = receipt["identity"]
+    assert isinstance(identity["repository_sha"], str) and len(identity["repository_sha"]) == 40
+    assert isinstance(identity["clean_tree"], bool)
+    assert isinstance(identity["command"], list) and identity["command"]
+    assert isinstance(identity["arguments"], dict)
+    assert identity["utc_start"]
+    assert identity["utc_end"]
+    assert identity["monotonic_end"] >= identity["monotonic_start"]
+    host = identity["host"]
+    for field in ("os", "os_release", "kernel", "architecture", "cpu_flags", "accelerator", "runtime_versions"):
+        assert field in host, f"host missing {field}"
+    assert isinstance(host["cpu_flags"], list)
+    assert isinstance(host["runtime_versions"], dict)
+    digests = identity["digests"]
+    for field in (
+        "dataset",
+        "fixture",
+        "config",
+        "model",
+        "tokenizer",
+        "provider",
+        "container_image",
+        "schema",
+        "result_contract",
+    ):
+        assert field in digests, f"digest missing {field}"
+        assert isinstance(digests[field], str) and digests[field].startswith("sha256:")
+    sut = receipt["sut_boundary"]
+    for field in (
+        "included_processes",
+        "containers",
+        "databases",
+        "proxies",
+        "caches",
+        "indexes",
+        "filesystems",
+        "background_workers",
+        "benchmark_process_count",
+        "host_workload_count",
+    ):
+        assert field in sut, f"sut_boundary missing {field}"
+    assert sut["benchmark_process_count"] == 1
+    assert sut["host_workload_count"] == 1
+    workload = receipt["workload"]
+    assert workload["order"], "workload order must be bound"
+    assert workload["order"] == sorted(workload["order"], key=workload["order"].index)
+    assert workload["order_digest"].startswith("sha256:")
+    assert _sha256_canonical(workload["order"]) == workload["order_digest"].removeprefix("sha256:")
+    warmup = workload["warmup"]
+    assert warmup["explicit"] is True
+    assert warmup["count"] >= 1
+    assert warmup["excluded_from_distribution"] is True
+    assert len(warmup["operation_ids"]) == warmup["count"]
+    concurrency = receipt["concurrency"]
+    assert concurrency["declared_max_in_flight"] == declared_concurrency
+    assert concurrency["observed_max_in_flight"] >= 1
+    assert "declared_overlap" in concurrency
+    assert "observed_overlap" in concurrency
+    assert isinstance(concurrency["overlap_evidence"], list)
+    assert "matches_declaration" in concurrency
+    assert concurrency["worker_count"] >= 1
+    assert concurrency["total_model_request_count"] >= 0
+    resources = receipt["resources"]
+    for sample in (resources["before"], resources["after"]):
+        for field in (
+            "total_memory_bytes",
+            "free_memory_bytes",
+            "available_memory_bytes",
+            "swap_bytes",
+            "process_rss_bytes",
+            "process_pss_or_working_set_bytes",
+            "vram_bytes",
+            "disk_bytes",
+            "network_bytes",
+            "load_averages",
+            "cpu_seconds",
+        ):
+            assert field in sample, f"resource sample missing {field}"
+    assert resources["during"], "resource samples during the run are required"
+    assert "memory_pressure" in resources
+    assert "swap_pagefile_delta" in resources
+    assert "disk_index_growth" in resources
+    assert "first_abort" in resources
+    observations = receipt["observations"]
+    assert observations, "per-request observations are required"
+    previous_issue = None
+    for obs in observations:
+        for field in ("op_id", "issue_monotonic", "start_monotonic", "end_monotonic"):
+            assert field in obs, f"observation missing {field}"
+        assert obs["issue_monotonic"] <= obs["start_monotonic"] <= obs["end_monotonic"]
+        if previous_issue is not None:
+            assert obs["issue_monotonic"] >= previous_issue
+        previous_issue = obs["issue_monotonic"]
+        assert obs["outcome"] in {"success", "timeout", "error"}
+        assert "excluded" in obs
+        assert "excluded_reason" in obs
+    denominators = receipt["denominators"]
+    assert denominators["issued"] == len(observations)
+    assert denominators["successes"] + denominators["timeouts"] + denominators["errors"] == denominators["issued"]
+    assert denominators["failed_remain_in_denominator"] is True
+    assert denominators["slow_samples_retained"] is True
+    rows = receipt["distributions"]
+    assert len(rows) == 1
+    assert rows[0]["name"] == distribution
+    assert rows[0]["sample_count"] >= 1
+    assert rows[0]["official_claim"] is False
+    assert rows[0]["asserted"] is False
+    for stat in ("p50_ms", "p95_ms", "p99_ms", "throughput_qps", "confidence_interval"):
+        assert stat in rows[0], f"distribution missing {stat}"
+    raw = receipt["raw_artifacts"]
+    for field in ("observations_sha256", "workload_sha256", "result_digest"):
+        assert raw[field].startswith("sha256:")
+    assert raw["observations_sha256"] == "sha256:" + _sha256_canonical(observations)
+    assert raw["workload_sha256"] == "sha256:" + _sha256_canonical(workload)
+    bindable = {
+        "schema": receipt["schema"],
+        "identity_digests": digests,
+        "workload": workload,
+        "concurrency": concurrency,
+        "observations": observations,
+        "denominators": denominators,
+        "distributions": rows,
+    }
+    assert raw["result_digest"] == "sha256:" + _sha256_canonical(bindable)
+
+
+def test_cap006_abi_helpers_exist():
+    for name in (
+        "RECEIPT_SCHEMA",
+        "DISTRIBUTION_WARM_SERIAL",
+        "DISTRIBUTION_CONCURRENT",
+        "pinned_workload",
+        "execute_pinned_workload",
+        "write_phase15_s4_receipt",
+    ):
+        assert hasattr(bench, name), f"bench.py is missing CAP-006 helper {name}"
+    assert bench.RECEIPT_SCHEMA == CAP006_SCHEMA
+    assert bench.DISTRIBUTION_WARM_SERIAL == "warm-serial"
+    assert bench.DISTRIBUTION_CONCURRENT == "concurrent"
+
+
+def test_pinned_workload_order_is_deterministic():
+    first = bench.pinned_workload()
+    second = bench.pinned_workload()
+    assert first["order"] == second["order"]
+    assert first["order"]
+    assert first["order"] == [op["op_id"] for op in first["operations"]]
+    assert first["order_digest"] == "sha256:" + _sha256_canonical(first["order"])
+    assert len(first["operations"]) >= 2
+
+
+def test_warm_serial_receipt_binds_identity_warmup_and_hashes():
+    receipt = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=2,
+        timeout_seconds=1.0,
+    )
+    _assert_receipt_abi(receipt, distribution="warm-serial", declared_concurrency=1)
+    assert receipt["concurrency"]["declared_overlap"] is False
+    assert receipt["concurrency"]["observed_overlap"] is False
+    assert receipt["concurrency"]["observed_max_in_flight"] == 1
+    assert receipt["concurrency"]["matches_declaration"] is True
+    warmup_ids = set(receipt["workload"]["warmup"]["operation_ids"])
+    measured = [obs for obs in receipt["observations"] if not obs["excluded"]]
+    excluded = [obs for obs in receipt["observations"] if obs["excluded"]]
+    assert excluded
+    assert all(obs["excluded_reason"] == "warmup" for obs in excluded)
+    assert {obs["op_id"] for obs in excluded} == warmup_ids
+    assert receipt["distributions"][0]["sample_count"] == len(measured)
+    assert receipt["validity"]["valid"] is True
+
+
+def test_failures_remain_in_denominator_and_slow_samples_are_kept():
+    receipt = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=1,
+        timeout_seconds=0.02,
+        inject_outcomes={
+            "q_capital_france": "timeout",
+            "q_capital_germany": "error",
+        },
+    )
+    outcomes = {obs["op_id"]: obs["outcome"] for obs in receipt["observations"] if not obs["excluded"]}
+    assert "timeout" in outcomes.values()
+    assert "error" in outcomes.values()
+    assert receipt["denominators"]["timeouts"] >= 1
+    assert receipt["denominators"]["errors"] >= 1
+    assert receipt["denominators"]["issued"] == (
+        receipt["denominators"]["successes"]
+        + receipt["denominators"]["timeouts"]
+        + receipt["denominators"]["errors"]
+    )
+    latencies = [obs["end_monotonic"] - obs["start_monotonic"] for obs in receipt["observations"]]
+    assert max(latencies) >= min(latencies)
+    assert receipt["denominators"]["slow_samples_retained"] is True
+
+
+def test_warm_driver_emits_the_same_serial_abi():
+    import bench_warm
+
+    assert hasattr(bench_warm, "run_warm_serial_receipt")
+    receipt = bench_warm.run_warm_serial_receipt(warmup_count=2, timeout_seconds=1.0)
+    _assert_receipt_abi(receipt, distribution="warm-serial", declared_concurrency=1)
+    assert receipt["workload"]["order"] == bench.pinned_workload()["order"]
+
+
+def test_concurrent_driver_records_declared_observed_overlap():
+    concurrent_path = HERE.parent / "bench_concurrent.py"
+    assert concurrent_path.is_file(), "eval/latency/bench_concurrent.py must exist"
+    import bench_concurrent
+
+    receipt = bench_concurrent.run_concurrent_receipt(
+        declared_concurrency=3,
+        warmup_count=1,
+        timeout_seconds=1.0,
+    )
+    _assert_receipt_abi(receipt, distribution="concurrent", declared_concurrency=3)
+    assert receipt["concurrency"]["declared_overlap"] is True
+    assert receipt["concurrency"]["observed_overlap"] is True
+    assert receipt["concurrency"]["observed_max_in_flight"] == 3
+    assert receipt["concurrency"]["matches_declaration"] is True
+    assert receipt["validity"]["valid"] is True
+    assert receipt["concurrency"]["overlap_evidence"]
+    for pair in receipt["concurrency"]["overlap_evidence"]:
+        assert len(pair["op_ids"]) == 2
+        assert pair["overlap_monotonic"] > 0
+    assert receipt["workload"]["order"] == bench.pinned_workload()["order"]
+
+
+def test_concurrent_receipt_invalid_when_overlap_or_inflight_mismatch():
+    import bench_concurrent
+
+    receipt = bench_concurrent.run_concurrent_receipt(
+        declared_concurrency=3,
+        warmup_count=1,
+        timeout_seconds=1.0,
+        executor_workers=1,
+    )
+    assert receipt["concurrency"]["declared_max_in_flight"] == 3
+    assert receipt["concurrency"]["observed_max_in_flight"] == 1
+    assert receipt["concurrency"]["declared_overlap"] is True
+    assert receipt["concurrency"]["observed_overlap"] is False
+    assert receipt["concurrency"]["matches_declaration"] is False
+    assert receipt["validity"]["valid"] is False
+    reasons = receipt["validity"]["invalid_reasons"]
+    assert "observed_max_in_flight_mismatch" in reasons
+    assert "observed_overlap_mismatch" in reasons
+
+
+def test_phase15_reports_are_separate_synthetic_receipts():
+    assert WARM_REPORT.is_file()
+    assert CONCURRENT_REPORT.is_file()
+    warm = json.loads(WARM_REPORT.read_text(encoding="utf-8"))
+    concurrent = json.loads(CONCURRENT_REPORT.read_text(encoding="utf-8"))
+    _assert_receipt_abi(warm, distribution="warm-serial", declared_concurrency=1)
+    _assert_receipt_abi(
+        concurrent,
+        distribution="concurrent",
+        declared_concurrency=concurrent["concurrency"]["declared_max_in_flight"],
+    )
+    assert concurrent["concurrency"]["declared_max_in_flight"] >= 2
+    assert warm["distributions"][0]["name"] == "warm-serial"
+    assert concurrent["distributions"][0]["name"] == "concurrent"
+    assert warm["distributions"][0]["name"] != concurrent["distributions"][0]["name"]
+    assert warm["raw_artifacts"]["result_digest"] != concurrent["raw_artifacts"]["result_digest"]
+    assert warm["official_claim"] is False
+    assert concurrent["official_claim"] is False
+
+
+def test_phase15_write_does_not_relabel_historical_latest():
+    latest_before = LATEST_JSON.read_bytes() if LATEST_JSON.exists() else None
+    warm_latest_before = WARM_LATEST_JSON.read_bytes() if WARM_LATEST_JSON.exists() else None
+    receipt = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=1,
+        timeout_seconds=1.0,
+    )
+    target = HERE.parent / "reports" / "phase15-s4-warm.write-test.json"
+    try:
+        bench.write_phase15_s4_receipt(receipt, target)
+        assert target.is_file()
+        assert json.loads(target.read_text(encoding="utf-8"))["schema"] == CAP006_SCHEMA
+        if latest_before is not None:
+            assert LATEST_JSON.read_bytes() == latest_before
+        if warm_latest_before is not None:
+            assert WARM_LATEST_JSON.read_bytes() == warm_latest_before
+        assert target.name != "latency_bench_latest.json"
+        assert target.name != "warm_latency_latest.json"
+    finally:
+        target.unlink(missing_ok=True)
 
 
 def _main() -> int:
