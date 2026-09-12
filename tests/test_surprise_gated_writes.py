@@ -412,11 +412,31 @@ def test_client_injected_prediction_error_cannot_override_computed_signal() -> N
     computed = job.payload["prediction_error"]["score"]
     assert ev.metadata["consolidation"]["prediction_error"] == computed
     assert ev.metadata["consolidation"]["prediction_error_gate"] == job.payload["prediction_error"]["gate"]
-    leaked = set(ev.metadata) & HELD_OUT_LABEL_KEYS
-    leaked.update(set(ev.metadata.get("consolidation") or {}) & HELD_OUT_LABEL_KEYS)
-    assert not leaked
+    assert "held_out_label" not in ev.metadata
+    assert "held_out_label" not in (ev.metadata.get("consolidation") or {})
+    assert ev.metadata["should_write"] is True
     run = _worker(engine).run_queue_payload(job.payload)
     assert _pass_details(run, "prediction_error_gate")["score"] == computed
+
+
+def test_caller_metadata_keys_are_not_stripped_as_eval_labels() -> None:
+    engine = LocalMemoryEngine()
+    result, _queue = _ingest(
+        engine,
+        "Caller-owned metadata names must survive ingest.",
+        metadata={
+            "should_write": True,
+            "held_out": "caller-holdout-bucket",
+            "failure_class": "caller-taxonomy",
+            "held_out_label": "eval-only",
+        },
+    )
+    ev = engine.get_evidence(TENANT, result.cid)
+    assert ev is not None
+    assert ev.metadata["should_write"] is True
+    assert ev.metadata["held_out"] == "caller-holdout-bucket"
+    assert ev.metadata["failure_class"] == "caller-taxonomy"
+    assert "held_out_label" not in ev.metadata
 
 
 def test_non_mapping_prediction_error_payload_cannot_raise_authority() -> None:
@@ -457,7 +477,7 @@ def test_held_out_labels_do_not_enter_media_extract_jobs() -> None:
     )
     media = next(job for job in result.queued_jobs if job["kind"] == MEDIA_EXTRACT_JOB)
     metadata = media["payload"]["metadata"]
-    assert "should_write" not in metadata
+    assert metadata["should_write"] is True
     assert "held_out_label" not in metadata
     assert metadata["ingest_case"] == "keep-me"
 
