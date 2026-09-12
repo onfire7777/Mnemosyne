@@ -8,8 +8,8 @@
   "performance_claim": null,
   "current_default": "local",
   "identity": {
-    "repository_sha": "1c39d774cf51789d4c739854ade80a5740e51908",
-    "clean_tree": false,
+    "repository_sha": "5c4f47f1db59ab8287d879bf71853198345b23fa",
+    "clean_tree": true,
     "command": [
       "/workspace/.venv/bin/python3",
       "eval/provider_bakeoff/run.py"
@@ -20,10 +20,10 @@
       "host_noise": false,
       "extra_load": false
     },
-    "utc_start": "2026-09-12T21:46:59.204815+00:00",
-    "utc_end": "2026-09-12T21:46:59.213802+00:00",
-    "monotonic_start": 1184.040103575,
-    "monotonic_end": 1184.049084337,
+    "utc_start": "2026-09-12T21:47:04.192856+00:00",
+    "utc_end": "2026-09-12T21:47:04.202581+00:00",
+    "monotonic_start": 1189.028148974,
+    "monotonic_end": 1189.037864922,
     "host": {
       "os": "Linux",
       "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 11 16:06:03 UTC 2026",
@@ -294,49 +294,49 @@
             "op_id": "cold:corpus-batch-0",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.040701905,
-            "start_monotonic": 1184.040701905,
-            "end_monotonic": 1184.041245821
+            "issue_monotonic": 1189.028868487,
+            "start_monotonic": 1189.028868487,
+            "end_monotonic": 1189.029403489
           },
           {
             "op_id": "cold:corpus-batch-1",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.041248368,
-            "start_monotonic": 1184.041248368,
-            "end_monotonic": 1184.041644917
+            "issue_monotonic": 1189.029406252,
+            "start_monotonic": 1189.029406252,
+            "end_monotonic": 1189.029838639
           },
           {
             "op_id": "q_capital_france",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.041647503,
-            "start_monotonic": 1184.041647503,
-            "end_monotonic": 1184.041889499
+            "issue_monotonic": 1189.029841491,
+            "start_monotonic": 1189.029841491,
+            "end_monotonic": 1189.030057977
           },
           {
             "op_id": "q_capital_germany",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.041891197,
-            "start_monotonic": 1184.041891197,
-            "end_monotonic": 1184.042123075
+            "issue_monotonic": 1189.030059916,
+            "start_monotonic": 1189.030059916,
+            "end_monotonic": 1189.030280143
           },
           {
             "op_id": "q_capital_japan",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.042124345,
-            "start_monotonic": 1184.042124345,
-            "end_monotonic": 1184.042337646
+            "issue_monotonic": 1189.030281086,
+            "start_monotonic": 1189.030281086,
+            "end_monotonic": 1189.030494151
           },
           {
             "op_id": "q_capital_canada",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.042338337,
-            "start_monotonic": 1184.042338337,
-            "end_monotonic": 1184.042537327
+            "issue_monotonic": 1189.030494941,
+            "start_monotonic": 1189.030494941,
+            "end_monotonic": 1189.030710553
           }
         ]
       },
@@ -348,49 +348,49 @@
             "op_id": "warm:corpus-batch-0",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.042541612,
-            "start_monotonic": 1184.042541612,
-            "end_monotonic": 1184.042987118
+            "issue_monotonic": 1189.030714507,
+            "start_monotonic": 1189.030714507,
+            "end_monotonic": 1189.031140128
           },
           {
             "op_id": "warm:corpus-batch-1",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.042988344,
-            "start_monotonic": 1184.042988344,
-            "end_monotonic": 1184.043356076
+            "issue_monotonic": 1189.031141233,
+            "start_monotonic": 1189.031141233,
+            "end_monotonic": 1189.031542985
           },
           {
             "op_id": "q_capital_france",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.043357606,
-            "start_monotonic": 1184.043357606,
-            "end_monotonic": 1184.043530343
+            "issue_monotonic": 1189.031544428,
+            "start_monotonic": 1189.031544428,
+            "end_monotonic": 1189.031764384
           },
           {
             "op_id": "q_capital_germany",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.043531113,
-            "start_monotonic": 1184.043531113,
-            "end_monotonic": 1184.043712742
+            "issue_monotonic": 1189.031765169,
+            "start_monotonic": 1189.031765169,
+            "end_monotonic": 1189.031981844
           },
           {
             "op_id": "q_capital_japan",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.043713271,
-            "start_monotonic": 1184.043713271,
-            "end_monotonic": 1184.043918418
+            "issue_monotonic": 1189.031982535,
+            "start_monotonic": 1189.031982535,
+            "end_monotonic": 1189.032200207
           },
           {
             "op_id": "q_capital_canada",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.043919199,
-            "start_monotonic": 1184.043919199,
-            "end_monotonic": 1184.044122054
+            "issue_monotonic": 1189.032201016,
+            "start_monotonic": 1189.032201016,
+            "end_monotonic": 1189.032389812
           }
         ]
       },
@@ -399,97 +399,97 @@
           "op_id": "cold:corpus-batch-0",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.040701905,
-          "start_monotonic": 1184.040701905,
-          "end_monotonic": 1184.041245821
+          "issue_monotonic": 1189.028868487,
+          "start_monotonic": 1189.028868487,
+          "end_monotonic": 1189.029403489
         },
         {
           "op_id": "cold:corpus-batch-1",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.041248368,
-          "start_monotonic": 1184.041248368,
-          "end_monotonic": 1184.041644917
+          "issue_monotonic": 1189.029406252,
+          "start_monotonic": 1189.029406252,
+          "end_monotonic": 1189.029838639
         },
         {
           "op_id": "q_capital_france",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.041647503,
-          "start_monotonic": 1184.041647503,
-          "end_monotonic": 1184.041889499
+          "issue_monotonic": 1189.029841491,
+          "start_monotonic": 1189.029841491,
+          "end_monotonic": 1189.030057977
         },
         {
           "op_id": "q_capital_germany",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.041891197,
-          "start_monotonic": 1184.041891197,
-          "end_monotonic": 1184.042123075
+          "issue_monotonic": 1189.030059916,
+          "start_monotonic": 1189.030059916,
+          "end_monotonic": 1189.030280143
         },
         {
           "op_id": "q_capital_japan",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.042124345,
-          "start_monotonic": 1184.042124345,
-          "end_monotonic": 1184.042337646
+          "issue_monotonic": 1189.030281086,
+          "start_monotonic": 1189.030281086,
+          "end_monotonic": 1189.030494151
         },
         {
           "op_id": "q_capital_canada",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.042338337,
-          "start_monotonic": 1184.042338337,
-          "end_monotonic": 1184.042537327
+          "issue_monotonic": 1189.030494941,
+          "start_monotonic": 1189.030494941,
+          "end_monotonic": 1189.030710553
         },
         {
           "op_id": "warm:corpus-batch-0",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.042541612,
-          "start_monotonic": 1184.042541612,
-          "end_monotonic": 1184.042987118
+          "issue_monotonic": 1189.030714507,
+          "start_monotonic": 1189.030714507,
+          "end_monotonic": 1189.031140128
         },
         {
           "op_id": "warm:corpus-batch-1",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.042988344,
-          "start_monotonic": 1184.042988344,
-          "end_monotonic": 1184.043356076
+          "issue_monotonic": 1189.031141233,
+          "start_monotonic": 1189.031141233,
+          "end_monotonic": 1189.031542985
         },
         {
           "op_id": "q_capital_france",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.043357606,
-          "start_monotonic": 1184.043357606,
-          "end_monotonic": 1184.043530343
+          "issue_monotonic": 1189.031544428,
+          "start_monotonic": 1189.031544428,
+          "end_monotonic": 1189.031764384
         },
         {
           "op_id": "q_capital_germany",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.043531113,
-          "start_monotonic": 1184.043531113,
-          "end_monotonic": 1184.043712742
+          "issue_monotonic": 1189.031765169,
+          "start_monotonic": 1189.031765169,
+          "end_monotonic": 1189.031981844
         },
         {
           "op_id": "q_capital_japan",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.043713271,
-          "start_monotonic": 1184.043713271,
-          "end_monotonic": 1184.043918418
+          "issue_monotonic": 1189.031982535,
+          "start_monotonic": 1189.031982535,
+          "end_monotonic": 1189.032200207
         },
         {
           "op_id": "q_capital_canada",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.043919199,
-          "start_monotonic": 1184.043919199,
-          "end_monotonic": 1184.044122054
+          "issue_monotonic": 1189.032201016,
+          "start_monotonic": 1189.032201016,
+          "end_monotonic": 1189.032389812
         }
       ],
       "denominators": {
@@ -568,60 +568,60 @@
       },
       "resources": {
         "before": {
-          "sampled_monotonic": 1184.040622038,
+          "sampled_monotonic": 1189.028784136,
           "total_memory_bytes": 16791945216,
-          "free_memory_bytes": 6402494464,
-          "available_memory_bytes": 7281414144,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
           "swap_bytes": 0,
-          "process_rss_bytes": 31780864,
+          "process_rss_bytes": 32067584,
           "process_pss_or_working_set_bytes": 14477312,
           "vram_bytes": 0,
           "disk_bytes": 0,
           "network_bytes": 0,
           "load_averages": [
-            0.05712890625,
-            0.02392578125,
-            0.001953125
+            0.05224609375,
+            0.0234375,
+            0.00146484375
           ],
-          "cpu_seconds": 0.042351
+          "cpu_seconds": 0.048771999999999996
         },
         "during": [
           {
-            "sampled_monotonic": 1184.044944277,
+            "sampled_monotonic": 1189.03321603,
             "total_memory_bytes": 16791945216,
-            "free_memory_bytes": 6401892352,
-            "available_memory_bytes": 7280812032,
+            "free_memory_bytes": 6404788224,
+            "available_memory_bytes": 7283769344,
             "swap_bytes": 0,
-            "process_rss_bytes": 31780864,
-            "process_pss_or_working_set_bytes": 14960640,
+            "process_rss_bytes": 32067584,
+            "process_pss_or_working_set_bytes": 14964736,
             "vram_bytes": 0,
             "disk_bytes": 0,
             "network_bytes": 0,
             "load_averages": [
-              0.05712890625,
-              0.02392578125,
-              0.001953125
+              0.05224609375,
+              0.0234375,
+              0.00146484375
             ],
-            "cpu_seconds": 0.046672
+            "cpu_seconds": 0.053203999999999994
           }
         ],
         "after": {
-          "sampled_monotonic": 1184.044203771,
+          "sampled_monotonic": 1189.032472992,
           "total_memory_bytes": 16791945216,
-          "free_memory_bytes": 6401892352,
-          "available_memory_bytes": 7280812032,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
           "swap_bytes": 0,
-          "process_rss_bytes": 31780864,
-          "process_pss_or_working_set_bytes": 14960640,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14964736,
           "vram_bytes": 0,
           "disk_bytes": 0,
           "network_bytes": 0,
           "load_averages": [
-            0.05712890625,
-            0.02392578125,
-            0.001953125
+            0.05224609375,
+            0.0234375,
+            0.00146484375
           ],
-          "cpu_seconds": 0.045931
+          "cpu_seconds": 0.05245999999999999
         }
       },
       "corpus_digest": "sha256:b81f2d2aa63d0821ca9cbf0ce4038088a0b719a3e36d82264f582b7b26ecea01",
@@ -660,49 +660,49 @@
             "op_id": "cold:corpus-batch-0",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.045211261,
-            "start_monotonic": 1184.045211261,
-            "end_monotonic": 1184.045565292
+            "issue_monotonic": 1189.033484728,
+            "start_monotonic": 1189.033484728,
+            "end_monotonic": 1189.033876718
           },
           {
             "op_id": "cold:corpus-batch-1",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.045566586,
-            "start_monotonic": 1184.045566586,
-            "end_monotonic": 1184.045919099
+            "issue_monotonic": 1189.033878162,
+            "start_monotonic": 1189.033878162,
+            "end_monotonic": 1189.034258244
           },
           {
             "op_id": "q_capital_france",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.045920674,
-            "start_monotonic": 1184.045920674,
-            "end_monotonic": 1184.04609544
+            "issue_monotonic": 1189.034259923,
+            "start_monotonic": 1189.034259923,
+            "end_monotonic": 1189.034449967
           },
           {
             "op_id": "q_capital_germany",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.046096157,
-            "start_monotonic": 1184.046096157,
-            "end_monotonic": 1184.046277226
+            "issue_monotonic": 1189.034450609,
+            "start_monotonic": 1189.034450609,
+            "end_monotonic": 1189.034643207
           },
           {
             "op_id": "q_capital_japan",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.046277754,
-            "start_monotonic": 1184.046277754,
-            "end_monotonic": 1184.046455703
+            "issue_monotonic": 1189.03464385,
+            "start_monotonic": 1189.03464385,
+            "end_monotonic": 1189.034832717
           },
           {
             "op_id": "q_capital_canada",
             "phase": "cold",
             "outcome": "success",
-            "issue_monotonic": 1184.04645649,
-            "start_monotonic": 1184.04645649,
-            "end_monotonic": 1184.046633887
+            "issue_monotonic": 1189.034833364,
+            "start_monotonic": 1189.034833364,
+            "end_monotonic": 1189.035026558
           }
         ]
       },
@@ -714,49 +714,49 @@
             "op_id": "warm:corpus-batch-0",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.046636033,
-            "start_monotonic": 1184.046636033,
-            "end_monotonic": 1184.047009104
+            "issue_monotonic": 1189.035029385,
+            "start_monotonic": 1189.035029385,
+            "end_monotonic": 1189.035423199
           },
           {
             "op_id": "warm:corpus-batch-1",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.047009851,
-            "start_monotonic": 1184.047009851,
-            "end_monotonic": 1184.04737174
+            "issue_monotonic": 1189.035424093,
+            "start_monotonic": 1189.035424093,
+            "end_monotonic": 1189.035832365
           },
           {
             "op_id": "q_capital_france",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.047372798,
-            "start_monotonic": 1184.047372798,
-            "end_monotonic": 1184.047551285
+            "issue_monotonic": 1189.035833713,
+            "start_monotonic": 1189.035833713,
+            "end_monotonic": 1189.036038755
           },
           {
             "op_id": "q_capital_germany",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.047551817,
-            "start_monotonic": 1184.047551817,
-            "end_monotonic": 1184.047732759
+            "issue_monotonic": 1189.036039588,
+            "start_monotonic": 1189.036039588,
+            "end_monotonic": 1189.036230546
           },
           {
             "op_id": "q_capital_japan",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.047733187,
-            "start_monotonic": 1184.047733187,
-            "end_monotonic": 1184.047905015
+            "issue_monotonic": 1189.036231,
+            "start_monotonic": 1189.036231,
+            "end_monotonic": 1189.036537753
           },
           {
             "op_id": "q_capital_canada",
             "phase": "warm",
             "outcome": "success",
-            "issue_monotonic": 1184.047905578,
-            "start_monotonic": 1184.047905578,
-            "end_monotonic": 1184.048098311
+            "issue_monotonic": 1189.036538738,
+            "start_monotonic": 1189.036538738,
+            "end_monotonic": 1189.036734569
           }
         ]
       },
@@ -765,97 +765,97 @@
           "op_id": "cold:corpus-batch-0",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.045211261,
-          "start_monotonic": 1184.045211261,
-          "end_monotonic": 1184.045565292
+          "issue_monotonic": 1189.033484728,
+          "start_monotonic": 1189.033484728,
+          "end_monotonic": 1189.033876718
         },
         {
           "op_id": "cold:corpus-batch-1",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.045566586,
-          "start_monotonic": 1184.045566586,
-          "end_monotonic": 1184.045919099
+          "issue_monotonic": 1189.033878162,
+          "start_monotonic": 1189.033878162,
+          "end_monotonic": 1189.034258244
         },
         {
           "op_id": "q_capital_france",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.045920674,
-          "start_monotonic": 1184.045920674,
-          "end_monotonic": 1184.04609544
+          "issue_monotonic": 1189.034259923,
+          "start_monotonic": 1189.034259923,
+          "end_monotonic": 1189.034449967
         },
         {
           "op_id": "q_capital_germany",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.046096157,
-          "start_monotonic": 1184.046096157,
-          "end_monotonic": 1184.046277226
+          "issue_monotonic": 1189.034450609,
+          "start_monotonic": 1189.034450609,
+          "end_monotonic": 1189.034643207
         },
         {
           "op_id": "q_capital_japan",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.046277754,
-          "start_monotonic": 1184.046277754,
-          "end_monotonic": 1184.046455703
+          "issue_monotonic": 1189.03464385,
+          "start_monotonic": 1189.03464385,
+          "end_monotonic": 1189.034832717
         },
         {
           "op_id": "q_capital_canada",
           "phase": "cold",
           "outcome": "success",
-          "issue_monotonic": 1184.04645649,
-          "start_monotonic": 1184.04645649,
-          "end_monotonic": 1184.046633887
+          "issue_monotonic": 1189.034833364,
+          "start_monotonic": 1189.034833364,
+          "end_monotonic": 1189.035026558
         },
         {
           "op_id": "warm:corpus-batch-0",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.046636033,
-          "start_monotonic": 1184.046636033,
-          "end_monotonic": 1184.047009104
+          "issue_monotonic": 1189.035029385,
+          "start_monotonic": 1189.035029385,
+          "end_monotonic": 1189.035423199
         },
         {
           "op_id": "warm:corpus-batch-1",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.047009851,
-          "start_monotonic": 1184.047009851,
-          "end_monotonic": 1184.04737174
+          "issue_monotonic": 1189.035424093,
+          "start_monotonic": 1189.035424093,
+          "end_monotonic": 1189.035832365
         },
         {
           "op_id": "q_capital_france",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.047372798,
-          "start_monotonic": 1184.047372798,
-          "end_monotonic": 1184.047551285
+          "issue_monotonic": 1189.035833713,
+          "start_monotonic": 1189.035833713,
+          "end_monotonic": 1189.036038755
         },
         {
           "op_id": "q_capital_germany",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.047551817,
-          "start_monotonic": 1184.047551817,
-          "end_monotonic": 1184.047732759
+          "issue_monotonic": 1189.036039588,
+          "start_monotonic": 1189.036039588,
+          "end_monotonic": 1189.036230546
         },
         {
           "op_id": "q_capital_japan",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.047733187,
-          "start_monotonic": 1184.047733187,
-          "end_monotonic": 1184.047905015
+          "issue_monotonic": 1189.036231,
+          "start_monotonic": 1189.036231,
+          "end_monotonic": 1189.036537753
         },
         {
           "op_id": "q_capital_canada",
           "phase": "warm",
           "outcome": "success",
-          "issue_monotonic": 1184.047905578,
-          "start_monotonic": 1184.047905578,
-          "end_monotonic": 1184.048098311
+          "issue_monotonic": 1189.036538738,
+          "start_monotonic": 1189.036538738,
+          "end_monotonic": 1189.036734569
         }
       ],
       "denominators": {
@@ -934,60 +934,60 @@
       },
       "resources": {
         "before": {
-          "sampled_monotonic": 1184.045130247,
+          "sampled_monotonic": 1189.033401327,
           "total_memory_bytes": 16791945216,
-          "free_memory_bytes": 6401892352,
-          "available_memory_bytes": 7280812032,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
           "swap_bytes": 0,
-          "process_rss_bytes": 31780864,
-          "process_pss_or_working_set_bytes": 14960640,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14964736,
           "vram_bytes": 0,
           "disk_bytes": 0,
           "network_bytes": 0,
           "load_averages": [
-            0.05712890625,
-            0.02392578125,
-            0.001953125
+            0.05224609375,
+            0.0234375,
+            0.00146484375
           ],
-          "cpu_seconds": 0.046859
+          "cpu_seconds": 0.053390999999999994
         },
         "during": [
           {
-            "sampled_monotonic": 1184.048792165,
+            "sampled_monotonic": 1189.037549339,
             "total_memory_bytes": 16791945216,
-            "free_memory_bytes": 6401892352,
-            "available_memory_bytes": 7280812032,
+            "free_memory_bytes": 6404788224,
+            "available_memory_bytes": 7283769344,
             "swap_bytes": 0,
-            "process_rss_bytes": 31780864,
-            "process_pss_or_working_set_bytes": 14981120,
+            "process_rss_bytes": 32067584,
+            "process_pss_or_working_set_bytes": 14993408,
             "vram_bytes": 0,
             "disk_bytes": 0,
             "network_bytes": 0,
             "load_averages": [
-              0.05712890625,
-              0.02392578125,
-              0.001953125
+              0.05224609375,
+              0.0234375,
+              0.00146484375
             ],
-            "cpu_seconds": 0.050520999999999996
+            "cpu_seconds": 0.057537
           }
         ],
         "after": {
-          "sampled_monotonic": 1184.048154882,
+          "sampled_monotonic": 1189.036816259,
           "total_memory_bytes": 16791945216,
-          "free_memory_bytes": 6401892352,
-          "available_memory_bytes": 7280812032,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
           "swap_bytes": 0,
-          "process_rss_bytes": 31780864,
-          "process_pss_or_working_set_bytes": 14977024,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14989312,
           "vram_bytes": 0,
           "disk_bytes": 0,
           "network_bytes": 0,
           "load_averages": [
-            0.05712890625,
-            0.02392578125,
-            0.001953125
+            0.05224609375,
+            0.0234375,
+            0.00146484375
           ],
-          "cpu_seconds": 0.049883
+          "cpu_seconds": 0.056804
         }
       },
       "corpus_digest": "sha256:b81f2d2aa63d0821ca9cbf0ce4038088a0b719a3e36d82264f582b7b26ecea01",
@@ -1002,62 +1002,62 @@
   ],
   "resources": {
     "before": {
-      "sampled_monotonic": 1184.040199507,
+      "sampled_monotonic": 1189.028288753,
       "total_memory_bytes": 16791945216,
-      "free_memory_bytes": 6402494464,
-      "available_memory_bytes": 7281414144,
+      "free_memory_bytes": 6404788224,
+      "available_memory_bytes": 7283769344,
       "swap_bytes": 0,
-      "process_rss_bytes": 31780864,
-      "process_pss_or_working_set_bytes": 14473216,
+      "process_rss_bytes": 32067584,
+      "process_pss_or_working_set_bytes": 14477312,
       "vram_bytes": 0,
       "disk_bytes": 0,
       "network_bytes": 0,
       "load_averages": [
-        0.05712890625,
-        0.02392578125,
-        0.001953125
+        0.05224609375,
+        0.0234375,
+        0.00146484375
       ],
-      "cpu_seconds": 0.041922999999999995
+      "cpu_seconds": 0.04826999999999999
     },
     "during": [
       {
-        "sampled_monotonic": 1184.04047744,
+        "sampled_monotonic": 1189.028619459,
         "total_memory_bytes": 16791945216,
-        "free_memory_bytes": 6402494464,
-        "available_memory_bytes": 7281414144,
+        "free_memory_bytes": 6404788224,
+        "available_memory_bytes": 7283769344,
         "swap_bytes": 0,
-        "process_rss_bytes": 31780864,
+        "process_rss_bytes": 32067584,
         "process_pss_or_working_set_bytes": 14477312,
         "vram_bytes": 0,
         "disk_bytes": 0,
         "network_bytes": 0,
         "load_averages": [
-          0.05712890625,
-          0.02392578125,
-          0.001953125
+          0.05224609375,
+          0.0234375,
+          0.00146484375
         ],
-        "cpu_seconds": 0.042205
+        "cpu_seconds": 0.048605999999999996
       }
     ],
     "after": {
-      "sampled_monotonic": 1184.048995046,
+      "sampled_monotonic": 1189.03776831,
       "total_memory_bytes": 16791945216,
-      "free_memory_bytes": 6401892352,
-      "available_memory_bytes": 7280812032,
+      "free_memory_bytes": 6404788224,
+      "available_memory_bytes": 7283769344,
       "swap_bytes": 0,
-      "process_rss_bytes": 31780864,
-      "process_pss_or_working_set_bytes": 14981120,
+      "process_rss_bytes": 32067584,
+      "process_pss_or_working_set_bytes": 14993408,
       "vram_bytes": 0,
       "disk_bytes": 0,
       "network_bytes": 0,
       "load_averages": [
-        0.05712890625,
-        0.02392578125,
-        0.001953125
+        0.05224609375,
+        0.0234375,
+        0.00146484375
       ],
-      "cpu_seconds": 0.050724
+      "cpu_seconds": 0.057756999999999996
     },
-    "memory_pressure": 0.4335895537023648,
+    "memory_pressure": 0.43376566861710275,
     "swap_pagefile_delta": 0,
     "disk_index_growth": 0,
     "network_bytes": 0,
@@ -1078,8 +1078,8 @@
     "requires_retained_measured_evidence": true
   },
   "raw_artifacts": {
-    "observations_sha256": "sha256:e3df304afe6d51c91e3ce25c2148da97ebd2c1e5197b6da2c772312c84acdf23",
+    "observations_sha256": "sha256:c987bc64d72fe168afdb04b105855a8f29aff5d5373d57031b7be4e6d0034675",
     "workload_sha256": "sha256:8ccb142c1b0e5e84837ebb639f7cedbe74b435e641dc349ad395b9802bf2b906",
-    "result_digest": "sha256:5e7a92677102c0d3a3904471fe9685822cc4fc85026c0735aa39da369d215cbe"
+    "result_digest": "sha256:5113390ad75fdaf6bfec4f957133afe10b5cd32aad5efa826613b5882b1fdab1"
   }
 }
