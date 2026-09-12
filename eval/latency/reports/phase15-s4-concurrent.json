@@ -5,24 +5,23 @@
   "admitted_measurement": false,
   "claim_status": "synthetic-development-receipt-only",
   "identity": {
-    "repository_sha": "c3a16b7e0d1e593f6957a291f2ae61cd469a7359",
-    "clean_tree": false,
+    "repository_sha": "606e272134eb318232eef6b923d24d0d10b20ff1",
+    "clean_tree": true,
     "command": [
-      "eval/latency/bench.py",
-      "cap006-synthetic"
+      "/workspace/.venv/bin/python3",
+      "eval/latency/bench_concurrent.py"
     ],
     "arguments": {
-      "distribution": "concurrent",
       "declared_concurrency": 3,
       "warmup_count": 1,
       "timeout_seconds": 1.0,
       "executor_workers": 3,
       "workload": "phase15-s4-synthetic-dev-v1"
     },
-    "utc_start": "2026-09-12T19:23:31.398239+00:00",
-    "utc_end": "2026-09-12T19:23:31.462016+00:00",
-    "monotonic_start": 396.991819474,
-    "monotonic_end": 397.05559457,
+    "utc_start": "2026-09-12T19:47:29.353134+00:00",
+    "utc_end": "2026-09-12T19:47:29.358184+00:00",
+    "monotonic_start": 1834.946712427,
+    "monotonic_end": 1834.95176291,
     "host": {
       "os": "Linux",
       "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 11 16:06:03 UTC 2026",
@@ -166,7 +165,7 @@
     "digests": {
       "dataset": "sha256:07506b1ed6e026af62736a728e0ced93766a591398bcab313f3a6d33d3b66437",
       "fixture": "sha256:3d64f0d85fa329f075805c9c3eba1e07759889527b09041d76cc0ce9305315ec",
-      "config": "sha256:8fda7e91c0894139f55963898120e031c2ef55a6f1734c1f88616ca3f3d83755",
+      "config": "sha256:11bc9cff365a07108159675aef5602962347af0a0a9d752bea8d362f8f6b37e4",
       "model": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
       "tokenizer": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
       "provider": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
@@ -275,166 +274,349 @@
           "q_capital_france",
           "q_capital_germany"
         ],
-        "overlap_monotonic": 0.020584494999980052
+        "overlap_monotonic": 0.0004070139998475497
       },
       {
         "op_ids": [
           "q_capital_france",
           "q_capital_japan"
         ],
-        "overlap_monotonic": 0.020118183000022327
+        "overlap_monotonic": 0.001411205000067639
       },
       {
         "op_ids": [
           "q_capital_france",
           "q_db_pref"
         ],
-        "overlap_monotonic": 0.0001496399999609821
+        "overlap_monotonic": 0.0006611609999254142
       },
       {
         "op_ids": [
-          "q_capital_germany",
-          "q_capital_japan"
-        ],
-        "overlap_monotonic": 0.020118183000022327
-      },
-      {
-        "op_ids": [
-          "q_capital_germany",
-          "q_db_pref"
-        ],
-        "overlap_monotonic": 0.00025603500000670465
-      },
-      {
-        "op_ids": [
-          "q_capital_germany",
+          "q_capital_france",
           "q_lang_pref"
         ],
-        "overlap_monotonic": 7.160400002703682e-05
+        "overlap_monotonic": 0.0006024930000876338
       },
       {
         "op_ids": [
-          "q_db_pref",
-          "q_lang_pref"
-        ],
-        "overlap_monotonic": 0.019971946999987722
-      },
-      {
-        "op_ids": [
-          "q_db_pref",
+          "q_capital_france",
           "q_meeting_day"
         ],
-        "overlap_monotonic": 0.019875302999992073
+        "overlap_monotonic": 0.00030629299999418436
+      },
+      {
+        "op_ids": [
+          "q_capital_germany",
+          "q_capital_japan"
+        ],
+        "overlap_monotonic": 0.0004070139998475497
+      },
+      {
+        "op_ids": [
+          "q_capital_japan",
+          "q_db_pref"
+        ],
+        "overlap_monotonic": 0.0006611609999254142
+      },
+      {
+        "op_ids": [
+          "q_capital_japan",
+          "q_lang_pref"
+        ],
+        "overlap_monotonic": 0.0002765100000488019
       },
       {
         "op_ids": [
           "q_lang_pref",
           "q_meeting_day"
         ],
-        "overlap_monotonic": 0.020012700999984645
+        "overlap_monotonic": 0.0007502549999571784
       },
       {
         "op_ids": [
           "q_lang_pref",
           "q_budget"
         ],
-        "overlap_monotonic": 0.00010641000000077838
+        "overlap_monotonic": 0.0004041380000217032
       },
       {
         "op_ids": [
           "q_meeting_day",
           "q_budget"
         ],
-        "overlap_monotonic": 0.00022446200000558747
+        "overlap_monotonic": 0.0006559020000622695
       },
       {
         "op_ids": [
           "q_meeting_day",
           "q_oncall"
         ],
-        "overlap_monotonic": 8.91139999907864e-05
+        "overlap_monotonic": 0.00023532099999101774
       },
       {
         "op_ids": [
           "q_budget",
           "q_oncall"
         ],
-        "overlap_monotonic": 0.02000436999998101
+        "overlap_monotonic": 0.0004443689999789058
       },
       {
         "op_ids": [
           "q_budget",
           "q_seine"
         ],
-        "overlap_monotonic": 0.01988692799994851
+        "overlap_monotonic": 0.00019115200007036037
       },
       {
         "op_ids": [
           "q_oncall",
           "q_seine"
         ],
-        "overlap_monotonic": 0.01999192999994648
+        "overlap_monotonic": 0.00029147300006115984
       }
     ],
     "worker_count": 3,
-    "total_model_request_count": 9,
+    "total_model_request_count": 0,
     "matches_declaration": true
   },
   "resources": {
     "before": {
+      "sampled_monotonic": 1834.9467823,
       "total_memory_bytes": 16791945216,
-      "free_memory_bytes": 6164500480,
-      "available_memory_bytes": 7273369600,
+      "free_memory_bytes": 6082306048,
+      "available_memory_bytes": 7266283520,
       "swap_bytes": 0,
-      "process_rss_bytes": 39276544,
-      "process_pss_or_working_set_bytes": 16863232,
+      "process_rss_bytes": 38445056,
+      "process_pss_or_working_set_bytes": 17062912,
       "vram_bytes": 0,
       "disk_bytes": 0,
       "network_bytes": 0,
       "load_averages": [
-        0.04248046875,
-        0.0791015625,
-        0.025390625
+        0.080078125,
+        0.0166015625,
+        0.00537109375
       ],
-      "cpu_seconds": 0.056924999999999996
+      "cpu_seconds": 0.060246999999999995
     },
     "during": [
       {
+        "sampled_monotonic": 1834.947391191,
         "total_memory_bytes": 16791945216,
-        "free_memory_bytes": 6164500480,
-        "available_memory_bytes": 7273369600,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
         "swap_bytes": 0,
-        "process_rss_bytes": 39276544,
-        "process_pss_or_working_set_bytes": 16863232,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17071104,
         "vram_bytes": 0,
         "disk_bytes": 0,
         "network_bytes": 0,
         "load_averages": [
-          0.04248046875,
-          0.0791015625,
-          0.025390625
+          0.080078125,
+          0.0166015625,
+          0.00537109375
         ],
-        "cpu_seconds": 0.057171999999999994
+        "cpu_seconds": 0.060916
+      },
+      {
+        "sampled_monotonic": 1834.948714696,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17226752,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.062458
+      },
+      {
+        "sampled_monotonic": 1834.949322903,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17325056,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.06301
+      },
+      {
+        "sampled_monotonic": 1834.948938286,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17325056,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.06282
+      },
+      {
+        "sampled_monotonic": 1834.948809354,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17325056,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.06256199999999999
+      },
+      {
+        "sampled_monotonic": 1834.949807701,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17669120,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.06387799999999999
+      },
+      {
+        "sampled_monotonic": 1834.950373141,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17669120,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.064248
+      },
+      {
+        "sampled_monotonic": 1834.950683384,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17746944,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.064898
+      },
+      {
+        "sampled_monotonic": 1834.950874403,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17746944,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.065138
+      },
+      {
+        "sampled_monotonic": 1834.95079298,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17820672,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.065026
+      },
+      {
+        "sampled_monotonic": 1834.951151261,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6082306048,
+        "available_memory_bytes": 7266283520,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38445056,
+        "process_pss_or_working_set_bytes": 17820672,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.080078125,
+          0.0166015625,
+          0.00537109375
+        ],
+        "cpu_seconds": 0.065483
       }
     ],
     "after": {
+      "sampled_monotonic": 1834.951648075,
       "total_memory_bytes": 16791945216,
-      "free_memory_bytes": 6164414464,
-      "available_memory_bytes": 7273295872,
+      "free_memory_bytes": 6082306048,
+      "available_memory_bytes": 7266283520,
       "swap_bytes": 0,
-      "process_rss_bytes": 39276544,
-      "process_pss_or_working_set_bytes": 17020928,
+      "process_rss_bytes": 38445056,
+      "process_pss_or_working_set_bytes": 17808384,
       "vram_bytes": 0,
       "disk_bytes": 0,
       "network_bytes": 0,
       "load_averages": [
-        0.04248046875,
-        0.0791015625,
-        0.025390625
+        0.080078125,
+        0.0166015625,
+        0.00537109375
       ],
-      "cpu_seconds": 0.06038299999999999
+      "cpu_seconds": 0.066454
     },
-    "memory_pressure": 0.4331419486212788,
+    "memory_pressure": 0.4327243464965816,
     "swap_pagefile_delta": 0,
     "disk_index_growth": 0,
     "network_bytes": 0,
@@ -443,13 +625,13 @@
   "observations": [
     {
       "op_id": "q_capital_france",
-      "issue_monotonic": 396.992086485,
-      "start_monotonic": 396.992094592,
-      "end_monotonic": 396.992105943,
-      "issue_utc": "2026-09-12T19:23:31.398516+00:00",
-      "start_utc": "2026-09-12T19:23:31.398524+00:00",
-      "end_utc": "2026-09-12T19:23:31.398536+00:00",
-      "latency_ms": 0.011351000011927681,
+      "issue_monotonic": 1834.946906024,
+      "start_monotonic": 1834.946911064,
+      "end_monotonic": 1834.94695705,
+      "issue_utc": "2026-09-12T19:47:29.353335+00:00",
+      "start_utc": "2026-09-12T19:47:29.353340+00:00",
+      "end_utc": "2026-09-12T19:47:29.353386+00:00",
+      "latency_ms": 0.045986000031916774,
       "outcome": "success",
       "error": null,
       "excluded": true,
@@ -457,13 +639,13 @@
     },
     {
       "op_id": "q_capital_france",
-      "issue_monotonic": 396.993215798,
-      "start_monotonic": 396.993588122,
-      "end_monotonic": 397.01449088,
-      "issue_utc": "2026-09-12T19:23:31.399646+00:00",
-      "start_utc": "2026-09-12T19:23:31.400020+00:00",
-      "end_utc": "2026-09-12T19:23:31.420922+00:00",
-      "latency_ms": 20.902757999976984,
+      "issue_monotonic": 1834.948039574,
+      "start_monotonic": 1834.948522235,
+      "end_monotonic": 1834.950259423,
+      "issue_utc": "2026-09-12T19:47:29.354469+00:00",
+      "start_utc": "2026-09-12T19:47:29.354952+00:00",
+      "end_utc": "2026-09-12T19:47:29.356691+00:00",
+      "latency_ms": 1.737188000106471,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -471,13 +653,13 @@
     },
     {
       "op_id": "q_capital_germany",
-      "issue_monotonic": 396.993637295,
-      "start_monotonic": 396.993906385,
-      "end_monotonic": 397.014597275,
-      "issue_utc": "2026-09-12T19:23:31.400068+00:00",
-      "start_utc": "2026-09-12T19:23:31.400337+00:00",
-      "end_utc": "2026-09-12T19:23:31.421028+00:00",
-      "latency_ms": 20.690890000025774,
+      "issue_monotonic": 1834.948211841,
+      "start_monotonic": 1834.948554926,
+      "end_monotonic": 1834.94896194,
+      "issue_utc": "2026-09-12T19:47:29.354641+00:00",
+      "start_utc": "2026-09-12T19:47:29.354985+00:00",
+      "end_utc": "2026-09-12T19:47:29.355392+00:00",
+      "latency_ms": 0.4070139998475497,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -485,13 +667,13 @@
     },
     {
       "op_id": "q_capital_japan",
-      "issue_monotonic": 396.993939132,
-      "start_monotonic": 396.994194044,
-      "end_monotonic": 397.014312227,
-      "issue_utc": "2026-09-12T19:23:31.400369+00:00",
-      "start_utc": "2026-09-12T19:23:31.400625+00:00",
-      "end_utc": "2026-09-12T19:23:31.420744+00:00",
-      "latency_ms": 20.118183000022327,
+      "issue_monotonic": 1834.94831952,
+      "start_monotonic": 1834.948405027,
+      "end_monotonic": 1834.94993344,
+      "issue_utc": "2026-09-12T19:47:29.354749+00:00",
+      "start_utc": "2026-09-12T19:47:29.354837+00:00",
+      "end_utc": "2026-09-12T19:47:29.356363+00:00",
+      "latency_ms": 1.5284129999599827,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -499,13 +681,13 @@
     },
     {
       "op_id": "q_db_pref",
-      "issue_monotonic": 396.994225389,
-      "start_monotonic": 397.01434124,
-      "end_monotonic": 397.034497618,
-      "issue_utc": "2026-09-12T19:23:31.400655+00:00",
-      "start_utc": "2026-09-12T19:23:31.420770+00:00",
-      "end_utc": "2026-09-12T19:23:31.440928+00:00",
-      "latency_ms": 20.15637799996739,
+      "issue_monotonic": 1834.948456574,
+      "start_monotonic": 1834.948981528,
+      "end_monotonic": 1834.949642689,
+      "issue_utc": "2026-09-12T19:47:29.354886+00:00",
+      "start_utc": "2026-09-12T19:47:29.355411+00:00",
+      "end_utc": "2026-09-12T19:47:29.356072+00:00",
+      "latency_ms": 0.6611609999254142,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -513,13 +695,13 @@
     },
     {
       "op_id": "q_lang_pref",
-      "issue_monotonic": 396.994238008,
-      "start_monotonic": 397.014525671,
-      "end_monotonic": 397.034635016,
-      "issue_utc": "2026-09-12T19:23:31.400667+00:00",
-      "start_utc": "2026-09-12T19:23:31.420955+00:00",
-      "end_utc": "2026-09-12T19:23:31.441066+00:00",
-      "latency_ms": 20.109344999980294,
+      "issue_monotonic": 1834.948467755,
+      "start_monotonic": 1834.94965693,
+      "end_monotonic": 1834.950703385,
+      "issue_utc": "2026-09-12T19:47:29.354897+00:00",
+      "start_utc": "2026-09-12T19:47:29.356086+00:00",
+      "end_utc": "2026-09-12T19:47:29.357133+00:00",
+      "latency_ms": 1.0464550000506279,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -527,13 +709,13 @@
     },
     {
       "op_id": "q_meeting_day",
-      "issue_monotonic": 396.994244889,
-      "start_monotonic": 397.014622315,
-      "end_monotonic": 397.034753068,
-      "issue_utc": "2026-09-12T19:23:31.400674+00:00",
-      "start_utc": "2026-09-12T19:23:31.421051+00:00",
-      "end_utc": "2026-09-12T19:23:31.441184+00:00",
-      "latency_ms": 20.130752999989454,
+      "issue_monotonic": 1834.948474518,
+      "start_monotonic": 1834.94995313,
+      "end_monotonic": 1834.950955149,
+      "issue_utc": "2026-09-12T19:47:29.354903+00:00",
+      "start_utc": "2026-09-12T19:47:29.356382+00:00",
+      "end_utc": "2026-09-12T19:47:29.357385+00:00",
+      "latency_ms": 1.0020189999977447,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -541,13 +723,13 @@
     },
     {
       "op_id": "q_budget",
-      "issue_monotonic": 396.994252299,
-      "start_monotonic": 397.034528606,
-      "end_monotonic": 397.054668324,
-      "issue_utc": "2026-09-12T19:23:31.400681+00:00",
-      "start_utc": "2026-09-12T19:23:31.440958+00:00",
-      "end_utc": "2026-09-12T19:23:31.461099+00:00",
-      "latency_ms": 20.13971799999581,
+      "issue_monotonic": 1834.948481665,
+      "start_monotonic": 1834.950299247,
+      "end_monotonic": 1834.951164197,
+      "issue_utc": "2026-09-12T19:47:29.354911+00:00",
+      "start_utc": "2026-09-12T19:47:29.356728+00:00",
+      "end_utc": "2026-09-12T19:47:29.357594+00:00",
+      "latency_ms": 0.8649500000501575,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -555,13 +737,13 @@
     },
     {
       "op_id": "q_oncall",
-      "issue_monotonic": 396.994258899,
-      "start_monotonic": 397.034663954,
-      "end_monotonic": 397.054773326,
-      "issue_utc": "2026-09-12T19:23:31.400688+00:00",
-      "start_utc": "2026-09-12T19:23:31.441093+00:00",
-      "end_utc": "2026-09-12T19:23:31.461204+00:00",
-      "latency_ms": 20.109371999978976,
+      "issue_monotonic": 1834.948486411,
+      "start_monotonic": 1834.950719828,
+      "end_monotonic": 1834.951264518,
+      "issue_utc": "2026-09-12T19:47:29.354915+00:00",
+      "start_utc": "2026-09-12T19:47:29.357149+00:00",
+      "end_utc": "2026-09-12T19:47:29.357694+00:00",
+      "latency_ms": 0.5446899999697052,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -569,13 +751,13 @@
     },
     {
       "op_id": "q_seine",
-      "issue_monotonic": 396.994264991,
-      "start_monotonic": 397.034781396,
-      "end_monotonic": 397.05498962,
-      "issue_utc": "2026-09-12T19:23:31.400694+00:00",
-      "start_utc": "2026-09-12T19:23:31.441210+00:00",
-      "end_utc": "2026-09-12T19:23:31.461421+00:00",
-      "latency_ms": 20.208223999986785,
+      "issue_monotonic": 1834.948492598,
+      "start_monotonic": 1834.950973045,
+      "end_monotonic": 1834.951423671,
+      "issue_utc": "2026-09-12T19:47:29.354922+00:00",
+      "start_utc": "2026-09-12T19:47:29.357402+00:00",
+      "end_utc": "2026-09-12T19:47:29.357853+00:00",
+      "latency_ms": 0.45062599997436337,
       "outcome": "success",
       "error": null,
       "excluded": false,
@@ -595,14 +777,14 @@
     {
       "name": "concurrent",
       "sample_count": 9,
-      "p50_ms": 20.13971799999581,
-      "p95_ms": 20.8180107999965,
-      "p99_ms": 20.885808559980887,
-      "throughput_qps": 142.7068159502403,
+      "p50_ms": 0.8649500000501575,
+      "p95_ms": 1.6536780000478757,
+      "p99_ms": 1.720486000094752,
+      "throughput_qps": 1954.8376040768874,
       "confidence_interval": {
-        "point": 20.818,
-        "ci_low": 20.1564,
-        "ci_high": 20.9028,
+        "point": 1.6537,
+        "ci_low": 1.002,
+        "ci_high": 1.7372,
         "ci_method": "bootstrap-pctl"
       },
       "official_claim": false,
@@ -614,8 +796,8 @@
     "invalid_reasons": []
   },
   "raw_artifacts": {
-    "observations_sha256": "sha256:76cb4be8aaf16c4e298f709cd2289d9151cb7cbc73ef386bcffb787df4b1f4f2",
+    "observations_sha256": "sha256:178b8ce09ecaf3f88d4a91c95a732fbedd5657bd048ec3dfc7af47d52ebb7a7c",
     "workload_sha256": "sha256:e754c2c989ce55bd1acd1c1fcab9925f21b0e4c26f5cd47454fd5740ecfdd8c7",
-    "result_digest": "sha256:203ae16c9cbd95f0e58a1e30deb158aa63e9079ff493006f2f30947020c2c821"
+    "result_digest": "sha256:34452a953a68bbdd7a9a33fd3ff9a32750cb1f561344160125139415c7f7e169"
   }
 }
