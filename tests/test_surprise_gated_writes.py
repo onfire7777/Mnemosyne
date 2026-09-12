@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from eval.g0.write_gating import FAILURE_CLASSES, run_write_gating_eval
+from eval.g0.write_gating import FAILURE_CLASSES, _run_mutation_budget, run_write_gating_eval
 from mnemosyne.consolidation import ConsolidationWorker, MutationRailBudget
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.media import MEDIA_EXTRACT_JOB
-from mnemosyne.models import Assertion, Evidence
+from mnemosyne.models import Evidence
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.security import CapabilityDecision, SecurityPolicy, TrustTier
 
@@ -226,51 +226,15 @@ def test_high_surprise_cannot_bypass_regression() -> None:
 
 
 def test_high_surprise_cannot_bypass_mutation_budget() -> None:
-    engine = LocalMemoryEngine()
-    for index in range(4):
-        cid = _append(engine, f"Entity {index} value is alpha.")
-        engine.upsert_assertion(
-            Assertion(
-                tenant_id=TENANT,
-                subject=f"Entity {index}",
-                predicate="value is",
-                object="alpha",
-                source_evidence_cids=[cid],
-                status="active",
-                trust_tier=int(TrustTier.NORMAL),
-                access_policy={"tenant": TENANT},
-            )
-        )
-    replacements = [
-        _append(
-            engine,
-            f"Entity {index} value is beta.",
-            metadata={"consolidation": {"prediction_error": 1.0}},
-        )
-        for index in range(4)
-    ]
-    before = {
-        row["id"]
-        for row in engine.export_tenant(TENANT)["assertions"]
-        if row.get("status") == "active" and row.get("branch", "main") == "main"
-    }
-    run = _worker(engine, max_supersession_rate=0.0, gate_cases=[]).run_queue_payload(
-        {
-            "tenant_id": TENANT,
-            "source_evidence_cids": replacements,
-            "prediction_error": {"score": 1.0},
-            "passes": ["extractor", "resolver", "belief_reviser", "promotion_gate"],
-        }
-    )
-    after = {
-        row["id"]
-        for row in engine.export_tenant(TENANT)["assertions"]
-        if row.get("status") == "active" and row.get("branch", "main") == "main"
-    }
-    rails = _pass_details(run, "mutation_rails")
-    assert len(before - after) == 0
+    outcome = _run_mutation_budget(LocalMemoryEngine(), TENANT)
+    rails = outcome["mutation_rails"]
+    assert outcome["wrote"] is False
     assert rails["supersessions_allowed"] == 0
-    assert any(item["rail"] == "max_supersession_rate" for item in rails["violations"]) or not _promoted(run)
+    assert any(item["rail"] == "max_supersession_rate" for item in rails["violations"])
+    assert any(
+        "rail_violation:max_supersession_rate" in str(item.get("failed_cases") or "")
+        for item in outcome["candidate_results"]
+    )
 
 
 def test_high_surprise_cannot_bypass_erasure() -> None:

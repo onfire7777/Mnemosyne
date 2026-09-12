@@ -148,12 +148,52 @@ def _passing_case() -> RegressionCase:
     )
 
 
+class _BudgetExtractor:
+    strategy = "write_gate_budget_extractor"
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+
+    def extract(self, tenant_id: str, payload: dict[str, Any], evidence: list[Evidence]) -> dict[str, Any]:
+        candidates: list[dict[str, Any]] = []
+        for index in range(self.count):
+            marker = f"Entity {index}"
+            source_cids = [item.cid for item in evidence if item.cid and marker in item.content]
+            candidates.append(
+                {
+                    "signature": f"{marker} value is beta",
+                    "query": marker,
+                    "candidate_subject": marker,
+                    "candidate_predicate": "value is",
+                    "candidate_object": "beta",
+                    "confidence": 0.72,
+                    "trust_tier": int(TrustTier.DIRECT_USER),
+                    "source_evidence_cids": source_cids,
+                }
+            )
+        return {
+            "candidates": candidates,
+            "details": {"strategy": self.strategy, "candidate_count": len(candidates)},
+        }
+
+
+def _budget_case() -> RegressionCase:
+    return RegressionCase(
+        id="case-budget-beta",
+        signature="entity value is",
+        query="entity beta",
+        expected_substring="beta",
+        tier="smoke",
+    )
+
+
 def _worker(
     engine: LocalMemoryEngine,
     *,
     security: SecurityPolicy | None = None,
     max_supersession_rate: float | None = None,
     gate_cases: list[RegressionCase] | None = None,
+    candidate_extractor: Any = None,
 ) -> ConsolidationWorker:
     return ConsolidationWorker(
         engine,
@@ -161,6 +201,7 @@ def _worker(
         consolidation_min_steps=0,
         security=security,
         max_supersession_rate=max_supersession_rate,
+        candidate_extractor=candidate_extractor,
     )
 
 
@@ -290,9 +331,7 @@ def _mechanism_matched(
     if failure_class == "mutation_budget":
         rails = outcome.get("mutation_rails") if isinstance(outcome.get("mutation_rails"), dict) else {}
         violations = rails.get("violations") if isinstance(rails.get("violations"), list) else []
-        return any(isinstance(item, dict) and item.get("rail") == "max_supersession_rate" for item in violations) or (
-            rails.get("supersessions_allowed") == 0 and not any(bool(item.get("promoted")) for item in candidates if isinstance(item, dict))
-        )
+        return any(isinstance(item, dict) and item.get("rail") == "max_supersession_rate" for item in violations)
     if failure_class == "erasure":
         return outcome.get("evidence_seen") == 0
     if failure_class == "capability":
@@ -517,7 +556,9 @@ def _run_regression(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
 
 
 def _run_mutation_budget(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
-    for index in range(4):
+    count = 4
+    replacements: list[str] = []
+    for index in range(count):
         cid = _append(engine, tenant, f"Entity {index} value is alpha.")
         engine.upsert_assertion(
             Assertion(
@@ -531,25 +572,39 @@ def _run_mutation_budget(engine: LocalMemoryEngine, tenant: str) -> dict[str, An
                 access_policy={"tenant": tenant},
             )
         )
-    replacements = [
-        _append(
-            engine,
-            tenant,
-            f"Entity {index} value is beta.",
-            metadata={"consolidation": {"prediction_error": 1.0}},
+        replacements.append(
+            _append(
+                engine,
+                tenant,
+                f"Entity {index} value is beta.",
+                metadata={"consolidation": {"prediction_error": 1.0}},
+            )
         )
-        for index in range(4)
-    ]
+        replacements.append(
+            _append(
+                engine,
+                tenant,
+                f"Independent note: Entity {index} value is beta.",
+                metadata={"consolidation": {"prediction_error": 1.0}},
+                source_type="note",
+            )
+        )
     before = {
         row["id"]
         for row in engine.export_tenant(tenant)["assertions"]
         if row.get("status") == "active" and row.get("branch", "main") == "main"
     }
-    run = _worker(engine, max_supersession_rate=0.0, gate_cases=[]).run_queue_payload(
+    run = _worker(
+        engine,
+        max_supersession_rate=0.0,
+        gate_cases=[_budget_case()],
+        candidate_extractor=_BudgetExtractor(count),
+    ).run_queue_payload(
         {
             "tenant_id": tenant,
             "source_evidence_cids": replacements,
             "prediction_error": {"score": 1.0},
+            "passes": ["extractor", "resolver", "belief_reviser", "promotion_gate"],
         }
     )
     after = {
