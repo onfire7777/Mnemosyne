@@ -751,13 +751,56 @@ The following packages are complete source history, not runnable work:
   does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #165: ordinary documentation receipt recording the merged PR #164
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T18:26:00Z`
-  capture and adds only the PR #164 merged-baseline bullet, the #163
+  lease-map lapse. It is **MERGED** at tip
+  `034decfad1b2868b34463a9a07737f42eb6338fb`. It was **OPEN/READY** at
+  the `2026-09-12T18:26:00Z` capture and adds only the PR #164
+  merged-baseline bullet, the #163 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #165 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `034decfad1b2868b34463a9a07737f42eb6338fb`.
+- PR #166: Exact 6 CAP-006 / P15-S4 / 15-03-01 warm-serial + concurrent
+  latency receipts
+  `eval/latency/bench.py`,
+  `eval/latency/bench_concurrent.py`,
+  `eval/latency/test_latency_bench.py`,
+  `eval/latency_warm/bench_warm.py`,
+  `eval/latency/reports/phase15-s4-warm.json`,
+  `eval/latency/reports/phase15-s4-concurrent.json`
+  (title: feat(eval): freeze CAP-006 warm and concurrent latency
+  receipt ABI (15-03-01))
+  from exact head `b1d375374faa5176ab76feb708a81604c9841593`; all
+  required exact-head Unit+drift checks passed in run `34715638835`;
+  merge `88724b16b30aa232c03018ec1768362032981d41` at
+  `2026-09-12T20:21:56Z`.
+  Prior tip was `034decfad1b2868b34463a9a07737f42eb6338fb` (PR #165).
+  Post-main tip Unit+drift will FAIL solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #166 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 6):
+  `eval/latency/bench.py`,
+  `eval/latency/bench_concurrent.py`,
+  `eval/latency/test_latency_bench.py`,
+  `eval/latency_warm/bench_warm.py`,
+  `eval/latency/reports/phase15-s4-warm.json`,
+  `eval/latency/reports/phase15-s4-concurrent.json`.
+  Purpose: P15-S4/15-03-01 CAP-006 warm/concurrent latency (no claimed
+  P95); docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #166 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #167: ordinary documentation receipt recording the merged PR #166
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T20:24:00Z`
+  capture and adds only the PR #166 merged-baseline bullet, the #165
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #165 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #167 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
