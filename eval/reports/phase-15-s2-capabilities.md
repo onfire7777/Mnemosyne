@@ -78,10 +78,14 @@ throughput A/B, model dependency, or go/no-go artifact is produced here.
 uv run --locked python -m pytest tests/test_consolidation_timescales.py tests/test_global_sensemaking.py tests/test_surprise_gated_writes.py tests/test_planning_traceability.py -q
 ```
 
-Expected on this exact-head candidate: exit 0; every collected test in those
-four modules passes. That outcome is a development-regression pin of the
-merged 15-01-01..04 source, not measured CAP-007/008 evidence and not an
-official, production, or superiority result.
+Recorded on this exact-head candidate with `uv run --locked` on CPython
+3.12.14: 127 passed, exit 0
+(`tests/test_consolidation_timescales.py` 37,
+`tests/test_global_sensemaking.py` 33,
+`tests/test_surprise_gated_writes.py` 17,
+`tests/test_planning_traceability.py` 40). That outcome is a
+development-regression pin of the merged 15-01-01..04 source, not measured
+CAP-007/008 evidence and not an official, production, or superiority result.
 
 The same candidate also exposes:
 
