@@ -1787,12 +1787,15 @@ class _SecurityCalibrationCLI:
             if any(token in question.lower() for token in ("replay", "deletion", "deleted")):
                 return {"answer": "not present", "abstained": False}
             return {"answer": "", "abstained": True}
-        primary = next(
-            (item["text"] for item in in_scope if item["text"].startswith("STORE AS NOTE:")),
-            in_scope[0]["text"],
+        primary = _security_calibration_best_note(
+            question, [item["text"] for item in in_scope]
         )
-        extracted = _security_calibration_short_span(primary)
+        extracted = (
+            _security_calibration_short_span(primary) if primary is not None else None
+        )
         if extracted is None:
+            if any(token in question.lower() for token in ("replay", "deletion", "deleted")):
+                return {"answer": "not present", "abstained": False}
             return {"answer": "", "abstained": True}
         return {"answer": extracted, "abstained": False}
 
@@ -1800,6 +1803,64 @@ class _SecurityCalibrationCLI:
         self.calls.append(("forget", tenant, cid))
         self._items.pop(cid, None)
         return {"ok": True}
+
+
+_SECURITY_CALIBRATION_STOPWORDS = frozenset(
+    {
+        "a",
+        "after",
+        "an",
+        "and",
+        "any",
+        "as",
+        "at",
+        "be",
+        "for",
+        "including",
+        "in",
+        "is",
+        "item",
+        "later",
+        "note",
+        "notes",
+        "of",
+        "on",
+        "or",
+        "other",
+        "please",
+        "recorded",
+        "should",
+        "store",
+        "the",
+        "this",
+        "to",
+        "what",
+    }
+)
+
+
+def _security_calibration_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if token not in _SECURITY_CALIBRATION_STOPWORDS and len(token) > 2
+    }
+
+
+def _security_calibration_best_note(question: str, notes: list[str]) -> str | None:
+    query_tokens = _security_calibration_tokens(question)
+    scored = [
+        (
+            len(query_tokens & _security_calibration_tokens(note)),
+            note.startswith("STORE AS NOTE:"),
+            note,
+        )
+        for note in notes
+    ]
+    scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    if not scored or scored[0][0] == 0:
+        return None
+    return scored[0][2]
 
 
 def _security_calibration_short_span(text: str) -> str | None:
