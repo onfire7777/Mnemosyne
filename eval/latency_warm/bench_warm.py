@@ -116,6 +116,13 @@ def run_warm_serial_receipt(
         warmup_count=warmup_count,
         timeout_seconds=timeout_seconds,
         inject_outcomes=inject_outcomes,
+        command=[sys.executable, str(HERE.relative_to(REPO_ROOT))],
+        arguments={
+            "warmup_count": warmup_count,
+            "timeout_seconds": timeout_seconds,
+            "workload": latency_bench.SYNTHETIC_WORKLOAD_ID,
+        },
+        model_request_count=0,
     )
 
 

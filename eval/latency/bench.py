@@ -189,11 +189,13 @@ def sample_resources() -> dict[str, Any]:
     usage = resource_mod.getrusage(resource_mod.RUSAGE_SELF)
     rss_bytes = int(usage.ru_maxrss) * 1024
     load = list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
+    swap_used = max(0, mem.get("SwapTotal", 0) - mem.get("SwapFree", 0))
     return {
+        "sampled_monotonic": time.perf_counter(),
         "total_memory_bytes": mem.get("MemTotal", 0),
         "free_memory_bytes": mem.get("MemFree", 0),
         "available_memory_bytes": mem.get("MemAvailable", 0),
-        "swap_bytes": mem.get("SwapTotal", 0),
+        "swap_bytes": swap_used,
         "process_rss_bytes": rss_bytes,
         "process_pss_or_working_set_bytes": _pss_or_working_set_bytes(rss_bytes),
         "vram_bytes": 0,
@@ -231,9 +233,7 @@ def _synthetic_execute(
     *,
     inject_outcomes: dict[str, str],
     timeout_seconds: float,
-    hold: Callable[[], None],
 ) -> None:
-    hold()
     injected = inject_outcomes.get(op["op_id"])
     if injected == "timeout":
         time.sleep(timeout_seconds + 0.005)
@@ -242,7 +242,8 @@ def _synthetic_execute(
         raise RuntimeError("injected error")
     if injected is not None:
         raise ValueError(f"unsupported injected outcome: {injected}")
-    hashlib.sha256(op["query"].encode("utf-8")).hexdigest()
+    payload = (op["query"] * 2048).encode("utf-8")
+    hashlib.sha256(payload).hexdigest()
 
 
 def _run_one_observation(
@@ -254,9 +255,15 @@ def _run_one_observation(
     excluded_reason: str | None,
     issue_monotonic: float,
     issue_utc: str,
+    before_start: Callable[[], None] | None = None,
+    during_samples: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    if before_start is not None:
+        before_start()
     start_monotonic = time.perf_counter()
     start_utc = datetime.now(timezone.utc).isoformat()
+    if during_samples is not None and not excluded:
+        during_samples.append(sample_resources())
     error: str | None = None
     outcome = "success"
     try:
@@ -330,21 +337,22 @@ def _apply_concurrency_validity(receipt: dict[str, Any]) -> None:
     receipt["validity"] = {"valid": not reasons, "invalid_reasons": reasons}
 
 
+def _payload_for_result_digest(receipt: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(_canonical_json(receipt))
+    artifacts = payload.get("raw_artifacts")
+    if isinstance(artifacts, dict):
+        artifacts.pop("result_digest", None)
+    return payload
+
+
 def _bind_raw_artifacts(receipt: dict[str, Any]) -> None:
-    bindable = {
-        "schema": receipt["schema"],
-        "identity_digests": receipt["identity"]["digests"],
-        "workload": receipt["workload"],
-        "concurrency": receipt["concurrency"],
-        "observations": receipt["observations"],
-        "denominators": receipt["denominators"],
-        "distributions": receipt["distributions"],
-    }
     receipt["raw_artifacts"] = {
         "observations_sha256": f"sha256:{_sha256_canonical(receipt['observations'])}",
         "workload_sha256": f"sha256:{_sha256_canonical(receipt['workload'])}",
-        "result_digest": f"sha256:{_sha256_canonical(bindable)}",
     }
+    receipt["raw_artifacts"]["result_digest"] = (
+        f"sha256:{_sha256_canonical(_payload_for_result_digest(receipt))}"
+    )
 
 
 def write_phase15_s4_receipt(receipt: dict[str, Any], path: Path) -> Path:
@@ -363,6 +371,9 @@ def execute_pinned_workload(
     inject_outcomes: dict[str, str] | None = None,
     executor_workers: int | None = None,
     execute: Callable[[dict[str, str]], None] | None = None,
+    command: list[str] | None = None,
+    arguments: dict[str, Any] | None = None,
+    model_request_count: int | None = None,
 ) -> dict[str, Any]:
     if distribution not in {DISTRIBUTION_WARM_SERIAL, DISTRIBUTION_CONCURRENT}:
         raise ValueError(f"unsupported distribution: {distribution}")
@@ -381,49 +392,43 @@ def execute_pinned_workload(
     if workers < 1:
         raise ValueError("executor_workers must be >= 1")
     declared_overlap = distribution == DISTRIBUTION_CONCURRENT
-    hold_gate = threading.Event()
-    in_flight = 0
-    in_flight_lock = threading.Lock()
+    assemble_gate = threading.Event()
+    assembled = 0
+    assemble_lock = threading.Lock()
 
-    def _hold() -> None:
-        nonlocal in_flight
+    def _assemble_declared_concurrency() -> None:
+        nonlocal assembled
         if declared_concurrency <= 1 or workers <= 1:
             return
-        with in_flight_lock:
-            in_flight += 1
-            if in_flight >= declared_concurrency:
-                hold_gate.set()
-        hold_gate.wait(timeout=1.0)
-        time.sleep(0.02)
+        with assemble_lock:
+            assembled += 1
+            if assembled >= declared_concurrency:
+                assemble_gate.set()
+        assemble_gate.wait(timeout=1.0)
 
-    def _execute(op: dict[str, str], *, hold_overlap: bool) -> None:
-        hold_fn = _hold if hold_overlap else (lambda: None)
+    def _execute_op(op: dict[str, str]) -> None:
         if execute is not None:
-            hold_fn()
             execute(op)
             return
         _synthetic_execute(
             op,
             inject_outcomes=injected,
             timeout_seconds=timeout_seconds,
-            hold=hold_fn,
         )
 
-    def _execute_warmup(op: dict[str, str]) -> None:
-        _execute(op, hold_overlap=False)
-
-    def _execute_measured(op: dict[str, str]) -> None:
-        _execute(op, hold_overlap=True)
-
-    command = ["eval/latency/bench.py", "cap006-synthetic"]
-    arguments = {
-        "distribution": distribution,
-        "declared_concurrency": declared_concurrency,
-        "warmup_count": warmup_count,
-        "timeout_seconds": timeout_seconds,
-        "executor_workers": workers,
-        "workload": SYNTHETIC_WORKLOAD_ID,
-    }
+    invocation = list(command) if command is not None else [sys.executable, "eval/latency/bench.py"]
+    invocation_arguments = (
+        dict(arguments)
+        if arguments is not None
+        else {
+            "distribution": distribution,
+            "declared_concurrency": declared_concurrency,
+            "warmup_count": warmup_count,
+            "timeout_seconds": timeout_seconds,
+            "executor_workers": workers,
+            "workload": SYNTHETIC_WORKLOAD_ID,
+        }
+    )
     repository_sha, clean_tree = _git_identity()
     utc_start = datetime.now(timezone.utc).isoformat()
     monotonic_start = time.perf_counter()
@@ -436,7 +441,7 @@ def execute_pinned_workload(
         warmup_observations.append(
             _run_one_observation(
                 op,
-                execute=_execute_warmup,
+                execute=_execute_op,
                 timeout_seconds=timeout_seconds,
                 excluded=True,
                 excluded_reason="warmup",
@@ -445,42 +450,58 @@ def execute_pinned_workload(
             )
         )
 
-    during = sample_resources()
+    during_samples: list[dict[str, Any]] = []
+    stop_sampler = threading.Event()
+
+    def _sample_during() -> None:
+        while not stop_sampler.is_set():
+            during_samples.append(sample_resources())
+            stop_sampler.wait(0.002)
+
+    sampler = threading.Thread(target=_sample_during, name="cap006-resource-sampler", daemon=True)
     measured_observations: list[dict[str, Any]] = []
     wall0 = time.perf_counter()
-    if workers <= 1:
-        for op in pinned["operations"]:
-            issue_monotonic = time.perf_counter()
-            measured_observations.append(
-                _run_one_observation(
-                    op,
-                    execute=_execute_measured,
-                    timeout_seconds=timeout_seconds,
-                    excluded=False,
-                    excluded_reason=None,
-                    issue_monotonic=issue_monotonic,
-                    issue_utc=datetime.now(timezone.utc).isoformat(),
-                )
-            )
-    else:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-            futures: list[concurrent.futures.Future[dict[str, Any]]] = []
+    sampler.start()
+    try:
+        if workers <= 1:
             for op in pinned["operations"]:
                 issue_monotonic = time.perf_counter()
-                issue_utc = datetime.now(timezone.utc).isoformat()
-                futures.append(
-                    pool.submit(
-                        _run_one_observation,
+                measured_observations.append(
+                    _run_one_observation(
                         op,
-                        execute=_execute_measured,
+                        execute=_execute_op,
                         timeout_seconds=timeout_seconds,
                         excluded=False,
                         excluded_reason=None,
                         issue_monotonic=issue_monotonic,
-                        issue_utc=issue_utc,
+                        issue_utc=datetime.now(timezone.utc).isoformat(),
+                        during_samples=during_samples,
                     )
                 )
-            measured_observations = [future.result() for future in futures]
+        else:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+                futures: list[concurrent.futures.Future[dict[str, Any]]] = []
+                for op in pinned["operations"]:
+                    issue_monotonic = time.perf_counter()
+                    issue_utc = datetime.now(timezone.utc).isoformat()
+                    futures.append(
+                        pool.submit(
+                            _run_one_observation,
+                            op,
+                            execute=_execute_op,
+                            timeout_seconds=timeout_seconds,
+                            excluded=False,
+                            excluded_reason=None,
+                            issue_monotonic=issue_monotonic,
+                            issue_utc=issue_utc,
+                            before_start=_assemble_declared_concurrency,
+                            during_samples=during_samples,
+                        )
+                    )
+                measured_observations = [future.result() for future in futures]
+    finally:
+        stop_sampler.set()
+        sampler.join(timeout=1.0)
     wall_s = time.perf_counter() - wall0
     after = sample_resources()
     utc_end = datetime.now(timezone.utc).isoformat()
@@ -515,7 +536,7 @@ def execute_pinned_workload(
     digests = {
         "dataset": f"sha256:{_sha256_file(DATASET)}",
         "fixture": f"sha256:{_sha256_canonical({'workload': SYNTHETIC_WORKLOAD_ID})}",
-        "config": f"sha256:{_sha256_canonical(arguments)}",
+        "config": f"sha256:{_sha256_canonical(invocation_arguments)}",
         "model": f"sha256:{_sha256_canonical('synthetic-dev-none')}",
         "tokenizer": f"sha256:{_sha256_canonical('synthetic-dev-none')}",
         "provider": f"sha256:{_sha256_canonical('synthetic-dev-none')}",
@@ -532,8 +553,8 @@ def execute_pinned_workload(
         "identity": {
             "repository_sha": repository_sha,
             "clean_tree": clean_tree,
-            "command": command,
-            "arguments": arguments,
+            "command": invocation,
+            "arguments": invocation_arguments,
             "utc_start": utc_start,
             "utc_end": utc_end,
             "monotonic_start": monotonic_start,
@@ -561,11 +582,11 @@ def execute_pinned_workload(
             "observed_overlap": bool(overlap),
             "overlap_evidence": overlap,
             "worker_count": workers,
-            "total_model_request_count": len(measured),
+            "total_model_request_count": 0 if model_request_count is None else model_request_count,
         },
         "resources": {
             "before": before,
-            "during": [during],
+            "during": during_samples or [sample_resources()],
             "after": after,
             "memory_pressure": (
                 "none"
