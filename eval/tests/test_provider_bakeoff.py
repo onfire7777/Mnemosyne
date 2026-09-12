@@ -309,6 +309,52 @@ def test_correctness_and_embedding_shape_parity() -> None:
     assert len({_canonical_json(hits) for hits in correctness}) == 1
 
 
+def test_embedder_raise_is_retained_and_forces_no_decision() -> None:
+    def boom(_text: str, _dims: int) -> list[float]:
+        raise RuntimeError("provider exploded")
+
+    receipt = run_provider_bakeoff(
+        [_candidate("broken", embed=boom), _candidate("synthetic-b")],
+        current_default="local",
+    )
+    broken = next(item for item in receipt["candidates"] if item["name"] == "broken")
+    assert broken["status"] == "compared"
+    assert broken["embedder_failed"] is True
+    assert broken["denominators"]["errors"] >= 1
+    assert broken["denominators"]["failed_remain_in_denominator"] is True
+    assert broken["denominators"]["issued"] == (
+        broken["denominators"]["successes"]
+        + broken["denominators"]["timeouts"]
+        + broken["denominators"]["errors"]
+    )
+    assert any(item["outcome"] == "error" for item in broken["observations"])
+    assert receipt["decision"]["decision"] == "no-decision"
+    assert receipt["decision"]["selected"] is None
+    assert any("embedder_failure" in blocker for blocker in receipt["decision"]["blockers"])
+    assert receipt["official_p95_claim"] is False
+    assert receipt["decision"]["config_promotion"] is False
+
+
+def test_malformed_vector_is_retained_and_forces_no_decision() -> None:
+    def malformed(_text: str, _dims: int) -> list[float]:
+        return [1.0, 2.0]
+
+    receipt = run_provider_bakeoff(
+        [_candidate("warped", embed=malformed), _candidate("synthetic-b")],
+        current_default="local",
+    )
+    warped = next(item for item in receipt["candidates"] if item["name"] == "warped")
+    assert warped["status"] == "compared"
+    assert warped["embedder_failed"] is True
+    assert warped["denominators"]["errors"] >= 1
+    assert warped["denominators"]["failed_remain_in_denominator"] is True
+    assert any(item["outcome"] == "error" for item in warped["observations"])
+    assert receipt["decision"]["decision"] == "no-decision"
+    assert receipt["decision"]["selected"] is None
+    assert any("embedder_failure" in blocker for blocker in receipt["decision"]["blockers"])
+    assert decide_provider_default(receipt) == receipt["decision"]
+
+
 def test_errors_remain_in_denominators() -> None:
     receipt = run_provider_bakeoff(
         [_candidate("synthetic-a"), _candidate("synthetic-b")],
@@ -433,6 +479,44 @@ def test_missing_rejected_or_unverifiable_license_forces_no_decision() -> None:
         assert any(status in blocker for blocker in receipt["decision"]["blockers"])
         computed = verify_candidate_license(candidate["license"])
         assert computed["verification_status"] == status
+
+
+def test_license_without_evidence_text_is_unverifiable_and_not_compared() -> None:
+    digest = "sha256:" + hashlib.sha256(b"spdx:Apache-2.0").hexdigest()
+    digest_only = {
+        "source": "spdx",
+        "identifier": "Apache-2.0",
+        "evidence_digest": digest,
+    }
+    empty_evidence = {
+        "source": "spdx",
+        "identifier": "Apache-2.0",
+        "evidence": "   ",
+        "evidence_digest": digest,
+    }
+    assert verify_candidate_license(digest_only)["verification_status"] == "unverifiable"
+    assert verify_candidate_license(empty_evidence)["verification_status"] == "unverifiable"
+
+    receipt = run_provider_bakeoff(
+        [
+            _candidate("licensed", license_record=_license()),
+            _candidate("digest-only", license_record=digest_only),
+            _candidate("blank-evidence", license_record=empty_evidence),
+        ],
+        current_default="local",
+    )
+    digest_candidate = next(item for item in receipt["candidates"] if item["name"] == "digest-only")
+    blank_candidate = next(item for item in receipt["candidates"] if item["name"] == "blank-evidence")
+    licensed = next(item for item in receipt["candidates"] if item["name"] == "licensed")
+    assert digest_candidate["license"]["verification_status"] == "unverifiable"
+    assert blank_candidate["license"]["verification_status"] == "unverifiable"
+    assert digest_candidate["status"] != "compared"
+    assert blank_candidate["status"] != "compared"
+    assert licensed["status"] == "compared"
+    assert receipt["decision"]["decision"] == "no-decision"
+    assert receipt["decision"]["selected"] is None
+    assert any("unverifiable" in blocker for blocker in receipt["decision"]["blockers"])
+    assert receipt["decision"]["config_promotion"] is False
 
 
 def test_unsupported_and_unavailable_are_recorded_not_simulated() -> None:

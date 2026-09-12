@@ -244,17 +244,19 @@ def verify_candidate_license(license_record: object) -> dict[str, str]:
     identifier = str(license_record.get("identifier") or "")
     evidence_digest = str(license_record.get("evidence_digest") or "")
     claimed = license_record.get("verification_status")
+    evidence_text = license_record.get("evidence")
+    evidence_present = isinstance(evidence_text, str) and bool(evidence_text.strip())
     if claimed == "rejected":
         status = "rejected"
     elif not source or not identifier or not evidence_digest:
         status = "missing"
     elif not _digest_pinned(evidence_digest):
         status = "unverifiable"
-    elif "evidence" in license_record:
-        expected = f"sha256:{_sha256_text(str(license_record.get('evidence')))}"
-        status = "verified" if expected == evidence_digest else "rejected"
+    elif not evidence_present:
+        status = "unverifiable"
     else:
-        status = "verified"
+        expected = f"sha256:{_sha256_text(str(evidence_text))}"
+        status = "verified" if expected == evidence_digest else "rejected"
     return {
         "source": source,
         "identifier": identifier,
@@ -302,6 +304,10 @@ def _batched(items: list[Any], size: int) -> list[list[Any]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
 
 
+class _EmbedFailure(Exception):
+    """Controlled embedder raise or malformed-vector failure."""
+
+
 def _observe(op_id: str, phase: str, outcome: str, started: float, ended: float) -> dict[str, Any]:
     return {
         "op_id": op_id,
@@ -311,6 +317,34 @@ def _observe(op_id: str, phase: str, outcome: str, started: float, ended: float)
         "start_monotonic": started,
         "end_monotonic": ended,
     }
+
+
+def _coerce_embedding(value: object, dims: int) -> list[float]:
+    if not isinstance(value, list) or len(value) != dims:
+        raise _EmbedFailure("malformed vector")
+    coerced: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, int | float):
+            raise _EmbedFailure("malformed vector")
+        number = float(item)
+        if not math.isfinite(number):
+            raise _EmbedFailure("malformed vector")
+        coerced.append(number)
+    return coerced
+
+
+def _invoke_embedder(
+    embed: Callable[[str, int], list[float]],
+    text: str,
+    dims: int,
+) -> list[float]:
+    try:
+        raw = embed(text, dims)
+    except _EmbedFailure:
+        raise
+    except Exception as exc:
+        raise _EmbedFailure("provider raise") from exc
+    return _coerce_embedding(raw, dims)
 
 
 def _measure_candidate(
@@ -330,24 +364,36 @@ def _measure_candidate(
     observed_lengths: list[int] = []
     embed_calls = 0
     batch_count = 0
+    embedder_failed = False
 
     def _embed_text(text: str) -> list[float]:
-        nonlocal embed_calls
+        nonlocal embed_calls, embedder_failed
         embed_calls += 1
-        vector = list(embed(text, dims))
+        vector = _invoke_embedder(embed, text, dims)
         observed_lengths.append(len(vector))
         return vector
 
     def _run_phase(phase: str) -> None:
-        nonlocal batch_count
+        nonlocal batch_count, embedder_failed
         target = cold_observations if phase == "cold" else warm_observations
         for batch_index, batch in enumerate(_batched(list(workload["corpus"]), int(batching["size"]))):
             started = time.perf_counter()
+            batch_failed = False
             for doc in batch:
-                vectors[str(doc["doc_id"])] = _embed_text(str(doc["text"]))
+                try:
+                    vectors[str(doc["doc_id"])] = _embed_text(str(doc["text"]))
+                except _EmbedFailure:
+                    embedder_failed = True
+                    batch_failed = True
             batch_count += 1
             ended = time.perf_counter()
-            observation = _observe(f"{phase}:corpus-batch-{batch_index}", phase, "success", started, ended)
+            observation = _observe(
+                f"{phase}:corpus-batch-{batch_index}",
+                phase,
+                "error" if batch_failed else "success",
+                started,
+                ended,
+            )
             observations.append(observation)
             target.append(observation)
         for query in workload["queries"]:
@@ -359,8 +405,12 @@ def _measure_candidate(
             elif injected == "error":
                 observation = _observe(qid, phase, "error", started, time.perf_counter())
             elif injected is None:
-                vectors[qid] = _embed_text(str(query["query"]))
-                observation = _observe(qid, phase, "success", started, time.perf_counter())
+                try:
+                    vectors[qid] = _embed_text(str(query["query"]))
+                    observation = _observe(qid, phase, "success", started, time.perf_counter())
+                except _EmbedFailure:
+                    embedder_failed = True
+                    observation = _observe(qid, phase, "error", started, time.perf_counter())
             else:
                 observation = _observe(qid, phase, "error", started, time.perf_counter())
             observations.append(observation)
@@ -418,8 +468,9 @@ def _measure_candidate(
             "observed_lengths": observed_lengths,
             "parity": shape_ok,
         },
+        "embedder_failed": embedder_failed,
         "correctness": {
-            "pass": bool(hits) and all(item["hit"] for item in hits),
+            "pass": bool(hits) and all(item["hit"] for item in hits) and not embedder_failed,
             "hits": hits,
             "parity": False,
         },
@@ -473,6 +524,8 @@ def decide_provider_default(receipt: dict[str, Any]) -> dict[str, Any]:
             blockers.append(f"license_{status}:{candidate.get('name')}")
         elif status and status not in _LICENSE_STATUSES:
             blockers.append(f"license_unverifiable:{candidate.get('name')}")
+        if candidate.get("embedder_failed") is True:
+            blockers.append(f"embedder_failure:{candidate.get('name')}")
 
     compared = [item for item in candidates if item.get("status") == "compared"]
     smoke_success = [
