@@ -38,8 +38,11 @@ CAP-012 and CAP-013 were consumed as completed contracts and were not redefined.
    `LocalMemoryEngine` instances and records `baseline` and `candidate`
    separately.
 2. Attaches the landed S2 cells to the candidate snapshot:
-   cadence/sleep source pin, global sensemaking regression, surprise-gated
-   write precision/recall aggregates.
+   cadence/sleep source pin (tier routing, min steps, default passes, and
+   fingerprint), global sensemaking regression, surprise-gated write
+   precision/recall aggregates. Sensemaking and write-gate summaries keep
+   any reported `ingested_label_keys` so isolation cannot pass if a cell
+   reports leakage.
 3. Scans product evidence metadata for held-out eval keys
    (`held_out_label`, `should_write`, `write_gate_label`, `eval_label`,
    `held_out`, `failure_class`) and fails closed if any appear.
