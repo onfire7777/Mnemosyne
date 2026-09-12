@@ -20,6 +20,7 @@ from eval.public.adapters import (
     longmemeval_qa,
     pm_bench_triggerbench,
     qa_smoke,
+    security_calibration_probe,
     smoke,
     whole_memory_reference,
     working_memory_action_probe,
@@ -62,6 +63,7 @@ _ADAPTERS = {
     "wmbs-m05-reference": whole_memory_reference.run_m05_provenance_development,
     "wmbs-m10-reference": whole_memory_reference.run_m10_development,
     "pm-bench-triggerbench": pm_bench_triggerbench.run,
+    "security-calibration-probe": security_calibration_probe.run,
     "working-memory-action": working_memory_action_probe.run,
 }
 _NORMALIZERS = {
@@ -86,6 +88,10 @@ _PROFILE_CONTRACTS = {
     "wmbs-m04-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
+    "security-calibration-development-v1": (
+        "security-calibration-development",
+        "descriptive",
+    ),
 }
 
 _FROZEN_RETRIEVAL_BASELINES = {
@@ -139,7 +145,39 @@ def load_registry() -> dict[str, dict[str, Any]]:
             raise ValueError(
                 f"{name}: invalid scoring profile, family, or interval method"
             )
+        if name == security_calibration_probe.SUITE:
+            _validate_security_calibration_suite(name, suite)
     return registry
+
+
+_SECURITY_CALIBRATION_FLAGS = (
+    "headline_eligible",
+    "independent_external_reproduction",
+    "pbpp_headline_eligible",
+    "publishable",
+    "upstream_comparable",
+)
+
+
+def _validate_security_calibration_suite(
+    name: str, suite: Mapping[str, Any]
+) -> None:
+    if name != security_calibration_probe.SUITE:
+        raise ValueError(f"{name}: security-calibration suite id is invalid")
+    if suite.get("adapter") != "security-calibration-probe":
+        raise ValueError(f"{name}: adapter must remain security-calibration-probe")
+    if suite.get("scoring_profile") != security_calibration_probe.PROFILE:
+        raise ValueError(f"{name}: scoring profile custody is invalid")
+    if suite.get("fixture") != "fixtures/security-calibration-development.json":
+        raise ValueError(f"{name}: fixture custody is invalid")
+    if suite.get("license") != "CC0-1.0":
+        raise ValueError(f"{name}: license must remain CC0-1.0")
+    if suite.get("split_role") != "development":
+        raise ValueError(f"{name}: split_role must remain development")
+    if suite.get("system_seam") != "public-cli-subprocess":
+        raise ValueError(f"{name}: system_seam must remain public-cli-subprocess")
+    if any(suite.get(flag) is not False for flag in _SECURITY_CALIBRATION_FLAGS):
+        raise ValueError(f"{name}: development publication flags must remain false")
 
 
 def load_pending_qa_suites() -> dict[str, dict[str, Any]]:
@@ -482,6 +520,13 @@ def run_public_suite(
         else:
             labels = _scoring_labels(benchmark)
         measured = score_profile(suite["scoring_profile"], labels, traces)
+    elif suite["family"] == "security-calibration-development":
+        from eval.public.scoring import score_profile
+
+        _validate_security_calibration_suite(suite_name, suite)
+        measured = score_profile(
+            suite["scoring_profile"], [{"fixture": benchmark}], traces
+        )
     interval_method = measured.get("interval", {}).get("method")
     if suite["scoring_profile"] == "qa-em-f1-v1":
         interval_method = measured.get("intervals", {}).get("token_f1", {}).get("method")

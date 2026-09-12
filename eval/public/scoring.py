@@ -12,8 +12,10 @@ from dataclasses import asdict
 from typing import Any
 
 from eval.harness.metrics import wilson_interval
+from eval.public import security_calibration as security_calibration_core
 from eval.public.adapters.pm_bench_triggerbench import recompute_metrics
 from eval.public.adapters.working_memory_action_probe import score as score_working_action
+from eval.public.adapters.security_calibration_probe import SCORING_FAMILY as SECURITY_CALIBRATION_FAMILY
 
 BOOTSTRAP_ITERATIONS = 2_000
 BOOTSTRAP_SEED = 1_234
@@ -48,6 +50,8 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
         return _score_pm_action(profile, labels, traces)
     if profile == "working-memory-action-v1":
         return _score_working_action(labels, traces)
+    if profile == "security-calibration-development-v1":
+        return _score_security_calibration(labels, traces)
     pairs = _bind(labels, traces)
     if profile == "longmemeval-retrieval-v1":
         _require_family(traces, "deterministic-retrieval")
@@ -95,6 +99,97 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
             },
         }
     raise ScoringError(f"unknown scoring profile: {profile}")
+
+
+_SECURITY_CALIBRATION_CLAIM_FLAGS = (
+    "headline_eligible",
+    "independent_reproduction",
+    "pbpp_headline_eligible",
+    "publishable",
+    "upstream_comparable",
+)
+_SECURITY_CALIBRATION_SELF_SCORE_KEYS = frozenset(
+    {
+        "asr",
+        "attack_success_rate",
+        "brier",
+        "correct",
+        "ece",
+        "gold",
+        "hard_gate_failed",
+        "labels",
+        "metrics",
+        "official_score",
+        "passed",
+        "score",
+    }
+)
+_SECURITY_CALIBRATION_OFFICIAL = ("MINJA", "AgentPoison", "PoisonedRAG")
+
+
+def _score_security_calibration(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    if not labels or not isinstance(labels[0], dict):
+        raise ScoringError("security-calibration scoring requires its fixture")
+    fixture = labels[0].get("fixture")
+    if not isinstance(fixture, dict):
+        raise ScoringError("security-calibration scoring fixture is missing")
+    if any(fixture.get(flag) is not False for flag in _SECURITY_CALIBRATION_CLAIM_FLAGS):
+        raise ScoringError("security-calibration claim state drifted")
+    if fixture.get("track") != "DEVELOPMENT" or fixture.get("admission_state") != "PROPOSED":
+        raise ScoringError("security-calibration official or upstream relabeling is forbidden")
+    if any(
+        marker in _string_values(fixture) or marker in _string_values(traces)
+        for marker in _SECURITY_CALIBRATION_OFFICIAL
+    ):
+        raise ScoringError("security-calibration official or upstream relabeling is forbidden")
+    families = {trace.get("scoring_family") for trace in traces}
+    if families != {SECURITY_CALIBRATION_FAMILY}:
+        raise ScoringError("metric families may not be blended")
+    observations: list[dict[str, Any]] = []
+    for trace in traces:
+        if not isinstance(trace, dict):
+            raise ScoringError("security-calibration traces must be objects")
+        extra = set(trace) - security_calibration_core._OBSERVATION_KEYS - {"scoring_family"}
+        if extra & _SECURITY_CALIBRATION_SELF_SCORE_KEYS or extra:
+            raise ScoringError("trace self-scoring is forbidden")
+        observations.append(
+            {
+                key: trace[key]
+                for key in security_calibration_core._OBSERVATION_KEYS
+                if key in trace
+            }
+        )
+    try:
+        measured = security_calibration_core.score(fixture, observations)
+    except security_calibration_core.SecurityCalibrationError as exc:
+        raise ScoringError(str(exc)) from exc
+    if measured["hard_gate_failed"] != bool(measured["hard_failures"]):
+        raise ScoringError("security-calibration hard failures are missing")
+    if measured["hard_gate_failed"] and measured["passed"]:
+        raise ScoringError("security-calibration hard failures are missing")
+    measured.update(
+        {
+            "family": SECURITY_CALIBRATION_FAMILY,
+            "interval": {"method": "descriptive"},
+            "profile": "security-calibration-development-v1",
+            "profile_version": 1,
+            "total": len(observations),
+            "trace_count": len(observations),
+        }
+    )
+    return measured
+
+
+def _string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [item for child in value.values() for item in _string_values(child)]
+    if isinstance(value, list):
+        return [item for child in value for item in _string_values(child)]
+    return []
 
 
 def _score_wmbs_m01(
