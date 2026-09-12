@@ -18,6 +18,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -341,11 +342,12 @@ def test_failures_remain_in_denominator_and_slow_samples_are_kept():
 
 
 def test_late_callback_is_timeout_observation_not_runner_hang():
-    block_s = 1.0
+    hang = threading.Event()
     timeout_s = 0.03
+    runner_budget_s = 1.0
 
-    def _block(_op: dict) -> None:
-        time.sleep(block_s)
+    def _hang(_op: dict) -> None:
+        hang.wait()
 
     started = time.perf_counter()
     serial = bench.execute_pinned_workload(
@@ -353,17 +355,17 @@ def test_late_callback_is_timeout_observation_not_runner_hang():
         declared_concurrency=1,
         warmup_count=1,
         timeout_seconds=timeout_s,
-        execute=_block,
+        execute=_hang,
     )
     serial_elapsed = time.perf_counter() - started
-    assert serial_elapsed < block_s, (
-        f"serial runner waited for late callback ({serial_elapsed:.3f}s >= {block_s}s)"
+    assert serial_elapsed < runner_budget_s, (
+        f"serial runner hung on blocked callback ({serial_elapsed:.3f}s)"
     )
     measured = [obs for obs in serial["observations"] if not obs["excluded"]]
     assert measured
     assert all(obs["outcome"] == "timeout" for obs in measured)
     assert serial["denominators"]["timeouts"] >= len(measured)
-    assert all((obs["end_monotonic"] - obs["start_monotonic"]) < block_s for obs in measured)
+    assert all((obs["end_monotonic"] - obs["start_monotonic"]) < runner_budget_s for obs in measured)
 
     started = time.perf_counter()
     concurrent = bench.execute_pinned_workload(
@@ -371,11 +373,11 @@ def test_late_callback_is_timeout_observation_not_runner_hang():
         declared_concurrency=3,
         warmup_count=1,
         timeout_seconds=timeout_s,
-        execute=_block,
+        execute=_hang,
     )
     concurrent_elapsed = time.perf_counter() - started
-    assert concurrent_elapsed < block_s, (
-        f"concurrent runner waited for late callback ({concurrent_elapsed:.3f}s >= {block_s}s)"
+    assert concurrent_elapsed < runner_budget_s, (
+        f"concurrent runner hung on blocked callback ({concurrent_elapsed:.3f}s)"
     )
     concurrent_measured = [obs for obs in concurrent["observations"] if not obs["excluded"]]
     assert concurrent_measured
@@ -531,6 +533,7 @@ def test_phase15_reports_are_separate_synthetic_receipts():
         )
         assert "execute_pinned_workload" in tree
         assert "_execute_with_deadline" in tree
+        assert "future.result(timeout=" in tree
 
 
 def test_phase15_write_does_not_relabel_historical_latest():

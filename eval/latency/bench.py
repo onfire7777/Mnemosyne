@@ -251,16 +251,17 @@ def _execute_with_deadline(
     op: dict[str, str],
     timeout_seconds: float,
 ) -> None:
-    error: list[BaseException] = []
-    finished = threading.Event()
+    future: concurrent.futures.Future[None] = concurrent.futures.Future()
 
     def _runner() -> None:
+        if not future.set_running_or_notify_cancel():
+            return
         try:
             execute(op)
         except BaseException as exc:
-            error.append(exc)
-        finally:
-            finished.set()
+            future.set_exception(exc)
+        else:
+            future.set_result(None)
 
     worker = threading.Thread(
         target=_runner,
@@ -268,10 +269,12 @@ def _execute_with_deadline(
         daemon=True,
     )
     worker.start()
-    if not finished.wait(timeout=timeout_seconds):
-        raise TimeoutError(f"callback exceeded timeout_seconds={timeout_seconds}")
-    if error:
-        raise error[0]
+    try:
+        future.result(timeout=timeout_seconds)
+    except concurrent.futures.TimeoutError as exc:
+        raise TimeoutError(
+            f"callback exceeded timeout_seconds={timeout_seconds}"
+        ) from exc
 
 
 def _run_one_observation(
@@ -507,7 +510,8 @@ def execute_pinned_workload(
                     )
                 )
         else:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+            try:
                 futures: list[concurrent.futures.Future[dict[str, Any]]] = []
                 for op in pinned["operations"]:
                     issue_monotonic = time.perf_counter()
@@ -526,7 +530,11 @@ def execute_pinned_workload(
                             during_samples=during_samples,
                         )
                     )
-                measured_observations = [future.result() for future in futures]
+                measured_observations = [
+                    future.result(timeout=timeout_seconds + 1.0) for future in futures
+                ]
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
     finally:
         stop_sampler.set()
         sampler.join(timeout=1.0)
