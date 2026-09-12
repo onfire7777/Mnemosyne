@@ -9,11 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from eval.g0.write_gating import (
-    FAILURE_CLASSES,
-    HELD_OUT_LABEL_KEYS,
-    run_write_gating_eval,
-)
+from eval.g0.write_gating import FAILURE_CLASSES, run_write_gating_eval
 from mnemosyne.consolidation import ConsolidationWorker, MutationRailBudget
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
