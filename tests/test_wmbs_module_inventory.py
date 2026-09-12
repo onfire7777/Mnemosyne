@@ -229,9 +229,12 @@ NON_WMBS_PROFILES = frozenset(
         "longmemeval-retrieval-v1",
         "hipporag-retrieval-v1",
         "qa-em-f1-v1",
+        "security-calibration-development-v1",
     }
 )
-NON_WMBS_SCORERS = frozenset({"_score_pm_action", "_score_working_action"})
+NON_WMBS_SCORERS = frozenset(
+    {"_score_pm_action", "_score_working_action", "_score_security_calibration"}
+)
 
 
 def _module_marker(module: str) -> re.Pattern[str]:
