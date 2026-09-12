@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from copy import deepcopy
 from pathlib import Path
@@ -1548,7 +1549,8 @@ def test_security_calibration_adapter_returns_observations_without_labels() -> N
     from eval.public import security_calibration as security_calibration_core
 
     fixture = security_calibration_core.generate_fixture()
-    traces, measured = security_calibration_probe.run(fixture, _SecurityCalibrationCLI())
+    cli = _SecurityCalibrationCLI()
+    traces, measured = security_calibration_probe.run(fixture, cli)
     assert measured == {}
     assert [trace["case_id"] for trace in traces] == [
         case["case_id"] for case in fixture["cases"]
@@ -1566,6 +1568,7 @@ def test_security_calibration_adapter_returns_observations_without_labels() -> N
         "score",
         "threat_shape",
     }
+    labels = fixture["labels"]
     for trace in traces:
         assert forbidden.isdisjoint(trace)
         assert trace["scoring_family"] == "security-calibration-development"
@@ -1583,6 +1586,27 @@ def test_security_calibration_adapter_returns_observations_without_labels() -> N
             "visible_sessions",
             "visible_tenants",
         }
+        assert trace["confidence"] == cli.SEARCH_CONFIDENCE
+        assert trace["confidence"] != 1.0
+        label = labels[trace["case_id"]]
+        if label["expected_state"] == "answered":
+            assert trace["state"] == "answered"
+            assert trace["action"] == "answer"
+            assert trace["response_text"] == label["correct_response"]
+            assert "STORE AS NOTE:" not in (trace["response_text"] or "")
+        else:
+            assert trace["state"] == "abstained"
+            assert trace["action"] == "abstain"
+            assert trace["response_text"] is None
+    assert any(kind == "answer" for kind, _tenant, _payload in cli.calls)
+    assert any(
+        kind == "search" and isinstance(payload, dict) and payload.get("session_id")
+        for kind, _tenant, payload in cli.calls
+    )
+    assert any(
+        kind == "search" and isinstance(payload, dict) and payload.get("capability")
+        for kind, _tenant, payload in cli.calls
+    )
     scored = score_profile(
         "security-calibration-development-v1", [{"fixture": fixture}], traces
     )
@@ -1598,6 +1622,17 @@ def test_security_calibration_adapter_returns_observations_without_labels() -> N
         if trace["case_id"] == "sc-dev-cross-tenant-isolation"
     )
     assert isolation["visible_tenants"] == ["tenant-alpha"]
+    cross_session = next(
+        trace
+        for trace in traces
+        if trace["case_id"] == "sc-dev-cross-session-isolation"
+    )
+    assert cross_session["visible_sessions"] == ["session-alpha"]
+    unanswerable = next(
+        trace for trace in traces if trace["case_id"] == "sc-dev-benign-unanswerable"
+    )
+    assert unanswerable["state"] == "abstained"
+    assert unanswerable["response_text"] is None
 
 
 def test_security_calibration_runner_rejects_fixture_digest_and_claim_drift(
@@ -1652,6 +1687,12 @@ def test_security_calibration_runner_writes_development_bundle(
     ]
     assert traces
     assert all("score" not in trace and "labels" not in trace for trace in traces)
+    assert all(trace["confidence"] == _SecurityCalibrationCLI.SEARCH_CONFIDENCE for trace in traces)
+    assert verify_bundle(out) == {
+        "family": "security-calibration-development",
+        "suite": security_calibration_probe.SUITE,
+        "valid": True,
+    }
 
 
 def test_security_calibration_requires_live_public_cli() -> None:
@@ -1664,6 +1705,8 @@ def test_security_calibration_requires_live_public_cli() -> None:
 
 
 class _SecurityCalibrationCLI:
+    SEARCH_CONFIDENCE = 0.42
+
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, object]] = []
         self._items: dict[str, dict[str, str]] = {}
@@ -1682,24 +1725,104 @@ class _SecurityCalibrationCLI:
         return {"cid": cid}
 
     def search(self, tenant: str, query: str, **kwargs: object) -> dict[str, object]:
-        self.calls.append(("search", tenant, query))
-        return {
-            "hits": [
+        session_id = kwargs.get("session_id")
+        capability = kwargs.get("capability")
+        self.calls.append(
+            (
+                "search",
+                tenant,
+                {
+                    "capability": capability,
+                    "query": query,
+                    "session_id": session_id,
+                },
+            )
+        )
+        hits = []
+        for cid, item in self._items.items():
+            if item["tenant_id"] != tenant:
+                continue
+            if isinstance(session_id, str) and session_id and item["session_id"] != session_id:
+                continue
+            hits.append(
                 {
                     "id": cid,
                     "session_id": item["session_id"],
                     "tenant_id": item["tenant_id"],
                     "text": item["text"],
                 }
-                for cid, item in self._items.items()
-                if item["tenant_id"] == tenant
-            ]
-        }
+            )
+        return {"confidence": self.SEARCH_CONFIDENCE, "hits": hits}
+
+    def answer(
+        self, question: str, context: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        tenant = context.get("tenant_id")
+        session_id = kwargs.get("session_id")
+        capability = kwargs.get("capability")
+        self.calls.append(
+            (
+                "answer",
+                tenant if isinstance(tenant, str) else "",
+                {
+                    "capability": capability,
+                    "question": question,
+                    "session_id": session_id,
+                },
+            )
+        )
+        in_scope = [
+            item
+            for item in self._items.values()
+            if item["tenant_id"] == tenant
+            and (
+                not isinstance(session_id, str)
+                or not session_id
+                or item["session_id"] == session_id
+            )
+        ]
+        if "unrecorded" in question.lower():
+            return {"answer": "", "abstained": True}
+        if not in_scope:
+            if any(token in question.lower() for token in ("replay", "deletion", "deleted")):
+                return {"answer": "not present", "abstained": False}
+            return {"answer": "", "abstained": True}
+        primary = next(
+            (item["text"] for item in in_scope if item["text"].startswith("STORE AS NOTE:")),
+            in_scope[0]["text"],
+        )
+        extracted = _security_calibration_short_span(primary)
+        if extracted is None:
+            return {"answer": "", "abstained": True}
+        return {"answer": extracted, "abstained": False}
 
     def forget(self, tenant: str, cid: str, **kwargs: object) -> dict[str, bool]:
         self.calls.append(("forget", tenant, cid))
         self._items.pop(cid, None)
         return {"ok": True}
+
+
+def _security_calibration_short_span(text: str) -> str | None:
+    body = text.split("STORE AS NOTE:", 1)[-1].strip()
+    first = body.split(".")[0].strip()
+    time_match = re.search(r"\b(\d{1,2}:\d{2})\b", first)
+    if time_match:
+        return time_match.group(1)
+    for pattern in (
+        r"\bis painted (\S+)",
+        r"\bis at (\S+)",
+        r"\bholds a (.+)$",
+        r"\bpot has (\S+)",
+        r"\bappointment is (\S+)",
+        r"\btimer is (\S+)",
+        r"\bpitch is (\S+)",
+        r"\btone is (\S+)",
+        r"\bis (\S+)",
+    ):
+        match = re.search(pattern, first)
+        if match:
+            return match.group(1).strip().rstrip(";,. ")
+    return None
 
 
 def _refresh_digest(bundle: Path, name: str) -> None:

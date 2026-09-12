@@ -156,6 +156,10 @@ _REGISTERED_SCORING_PROFILES = {
     "wmbs-m03-valid-time-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
+    "security-calibration-development-v1": (
+        "security-calibration-development",
+        "descriptive",
+    ),
 }
 _REPRO_CANONICAL_HIT_AT_K_PROFILE = "smoke-hit-at-k-v1"
 
@@ -1541,6 +1545,12 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
                 }
                 for case in benchmark["cases"]
             ]
+        if (
+            benchmark.get("schema_id") == "security-calibration-development/fixture/0.1"
+            or benchmark.get("suite") == "security-calibration-style-development-v1"
+            or benchmark.get("profile") == "security-calibration-development-v1"
+        ):
+            return [{"fixture": benchmark}]
         raise BundleError("unknown case-based benchmark schema")
     if benchmark.get("schema_id") == "wmbs-m01-fixture-v1":
         return [{"case_id": "M01", "fixture": benchmark}]
@@ -1585,6 +1595,11 @@ def _scoring_labels(benchmark: Any) -> list[dict[str, Any]]:
 
 
 def _trace_id(trace: dict[str, Any], *, family: Any) -> tuple[Any, ...]:
+    if family == "security-calibration-development":
+        case_id = trace.get("case_id")
+        if not isinstance(case_id, str) or not case_id:
+            raise BundleError("missing security-calibration trace ID")
+        return (case_id,)
     if family in {"deterministic-action", "whole-memory-development"}:
         case_id, step_id = trace.get("case_id"), trace.get("step_id")
         if not isinstance(case_id, str) or not case_id or (

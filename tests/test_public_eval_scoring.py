@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -231,7 +232,17 @@ def test_security_calibration_hard_gate_is_not_offset_by_other_families() -> Non
     assert scored["security"]["families"]["cross_tenant_isolation"]["successful_attacks"] == 1
 
 
-def test_security_calibration_bundle_verify_rejects_family_blending(
+def test_security_calibration_bundle_registers_profile_and_fixture_labels() -> None:
+    from eval.public import bundle as public_bundle
+
+    fixture = security_calibration_core.generate_fixture()
+    assert public_bundle._REGISTERED_SCORING_PROFILES[
+        "security-calibration-development-v1"
+    ] == ("security-calibration-development", "descriptive")
+    assert public_bundle._scoring_labels(fixture) == [{"fixture": fixture}]
+
+
+def test_security_calibration_bundle_verify_recomputes_and_rejects_blending(
     tmp_path: Path,
 ) -> None:
     fixture = security_calibration_core.generate_fixture()
@@ -241,24 +252,27 @@ def test_security_calibration_bundle_verify_rejects_family_blending(
         "security-calibration-development-v1", [{"fixture": fixture}], traces
     )
     source = tmp_path / "source"
-    bundled = [{**row, "question_id": row["case_id"]} for row in traces]
     write_bundle(
         source,
         benchmark=fixture,
         metadata={**suite, "suite": "security-calibration-style-development-v1"},
         metrics=measured,
-        traces=bundled,
+        traces=traces,
     )
-    bundled[0]["scoring_family"] = "qa"
+    assert verify_bundle(source) == {
+        "family": "security-calibration-development",
+        "suite": "security-calibration-style-development-v1",
+        "valid": True,
+    }
+    tampered = [dict(row) for row in traces]
+    tampered[0]["scoring_family"] = "qa"
     (source / "traces.jsonl").write_text(
         "".join(
             json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
-            for row in bundled
+            for row in tampered
         )
     )
     manifest = json.loads((source / "bundle-manifest.json").read_text())
-    import hashlib
-
     manifest["files"]["traces.jsonl"] = hashlib.sha256(
         (source / "traces.jsonl").read_bytes()
     ).hexdigest()
