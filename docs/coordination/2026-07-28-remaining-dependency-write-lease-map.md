@@ -639,13 +639,44 @@ The following packages are complete source history, not runnable work:
   does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #159: ordinary documentation receipt recording the merged PR #158
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T01:20:00Z`
-  capture and adds only the PR #158 merged-baseline bullet, the #157
+  lease-map lapse. It is **MERGED** at tip
+  `df3d8101d4fc2e6b09bb74086c19a6085e55e2da`. It was **OPEN/READY** at
+  the `2026-09-12T01:20:00Z` capture and adds only the PR #158
+  merged-baseline bullet, the #157 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #159 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `df3d8101d4fc2e6b09bb74086c19a6085e55e2da`.
+- PR #160: Exact 2 S2 continual-learning evidence closure
+  `eval/g0/continual_learning.py`, `eval/reports/phase-15-s2-capabilities.md`
+  (title: feat(eval): S2 continual-learning evidence closure (15-01-06))
+  from exact head `22b8082ddb47b8db0e3db965c529cbee2a6c1a6b`; all
+  required exact-head checks passed in run `34667992401`; merge
+  `cccc27009de00acd71009fca271430e1df2cc71b` at `2026-09-12T03:03:18Z`.
+  Prior tip was `df3d8101d4fc2e6b09bb74086c19a6085e55e2da` (PR #159).
+  Post-main tip Unit+drift will FAIL on CI `34669328279`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #160 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 2):
+  `eval/g0/continual_learning.py`, `eval/reports/phase-15-s2-capabilities.md`.
+  Purpose: P15-S2/15-01-06 S2 continual-learning evidence closure;
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #160 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #161: ordinary documentation receipt recording the merged PR #160
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T03:05:00Z`
+  capture and adds only the PR #160 merged-baseline bullet, the #159
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #159 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #161 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
