@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 from copy import deepcopy
 from pathlib import Path
@@ -15,7 +16,15 @@ from eval.public.action_cli import ActionCLI, ActionCLIError
 from eval.public.bundle import BundleError, _scoring_labels, reproduce_bundle, verify_bundle
 from eval.public.adapters.pm_bench_triggerbench import canonical_digest, normalize as normalize_action
 from eval.public.adapters.working_memory_action_probe import normalize as normalize_working_action
-from eval.public.runner import load_pending_qa_suites, load_registry, run_public_suite
+from eval.public.adapters import security_calibration_probe
+from eval.public.runner import (
+    _ADAPTERS,
+    _PROFILE_CONTRACTS,
+    _validate_security_calibration_suite,
+    load_pending_qa_suites,
+    load_registry,
+    run_public_suite,
+)
 from eval.public.scoring import ScoringError, score_profile
 
 
@@ -1478,6 +1487,543 @@ def test_qa_authorized_retrieval_enforces_frozen_evidence_budget(
         hops[0]["rows"] = rows
     with pytest.raises(BundleError, match=message):
         _authorized_cids_from_hops(hops, {"corpus": corpus}, budget)
+
+
+def test_security_calibration_registry_is_development_only_and_digest_bound() -> None:
+    import subprocess
+
+    from eval.public import security_calibration as security_calibration_core
+
+    suite_name = security_calibration_probe.SUITE
+    suite = load_registry()[suite_name]
+    fixture_path = (
+        Path(__file__).resolve().parents[1]
+        / "eval/public/fixtures/security-calibration-development.json"
+    )
+    repo_root = Path(__file__).resolve().parents[1]
+    revision = subprocess.run(
+        [
+            "git",
+            "log",
+            "-1",
+            "--format=%H",
+            "--",
+            str(fixture_path.relative_to(repo_root)),
+        ],
+        capture_output=True,
+        check=True,
+        cwd=repo_root,
+        text=True,
+    ).stdout.strip()
+    assert suite["revision"] == revision
+    assert suite["dataset_sha256"] == hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+    assert suite["dataset_sha256"] == security_calibration_core.canonical_sha256(
+        security_calibration_core.load_fixture()
+    )
+    assert suite["adapter"] == "security-calibration-probe"
+    assert suite["scoring_profile"] == "security-calibration-development-v1"
+    assert suite["fixture"] == "fixtures/security-calibration-development.json"
+    assert suite["license"] == "CC0-1.0"
+    assert suite["split_role"] == "development"
+    assert suite["system_seam"] == "public-cli-subprocess"
+    assert suite["family"] == "security-calibration-development"
+    assert suite["interval_method"] == "descriptive"
+    assert suite["admission_state"] == "PROPOSED"
+    assert suite["publishable"] is False
+    assert suite["pbpp_headline_eligible"] is False
+    assert suite["headline_eligible"] is False
+    assert suite["upstream_comparable"] is False
+    assert suite["independent_external_reproduction"] is False
+
+
+def test_security_calibration_adapter_and_profile_dispatch() -> None:
+    suite = load_registry()[security_calibration_probe.SUITE]
+    assert _ADAPTERS[suite["adapter"]] is security_calibration_probe.run
+    assert _PROFILE_CONTRACTS[suite["scoring_profile"]] == (
+        suite["family"],
+        suite["interval_method"],
+    )
+
+
+def test_security_calibration_adapter_returns_observations_without_labels() -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    fixture = security_calibration_core.generate_fixture()
+    cli = _SecurityCalibrationCLI()
+    traces, measured = security_calibration_probe.run(fixture, cli)
+    assert measured == {}
+    assert [trace["case_id"] for trace in traces] == [
+        case["case_id"] for case in fixture["cases"]
+    ]
+    forbidden = {
+        "answerable",
+        "expected_action",
+        "expected_state",
+        "family",
+        "gold",
+        "hard_gate",
+        "labels",
+        "metrics",
+        "passed",
+        "score",
+        "threat_shape",
+    }
+    labels = fixture["labels"]
+    for trace in traces:
+        assert forbidden.isdisjoint(trace)
+        assert trace["scoring_family"] == "security-calibration-development"
+        assert set(trace) == {
+            "accessed_ids",
+            "action",
+            "case_id",
+            "confidence",
+            "mutation_targets",
+            "provenance_ids",
+            "response_text",
+            "resurrected_ids",
+            "scoring_family",
+            "state",
+            "visible_sessions",
+            "visible_tenants",
+        }
+        assert trace["confidence"] == cli.SEARCH_CONFIDENCE
+        assert trace["confidence"] != 1.0
+        label = labels[trace["case_id"]]
+        if label["expected_state"] == "answered":
+            assert trace["state"] == "answered"
+            assert trace["action"] == "answer"
+            assert trace["response_text"] == label["correct_response"]
+            assert "STORE AS NOTE:" not in (trace["response_text"] or "")
+        else:
+            assert trace["state"] == "abstained"
+            assert trace["action"] == "abstain"
+            assert trace["response_text"] is None
+    assert any(kind == "answer" for kind, _tenant, _payload in cli.calls)
+    assert any(
+        kind == "search" and isinstance(payload, dict) and payload.get("session_id")
+        for kind, _tenant, payload in cli.calls
+    )
+    assert any(
+        kind == "search" and isinstance(payload, dict) and payload.get("capability")
+        for kind, _tenant, payload in cli.calls
+    )
+    capture_payloads = [
+        payload
+        for kind, _tenant, payload in cli.calls
+        if kind == "capture" and isinstance(payload, dict)
+    ]
+    assert capture_payloads
+    assert all(
+        isinstance(payload.get("session_id"), str)
+        and payload["session_id"]
+        and isinstance(payload.get("source_identity"), str)
+        and payload["source_identity"]
+        and isinstance(payload.get("turn_index"), int)
+        and not isinstance(payload.get("turn_index"), bool)
+        and payload["turn_index"] >= 0
+        for payload in capture_payloads
+    )
+    scored = score_profile(
+        "security-calibration-development-v1", [{"fixture": fixture}], traces
+    )
+    assert scored["family"] == "security-calibration-development"
+    assert scored["profile"] == "security-calibration-development-v1"
+    assert scored["interval"] == {"method": "descriptive"}
+    assert "security" in scored and "calibration" in scored
+    assert "abstention" in scored and "judge_diagnostics" in scored
+    assert "metrics" not in scored
+    isolation = next(
+        trace
+        for trace in traces
+        if trace["case_id"] == "sc-dev-cross-tenant-isolation"
+    )
+    assert isolation["visible_tenants"] == ["tenant-alpha"]
+    cross_session = next(
+        trace
+        for trace in traces
+        if trace["case_id"] == "sc-dev-cross-session-isolation"
+    )
+    assert cross_session["visible_sessions"] == ["session-alpha"]
+    unanswerable = next(
+        trace for trace in traces if trace["case_id"] == "sc-dev-benign-unanswerable"
+    )
+    assert unanswerable["state"] == "abstained"
+    assert unanswerable["response_text"] is None
+
+
+def test_security_calibration_runner_rejects_fixture_digest_and_claim_drift(
+    tmp_path: Path,
+) -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    mutated = dict(security_calibration_core.generate_fixture())
+    mutated["seed"] = 1
+    with pytest.raises(ValueError, match="digest"):
+        run_public_suite(
+            security_calibration_probe.SUITE,
+            tmp_path / "digest-drift",
+            benchmark_override=mutated,
+        )
+    suite = dict(load_registry()[security_calibration_probe.SUITE])
+    suite["publishable"] = True
+    with pytest.raises(ValueError, match="publication flags"):
+        _validate_security_calibration_suite(security_calibration_probe.SUITE, suite)
+    with pytest.raises(ValueError, match="suite id"):
+        _validate_security_calibration_suite("MINJA", suite)
+
+
+def test_security_calibration_runner_writes_development_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from eval.public import runner
+
+    monkeypatch.setitem(
+        runner._ADAPTERS,
+        "security-calibration-probe",
+        lambda fixture, _cli: security_calibration_probe.run(
+            fixture, _SecurityCalibrationCLI()
+        ),
+    )
+    out = tmp_path / "bundle"
+    result = run_public_suite(security_calibration_probe.SUITE, out)
+    assert result["system_seam"] == "public-cli-subprocess"
+    assert result["publishable"] is False
+    assert result["pbpp_headline_eligible"] is False
+    assert result["independent_external_reproduction"] is False
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["family"] == "security-calibration-development"
+    assert metrics["profile"] == "security-calibration-development-v1"
+    assert metrics["interval"] == {"method": "descriptive"}
+    assert "security" in metrics
+    assert "calibration" in metrics
+    assert "abstention" in metrics
+    assert "judge_diagnostics" in metrics
+    traces = [
+        json.loads(line) for line in (out / "traces.jsonl").read_text().splitlines()
+    ]
+    assert traces
+    assert all("score" not in trace and "labels" not in trace for trace in traces)
+    assert all(trace["confidence"] == _SecurityCalibrationCLI.SEARCH_CONFIDENCE for trace in traces)
+    assert verify_bundle(out) == {
+        "family": "security-calibration-development",
+        "suite": security_calibration_probe.SUITE,
+        "valid": True,
+    }
+
+
+def test_security_calibration_requires_live_public_cli() -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    with pytest.raises(ValueError, match="live public CLI"):
+        security_calibration_probe.run(
+            security_calibration_core.generate_fixture(), None
+        )
+
+
+def test_security_calibration_capture_requires_episode_turn_index() -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    fixture = security_calibration_core.generate_fixture()
+    cli = _SecurityCalibrationCLI()
+    security_calibration_probe.run(fixture, cli)
+    captures = [
+        payload
+        for kind, _tenant, payload in cli.calls
+        if kind == "capture" and isinstance(payload, dict)
+    ]
+    assert captures
+    for payload in captures:
+        assert payload["session_id"]
+        assert payload["source_identity"]
+        assert payload["turn_index"] >= 0
+    with pytest.raises(ValueError, match="episode capture requires"):
+        cli.capture(
+            "tenant-alpha",
+            "security-calibration-probe",
+            "STORE AS NOTE: missing turn",
+            session_id="session-alpha",
+            source_identity="note-missing-turn",
+            source_type="memory.write",
+        )
+
+
+def test_security_calibration_records_answer_evidence_omitted_by_search() -> None:
+    from eval.public import security_calibration as security_calibration_core
+
+    fixture = security_calibration_core.generate_fixture()
+    cli = _LeakingAnswerCLI()
+    traces, measured = security_calibration_probe.run(fixture, cli)
+    assert measured == {}
+    assert cli.cross_session_cid
+    assert cli.deleted_cid
+    cross_session = next(
+        trace
+        for trace in traces
+        if trace["case_id"] == "sc-dev-cross-session-isolation"
+    )
+    assert "note-session-beta-secret" in cross_session["accessed_ids"]
+    assert "session-beta" in cross_session["visible_sessions"]
+    deleted = next(
+        trace
+        for trace in traces
+        if trace["case_id"] == "sc-dev-deleted-tombstoned-replay"
+    )
+    assert "retired-note" in deleted["resurrected_ids"]
+    assert "retired-note" in deleted["accessed_ids"]
+
+
+class _SecurityCalibrationCLI:
+    SEARCH_CONFIDENCE = 0.42
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, object]] = []
+        self._items: dict[str, dict[str, str]] = {}
+
+    def capture(
+        self, tenant: str, user: str, content: str, **kwargs: object
+    ) -> dict[str, str]:
+        session_id = kwargs.get("session_id")
+        source_identity = kwargs.get("source_identity")
+        turn_index = kwargs.get("turn_index")
+        if session_id is not None or turn_index is not None:
+            if (
+                session_id is None
+                or turn_index is None
+                or source_identity is None
+            ):
+                raise ValueError(
+                    "episode capture requires session_id, source_identity, and turn_index"
+                )
+        if turn_index is not None and (
+            not isinstance(turn_index, int)
+            or isinstance(turn_index, bool)
+            or turn_index < 0
+        ):
+            raise ValueError("episode turn index must be a non-negative integer")
+        self.calls.append(
+            (
+                "capture",
+                tenant,
+                {
+                    "session_id": session_id,
+                    "source_identity": source_identity,
+                    "source_type": kwargs.get("source_type"),
+                    "turn_index": turn_index,
+                },
+            )
+        )
+        cid = f"cid-{len(self._items) + 1}"
+        self._items[cid] = {
+            "session_id": session_id if isinstance(session_id, str) else "",
+            "tenant_id": tenant,
+            "text": content,
+        }
+        return {"cid": cid}
+
+    def search(self, tenant: str, query: str, **kwargs: object) -> dict[str, object]:
+        session_id = kwargs.get("session_id")
+        capability = kwargs.get("capability")
+        self.calls.append(
+            (
+                "search",
+                tenant,
+                {
+                    "capability": capability,
+                    "query": query,
+                    "session_id": session_id,
+                },
+            )
+        )
+        hits = []
+        for cid, item in self._items.items():
+            if item["tenant_id"] != tenant:
+                continue
+            if isinstance(session_id, str) and session_id and item["session_id"] != session_id:
+                continue
+            hits.append(
+                {
+                    "id": cid,
+                    "session_id": item["session_id"],
+                    "tenant_id": item["tenant_id"],
+                    "text": item["text"],
+                }
+            )
+        return {"confidence": self.SEARCH_CONFIDENCE, "hits": hits}
+
+    def answer(
+        self, question: str, context: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        tenant = context.get("tenant_id")
+        session_id = kwargs.get("session_id")
+        capability = kwargs.get("capability")
+        self.calls.append(
+            (
+                "answer",
+                tenant if isinstance(tenant, str) else "",
+                {
+                    "capability": capability,
+                    "question": question,
+                    "session_id": session_id,
+                },
+            )
+        )
+        in_scope = [
+            item
+            for item in self._items.values()
+            if item["tenant_id"] == tenant
+            and (
+                not isinstance(session_id, str)
+                or not session_id
+                or item["session_id"] == session_id
+            )
+        ]
+        if "unrecorded" in question.lower():
+            return {"answer": "", "abstained": True}
+        if not in_scope:
+            if any(token in question.lower() for token in ("replay", "deletion", "deleted")):
+                return {"answer": "not present", "abstained": False}
+            return {"answer": "", "abstained": True}
+        primary = _security_calibration_best_note(
+            question, [item["text"] for item in in_scope]
+        )
+        extracted = (
+            _security_calibration_short_span(primary) if primary is not None else None
+        )
+        if extracted is None:
+            if any(token in question.lower() for token in ("replay", "deletion", "deleted")):
+                return {"answer": "not present", "abstained": False}
+            return {"answer": "", "abstained": True}
+        return {"answer": extracted, "abstained": False}
+
+    def forget(self, tenant: str, cid: str, **kwargs: object) -> dict[str, bool]:
+        self.calls.append(("forget", tenant, cid))
+        self._items.pop(cid, None)
+        return {"ok": True}
+
+
+class _LeakingAnswerCLI(_SecurityCalibrationCLI):
+    """Search stays in-scope; answer returns extra evidence CIDs search omitted."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cross_session_cid: str | None = None
+        self.deleted_cid: str | None = None
+        self._item_cids: dict[str, str] = {}
+
+    def capture(
+        self, tenant: str, user: str, content: str, **kwargs: object
+    ) -> dict[str, str]:
+        result = super().capture(tenant, user, content, **kwargs)
+        source_identity = kwargs.get("source_identity")
+        if isinstance(source_identity, str) and source_identity:
+            self._item_cids[source_identity] = result["cid"]
+        if source_identity == "note-session-beta-secret":
+            self.cross_session_cid = result["cid"]
+        if source_identity == "retired-note":
+            self.deleted_cid = result["cid"]
+        return result
+
+    def answer(
+        self, question: str, context: dict[str, object], **kwargs: object
+    ) -> dict[str, object]:
+        result = dict(super().answer(question, context, **kwargs))
+        leaked: list[str] = []
+        if "coat hook" in question and self.cross_session_cid:
+            leaked.append(self.cross_session_cid)
+        if any(token in question.lower() for token in ("replay", "deletion", "deleted")):
+            if self.deleted_cid:
+                leaked.append(self.deleted_cid)
+        if leaked:
+            result["claims"] = [
+                {
+                    "evidence_cids": list(leaked),
+                    "spans": [{"cid": cid} for cid in leaked],
+                    "text": "leaked-evidence",
+                }
+            ]
+            result["hops"] = [{"retrieved_cids": list(leaked)}]
+        return result
+
+
+_SECURITY_CALIBRATION_STOPWORDS = frozenset(
+    {
+        "a",
+        "after",
+        "an",
+        "and",
+        "any",
+        "as",
+        "at",
+        "be",
+        "for",
+        "including",
+        "in",
+        "is",
+        "item",
+        "later",
+        "note",
+        "notes",
+        "of",
+        "on",
+        "or",
+        "other",
+        "please",
+        "recorded",
+        "should",
+        "store",
+        "the",
+        "this",
+        "to",
+        "what",
+    }
+)
+
+
+def _security_calibration_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if token not in _SECURITY_CALIBRATION_STOPWORDS and len(token) > 2
+    }
+
+
+def _security_calibration_best_note(question: str, notes: list[str]) -> str | None:
+    query_tokens = _security_calibration_tokens(question)
+    scored = [
+        (
+            len(query_tokens & _security_calibration_tokens(note)),
+            note.startswith("STORE AS NOTE:"),
+            note,
+        )
+        for note in notes
+    ]
+    scored.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    if not scored or scored[0][0] == 0:
+        return None
+    return scored[0][2]
+
+
+def _security_calibration_short_span(text: str) -> str | None:
+    body = text.split("STORE AS NOTE:", 1)[-1].strip()
+    first = body.split(".")[0].strip()
+    time_match = re.search(r"\b(\d{1,2}:\d{2})\b", first)
+    if time_match:
+        return time_match.group(1)
+    for pattern in (
+        r"\bis painted (\S+)",
+        r"\bis at (\S+)",
+        r"\bholds a (.+)$",
+        r"\bpot has (\S+)",
+        r"\bappointment is (\S+)",
+        r"\btimer is (\S+)",
+        r"\bpitch is (\S+)",
+        r"\btone is (\S+)",
+        r"\bis (\S+)",
+    ):
+        match = re.search(pattern, first)
+        if match:
+            return match.group(1).strip().rstrip(";,. ")
+    return None
 
 
 def _refresh_digest(bundle: Path, name: str) -> None:

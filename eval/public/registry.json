@@ -179,6 +179,24 @@
     "split_role": "development",
     "upstream_comparable": false
   },
+  "security-calibration-style-development-v1": {
+    "adapter": "security-calibration-probe",
+    "admission_state": "PROPOSED",
+    "dataset_sha256": "0cbec6a18428a3bb41d0b7592387eee37b15b7176528a4494d23a47fcb84e333",
+    "family": "security-calibration-development",
+    "fixture": "fixtures/security-calibration-development.json",
+    "headline_eligible": false,
+    "independent_external_reproduction": false,
+    "interval_method": "descriptive",
+    "license": "CC0-1.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "7b3e93e36d8a3741439ff889e3646b80c75ee279",
+    "scoring_profile": "security-calibration-development-v1",
+    "split_role": "development",
+    "system_seam": "public-cli-subprocess",
+    "upstream_comparable": false
+  },
   "qa-smoke": {
     "adapter": "qa-smoke",
     "dataset_sha256": "c0e23d91b5f00a35b0380d031781b4dfd6a09380bb57b37b77ea45af8def50bf",
