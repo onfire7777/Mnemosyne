@@ -5,27 +5,155 @@ after Mnemosyne learns later task blocks, earlier task queries should retain the
 same retrieval accuracy they had immediately after the earlier block was
 ingested. The fixture uses the live LocalMemoryEngine path rather than a mocked
 score so regressions in indexing, retrieval, or ranking are visible.
+
+P15-S2 / 15-01-06 records isolated baseline and candidate snapshots on one
+exact-head run and attaches the already-landed S2 development-regression cells
+(cadence/sleep, global sensemaking, surprise-gated writes). Held-out eval
+labels stay in those helpers and are never written onto product evidence.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from eval.g0.sensemaking import run_sensemaking_eval
+from eval.g0.write_gating import HELD_OUT_LABEL_KEYS, run_write_gating_eval
+from mnemosyne.consolidation import CONSOLIDATE_SLEEP_JOB, DEFAULT_CONSOLIDATION_PASSES
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
+from mnemosyne.policy import CONSOLIDATION_CADENCE_TIERS, OperatingPolicy
 
 
 DEFAULT_DATASET_PATH = Path(__file__).resolve().parents[1] / "datasets" / "continual_learning_interference.json"
+
+S2_HANDOFFS: tuple[dict[str, str], ...] = (
+    {
+        "task_id": "15-01-01",
+        "name": "fast|medium|slow consolidation cadence",
+        "pr": "147",
+        "merge_sha": "72f3d94b87b46f379d9c93a3a029c4d121ecd111",
+    },
+    {
+        "task_id": "15-01-02",
+        "name": "queue-backed sleep consolidation",
+        "pr": "149",
+        "merge_sha": "8aad159b47b332ea83b3f50424dc0a57dbca2e11",
+    },
+    {
+        "task_id": "15-01-03",
+        "name": "global RAPTOR sensemaking",
+        "pr": "153",
+        "merge_sha": "3b6763d6b74a886f082cdac9ab8d70c4c237d3e1",
+    },
+    {
+        "task_id": "15-01-04",
+        "name": "surprise-gated write closure",
+        "pr": "158",
+        "merge_sha": "a26f36896a3d29e021d6cc6ddc2cd28f03f90289",
+    },
+)
+
+S2_INTEGRATION_BASE_SHA = "df3d8101d4fc2e6b09bb74086c19a6085e55e2da"
+S2_VERIFY_COMMAND = (
+    "uv run --locked python -m pytest "
+    "tests/test_consolidation_timescales.py "
+    "tests/test_global_sensemaking.py "
+    "tests/test_surprise_gated_writes.py "
+    "tests/test_planning_traceability.py -q"
+)
+EXPECTED_CADENCE_TIER_PASSES: dict[str, list[str]] = {
+    "fast": ["replayer", "summarizer", "embedder"],
+    "medium": ["replayer", "extractor", "resolver", "belief_reviser", "promotion_gate"],
+    "slow": ["replayer", "lesson_distiller", "skill_inducer", "forgetter", "user_model_updater"],
+}
+EXPECTED_CADENCE_TIER_MIN_STEPS: dict[str, int] = {"fast": 5, "medium": 15, "slow": 60}
+EXPECTED_DEFAULT_CONSOLIDATION_PASSES: list[str] = [
+    "replayer",
+    "extractor",
+    "resolver",
+    "belief_reviser",
+    "skill_inducer",
+    "lesson_distiller",
+    "summarizer",
+    "forgetter",
+    "embedder",
+    "promotion_gate",
+    "user_model_updater",
+]
 
 
 def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, Any]:
     """Run the deterministic G0 continual-learning interference fixture."""
 
-    dataset = _load_dataset(dataset_path or DEFAULT_DATASET_PATH)
+    resolved_dataset = dataset_path or DEFAULT_DATASET_PATH
+    dataset = _load_dataset(resolved_dataset)
+    baseline = _run_interference_snapshot(dataset, role="baseline")
+    candidate = _run_interference_snapshot(dataset, role="candidate")
+    s2_cells = _run_s2_capability_cells()
+    ingested_label_keys = sorted(
+        set(baseline["ingested_label_keys"])
+        | set(candidate["ingested_label_keys"])
+        | set(s2_cells["ingested_label_keys"])
+    )
+    held_out_labels_isolated = not ingested_label_keys
+    interference_passed = bool(baseline["passed"] and candidate["passed"])
+    generated_at = datetime.now(timezone.utc).isoformat()
+    candidate_public = _public_interference_snapshot(candidate)
+    candidate_public["s2_cells"] = s2_cells["cells"]
+    return {
+        "schema_version": "g0.continual_learning.v1",
+        "generated_at": generated_at,
+        "metric": "continual_learning_interference",
+        "definition": (
+            "Backward-transfer accuracy drop on earlier task queries after "
+            "sequentially ingesting later task blocks."
+        ),
+        "metric_note": (
+            "Deterministic local proxy for the full sequential task-block G0 "
+            "benchmark; this records whether the live LocalMemoryEngine "
+            "retrieval path retains earlier task accuracy after later "
+            "overlapping ingests. Baseline and candidate snapshots are "
+            "recorded on isolated engines. This is a development-regression "
+            "cell, not an official, production, or superiority claim."
+        ),
+        "dataset_path": _portable_path(resolved_dataset),
+        "retrieval_k": candidate["retrieval_k"],
+        "total_cases": candidate["total_cases"],
+        "before_accuracy": candidate["before_accuracy"],
+        "after_accuracy": candidate["after_accuracy"],
+        "interference": candidate["interference"],
+        "target": 0.0,
+        "passed": interference_passed and held_out_labels_isolated,
+        "rows": candidate["rows"],
+        "baseline": _public_interference_snapshot(baseline),
+        "candidate": candidate_public,
+        "s2_cells": s2_cells["cells"],
+        "s2_cells_passed": s2_cells["passed"],
+        "s2_handoffs": [dict(item) for item in S2_HANDOFFS],
+        "s2_integration_base_sha": S2_INTEGRATION_BASE_SHA,
+        "verify_command": S2_VERIFY_COMMAND,
+        "ingested_label_keys": ingested_label_keys,
+        "held_out_labels_isolated": held_out_labels_isolated,
+        "claim_class": "development_regression",
+        "official_claim": False,
+        "production_claim": False,
+        "superiority_claim": False,
+        "cartridge_ab_implemented": False,
+        "requirements_status": {
+            "CAP-007": "Planned",
+            "CAP-008": "Planned",
+            "CAP-009": "externally_deferred_to_s5_15-04",
+        },
+        "lifecycle_surfaces_updated": [],
+    }
+
+
+def _run_interference_snapshot(dataset: dict[str, Any], *, role: str) -> dict[str, Any]:
     tenant = str(dataset["tenant"])
     earlier_task = dataset["earlier_task"]
     later_task = dataset["later_task"]
@@ -41,9 +169,11 @@ def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, A
                 user_id="g0-eval",
                 actor="system",
                 source_type=case["source_type"],
-                source_identity=f"g0:{earlier_task['id']}:{case['case_id']}",
+                source_identity=f"g0:{earlier_task['id']}:{role}:{case['case_id']}",
                 content=case["content"],
-                metadata={"task_block": earlier_task["id"], "case_id": case["case_id"]},
+                metadata=_product_metadata(
+                    {"task_block": earlier_task["id"], "case_id": case["case_id"], "snapshot_role": role}
+                ),
                 trust_tier=1,
                 capability_tags=["g0-continual-learning"],
                 access_policy={"tenant": tenant},
@@ -51,7 +181,10 @@ def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, A
         )
         expected_cids[case["case_id"]] = cid
 
-    before = [_score_case(engine, tenant, case, expected_cids[case["case_id"]], phase="before", k=k) for case in earlier_items]
+    before = [
+        _score_case(engine, tenant, case, expected_cids[case["case_id"]], phase="before", k=k)
+        for case in earlier_items
+    ]
 
     for index, item in enumerate(later_items, start=1):
         engine.append_evidence(
@@ -60,41 +193,35 @@ def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, A
                 user_id="g0-eval",
                 actor="system",
                 source_type=item["source_type"],
-                source_identity=f"g0:{later_task['id']}:{index}",
+                source_identity=f"g0:{later_task['id']}:{role}:{index}",
                 content=item["content"],
-                metadata={"task_block": later_task["id"], "rank": index},
+                metadata=_product_metadata(
+                    {"task_block": later_task["id"], "rank": index, "snapshot_role": role}
+                ),
                 trust_tier=1,
                 capability_tags=["g0-continual-learning"],
                 access_policy={"tenant": tenant},
             )
         )
 
-    after = [_score_case(engine, tenant, case, expected_cids[case["case_id"]], phase="after", k=k) for case in earlier_items]
+    after = [
+        _score_case(engine, tenant, case, expected_cids[case["case_id"]], phase="after", k=k)
+        for case in earlier_items
+    ]
     before_accuracy = _accuracy(before)
     after_accuracy = _accuracy(after)
     interference = max(0.0, before_accuracy - after_accuracy)
+    ingested_label_keys = _collect_leaked_labels(engine, tenant)
     return {
-        "schema_version": "g0.continual_learning.v1",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "metric": "continual_learning_interference",
-        "definition": (
-            "Backward-transfer accuracy drop on earlier task queries after "
-            "sequentially ingesting later task blocks."
-        ),
-        "metric_note": (
-            "Deterministic local proxy for the full sequential task-block G0 "
-            "benchmark; this records whether the live LocalMemoryEngine "
-            "retrieval path retains earlier task accuracy after later "
-            "overlapping ingests."
-        ),
-        "dataset_path": _portable_path(dataset_path or DEFAULT_DATASET_PATH),
+        "role": role,
         "retrieval_k": k,
         "total_cases": len(earlier_items),
         "before_accuracy": round(before_accuracy, 6),
         "after_accuracy": round(after_accuracy, 6),
         "interference": round(interference, 6),
         "target": 0.0,
-        "passed": interference == 0.0,
+        "passed": interference == 0.0 and not ingested_label_keys,
+        "ingested_label_keys": ingested_label_keys,
         "rows": [
             {
                 "case_id": case["case_id"],
@@ -107,6 +234,177 @@ def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, A
             for index, case in enumerate(earlier_items)
         ],
     }
+
+
+def _public_interference_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "role": snapshot["role"],
+        "retrieval_k": snapshot["retrieval_k"],
+        "total_cases": snapshot["total_cases"],
+        "before_accuracy": snapshot["before_accuracy"],
+        "after_accuracy": snapshot["after_accuracy"],
+        "interference": snapshot["interference"],
+        "target": snapshot["target"],
+        "passed": snapshot["passed"],
+        "ingested_label_keys": list(snapshot["ingested_label_keys"]),
+        "rows": snapshot["rows"],
+    }
+
+
+def _run_s2_capability_cells() -> dict[str, Any]:
+    cadence_sleep = _cadence_sleep_cell()
+    sensemaking = _summarize_sensemaking(run_sensemaking_eval())
+    write_gating = _summarize_write_gating(run_write_gating_eval())
+    cells = {
+        "cadence_sleep": cadence_sleep,
+        "global_sensemaking": sensemaking,
+        "surprise_gated_writes": write_gating,
+    }
+    ingested_label_keys = sorted(
+        set(cadence_sleep["ingested_label_keys"])
+        | set(sensemaking["ingested_label_keys"])
+        | set(write_gating["ingested_label_keys"])
+    )
+    return {
+        "cells": cells,
+        "passed": all(cell["passed"] for cell in cells.values()) and not ingested_label_keys,
+        "ingested_label_keys": ingested_label_keys,
+    }
+
+
+def _cadence_sleep_cell() -> dict[str, Any]:
+    policy = OperatingPolicy()
+    tiers = list(CONSOLIDATION_CADENCE_TIERS)
+    tier_passes = {
+        tier: list(policy.consolidation_cadence_tier_passes[tier]) for tier in CONSOLIDATION_CADENCE_TIERS
+    }
+    tier_min_steps = {
+        tier: int(policy.consolidation_cadence_tier_min_steps[tier]) for tier in CONSOLIDATION_CADENCE_TIERS
+    }
+    default_passes = list(DEFAULT_CONSOLIDATION_PASSES)
+    fingerprint = policy.cadence_policy_fingerprint()
+    passed = (
+        tiers == ["fast", "medium", "slow"]
+        and CONSOLIDATE_SLEEP_JOB == "consolidate_sleep"
+        and tier_passes == EXPECTED_CADENCE_TIER_PASSES
+        and tier_min_steps == EXPECTED_CADENCE_TIER_MIN_STEPS
+        and default_passes == EXPECTED_DEFAULT_CONSOLIDATION_PASSES
+        and fingerprint == _expected_cadence_fingerprint()
+    )
+    return {
+        "cell": "mnemosyne.policy+mnemosyne.consolidation+mnemosyne.jobs",
+        "task_ids": ["15-01-01", "15-01-02"],
+        "cap_id": "CAP-007",
+        "tiers": tiers,
+        "tier_passes": tier_passes,
+        "tier_min_steps": tier_min_steps,
+        "cadence_policy_fingerprint": fingerprint,
+        "sleep_job": CONSOLIDATE_SLEEP_JOB,
+        "default_passes_when_tier_omitted": default_passes,
+        "passed": passed,
+        "ingested_label_keys": [],
+        "claim_class": "development_regression",
+        "metric_note": (
+            "Source pin of allowlisted cadence tiers, default pass routing, "
+            "fingerprint, and the queue-backed sleep job name. This is not "
+            "measured forgetting-reduction, operator, hardware, or custody "
+            "evidence."
+        ),
+    }
+
+
+def _expected_cadence_fingerprint() -> str:
+    payload = {
+        "consolidation_cadence_tier_min_steps": dict(EXPECTED_CADENCE_TIER_MIN_STEPS),
+        "consolidation_cadence_tier_passes": {
+            tier: list(passes) for tier, passes in EXPECTED_CADENCE_TIER_PASSES.items()
+        },
+        "max_prune_fraction_per_pass": 0.02,
+        "max_supersession_rate": 0.05,
+        "min_external_corroboration_for_fact": 2,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _summarize_sensemaking(report: dict[str, Any]) -> dict[str, Any]:
+    ingested_label_keys = _held_out_keys_from_report(report)
+    return {
+        "cell": "eval.g0.sensemaking",
+        "task_id": "15-01-03",
+        "cap_id": "CAP-008",
+        "schema_version": report["schema_version"],
+        "metric": report["metric"],
+        "query_mode": report["query_mode"],
+        "passed": bool(report["passed"]) and not ingested_label_keys,
+        "total_cases": report["total_cases"],
+        "passed_cases": report["passed_cases"],
+        "ingested_label_keys": ingested_label_keys,
+        "claim_class": "development_regression",
+    }
+
+
+def _held_out_keys_from_report(report: dict[str, Any]) -> list[str]:
+    leaked: set[str] = set()
+    raw = report.get("ingested_label_keys")
+    if isinstance(raw, list):
+        leaked.update(str(item) for item in raw if item)
+    leaked.update(_held_out_keys_in_metadata(report))
+    return sorted(leaked)
+
+
+def _held_out_keys_in_metadata(payload: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(payload, dict):
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            found.update(set(metadata) & HELD_OUT_LABEL_KEYS)
+            consolidation = metadata.get("consolidation")
+            if isinstance(consolidation, dict):
+                found.update(set(consolidation) & HELD_OUT_LABEL_KEYS)
+        for value in payload.values():
+            found.update(_held_out_keys_in_metadata(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            found.update(_held_out_keys_in_metadata(item))
+    return found
+
+
+def _summarize_write_gating(report: dict[str, Any]) -> dict[str, Any]:
+    ingested_label_keys = _held_out_keys_from_report(report)
+    return {
+        "cell": "eval.g0.write_gating",
+        "task_id": "15-01-04",
+        "cap_id": "CAP-008",
+        "schema_version": report["schema_version"],
+        "metric": report["metric"],
+        "passed": bool(report["passed"]) and not ingested_label_keys,
+        "total_cases": report["total_cases"],
+        "passed_cases": report["passed_cases"],
+        "confusion": report["confusion"],
+        "denominators": report["denominators"],
+        "precision": report["precision"],
+        "recall": report["recall"],
+        "failure_classes": report["failure_classes"],
+        "ingested_label_keys": ingested_label_keys,
+        "claim_class": "development_regression",
+    }
+
+
+def _product_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key not in HELD_OUT_LABEL_KEYS}
+
+
+def _collect_leaked_labels(engine: LocalMemoryEngine, tenant: str) -> list[str]:
+    leaked: list[str] = []
+    for row in engine.export_tenant(tenant).get("evidence", []):
+        metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+        leaked.extend(sorted(set(metadata) & HELD_OUT_LABEL_KEYS))
+        consolidation = metadata.get("consolidation")
+        if isinstance(consolidation, dict):
+            leaked.extend(sorted(set(consolidation) & HELD_OUT_LABEL_KEYS))
+    return sorted(set(leaked))
 
 
 def _load_dataset(path: Path) -> dict[str, Any]:
@@ -209,7 +507,7 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     if args.print_json or not args.out:
         print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if report["passed"] else 1
+    return 0 if report["passed"] and report["s2_cells_passed"] else 1
 
 
 if __name__ == "__main__":
