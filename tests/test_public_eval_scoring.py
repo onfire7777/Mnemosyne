@@ -241,18 +241,19 @@ def test_security_calibration_bundle_verify_rejects_family_blending(
         "security-calibration-development-v1", [{"fixture": fixture}], traces
     )
     source = tmp_path / "source"
+    bundled = [{**row, "question_id": row["case_id"]} for row in traces]
     write_bundle(
         source,
         benchmark=fixture,
         metadata={**suite, "suite": "security-calibration-style-development-v1"},
         metrics=measured,
-        traces=traces,
+        traces=bundled,
     )
-    traces[0]["scoring_family"] = "qa"
+    bundled[0]["scoring_family"] = "qa"
     (source / "traces.jsonl").write_text(
         "".join(
             json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
-            for row in traces
+            for row in bundled
         )
     )
     manifest = json.loads((source / "bundle-manifest.json").read_text())
