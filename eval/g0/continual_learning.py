@@ -15,6 +15,7 @@ labels stay in those helpers and are never written onto product evidence.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +66,25 @@ S2_VERIFY_COMMAND = (
     "tests/test_surprise_gated_writes.py "
     "tests/test_planning_traceability.py -q"
 )
+EXPECTED_CADENCE_TIER_PASSES: dict[str, list[str]] = {
+    "fast": ["replayer", "summarizer", "embedder"],
+    "medium": ["replayer", "extractor", "resolver", "belief_reviser", "promotion_gate"],
+    "slow": ["replayer", "lesson_distiller", "skill_inducer", "forgetter", "user_model_updater"],
+}
+EXPECTED_CADENCE_TIER_MIN_STEPS: dict[str, int] = {"fast": 5, "medium": 15, "slow": 60}
+EXPECTED_DEFAULT_CONSOLIDATION_PASSES: list[str] = [
+    "replayer",
+    "extractor",
+    "resolver",
+    "belief_reviser",
+    "skill_inducer",
+    "lesson_distiller",
+    "summarizer",
+    "forgetter",
+    "embedder",
+    "promotion_gate",
+    "user_model_updater",
+]
 
 
 def run_continual_learning_eval(dataset_path: Path | None = None) -> dict[str, Any]:
@@ -255,33 +275,61 @@ def _run_s2_capability_cells() -> dict[str, Any]:
 def _cadence_sleep_cell() -> dict[str, Any]:
     policy = OperatingPolicy()
     tiers = list(CONSOLIDATION_CADENCE_TIERS)
-    passed = tiers == ["fast", "medium", "slow"] and CONSOLIDATE_SLEEP_JOB == "consolidate_sleep"
+    tier_passes = {
+        tier: list(policy.consolidation_cadence_tier_passes[tier]) for tier in CONSOLIDATION_CADENCE_TIERS
+    }
+    tier_min_steps = {
+        tier: int(policy.consolidation_cadence_tier_min_steps[tier]) for tier in CONSOLIDATION_CADENCE_TIERS
+    }
+    default_passes = list(DEFAULT_CONSOLIDATION_PASSES)
+    fingerprint = policy.cadence_policy_fingerprint()
+    passed = (
+        tiers == ["fast", "medium", "slow"]
+        and CONSOLIDATE_SLEEP_JOB == "consolidate_sleep"
+        and tier_passes == EXPECTED_CADENCE_TIER_PASSES
+        and tier_min_steps == EXPECTED_CADENCE_TIER_MIN_STEPS
+        and default_passes == EXPECTED_DEFAULT_CONSOLIDATION_PASSES
+        and fingerprint == _expected_cadence_fingerprint()
+    )
     return {
         "cell": "mnemosyne.policy+mnemosyne.consolidation+mnemosyne.jobs",
         "task_ids": ["15-01-01", "15-01-02"],
         "cap_id": "CAP-007",
         "tiers": tiers,
-        "tier_passes": {
-            tier: list(policy.consolidation_cadence_tier_passes[tier]) for tier in CONSOLIDATION_CADENCE_TIERS
-        },
-        "tier_min_steps": {
-            tier: int(policy.consolidation_cadence_tier_min_steps[tier]) for tier in CONSOLIDATION_CADENCE_TIERS
-        },
-        "cadence_policy_fingerprint": policy.cadence_policy_fingerprint(),
+        "tier_passes": tier_passes,
+        "tier_min_steps": tier_min_steps,
+        "cadence_policy_fingerprint": fingerprint,
         "sleep_job": CONSOLIDATE_SLEEP_JOB,
-        "default_passes_when_tier_omitted": list(DEFAULT_CONSOLIDATION_PASSES),
+        "default_passes_when_tier_omitted": default_passes,
         "passed": passed,
         "ingested_label_keys": [],
         "claim_class": "development_regression",
         "metric_note": (
             "Source pin of allowlisted cadence tiers, default pass routing, "
-            "and the queue-backed sleep job name. This is not measured "
-            "forgetting-reduction, operator, hardware, or custody evidence."
+            "fingerprint, and the queue-backed sleep job name. This is not "
+            "measured forgetting-reduction, operator, hardware, or custody "
+            "evidence."
         ),
     }
 
 
+def _expected_cadence_fingerprint() -> str:
+    payload = {
+        "consolidation_cadence_tier_min_steps": dict(EXPECTED_CADENCE_TIER_MIN_STEPS),
+        "consolidation_cadence_tier_passes": {
+            tier: list(passes) for tier, passes in EXPECTED_CADENCE_TIER_PASSES.items()
+        },
+        "max_prune_fraction_per_pass": 0.02,
+        "max_supersession_rate": 0.05,
+        "min_external_corroboration_for_fact": 2,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _summarize_sensemaking(report: dict[str, Any]) -> dict[str, Any]:
+    ingested_label_keys = _held_out_keys_from_report(report)
     return {
         "cell": "eval.g0.sensemaking",
         "task_id": "15-01-03",
@@ -289,22 +337,49 @@ def _summarize_sensemaking(report: dict[str, Any]) -> dict[str, Any]:
         "schema_version": report["schema_version"],
         "metric": report["metric"],
         "query_mode": report["query_mode"],
-        "passed": bool(report["passed"]),
+        "passed": bool(report["passed"]) and not ingested_label_keys,
         "total_cases": report["total_cases"],
         "passed_cases": report["passed_cases"],
-        "ingested_label_keys": [],
+        "ingested_label_keys": ingested_label_keys,
         "claim_class": "development_regression",
     }
 
 
+def _held_out_keys_from_report(report: dict[str, Any]) -> list[str]:
+    leaked: set[str] = set()
+    raw = report.get("ingested_label_keys")
+    if isinstance(raw, list):
+        leaked.update(str(item) for item in raw if item)
+    leaked.update(_held_out_keys_in_metadata(report))
+    return sorted(leaked)
+
+
+def _held_out_keys_in_metadata(payload: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(payload, dict):
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict):
+            found.update(set(metadata) & HELD_OUT_LABEL_KEYS)
+            consolidation = metadata.get("consolidation")
+            if isinstance(consolidation, dict):
+                found.update(set(consolidation) & HELD_OUT_LABEL_KEYS)
+        for value in payload.values():
+            found.update(_held_out_keys_in_metadata(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            found.update(_held_out_keys_in_metadata(item))
+    return found
+
+
 def _summarize_write_gating(report: dict[str, Any]) -> dict[str, Any]:
+    ingested_label_keys = _held_out_keys_from_report(report)
     return {
         "cell": "eval.g0.write_gating",
         "task_id": "15-01-04",
         "cap_id": "CAP-008",
         "schema_version": report["schema_version"],
         "metric": report["metric"],
-        "passed": bool(report["passed"]),
+        "passed": bool(report["passed"]) and not ingested_label_keys,
         "total_cases": report["total_cases"],
         "passed_cases": report["passed_cases"],
         "confusion": report["confusion"],
@@ -312,7 +387,7 @@ def _summarize_write_gating(report: dict[str, Any]) -> dict[str, Any]:
         "precision": report["precision"],
         "recall": report["recall"],
         "failure_classes": report["failure_classes"],
-        "ingested_label_keys": list(report.get("ingested_label_keys") or []),
+        "ingested_label_keys": ingested_label_keys,
         "claim_class": "development_regression",
     }
 
