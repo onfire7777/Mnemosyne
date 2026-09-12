@@ -1385,12 +1385,14 @@ class ConsolidationWorker:
         explicit_invalid = False
         if "prediction_error" in payload:
             raw_error = payload.get("prediction_error")
-            raw_score = raw_error.get("score") if isinstance(raw_error, dict) else raw_error
-            parsed = _parse_unit_score(raw_score)
-            if parsed is None:
+            if not isinstance(raw_error, dict):
                 explicit_invalid = True
             else:
-                scores.append(parsed)
+                parsed = _parse_unit_score(raw_error.get("score"))
+                if parsed is None:
+                    explicit_invalid = True
+                else:
+                    scores.append(parsed)
         for item in evidence:
             metadata = item.metadata if isinstance(item.metadata, dict) else {}
             consolidation = metadata.get("consolidation")

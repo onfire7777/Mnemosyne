@@ -578,7 +578,9 @@ class IngestionPipeline:
                 "source_trust_tier": trust_tier,
                 "sensitivity": sensitivity,
                 "capability_tags": list(capability_tags),
-                "metadata": dict(request.metadata),
+                "metadata": _without_held_out_write_gate_labels(
+                    request.metadata if isinstance(request.metadata, dict) else {}
+                ),
             },
         )
 
