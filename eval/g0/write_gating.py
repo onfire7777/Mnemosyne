@@ -90,7 +90,7 @@ def run_write_gating_eval() -> dict[str, Any]:
     for row in rows:
         key = _confusion_key(should_write=row["should_write"], wrote=row["wrote"])
         confusion[key] += 1
-        if row["failure_class"] in failure_classes:
+        if row["mechanism_matched"] and row["failure_class"] in failure_classes:
             failure_classes[row["failure_class"]] += 1
 
     precision_den = confusion["tp"] + confusion["fp"]
@@ -244,13 +244,20 @@ def _run_case(spec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     leaked = _collect_leaked_labels(engine, tenant)
     should_write = bool(spec["should_write"])
     wrote = bool(outcome["wrote"])
-    passed = wrote is should_write and not leaked
+    mechanism_matched = _mechanism_matched(
+        spec.get("failure_class"),
+        outcome,
+        should_write=should_write,
+        wrote=wrote,
+    )
+    passed = wrote is should_write and mechanism_matched and not leaked
     row = {
         "case_id": spec["case_id"],
         "should_write": should_write,
         "wrote": wrote,
         "passed": passed,
         "failure_class": spec["failure_class"],
+        "mechanism_matched": mechanism_matched,
         "gate": outcome.get("gate"),
         "skipped": outcome.get("skipped") or [],
         "evidence_seen": outcome.get("evidence_seen"),
@@ -259,11 +266,71 @@ def _run_case(spec: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return row, leaked
 
 
+def _mechanism_matched(
+    failure_class: str | None,
+    outcome: dict[str, Any],
+    *,
+    should_write: bool,
+    wrote: bool,
+) -> bool:
+    if failure_class is None:
+        return should_write is True and wrote is True
+    if wrote:
+        return False
+    candidates = outcome.get("candidate_results") or []
+    skipped = [str(item) for item in (outcome.get("skipped") or [])]
+    failed = [str(item.get("failed_cases") or "") for item in candidates if isinstance(item, dict)]
+    gate = outcome.get("gate")
+    if failure_class == "security":
+        return any("security_denied" in text for text in failed)
+    if failure_class == "corroboration":
+        return any("fact_external_corroboration" in text for text in failed)
+    if failure_class == "regression":
+        return any(bool(item.get("protected_regressions")) for item in candidates if isinstance(item, dict))
+    if failure_class == "mutation_budget":
+        rails = outcome.get("mutation_rails") if isinstance(outcome.get("mutation_rails"), dict) else {}
+        violations = rails.get("violations") if isinstance(rails.get("violations"), list) else []
+        return any(isinstance(item, dict) and item.get("rail") == "max_supersession_rate" for item in violations) or (
+            rails.get("supersessions_allowed") == 0 and not any(bool(item.get("promoted")) for item in candidates if isinstance(item, dict))
+        )
+    if failure_class == "erasure":
+        return outcome.get("evidence_seen") == 0
+    if failure_class == "capability":
+        return "source_marked_data_only" in skipped
+    if failure_class == "low_surprise_metadata_only":
+        return gate == "low_prediction_error_metadata_only" and "low_prediction_error_metadata_only" in skipped
+    if failure_class == "malformed_surprise":
+        return gate == "low_prediction_error_metadata_only"
+    if failure_class == "untrusted_surprise":
+        return "source_marked_data_only" in skipped
+    return False
+
+
 def _gate_name(run: Any) -> str | None:
     for item in run.pass_results:
         if item["name"] == "prediction_error_gate":
             return str(item["details"].get("gate") or "")
     return None
+
+
+def _mutation_rails(run: Any) -> dict[str, Any]:
+    for item in run.pass_results:
+        if item["name"] == "mutation_rails" and isinstance(item.get("details"), dict):
+            return item["details"]
+    return {}
+
+
+def _run_outcome(run: Any, **extra: Any) -> dict[str, Any]:
+    payload = {
+        "wrote": _promoted(run),
+        "gate": _gate_name(run),
+        "skipped": run.skipped,
+        "evidence_seen": run.evidence_seen,
+        "candidate_results": list(run.candidate_results),
+        "mutation_rails": _mutation_rails(run),
+    }
+    payload.update(extra)
+    return payload
 
 
 def _run_trusted_high_surprise(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -282,7 +349,7 @@ def _run_trusted_high_surprise(engine: LocalMemoryEngine, tenant: str) -> dict[s
             "prediction_error": {"score": 0.91},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_uncorroborated(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -294,7 +361,7 @@ def _run_uncorroborated(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any
             "prediction_error": {"score": 1.0},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_low_surprise(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -313,7 +380,7 @@ def _run_low_surprise(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "prediction_error": {"score": 0.0},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_untrusted(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -336,16 +403,13 @@ def _run_untrusted(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "capability_tags": ["data-only", "no-write-authority"],
         }
     )
-    return {
-        "wrote": _promoted(run),
-        "gate": _gate_name(run),
-        "skipped": run.skipped,
-        "evidence_seen": run.evidence_seen,
-        "ingest_metadata": {
+    return _run_outcome(
+        run,
+        ingest_metadata={
             "write_priority": (ingest_metadata.get("write_priority") or {}),
             "consolidation": (ingest_metadata.get("consolidation") or {}),
         },
-    }
+    )
 
 
 def _run_malformed(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -358,7 +422,7 @@ def _run_malformed(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "prediction_error": {"score": "not-a-number"},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_erasure(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -379,7 +443,7 @@ def _run_erasure(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "prediction_error": {"score": 1.0},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_capability(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -406,7 +470,7 @@ def _run_capability(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "capability_tags": ["data-only", "no-write-authority"],
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_security(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -425,7 +489,7 @@ def _run_security(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "prediction_error": {"score": 1.0},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_regression(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -449,7 +513,7 @@ def _run_regression(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
             "prediction_error": {"score": 1.0},
         }
     )
-    return {"wrote": _promoted(run), "gate": _gate_name(run), "skipped": run.skipped, "evidence_seen": run.evidence_seen}
+    return _run_outcome(run)
 
 
 def _run_mutation_budget(engine: LocalMemoryEngine, tenant: str) -> dict[str, Any]:
@@ -494,12 +558,7 @@ def _run_mutation_budget(engine: LocalMemoryEngine, tenant: str) -> dict[str, An
         if row.get("status") == "active" and row.get("branch", "main") == "main"
     }
     over_budget = bool(before - after)
-    return {
-        "wrote": over_budget,
-        "gate": _gate_name(run),
-        "skipped": run.skipped,
-        "evidence_seen": run.evidence_seen,
-    }
+    return _run_outcome(run, wrote=over_budget)
 
 
 _CASES: tuple[dict[str, Any], ...] = (

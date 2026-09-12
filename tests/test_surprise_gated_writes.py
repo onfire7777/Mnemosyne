@@ -18,6 +18,7 @@ from mnemosyne.consolidation import ConsolidationWorker, MutationRailBudget
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.gate import RegressionCase
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
+from mnemosyne.media import MEDIA_EXTRACT_JOB
 from mnemosyne.models import Assertion, Evidence
 from mnemosyne.queue import InProcessQueue
 from mnemosyne.security import CapabilityDecision, SecurityPolicy, TrustTier
@@ -418,6 +419,49 @@ def test_client_injected_prediction_error_cannot_override_computed_signal() -> N
     assert _pass_details(run, "prediction_error_gate")["score"] == computed
 
 
+def test_non_mapping_prediction_error_payload_cannot_raise_authority() -> None:
+    engine = LocalMemoryEngine()
+    cid_a = _append(engine, FACT_A, metadata={"consolidation": {"prediction_error": 0.0}})
+    cid_b = _append(engine, FACT_B, metadata={"consolidation": {"prediction_error": 0.0}}, source_type="note")
+    run = _worker(engine).run_queue_payload(
+        {
+            "tenant_id": TENANT,
+            "source_evidence_cids": [cid_a, cid_b],
+            "prediction_error": 1.0,
+        }
+    )
+    gate = _pass_details(run, "prediction_error_gate")
+    assert gate["gate"] == "low_prediction_error_metadata_only"
+    assert gate["score"] == 0.0
+    assert _promoted(run) is False
+
+
+def test_held_out_labels_do_not_enter_media_extract_jobs() -> None:
+    engine = LocalMemoryEngine()
+    queue = InProcessQueue()
+    result = IngestionPipeline(engine, queue=queue).ingest(
+        IngestRequest(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="chat",
+            data=b"\x89PNG\r\n\x1a\nwrite-gate",
+            media_type="image/png",
+            modality="image",
+            metadata={
+                "should_write": True,
+                "held_out_label": "should_write",
+                "ingest_case": "keep-me",
+            },
+        )
+    )
+    media = next(job for job in result.queued_jobs if job["kind"] == MEDIA_EXTRACT_JOB)
+    metadata = media["payload"]["metadata"]
+    assert "should_write" not in metadata
+    assert "held_out_label" not in metadata
+    assert metadata["ingest_case"] == "keep-me"
+
+
 def test_replay_is_stable() -> None:
     engine = LocalMemoryEngine()
     cid_a = _append(
@@ -483,6 +527,8 @@ def test_write_gating_eval_exposes_confusion_counts_without_leaking_labels() -> 
     for row in first["rows"]:
         assert "held_out_label" not in (row.get("ingest_metadata") or {})
         assert row["failure_class"] in {None, *FAILURE_CLASSES}
+        assert row["mechanism_matched"] is True
+    assert all(first["failure_classes"][name] == 1 for name in FAILURE_CLASSES)
 
 
 def test_mutation_rail_budget_object_still_clamps_when_surprise_is_maxed() -> None:
