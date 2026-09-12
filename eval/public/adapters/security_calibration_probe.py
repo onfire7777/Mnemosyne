@@ -94,8 +94,13 @@ def _execute_case(case: Mapping[str, Any], cli: Any) -> dict[str, Any]:
     confidence: float | None = None
     answer_text: str | None = None
     abstained = False
+    capture_turn = 0
     for operation in case["operations"]:
-        result = _execute_operation(operation, cli, recorded)
+        result = _execute_operation(
+            operation, cli, recorded, capture_turn=capture_turn
+        )
+        if operation["operation"] == "capture":
+            capture_turn += 1
         if operation["operation"] == "retrieve":
             hits = result["hits"]
             confidence = result["confidence"]
@@ -111,6 +116,8 @@ def _execute_operation(
     operation: Mapping[str, Any],
     cli: Any,
     recorded: dict[str, dict[str, Any]],
+    *,
+    capture_turn: int,
 ) -> dict[str, Any]:
     kind = operation["operation"]
     tenant_id = operation["tenant_id"]
@@ -128,6 +135,7 @@ def _execute_operation(
                 session_id=session_id,
                 source_identity=item_id or _PROBE_USER,
                 source_type=capability,
+                turn_index=_capture_turn_index(operation, capture_turn),
             ),
             "capture",
         )
@@ -170,9 +178,16 @@ def _execute_operation(
             "answer": answered["answer"],
             "abstained": answered["abstained"],
             "confidence": search["confidence"],
-            "hits": search["hits"],
+            "hits": _merge_hits(search["hits"], answered["hits"]),
         }
     raise ValueError(f"unsupported public operation: {kind}")
+
+
+def _capture_turn_index(operation: Mapping[str, Any], capture_turn: int) -> int:
+    declared = operation.get("turn_index")
+    if isinstance(declared, int) and not isinstance(declared, bool) and declared >= 0:
+        return declared
+    return capture_turn
 
 
 def _search(cli: Any, operation: Mapping[str, Any]) -> dict[str, Any]:
@@ -231,12 +246,81 @@ def _answer(cli: Any, operation: Mapping[str, Any]) -> dict[str, Any]:
             session_id=operation["session_id"],
         )
     result = _require_mapping(raw, "answer")
+    evidence = _answer_evidence_hits(result)
     if result.get("abstained") is True:
-        return {"answer": None, "abstained": True}
+        return {"answer": None, "abstained": True, "hits": evidence}
     answer = _answer_text(result)
     if answer is None:
-        return {"answer": None, "abstained": True}
-    return {"answer": answer, "abstained": False}
+        return {"answer": None, "abstained": True, "hits": evidence}
+    return {"answer": answer, "abstained": False, "hits": evidence}
+
+
+def _answer_evidence_hits(result: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """Collect evidence CIDs returned by the answer payload itself."""
+    hits: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(cid: object, extra: Mapping[str, Any] | None = None) -> None:
+        if not isinstance(cid, str) or not cid or cid in seen:
+            return
+        seen.add(cid)
+        hit: dict[str, Any] = {"id": cid}
+        if extra is not None:
+            for key in ("metadata", "provenance", "session_id", "tenant_id"):
+                if key in extra:
+                    hit[key] = extra[key]
+        hits.append(hit)
+
+    raw_hits = result.get("hits")
+    if isinstance(raw_hits, list):
+        for hit in raw_hits:
+            if isinstance(hit, Mapping):
+                add(hit.get("id") or hit.get("cid"), hit)
+    for key in ("evidence_cids", "retrieved_cids"):
+        values = result.get(key)
+        if isinstance(values, list):
+            for cid in values:
+                add(cid)
+    claims = result.get("claims")
+    if isinstance(claims, list):
+        for claim in claims:
+            if not isinstance(claim, Mapping):
+                continue
+            evidence_cids = claim.get("evidence_cids")
+            if isinstance(evidence_cids, list):
+                for cid in evidence_cids:
+                    add(cid)
+            spans = claim.get("spans")
+            if isinstance(spans, list):
+                for span in spans:
+                    if isinstance(span, Mapping):
+                        add(span.get("cid"))
+    hops = result.get("hops")
+    if isinstance(hops, list):
+        for hop in hops:
+            if not isinstance(hop, Mapping):
+                continue
+            retrieved = hop.get("retrieved_cids")
+            if isinstance(retrieved, list):
+                for cid in retrieved:
+                    add(cid)
+    return hits
+
+
+def _merge_hits(
+    search_hits: list[Mapping[str, Any]],
+    answer_hits: list[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    merged: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    for hit in [*search_hits, *answer_hits]:
+        cid = hit.get("id")
+        if isinstance(cid, str) and cid:
+            if cid in seen:
+                continue
+            seen.add(cid)
+        merged.append(hit)
+    return merged
 
 
 def _answer_text(result: Mapping[str, Any]) -> str | None:
