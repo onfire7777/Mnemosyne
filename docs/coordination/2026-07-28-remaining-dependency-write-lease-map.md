@@ -670,13 +670,48 @@ The following packages are complete source history, not runnable work:
   does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #161: ordinary documentation receipt recording the merged PR #160
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T03:05:00Z`
-  capture and adds only the PR #160 merged-baseline bullet, the #159
+  lease-map lapse. It is **MERGED** at tip
+  `ac66fcf9f08a5c25118c386cf75c26d1261e321f`. It was **OPEN/READY** at
+  the `2026-09-12T03:05:00Z` capture and adds only the PR #160
+  merged-baseline bullet, the #159 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #161 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `ac66fcf9f08a5c25118c386cf75c26d1261e321f`.
+- PR #162: Exact 3 security-calibration development Stage A
+  `eval/public/fixtures/security-calibration-development.json`,
+  `eval/public/security_calibration.py`,
+  `tests/test_public_security_calibration.py`
+  (title: feat(eval): security-calibration development Stage A (15-02))
+  from exact head `b91f081b8187e181a8eb169b8c0bd6a4852aff97`; all
+  required exact-head checks passed in run `34701573916`; merge
+  `7db0c810f53cbef36c83c884b971a4796aa7fca6` at `2026-09-12T15:37:22Z`.
+  Prior tip was `ac66fcf9f08a5c25118c386cf75c26d1261e321f` (PR #161).
+  Post-main tip Unit+drift will FAIL on CI `34702788518`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #162 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `eval/public/fixtures/security-calibration-development.json`,
+  `eval/public/security_calibration.py`,
+  `tests/test_public_security_calibration.py`.
+  Purpose: 15-02 security-calibration development Stage A;
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #162 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #163: ordinary documentation receipt recording the merged PR #162
+  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T15:40:00Z`
+  capture and adds only the PR #162 merged-baseline bullet, the #161
   MERGED mark, and this structured self-record in this map. Exclusive
   File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #161 changes no
+  merge SHA/time, or post-main CI is claimed here. PR #163 changes no
   benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review, security,
   and CI before merge.
