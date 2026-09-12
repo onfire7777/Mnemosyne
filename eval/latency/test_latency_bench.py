@@ -16,7 +16,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
@@ -120,9 +122,12 @@ def test_markdown_renders():
     assert "what would close the gap" in md.lower()
 
 
+def _canonical_json(payload: object) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
 def _sha256_canonical(payload: object) -> str:
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
 def _assert_receipt_abi(receipt: dict, *, distribution: str, declared_concurrency: int) -> None:
@@ -210,10 +215,18 @@ def _assert_receipt_abi(receipt: dict, *, distribution: str, declared_concurrenc
         ):
             assert field in sample, f"resource sample missing {field}"
     assert resources["during"], "resource samples during the run are required"
+    for sample in resources["during"]:
+        assert "sampled_monotonic" in sample
+        assert sample["sampled_monotonic"] >= identity["monotonic_start"]
+        assert sample["sampled_monotonic"] <= identity["monotonic_end"]
     assert "memory_pressure" in resources
     assert "swap_pagefile_delta" in resources
     assert "disk_index_growth" in resources
     assert "first_abort" in resources
+    assert concurrency["total_model_request_count"] == 0
+    assert "cap006-synthetic" not in identity["command"]
+    command_leaf = Path(str(identity["command"][-1])).name
+    assert command_leaf in {"bench.py", "bench_concurrent.py", "bench_warm.py"}
     observations = receipt["observations"]
     assert observations, "per-request observations are required"
     previous_issue = None
@@ -245,16 +258,13 @@ def _assert_receipt_abi(receipt: dict, *, distribution: str, declared_concurrenc
         assert raw[field].startswith("sha256:")
     assert raw["observations_sha256"] == "sha256:" + _sha256_canonical(observations)
     assert raw["workload_sha256"] == "sha256:" + _sha256_canonical(workload)
-    bindable = {
-        "schema": receipt["schema"],
-        "identity_digests": digests,
-        "workload": workload,
-        "concurrency": concurrency,
-        "observations": observations,
-        "denominators": denominators,
-        "distributions": rows,
-    }
-    assert raw["result_digest"] == "sha256:" + _sha256_canonical(bindable)
+    complete = json.loads(_canonical_json(receipt))
+    complete["raw_artifacts"].pop("result_digest", None)
+    assert raw["result_digest"] == "sha256:" + _sha256_canonical(complete)
+    rewritten = json.loads(_canonical_json(receipt))
+    rewritten["identity"]["repository_sha"] = "0" * 40
+    rewritten["raw_artifacts"].pop("result_digest", None)
+    assert raw["result_digest"] != "sha256:" + _sha256_canonical(rewritten)
 
 
 def test_cap006_abi_helpers_exist():
@@ -362,6 +372,64 @@ def test_concurrent_driver_records_declared_observed_overlap():
     assert receipt["workload"]["order"] == bench.pinned_workload()["order"]
 
 
+def test_concurrent_latency_excludes_overlap_scaffolding():
+    import bench_concurrent
+
+    receipt = bench_concurrent.run_concurrent_receipt(
+        declared_concurrency=3,
+        warmup_count=1,
+        timeout_seconds=1.0,
+    )
+    measured = [
+        obs for obs in receipt["observations"] if not obs["excluded"] and obs["outcome"] == "success"
+    ]
+    assert measured
+    assert max(obs["latency_ms"] for obs in measured) < 15.0
+    assert receipt["concurrency"]["observed_overlap"] is True
+    assert receipt["concurrency"]["observed_max_in_flight"] == 3
+    assert receipt["validity"]["valid"] is True
+
+
+def test_resource_samples_are_taken_while_requests_are_active():
+    def _hold_op(_op: dict) -> None:
+        time.sleep(0.03)
+
+    receipt = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=1,
+        timeout_seconds=1.0,
+        execute=_hold_op,
+    )
+    measured = [obs for obs in receipt["observations"] if not obs["excluded"]]
+    window_start = min(obs["start_monotonic"] for obs in measured)
+    window_end = max(obs["end_monotonic"] for obs in measured)
+    during = receipt["resources"]["during"]
+    assert during
+    assert any(window_start <= sample["sampled_monotonic"] <= window_end for sample in during)
+
+
+def test_swap_bytes_measure_consumption_not_capacity():
+    receipt = bench.execute_pinned_workload(
+        distribution=bench.DISTRIBUTION_WARM_SERIAL,
+        declared_concurrency=1,
+        warmup_count=1,
+        timeout_seconds=1.0,
+    )
+    meminfo = Path("/proc/meminfo")
+    if not meminfo.exists():
+        return
+    parsed: dict[str, int] = {}
+    for line in meminfo.read_text(encoding="utf-8", errors="replace").splitlines():
+        name, _, rest = line.partition(":")
+        token = rest.strip().split()
+        if token:
+            parsed[name] = int(token[0]) * 1024
+    expected = parsed.get("SwapTotal", 0) - parsed.get("SwapFree", 0)
+    assert receipt["resources"]["before"]["swap_bytes"] == expected
+    assert receipt["resources"]["before"]["swap_bytes"] <= parsed.get("SwapTotal", 0)
+
+
 def test_concurrent_receipt_invalid_when_overlap_or_inflight_mismatch():
     import bench_concurrent
 
@@ -400,6 +468,25 @@ def test_phase15_reports_are_separate_synthetic_receipts():
     assert warm["raw_artifacts"]["result_digest"] != concurrent["raw_artifacts"]["result_digest"]
     assert warm["official_claim"] is False
     assert concurrent["official_claim"] is False
+    stale_sha = "c3a16b7e0d1e593f6957a291f2ae61cd469a7359"
+    assert warm["identity"]["clean_tree"] is True
+    assert concurrent["identity"]["clean_tree"] is True
+    assert warm["identity"]["repository_sha"] != stale_sha
+    assert concurrent["identity"]["repository_sha"] != stale_sha
+    for receipt in (warm, concurrent):
+        sha = receipt["identity"]["repository_sha"]
+        shown = subprocess.check_output(
+            ["git", "rev-parse", "--verify", sha],
+            cwd=REPO_ROOT,
+            text=True,
+        ).strip()
+        assert shown == sha
+        tree = subprocess.check_output(
+            ["git", "cat-file", "-p", f"{sha}:eval/latency/bench.py"],
+            cwd=REPO_ROOT,
+            text=True,
+        )
+        assert "execute_pinned_workload" in tree
 
 
 def test_phase15_write_does_not_relabel_historical_latest():

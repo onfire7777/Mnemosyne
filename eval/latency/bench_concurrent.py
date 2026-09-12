@@ -36,6 +36,8 @@ def run_concurrent_receipt(
     inject_outcomes: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Issue the pinned workload at declared concurrency and bind a receipt."""
+    relative = str(HERE.relative_to(REPO_ROOT))
+    observed_workers = declared_concurrency if executor_workers is None else executor_workers
     return bench.execute_pinned_workload(
         distribution=bench.DISTRIBUTION_CONCURRENT,
         declared_concurrency=declared_concurrency,
@@ -43,6 +45,15 @@ def run_concurrent_receipt(
         timeout_seconds=timeout_seconds,
         executor_workers=executor_workers,
         inject_outcomes=inject_outcomes,
+        command=[sys.executable, relative],
+        arguments={
+            "declared_concurrency": declared_concurrency,
+            "warmup_count": warmup_count,
+            "timeout_seconds": timeout_seconds,
+            "executor_workers": observed_workers,
+            "workload": bench.SYNTHETIC_WORKLOAD_ID,
+        },
+        model_request_count=0,
     )
 
 
@@ -53,6 +64,15 @@ def emit_phase15_s4_receipts() -> tuple[Path, Path]:
         declared_concurrency=1,
         warmup_count=2,
         timeout_seconds=1.0,
+        command=[sys.executable, "eval/latency/bench.py"],
+        arguments={
+            "distribution": bench.DISTRIBUTION_WARM_SERIAL,
+            "declared_concurrency": 1,
+            "warmup_count": 2,
+            "timeout_seconds": 1.0,
+            "workload": bench.SYNTHETIC_WORKLOAD_ID,
+        },
+        model_request_count=0,
     )
     concurrent = run_concurrent_receipt(
         declared_concurrency=3,
