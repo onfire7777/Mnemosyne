@@ -30,14 +30,13 @@ from mnemosyne.storage import LocalObjectStore
 
 Modality = Literal["text", "image", "audio", "video", "binary", "multimodal"]
 
+# Reserved eval-only names. Generic caller keys such as should_write,
+# held_out, and failure_class are preserved on IngestRequest.metadata.
 _HELD_OUT_WRITE_GATE_KEYS = frozenset(
     {
         "held_out_label",
-        "should_write",
         "write_gate_label",
         "eval_label",
-        "held_out",
-        "failure_class",
     }
 )
 
