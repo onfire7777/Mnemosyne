@@ -2295,25 +2295,38 @@ def global_sensemaking_projection(
             denied_cids.add(cid)
             continue
         readable_items.append(item)
-    readable_summary_ids = {
-        str(_item_field(item, "cid") or "") for item in readable_items if _item_field(item, "cid")
-    }
-
-    mapped: list[Hit] = []
-    source_cids: list[str] = []
-    levels: set[int] = set()
-    for item in readable_items:
+    # Validate bottom-up so a hidden/redacted/erased descendant invalidates
+    # every ancestor. readable_summary_ids is the validated set, not merely
+    # policy-readable nodes — that preserves tip unread-erased-child redaction
+    # and supersedes it for redacted children that still pass classify().
+    validated_hits: dict[str, Hit] = {}
+    validated_summary_ids: set[str] = set()
+    for item in sorted(
+        readable_items,
+        key=lambda row: (raptor_level_of(_item_field(row, "metadata") or {}) or 0, str(_item_field(row, "cid") or "")),
+    ):
+        cid = str(_item_field(item, "cid") or "")
         hit = _raptor_node_hit(
             item,
             ops=ops,
             filt=filt,
             policy=policy,
             query=query,
-            readable_summary_ids=readable_summary_ids,
+            readable_summary_ids=validated_summary_ids,
             denied_cids=denied_cids,
         )
         if hit is None:
             hidden_source_dropped += 1
+            continue
+        validated_hits[cid] = hit
+        validated_summary_ids.add(cid)
+
+    mapped: list[Hit] = []
+    source_cids: list[str] = []
+    levels: set[int] = set()
+    for item in readable_items:
+        hit = validated_hits.get(str(_item_field(item, "cid") or ""))
+        if hit is None:
             continue
         mapped.append(hit)
         level = int(hit.metadata.get("raptor_level") or 0)
@@ -2323,7 +2336,13 @@ def global_sensemaking_projection(
             if source_cid and source_cid not in source_cids:
                 source_cids.append(source_cid)
 
-    reduced, theme_roots, incomplete = _reduce_sensemaking_hits(mapped, node_budget=node_budget, query=query)
+    # Return the complete ranked candidate set so the shared pipeline can pack
+    # tokens first and then fill the node budget from smaller surviving nodes.
+    reduced, theme_roots, incomplete = _reduce_sensemaking_hits(
+        mapped,
+        node_budget=max(node_budget, len(mapped)),
+        query=query,
+    )
     exclusions: list[dict[str, Any]] = []
     if policy_denied:
         exclusions.append({"reason": "policy_denied", "count": policy_denied})
@@ -2399,10 +2418,16 @@ def _raptor_node_hit(
         status="active",
         erased=bool(_item_field(item, "erased")),
     )
+    if not decision.allowed:
+        return None
+    if decision.redacted:
+        return None
     content = str(_item_field(item, "content") or "")
     text, privacy = apply_text_redactions(content, access_policy, decision)
     if not text:
         return None
+    # Tip unread-erased-child redaction: any child CID missing from the
+    # validated (or policy-readable) set drops this ancestor entirely.
     unavailable_child_cids = {
         child for child in _raptor_child_summary_cids(metadata) if child not in readable_summary_ids
     }
@@ -2427,7 +2452,10 @@ def _raptor_node_hit(
     for key in ("child_summary_cids", "source_summary_cids"):
         raw_children = summary.get(key)
         if isinstance(raw_children, list):
-            summary[key] = [str(child) for child in raw_children if str(child) in readable_summary_ids]
+            children = [str(child) for child in raw_children if str(child)]
+            if any(child not in readable_summary_ids for child in children):
+                return None
+            summary[key] = [child for child in children if child in readable_summary_ids]
     summary["source_evidence_cids"] = list(source_cids)
     provenance = [cid, *source_cids]
     return Hit(
@@ -2487,6 +2515,21 @@ def _revalidate_source_cids(
             policy=policy,
         )
         if not allowed:
+            hidden = True
+            continue
+        access_policy = _item_field(evidence, "access_policy") or {}
+        if not isinstance(access_policy, Mapping):
+            access_policy = {}
+        decision = may_read_item(
+            item_tenant_id=tenant_id,
+            sensitivity=int(_item_field(evidence, "sensitivity") or 0),
+            access_policy=access_policy,
+            context=filt,
+            policy_max_sensitivity=policy.max_sensitivity,
+            status="active",
+            erased=bool(_item_field(evidence, "erased")),
+        )
+        if not decision.allowed or decision.redacted:
             hidden = True
             continue
         if cid not in readable:

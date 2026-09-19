@@ -451,11 +451,64 @@ def _run_global_sensemaking(
         policy=policy,
         deep=deep,
     )
-    budgeted, used = ops._fit_budget(hits, policy.token_budget)
+    node_budget = int(report["budget"]["node_budget"])
+    candidate_costs: dict[str, int] = {}
+    token_fitted: list[Hit] = []
+    for hit in hits:
+        individually_fitted, cost = ops._fit_budget([hit], policy.token_budget)
+        if individually_fitted:
+            token_fitted.append(hit)
+            candidate_costs[hit.id] = cost
+    root_groups: dict[str, list[Hit]] = {}
+    for hit in token_fitted:
+        root = str(hit.metadata.get("theme_root_cid") or hit.id)
+        root_groups.setdefault(root, []).append(hit)
+    budgeted: list[Hit] = []
+    used = 0
+    for members in root_groups.values():
+        representative = min(
+            members, key=lambda hit: (candidate_costs[hit.id], -hit.score, hit.id)
+        )
+        fitted, cost = ops._fit_budget([representative], policy.token_budget - used)
+        if not fitted:
+            continue
+        budgeted.append(representative)
+        used += cost
+        if len(budgeted) >= node_budget:
+            break
+    # Coverage is reserved with compact representatives first. Spend the
+    # remaining shared budget upgrading each occupied theme slot by relevance.
+    for index, representative in enumerate(list(budgeted)):
+        root = str(representative.metadata.get("theme_root_cid") or representative.id)
+        available = policy.token_budget - used + candidate_costs[representative.id]
+        for candidate in sorted(
+            root_groups[root],
+            key=lambda hit: (-hit.score, candidate_costs[hit.id], hit.id),
+        ):
+            if candidate_costs[candidate.id] <= available:
+                budgeted[index] = candidate
+                used += candidate_costs[candidate.id] - candidate_costs[representative.id]
+                break
+    if len(budgeted) < node_budget:
+        selected_ids = {hit.id for hit in budgeted}
+        for hit in token_fitted:
+            if hit.id in selected_ids:
+                continue
+            fitted, cost = ops._fit_budget([hit], policy.token_budget - used)
+            if not fitted:
+                continue
+            budgeted.append(hit)
+            selected_ids.add(hit.id)
+            used += cost
+            if len(budgeted) >= node_budget:
+                break
+    token_fitted_ids = {hit.id for hit in token_fitted}
     kept_ids = {hit.id for hit in budgeted}
     for hit in hits:
-        if hit.id not in kept_ids:
+        if hit.id not in token_fitted_ids:
             report["exclusions"].append({"cid": hit.id, "reason": "token_budget"})
+        elif hit.id not in kept_ids:
+            report["exclusions"].append({"cid": hit.id, "reason": "node_budget"})
     report["exclusions"] = sorted(
         report["exclusions"],
         key=lambda item: (str(item.get("reason") or ""), str(item.get("cid") or ""), int(item.get("count") or 0)),
@@ -622,17 +675,21 @@ def run_retrieval_pipeline(
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
-    cache_key = _result_cache_key(
-        ops,
-        query=query,
-        tenant_id=tenant_id,
-        branch=branch,
-        deep=deep,
-        effective_filter=effective_filter,
-        workspace_broadcast=workspace_broadcast,
-        k=k,
-        graph_k=graph_k,
-        policy=policy,
+    cache_key = (
+        None
+        if query_mode == GLOBAL_SENSEMAKING_MODE
+        else _result_cache_key(
+            ops,
+            query=query,
+            tenant_id=tenant_id,
+            branch=branch,
+            deep=deep,
+            effective_filter=effective_filter,
+            workspace_broadcast=workspace_broadcast,
+            k=k,
+            graph_k=graph_k,
+            policy=policy,
+        )
     )
     if cache_key is not None:
         cached = _result_cache_get(cache_key)
