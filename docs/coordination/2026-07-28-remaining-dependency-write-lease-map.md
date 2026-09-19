@@ -863,16 +863,42 @@ The following packages are complete source history, not runnable work:
   node, and does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #172: ordinary documentation receipt recording the merged PR #169
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-19T20:50:00Z`
-  capture and adds only the PR #169 merged-baseline bullet, the #171
-  MERGED mark, and this structured self-record in this map. Exclusive
-  File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `4534761ae547c3c04de644f0f7c9d033e2f4763b`. It was **OPEN/READY** at
+  the `2026-09-19T20:50:00Z` capture and adds only the PR #169
+  merged-baseline bullet, the #171 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #172 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #172 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `4534761ae547c3c04de644f0f7c9d033e2f4763b`.
+- PR #168: Exact 3 P15-S4/15-03-02 provider bake-off
+  `eval/provider_bakeoff/run.py`,
+  `eval/tests/test_provider_bakeoff.py`,
+  `eval/provider_bakeoff/reports/phase15-s4-provider.json`
+  (title: feat(eval): freeze CAP-006 provider bake-off decision ABI
+  (15-03-02))
+  from exact head `e00ce62d291bb88f8c817ad76aa583e035d47e5e`; all
+  required exact-head Unit+drift checks passed in run `35469947839`;
+  merge `bd07367a119398680c9ec571dc2dc0bf5c5e4a30` at
+  `2026-09-19T21:44:41Z`.
+  Prior tip was `4534761ae547c3c04de644f0f7c9d033e2f4763b` (PR #172).
+  Post-main tip Unit+drift will FAIL on CI `35471317284`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #168 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `eval/provider_bakeoff/run.py`,
+  `eval/tests/test_provider_bakeoff.py`,
+  `eval/provider_bakeoff/reports/phase15-s4-provider.json`.
+  Purpose: P15-S4/15-03-02 provider bake-off CAP-006 freeze (no claimed
+  P95); docs-only privacy for THIS receipt PR is Exact-1
+  lease-map only (the recorded #168 was code). This receipt does not
+  invent M16; the M14 freeze is unchanged. This receipt changes no
+  benchmark result or admission state, admits no successor source
+  node, and does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
