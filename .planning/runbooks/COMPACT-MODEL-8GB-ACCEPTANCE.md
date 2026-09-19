@@ -96,6 +96,28 @@ A failure is evidence, not permission to raise a resource limit, weaken a
 quality threshold, or omit a platform. The candidate returns to development
 under a new preregistration.
 
+## Executable receipt admission
+
+The executable harness is `eval/compact_answering/acceptance.py`. Committed
+`phase15-s4-8gb-windows.json` and `phase15-s4-8gb-linux.json` files are schema
+stubs only (`admitted_measurement=false`, `measured=false`, `harness_ready=true`).
+A stub, development host, or single-platform receipt does not close CAP-011.
+
+Confirmed receipt ABI (previously unspecified by this runbook):
+
+- schema: `mnemosyne.cap011.8gb-acceptance-receipt/v1`;
+- exactly 8 GiB means `8589934592` bytes (`8 * 1024^3`);
+- a required host is native `x86_64`/`amd64` AVX2 Windows or Linux with
+  `physical=true`, `host_class=physical`, `virtualization=none`, and no
+  `hypervisor` CPU flag;
+- ARM64 is additional evidence only and cannot satisfy a required host;
+- fail-closed reasons are `non_physical`, `wrong_memory`,
+  `wrong_architecture`, `missing_avx2`, `hidden_worker`, `digest_mismatch`,
+  `swap_pagefile_growth`, `incomplete`, and `quality_weakened`.
+
+Physical dual-host measured runs remain later operator work. This section does
+not weaken the quality, custody, resource, or dual-host gates above.
+
 ## Claim boundary
 
 Passing this contract establishes internal 8 GB admission evidence only. No

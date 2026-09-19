@@ -1,0 +1,90 @@
+{
+  "schema": "mnemosyne.cap011.8gb-acceptance-receipt/v1",
+  "receipt_class": "schema-stub",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "measured": false,
+  "harness_ready": true,
+  "claim_status": "harness-ready-blocked",
+  "physical": false,
+  "host_class": "development-stub",
+  "virtualization": "none",
+  "platform": "windows",
+  "identity": {
+    "based_on_sha": "eed2d1f8a531b181665c4d1745b54472df0e7a41",
+    "workload": "phase15-s4-8gb-acceptance-v1",
+    "host": {
+      "os_family": "windows",
+      "architecture": null,
+      "cpu_flags": [],
+      "physical_memory_bytes": null
+    },
+    "digests": {
+      "code": "sha256:71cdc92600f602483280543e43707cd17eb59759a66d7b3a96f709f055e34715",
+      "artifact": "sha256:b1710220831ad5058fcf083887410ff76937345c086385fd900a4520f7548b4f",
+      "configuration": "sha256:8962e446a383622b693526f8d4c2610fc3a576e29a69898a469c6c98e93958da",
+      "provider": "sha256:f943507390b79ead4956b109289723e5dedb9a3e35e8ee7848d49a91531790c0",
+      "corpus": "sha256:0719c72a27a47858b20912b6aabb82b5b0e0bfa79d039319ab83d6fc9e267ba4",
+      "policy": "sha256:dad896b8857aa9d0c3a17eb5fbfd90685620667c317ff503d013f7bbfac8caf5",
+      "result_contract": "sha256:7564ca6b161bbb6280b9f1669ed94669fdfb9b09b1993d84fe3e5d2780fd2a8f"
+    }
+  },
+  "sut_boundary": {
+    "included_processes": [],
+    "background_workers": [],
+    "hidden_workers": false,
+    "benchmark_process_count": 0,
+    "host_workload_count": 0,
+    "declared_concurrency": 0,
+    "observed_concurrency": 0
+  },
+  "resources": {
+    "before": {
+      "total_memory_bytes": null,
+      "available_memory_bytes": null,
+      "swap_bytes": null
+    },
+    "during": [],
+    "after": {
+      "total_memory_bytes": null,
+      "available_memory_bytes": null,
+      "swap_bytes": null
+    },
+    "swap_pagefile_delta": null,
+    "model_tokenizer_bytes": null,
+    "sidecar_peak_bytes": null,
+    "process_tree_peak_bytes": null,
+    "min_available_memory_bytes": null,
+    "first_abort": null
+  },
+  "quality": {
+    "weakened": false,
+    "canonical_receipt": null,
+    "em": null,
+    "f1": null,
+    "recall_at_5": null,
+    "ndcg_at_5": null,
+    "cap003": null,
+    "deterministic_retrieval": null,
+    "grounding": null,
+    "abstention": null,
+    "section_31": null,
+    "section_33": null,
+    "custody": null
+  },
+  "completeness": {
+    "cold_load": false,
+    "warm_runs": 0,
+    "unload_reload": false,
+    "raw_traces": false
+  },
+  "cap011": {
+    "status": "open",
+    "closes": false,
+    "measured": false
+  },
+  "blockers": [
+    "physical_dual_host_measurement_missing",
+    "cap011_remains_open"
+  ]
+}
