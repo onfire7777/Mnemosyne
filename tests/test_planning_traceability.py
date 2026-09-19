@@ -1730,8 +1730,20 @@ def test_goal_topology_bootstrap_disables_sitecustomize(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
     ).stdout.strip()
+    # Debian/Ubuntu 3.12 ships stdlib sitecustomize (apport) earlier on
+    # sys.path than venv site-packages. Isolated `import sitecustomize`
+    # therefore binds the stdlib module and a planted site-packages
+    # sitecustomize.py never runs. site.py still executes .pth import
+    # lines when site is enabled, and -S skips that entire path — the
+    # same gate that disables sitecustomize. Plant both so the control
+    # is truthful on Debian and on vanilla CPython, and so dropping -S
+    # still fails closed.
+    site_hook = "import os; os._exit(0)\n"
     (Path(site_packages) / "sitecustomize.py").write_text(
-        "import os; os._exit(0)\n", encoding="utf-8"
+        site_hook, encoding="utf-8"
+    )
+    (Path(site_packages) / "zz_sitecustomize_probe.pth").write_text(
+        site_hook, encoding="utf-8"
     )
     control = subprocess.run([str(python), "-I", "-c", "raise SystemExit(2)"])
     assert control.returncode == 0
