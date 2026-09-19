@@ -794,16 +794,37 @@ The following packages are complete source history, not runnable work:
   does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #167: ordinary documentation receipt recording the merged PR #166
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-12T20:24:00Z`
-  capture and adds only the PR #166 merged-baseline bullet, the #165
-  MERGED mark, and this structured self-record in this map. Exclusive
-  File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4`. It was **OPEN/READY** at
+  the `2026-09-12T20:24:00Z` capture and adds only the PR #166
+  merged-baseline bullet, the #165 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #167 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #167 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4`.
+- PR #170: Exact 1 sitecustomize/planning_traceability fix
+  `tests/test_planning_traceability.py`
+  (title: fix planning_traceability sitecustomize bootstrap test for
+  Ubuntu 3.12 site import)
+  from exact head `70e564e1b131087f2f3ab098a7ed24f9394ad17e`; all
+  required exact-head Unit+drift checks passed in run `35463262102`;
+  merge `f027282a5f6dcbe1a3828ccdb7dbb9a20ebf3284` at
+  `2026-09-19T19:27:35Z`.
+  Prior tip was `e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4` (PR #167).
+  Post-main tip Unit+drift will FAIL solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #170 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 1):
+  `tests/test_planning_traceability.py`.
+  Purpose: sitecustomize/planning_traceability Ubuntu 3.12 site-import
+  fix; docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #170 was test). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
