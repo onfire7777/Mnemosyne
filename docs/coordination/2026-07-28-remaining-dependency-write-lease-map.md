@@ -900,16 +900,48 @@ The following packages are complete source history, not runnable work:
   node, and does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #173: ordinary documentation receipt recording the merged PR #168
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-19T21:50:00Z`
-  capture and adds only the PR #168 merged-baseline bullet, the #172
-  MERGED mark, and this structured self-record in this map. Exclusive
-  File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `eed2d1f8a531b181665c4d1745b54472df0e7a41`. It was **OPEN/READY** at
+  the `2026-09-19T21:50:00Z` capture and adds only the PR #168
+  merged-baseline bullet, the #172 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #173 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #173 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `eed2d1f8a531b181665c4d1745b54472df0e7a41`.
+- PR #174: Exact 5 P15-S4/15-03-04 CAP-011 compact 8GB acceptance
+  harness
+  `eval/compact_answering/acceptance.py`,
+  `tests/test_compact_answering_acceptance.py`,
+  `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md`,
+  `eval/compact_answering/reports/phase15-s4-8gb-windows.json`,
+  `eval/compact_answering/reports/phase15-s4-8gb-linux.json`
+  (title: feat(eval): Exact 5 CAP-011 compact 8GB acceptance harness
+  (15-03-04))
+  from exact head `4acd2f5d1ff2084e71507e9c5ce3c6bb4bcf4537`; all
+  required exact-head Unit+drift checks passed in run `35474061398`;
+  merge `03501545899f5bb2bb15816e217c26002fe58244` at
+  `2026-09-19T23:06:23Z`.
+  Prior tip was `eed2d1f8a531b181665c4d1745b54472df0e7a41` (PR #173).
+  Post-main tip Unit+drift will FAIL on CI `35475178719`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #174 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 5):
+  `eval/compact_answering/acceptance.py`,
+  `tests/test_compact_answering_acceptance.py`,
+  `.planning/runbooks/COMPACT-MODEL-8GB-ACCEPTANCE.md`,
+  `eval/compact_answering/reports/phase15-s4-8gb-windows.json`,
+  `eval/compact_answering/reports/phase15-s4-8gb-linux.json`.
+  Purpose: P15-S4/15-03-04 CAP-011 compact 8GB acceptance harness
+  (stub receipts do NOT close CAP-011; physical dual-host later);
+  docs-only privacy for THIS receipt PR is Exact-1
+  lease-map only (the recorded #174 was code). This receipt does not
+  invent M16; the M14 freeze is unchanged. This receipt changes no
+  benchmark result or admission state, admits no successor source
+  node, and does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
