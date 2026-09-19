@@ -8,7 +8,9 @@ from typing import Any
 
 import pytest
 
+import mnemosyne.retrieval as retrieval_module
 from eval.g0.sensemaking import SENSEMAKING_FILT, SENSEMAKING_QUERY_MODE, run_sensemaking_eval
+from mnemosyne.access_policy import AccessDecision
 from mnemosyne.consolidation import ConsolidationWorker
 from mnemosyne.engine import LocalMemoryEngine
 from mnemosyne.models import Evidence
@@ -438,6 +440,89 @@ def test_global_sensemaking_is_deterministic_and_bounded() -> None:
     assert report["reduce_count"] <= 2
 
 
+def test_global_sensemaking_refills_node_budget_after_oversized_hit() -> None:
+    engine = LocalMemoryEngine(policy=OperatingPolicy(token_budget=12, top_k=1))
+    tenant = "sensemaking-token-refill"
+    large_source = _append_theme(engine, tenant, "user-token-refill", "zebra quantum orchard " * 40)
+    small_source = _append_theme(engine, tenant, "user-token-refill", "zebra note")
+    large = _append_raptor_summary(
+        engine,
+        tenant,
+        "zebra quantum orchard " * 40,
+        source_cids=[large_source],
+    )
+    small = _append_raptor_summary(engine, tenant, "zebra note", source_cids=[small_source])
+
+    result = _sensemaking(engine, tenant, "zebra quantum orchard")
+    report = _report(result)
+
+    assert [hit.id for hit in result.hits] == [small]
+    assert any(item.get("cid") == large and item.get("reason") == "token_budget" for item in report["exclusions"])
+    assert report["abstention_reason"] != "budget_exhausted"
+
+
+def test_global_sensemaking_preserves_theme_roots_after_token_packing() -> None:
+    engine = LocalMemoryEngine(policy=OperatingPolicy(token_budget=256, top_k=2))
+    tenant = "sensemaking-root-aware-packing"
+    alpha_source = _append_theme(engine, tenant, "user-root-pack", "alpha orchard ledger bright")
+    alpha_leaf = _append_raptor_summary(
+        engine, tenant, "alpha orchard ledger bright", source_cids=[alpha_source], level=1
+    )
+    alpha_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "alpha orchard ledger bright",
+        source_cids=[alpha_source],
+        level=2,
+        child_summary_cids=[alpha_leaf],
+    )
+    beta_source = _append_theme(engine, tenant, "user-root-pack", "beta harbor note")
+    beta_root = _append_raptor_summary(
+        engine, tenant, "beta harbor note", source_cids=[beta_source], level=2
+    )
+
+    result = _sensemaking(engine, tenant, "alpha orchard ledger bright beta")
+
+    assert {alpha_root, beta_root}.issubset({hit.metadata.get("theme_root_cid") for hit in result.hits})
+    assert _report(result)["incomplete_theme_coverage"] is False
+
+
+def test_global_sensemaking_packs_compact_theme_representatives_first() -> None:
+    engine = LocalMemoryEngine(policy=OperatingPolicy(token_budget=32, top_k=2))
+    tenant = "sensemaking-compact-root-packing"
+    alpha_source = _append_theme(engine, tenant, "user-compact-pack", "alpha beta theme source")
+    alpha_leaf = _append_raptor_summary(
+        engine,
+        tenant,
+        "alpha beta " + "ranked " * 6,
+        source_cids=[alpha_source],
+        level=1,
+    )
+    alpha_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "alpha compact",
+        source_cids=[alpha_source],
+        level=2,
+        child_summary_cids=[alpha_leaf],
+    )
+    beta_source = _append_theme(engine, tenant, "user-compact-pack", "beta theme source")
+    beta_root = _append_raptor_summary(
+        engine,
+        tenant,
+        "beta " + "compact " * 4,
+        source_cids=[beta_source],
+        level=2,
+    )
+
+    result = _sensemaking(engine, tenant, "ranked beta")
+    roots = {hit.metadata.get("theme_root_cid") for hit in result.hits}
+
+    assert roots == {alpha_root, beta_root}
+    assert alpha_leaf in {hit.id for hit in result.hits}
+    assert _report(result)["incomplete_theme_coverage"] is False
+
+
 def test_global_sensemaking_excludes_expired_hidden_and_foreign_nodes() -> None:
     engine = LocalMemoryEngine()
     tenant = "sensemaking-scope"
@@ -520,6 +605,112 @@ def test_global_sensemaking_denies_unsupported_query_modes() -> None:
         engine.retrieve(SENSEMAKING_QUERY, tenant, filt={"query_mode": "graph_community"})
     with pytest.raises(ValueError, match="unsupported query_mode"):
         engine.retrieve(SENSEMAKING_QUERY, tenant, filt={"query_mode": "local"})
+
+
+def test_global_sensemaking_does_not_cache_past_source_expiry(monkeypatch: Any) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-cache-expiry"
+    source = _append_theme(engine, tenant, "user-cache-expiry", "Amber lighthouse expiry evidence.")
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse expiry evidence.",
+        source_cids=[source],
+    )
+    evidence = engine.evidence[engine._evidence_key(tenant, "main", source)]
+    evidence.access_policy = {
+        **dict(evidence.access_policy),
+        "expires_at": (datetime.now(UTC) + timedelta(minutes=1)).isoformat(),
+    }
+
+    first = run_retrieval_pipeline(
+        engine,
+        query="amber lighthouse expiry evidence",
+        tenant_id=tenant,
+        branch="main",
+        deep=False,
+        filt=dict(SENSEMAKING_FILT),
+        policy=engine.policy,
+        record_access=False,
+    )
+    assert root in {hit.id for hit in first.hits}
+
+    evidence.access_policy["expires_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+    second = run_retrieval_pipeline(
+        engine,
+        query="amber lighthouse expiry evidence",
+        tenant_id=tenant,
+        branch="main",
+        deep=False,
+        filt=dict(SENSEMAKING_FILT),
+        policy=engine.policy,
+        record_access=False,
+    )
+
+    assert root not in {hit.id for hit in second.hits}
+    assert second.abstained is True
+
+
+def test_global_sensemaking_rejects_summary_denied_during_second_policy_check(
+    monkeypatch: Any,
+) -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-policy-race"
+    source = _append_theme(engine, tenant, "user-policy-race", "Amber lighthouse policy race.")
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Amber lighthouse policy race.",
+        source_cids=[source],
+    )
+    engine.evidence[engine._evidence_key(tenant, "main", root)].sensitivity = 1
+    original = retrieval_module.may_read_item
+    summary_checks = 0
+
+    def deny_second_summary_check(**kwargs: Any) -> AccessDecision:
+        nonlocal summary_checks
+        decision = original(**kwargs)
+        if kwargs.get("sensitivity") == 1:
+            summary_checks += 1
+            if summary_checks == 2:
+                return AccessDecision(False, "expired_access_policy", decision.role, decision.ceiling)
+        return decision
+
+    monkeypatch.setattr(retrieval_module, "may_read_item", deny_second_summary_check)
+    result = _sensemaking(engine, tenant, "amber lighthouse policy race")
+
+    assert summary_checks >= 2
+    assert root not in {hit.id for hit in result.hits}
+    assert result.abstained is True
+
+
+def test_global_sensemaking_rejects_source_denied_during_second_policy_check(
+    monkeypatch: Any,
+) -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-source-policy-race"
+    source = _append_theme(engine, tenant, "user-policy-race", "Amber source policy race.")
+    root = _append_raptor_summary(engine, tenant, "Amber source policy race.", source_cids=[source])
+    engine.evidence[engine._evidence_key(tenant, "main", source)].sensitivity = 1
+    original = retrieval_module.may_read_item
+    source_checks = 0
+
+    def deny_second_source_check(**kwargs: Any) -> AccessDecision:
+        nonlocal source_checks
+        decision = original(**kwargs)
+        if kwargs.get("sensitivity") == 1:
+            source_checks += 1
+            if source_checks == 2:
+                return AccessDecision(False, "expired_access_policy", decision.role, decision.ceiling)
+        return decision
+
+    monkeypatch.setattr(retrieval_module, "may_read_item", deny_second_source_check)
+    result = _sensemaking(engine, tenant, "amber source policy race")
+
+    assert source_checks >= 2
+    assert root not in {hit.id for hit in result.hits}
+    assert result.abstained is True
 
 
 def test_global_sensemaking_routes_through_the_shared_engine_seam() -> None:
@@ -662,6 +853,111 @@ def test_global_sensemaking_revalidates_hidden_source_cids() -> None:
     for hit in result.hits:
         assert hidden_source not in hit.provenance
         assert hidden_source not in (hit.metadata.get("source_evidence_cids") or [])
+
+
+def test_global_sensemaking_drops_summary_when_source_now_requires_redaction() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-redacted-source"
+    source = _append_theme(engine, tenant, "user-redacted-source", "secret: amber harbor code")
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "secret: amber harbor code",
+        source_cids=[source],
+    )
+    evidence = engine.evidence[engine._evidence_key(tenant, "main", source)]
+    evidence.access_policy = {
+        **dict(evidence.access_policy),
+        "redact_fields": ["secret"],
+        "min_role_for_raw": "admin",
+    }
+
+    result = _sensemaking(engine, tenant, "amber harbor code", role="reader")
+
+    assert root not in {hit.id for hit in result.hits}
+    assert all("amber harbor code" not in hit.text for hit in result.hits)
+    assert result.abstained is True
+
+
+def test_global_sensemaking_drops_parent_when_child_summary_is_hidden() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-hidden-child"
+    tree = _build_raptor(engine, tenant, "user-hidden-child")
+    hidden_child = tree["leaf_cids"][0]
+    child = engine.evidence[engine._evidence_key(tenant, "main", hidden_child)]
+    child.sensitivity = 4
+
+    result = _sensemaking(engine, tenant, role="reader")
+    disclosed = _disclosed_ids(result)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert hidden_child not in disclosed
+    assert hidden_child not in blob
+    assert tree["root_cid"] not in disclosed
+    assert tree["root_cid"] not in blob
+
+
+def test_global_sensemaking_drops_parent_when_child_summary_is_redacted() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-redacted-child"
+    source = _append_theme(engine, tenant, "user-redacted-child", "Amber source.")
+    child = _append_raptor_summary(
+        engine, tenant, "secret: amber child code", source_cids=[source], level=1
+    )
+    parent = _append_raptor_summary(
+        engine,
+        tenant,
+        "Parent synthesized from amber child code.",
+        source_cids=[source],
+        level=2,
+        child_summary_cids=[child],
+    )
+    child_item = engine.evidence[engine._evidence_key(tenant, "main", child)]
+    child_item.access_policy = {
+        **dict(child_item.access_policy),
+        "redact_fields": ["secret"],
+        "min_role_for_raw": "admin",
+    }
+
+    result = _sensemaking(engine, tenant, "amber child code", role="reader")
+    disclosed = _disclosed_ids(result)
+
+    assert child not in disclosed
+    assert parent not in disclosed
+    assert result.abstained is True
+
+
+def test_global_sensemaking_propagates_hidden_descendants_to_every_ancestor() -> None:
+    engine = LocalMemoryEngine()
+    tenant = "sensemaking-hidden-descendant"
+    source = _append_theme(engine, tenant, "user-hidden-descendant", "Amber lighthouse theme source.")
+    leaf = _append_raptor_summary(engine, tenant, "Leaf amber theme.", source_cids=[source], level=1)
+    parent = _append_raptor_summary(
+        engine,
+        tenant,
+        "Parent amber theme.",
+        source_cids=[source],
+        level=2,
+        child_summary_cids=[leaf],
+    )
+    root = _append_raptor_summary(
+        engine,
+        tenant,
+        "Root amber theme.",
+        source_cids=[source],
+        level=3,
+        child_summary_cids=[parent],
+    )
+    engine.evidence[engine._evidence_key(tenant, "main", leaf)].sensitivity = 4
+
+    result = _sensemaking(engine, tenant, role="reader")
+    disclosed = _disclosed_ids(result)
+    blob = json.dumps(result.to_dict(), sort_keys=True)
+
+    assert not {leaf, parent, root}.intersection(disclosed)
+    assert leaf not in blob
+    assert parent not in blob
+    assert root not in blob
 
 
 def test_global_sensemaking_preserves_coverage_across_roots() -> None:
