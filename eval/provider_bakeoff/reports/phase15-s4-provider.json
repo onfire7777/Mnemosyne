@@ -1,0 +1,1085 @@
+{
+  "schema": "mnemosyne.cap006.provider-receipt/v1",
+  "receipt_class": "synthetic-development",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "claim_status": "synthetic-development-receipt-only",
+  "official_p95_claim": false,
+  "performance_claim": null,
+  "current_default": "local",
+  "identity": {
+    "repository_sha": "5c4f47f1db59ab8287d879bf71853198345b23fa",
+    "clean_tree": true,
+    "command": [
+      "/workspace/.venv/bin/python3",
+      "eval/provider_bakeoff/run.py"
+    ],
+    "arguments": {
+      "workload": "phase15-s4-provider-synthetic-dev-v1",
+      "current_default": "local",
+      "host_noise": false,
+      "extra_load": false
+    },
+    "utc_start": "2026-09-12T21:47:04.192856+00:00",
+    "utc_end": "2026-09-12T21:47:04.202581+00:00",
+    "monotonic_start": 1189.028148974,
+    "monotonic_end": 1189.037864922,
+    "host": {
+      "os": "Linux",
+      "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 11 16:06:03 UTC 2026",
+      "kernel": "6.12.94+",
+      "architecture": "x86_64",
+      "cpu_flags": [
+        "fpu",
+        "vme",
+        "de",
+        "pse",
+        "tsc",
+        "msr",
+        "pae",
+        "mce",
+        "cx8",
+        "apic",
+        "sep",
+        "mtrr",
+        "pge",
+        "mca",
+        "cmov",
+        "pat",
+        "pse36",
+        "clflush",
+        "dts",
+        "mmx",
+        "fxsr",
+        "sse",
+        "sse2",
+        "ss",
+        "ht",
+        "syscall",
+        "nx",
+        "pdpe1gb",
+        "rdtscp",
+        "lm",
+        "constant_tsc",
+        "pebs",
+        "bts",
+        "rep_good",
+        "nopl",
+        "xtopology",
+        "nonstop_tsc",
+        "cpuid",
+        "tsc_known_freq",
+        "pni",
+        "pclmulqdq",
+        "dtes64",
+        "vmx",
+        "ssse3",
+        "fma",
+        "cx16",
+        "pcid",
+        "sse4_1",
+        "sse4_2",
+        "x2apic",
+        "movbe",
+        "popcnt",
+        "tsc_deadline_timer",
+        "aes",
+        "xsave",
+        "avx",
+        "f16c",
+        "rdrand",
+        "hypervisor",
+        "lahf_lm",
+        "abm",
+        "3dnowprefetch",
+        "cpuid_fault",
+        "ssbd",
+        "ibrs",
+        "ibpb",
+        "stibp",
+        "ibrs_enhanced",
+        "tpr_shadow",
+        "flexpriority",
+        "ept",
+        "vpid",
+        "ept_ad",
+        "fsgsbase",
+        "tsc_adjust",
+        "bmi1",
+        "avx2",
+        "smep",
+        "bmi2",
+        "erms",
+        "invpcid",
+        "avx512f",
+        "avx512dq",
+        "rdseed",
+        "adx",
+        "smap",
+        "avx512ifma",
+        "clflushopt",
+        "clwb",
+        "avx512cd",
+        "sha_ni",
+        "avx512bw",
+        "avx512vl",
+        "xsaveopt",
+        "xsavec",
+        "xgetbv1",
+        "xsaves",
+        "avx_vnni",
+        "avx512_bf16",
+        "wbnoinvd",
+        "arat",
+        "vnmi",
+        "avx512vbmi",
+        "umip",
+        "pku",
+        "ospke",
+        "avx512_vbmi2",
+        "gfni",
+        "vaes",
+        "vpclmulqdq",
+        "avx512_vnni",
+        "avx512_bitalg",
+        "avx512_vpopcntdq",
+        "rdpid",
+        "bus_lock_detect",
+        "cldemote",
+        "movdiri",
+        "movdir64b",
+        "fsrm",
+        "md_clear",
+        "serialize",
+        "tsxldtrk",
+        "amx_bf16",
+        "avx512_fp16",
+        "amx_tile",
+        "amx_int8",
+        "flush_l1d",
+        "arch_capabilities"
+      ],
+      "accelerator": "none",
+      "runtime_versions": {
+        "python": "3.12.3"
+      }
+    },
+    "digests": {
+      "dataset": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc",
+      "fixture": "sha256:2efaa005c75e856b8858b02bb11423edb1060fa741579edb1691b6de9fec80cb",
+      "config": "sha256:705f85ae001f57a185510a6b96e2377c71e5a26ea740c7badeaf04af5a36b9cb",
+      "model": "sha256:36335cd64468df849d721eb71398069fafc28806e8a7ce77b964d394e65c77be",
+      "tokenizer": "sha256:43f7f0a8fea3138ebccfb6782977c816395771cd7b9f8aa2002ceef571b1bf19",
+      "provider": "sha256:92b8cd0740f1247b5b507536136f0ee6825803a0810a72b76773aaa1157cc870",
+      "container_image": "sha256:30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+      "schema": "sha256:5a65295354502f79b5b16677adfc417457fff3cf68b4fd22277e6c70e56effdd",
+      "result_contract": "sha256:f743525ab9052fdc79002aa95a040ce4050a208795f599be087d53c8eef1a429"
+    }
+  },
+  "sut_boundary": {
+    "included_processes": [
+      "synthetic-dev-provider-bakeoff"
+    ],
+    "containers": [],
+    "databases": [],
+    "proxies": [],
+    "caches": [],
+    "indexes": [],
+    "filesystems": [
+      "workspace"
+    ],
+    "background_workers": [],
+    "benchmark_process_count": 1,
+    "host_workload_count": 1
+  },
+  "workload": {
+    "workload_id": "phase15-s4-provider-synthetic-dev-v1",
+    "corpus": [
+      {
+        "doc_id": "d_france",
+        "text": "Paris is the capital of France."
+      },
+      {
+        "doc_id": "d_germany",
+        "text": "Berlin is the capital of Germany."
+      },
+      {
+        "doc_id": "d_japan",
+        "text": "Tokyo is the capital of Japan."
+      },
+      {
+        "doc_id": "d_canada",
+        "text": "Ottawa is the capital of Canada."
+      }
+    ],
+    "queries": [
+      {
+        "qid": "q_capital_france",
+        "query": "capital of France",
+        "relevant": [
+          "d_france"
+        ]
+      },
+      {
+        "qid": "q_capital_germany",
+        "query": "capital of Germany",
+        "relevant": [
+          "d_germany"
+        ]
+      },
+      {
+        "qid": "q_capital_japan",
+        "query": "capital of Japan",
+        "relevant": [
+          "d_japan"
+        ]
+      },
+      {
+        "qid": "q_capital_canada",
+        "query": "capital of Canada",
+        "relevant": [
+          "d_canada"
+        ]
+      }
+    ],
+    "batching": {
+      "size": 2,
+      "order": "document-then-query"
+    },
+    "dimensions": 1024,
+    "corpus_digest": "sha256:b81f2d2aa63d0821ca9cbf0ce4038088a0b719a3e36d82264f582b7b26ecea01",
+    "queries_digest": "sha256:44ff195ed0082251eb0bd93c507615ebcd7ed9bd32e158e24d94d1c44f14a475",
+    "batching_digest": "sha256:99b45f2739a59e9d6908b44a26b38fb233170eb34f40e347dee5d4c34a09943d",
+    "dimensions_digest": "sha256:e39eef82f61b21e2e7f762fcc4307358f165757f2e77ec855d6992f7e0191932",
+    "workload_digest": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc",
+    "cold_warm_state": "separated",
+    "warmup": {
+      "explicit": true,
+      "excluded_from_distribution": true,
+      "count": 4
+    }
+  },
+  "comparison": {
+    "identical_corpus": true,
+    "identical_queries": true,
+    "identical_batching": true,
+    "identical_dimensions": true,
+    "workload_digest": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc"
+  },
+  "candidates": [
+    {
+      "name": "synthetic-a",
+      "kind": "measured",
+      "installed": true,
+      "available": true,
+      "supported": true,
+      "digest": "sha256:28b738f3a19278b3dc63574f6e98814fada65c3f1ae01e720771337e4092191f",
+      "license": {
+        "source": "spdx",
+        "identifier": "Apache-2.0",
+        "evidence_digest": "sha256:4c448ca576e75b298691144efae9a3cbbb72b8292dc9eaa340ca51f9dd683910",
+        "verification_status": "verified"
+      },
+      "identity": {
+        "name": "synthetic-a",
+        "digest": "sha256:28b738f3a19278b3dc63574f6e98814fada65c3f1ae01e720771337e4092191f"
+      },
+      "status": "compared",
+      "simulated": false,
+      "cold": {
+        "separated_from_warm": true,
+        "sample_count": 6,
+        "observations": [
+          {
+            "op_id": "cold:corpus-batch-0",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.028868487,
+            "start_monotonic": 1189.028868487,
+            "end_monotonic": 1189.029403489
+          },
+          {
+            "op_id": "cold:corpus-batch-1",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.029406252,
+            "start_monotonic": 1189.029406252,
+            "end_monotonic": 1189.029838639
+          },
+          {
+            "op_id": "q_capital_france",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.029841491,
+            "start_monotonic": 1189.029841491,
+            "end_monotonic": 1189.030057977
+          },
+          {
+            "op_id": "q_capital_germany",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.030059916,
+            "start_monotonic": 1189.030059916,
+            "end_monotonic": 1189.030280143
+          },
+          {
+            "op_id": "q_capital_japan",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.030281086,
+            "start_monotonic": 1189.030281086,
+            "end_monotonic": 1189.030494151
+          },
+          {
+            "op_id": "q_capital_canada",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.030494941,
+            "start_monotonic": 1189.030494941,
+            "end_monotonic": 1189.030710553
+          }
+        ]
+      },
+      "warm": {
+        "separated_from_cold": true,
+        "sample_count": 6,
+        "observations": [
+          {
+            "op_id": "warm:corpus-batch-0",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.030714507,
+            "start_monotonic": 1189.030714507,
+            "end_monotonic": 1189.031140128
+          },
+          {
+            "op_id": "warm:corpus-batch-1",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.031141233,
+            "start_monotonic": 1189.031141233,
+            "end_monotonic": 1189.031542985
+          },
+          {
+            "op_id": "q_capital_france",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.031544428,
+            "start_monotonic": 1189.031544428,
+            "end_monotonic": 1189.031764384
+          },
+          {
+            "op_id": "q_capital_germany",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.031765169,
+            "start_monotonic": 1189.031765169,
+            "end_monotonic": 1189.031981844
+          },
+          {
+            "op_id": "q_capital_japan",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.031982535,
+            "start_monotonic": 1189.031982535,
+            "end_monotonic": 1189.032200207
+          },
+          {
+            "op_id": "q_capital_canada",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.032201016,
+            "start_monotonic": 1189.032201016,
+            "end_monotonic": 1189.032389812
+          }
+        ]
+      },
+      "observations": [
+        {
+          "op_id": "cold:corpus-batch-0",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.028868487,
+          "start_monotonic": 1189.028868487,
+          "end_monotonic": 1189.029403489
+        },
+        {
+          "op_id": "cold:corpus-batch-1",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.029406252,
+          "start_monotonic": 1189.029406252,
+          "end_monotonic": 1189.029838639
+        },
+        {
+          "op_id": "q_capital_france",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.029841491,
+          "start_monotonic": 1189.029841491,
+          "end_monotonic": 1189.030057977
+        },
+        {
+          "op_id": "q_capital_germany",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.030059916,
+          "start_monotonic": 1189.030059916,
+          "end_monotonic": 1189.030280143
+        },
+        {
+          "op_id": "q_capital_japan",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.030281086,
+          "start_monotonic": 1189.030281086,
+          "end_monotonic": 1189.030494151
+        },
+        {
+          "op_id": "q_capital_canada",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.030494941,
+          "start_monotonic": 1189.030494941,
+          "end_monotonic": 1189.030710553
+        },
+        {
+          "op_id": "warm:corpus-batch-0",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.030714507,
+          "start_monotonic": 1189.030714507,
+          "end_monotonic": 1189.031140128
+        },
+        {
+          "op_id": "warm:corpus-batch-1",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.031141233,
+          "start_monotonic": 1189.031141233,
+          "end_monotonic": 1189.031542985
+        },
+        {
+          "op_id": "q_capital_france",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.031544428,
+          "start_monotonic": 1189.031544428,
+          "end_monotonic": 1189.031764384
+        },
+        {
+          "op_id": "q_capital_germany",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.031765169,
+          "start_monotonic": 1189.031765169,
+          "end_monotonic": 1189.031981844
+        },
+        {
+          "op_id": "q_capital_japan",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.031982535,
+          "start_monotonic": 1189.031982535,
+          "end_monotonic": 1189.032200207
+        },
+        {
+          "op_id": "q_capital_canada",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.032201016,
+          "start_monotonic": 1189.032201016,
+          "end_monotonic": 1189.032389812
+        }
+      ],
+      "denominators": {
+        "issued": 12,
+        "successes": 12,
+        "timeouts": 0,
+        "errors": 0,
+        "failed_remain_in_denominator": true
+      },
+      "embedding_shape": {
+        "dims": 1024,
+        "vector_count": 16,
+        "observed_lengths": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024
+        ],
+        "parity": true
+      },
+      "embedder_failed": false,
+      "correctness": {
+        "pass": true,
+        "hits": [
+          {
+            "qid": "q_capital_france",
+            "top": "d_france",
+            "relevant": [
+              "d_france"
+            ],
+            "hit": true
+          },
+          {
+            "qid": "q_capital_germany",
+            "top": "d_germany",
+            "relevant": [
+              "d_germany"
+            ],
+            "hit": true
+          },
+          {
+            "qid": "q_capital_japan",
+            "top": "d_japan",
+            "relevant": [
+              "d_japan"
+            ],
+            "hit": true
+          },
+          {
+            "qid": "q_capital_canada",
+            "top": "d_canada",
+            "relevant": [
+              "d_canada"
+            ],
+            "hit": true
+          }
+        ],
+        "parity": true
+      },
+      "cost": {
+        "embed_calls": 16,
+        "batch_count": 4,
+        "estimated_units": 16.0
+      },
+      "resources": {
+        "before": {
+          "sampled_monotonic": 1189.028784136,
+          "total_memory_bytes": 16791945216,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
+          "swap_bytes": 0,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14477312,
+          "vram_bytes": 0,
+          "disk_bytes": 0,
+          "network_bytes": 0,
+          "load_averages": [
+            0.05224609375,
+            0.0234375,
+            0.00146484375
+          ],
+          "cpu_seconds": 0.048771999999999996
+        },
+        "during": [
+          {
+            "sampled_monotonic": 1189.03321603,
+            "total_memory_bytes": 16791945216,
+            "free_memory_bytes": 6404788224,
+            "available_memory_bytes": 7283769344,
+            "swap_bytes": 0,
+            "process_rss_bytes": 32067584,
+            "process_pss_or_working_set_bytes": 14964736,
+            "vram_bytes": 0,
+            "disk_bytes": 0,
+            "network_bytes": 0,
+            "load_averages": [
+              0.05224609375,
+              0.0234375,
+              0.00146484375
+            ],
+            "cpu_seconds": 0.053203999999999994
+          }
+        ],
+        "after": {
+          "sampled_monotonic": 1189.032472992,
+          "total_memory_bytes": 16791945216,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
+          "swap_bytes": 0,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14964736,
+          "vram_bytes": 0,
+          "disk_bytes": 0,
+          "network_bytes": 0,
+          "load_averages": [
+            0.05224609375,
+            0.0234375,
+            0.00146484375
+          ],
+          "cpu_seconds": 0.05245999999999999
+        }
+      },
+      "corpus_digest": "sha256:b81f2d2aa63d0821ca9cbf0ce4038088a0b719a3e36d82264f582b7b26ecea01",
+      "queries_digest": "sha256:44ff195ed0082251eb0bd93c507615ebcd7ed9bd32e158e24d94d1c44f14a475",
+      "batching": {
+        "size": 2,
+        "order": "document-then-query"
+      },
+      "dimensions": 1024,
+      "workload_digest": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc"
+    },
+    {
+      "name": "synthetic-b",
+      "kind": "measured",
+      "installed": true,
+      "available": true,
+      "supported": true,
+      "digest": "sha256:c5612c7ce100ad0002d2dcc8986aa5540680fa3992be459bc40b503a7becdbfa",
+      "license": {
+        "source": "spdx",
+        "identifier": "Apache-2.0",
+        "evidence_digest": "sha256:d3b51f3926b9afa35cd4e5f57a26d7eb7e13309c3f15e65dcdb2bb04739c7b39",
+        "verification_status": "verified"
+      },
+      "identity": {
+        "name": "synthetic-b",
+        "digest": "sha256:c5612c7ce100ad0002d2dcc8986aa5540680fa3992be459bc40b503a7becdbfa"
+      },
+      "status": "compared",
+      "simulated": false,
+      "cold": {
+        "separated_from_warm": true,
+        "sample_count": 6,
+        "observations": [
+          {
+            "op_id": "cold:corpus-batch-0",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.033484728,
+            "start_monotonic": 1189.033484728,
+            "end_monotonic": 1189.033876718
+          },
+          {
+            "op_id": "cold:corpus-batch-1",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.033878162,
+            "start_monotonic": 1189.033878162,
+            "end_monotonic": 1189.034258244
+          },
+          {
+            "op_id": "q_capital_france",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.034259923,
+            "start_monotonic": 1189.034259923,
+            "end_monotonic": 1189.034449967
+          },
+          {
+            "op_id": "q_capital_germany",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.034450609,
+            "start_monotonic": 1189.034450609,
+            "end_monotonic": 1189.034643207
+          },
+          {
+            "op_id": "q_capital_japan",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.03464385,
+            "start_monotonic": 1189.03464385,
+            "end_monotonic": 1189.034832717
+          },
+          {
+            "op_id": "q_capital_canada",
+            "phase": "cold",
+            "outcome": "success",
+            "issue_monotonic": 1189.034833364,
+            "start_monotonic": 1189.034833364,
+            "end_monotonic": 1189.035026558
+          }
+        ]
+      },
+      "warm": {
+        "separated_from_cold": true,
+        "sample_count": 6,
+        "observations": [
+          {
+            "op_id": "warm:corpus-batch-0",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.035029385,
+            "start_monotonic": 1189.035029385,
+            "end_monotonic": 1189.035423199
+          },
+          {
+            "op_id": "warm:corpus-batch-1",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.035424093,
+            "start_monotonic": 1189.035424093,
+            "end_monotonic": 1189.035832365
+          },
+          {
+            "op_id": "q_capital_france",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.035833713,
+            "start_monotonic": 1189.035833713,
+            "end_monotonic": 1189.036038755
+          },
+          {
+            "op_id": "q_capital_germany",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.036039588,
+            "start_monotonic": 1189.036039588,
+            "end_monotonic": 1189.036230546
+          },
+          {
+            "op_id": "q_capital_japan",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.036231,
+            "start_monotonic": 1189.036231,
+            "end_monotonic": 1189.036537753
+          },
+          {
+            "op_id": "q_capital_canada",
+            "phase": "warm",
+            "outcome": "success",
+            "issue_monotonic": 1189.036538738,
+            "start_monotonic": 1189.036538738,
+            "end_monotonic": 1189.036734569
+          }
+        ]
+      },
+      "observations": [
+        {
+          "op_id": "cold:corpus-batch-0",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.033484728,
+          "start_monotonic": 1189.033484728,
+          "end_monotonic": 1189.033876718
+        },
+        {
+          "op_id": "cold:corpus-batch-1",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.033878162,
+          "start_monotonic": 1189.033878162,
+          "end_monotonic": 1189.034258244
+        },
+        {
+          "op_id": "q_capital_france",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.034259923,
+          "start_monotonic": 1189.034259923,
+          "end_monotonic": 1189.034449967
+        },
+        {
+          "op_id": "q_capital_germany",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.034450609,
+          "start_monotonic": 1189.034450609,
+          "end_monotonic": 1189.034643207
+        },
+        {
+          "op_id": "q_capital_japan",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.03464385,
+          "start_monotonic": 1189.03464385,
+          "end_monotonic": 1189.034832717
+        },
+        {
+          "op_id": "q_capital_canada",
+          "phase": "cold",
+          "outcome": "success",
+          "issue_monotonic": 1189.034833364,
+          "start_monotonic": 1189.034833364,
+          "end_monotonic": 1189.035026558
+        },
+        {
+          "op_id": "warm:corpus-batch-0",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.035029385,
+          "start_monotonic": 1189.035029385,
+          "end_monotonic": 1189.035423199
+        },
+        {
+          "op_id": "warm:corpus-batch-1",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.035424093,
+          "start_monotonic": 1189.035424093,
+          "end_monotonic": 1189.035832365
+        },
+        {
+          "op_id": "q_capital_france",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.035833713,
+          "start_monotonic": 1189.035833713,
+          "end_monotonic": 1189.036038755
+        },
+        {
+          "op_id": "q_capital_germany",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.036039588,
+          "start_monotonic": 1189.036039588,
+          "end_monotonic": 1189.036230546
+        },
+        {
+          "op_id": "q_capital_japan",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.036231,
+          "start_monotonic": 1189.036231,
+          "end_monotonic": 1189.036537753
+        },
+        {
+          "op_id": "q_capital_canada",
+          "phase": "warm",
+          "outcome": "success",
+          "issue_monotonic": 1189.036538738,
+          "start_monotonic": 1189.036538738,
+          "end_monotonic": 1189.036734569
+        }
+      ],
+      "denominators": {
+        "issued": 12,
+        "successes": 12,
+        "timeouts": 0,
+        "errors": 0,
+        "failed_remain_in_denominator": true
+      },
+      "embedding_shape": {
+        "dims": 1024,
+        "vector_count": 16,
+        "observed_lengths": [
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024,
+          1024
+        ],
+        "parity": true
+      },
+      "embedder_failed": false,
+      "correctness": {
+        "pass": true,
+        "hits": [
+          {
+            "qid": "q_capital_france",
+            "top": "d_france",
+            "relevant": [
+              "d_france"
+            ],
+            "hit": true
+          },
+          {
+            "qid": "q_capital_germany",
+            "top": "d_germany",
+            "relevant": [
+              "d_germany"
+            ],
+            "hit": true
+          },
+          {
+            "qid": "q_capital_japan",
+            "top": "d_japan",
+            "relevant": [
+              "d_japan"
+            ],
+            "hit": true
+          },
+          {
+            "qid": "q_capital_canada",
+            "top": "d_canada",
+            "relevant": [
+              "d_canada"
+            ],
+            "hit": true
+          }
+        ],
+        "parity": true
+      },
+      "cost": {
+        "embed_calls": 16,
+        "batch_count": 4,
+        "estimated_units": 16.0
+      },
+      "resources": {
+        "before": {
+          "sampled_monotonic": 1189.033401327,
+          "total_memory_bytes": 16791945216,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
+          "swap_bytes": 0,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14964736,
+          "vram_bytes": 0,
+          "disk_bytes": 0,
+          "network_bytes": 0,
+          "load_averages": [
+            0.05224609375,
+            0.0234375,
+            0.00146484375
+          ],
+          "cpu_seconds": 0.053390999999999994
+        },
+        "during": [
+          {
+            "sampled_monotonic": 1189.037549339,
+            "total_memory_bytes": 16791945216,
+            "free_memory_bytes": 6404788224,
+            "available_memory_bytes": 7283769344,
+            "swap_bytes": 0,
+            "process_rss_bytes": 32067584,
+            "process_pss_or_working_set_bytes": 14993408,
+            "vram_bytes": 0,
+            "disk_bytes": 0,
+            "network_bytes": 0,
+            "load_averages": [
+              0.05224609375,
+              0.0234375,
+              0.00146484375
+            ],
+            "cpu_seconds": 0.057537
+          }
+        ],
+        "after": {
+          "sampled_monotonic": 1189.036816259,
+          "total_memory_bytes": 16791945216,
+          "free_memory_bytes": 6404788224,
+          "available_memory_bytes": 7283769344,
+          "swap_bytes": 0,
+          "process_rss_bytes": 32067584,
+          "process_pss_or_working_set_bytes": 14989312,
+          "vram_bytes": 0,
+          "disk_bytes": 0,
+          "network_bytes": 0,
+          "load_averages": [
+            0.05224609375,
+            0.0234375,
+            0.00146484375
+          ],
+          "cpu_seconds": 0.056804
+        }
+      },
+      "corpus_digest": "sha256:b81f2d2aa63d0821ca9cbf0ce4038088a0b719a3e36d82264f582b7b26ecea01",
+      "queries_digest": "sha256:44ff195ed0082251eb0bd93c507615ebcd7ed9bd32e158e24d94d1c44f14a475",
+      "batching": {
+        "size": 2,
+        "order": "document-then-query"
+      },
+      "dimensions": 1024,
+      "workload_digest": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc"
+    }
+  ],
+  "resources": {
+    "before": {
+      "sampled_monotonic": 1189.028288753,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6404788224,
+      "available_memory_bytes": 7283769344,
+      "swap_bytes": 0,
+      "process_rss_bytes": 32067584,
+      "process_pss_or_working_set_bytes": 14477312,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.05224609375,
+        0.0234375,
+        0.00146484375
+      ],
+      "cpu_seconds": 0.04826999999999999
+    },
+    "during": [
+      {
+        "sampled_monotonic": 1189.028619459,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6404788224,
+        "available_memory_bytes": 7283769344,
+        "swap_bytes": 0,
+        "process_rss_bytes": 32067584,
+        "process_pss_or_working_set_bytes": 14477312,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.05224609375,
+          0.0234375,
+          0.00146484375
+        ],
+        "cpu_seconds": 0.048605999999999996
+      }
+    ],
+    "after": {
+      "sampled_monotonic": 1189.03776831,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6404788224,
+      "available_memory_bytes": 7283769344,
+      "swap_bytes": 0,
+      "process_rss_bytes": 32067584,
+      "process_pss_or_working_set_bytes": 14993408,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.05224609375,
+        0.0234375,
+        0.00146484375
+      ],
+      "cpu_seconds": 0.057756999999999996
+    },
+    "memory_pressure": 0.43376566861710275,
+    "swap_pagefile_delta": 0,
+    "disk_index_growth": 0,
+    "network_bytes": 0,
+    "first_abort": null
+  },
+  "noise_load": {
+    "noise_detected": false,
+    "load_detected": false,
+    "rejected": false
+  },
+  "ok": true,
+  "decision": {
+    "decision": "select",
+    "selected": "synthetic-a",
+    "rollback_value": "local",
+    "blockers": [],
+    "config_promotion": false,
+    "requires_retained_measured_evidence": true
+  },
+  "raw_artifacts": {
+    "observations_sha256": "sha256:c987bc64d72fe168afdb04b105855a8f29aff5d5373d57031b7be4e6d0034675",
+    "workload_sha256": "sha256:8ccb142c1b0e5e84837ebb639f7cedbe74b435e641dc349ad395b9802bf2b906",
+    "result_digest": "sha256:5113390ad75fdaf6bfec4f957133afe10b5cd32aad5efa826613b5882b1fdab1"
+  }
+}
