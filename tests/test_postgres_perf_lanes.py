@@ -12,6 +12,7 @@ MNEMOSYNE_POSTGRES_DSN is set, matching tests/test_postgres_engine_live.py.
 
 from __future__ import annotations
 
+import inspect
 import os
 import threading
 import types
@@ -23,6 +24,16 @@ from uuid import uuid4
 import pytest
 
 import mnemosyne.postgres_engine as postgres_engine
+from eval.scale.bench_100k import (
+    NULL_EMBEDDING_FALLBACK_LIMIT,
+    POSTGRES_BACKFILL_APPLY,
+    POSTGRES_BACKFILL_PLAN,
+    POSTGRES_HYGIENE_SNAPSHOT,
+    SCALE_INDEX_IDENTITY,
+    SECOND_BACKFILL_PATH,
+    production_backfill_gate,
+)
+from mnemosyne import cli
 from mnemosyne.algorithms import mmr_select
 from mnemosyne.calibration import CalibrationSet
 from mnemosyne.models import Assertion, Evidence, Hit
@@ -1582,3 +1593,72 @@ def test_live_mmr_stored_space_returns_stored_vectors(
     )
     assert [hit.id for hit in default_selection] == [hit.id for hit in expected_default]
     engine.close_connections()
+
+
+# --------------------------------------------------------------------------- #
+# Scale-harness contracts (15-03-03): reuse the existing hygiene / backfill
+# controls. Do not add a second backfill path.
+# --------------------------------------------------------------------------- #
+
+
+def test_scale_harness_reuses_existing_postgres_backfill_controls() -> None:
+    assert POSTGRES_HYGIENE_SNAPSHOT is PostgresEngine.vector_hygiene_snapshot
+    assert POSTGRES_BACKFILL_PLAN is PostgresEngine.vector_backfill_plan
+    assert POSTGRES_BACKFILL_APPLY is PostgresEngine.vector_backfill_apply
+    assert SECOND_BACKFILL_PATH is None
+
+
+def test_scale_harness_index_identity_matches_vector_schema_indexes() -> None:
+    assert SCALE_INDEX_IDENTITY == VECTOR_INDEXES
+
+
+def test_scale_harness_fallback_cap_is_the_shared_postgres_control() -> None:
+    assert NULL_EMBEDDING_FALLBACK_LIMIT is _null_embedding_fallback_limit
+    assert NULL_EMBEDDING_FALLBACK_LIMIT(5) == _null_embedding_fallback_limit(5)
+
+
+def test_production_vector_backfill_remains_operator_gated() -> None:
+    source = inspect.getsource(cli.cmd_vector_backfill_apply)
+    assert "confirm_apply" in source
+    assert "requires --confirm-apply" in source
+    gate = production_backfill_gate(operator_authorized=False)
+    assert gate["allowed"] is False
+    assert gate["reason"] == "operator_window_required"
+
+
+def test_vector_backfill_apply_is_noop_when_backlog_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine, _ = make_engine(monkeypatch, reuse=True)
+    conn = _VectorBackfillApplyFakeConnection([])
+    snapshots = iter(
+        [
+            {
+                "backend": "postgres",
+                "ok": True,
+                "embeddable_null_embeddings": 0,
+                "live_rows": 21,
+            },
+            {
+                "backend": "postgres",
+                "ok": True,
+                "embeddable_null_embeddings": 0,
+                "live_rows": 21,
+            },
+        ]
+    )
+    monkeypatch.setattr(engine, "connect", lambda: conn)
+    monkeypatch.setattr(engine, "_ensure_evidence_vector_schema", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(engine, "vector_hygiene_snapshot", lambda *_args, **_kwargs: next(snapshots))
+
+    report = engine.vector_backfill_apply("tenant", branch="main", limit=1)
+
+    assert report["applied_count"] == 0
+    assert report["failed_count"] == 0
+    assert report["ok"] is True
+    assert report["complete"] is True
+    assert report["before"]["embeddable_null_embeddings"] == 0
+    assert report["after"]["embeddable_null_embeddings"] == 0
+    assert report["before"]["live_rows"] == report["after"]["live_rows"]
+    assert conn.assertion_update_params is None
+    assert not any(sql.startswith("UPDATE ") for sql in conn.statements)

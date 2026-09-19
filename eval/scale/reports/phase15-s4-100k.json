@@ -1,0 +1,33 @@
+{
+  "schema": "mnemosyne.cap006.scale-receipt/v1",
+  "receipt_class": "synthetic-development",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "claim_status": "harness-ready-blocked",
+  "harness_ready": true,
+  "identity": {
+    "based_on_sha": "e32e1cb7ceb455ffbfd06ddc6c0bd2d526bfe4d4",
+    "workload": "phase15-s4-100k-synthetic-dev-v1",
+    "item_count": 100000
+  },
+  "blockers": [
+    "admitted_100k_measurement_missing",
+    "production_backfill_operator_window_missing",
+    "cap006_remains_open"
+  ],
+  "cap006": {
+    "status": "open",
+    "measured_100k": false
+  },
+  "distributions": [
+    {
+      "name": "query",
+      "sample_count": 0,
+      "p50_ms": null,
+      "p95_ms": null,
+      "p99_ms": null,
+      "official_claim": false,
+      "asserted": false
+    }
+  ]
+}
