@@ -1160,13 +1160,25 @@ The following packages are complete source history, not runnable work:
 - PR #186: ordinary documentation receipt recording the merged PR #185
   lease-map lapse (Exact-1 lease-map receipt for product #185
   P15-S5/15-04-03 J-lens tripwire @
-  `aed883d5928929dc410d55bd41e6852d71cd1f7f`). It is **OPEN/READY**
+  `aed883d5928929dc410d55bd41e6852d71cd1f7f`). It is **MERGED** at tip
+  `c0ff999c135955eb65dfe65ccfe403ed0dbed3e7` from Exact HEAD
+  `a742f674e1aaaef5b419dff6213de8b50a052afa`. It was **OPEN/READY**
   at the `2026-09-20T06:27:00Z` capture and adds only the PR #185
   merged-baseline bullet, the #184 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #186 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `c0ff999c135955eb65dfe65ccfe403ed0dbed3e7`.
+- PR #187: ordinary documentation receipt recording the merged PR #186
+  lease-map lapse (Exact-1 lease-map receipt for receipt #186
+  of product #185 @
+  `a742f674e1aaaef5b419dff6213de8b50a052afa`). It is **OPEN/READY**
+  at the `2026-09-20T06:49:00Z` capture and adds only the #186 MERGED
+  mark and this structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #186 changes
+  merge SHA/time, or post-main CI is claimed here. PR #187 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
