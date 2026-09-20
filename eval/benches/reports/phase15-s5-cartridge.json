@@ -1,0 +1,588 @@
+{
+  "schema": "mnemosyne.cap009.cartridge-receipt/v1",
+  "receipt_class": "synthetic-development",
+  "official_claim": false,
+  "admitted_measurement": false,
+  "claim_status": "synthetic-development-receipt-only",
+  "product_adoption": false,
+  "speedup_asserted": false,
+  "cap_go_no_go": "15-04-05",
+  "identity": {
+    "repository_sha": "d3cd013fe07540c3e561bab821e42504b15c82ce",
+    "candidate_sha": "d3cd013fe07540c3e561bab821e42504b15c82ce",
+    "clean_tree": false,
+    "command": [
+      "/workspace/.venv/bin/python3",
+      "eval/benches/bench_cartridge_ab.py"
+    ],
+    "arguments": {
+      "workload": "phase15-s5-cartridge-synthetic-dev-v1",
+      "kind": "measured",
+      "use_historical": false,
+      "admitted_measurement": false,
+      "faults": []
+    },
+    "utc_start": "2026-09-20T04:18:07.120023+00:00",
+    "utc_end": "2026-09-20T04:18:07.126429+00:00",
+    "monotonic_start": 322.529511628,
+    "monotonic_end": 322.535910462,
+    "host": {
+      "os": "Linux",
+      "os_release": "#1 SMP PREEMPT_DYNAMIC Fri Sep 18 16:05:18 UTC 2026",
+      "kernel": "6.12.94+",
+      "architecture": "x86_64",
+      "cpu_flags": [
+        "fpu",
+        "vme",
+        "de",
+        "pse",
+        "tsc",
+        "msr",
+        "pae",
+        "mce",
+        "cx8",
+        "apic",
+        "sep",
+        "mtrr",
+        "pge",
+        "mca",
+        "cmov",
+        "pat",
+        "pse36",
+        "clflush",
+        "dts",
+        "mmx",
+        "fxsr",
+        "sse",
+        "sse2",
+        "ss",
+        "ht",
+        "syscall",
+        "nx",
+        "pdpe1gb",
+        "rdtscp",
+        "lm",
+        "constant_tsc",
+        "pebs",
+        "bts",
+        "rep_good",
+        "nopl",
+        "xtopology",
+        "nonstop_tsc",
+        "cpuid",
+        "tsc_known_freq",
+        "pni",
+        "pclmulqdq",
+        "dtes64",
+        "vmx",
+        "ssse3",
+        "fma",
+        "cx16",
+        "pcid",
+        "sse4_1",
+        "sse4_2",
+        "x2apic",
+        "movbe",
+        "popcnt",
+        "tsc_deadline_timer",
+        "aes",
+        "xsave",
+        "avx",
+        "f16c",
+        "rdrand",
+        "hypervisor",
+        "lahf_lm",
+        "abm",
+        "3dnowprefetch",
+        "cpuid_fault",
+        "ssbd",
+        "ibrs",
+        "ibpb",
+        "stibp",
+        "ibrs_enhanced",
+        "tpr_shadow",
+        "flexpriority",
+        "ept",
+        "vpid",
+        "ept_ad",
+        "fsgsbase",
+        "tsc_adjust",
+        "bmi1",
+        "avx2",
+        "smep",
+        "bmi2",
+        "erms",
+        "invpcid",
+        "avx512f",
+        "avx512dq",
+        "rdseed",
+        "adx",
+        "smap",
+        "avx512ifma",
+        "clflushopt",
+        "clwb",
+        "avx512cd",
+        "sha_ni",
+        "avx512bw",
+        "avx512vl",
+        "xsaveopt",
+        "xsavec",
+        "xgetbv1",
+        "xsaves",
+        "avx_vnni",
+        "avx512_bf16",
+        "wbnoinvd",
+        "arat",
+        "vnmi",
+        "avx512vbmi",
+        "umip",
+        "pku",
+        "ospke",
+        "avx512_vbmi2",
+        "gfni",
+        "vaes",
+        "vpclmulqdq",
+        "avx512_vnni",
+        "avx512_bitalg",
+        "avx512_vpopcntdq",
+        "rdpid",
+        "bus_lock_detect",
+        "cldemote",
+        "movdiri",
+        "movdir64b",
+        "fsrm",
+        "md_clear",
+        "serialize",
+        "tsxldtrk",
+        "amx_bf16",
+        "avx512_fp16",
+        "amx_tile",
+        "amx_int8",
+        "flush_l1d",
+        "arch_capabilities"
+      ],
+      "accelerator": "none",
+      "runtime_versions": {
+        "python": "3.12.3"
+      }
+    },
+    "digests": {
+      "dataset": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc",
+      "fixture": "sha256:6f5fc36bd231520dc8482fb94b77c3ac6bbf34cda5526e58b53c58860727e288",
+      "config": "sha256:dd1bb44d878881e978dd4d2dc0f0510252734f90319ed1b3af6c5b5ac7997ff9",
+      "model": "sha256:fa2a61a0a5796f20075d54c597ee79e7d86f148848dd132d1b35437105e07d01",
+      "tokenizer": "sha256:30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+      "provider": "sha256:b38558a9f48c36bffe66c6e13a2cf5419fe9d6271d74d81eeb2171cf51bf4761",
+      "container_image": "sha256:30a0924a3360be687d1df9fcbbfdff62c01bc0fd14036ab9076cf7f451568666",
+      "schema": "sha256:f01341744b41cc59db248a1f13bc439b12ca5d7e7bd0ead77c34318434745eec",
+      "result_contract": "sha256:ffefd7f57464db1649410bfd7297ff7ef3d2dec17bb1341f0e78099437facffa",
+      "hardware_receipt": "sha256:a94b4ebd240cd84e7d1dd80b97e20d798d0aea01f13839b8d3a2b42ba9448e2a",
+      "s4_identical_work": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc",
+      "s4_retrieval_baselines": "sha256:ed3a972190fe65bee129e8ebd82d1df64866a0dd6a23c873e56218780aad6b01",
+      "s4_provider_receipt": "sha256:d3725a935e5a1d7cb4fbcfaba21944a92609d62ab96b92e9bd9278d83feccab6",
+      "s4_resource_receipt_identity": "sha256:cf2b0f27ecaa35ba38b27db9484e13a541207882e399f0f2c19bd40c9563a604"
+    },
+    "s4_binding": {
+      "identical_work_abi": "eval.provider_bakeoff.run:pinned_identical_workload",
+      "workload_digest": "sha256:4f2d76f5311f88cfcec90522626dc39277fe7837f31823b2b26aa32ac2c953fc",
+      "retrieval_baselines_digest": "sha256:ed3a972190fe65bee129e8ebd82d1df64866a0dd6a23c873e56218780aad6b01",
+      "provider_receipt_digest": "sha256:d3725a935e5a1d7cb4fbcfaba21944a92609d62ab96b92e9bd9278d83feccab6",
+      "resource_receipt_identity": "sha256:cf2b0f27ecaa35ba38b27db9484e13a541207882e399f0f2c19bd40c9563a604"
+    }
+  },
+  "sut_boundary": {
+    "included_processes": [
+      "synthetic-dev-cartridge-ab"
+    ],
+    "containers": [],
+    "databases": [],
+    "proxies": [],
+    "caches": [],
+    "indexes": [],
+    "filesystems": [
+      "workspace"
+    ],
+    "background_workers": [],
+    "benchmark_process_count": 1,
+    "host_workload_count": 1
+  },
+  "workload": {
+    "workload_id": "phase15-s5-cartridge-synthetic-dev-v1",
+    "tenant_scoped": true,
+    "tenant_id_omitted": true,
+    "tenant_digest": "sha256:7893e78b82bb8f1d70513f209b1d35f08101acf945382e388db8215ecee9a1b7",
+    "corpus_digest": "sha256:26bedf805f0b4912f772ca9e1189e881340d1e826eb44d1eb7fc542894297dbb",
+    "queries_digest": "sha256:d2303361325d566ef21b33cc92ac9d6a532c270558886458c68fe4c457d7f0ca",
+    "reader_digest": "sha256:7e5cd65e7268f8a144d2072128afbe7bbf26bf5dccf2455f0b2915d9600de7e5",
+    "identical_across_arms": true,
+    "warmup": {
+      "explicit": true,
+      "excluded_from_distribution": true,
+      "count": 1
+    },
+    "repetitions": 1,
+    "concurrency": {
+      "declared_max_in_flight": 1,
+      "observed_max_in_flight": 1,
+      "declared_overlap": false,
+      "observed_overlap": false,
+      "matches_declaration": true,
+      "worker_count": 1
+    },
+    "budgets": {
+      "time_limit_s": 30,
+      "case_limit": 32,
+      "memory_limit_mb": 512,
+      "vram_limit_mb": 0,
+      "disk_limit_mb": 64,
+      "network_limit_bytes": 0
+    }
+  },
+  "arms": {
+    "baseline": {
+      "name": "unchanged-s4-retrieval",
+      "kind": "s4-retrieval-baseline",
+      "workload_digest": "sha256:b2f19fbe0e07e7b2ab92fca69298894ce2e090ea6d26ea4f50687a188691a43b",
+      "tenant_digest": "sha256:7893e78b82bb8f1d70513f209b1d35f08101acf945382e388db8215ecee9a1b7",
+      "setup": {
+        "hidden": false,
+        "excluded_from_query_time": true,
+        "compile_time_ms": 0.0,
+        "artifact_size_bytes": 0
+      },
+      "cold": {
+        "separated_from_warm": true,
+        "sample_count": 4,
+        "p50_ms": 0.16409200003408841,
+        "p95_ms": 0.16524000000117667,
+        "p99_ms": 0.16524000000117667,
+        "throughput_qps": 6164.230510941943,
+        "mean_ms": 0.16222625001205415,
+        "confidence_interval": {
+          "ci_low": 0.15574899998682668,
+          "ci_high": 0.16524000000117667,
+          "ci_method": "synthetic-dev-minmax"
+        }
+      },
+      "warm": {
+        "separated_from_cold": true,
+        "sample_count": 4,
+        "p50_ms": 0.15935999999783235,
+        "p95_ms": 0.1656050000065079,
+        "p99_ms": 0.1656050000065079,
+        "throughput_qps": 6248.98453988731,
+        "mean_ms": 0.16002600000319944,
+        "confidence_interval": {
+          "ci_low": 0.1559290000159308,
+          "ci_high": 0.1656050000065079,
+          "ci_method": "synthetic-dev-minmax"
+        }
+      },
+      "denominators": {
+        "issued": 9,
+        "successes": 9,
+        "timeouts": 0,
+        "errors": 0,
+        "failed_remain_in_denominator": true,
+        "denominator_rule": "issued includes every cold/warm/warmup attempt; latency/throughput/quality exclude warmup and invalid measurements"
+      },
+      "quality": {
+        "recall_at_k": 1.0,
+        "ndcg_at_k": 1.0,
+        "answer_digest": "sha256:80149f537ef2faeb6f35239093590d684e8b41566e8ba9ba5fdf390693ae4f9b",
+        "abstention_digest": "sha256:7fe209e574482ef4592b6473712609057c29dc3e5abea3d89698865e32580b92",
+        "citation_digest": "sha256:f5b2c5d49f3c5d6547d02eaf08a048c732f1d2fddb4b958a86061bedce8e4e73"
+      },
+      "resources": {
+        "peak_ram_bytes": 38285312,
+        "peak_vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0
+      }
+    },
+    "cartridge": {
+      "name": "offline-cartridge",
+      "kind": "optional-offline-cartridge",
+      "workload_digest": "sha256:b2f19fbe0e07e7b2ab92fca69298894ce2e090ea6d26ea4f50687a188691a43b",
+      "tenant_digest": "sha256:7893e78b82bb8f1d70513f209b1d35f08101acf945382e388db8215ecee9a1b7",
+      "setup": {
+        "hidden": false,
+        "excluded_from_query_time": true,
+        "compile_time_ms": 0.28860200001190606,
+        "artifact_size_bytes": 736
+      },
+      "cold": {
+        "separated_from_warm": true,
+        "sample_count": 4,
+        "p50_ms": 0.16505399997868153,
+        "p95_ms": 0.17318599998361606,
+        "p99_ms": 0.17318599998361606,
+        "throughput_qps": 6100.201916842238,
+        "mean_ms": 0.16392899999573274,
+        "confidence_interval": {
+          "ci_low": 0.15728100004253065,
+          "ci_high": 0.17318599998361606,
+          "ci_method": "synthetic-dev-minmax"
+        }
+      },
+      "warm": {
+        "separated_from_cold": true,
+        "sample_count": 4,
+        "p50_ms": 0.15858400001889095,
+        "p95_ms": 0.1593819999925472,
+        "p99_ms": 0.1593819999925472,
+        "throughput_qps": 6352.493511559228,
+        "mean_ms": 0.15741850002370938,
+        "confidence_interval": {
+          "ci_low": 0.15411000003950903,
+          "ci_high": 0.1593819999925472,
+          "ci_method": "synthetic-dev-minmax"
+        }
+      },
+      "denominators": {
+        "issued": 9,
+        "successes": 9,
+        "timeouts": 0,
+        "errors": 0,
+        "failed_remain_in_denominator": true,
+        "denominator_rule": "issued includes every cold/warm/warmup attempt; latency/throughput/quality exclude warmup and invalid measurements"
+      },
+      "quality": {
+        "recall_at_k": 1.0,
+        "ndcg_at_k": 1.0,
+        "answer_digest": "sha256:80149f537ef2faeb6f35239093590d684e8b41566e8ba9ba5fdf390693ae4f9b",
+        "abstention_digest": "sha256:7fe209e574482ef4592b6473712609057c29dc3e5abea3d89698865e32580b92",
+        "citation_digest": "sha256:f5b2c5d49f3c5d6547d02eaf08a048c732f1d2fddb4b958a86061bedce8e4e73"
+      },
+      "resources": {
+        "peak_ram_bytes": 38285312,
+        "peak_vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0
+      },
+      "artifact_digest": "sha256:18f8edcccbfd698fb1ea82817987e16605c3884102948bb25c0d9c44e247842f"
+    }
+  },
+  "query_time": {
+    "includes_setup": false,
+    "includes_compile": false,
+    "duration_ms": 0.6435997500346957
+  },
+  "comparison": {
+    "identical_work": true,
+    "answer_equality": true,
+    "abstention_equality": true,
+    "citation_equality": true,
+    "retrieval_quality_match": true,
+    "identity_bound": true,
+    "setup_cost_accounted": true,
+    "resource_accounting_complete": true,
+    "cross_tenant_reuse": false,
+    "raw_secret_persistence": false,
+    "redaction_passed": true
+  },
+  "aggregates": {
+    "baseline_warm_p95_ms": 0.1656050000065079,
+    "cartridge_warm_p95_ms": 0.1593819999925472,
+    "baseline_recall_at_k": 1.0,
+    "cartridge_recall_at_k": 1.0,
+    "compile_time_ms": 0.28860200001190606,
+    "artifact_size_bytes": 736
+  },
+  "cases": [
+    {
+      "case_id": "sha256:ea47c4a6a906af9ae82fd4f643ba5334e8766a74e71b9d61dfc094f4d48dc3d7",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:b14185c2bee2b62c9905df983f9875539bdc56cb71eba725bea8d2e3e22d70f0",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:8146808a6ce6e33c040897fd02ea74ae6cad98b2b600c6fe4e50eb87b6f1f9e0",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:6c6a3f6449bc7dc69e0ecd0768565e43708464fe5d4ba484c155fd9a9a623816",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:8043aebe81293bff63a2241d802f5acaf24460d7f148f947488d31f659152dd8",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:13afb740524c92bbfb385ecac2a1e050cf5f5866232540a9793807417a8713be",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:77a4ca216a098f3675dd741767340ae34dda2bfc0abd84d97cf9cfaad82810e4",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:0c9785aea08800f89199b5b6e9017c7b528b9ea2162c6e25da7dca7aa616b1e0",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:7a29007f0e0eb03027f2c31d1c7489f341cef6a81a2c605481d222a030314441",
+      "outcome": "success",
+      "arm": "baseline"
+    },
+    {
+      "case_id": "sha256:9214da9a4128a4b03a899f37aae58abdf7de355eeafd3bc7a3b5367a0e319e7c",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:c3ec10ef1de78cfd80d50feb0241dfd9ebf50c868bdd3f60934343cd865864e5",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:3c897e1e22692dfe61657021fd8f64d694ff096208bb46ae7a3bdab68c5374db",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:0ede9d14973081910fa927208bdfebd1010ed6deebaae68ef4fb8f34df343790",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:e48ba7ea23d956475a77819729c9204f23ebb204f0e541fdc1a5ba338ee2102b",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:7023138e32bccab50147d0e579dcdc5af256ba6cc36ab56cdf1d65e37428e4b2",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:69ffe87f36a78ac5123d3526de59c2b62bdab77c4d0c01473230f18abc2a579f",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:ec3bb5df2b24daf4f2ee83b10d6ffb98e5cc8304259d580cc134ee345ae68487",
+      "outcome": "success",
+      "arm": "cartridge"
+    },
+    {
+      "case_id": "sha256:7151a1f0e56fa6fadda0af4118c4b157c3299396306af54827bc37fbc8e8673e",
+      "outcome": "success",
+      "arm": "cartridge"
+    }
+  ],
+  "diagnostics": [],
+  "resources": {
+    "before": {
+      "sampled_monotonic": 322.529637627,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6217318400,
+      "available_memory_bytes": 7270330368,
+      "swap_bytes": 0,
+      "process_rss_bytes": 38285312,
+      "process_pss_or_working_set_bytes": 15734784,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.0205078125,
+        0.09423828125,
+        0.05322265625
+      ],
+      "cpu_seconds": 0.041053
+    },
+    "during": [
+      {
+        "sampled_monotonic": 322.529894153,
+        "total_memory_bytes": 16791945216,
+        "free_memory_bytes": 6217318400,
+        "available_memory_bytes": 7270330368,
+        "swap_bytes": 0,
+        "process_rss_bytes": 38285312,
+        "process_pss_or_working_set_bytes": 15734784,
+        "vram_bytes": 0,
+        "disk_bytes": 0,
+        "network_bytes": 0,
+        "load_averages": [
+          0.0205078125,
+          0.09423828125,
+          0.05322265625
+        ],
+        "cpu_seconds": 0.041311999999999995
+      }
+    ],
+    "after": {
+      "sampled_monotonic": 322.53583668,
+      "total_memory_bytes": 16791945216,
+      "free_memory_bytes": 6217318400,
+      "available_memory_bytes": 7270330368,
+      "swap_bytes": 0,
+      "process_rss_bytes": 38285312,
+      "process_pss_or_working_set_bytes": 15902720,
+      "vram_bytes": 0,
+      "disk_bytes": 0,
+      "network_bytes": 0,
+      "load_averages": [
+        0.0205078125,
+        0.09423828125,
+        0.05322265625
+      ],
+      "cpu_seconds": 0.047258999999999995
+    },
+    "memory_pressure": 0.5670346541464086,
+    "swap_pagefile_delta": 0,
+    "disk_index_growth": 0,
+    "network_bytes": 0,
+    "first_abort": null,
+    "peak_ram_bytes": 38285312,
+    "peak_vram_bytes": 0,
+    "disk_bytes": 0
+  },
+  "custody": {
+    "redacted": true,
+    "class": "synthetic-development",
+    "consent": "authored-from-scratch",
+    "raw_content_omitted": true,
+    "tenant_identifiers_omitted": true,
+    "secrets_omitted": true,
+    "scan": {
+      "raw_content": "pass",
+      "secrets": "pass"
+    }
+  },
+  "denominators": {
+    "issued": 18,
+    "successes": 18,
+    "timeouts": 0,
+    "errors": 0,
+    "failed_remain_in_denominator": true,
+    "denominator_rule": "attempt/failure/coverage include every issued case; latency, throughput, and quality exclude warmup and invalid measurements"
+  },
+  "decision": {
+    "decision": "research-only",
+    "reasons": [],
+    "blockers": [
+      "admitted_measurement_missing",
+      "approved_numeric_threshold_absent"
+    ],
+    "product_adoption": false,
+    "speedup_asserted": false,
+    "numeric_threshold_invented": false,
+    "cap_go_no_go_owner": "15-04-05"
+  },
+  "raw_artifacts": {
+    "observations_sha256": "sha256:90d8e365be9cc2709021b5043d904c7d0f1a961899f1719a3286a3c92969773d",
+    "workload_sha256": "sha256:cc8c513b12ac29cb7acf84b0bcc3769ffbb60f10f03fd1231341f639724baca4",
+    "result_digest": "sha256:4f13f9ee60d42f0270e5587543d3b0215fd45dfebee171c0e6050d3d3a67ef18"
+  }
+}
