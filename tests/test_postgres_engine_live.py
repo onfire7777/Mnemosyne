@@ -566,6 +566,46 @@ class StaticMediaExtractor:
         )
 
 
+def test_postgres_lists_only_live_raptor_summaries_in_requested_branch() -> None:
+    engine = PostgresEngine(live_dsn())
+    tenant = f"tenant-raptor-list-live-{uuid4()}"
+
+    def append_summary(content: str, *, branch: str = "main") -> str:
+        return engine.append_evidence(
+            Evidence(
+                tenant_id=tenant,
+                user_id="user-raptor-list",
+                actor="system",
+                source_type="consolidation-summary",
+                content=content,
+                branch=branch,
+                trust_tier=2,
+                access_policy={"tenant": tenant},
+                metadata={"summary": {"raptor_level": 1, "source_evidence_cids": []}},
+            ),
+            branch=branch,
+        )
+
+    main_cid = append_summary("Main RAPTOR summary")
+    erased_cid = append_summary("Erased RAPTOR summary")
+    branch_cid = append_summary("Candidate RAPTOR summary", branch="candidate")
+    engine.append_evidence(
+        Evidence(
+            tenant_id=tenant,
+            user_id="user-raptor-list",
+            actor="user",
+            source_type="chat",
+            content="Ordinary evidence is not a RAPTOR node.",
+            trust_tier=0,
+            access_policy={"tenant": tenant},
+        )
+    )
+    assert engine.forget(tenant, erased_cid)["erased"] is True
+
+    assert [row.cid for row in engine.list_raptor_summaries(tenant)] == [main_cid]
+    assert [row.cid for row in engine.list_raptor_summaries(tenant, "candidate")] == [branch_cid]
+
+
 def test_postgres_engine_live_contract_smoke() -> None:
     engine = PostgresEngine(live_dsn())
     tenant = f"tenant-live-{uuid4()}"
