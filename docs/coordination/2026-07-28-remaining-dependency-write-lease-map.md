@@ -1245,12 +1245,55 @@ The following packages are complete source history, not runnable work:
 - PR #194: ordinary documentation receipt recording the merged PR #192
   lease-map lapse (Exact-1 lease-map receipt for receipt #192
   of product #185 @
-  `ca266e2ba9b6343d8a85d16162b450950a90049f`). It is **OPEN/READY**
+  `ca266e2ba9b6343d8a85d16162b450950a90049f`). It is **MERGED** at tip
+  `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a` from Exact HEAD
+  `eb92f3456e3ce71bccbc0a916702cddb6efe324a`. It was **OPEN/READY**
   at the `2026-09-20T09:53:00Z` capture and adds only the #192 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #194 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a`.
+- PR #193: Exact 3 P15-S5/15-04-04 persona-drift diagnostic
+  `research/activation-memory/persona_drift_eval.py`,
+  `research/activation-memory/reports/phase15-s5-persona-drift.json`,
+  `tests/test_persona_drift_eval.py`
+  (title: feat(research): Exact 3 P15-S5/15-04-04 persona-drift
+  diagnostic)
+  from exact head `60e5150880a9d3931c03b6eb9230b73ee254afa2`; all
+  required exact-head Unit+drift checks passed in run `35504813545`;
+  merge `02b1982f2a6d8010f36a4d38031bcbe65ba5d82c` at
+  `2026-09-20T10:50:24Z`.
+  Prior tip was `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a` (PR #194).
+  Post-main tip Unit+drift will FAIL on CI `35506179082`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #193 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `research/activation-memory/persona_drift_eval.py`,
+  `research/activation-memory/reports/phase15-s5-persona-drift.json`,
+  `tests/test_persona_drift_eval.py`.
+  Purpose: P15-S5/15-04-04 persona-drift diagnostic
+  (research-only diagnostic; no product write/model-import);
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #193 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #195: ordinary documentation receipt recording the merged PR #193
+  lease-map lapse (Exact-1 lease-map receipt for product #193
+  P15-S5/15-04-04 persona-drift diagnostic @
+  `60e5150880a9d3931c03b6eb9230b73ee254afa2`; folds the #194 MERGED
+  receipt and voids stale Exact-1 HEAD
+  `2ad9879c82349894ae4c16ee66149a73a801f810`). It is **OPEN/READY**
+  at the `2026-09-20T10:53:16Z` capture and adds the #193 MERGED
+  mark, the #194 MERGED mark, and this structured self-record in
+  this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #194 changes
+  merge SHA/time, or post-main CI is claimed here. PR #195 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
