@@ -1002,15 +1002,52 @@ The following packages are complete source history, not runnable work:
   (baseline stays `main@f688c747`). Delivery is MERGED at tip
   `649b911b5d23fae975cd4aae07aeadae9e454995`.
 - PR #179: ordinary documentation receipt recording the merged PR #178
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-20T01:16:00Z`
-  capture and adds only the PR #178 merged-baseline bullet and this
-  structured self-record in this map. Exclusive File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `69213f95754edfd4c97fcb109c3fb0656c951419` from Exact HEAD
+  `b4325df8b149c5796a607c0b2b4b13b3e857f5df`. It was **OPEN/READY**
+  at the `2026-09-20T01:16:00Z` capture and adds only the PR #178
+  merged-baseline bullet and this structured self-record in this
+  map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #179 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `69213f95754edfd4c97fcb109c3fb0656c951419`.
+- PR #177: Exact 1 P15-S4/15-03-05 performance-scale report
+  `eval/reports/phase-15-s4-performance-scale.md`
+  (title: docs(eval): Exact 1 P15-S4 performance-scale report
+  (15-03-05))
+  from exact head `dd5147431f6896f61f999af16d6ca92cc1e75849`; all
+  required exact-head Unit+drift checks passed in run `35482333874`;
+  merge `336d34b4db930907081824d765748c9f585a2bca` at
+  `2026-09-20T02:15:39Z`.
+  Prior tip was `69213f95754edfd4c97fcb109c3fb0656c951419` (PR #179).
+  Post-main tip Unit+drift will FAIL on CI `35483526085`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #177 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 1):
+  `eval/reports/phase-15-s4-performance-scale.md`.
+  Purpose: P15-S4/15-03-05 performance-scale report (CAP-006 OPEN;
+  CAP-011 harness-ready-blocked; no asserted P95); docs-only privacy
+  for THIS receipt PR is Exact-1 lease-map only (the recorded #177
+  was docs). This receipt does not invent M16; the M14 freeze is
+  unchanged. This receipt changes no benchmark result or admission
+  state, admits no successor source node, and does not recompute
+  the canonical baseline (baseline stays `main@f688c747`).
+- PR #180: ordinary documentation receipt recording the merged PR #177
+  lease-map lapse (Exact-1 lease-map receipt for product #177
+  P15-S4/15-03-05 performance-scale report @
+  `dd5147431f6896f61f999af16d6ca92cc1e75849`). It is **OPEN/READY**
+  at the `2026-09-20T02:18:16Z` capture and adds only the PR #177
+  merged-baseline bullet, the #179 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #179 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  merge SHA/time, or post-main CI is claimed here. PR #180 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
