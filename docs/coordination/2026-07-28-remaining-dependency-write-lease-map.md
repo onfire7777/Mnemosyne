@@ -943,16 +943,46 @@ The following packages are complete source history, not runnable work:
   node, and does not recompute the canonical baseline (baseline stays
   `main@f688c747`).
 - PR #175: ordinary documentation receipt recording the merged PR #174
-  lease-map lapse. It is **OPEN/READY** at the `2026-09-19T23:12:00Z`
-  capture and adds only the PR #174 merged-baseline bullet, the #173
-  MERGED mark, and this structured self-record in this map. Exclusive
-  File Set:
+  lease-map lapse. It is **MERGED** at tip
+  `e1424ce049dccc0e91117ee5b59ad3de8dcaa984`. It was **OPEN/READY** at
+  the `2026-09-19T23:12:00Z` capture and adds only the PR #174
+  merged-baseline bullet, the #173 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
-  Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #175 changes no
-  benchmark result or admission state, does not recompute the
-  canonical baseline, and must pass fresh exact-head review, security,
-  and CI before merge.
+  PR #175 changes no benchmark result or admission state and does not
+  recompute the canonical baseline. Delivery is MERGED at tip
+  `e1424ce049dccc0e91117ee5b59ad3de8dcaa984`.
+- PR #176: Exact 4 residual RAPTOR/global-sensemaking harden post-#155
+  SPLIT
+  `src/mnemosyne/retrieval.py`,
+  `src/mnemosyne/pipeline.py`,
+  `tests/test_global_sensemaking.py`,
+  `tests/test_postgres_engine_live.py`
+  (title: feat(retrieval): Exact residual RAPTOR/global-sensemaking
+  harden (post-#155 SPLIT))
+  from exact head `8bb2131d3b535c2591e7a53d664356b5462d9ec7`; all
+  required exact-head Unit+drift checks passed in run `35476826176`;
+  merge `2cd543e51464b2a390cb96d9574e7c0f0e9d5919` at
+  `2026-09-20T00:12:33Z`.
+  Prior tip was `e1424ce049dccc0e91117ee5b59ad3de8dcaa984` (PR #175).
+  Post-main tip Unit+drift will FAIL on CI `35478157511`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #176 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 4):
+  `src/mnemosyne/retrieval.py`,
+  `src/mnemosyne/pipeline.py`,
+  `tests/test_global_sensemaking.py`,
+  `tests/test_postgres_engine_live.py`.
+  Purpose: Exact residual RAPTOR/global-sensemaking harden post-#155
+  SPLIT (3-way reconcile from closed #155 `b8847bdd`; NOT historical
+  Exact 8 #164); docs-only privacy for THIS receipt PR is Exact-1
+  lease-map only (the recorded #176 was code). This receipt does not
+  invent M16; the M14 freeze is unchanged. This receipt changes no
+  benchmark result or admission state, admits no successor source
+  node, and does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
