@@ -1038,13 +1038,54 @@ The following packages are complete source history, not runnable work:
 - PR #180: ordinary documentation receipt recording the merged PR #177
   lease-map lapse (Exact-1 lease-map receipt for product #177
   P15-S4/15-03-05 performance-scale report @
-  `dd5147431f6896f61f999af16d6ca92cc1e75849`). It is **OPEN/READY**
+  `dd5147431f6896f61f999af16d6ca92cc1e75849`). It is **MERGED** at tip
+  `7ae3f615c5b47c6768fc6d20782ea2fe2a767cbd` from Exact HEAD
+  `f223c753e43f5dd0999d1406ee4d3abf4d3e5e54`. It was **OPEN/READY**
   at the `2026-09-20T02:18:16Z` capture and adds only the PR #177
   merged-baseline bullet, the #179 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #180 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `7ae3f615c5b47c6768fc6d20782ea2fe2a767cbd`.
+- PR #181: Exact 3 P15-S5/15-04-01 activation-memory contract
+  `research/activation-memory/contract.py`,
+  `research/activation-memory/fixtures/development.json`,
+  `tests/test_activation_memory_contract.py`
+  (title: feat(research): Exact 3 activation-memory contract
+  (15-04-01))
+  from exact head `4b4a1ba13d946e7e457762b60aa867659ee3d504`; all
+  required exact-head Unit+drift checks passed in run `35484900818`;
+  merge `20277f736af103ea505f32e507c5558030ed37b4` at
+  `2026-09-20T03:15:43Z`.
+  Prior tip was `7ae3f615c5b47c6768fc6d20782ea2fe2a767cbd` (PR #180).
+  Post-main tip Unit+drift will FAIL on CI `35486118444`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #181 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `research/activation-memory/contract.py`,
+  `research/activation-memory/fixtures/development.json`,
+  `tests/test_activation_memory_contract.py`.
+  Purpose: P15-S5/15-04-01 activation-memory contract
+  (development-only observations; no product write/model-import);
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #181 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #182: ordinary documentation receipt recording the merged PR #181
+  lease-map lapse (Exact-1 lease-map receipt for product #181
+  P15-S5/15-04-01 activation-memory contract @
+  `4b4a1ba13d946e7e457762b60aa867659ee3d504`). It is **OPEN/READY**
+  at the `2026-09-20T03:18:00Z` capture and adds only the PR #181
+  merged-baseline bullet, the #180 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #180 changes
+  merge SHA/time, or post-main CI is claimed here. PR #182 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
