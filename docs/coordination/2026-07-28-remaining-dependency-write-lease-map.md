@@ -1120,13 +1120,53 @@ The following packages are complete source history, not runnable work:
 - PR #184: ordinary documentation receipt recording the merged PR #183
   lease-map lapse (Exact-1 lease-map receipt for product #183
   P15-S5/15-04-02 CAP-009 cartridge A/B harness @
-  `5ebdbd2f486f21fcde2c2d991894b6dee66a9450`). It is **OPEN/READY**
+  `5ebdbd2f486f21fcde2c2d991894b6dee66a9450`). It is **MERGED** at tip
+  `004286f7233d14d26937af0ea899b07474bf293d` from Exact HEAD
+  `db4a7473e8b2dd235acc3c0c27f633e73ed99b93`. It was **OPEN/READY**
   at the `2026-09-20T04:53:00Z` capture and adds only the PR #183
   merged-baseline bullet, the #182 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #184 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `004286f7233d14d26937af0ea899b07474bf293d`.
+- PR #185: Exact 3 P15-S5/15-04-03 J-lens tripwire
+  `research/activation-memory/j_lens_eval.py`,
+  `research/activation-memory/reports/phase15-s5-j-lens.json`,
+  `tests/test_j_lens_tripwire.py`
+  (title: feat(research): Exact 3 P15-S5/15-04-03 J-lens tripwire)
+  from exact head `aed883d5928929dc410d55bd41e6852d71cd1f7f`; all
+  required exact-head Unit+drift checks passed in run `35492870190`;
+  merge `d15d78aea6fc677517b89c87f6dbe8303c306fb9` at
+  `2026-09-20T06:24:56Z`.
+  Prior tip was `004286f7233d14d26937af0ea899b07474bf293d` (PR #184).
+  Post-main tip Unit+drift will FAIL on CI `35494168611`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #185 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `research/activation-memory/j_lens_eval.py`,
+  `research/activation-memory/reports/phase15-s5-j-lens.json`,
+  `tests/test_j_lens_tripwire.py`.
+  Purpose: P15-S5/15-04-03 J-lens tripwire
+  (research-only functional tripwire; no product write/model-import);
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #185 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #186: ordinary documentation receipt recording the merged PR #185
+  lease-map lapse (Exact-1 lease-map receipt for product #185
+  P15-S5/15-04-03 J-lens tripwire @
+  `aed883d5928929dc410d55bd41e6852d71cd1f7f`). It is **OPEN/READY**
+  at the `2026-09-20T06:27:00Z` capture and adds only the PR #185
+  merged-baseline bullet, the #184 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #184 changes
+  merge SHA/time, or post-main CI is claimed here. PR #186 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
