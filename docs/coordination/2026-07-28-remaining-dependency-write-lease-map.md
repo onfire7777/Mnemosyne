@@ -1079,13 +1079,54 @@ The following packages are complete source history, not runnable work:
 - PR #182: ordinary documentation receipt recording the merged PR #181
   lease-map lapse (Exact-1 lease-map receipt for product #181
   P15-S5/15-04-01 activation-memory contract @
-  `4b4a1ba13d946e7e457762b60aa867659ee3d504`). It is **OPEN/READY**
+  `4b4a1ba13d946e7e457762b60aa867659ee3d504`). It is **MERGED** at tip
+  `d3cd013fe07540c3e561bab821e42504b15c82ce` from Exact HEAD
+  `e39ea06bec8763b0cf490de5f01bf04a4fb858ea`. It was **OPEN/READY**
   at the `2026-09-20T03:18:00Z` capture and adds only the PR #181
   merged-baseline bullet, the #180 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #182 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `d3cd013fe07540c3e561bab821e42504b15c82ce`.
+- PR #183: Exact 3 P15-S5/15-04-02 CAP-009 cartridge A/B harness
+  `eval/benches/bench_cartridge_ab.py`,
+  `eval/benches/reports/phase15-s5-cartridge.json`,
+  `tests/test_cartridge_ab.py`
+  (title: feat(eval): Exact 3 P15-S5/15-04-02 CAP-009 cartridge
+  A/B harness)
+  from exact head `5ebdbd2f486f21fcde2c2d991894b6dee66a9450`; all
+  required exact-head Unit+drift checks passed in run `35488845280`;
+  merge `3eb8c30ee721c890c5339ebbbaeae43300f36bf4` at
+  `2026-09-20T04:50:52Z`.
+  Prior tip was `d3cd013fe07540c3e561bab821e42504b15c82ce` (PR #182).
+  Post-main tip Unit+drift will FAIL on CI `35490166255`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #183 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `eval/benches/bench_cartridge_ab.py`,
+  `eval/benches/reports/phase15-s5-cartridge.json`,
+  `tests/test_cartridge_ab.py`.
+  Purpose: P15-S5/15-04-02 CAP-009 cartridge A/B harness
+  (research-only bounded decision; no product adoption/speedup);
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #183 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #184: ordinary documentation receipt recording the merged PR #183
+  lease-map lapse (Exact-1 lease-map receipt for product #183
+  P15-S5/15-04-02 CAP-009 cartridge A/B harness @
+  `5ebdbd2f486f21fcde2c2d991894b6dee66a9450`). It is **OPEN/READY**
+  at the `2026-09-20T04:53:00Z` capture and adds only the PR #183
+  merged-baseline bullet, the #182 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #182 changes
+  merge SHA/time, or post-main CI is claimed here. PR #184 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
