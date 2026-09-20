@@ -1197,12 +1197,24 @@ The following packages are complete source history, not runnable work:
 - PR #189: ordinary documentation receipt recording the merged PR #188
   lease-map lapse (Exact-1 lease-map receipt for receipt #188
   of product #185 @
-  `a5bb2f813e17e536a7c02bbdc5ab7c360e12d596`). It is **OPEN/READY**
+  `a5bb2f813e17e536a7c02bbdc5ab7c360e12d596`). It is **MERGED** at tip
+  `ae858c7a690c9f9849a842365c9da7489f246fa8` from Exact HEAD
+  `630845c8290ded8fbec80c442428262ef3175c38`. It was **OPEN/READY**
   at the `2026-09-20T07:49:00Z` capture and adds only the #188 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #189 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `ae858c7a690c9f9849a842365c9da7489f246fa8`.
+- PR #190: ordinary documentation receipt recording the merged PR #189
+  lease-map lapse (Exact-1 lease-map receipt for receipt #189
+  of product #185 @
+  `630845c8290ded8fbec80c442428262ef3175c38`). It is **OPEN/READY**
+  at the `2026-09-20T08:21:00Z` capture and adds only the #189 MERGED
+  mark and this structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #189 changes
+  merge SHA/time, or post-main CI is claimed here. PR #190 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
