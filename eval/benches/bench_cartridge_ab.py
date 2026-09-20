@@ -26,8 +26,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from eval.harness.metrics import ndcg_at_k, recall_at_k
-from eval.provider_bakeoff.run import (
+from eval.harness.metrics import ndcg_at_k, recall_at_k  # noqa: E402
+from eval.provider_bakeoff.run import (  # noqa: E402
     CAP006_PROVIDER_SCHEMA,
     PHASE15_S4_PROVIDER_REPORT,
     pinned_identical_workload,
