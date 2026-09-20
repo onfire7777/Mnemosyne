@@ -1,0 +1,477 @@
+"""Deterministic synthetic J-lens functional tripwire (15-04-03 / CAP-010).
+
+Compares reduced j_lens observations with scorer-owned development labels and
+emits a redacted, non-authoritative receipt. Inferences are functional and
+correlational only. This module does not import model libraries, write product
+memory, change trust or capability, or infer consciousness, intent, honesty,
+ground truth, or authorization.
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import json
+import math
+import re
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+from types import ModuleType
+from typing import Any, Never
+
+FAMILY = "j_lens"
+SCHEMA_ID = "activation-memory-development/j-lens-tripwire/0.1"
+PREREGISTERED_TRIPWIRE_THRESHOLD = 0.5
+APPROVED_NUMERIC_THRESHOLD = None
+PRODUCT_WRITE_PATH = False
+MODEL_IMPORT_PATH = False
+VALID_VALUE_MIN = 0.0
+VALID_VALUE_MAX = 1.0
+SYNTHETIC_CASE_LATENCY_MS = 1.0
+PHASE15_S5_J_LENS_REPORT = (
+    Path(__file__).resolve().parent / "reports" / "phase15-s5-j-lens.json"
+)
+CONTRACT_PATH = Path(__file__).resolve().parent / "contract.py"
+DOES_NOT_INFER = (
+    "consciousness",
+    "intent",
+    "honesty",
+    "ground_truth",
+    "authorization",
+)
+PROHIBITED_FIXTURE_FRAGMENTS = (
+    "minja",
+    "agentpoison",
+    "poisonedrag",
+    "sk-",
+    "AKIA",
+    "api_key",
+    "BEGIN PRIVATE KEY",
+    "hidden_state",
+    "hidden_states",
+    "raw_prompt",
+    "input_ids",
+)
+SECRET_LIKE = re.compile(
+    r"(sk-[A-Za-z0-9]{8,}|AKIA[0-9A-Z]{16}|BEGIN PRIVATE KEY|api[_-]?key\s*[:=])",
+    re.IGNORECASE,
+)
+_DENOMINATOR_RULE = (
+    "Attempt, failure, and coverage denominators retain invalid, error, "
+    "timeout, and aborted cases. Precision, recall, false-positive rate, and "
+    "latency use valid measurements only."
+)
+
+
+class JLensEvalError(ValueError):
+    """The J-lens scorer rejected an immutable-threshold or receipt violation."""
+
+
+def _load_contract() -> ModuleType:
+    cached = sys.modules.get("activation_memory_contract")
+    cached_path = getattr(cached, "__file__", None) if cached is not None else None
+    if cached is not None and cached_path == str(CONTRACT_PATH):
+        return cached
+    spec = importlib.util.spec_from_file_location(
+        "activation_memory_contract", CONTRACT_PATH
+    )
+    if spec is None or spec.loader is None:
+        raise JLensEvalError("activation-memory contract is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["activation_memory_contract"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_CONTRACT = _load_contract()
+
+
+def product_write_path() -> bool:
+    return False
+
+
+def model_import_path() -> bool:
+    return False
+
+
+def _assert_never(value: Never) -> Never:
+    raise JLensEvalError(f"unhandled variant: {value}")
+
+
+def _as_outcome(value: str) -> str:
+    if value == "success":
+        return "success"
+    if value == "invalid":
+        return "invalid"
+    if value == "error":
+        return "error"
+    if value == "timeout":
+        return "timeout"
+    if value == "aborted":
+        return "aborted"
+    return _assert_never(value)
+
+
+def _as_decision(value: str) -> str:
+    if value == "research-only":
+        return "research-only"
+    if value == "reject":
+        return "reject"
+    if value == "adopt":
+        return "adopt"
+    return _assert_never(value)
+
+
+def _canonical_json(payload: object) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
+def _pinned_digest(text: str) -> str:
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    if digest == "0" * 64:
+        raise JLensEvalError("digest pin collapsed")
+    return digest
+
+
+def _rate(numerator: int, denominator: int) -> float | None:
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def score_observation(value: float) -> bool:
+    if type(value) is bool:
+        raise JLensEvalError("observation value must not be a boolean")
+    if type(value) not in {int, float}:
+        raise JLensEvalError("observation value must be a finite number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise JLensEvalError("observation value must be finite")
+    return number >= PREREGISTERED_TRIPWIRE_THRESHOLD
+
+
+def _valid_value(value: object) -> bool:
+    if type(value) is bool or type(value) not in {int, float}:
+        return False
+    number = float(value)
+    return math.isfinite(number) and VALID_VALUE_MIN <= number <= VALID_VALUE_MAX
+
+
+def scan_report_for_prohibited_content(payload: Mapping[str, Any]) -> list[str]:
+    serialized = _canonical_json(dict(payload))
+    lowered = serialized.lower()
+    findings: list[str] = []
+    for fragment in PROHIBITED_FIXTURE_FRAGMENTS:
+        if fragment.lower() in lowered:
+            findings.append(f"raw:{fragment}")
+    if SECRET_LIKE.search(serialized):
+        findings.append("secret-like")
+    return findings
+
+
+def _fault_case(case_id: str, outcome: str) -> dict[str, Any]:
+    return {
+        "case_id": case_id,
+        "family": FAMILY,
+        "content_digest": _pinned_digest(case_id),
+        "redacted": True,
+        "label_owner": "scorer",
+        "predicted_tripwire": None,
+        "expected_tripwire": None,
+        "outcome": _as_outcome(outcome),
+    }
+
+
+def _score_bundle_cases(bundle: Mapping[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for observation in bundle["observations"]:
+        if observation["family"] != FAMILY:
+            continue
+        label = bundle["labels"][observation["case_id"]]
+        if label["family"] != FAMILY or label["owner"] != "scorer":
+            raise JLensEvalError("j_lens labels must be scorer-owned")
+        if not observation["redacted"] or not _valid_value(observation["value"]):
+            rows.append(
+                {
+                    "case_id": observation["case_id"],
+                    "family": FAMILY,
+                    "content_digest": observation["content_digest"],
+                    "redacted": bool(observation["redacted"]),
+                    "label_owner": "scorer",
+                    "predicted_tripwire": None,
+                    "expected_tripwire": bool(label["expected_tripwire"]),
+                    "outcome": _as_outcome("invalid"),
+                    "value": observation["value"],
+                }
+            )
+            continue
+        predicted = score_observation(observation["value"])
+        rows.append(
+            {
+                "case_id": observation["case_id"],
+                "family": FAMILY,
+                "content_digest": observation["content_digest"],
+                "redacted": True,
+                "label_owner": "scorer",
+                "predicted_tripwire": predicted,
+                "expected_tripwire": bool(label["expected_tripwire"]),
+                "outcome": _as_outcome("success"),
+                "value": observation["value"],
+            }
+        )
+    return rows
+
+
+def _confusion(cases: list[Mapping[str, Any]]) -> dict[str, int]:
+    counts = {"tp": 0, "fp": 0, "tn": 0, "fn": 0}
+    for row in cases:
+        if row["outcome"] != "success":
+            continue
+        predicted = row["predicted_tripwire"]
+        expected = row["expected_tripwire"]
+        if predicted is True and expected is True:
+            counts["tp"] += 1
+        elif predicted is True and expected is False:
+            counts["fp"] += 1
+        elif predicted is False and expected is False:
+            counts["tn"] += 1
+        elif predicted is False and expected is True:
+            counts["fn"] += 1
+        else:
+            raise JLensEvalError("scored case missing a boolean label pair")
+    return counts
+
+
+def _observed_resources(valid_count: int, limits: Mapping[str, Any]) -> dict[str, Any]:
+    observed = {
+        "memory_mb": 0,
+        "vram_mb": 0,
+        "disk_mb": 0,
+        "network_bytes": 0,
+        "cost_usd": 0,
+        "time_s": valid_count * (SYNTHETIC_CASE_LATENCY_MS / 1000.0),
+        "tokens": 0,
+    }
+    within_limits = (
+        observed["memory_mb"] <= limits["memory_limit_mb"]
+        and observed["vram_mb"] <= limits["vram_limit_mb"]
+        and observed["disk_mb"] <= limits["disk_limit_mb"]
+        and observed["network_bytes"] <= limits["network_limit_bytes"]
+        and observed["cost_usd"] <= limits["cost_limit_usd"]
+        and observed["time_s"] <= limits["time_limit_s"]
+        and observed["tokens"] <= limits["token_limit"]
+        and valid_count <= limits["case_limit"]
+    )
+    return {"limits": dict(limits), "observed": observed, "within_limits": within_limits}
+
+
+def _latency(valid_count: int) -> dict[str, Any]:
+    return {
+        "valid_case_count": valid_count,
+        "mean_ms": SYNTHETIC_CASE_LATENCY_MS if valid_count else 0.0,
+        "total_ms": SYNTHETIC_CASE_LATENCY_MS * valid_count,
+        "denominator_rule": _DENOMINATOR_RULE,
+    }
+
+
+def evaluate_j_lens(
+    bundle: Mapping[str, Any] | None = None,
+    *,
+    threshold: float | None = None,
+    invalid_output: bool = False,
+    error: bool = False,
+    timeout: bool = False,
+    abort: bool = False,
+) -> dict[str, Any]:
+    if threshold is not None and threshold != PREREGISTERED_TRIPWIRE_THRESHOLD:
+        raise JLensEvalError("threshold is immutable; post-hoc tuning is forbidden")
+
+    payload = (
+        copy.deepcopy(_CONTRACT.load_development_fixture())
+        if bundle is None
+        else copy.deepcopy(dict(bundle))
+    )
+    if abort:
+        payload["abort"] = {"status": "aborted", "reason": "time_ceiling"}
+    accepted = _CONTRACT.validate_observation_bundle(payload)
+
+    cases = _score_bundle_cases(accepted)
+    if invalid_output:
+        cases.append(_fault_case("am-dev-j-lens-invalid", "invalid"))
+    if error:
+        cases.append(_fault_case("am-dev-j-lens-error", "error"))
+    if timeout:
+        cases.append(_fault_case("am-dev-j-lens-timeout", "timeout"))
+    if abort:
+        cases.append(_fault_case("am-dev-j-lens-aborted", "aborted"))
+    cases.sort(key=lambda row: str(row["case_id"]))
+
+    issued = len(cases)
+    valid = sum(1 for row in cases if row["outcome"] == "success")
+    invalid = sum(1 for row in cases if row["outcome"] == "invalid")
+    errors = sum(1 for row in cases if row["outcome"] == "error")
+    timeouts = sum(1 for row in cases if row["outcome"] == "timeout")
+    aborted = sum(1 for row in cases if row["outcome"] == "aborted")
+    confusion = _confusion(cases)
+    precision = _rate(confusion["tp"], confusion["tp"] + confusion["fp"])
+    recall = _rate(confusion["tp"], confusion["tp"] + confusion["fn"])
+    false_positive_rate = _rate(confusion["fp"], confusion["fp"] + confusion["tn"])
+    coverage = _rate(valid, issued) or 0.0
+    identity = dict(accepted["identity"])
+    resources = _observed_resources(valid, accepted["resources"])
+    latency = _latency(valid)
+    row = {
+        "model_revision": identity["model_revision"],
+        "hook_layer": identity["hook_layer"],
+        "inference_class": "functional",
+        "inference_kind": "correlational",
+        "authoritative": False,
+        "confusion": confusion,
+        "precision": precision,
+        "recall": recall,
+        "false_positive_rate": false_positive_rate,
+        "coverage": coverage,
+        "invalid_outputs": invalid,
+        "latency": latency,
+        "resources": resources,
+    }
+    receipt: dict[str, Any] = {
+        "schema_id": SCHEMA_ID,
+        "observation_schema_id": _CONTRACT.SCHEMA_ID,
+        "track": accepted["track"],
+        "split_role": accepted["split_role"],
+        "license": accepted["license"],
+        "family": FAMILY,
+        "receipt_class": "synthetic-development",
+        "official_claim": False,
+        "admitted_measurement": False,
+        "publishable": False,
+        "headline_eligible": False,
+        "product_write_path": False,
+        "model_import_path": False,
+        "product_adoption": False,
+        "authoritative": False,
+        "non_authoritative": True,
+        "inference_class": "functional",
+        "inference_kind": "correlational",
+        "labels_are_scorer_owned_not_ground_truth": True,
+        "does_not_infer": list(DOES_NOT_INFER),
+        "cap_go_no_go": "15-04-05",
+        "identity": identity,
+        "threshold": {
+            "preregistered_tripwire_threshold": PREREGISTERED_TRIPWIRE_THRESHOLD,
+            "immutable": True,
+            "tuned_post_hoc": False,
+            "approved_numeric_threshold": APPROVED_NUMERIC_THRESHOLD,
+            "numeric_threshold_invented": False,
+        },
+        "abort": dict(accepted["abort"]),
+        "cases": cases,
+        "rows": [row],
+        "aggregates": {
+            "confusion": confusion,
+            "precision": precision,
+            "recall": recall,
+            "false_positive_rate": false_positive_rate,
+            "coverage": coverage,
+            "invalid_outputs": invalid,
+            "row_count": 1,
+            "pooled_across_models_or_layers": False,
+        },
+        "denominators": {
+            "issued": issued,
+            "valid": valid,
+            "invalid": invalid,
+            "errors": errors,
+            "timeouts": timeouts,
+            "aborted": aborted,
+            "failed_remain_in_denominator": True,
+            "quality_excludes_invalid": True,
+            "latency_excludes_invalid": True,
+            "coverage_includes_invalid": True,
+            "denominator_rule": _DENOMINATOR_RULE,
+        },
+        "effects": {
+            "memory_mutated": False,
+            "trust_mutated": False,
+            "capability_mutated": False,
+            "authorization_granted": False,
+            "product_write_path": False,
+        },
+        "custody": {
+            "redacted": True,
+            "class": accepted["custody"]["class"],
+            "consent": accepted["custody"]["consent"],
+            "authored_from_scratch": True,
+            "protected_cases_included": False,
+            "upstream_bytes_included": False,
+            "scan": {"raw_content": "pass", "secrets": "pass"},
+        },
+        "decision": {
+            "decision": _as_decision("research-only"),
+            "reasons": [],
+            "blockers": [
+                "admitted_measurement_missing",
+                "approved_numeric_threshold_absent",
+            ],
+            "product_adoption": False,
+            "numeric_threshold_invented": False,
+            "cap_go_no_go_owner": "15-04-05",
+        },
+    }
+    findings = scan_report_for_prohibited_content(receipt)
+    if findings:
+        receipt["custody"]["scan"]["raw_content"] = "fail"
+        receipt["custody"]["scan"]["secrets"] = (
+            "fail" if any(item == "secret-like" or item.startswith("raw:sk") for item in findings)
+            else "pass"
+        )
+        receipt["decision"]["decision"] = _as_decision("reject")
+        receipt["decision"]["reasons"] = sorted(findings)
+        receipt["decision"]["product_adoption"] = False
+    return receipt
+
+
+def merge_model_layer_rows(*receipts: Mapping[str, Any]) -> dict[str, Any]:
+    if len(receipts) < 2:
+        raise JLensEvalError("merge requires separate model/layer receipts")
+    merged = copy.deepcopy(dict(receipts[0]))
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for receipt in receipts:
+        for row in receipt["rows"]:
+            key = (str(row["model_revision"]), str(row["hook_layer"]))
+            if key in seen:
+                raise JLensEvalError("model/layer rows must stay separate")
+            seen.add(key)
+            rows.append(copy.deepcopy(dict(row)))
+    merged["rows"] = rows
+    aggregates = dict(merged.get("aggregates") or {})
+    aggregates["row_count"] = len(rows)
+    aggregates["pooled_across_models_or_layers"] = False
+    merged["aggregates"] = aggregates
+    return merged
+
+
+def write_report(
+    receipt: Mapping[str, Any] | None = None,
+    *,
+    path: Path | None = None,
+) -> Path:
+    target = path or PHASE15_S5_J_LENS_REPORT
+    payload = dict(receipt) if receipt is not None else evaluate_j_lens()
+    findings = scan_report_for_prohibited_content(payload)
+    if findings:
+        raise JLensEvalError(f"report failed redaction/secret scan: {findings}")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        encoding="utf-8",
+    )
+    return target
+
+
+if __name__ == "__main__":
+    write_report()
