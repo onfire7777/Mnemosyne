@@ -11,7 +11,7 @@ Run it locally with SQLite or use PostgreSQL for a server-backed deployment.
 not a verified comparative ranking. Judge the implementation by its code,
 reproducible evaluations, and documented limitations—not a leaderboard claim.
 
-[Get started](#quick-start) · [Documentation](docs/README.md) · [Evaluations](eval/README.md) · [Report an issue](https://github.com/onfire7777/Mnemosyne/issues) · [Apache 2.0 license](LICENSE)
+[Get started](#quick-start) · [Documentation](https://github.com/onfire7777/Mnemosyne/blob/main/docs/README.md) · [Evaluations](https://github.com/onfire7777/Mnemosyne/blob/main/eval/README.md) · [Report an issue](https://github.com/onfire7777/Mnemosyne/issues) · [Apache 2.0 license](https://github.com/onfire7777/Mnemosyne/blob/main/LICENSE)
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
