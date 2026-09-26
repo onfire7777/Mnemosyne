@@ -1,15 +1,35 @@
 # Mnemosyne
 
-**A local-first memory compiler for AI agents.** Content-addressed evidence ledger, rebuildable typed projections, bitemporal beliefs, hybrid retrieval, calibrated abstention, and hard invariant rails — runs in memory, on per-tenant SQLite, or on PostgreSQL, and speaks the Model Context Protocol.
+### Building the world's best AI memory — open source, local first, evidence driven.
+
+Give AI agents a memory they can search, inspect, correct, and carry between sessions.
+Mnemosyne combines a content-addressed evidence ledger with hybrid retrieval,
+time-aware beliefs, provenance, and the Model Context Protocol (MCP).
+Run it locally with SQLite or use PostgreSQL for a server-backed deployment.
+
+**Our ambition is to build the best AI memory in the world.** This is a mission,
+not a verified comparative ranking. Judge the implementation by its code,
+reproducible evaluations, and documented limitations—not a leaderboard claim.
+
+[Get started](#quick-start) · [Documentation](https://github.com/onfire7777/Mnemosyne/blob/main/docs/README.md) · [Evaluations](https://github.com/onfire7777/Mnemosyne/blob/main/eval/README.md) · [Report an issue](https://github.com/onfire7777/Mnemosyne/issues) · [Apache 2.0 license](https://github.com/onfire7777/Mnemosyne/blob/main/LICENSE)
 
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
-![Status](https://img.shields.io/badge/SLOs-6%2F6%20proven-success)
-![Completion](https://img.shields.io/badge/strict%20parity-Tier--B%20evidence%20verified-success)
+![Status](https://img.shields.io/badge/status-active%20development-orange)
 ![Backend](https://img.shields.io/badge/backends-local%20%7C%20sqlite%20%7C%20postgres-informational)
 ![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
 
-Mnemosyne (`mnemosyne-memory`, v0.1.0) implements the **Mnemosyne v2 build blueprint**: agent memory as a *compiler*, not a vector dump. Every write lands first in an append-only, content-addressed **evidence** ledger; typed **projections** (assertions, entities, relations, preferences, procedures, lessons) are derived from that ledger and can be rebuilt deterministically. Beliefs are **bitemporal** (valid-time + transaction-time), retrieval is **hybrid** (lexical + dense + graph, reranked), confidence is **conformally calibrated** so the system *abstains* rather than guess, and a warm-loop **consolidation** pipeline promotes new beliefs only through a protected regression gate guarded by seven non-negotiable invariant rails.
+Mnemosyne (`mnemosyne-memory`, v0.1.0) develops the **Mnemosyne v2 build blueprint**:
+agent memory as a compiler, not just a vector store. Evidence is the source of
+truth; typed projections make it useful for retrieval and reasoning.
+
+> **Development status:** core local capture and retrieval are usable, but not
+> every advanced capability or deployment profile is production-ready. Evaluation
+> results apply to their recorded commit, configuration, dataset, and hardware.
+> Windows has known platform-specific validation gaps. Do not store secrets or
+> sensitive production data without reviewing your deployment's access controls.
+> Removing evidence is not the same as deleting backups or unlearning trained
+> weights; parametric/provider erasure and complete source lineage remain open work.
 
 ---
 
@@ -28,13 +48,13 @@ source for this repository and depends on no external local path.
 - **Evidence is immutable; projections are rebuildable.** Beliefs are *compiled* from content-addressed evidence, so retraction, erasure, and re-derivation are first-class — not bolt-ons.
 - **Bitemporal by construction.** Supersession, contradiction handling, and `as-of` time travel are native; you can ask what the agent believed *at any point in the past*.
 - **Hybrid retrieval, not just cosine.** Postgres FTS + pgvector (HNSW, 1024-dim) + recursive graph/PPR, fused and reranked — with shell-free command adapters to swap in ParadeDB/BM25 or Apache AGE without touching engine code.
-- **Calibrated abstention.** Conformal calibration drives a measured **ECE of 0.0063** (target ≤0.05). Mnemosyne says "I don't know" instead of hallucinating.
+- **Calibrated abstention.** Retrieval exposes confidence and can abstain when support is insufficient. Calibration results are evaluation-specific, not a guarantee against hallucination.
 - **Hard invariant rails.** Seven §31 rails (bounded supersession, corroborated deletion, bounded pruning, monotonic trust, external-only reward, retrieved-text-is-data, bounded cadence) are enforced and regression-tested.
 - **Capability-mediated, fail-closed writes.** Trust tiers, sensitivity ceilings, signed CLI/MCP sessions, OIDC→role mapping, and prompt-injection sanitization on every retrieved span.
 - **Branchable memory.** Fork a tenant's memory, experiment, then `merge` or `discard` — like git for beliefs.
 - **Working- and prospective-memory planes.** Beyond the retrospective projection store, an authenticated **working-memory plane** holds TTL-bounded seeds that promote into beliefs through the same regression gate or expire, and a **prospective-memory plane** schedules session-bound, recurring *intentions* that fire when evaluated.
-- **Signed, fail-closed deletion.** Hard-delete and erasure emit a **signed deletion manifest** (`deletion.py` + `deletion_manifest.py`) whose semantic verifier proves every custody surface was swept before the operation is reported complete.
-- **Three backends, proven equivalent.** A zero-dependency in-memory engine, a PostgreSQL-backed engine, and a per-tenant SQLite engine pass the shared contract + parity test suite; the Tier-B operator production evidence is now captured and offline-verified (2026-07-07 — 29/29 production deployment-soak green, `release-audit` `ok:true`, `production-evidence-verify` `ok:true`; see `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`).
+- **Auditable deletion primitives.** Signed deletion manifests and semantic verification support custody checks. End-to-end coverage depends on the configured surfaces; public forgetting does not yet establish parametric/provider unlearning.
+- **Three backends.** An in-memory engine, PostgreSQL, and per-tenant SQLite share contract and parity tests. Historical deployment evidence is documented in `.planning/STRICT-BLUEPRINT-PARITY-AUDIT.md`; it is not blanket certification of every current configuration.
 - **Local-first.** Single core dependency (`cryptography`). No network, no Postgres, and no model server required to start.
 
 ---
@@ -70,6 +90,10 @@ flowchart TD
 ## Quick Start
 
 ```bash
+# Get the source
+git clone https://github.com/onfire7777/Mnemosyne.git
+cd Mnemosyne
+
 # 1. Environment
 python3 -m pip install --user pip==26.1.2 uv==0.11.16
 
