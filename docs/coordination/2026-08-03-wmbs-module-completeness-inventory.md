@@ -91,8 +91,7 @@ them").
    `scoring.py:42` (`_score_working_action`); M15's lives in
    `adapters/whole_memory_reference.py:254` plus `bundle.py:94`/`:158`.
    M06 adds the Stage A oracle `eval/public/wmbs_m06.py`.
-   **Scorer-bearing modules are M01, M02, M03, M04, M05, M06, M10, M12, M13, M15 —
-   10 of 20.**
+   **Scorer-bearing modules are M01, M02, M03, M04, M05, M06, M10, M12, M13, M15 — 10 of 20.**
 
 2. **"registry-admitted: M01, M10 — 2 of 20" undercounts by two.** The count
    evidently grepped the `wmbs-` prefix. `eval/public/registry.json` also
@@ -161,6 +160,7 @@ them").
    M05 is now column-complete as a development cell like M02/M04 — still
    `PROPOSED`, publication flags false; do not call M05 landed end to end.
    M12, M13, and M15 remain in the count as on main.
+   M06 is not column-complete until its registry cell is yes; Stage A landed outside the registry.
 
 ## Highest-value next gaps
 
