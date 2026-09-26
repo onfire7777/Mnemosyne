@@ -431,20 +431,24 @@ upstream-equivalence claim.
 
 Stage A only. This cell admits the development oracle `wmbs_m06.py`, the
 fixture `fixtures/wmbs-m06-consolidation-development.json`, and
-`tests/test_public_wmbs_m06.py`. The finite synthetic corpus uses seeds
-`17`, `31`, `43`, `61`, and `79` and six families (`repeated`,
-`corroborated`, `contradictory`, `procedural`, `related-transfer`,
-`unrelated-control`): 30 cases, `cycles_per_case` 5, and the public
-operations `ingest`, `retrieve`, and `answer`. Observations are descriptive
-finite-corpus measurements of that exact corpus. They are not benchmark
-results, population claims, or spec CI-LCB acceptance. A public
-no-consolidation control cannot be exercised through those operations, so
-the universal no-memory ablation is substituted and that substitution is
-disclosed. `admission_state: PROPOSED`; `publishable: false`;
+`tests/test_public_wmbs_m06.py`. The suite is unregistered, so this cell
+has no `uv run --suite` command.
+
+The finite synthetic corpus uses seeds `17`, `31`, `43`, `61`, and `79`
+and six families (`repeated`, `corroborated`, `contradictory`,
+`procedural`, `related-transfer`, `unrelated-control`): 30 cases,
+`cycles_per_case` 5, and the public operations `ingest`, `retrieve`, and
+`answer`. Observations are descriptive measurements of that exact finite
+corpus only. `admission_state: PROPOSED`; `publishable: false`;
 `pbpp_headline_eligible: false`; `headline_eligible: false`;
-`upstream_comparable: false`; `independent_reproduction: false`. The suite
-is unregistered, so this cell has no `uv run --suite` command. It records
-no registry entry, no adapter, and no Stage B harness.
+`upstream_comparable: false`; `independent_external_reproduction: false`.
+
+The oracle reports `latency`, `tokens`, and `calls` as `unsupported`.
+A public no-consolidation control cannot be exercised through universal
+ingest, retrieve, and answer, so the universal no-memory control is
+substituted and that missing ablation is disclosed. This cell claims no
+spec CI-LCB acceptance, no official MemoryAgentBench or EvoMemBench
+result, and no private API.
 
 ### M10 calibration and abstention
 
