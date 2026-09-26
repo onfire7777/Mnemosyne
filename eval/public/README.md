@@ -425,30 +425,35 @@ quarantines remain recorded in
 Nothing here is a publication, comparability, ranking, superiority, or
 upstream-equivalence claim.
 
-### M06 consolidation development
+### M06 consolidation and learning
 
 **PROPOSED.**
 
-Stage A only. This cell admits the development oracle `wmbs_m06.py`, the
-fixture `fixtures/wmbs-m06-consolidation-development.json`, and
-`tests/test_public_wmbs_m06.py`. The suite is unregistered, so this cell
-has no `uv run --suite` command.
+Stage A development cell only. `wmbs_m06.py` is the stdlib oracle over
+fixture `fixtures/wmbs-m06-consolidation-development.json`, pinned by
+`tests/test_public_wmbs_m06.py`. Admission stays `PROPOSED` /
+`DEVELOPMENT` / `split_role: development` and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+No headline. No `PILOT-READY-DEV`.
 
-The finite synthetic corpus uses seeds `17`, `31`, `43`, `61`, and `79`
-and six families (`repeated`, `corroborated`, `contradictory`,
-`procedural`, `related-transfer`, `unrelated-control`): 30 cases,
-`cycles_per_case` 5, and the public operations `ingest`, `retrieve`, and
-`answer`. Observations are descriptive measurements of that exact finite
-corpus only. `admission_state: PROPOSED`; `publishable: false`;
-`pbpp_headline_eligible: false`; `headline_eligible: false`;
-`upstream_comparable: false`; `independent_external_reproduction: false`.
+The cell is **not** registry-reachable. Stage B harness registration
+(`registry.json` / runner / scoring profile) is out of scope for Exact
+15-05-01. Unregistered → no `uv run --locked mneme eval-public --suite`
+command block.
 
-The oracle reports `latency`, `tokens`, and `calls` as `unsupported`.
-A public no-consolidation control cannot be exercised through universal
-ingest, retrieve, and answer, so the universal no-memory control is
-substituted and that missing ablation is disclosed. This cell claims no
-spec CI-LCB acceptance, no official MemoryAgentBench or EvoMemBench
-result, and no private API.
+Corpus (Stage A, still `PROPOSED`): six episode families (`repeated`,
+`corroborated`, `contradictory`, `procedural`, `related-transfer`,
+`unrelated-control`); five cycles per case; seeds `17`, `31`, `43`, `61`,
+`79`. Metrics are descriptive finite-corpus observations only (utility
+delta vs no-memory control, harmful promotion, compounding-error,
+cross-episode transfer, storage, cost). Latency, tokens, and calls are
+`unsupported`. A public no-consolidation ablation is unavailable; the
+universal no-memory control is substituted and disclosed. Spec CI-LCB
+acceptance and official MemoryAgentBench/EvoMemBench stay deferred. No
+private consolidation API. Source
+`docs/plans/wmb-m06-consolidation-learning-implementation-plan.md` remains
+a PROPOSED planning artifact.
 
 ### M10 calibration and abstention
 
