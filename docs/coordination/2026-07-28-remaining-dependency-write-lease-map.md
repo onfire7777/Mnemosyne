@@ -1365,7 +1365,20 @@ The following packages are complete source history, not runnable work:
   `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
   because PR #202 is absent from this lease-map (baseline
   `main@f688c747`); this receipt repairs that bookkeeping
-  like prior Exact-1 receipts. Exclusive File Set (Lease-5):
+  like prior Exact-1 receipts. Plan `15-05-PLAN.md` / Exact Exclusive-3
+  authorized only:
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`
+  (README/inventory forbidden by plan).
+  Mid-cascade, after tip-aligned Unit+drift FAILURE on inventory cells
+  for the Stage A artifacts, CoS authorized an expansion beyond plan
+  Exclusive-3 to also lease `eval/public/README.md` and
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`
+  (Lease-5). That expansion is a recorded deviation; plan Exclusive-3
+  otherwise unchanged; Stage B still blocked; publication closed; no
+  harness/registry registration.
+  Shipped paths remain the five listed above:
   `eval/public/wmbs_m06.py`,
   `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
   `tests/test_public_wmbs_m06.py`,
@@ -1373,10 +1386,11 @@ The following packages are complete source history, not runnable work:
   `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
   Purpose: WMBS M06 Stage A development cell
   (stdlib descriptive oracle + fixture + contract tests +
-  inventory/README disclosure). Publication closed; no
-  harness/registry registration; Stage B blocked.
+  inventory/README disclosure).
   docs-only privacy for THIS receipt PR is Exact-1 lease-map only
-  (the recorded #202 was the Lease-5 development cell). This receipt
+  (the recorded #202 shipped those five paths; README and inventory
+  are the recorded Lease-5 deviation from plan Exclusive-3, not an
+  authorized Exclusive-3 lease). This receipt
   does not invent M16; the M14 freeze is unchanged. This receipt
   changes no benchmark result or admission state, admits no successor
   source node, and does not recompute the canonical baseline
