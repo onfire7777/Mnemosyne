@@ -425,6 +425,36 @@ quarantines remain recorded in
 Nothing here is a publication, comparability, ranking, superiority, or
 upstream-equivalence claim.
 
+### M06 consolidation and learning
+
+**PROPOSED.**
+
+Stage A development cell only. `wmbs_m06.py` is the stdlib oracle over
+fixture `fixtures/wmbs-m06-consolidation-development.json`, pinned by
+`tests/test_public_wmbs_m06.py`. Admission stays `PROPOSED` /
+`DEVELOPMENT` / `split_role: development` and carries `publishable: false`,
+`pbpp_headline_eligible: false`, `headline_eligible: false`,
+`upstream_comparable: false`, and `independent_external_reproduction: false`.
+No headline. No `PILOT-READY-DEV`.
+
+The cell is **not** registry-reachable. Stage B harness registration
+(`registry.json` / runner / scoring profile) is out of scope for Exact
+15-05-01. Unregistered → no `uv run --locked mneme eval-public --suite`
+command block.
+
+Corpus (Stage A, still `PROPOSED`): six episode families (`repeated`,
+`corroborated`, `contradictory`, `procedural`, `related-transfer`,
+`unrelated-control`); five cycles per case; seeds `17`, `31`, `43`, `61`,
+`79`. Metrics are descriptive finite-corpus observations only (utility
+delta vs no-memory control, harmful promotion, compounding-error,
+cross-episode transfer, storage, cost). Latency, tokens, and calls are
+`unsupported`. A public no-consolidation ablation is unavailable; the
+universal no-memory control is substituted and disclosed. Spec CI-LCB
+acceptance and official MemoryAgentBench/EvoMemBench stay deferred. No
+private consolidation API. Source
+`docs/plans/wmb-m06-consolidation-learning-implementation-plan.md` remains
+a PROPOSED planning artifact.
+
 ### M10 calibration and abstention
 
 **PROPOSED.**
