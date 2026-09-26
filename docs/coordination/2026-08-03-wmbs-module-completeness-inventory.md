@@ -59,7 +59,7 @@ mapping is its C01–C24 table (same file, lines 502–525).
 | M03 | C04 — Temporal evolution | yes — pilot plan `…harness-pilots.md:68` | yes — `eval/public/fixtures/wmbs-m03-valid-time-development.json` | yes, **inline, with no `wmbs_m03.py` file** — profile `wmbs-m03-valid-time-v1` at `eval/public/scoring.py:37`, `_score_wmbs_m03_valid_time` at `scoring.py:156`; adapter `run_m03_valid_time_development` at `adapters/whole_memory_reference.py:138`; seeds at `eval/public/bundle.py:44` | yes — `tests/test_public_whole_memory_reference.py:3119`, `:3176`, `:3213`, `:3232`; admission conformance in `tests/test_public_wmbs_m03_registry_admission.py` | yes — `wmbs-m03-valid-time-development` at `eval/public/registry.json:234` | `PROPOSED` for full M03; valid-time slice `INTERNALLY_MEASURED` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED` for full M03; valid-time slice `INTERNALLY_MEASURED`); publication unchanged (`publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`). Residue: full transaction-time bitemporality, out of scope for the valid-time slice |
 | M04 | C05 — Conflict and correction | exists, **not approved** — `docs/plans/wmb-m04-conflict-correction-implementation-plan.md`, `Status: PROPOSED` at its line 3; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m04-development.json` | yes — `eval/public/wmbs_m04.py`; profile `wmbs-m04-v1` at `eval/public/scoring.py:41`, `_score_wmbs_m04` at `scoring.py:174`; adapter `run_m04_conflict_development` at `adapters/whole_memory_reference.py:411` | yes — `tests/test_public_wmbs_m04.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:3805`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | yes — `wmbs-m04-development` at `eval/public/registry.json:272` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Residue: deferred `bundle.py` `allowed_profile` / `_CANONICAL_REPLAY_SEEDS`. Plan freeze gate still outstanding. README cell at `eval/public/README.md:272` |
 | M05 | C06 — Provenance and explanation | exists, **not approved** — `docs/plans/wmb-m05-provenance-explanation-implementation-plan.md`, `Status: PROPOSED` at its line 5; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m05-provenance-development.json` | yes — `eval/public/wmbs_m05.py`; profile `wmbs-m05-v1` at `eval/public/scoring.py:43`, `_score_wmbs_m05` at `scoring.py:194`; adapter `run_m05_provenance_development` at `adapters/whole_memory_reference.py:719` | yes — `tests/test_public_wmbs_m05.py`; Stage B RED-B in `tests/test_public_whole_memory_reference.py:4146`; ABI conformance in `tests/test_public_wmbs_portable_event_abi.py` | yes — `wmbs-m05-development` at `eval/public/registry.json:289` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`; `system_seam: public-cli-subprocess` | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Stage B is a reachability fix only. Residue: plan freeze gate outstanding; open quarantines Q1/Q2/Q3/Q4/Q7/Q9/Q10/Q12. README cell at `eval/public/README.md:315` (`### M05 provenance development`) |
-| M06 | C08 — Consolidation and learning | exists via open PR #116, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m06-consolidation-learning-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED`; not in the first pilot (`…standard-design.md:771`) | Plan exists as PROPOSED / NOT CODE-READY via #116. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
+| M06 | C08 — Consolidation and learning | exists via open PR #116, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m06-consolidation-learning-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | yes — `eval/public/fixtures/wmbs-m06-consolidation-development.json` | yes — `eval/public/wmbs_m06.py` | yes — `tests/test_public_wmbs_m06.py` | **no** | `PROPOSED`; development Stage A; all publication flags false (`publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_reproduction:false`); not in the first pilot (`…standard-design.md:771`) | Stage A oracle, fixture, and tests landed (Exact 15-05-01). Not registry-reachable. Not landed end to end. Residue: Stage B harness/registry; freeze/approval gate outstanding. README cell at `eval/public/README.md:428` (`### M06 consolidation development`) |
 | M07 | C09 — Retention, rehearsal, and decay | exists via open PR #118, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED`; not in the first pilot (`…standard-design.md:798`) | Plan exists as PROPOSED / NOT CODE-READY via #118. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
 | M08 | C10 — Reversible forgetting | exists via open PR #119, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for adapters exposing the hook, else `UNSUPPORTED-BY-SYSTEM` (`…standard-design.md:818`) | Plan exists as PROPOSED / NOT CODE-READY via #119. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
 | M09 | C11 — Declared-surface erasure conformance | exists via open PR #122, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for Local/SQLite declared surfaces (`…standard-design.md:846`) | Plan exists as PROPOSED / NOT CODE-READY via #122. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
@@ -84,14 +84,15 @@ these are the recomputation's corrections, as the directive itself instructs
 them").
 
 1. **"implemented (`eval/public/wmbs_*.py`): M01, M02, M04, M05, M10 — 5 of
-   20" undercounts by four.** The filename glob is not the implementation
+   20" undercounts by five.** The filename glob is not the implementation
    surface. M03's scorer is implemented inline in `eval/public/scoring.py:156`
    with no `wmbs_m03.py` file at all; M12's is dispatched inline at
    `scoring.py:40` (`_score_pm_action`, `scoring.py:336`); M13's at
    `scoring.py:42` (`_score_working_action`); M15's lives in
    `adapters/whole_memory_reference.py:254` plus `bundle.py:94`/`:158`.
-   **Scorer-bearing modules are M01, M02, M03, M04, M05, M10, M12, M13, M15 —
-   9 of 20.**
+   M06 adds the Stage A oracle `eval/public/wmbs_m06.py`.
+   **Scorer-bearing modules are M01, M02, M03, M04, M05, M06, M10, M12, M13, M15 —
+   10 of 20.**
 
 2. **"registry-admitted: M01, M10 — 2 of 20" undercounts by two.** The count
    evidently grepped the `wmbs-` prefix. `eval/public/registry.json` also
@@ -131,9 +132,12 @@ them").
    `leaderboard/` with six committed test files. Its open work is the
    result-v2 delta (also planned as PROPOSED / NOT CODE-READY via #127),
    which is lease-blocked behind node `N12`, not greenfield module authoring.
-   M06, M07, M08, M09, M11, M17, and M18 have open ACCEPT plans (#116, #118,
+   M07, M08, M09, M11, M17, and M18 have open ACCEPT plans (#118,
    #119, #122, #123, #124, #125) that are PROPOSED / NOT CODE-READY — they
-   are plan-without-artifact, not no-plan. M19 is deferred-with-plan via
+   are plan-without-artifact, not no-plan. M06 has an open ACCEPT plan
+   (#116, PROPOSED / NOT CODE-READY, **not approved**) plus a Stage A oracle,
+   fixture, and tests; it is neither no-plan nor plan-without-artifact, and
+   it is not registry-reachable. M19 is deferred-with-plan via
    #126, not no-plan. **True no-plan-and-no-artifact modules are M16 —
    1 of 20.**
 
@@ -179,8 +183,9 @@ second.
    Q2/Q7/Q9/Q10/Q12) remain open. M14 stays the next highest
    non-lease-blocked gap.
 2. **M14 — plan exists, no artifact.** The only on-main per-module plan
-   with nothing built (open ACCEPT plan PRs for M06–M09/M11/M17–M19 are also
-   plan-without-artifact but remain `PROPOSED` / NOT CODE-READY). That plan
+   with nothing built (open ACCEPT plan PRs for M07–M09/M11/M17–M19 are also
+   plan-without-artifact but remain `PROPOSED` / NOT CODE-READY; M06 now has
+   Stage A artifacts and remains `PROPOSED` / NOT CODE-READY). That plan
    is `PROPOSED` — its own line 3 reads
    `PLANNING ARTIFACT ONLY — NOT CODE-READY` and its freeze gate is
    outstanding, so it authorizes no implementation as it stands. Steps 2–3 of
@@ -198,9 +203,13 @@ second.
    M11 is no longer greenfield: its ACCEPT plan exists via #123 as
    `PROPOSED` / NOT CODE-READY; freeze/approval gate outstanding; do not
    start Stage A. CAP-004 and RAIL-001/004 still depend on M11.
-5. **M06, M07, M08, M09, M17, M18 — open ACCEPT plans, not greenfield.**
-   Each has a `PROPOSED` / NOT CODE-READY plan PR (#116, #118, #119, #122,
-   #124, #125). Freeze/approval gate outstanding. Do not start Stage A.
+5. **M06 Stage A oracle landed; M07, M08, M09, M17, M18 remain open ACCEPT plans.**
+   M06 Stage A oracle, fixture, and tests have landed (Exact 15-05-01).
+   Stage B and registry admission have not started; both stay blocked on the
+   freeze/approval gate. M06 is not registry-reachable and is not landed end
+   to end. M07, M08, M09, M17, and M18 each have a `PROPOSED` / NOT
+   CODE-READY plan PR (#118, #119, #122, #124, #125). Freeze/approval gate
+   outstanding. Do not start Stage A for those modules.
 6. **M20 — lease-blocked, not greenfield.** The v2 delta now has an open
    `PROPOSED` / NOT CODE-READY plan (#127) and still waits on node `N12`
    and the protected signed-publication paths; do not open it as module
