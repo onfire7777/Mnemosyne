@@ -1338,13 +1338,73 @@ The following packages are complete source history, not runnable work:
 - PR #200: ordinary documentation receipt recording the merged PR #199
   lease-map lapse (Exact-1 lease-map receipt for product #199
   P15-S5/15-04-05 go/no-go closure @
-  `6a835ffe055633524475588f5ff9e384dbb91c6d`). It is **OPEN/READY**
+  `6a835ffe055633524475588f5ff9e384dbb91c6d`). It is **MERGED** at tip
+  `ba48dc89c6de8663e02d7bb576dd0cc94b8ef334` from Exact HEAD
+  `1f42bcebae5ffaaf46ec8ffd717a983ffced38e7`. It was **OPEN/READY**
   at the `2026-09-25T23:20:09Z` capture and adds the PR #199
   merged-baseline bullet, the #196 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #200 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `ba48dc89c6de8663e02d7bb576dd0cc94b8ef334`.
+- PR #202: Exact 15-05-01 · WMBS M06 Stage A development cell
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`,
+  `eval/public/README.md`,
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`
+  (title: Exact 15-05-01 · WMBS M06 Stage A development cell)
+  from exact head `a3c1890c8103896f1ad4db0a3636b9db6ee14cd6`; all
+  required exact-head Unit+drift checks passed in run `36259034748`;
+  merge `cff84192f271e5ecdc9d72a3e139ed69e544b10f` at
+  `2026-09-26T17:56:50Z`.
+  Prior tip was `d374be71314252d35f02323143da279b94a5446e` (PR #201 plan).
+  Post-main tip Unit+drift failed on CI `36260812674`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #202 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Plan `15-05-PLAN.md` / Exact Exclusive-3
+  authorized only:
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`
+  (README/inventory forbidden by plan).
+  Mid-cascade, after tip-aligned Unit+drift FAILURE on inventory cells
+  for the Stage A artifacts, CoS authorized an expansion beyond plan
+  Exclusive-3 to also lease `eval/public/README.md` and
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`
+  (Lease-5). That expansion is a recorded deviation; plan Exclusive-3
+  otherwise unchanged; Stage B still blocked; publication closed; no
+  harness/registry registration.
+  Shipped paths remain the five listed above:
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`,
+  `eval/public/README.md`,
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+  Purpose: WMBS M06 Stage A development cell
+  (stdlib descriptive oracle + fixture + contract tests +
+  inventory/README disclosure).
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #202 shipped those five paths; README and inventory
+  are the recorded Lease-5 deviation from plan Exclusive-3, not an
+  authorized Exclusive-3 lease). This receipt
+  does not invent M16; the M14 freeze is unchanged. This receipt
+  changes no benchmark result or admission state, admits no successor
+  source node, and does not recompute the canonical baseline
+  (baseline stays `main@f688c747`).
+- PR #203: ordinary documentation receipt recording the merged PR #202
+  lease-map lapse (Exact-1 lease-map receipt for product #202
+  Exact 15-05-01 WMBS M06 Stage A development cell @
+  `a3c1890c8103896f1ad4db0a3636b9db6ee14cd6`). It is **OPEN/READY**
+  at the `2026-09-26T18:27:47Z` capture and adds the PR #202
+  merged-baseline bullet, the #200 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #200 changes
+  merge SHA/time, or post-main CI is claimed here. PR #203 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
