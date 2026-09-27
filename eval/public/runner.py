@@ -62,6 +62,7 @@ _ADAPTERS = {
     "wmbs-m02-retrieval-reference": whole_memory_reference.run_m02_retrieval_development,
     "wmbs-m04-conflict-reference": whole_memory_reference.run_m04_conflict_development,
     "wmbs-m05-reference": whole_memory_reference.run_m05_provenance_development,
+    "wmbs-m06-reference": whole_memory_reference.run_m06_consolidation_development,
     "wmbs-m10-reference": whole_memory_reference.run_m10_development,
     "pm-bench-triggerbench": pm_bench_triggerbench.run,
     "security-calibration-probe": security_calibration_probe.run,
@@ -88,6 +89,7 @@ _PROFILE_CONTRACTS = {
     "wmbs-m02-retrieval-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m04-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m05-v1": ("whole-memory-development", "descriptive"),
+    "wmbs-m06-v1": ("whole-memory-development", "descriptive"),
     "wmbs-m10-v1": ("whole-memory-development", "descriptive"),
     "security-calibration-development-v1": (
         "security-calibration-development",
@@ -512,7 +514,7 @@ def run_public_suite(
             suite["scoring_profile"], _scoring_labels(benchmark), traces
         )
     elif suite["family"] == "whole-memory-development":
-        if suite_name == "wmbs-m04-development":
+        if suite_name in {"wmbs-m04-development", "wmbs-m06-development"}:
             labels = [{"fixture": benchmark}]
         else:
             labels = _scoring_labels(benchmark)
@@ -535,6 +537,7 @@ def run_public_suite(
         "wmbs-m02-retrieval-development",
         "wmbs-m04-development",
         "wmbs-m05-development",
+        "wmbs-m06-development",
     }:
         metadata = _m02_bundle_metadata(
             suite, suite_name, backend=exercised_backend
