@@ -1435,13 +1435,59 @@ The following packages are complete source history, not runnable work:
 - PR #206: ordinary documentation receipt recording the merged PR #204
   lease-map lapse (Exact-1 lease-map receipt for product #204
   15-06 Exact plan for WMBS M06 Stage B reachability @
-  `22616ffb5dd0516d617156547502944813db5e30`). It is **OPEN/READY**
+  `22616ffb5dd0516d617156547502944813db5e30`). It is **MERGED** at tip
+  `e270a90cc231c64f05084439b3346eb98f77e327` from Exact HEAD
+  `e7da24a4dab1729841bc308f9b950169a230449d`.
+  Post-main CI SUCCESS run `36362670329`. It was **OPEN/READY**
   at the `2026-09-28T00:01:02Z` capture and adds the PR #204
   merged-baseline bullet, the #203 MERGED mark, and this structured
   self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #206 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `e270a90cc231c64f05084439b3346eb98f77e327`.
+- PR #205: Exact 15-06-01 · WMBS M06 Stage B reachability
+  (title: Exact 15-06-01: WMBS M06 Stage B reachability)
+  from exact head `d20cad69bd0cd1ffcfeaf1b3f4b2c458aae2e917`; all
+  required exact-head Unit+drift checks passed in run `36367066800`;
+  merge `74f23509215461adb8cd06107a23008273d4aa75` at
+  `2026-09-28T02:20:21Z`.
+  Prior tip was `e270a90cc231c64f05084439b3346eb98f77e327` (PR #206 Exact-1).
+  Post-main tip Unit+drift failed on CI `36369440257`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #205 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact Exclusive-7):
+  `eval/public/registry.json`,
+  `eval/public/runner.py`,
+  `eval/public/scoring.py`,
+  `eval/public/adapters/whole_memory_reference.py`,
+  `eval/public/README.md`,
+  `tests/test_public_wmbs_m06.py`,
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+  Purpose: Exact 15-06-01 WMBS M06 Stage B reachability under frozen plan
+  `.planning/phases/15-security-calibration-performance-and-scale-columns/15-06-PLAN.md`.
+  Suite `wmbs-m06-development` / adapter `wmbs-m06-reference` / profile
+  `wmbs-m06-v1` / seam `public-cli-subprocess`; all publication flags false.
+  Adapter maps ingest/retrieve → capture, assert_fact, search; does not call
+  `MnemoCLI.answer`; empty `answer_text` when model-free payload has no
+  string; never copies gold. Does not invent M16; M14 freeze unchanged.
+  Changes no admission/publication claim beyond the leased Exact
+  reachability; admits no successor source node; does not recompute the
+  canonical baseline (baseline stays `main@f688c747`).
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #205 shipped the Exclusive-7 product paths above).
+- PR #207: ordinary documentation receipt recording the merged PR #205
+  lease-map lapse (Exact-1 lease-map receipt for product #205
+  Exact 15-06-01 WMBS M06 Stage B reachability @
+  `d20cad69bd0cd1ffcfeaf1b3f4b2c458aae2e917`). It is **OPEN/READY**
+  at the `2026-09-28T02:50:30Z` capture and adds the PR #205
+  merged-baseline bullet, the #206 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #206 changes
+  merge SHA/time, or post-main CI is claimed here. PR #207 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
