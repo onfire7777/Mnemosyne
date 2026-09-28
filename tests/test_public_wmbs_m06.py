@@ -1,8 +1,8 @@
-"""Contract tests for the WMBS M06 Stage A development cell.
+"""Contract tests for the WMBS M06 development cell.
 
-The cell is a deterministic local fixture plus a stdlib oracle. It is not a
-publishable result, a spec CI-LCB acceptance verdict, or a private
-consolidation hook.
+Stage A is a deterministic local fixture plus a stdlib oracle. Stage B only
+makes that cell reachable in the public harness. It is not a publishable
+result, a spec CI-LCB acceptance verdict, or a private consolidation hook.
 """
 
 from __future__ import annotations
@@ -13,10 +13,21 @@ import importlib
 import importlib.util
 import json
 import re
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
+
+from eval.public.adapters import whole_memory_reference
+from eval.public.bundle import BundleError, _canonical, _scoring_labels
+from eval.public.runner import (
+    _ADAPTERS,
+    _PROFILE_CONTRACTS,
+    load_registry,
+    run_public_suite,
+)
+from eval.public.scoring import score_profile
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_PATH = (
@@ -509,3 +520,356 @@ def _walk_keys(value):
 
 def _walk_contains_key(value, key: str) -> bool:
     return key in _walk_keys(value)
+
+
+_M06_DATASET_SHA256 = "7aeff310dc70efb9295f493ea61299eea94304f1b4638244807780dc04f028ed"
+_M06_REVISION = "d36f41c09d183e9845554b66710d767e39f6a284"
+_M06_SUITE = "wmbs-m06-development"
+README_PATH = REPO_ROOT / "eval/public/README.md"
+SOURCE_PLAN_PATH = (
+    REPO_ROOT / "docs/plans/wmb-m06-consolidation-learning-implementation-plan.md"
+)
+
+
+def _m06_suite() -> dict:
+    registry = load_registry()
+    assert _M06_SUITE in registry
+    return registry[_M06_SUITE]
+
+
+def _m06_readme_section() -> str:
+    readme = README_PATH.read_text(encoding="utf-8")
+    start = readme.index("### M06 consolidation and learning")
+    end = readme.index("### M10 calibration and abstention")
+    return readme[start:end]
+
+
+def _tiny_m06_fixture() -> dict:
+    m06 = _module()
+    fixture = m06.generate_fixture(m06.SEEDS[0])
+    case = dict(fixture["cases"][0])
+    case["cycles"] = [dict(case["cycles"][0])]
+    tiny = dict(fixture)
+    tiny["cases"] = [case]
+    tiny.pop("dataset_sha256", None)
+    return tiny
+
+
+def _adapter_traces(observations: dict) -> list[dict]:
+    return [
+        {
+            "case_id": case["case_id"],
+            "scoring_family": "whole-memory-development",
+            "cycles": [
+                {
+                    "operations": list(cycle["operations"]),
+                    "answer_text": cycle["answer_text"],
+                }
+                for cycle in case["cycles"]
+            ],
+        }
+        for case in observations["cases"]
+    ]
+
+
+class _M06RecordingCLI:
+    def __init__(self, backend: str = "local", search_payload: dict | None = None) -> None:
+        self.backend = backend
+        self.search_payload = {"hits": []} if search_payload is None else search_payload
+        self.calls: list[str] = []
+        self.captures: list[tuple] = []
+        self.assertions: list[tuple] = []
+        self.searches: list[tuple] = []
+
+    def capture(self, tenant, user, content, **kwargs):
+        self.calls.append("capture")
+        self.captures.append((tenant, user, content, kwargs))
+        return {"cid": f"cid-{kwargs.get('source_identity') or user}"}
+
+    def assert_fact(self, tenant, subject, predicate, obj, **kwargs):
+        self.calls.append("assert_fact")
+        self.assertions.append((tenant, subject, predicate, obj, kwargs))
+        return {"ok": True}
+
+    def search(self, tenant, query, **kwargs):
+        self.calls.append("search")
+        self.searches.append((tenant, query, kwargs))
+        return dict(self.search_payload)
+
+    def answer(self, question, context, **kwargs):
+        self.calls.append("answer")
+        return {"answer": "must-not-be-called"}
+
+
+def test_stage_b_registry_admits_m06_between_m05_and_m10() -> None:
+    registry = load_registry()
+    names = list(registry)
+    assert names[names.index("wmbs-m05-development") + 1] == _M06_SUITE
+    assert names[names.index(_M06_SUITE) + 1] == "wmbs-m10-development"
+    cell = _m06_suite()
+    assert list(cell) == list(registry["wmbs-m05-development"])
+    assert cell == {
+        "adapter": "wmbs-m06-reference",
+        "admission_state": "PROPOSED",
+        "dataset_sha256": _M06_DATASET_SHA256,
+        "family": "whole-memory-development",
+        "fixture": "fixtures/wmbs-m06-consolidation-development.json",
+        "headline_eligible": False,
+        "independent_external_reproduction": False,
+        "interval_method": "descriptive",
+        "license": "CC0-1.0",
+        "pbpp_headline_eligible": False,
+        "publishable": False,
+        "revision": _M06_REVISION,
+        "scoring_profile": "wmbs-m06-v1",
+        "split_role": "development",
+        "system_seam": "public-cli-subprocess",
+        "track_kind": "ENHANCED-SUCCESSOR",
+        "upstream_comparable": False,
+    }
+    for flag in (
+        "publishable",
+        "pbpp_headline_eligible",
+        "headline_eligible",
+        "upstream_comparable",
+        "independent_external_reproduction",
+    ):
+        assert cell[flag] is False
+    digest = hashlib.sha256(
+        _canonical(json.loads(FIXTURE_PATH.read_bytes()))
+    ).hexdigest()
+    assert cell["dataset_sha256"] == digest == _M06_DATASET_SHA256
+
+
+def test_stage_b_revision_matches_unchanged_fixture_bytes() -> None:
+    cell = _m06_suite()
+    relative = FIXTURE_PATH.relative_to(REPO_ROOT).as_posix()
+    revision = subprocess.run(
+        ["git", "log", "-1", "--format=%H", "--", relative],
+        capture_output=True,
+        check=True,
+        cwd=REPO_ROOT,
+        text=True,
+    ).stdout.strip()
+    assert revision == _M06_REVISION
+    assert cell["revision"] == revision
+    shown = subprocess.run(
+        ["git", "show", f"{revision}:{relative}"],
+        capture_output=True,
+        check=True,
+        cwd=REPO_ROOT,
+    ).stdout
+    assert shown == FIXTURE_PATH.read_bytes()
+
+
+def test_stage_b_adapter_and_profile_resolve() -> None:
+    suite = _m06_suite()
+    assert suite["adapter"] == "wmbs-m06-reference"
+    assert suite["scoring_profile"] == "wmbs-m06-v1"
+    run = getattr(whole_memory_reference, "run_m06_consolidation_development", None)
+    assert run is not None
+    assert _ADAPTERS["wmbs-m06-reference"] is run
+    assert _PROFILE_CONTRACTS["wmbs-m06-v1"] == (
+        "whole-memory-development",
+        "descriptive",
+    )
+    assert _PROFILE_CONTRACTS[suite["scoring_profile"]] == (
+        suite["family"],
+        suite["interval_method"],
+    )
+
+
+def test_stage_b_adapter_requires_live_cli_and_does_not_copy_gold() -> None:
+    run = getattr(whole_memory_reference, "run_m06_consolidation_development", None)
+    assert run is not None
+    tiny = _tiny_m06_fixture()
+    cycle = tiny["cases"][0]["cycles"][0]
+    event = cycle["events"][0]
+    case_id = tiny["cases"][0]["case_id"]
+    tenant = f"wmbs-m06-{case_id}"
+    with pytest.raises(ValueError, match="live MnemoCLI"):
+        run(tiny, None)
+    cli = _M06RecordingCLI()
+    traces, evidence = run(tiny, cli)
+    assert cli.calls == ["capture", "assert_fact", "search"]
+    assert "answer" not in cli.calls
+    assert cli.captures == [
+        (
+            tenant,
+            event["actor_label"],
+            event["content"],
+            {"source_identity": event["event_id"]},
+        )
+    ]
+    assert cli.assertions == [
+        (
+            tenant,
+            event["event_id"],
+            "source",
+            event["content"],
+            {
+                "user": event["actor_label"],
+                "evidence_cids": (f"cid-{event['event_id']}",),
+            },
+        )
+    ]
+    assert cli.searches == [(tenant, cycle["retrieve"]["query"], {})]
+    assert traces == [
+        {
+            "case_id": case_id,
+            "scoring_family": "whole-memory-development",
+            "cycles": [
+                {
+                    "operations": ["ingest", "retrieve", "answer"],
+                    "answer_text": "",
+                }
+            ],
+        }
+    ]
+    assert evidence == {"backend": "local"}
+    rendered = json.dumps(traces)
+    assert cycle["gold_answer"] not in rendered
+    assert cycle["no_memory_answer"] not in rendered
+    assert "gold_answer" not in rendered
+    assert "harmful_answer" not in rendered
+    assert "no_memory_answer" not in rendered
+    answered = _M06RecordingCLI(search_payload={"answer": "from-cli"})
+    answered_traces, _ = run(tiny, answered)
+    assert answered_traces[0]["cycles"][0]["answer_text"] == "from-cli"
+    assert "answer" not in answered.calls
+    forged = dict(tiny)
+    forged["fixture_id"] = "wmbs-m06-other"
+    with pytest.raises(ValueError, match="fixture_id"):
+        run(forged, _M06RecordingCLI())
+    forged_digest = dict(tiny)
+    forged_digest["dataset_sha256"] = "a" * 64
+    with pytest.raises(ValueError, match="dataset_sha256"):
+        run(forged_digest, _M06RecordingCLI())
+
+
+def test_stage_b_full_fixture_validates_and_keeps_answer_off_the_cli() -> None:
+    run = getattr(whole_memory_reference, "run_m06_consolidation_development", None)
+    assert run is not None
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    cli = _M06RecordingCLI(backend="sqlite")
+    traces, evidence = run(fixture, cli)
+    assert evidence == {"backend": "sqlite"}
+    assert "answer" not in cli.calls
+    assert len(traces) == len(fixture["cases"])
+    for case, trace in zip(fixture["cases"], traces, strict=True):
+        assert trace["case_id"] == case["case_id"]
+        assert trace["scoring_family"] == "whole-memory-development"
+        assert len(trace["cycles"]) == 5
+        for cycle in trace["cycles"]:
+            assert cycle["operations"] == ["ingest", "retrieve", "answer"]
+            assert cycle["answer_text"] == ""
+    rendered = json.dumps(traces)
+    for case in fixture["cases"]:
+        for cycle in case["cycles"]:
+            assert cycle["gold_answer"] not in rendered
+            if isinstance(cycle["harmful_answer"], str):
+                assert cycle["harmful_answer"] not in rendered
+            assert cycle["no_memory_answer"] not in rendered
+
+
+def test_stage_b_score_profile_keeps_oracle_interval_and_drifts() -> None:
+    m06 = _module()
+    fixture = m06.generate_fixture(m06.SEEDS[0])
+    observations = _gold_observations(fixture)
+    observations["control"] = "no-memory"
+    traces = _adapter_traces(observations)
+    expected = m06.score(fixture, observations)
+    expected["family"] = "whole-memory-development"
+    expected["profile"] = "wmbs-m06-v1"
+    expected["interval"] = {**expected["interval"], "method": "descriptive"}
+    measured = score_profile("wmbs-m06-v1", [{"fixture": fixture}], traces)
+    assert measured == expected
+    assert measured["interval"]["scope"] == "finite-corpus"
+    assert measured["interval"]["statistic"] == "utility_delta"
+    assert measured["interval"]["minimum"] == expected["interval"]["minimum"]
+    assert measured["interval"]["maximum"] == expected["interval"]["maximum"]
+    assert measured["interval"]["count"] == expected["interval"]["count"]
+    assert measured["interval"]["method"] == "descriptive"
+    assert "ci_lcb" not in measured["interval"]
+    fallback = score_profile("wmbs-m06-v1", [], traces)
+    assert fallback == expected
+    drifted = deepcopy(traces)
+    drifted[0]["cycles"][0]["answer_text"] = "drifted-answer"
+    assert score_profile("wmbs-m06-v1", [{"fixture": fixture}], drifted) != expected
+
+
+def test_stage_b_runner_passes_fixture_labels_and_records_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(BundleError, match="unknown case-based benchmark schema"):
+        _scoring_labels(fixture)
+    captured: dict = {}
+
+    def fake_adapter(benchmark, cli):
+        captured["benchmark"] = benchmark
+        captured["cli"] = cli
+        return ([], {"backend": getattr(cli, "backend", "local")})
+
+    def fake_score(profile, labels, traces):
+        captured["profile"] = profile
+        captured["labels"] = labels
+        captured["traces"] = traces
+        return {
+            "family": "whole-memory-development",
+            "profile": profile,
+            "interval": {"method": "descriptive"},
+        }
+
+    monkeypatch.setitem(_ADAPTERS, "wmbs-m06-reference", fake_adapter)
+    monkeypatch.setattr("eval.public.runner.score_profile", fake_score)
+
+    class FakeCLI:
+        backend = "sqlite"
+
+        def __init__(self, store, env):
+            captured["store"] = store
+
+    monkeypatch.setattr("eval.public.runner.MnemoCLI", FakeCLI)
+    out = tmp_path / "wmbs-m06-development"
+    result = run_public_suite(_M06_SUITE, out_dir=out)
+    assert captured["labels"] == [{"fixture": fixture}]
+    assert captured["profile"] == "wmbs-m06-v1"
+    assert captured["traces"] == []
+    assert captured["cli"] is not None
+    written = json.loads((out / "benchmark.json").read_text(encoding="utf-8"))
+    assert written["metadata"]["backend"] == "sqlite"
+    assert written["metadata"]["suite"] == _M06_SUITE
+    assert result["publishable"] is False
+    assert result["pbpp_headline_eligible"] is False
+    assert result["independent_external_reproduction"] is False
+    assert result["suite"] == _M06_SUITE
+    assert result["system_seam"] == "public-cli-subprocess"
+
+
+def test_stage_b_readme_discloses_reachability_only() -> None:
+    section = _m06_readme_section()
+    assert section.startswith("### M06 consolidation and learning\n")
+    assert "**PROPOSED.**" in section
+    command = (
+        "uv run --locked mneme eval-public --suite wmbs-m06-development "
+        "--out-dir /tmp/wmbs-m06-development"
+    )
+    assert command in section
+    assert "reachability only" in section
+    plain = re.sub(r"\*+", "", section).casefold()
+    assert "not registry-reachable" not in plain
+    assert "unregistered" not in plain
+    assert "wmbs-m06-reference" in section
+    assert "wmbs-m06-v1" in section
+    assert "public-cli-subprocess" in section
+    assert "ENHANCED-SUCCESSOR" in section
+    assert "publishable: false" in section
+    assert "bundle.py" in section
+    assert "verify_bundle" in section
+    assert "_scoring_labels" in section
+    assert "mnemo answer" in section
+    assert "PROPOSED planning artifact" in section
+    source = SOURCE_PLAN_PATH.read_text(encoding="utf-8")
+    assert "Status: `PROPOSED`" in source
+    assert "NOT CODE-READY" in source
