@@ -429,20 +429,23 @@ upstream-equivalence claim.
 
 **PROPOSED.**
 
-Stage A development cell only. `wmbs_m06.py` is the stdlib oracle over
-fixture `fixtures/wmbs-m06-consolidation-development.json`, pinned by
-`tests/test_public_wmbs_m06.py`. Admission stays `PROPOSED` /
-`DEVELOPMENT` / `split_role: development` and carries `publishable: false`,
+The M06 consolidation and learning cell is registry-reachable through the same public CLI
+subprocess seam. Registration is reachability only.
+
+```bash
+uv run --locked mneme eval-public --suite wmbs-m06-development --out-dir /tmp/wmbs-m06-development
+```
+
+`wmbs-m06-development` is `PROPOSED`, `ENHANCED-SUCCESSOR`,
+`split_role: development`, adapter `wmbs-m06-reference`, scoring profile
+`wmbs-m06-v1`, fixture `fixtures/wmbs-m06-consolidation-development.json`,
+`system_seam: public-cli-subprocess`, and carries `publishable: false`,
 `pbpp_headline_eligible: false`, `headline_eligible: false`,
 `upstream_comparable: false`, and `independent_external_reproduction: false`.
-No headline. No `PILOT-READY-DEV`.
+Registration is a reachability fix only. It advances no admission state and
+supports no publication, comparability, or superiority claim.
 
-The cell is **not** registry-reachable. Stage B harness registration
-(`registry.json` / runner / scoring profile) is out of scope for Exact
-15-05-01. Unregistered → no `uv run --locked mneme eval-public --suite`
-command block.
-
-Corpus (Stage A, still `PROPOSED`): six episode families (`repeated`,
+**M06 corpus (registered, still `PROPOSED`).** Six episode families (`repeated`,
 `corroborated`, `contradictory`, `procedural`, `related-transfer`,
 `unrelated-control`); five cycles per case; seeds `17`, `31`, `43`, `61`,
 `79`. Metrics are descriptive finite-corpus observations only (utility
@@ -451,9 +454,17 @@ cross-episode transfer, storage, cost). Latency, tokens, and calls are
 `unsupported`. A public no-consolidation ablation is unavailable; the
 universal no-memory control is substituted and disclosed. Spec CI-LCB
 acceptance and official MemoryAgentBench/EvoMemBench stay deferred. No
-private consolidation API. Source
+private consolidation API. No headline. No `PILOT-READY-DEV`. Source
 `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md` remains
 a PROPOSED planning artifact.
+
+`verify_bundle` still has no `allowed_profile` or
+canonical-replay-seed row for `wmbs-m06-v1` because
+`bundle.py` is outside this lease; Stage B scores through
+`score_profile` instead. The runner passes the fixture as scoring labels
+because `bundle._scoring_labels` rejects this case-based schema. The
+adapter does not call `mnemo answer`, because that command is not a
+model-free path and this cell admits no provider budget.
 
 ### M10 calibration and abstention
 
