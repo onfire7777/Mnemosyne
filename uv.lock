@@ -329,6 +329,7 @@ sqlitevec = [
 [package.dev-dependencies]
 dev = [
     { name = "hypothesis" },
+    { name = "jsonschema" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
     { name = "ruff" },
@@ -347,6 +348,7 @@ provides-extras = ["postgres", "mcp", "native", "sqlitevec"]
 [package.metadata.requires-dev]
 dev = [
     { name = "hypothesis", specifier = ">=6.100" },
+    { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "pytest", specifier = "==9.1.1" },
     { name = "pytest-benchmark", specifier = ">=5.1" },
     { name = "ruff", specifier = "==0.15.20" },
