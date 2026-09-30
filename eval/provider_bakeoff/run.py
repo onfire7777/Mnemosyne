@@ -14,7 +14,6 @@ import math
 import os
 import platform
 import re
-import resource as resource_mod
 import subprocess
 import sys
 import time
@@ -22,6 +21,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+try:  # getrusage is POSIX-only; Windows falls back to process_time below.
+    import resource as resource_mod
+except ImportError:
+    resource_mod = None
 
 REPORT_PROTOCOL = "mnemosyne-provider-bakeoff-report-v1"
 CAP006_PROVIDER_SCHEMA = "mnemosyne.cap006.provider-receipt/v1"
@@ -145,8 +149,13 @@ def _meminfo_bytes() -> dict[str, int]:
 
 def sample_resources() -> dict[str, Any]:
     mem = _meminfo_bytes()
-    usage = resource_mod.getrusage(resource_mod.RUSAGE_SELF)
-    rss_bytes = int(usage.ru_maxrss) * 1024
+    if resource_mod is not None:
+        usage = resource_mod.getrusage(resource_mod.RUSAGE_SELF)
+        rss_bytes = int(usage.ru_maxrss) * 1024
+        cpu_seconds = usage.ru_utime + usage.ru_stime
+    else:
+        rss_bytes = 0
+        cpu_seconds = time.process_time()
     load = list(os.getloadavg()) if hasattr(os, "getloadavg") else [0.0, 0.0, 0.0]
     swap_used = max(0, mem.get("SwapTotal", 0) - mem.get("SwapFree", 0))
     return {
@@ -161,7 +170,7 @@ def sample_resources() -> dict[str, Any]:
         "disk_bytes": 0,
         "network_bytes": 0,
         "load_averages": load,
-        "cpu_seconds": usage.ru_utime + usage.ru_stime,
+        "cpu_seconds": cpu_seconds,
     }
 
 

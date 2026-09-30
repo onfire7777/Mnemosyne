@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import os
-import pwd
 import re
 import secrets
 import shutil
@@ -22,6 +20,10 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+# The rotator is POSIX shell built on flock(1) and a passwd-database HOME.
+fcntl = pytest.importorskip("fcntl", reason="the MCP client cert rotator targets POSIX hosts")
+pwd = pytest.importorskip("pwd", reason="the MCP client cert rotator targets POSIX hosts")
 
 
 REPO = Path(__file__).resolve().parents[1]
