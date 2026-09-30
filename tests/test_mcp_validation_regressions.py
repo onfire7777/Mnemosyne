@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -20,6 +21,7 @@ from mnemosyne.mcp_server import (
     build_sdk_server,
 )
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC, _require_mapping_field
+from mnemosyne.models import Evidence
 from mnemosyne.security import SecurityPolicy, SessionIdentity, SessionTokenVerifier, TrustTier
 
 TENANT = "tenant-validation"
@@ -826,3 +828,157 @@ def test_b16_conversation_turn_is_a_working_memory_kind_on_every_backend() -> No
     assert "conversation_turn" in engine._WORKING_MEMORY_KINDS
     assert sqlite_engine._WORKING_MEMORY_KINDS == engine._WORKING_MEMORY_KINDS
     assert postgres_engine._WORKING_MEMORY_KINDS == engine._WORKING_MEMORY_KINDS
+
+
+# ---------------------------------------------------------------------------
+# P1-1: capture reported created=true when append stored nothing
+# ---------------------------------------------------------------------------
+
+
+def test_p1_capture_of_an_erased_payload_does_not_report_created() -> None:
+    """A tombstone blocks the replay and still returns the cid. Nothing is live."""
+
+    tools = _tools()
+    content = "P1 erased payload that must not come back as created."
+    first = _capture(tools, content)
+    cid = str(first["cid"])
+    assert first["created"] is True
+
+    forgotten = tools.forget(
+        tenant_id=TENANT, cid=cid, erasure_mode="tombstone_recompute", **OPERATOR
+    )
+    assert forgotten["erased"] is True
+    assert tools.engine.get_evidence(TENANT, cid) is None
+    assert tools.engine.evidence_is_erased(TENANT, cid) is True
+
+    again = _capture(tools, content)
+
+    assert again["cid"] == cid
+    assert again["created"] is False
+    assert again["idempotent"] is False
+    assert tools.engine.get_evidence(TENANT, cid) is None
+    assert tools.engine.evidence_is_erased(TENANT, cid) is True
+
+
+def test_p1_capture_deferred_by_self_generation_budget_does_not_report_created() -> None:
+    """A budget deferral returns the cid and stores nothing."""
+
+    engine = LocalMemoryEngine()
+    engine.policy.self_generation_budget_max_events = 1
+    tools = MemoryTools(engine)
+
+    def capture(content: str) -> dict[str, object]:
+        return tools.capture(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="assistant",
+            source_type="summary",
+            content=content,
+        )
+
+    first = capture("P1 self-generated note inside the budget.")
+    deferred = capture("P1 self-generated note past the budget.")
+
+    assert first["created"] is True
+    assert first["idempotent"] is False
+    assert engine.get_evidence(TENANT, str(first["cid"])) is not None
+    assert deferred["created"] is False
+    assert deferred["idempotent"] is False
+    assert engine.get_evidence(TENANT, str(deferred["cid"])) is None
+    assert engine.evidence_is_erased(TENANT, str(deferred["cid"])) is False
+
+
+# ---------------------------------------------------------------------------
+# P1-2: hard-delete shred ran before every branch accepted
+# ---------------------------------------------------------------------------
+
+_P1_POINTER = "local-object://sha256/" + ("ab" * 32)
+_P1_OTHER = "p1-other"
+
+
+def _shared_external_evidence(tools: MemoryTools) -> str:
+    """The same pointed-at payload, live on main and on a scratch branch."""
+
+    cid = tools.engine.append_evidence(
+        Evidence(
+            tenant_id=TENANT,
+            user_id=USER,
+            actor="user",
+            source_type="legal",
+            content="P1 shared external payload.",
+            content_pointer=_P1_POINTER,
+            trust_tier=0,
+            access_policy={"tenant": TENANT},
+        )
+    )
+    tools.branch(_P1_OTHER, from_branch="main", tenant_id=TENANT, **OPERATOR)
+    return cid
+
+
+def _spy_shred(tools: MemoryTools) -> Mock:
+    shred = Mock(return_value={"shredded": True, "crypto_shredded": True, "reason": "key_shredded"})
+    tools.ingestion.object_store.shred = shred
+    return shred
+
+
+@pytest.mark.parametrize("requested_branch", ["main", _P1_OTHER])
+def test_p1_hard_delete_does_not_shred_when_another_branch_rejects(requested_branch: str) -> None:
+    """One branch may erase while another still needs the shared object."""
+
+    tools = _tools()
+    cid = _shared_external_evidence(tools)
+    tools.assert_fact(
+        TENANT,
+        "subject",
+        "predicate",
+        "value",
+        source_evidence_cids=[cid],
+        branch=_P1_OTHER,
+        role="operator",
+        source_trust_tier=0,
+    )
+    shred = _spy_shred(tools)
+
+    result = tools.forget(
+        tenant_id=TENANT,
+        cid=cid,
+        branch=requested_branch,
+        requested_by="operator",
+        erasure_mode="hard_delete_legal",
+        **OPERATOR,
+    )
+
+    shred.assert_not_called()
+    assert result["branches_erased"] == ["main"]
+    assert result["branch_results"]["main"]["erased"] is True
+    assert "object_shred" not in result["branch_results"]["main"]
+    assert result["branch_results"][_P1_OTHER]["erased"] is False
+    assert result["branch_results"][_P1_OTHER]["reason"] == "min_corroboration_for_delete"
+    assert "object_shred" not in result
+    surviving = tools.engine.get_evidence(TENANT, cid, _P1_OTHER)
+    assert surviving is not None
+    assert surviving.content == "P1 shared external payload."
+    assert surviving.content_pointer == _P1_POINTER
+    assert tools.engine.get_evidence(TENANT, cid, "main") is None
+
+
+def test_p1_hard_delete_shreds_once_when_every_live_copy_is_erased() -> None:
+    tools = _tools()
+    cid = _shared_external_evidence(tools)
+    shred = _spy_shred(tools)
+
+    result = tools.forget(
+        tenant_id=TENANT,
+        cid=cid,
+        requested_by="operator",
+        erasure_mode="hard_delete_legal",
+        **OPERATOR,
+    )
+
+    shred.assert_called_once_with(_P1_POINTER, tenant_id=TENANT)
+    assert set(result["branches_erased"]) == {"main", _P1_OTHER}
+    assert result["object_shred"]["reason"] == "key_shredded"
+    assert result["branch_results"]["main"]["object_shred"]["reason"] == "key_shredded"
+    assert result["branch_results"][_P1_OTHER]["object_shred"]["reason"] == "key_shredded"
+    assert tools.engine.get_evidence(TENANT, cid, "main") is None
+    assert tools.engine.get_evidence(TENANT, cid, _P1_OTHER) is None
