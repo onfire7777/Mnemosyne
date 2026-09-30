@@ -883,6 +883,10 @@ _WORKING_MEMORY_KINDS = {
     "tool_result",
     "recent_tool_result",
     "intermediate_conclusion",
+    # One spoken or written turn of a live conversation - what was just said,
+    # by whom - so an agent's short-term memory of a dialogue can live here
+    # rather than in a context window of its own.
+    "conversation_turn",
 }
 
 

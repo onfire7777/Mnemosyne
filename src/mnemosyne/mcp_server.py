@@ -12,6 +12,7 @@ import ssl
 import sys
 import threading
 from contextlib import asynccontextmanager, nullcontext, suppress
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import UnionType
@@ -629,6 +630,52 @@ class MnemosyneMcpServer:
                 stdout.flush()
 
 
+@lru_cache(maxsize=1)
+def _argument_schema_patches() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict[str, Any]]]]:
+    """Numeric bounds and item shapes published in the tool input schemas.
+
+    The first table is keyed by argument name and applies to every tool taking
+    that argument; the second is keyed by tool then argument. Each entry is merged
+    over the schema derived from the Python signature, which carries only a type.
+    ``MemoryTools`` enforces the same bounds at runtime -- these publish them, so
+    a client is told the range instead of having a nonsense value quietly stored
+    (confidence 1.5, probability 7, total_cases 0, k 0, hops ignored).
+    """
+
+    from mnemosyne.security import TrustTier
+
+    by_argument: dict[str, dict[str, Any]] = {
+        "confidence": {"minimum": 0.0, "maximum": 1.0},
+        "min_trust_tier": {"minimum": int(TrustTier.DIRECT_USER), "maximum": int(TrustTier.UNTRUSTED_EXTERNAL)},
+        "max_trust_tier": {"minimum": int(TrustTier.DIRECT_USER), "maximum": int(TrustTier.UNTRUSTED_EXTERNAL)},
+    }
+    by_tool: dict[str, dict[str, dict[str, Any]]] = {
+        "graph_neighbors": {"k": {"minimum": 1}},
+        "graph_query": {"k": {"minimum": 1}, "hops": {"minimum": 1}},
+        "outcome_evaluate": {
+            "before_successes": {"minimum": 0},
+            "after_successes": {"minimum": 0},
+            "total_cases": {"minimum": 1},
+        },
+        "prefetch": {
+            "candidates": {
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "probability": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        "reason": {"type": "string"},
+                        "metadata": {"type": "object", "additionalProperties": True},
+                    },
+                    "required": ["query", "probability"],
+                    "additionalProperties": True,
+                }
+            }
+        },
+    }
+    return by_argument, by_tool
+
+
 def _to_mcp_tool_spec(spec: dict[str, Any]) -> dict[str, Any]:
     from mnemosyne.mcp_tools import MemoryTools
 
@@ -649,6 +696,9 @@ def _to_mcp_tool_spec(spec: dict[str, Any]) -> dict[str, Any]:
                 schema["default"] = parameter.default
             else:
                 required.append(name)
+            by_argument, by_tool = _argument_schema_patches()
+            schema.update(by_argument.get(name, {}))
+            schema.update(by_tool.get(spec["name"], {}).get(name, {}))
             properties[name] = schema
     return {
         "name": spec["name"],
@@ -710,21 +760,43 @@ def _validate_tool_arguments(name: str, arguments: dict[str, Any], schemas_by_na
         raise ValueError(f"Input validation error: {exc.message}") from exc
 
 
+def _validate_numeric_bounds(instance: Any, schema: dict[str, Any], path: str) -> None:
+    """Enforce ``minimum``/``maximum`` in the no-jsonschema fallback path.
+
+    Booleans are not numbers here, matching :func:`_json_type_matches`.
+    """
+
+    if isinstance(instance, bool) or not isinstance(instance, (int, float)):
+        return
+    minimum = schema.get("minimum")
+    if minimum is not None and instance < minimum:
+        raise ValueError(f"Input validation error: {path} must be >= {minimum}")
+    maximum = schema.get("maximum")
+    if maximum is not None and instance > maximum:
+        raise ValueError(f"Input validation error: {path} must be <= {maximum}")
+
+
 def _validate_json_schema_subset(instance: Any, schema: dict[str, Any], path: str = "$") -> None:
     if "anyOf" in schema:
         errors = []
         for option in schema["anyOf"]:
             try:
                 _validate_json_schema_subset(instance, option, path)
-                return
+                break
             except ValueError as exc:
                 errors.append(str(exc))
-        raise ValueError(f"Input validation error: {path} does not match any allowed schema: {'; '.join(errors)}")
+        else:
+            raise ValueError(f"Input validation error: {path} does not match any allowed schema: {'; '.join(errors)}")
+        # Bounds sit alongside `anyOf` (an optional bounded number is
+        # `anyOf: [integer, null]` plus a minimum), so they still apply.
+        _validate_numeric_bounds(instance, schema, path)
+        return
     expected_type = schema.get("type")
     if expected_type and not _json_type_matches(instance, expected_type):
         raise ValueError(f"Input validation error: {path} must be {expected_type}")
     if "enum" in schema and instance not in schema["enum"]:
         raise ValueError(f"Input validation error: {path} must be one of {schema['enum']}")
+    _validate_numeric_bounds(instance, schema, path)
     if expected_type == "object" or isinstance(instance, dict):
         if not isinstance(instance, dict):
             return
@@ -823,8 +895,15 @@ def build_sdk_server(**kwargs: Any) -> Any:
                 raw_arguments = facade.prepare_tool_arguments(name, auth_params, raw_arguments)
             except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
                 return _sdk_tool_error(types, str(exc))
+            # The bound session identity is an internal keyword the published
+            # schema never lists: validate the public view, exactly as handle()
+            # does, or every signed call to a session_identity tool is refused
+            # as an unexpected property.
+            public_arguments = {
+                key: value for key, value in raw_arguments.items() if key != "session_identity"
+            }
             try:
-                _validate_tool_arguments(name, raw_arguments, schemas_by_name)
+                _validate_tool_arguments(name, public_arguments, schemas_by_name)
             except ValueError as exc:
                 return _sdk_tool_error(types, str(exc))
             try:

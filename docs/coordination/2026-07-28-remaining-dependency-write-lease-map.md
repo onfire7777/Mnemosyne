@@ -1513,6 +1513,43 @@ The following packages are complete source history, not runnable work:
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
+- PR #209: owner-directed maintenance outside the GoalEx lease sweep:
+  the MCP validation sweep across all 59 `TOOL_SPEC` tools moved from
+  14 `FAIL` to `FAIL 0`/`CRASH 0` (`PASS` 219 -> 233, `INFO` 125 steady,
+  59/59 tools exercised). Corrected schema/handler drift where tools
+  advertised parameters no handler read, `min_trust_tier` and
+  `max_trust_tier` treated as two independent filters rather than aliases
+  of one range, argument coercion rejecting valid JSON-typed input, and
+  handlers raising instead of returning a structured error on empty or
+  absent scope. Adds the access-policy checks the scope-sensitive tools
+  lacked, consistent protocol-level method errors, and `python -m
+  mnemosyne` through a new `__main__.py`. Two further findings from
+  driving the SDK transport with signed sessions: the SDK adapter
+  validated the bound `session_identity` against the published schema
+  and so refused every signed call to a `session_identity` tool (B15),
+  and working memory had no kind for a turn of conversation (B16) -
+  `conversation_turn` joins the kind set on all three backends, pinned
+  identical by test.
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `src/mnemosyne/mcp_tools.py`,
+  `src/mnemosyne/mcp_server.py`,
+  `src/mnemosyne/security.py`,
+  `src/mnemosyne/cli.py`,
+  `src/mnemosyne/__main__.py`,
+  `src/mnemosyne/engine.py`,
+  `src/mnemosyne/sqlite_engine.py`,
+  `src/mnemosyne/postgres_engine.py`,
+  `tests/test_mcp_validation_regressions.py`,
+  `tests/test_cli_mcp_serve.py`,
+  `tests/test_access_policy_enforcement.py`,
+  `tests/test_cli_runtime_tools.py`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #209 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
