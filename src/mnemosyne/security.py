@@ -1256,6 +1256,55 @@ class SecurityPolicy:
             identity.agent_id if operation == "schedule" else None,
         )
 
+    def _minimum_write_role(
+        self,
+        operation: str,
+        normalized_sink: str | None,
+        destructive: bool,
+    ) -> WriteRole:
+        """The weakest role that may perform this write.
+
+        ``reader`` is never returned: it is a read-only role and holds no write
+        authority on any sink (see :meth:`authorize_write`). Reported as
+        ``required_role`` on both allow and deny decisions so a caller is told
+        the authority the operation demands rather than the authority it claimed.
+        """
+
+        if operation in self.consolidator_only_ops:
+            return "consolidator"
+        if normalized_sink in INSTRUCTION_SINKS:
+            return "operator"
+        if normalized_sink == "branch_promotion" or destructive:
+            return "consolidator"
+        return "agent"
+
+    def _minimum_write_trust(
+        self,
+        normalized_sink: str | None,
+        destructive: bool,
+        source_trust_tier: int,
+    ) -> int:
+        """The trust floor this write must clear (lower tier is more trusted).
+
+        Falls back to ``source_trust_tier`` when no sink-specific floor applies,
+        matching the tier reported on an allowed decision.
+        """
+
+        if normalized_sink in INSTRUCTION_SINKS:
+            return self.min_policy_write_trust
+        floors: dict[str, int] = {
+            "preference": self.min_preference_write_trust,
+            "belief": self.min_belief_write_trust,
+            "belief_correction": self.min_correction_write_trust,
+            "branch": self.min_branch_write_trust,
+            "branch_promotion": self.min_branch_promotion_trust,
+        }
+        if destructive:
+            return self.min_destructive_trust
+        if normalized_sink in floors:
+            return floors[normalized_sink]
+        return source_trust_tier
+
     def authorize_write(
         self,
         operation: str,
@@ -1272,6 +1321,18 @@ class SecurityPolicy:
         if is_write_tainted(source_capability_tags):
             return CapabilityDecision(False, "tainted data carries no write authority (data is not instruction)", role, source_trust_tier, operation)
         normalized_sink = str(target_sink).strip().lower() if target_sink is not None else None
+        required_role = self._minimum_write_role(operation, normalized_sink, destructive)
+        required_trust = self._minimum_write_trust(normalized_sink, destructive, source_trust_tier)
+        if role not in _WRITE_ROLES:
+            # Fail closed: an unrecognised role string carries no write authority,
+            # so a novel role cannot slip past the reader baseline below.
+            return CapabilityDecision(
+                False,
+                f"unknown write role {role!r} carries no write authority",
+                required_role,
+                required_trust,
+                operation,
+            )
         if operation in self.consolidator_only_ops and role not in {"consolidator", "operator"}:
             return CapabilityDecision(False, "operation requires consolidator write authority", "consolidator", 0, operation)
         if normalized_sink in INSTRUCTION_SINKS:
@@ -1289,7 +1350,23 @@ class SecurityPolicy:
             return CapabilityDecision(False, "branch promotion requires operator/consolidator authority and user-authored trust", "consolidator", self.min_branch_promotion_trust, operation)
         if destructive and (role not in {"consolidator", "operator"} or not meets_trust(source_trust_tier, self.min_destructive_trust)):
             return CapabilityDecision(False, "destructive writes require mediated high-trust authority", "consolidator", self.min_destructive_trust, operation)
-        return CapabilityDecision(True, "allowed", role, source_trust_tier, operation)
+        # Baseline write authority. Every check above gates one specific sink, one
+        # trust floor or one operation class, so a plain write on an ordinary sink
+        # reached `allowed` for ANY role -- including `reader`, which could then
+        # assert_fact / relation / correct / propose / branch / profile_* and run
+        # source_sync with apply=true. `reader` is read-only: deny it here, and
+        # name the role the operation really needs.
+        if role == "reader":
+            return CapabilityDecision(
+                False,
+                f"reader role holds no write authority; {operation} requires the {required_role} role or stronger",
+                required_role,
+                required_trust,
+                operation,
+            )
+        # Report the authority the operation demands, not an echo of the caller's
+        # own role (which made every allow decision self-justifying).
+        return CapabilityDecision(True, "allowed", required_role, source_trust_tier, operation)
 
 
 def sanitize_retrieved_text(text: str, trust_tier: int) -> dict[str, Any]:

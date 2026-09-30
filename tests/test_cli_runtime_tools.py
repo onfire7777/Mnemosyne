@@ -13996,7 +13996,9 @@ def test_cli_session_token_binds_identity_and_authority(tmp_path: Path) -> None:
     )
 
     assert asserted["security"]["allowed"] is True
-    assert asserted["security"]["required_role"] == "operator"
+    # required_role names the authority the operation demands (a belief write needs
+    # `agent` or stronger), not an echo of the operator role the caller presented.
+    assert asserted["security"]["required_role"] == "agent"
     assert asserted["security"]["required_trust"] == 0
     assert fetched["user_id"] == USER
     assert branched["security"]["allowed"] is True
