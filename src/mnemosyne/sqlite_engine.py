@@ -168,6 +168,7 @@ _WORKING_MEMORY_KINDS = {
     "tool_result",
     "recent_tool_result",
     "intermediate_conclusion",
+    "conversation_turn",
 }
 
 

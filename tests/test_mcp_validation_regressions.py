@@ -7,6 +7,7 @@ HIGH, B3-B7 MEDIUM, B8-B14 LOW.
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -16,9 +17,10 @@ from mnemosyne.mcp_server import (
     MnemosyneMcpServer,
     _to_mcp_tool_spec,
     _validate_json_schema_subset,
+    build_sdk_server,
 )
 from mnemosyne.mcp_tools import MemoryTools, TOOL_SPEC, _require_mapping_field
-from mnemosyne.security import SecurityPolicy, TrustTier
+from mnemosyne.security import SecurityPolicy, SessionIdentity, SessionTokenVerifier, TrustTier
 
 TENANT = "tenant-validation"
 USER = "user-validation"
@@ -718,3 +720,109 @@ def test_b14_the_shim_answers_method_not_found_for_an_unknown_method(tmp_path) -
 
     assert response is not None
     assert response["error"]["code"] == -32601
+
+
+# ---------------------------------------------------------------------------
+# B15 (HIGH): over the official SDK transport a signed session broke EVERY tool
+# that takes session_identity (working_*, intentions). The adapter bound the
+# identity into the arguments and then validated them against the published
+# schema, which refused it as an unexpected property. handle() had always
+# validated the public view; the SDK adapter now does the same.
+# ---------------------------------------------------------------------------
+
+
+def test_b15_sdk_adapter_accepts_signed_sessions_on_session_identity_tools(tmp_path) -> None:
+    pytest.importorskip("mcp")
+    from mcp import types
+
+    secret = "b15-session-secret"
+    server = build_sdk_server(store_path=tmp_path / "b15-store.json", session_secret=secret)
+    token = SessionTokenVerifier(secret).sign(
+        SessionIdentity(
+            tenant_id=TENANT,
+            user_id=USER,
+            role="agent",
+            source_trust_tier=0,
+            agent_id="burnos",
+            session_id="voice",
+        )
+    )
+    scope = {
+        "session_token": token,
+        "tenant_id": TENANT,
+        "session_id": "voice",
+        "user_id": USER,
+        "agent_id": "burnos",
+        "task_id": "talk",
+        "branch": "main",
+    }
+
+    async def exercise() -> tuple[object, object]:
+        call_handler = server.request_handlers[types.CallToolRequest]
+        # The turn is captured verbatim first; the working item cites that cid.
+        captured = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "capture",
+                    "arguments": {
+                        "session_token": token,
+                        "tenant_id": TENANT,
+                        "user_id": USER,
+                        "actor": "burnos",
+                        "source_type": "conversation",
+                        "content": "[2026-09-30 18:00:00] user: hello there",
+                    },
+                }
+            )
+        )
+        assert captured.root.isError is False, captured.root.content[0].text
+        seeded = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "working_seed",
+                    "arguments": {
+                        **scope,
+                        "kind": "conversation_turn",
+                        "content": "user: hello there",
+                        "evidence_ids": [captured.root.structuredContent["cid"]],
+                        "ttl_seconds": 600,
+                        "created_at": "2026-09-30T18:00:00+00:00",
+                    },
+                }
+            )
+        )
+        queried = await call_handler(
+            types.CallToolRequest(
+                params={
+                    "name": "working_query",
+                    "arguments": {**scope, "as_of": "2026-09-30T18:05:00+00:00"},
+                }
+            )
+        )
+        return seeded, queried
+
+    try:
+        seeded, queried = asyncio.run(exercise())
+    finally:
+        server.mnemosyne_mcp_facade.close()
+
+    assert seeded.root.isError is False, seeded.root.content[0].text
+    assert "session_identity" not in (seeded.root.content[0].text if seeded.root.content else "")
+    assert seeded.root.structuredContent["item"]["content"] == "user: hello there"
+    assert queried.root.isError is False, queried.root.content[0].text
+    assert [item["content"] for item in queried.root.structuredContent["items"]] == ["user: hello there"]
+
+
+# ---------------------------------------------------------------------------
+# B16 (MEDIUM): working memory had no kind for a turn of conversation, so a
+# dialogue agent could not keep its short-term memory in Mnemosyne at all. The
+# allowed kinds are copied into each backend; they must stay identical.
+# ---------------------------------------------------------------------------
+
+
+def test_b16_conversation_turn_is_a_working_memory_kind_on_every_backend() -> None:
+    from mnemosyne import engine, postgres_engine, sqlite_engine
+
+    assert "conversation_turn" in engine._WORKING_MEMORY_KINDS
+    assert sqlite_engine._WORKING_MEMORY_KINDS == engine._WORKING_MEMORY_KINDS
+    assert postgres_engine._WORKING_MEMORY_KINDS == engine._WORKING_MEMORY_KINDS
