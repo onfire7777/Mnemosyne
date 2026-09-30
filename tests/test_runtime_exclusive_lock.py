@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,9 @@ import time
 from typing import Any
 
 import pytest
+
+# runtime-exclusive-lock.sh is POSIX shell built on flock(1); Windows has neither.
+fcntl = pytest.importorskip("fcntl", reason="runtime-exclusive-lock.sh targets POSIX hosts")
 
 
 HELPER = (

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -485,7 +486,7 @@ class ParametricArtifactStore:
             raise ValueError("parametric artifact path escaped store root") from exc
         if path == self.root:
             raise ValueError("parametric artifact path escaped store root")
-        return path
+        return _long_path_safe(path)
 
     def _parse_uri(self, artifact_uri: str) -> tuple[str, str]:
         if not artifact_uri.startswith(self.uri_prefix):
@@ -500,6 +501,26 @@ class ParametricArtifactStore:
     def _validate_segment(value: str, label: str) -> None:
         if not value or value in {".", ".."} or "/" in value or "\\" in value or ".." in value:
             raise ValueError(f"invalid parametric {label} id")
+
+
+def _long_path_safe(path: Path) -> Path:
+    """Let Windows open an absolute path longer than MAX_PATH (260 chars).
+
+    Win32 file APIs reject such paths unless they carry the extended-length
+    ``\\\\?\\`` prefix or the machine has LongPathsEnabled set. The tenant id
+    appears in both the store root and the artifact directory, so a deep store
+    root reaches the limit quickly. Every other platform gets the path back
+    unchanged. ``path`` is already resolved and confined to the store root.
+    """
+
+    if os.name != "nt":
+        return path
+    text = str(path)
+    if text.startswith("\\\\?\\"):
+        return path
+    if text.startswith("\\\\"):
+        return Path("\\\\?\\UNC\\" + text[2:])
+    return Path("\\\\?\\" + text)
 
 
 def _provider_adapter_kind(provider: dict[str, Any], *, default: str) -> str:
