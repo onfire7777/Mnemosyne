@@ -5078,6 +5078,93 @@ def _mcp_transport_check(
     }
 
 
+_MCP_SERVE_TRANSPORTS = ("stdio", "sdk-stdio", "streamable-http", "http")
+
+
+def _mcp_serve_argv(args: argparse.Namespace) -> list[str]:
+    """Translate `mneme mcp-serve` options into a `mneme-mcp` argv.
+
+    The server module owns every knob; this only maps the handful of options a
+    local launch needs and forwards the global --backend/--store so a single
+    invocation stays consistent with the rest of the CLI.
+    """
+
+    argv: list[str] = ["--backend", str(args.backend), "--store", str(args.store)]
+    if args.backend == "postgres" and getattr(args, "postgres_dsn", None):
+        argv += ["--postgres-dsn", str(args.postgres_dsn)]
+    transport = args.transport
+    if transport == "sdk-stdio":
+        argv.append("--sdk")
+    elif transport == "streamable-http":
+        argv += [
+            "--sdk-streamable-http",
+            "--http-host",
+            str(args.host),
+            "--http-port",
+            str(args.port),
+            "--sdk-streamable-http-path",
+            str(args.path),
+            "--sdk-streamable-health-path",
+            str(args.health_path),
+        ]
+        if args.stateful_sessions:
+            argv.append("--sdk-streamable-stateful")
+    elif transport == "http":
+        argv += [
+            "--http",
+            "--http-host",
+            str(args.host),
+            "--http-port",
+            str(args.port),
+            "--http-rpc-path",
+            str(args.path),
+            "--http-health-path",
+            str(args.health_path),
+        ]
+    if args.auth_token:
+        argv += ["--auth-token", str(args.auth_token)]
+    if args.require_session:
+        argv.append("--require-session")
+    if args.self_test:
+        argv.append("--self-test")
+    argv.extend(str(extra) for extra in (args.mcp_arg or ()))
+    return argv
+
+
+def _mcp_serve_preflight(transport: str) -> None:
+    """Fail with an actionable message instead of a serving traceback.
+
+    The SDK StreamableHTTP transport needs the optional `mcp` extra plus
+    uvicorn; without them the server raises mid-startup, which reads as a crash.
+    """
+
+    import importlib.util
+
+    if transport != "streamable-http":
+        return
+    missing = [name for name in ("mcp", "uvicorn") if importlib.util.find_spec(name) is None]
+    if missing:
+        raise SystemExit(
+            "mcp-serve --transport streamable-http requires "
+            + " and ".join(missing)
+            + ": install the MCP extra with `pip install 'mnemosyne-memory[mcp]'` "
+            "(or `uv sync --extra mcp` in a checkout)."
+        )
+
+
+def cmd_mcp_serve(args: argparse.Namespace) -> None:
+    """Start the local MCP server from the release CLI executable."""
+
+    from mnemosyne import mcp_server
+
+    argv = _mcp_serve_argv(args)
+    if args.print_command:
+        print(json.dumps({"prog": "mneme-mcp", "argv": argv}, indent=2, sort_keys=True))
+        return
+    _mcp_serve_preflight(args.transport)
+    mcp_server.main(argv)
+
+
 def cmd_mcp_ops_check(args: argparse.Namespace) -> None:
     bundle = _load_mcp_ops_bundle(args)
     findings: list[dict[str, str]] = []
@@ -19565,6 +19652,63 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_ops_check.add_argument("--allow-localhost", action="store_true")
     mcp_ops_check.add_argument("--expected-fingerprint")
     mcp_ops_check.set_defaults(func=cmd_mcp_ops_check)
+
+    mcp_serve = sub.add_parser(
+        "mcp-serve",
+        help="Start the local MCP server using the same runtime as the mneme-mcp executable",
+    )
+    mcp_serve.add_argument(
+        "--transport",
+        choices=list(_MCP_SERVE_TRANSPORTS),
+        default=os.environ.get("MNEMOSYNE_MCP_SERVE_TRANSPORT", "stdio"),
+        help=(
+            "stdio (default, what MCP clients spawn), sdk-stdio, "
+            "streamable-http (localhost HTTP for the official SDK), or http (hosted JSON-RPC)"
+        ),
+    )
+    mcp_serve.add_argument(
+        "--host",
+        default=os.environ.get("MNEMOSYNE_MCP_HTTP_HOST", "127.0.0.1"),
+        help="Bind address for the HTTP transports",
+    )
+    mcp_serve.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("MNEMOSYNE_MCP_HTTP_PORT", "8765")),
+        help="Bind port for the HTTP transports",
+    )
+    mcp_serve.add_argument("--path", default="/mcp", help="JSON-RPC endpoint path for the HTTP transports")
+    mcp_serve.add_argument("--health-path", default="/healthz", help="Liveness endpoint path for the HTTP transports")
+    mcp_serve.add_argument(
+        "--stateful-sessions",
+        action="store_true",
+        help="Use stateful StreamableHTTP sessions instead of stateless per-request transports",
+    )
+    mcp_serve.add_argument(
+        "--auth-token",
+        help="Require this bearer token for tools/call; prefer MNEMOSYNE_MCP_TOKEN, which the server reads itself",
+    )
+    mcp_serve.add_argument(
+        "--require-session",
+        action="store_true",
+        help="Require a valid signed session token on tools/call",
+    )
+    mcp_serve.add_argument("--self-test", action="store_true", help="Run MCP deployment validation checks and exit")
+    mcp_serve.add_argument(
+        "--print-command",
+        action="store_true",
+        help="Print the mneme-mcp argv this would run, as JSON, and exit without serving",
+    )
+    mcp_serve.add_argument(
+        "--mcp-arg",
+        action="append",
+        default=[],
+        help=(
+            "Extra raw mneme-mcp argument to forward verbatim; repeatable. "
+            "Values that start with a dash need the equals form: --mcp-arg=--queue-tenant"
+        ),
+    )
+    mcp_serve.set_defaults(func=cmd_mcp_serve)
 
     worker_ops_check = sub.add_parser("worker-ops-check")
     worker_ops_check.add_argument("--bundle", help="Path to production worker deployment evidence bundle")
