@@ -1491,6 +1491,28 @@ The following packages are complete source history, not runnable work:
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
+- PR #208: owner-directed maintenance outside the GoalEx lease sweep:
+  Windows MAX_PATH-safe `ParametricArtifactStore` writes, the POSIX-only
+  infra-tooling suites skipped on Windows through `pytest.importorskip`,
+  an optional `resource` import in the provider bake-off, and the
+  `jsonschema` development dependency the scheduled Public regression job
+  needs (its `--group dev` sync stopped run `36445311486` at collection).
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `pyproject.toml`,
+  `uv.lock`,
+  `src/mnemosyne/parametric.py`,
+  `eval/provider_bakeoff/run.py`,
+  `tests/test_runtime_exclusive_lock.py`,
+  `tests/test_production_evidence_preflight.py`,
+  `tests/test_production_mcp_client_cert_rotator.py`,
+  `tests/test_production_blackbox_probe.py`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #208 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.

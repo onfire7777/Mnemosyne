@@ -3,13 +3,15 @@ from __future__ import annotations
 import base64
 import json
 import os
-import pwd
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 import pytest
+
+# The probe is POSIX shell run with a passwd-database HOME.
+pwd = pytest.importorskip("pwd", reason="the blackbox probe script targets POSIX hosts")
 
 
 REPO = Path(__file__).resolve().parents[1]
