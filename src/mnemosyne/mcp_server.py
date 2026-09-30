@@ -895,8 +895,15 @@ def build_sdk_server(**kwargs: Any) -> Any:
                 raw_arguments = facade.prepare_tool_arguments(name, auth_params, raw_arguments)
             except Exception as exc:  # noqa: BLE001 - SDK tool calls report failures as tool results.
                 return _sdk_tool_error(types, str(exc))
+            # The bound session identity is an internal keyword the published
+            # schema never lists: validate the public view, exactly as handle()
+            # does, or every signed call to a session_identity tool is refused
+            # as an unexpected property.
+            public_arguments = {
+                key: value for key, value in raw_arguments.items() if key != "session_identity"
+            }
             try:
-                _validate_tool_arguments(name, raw_arguments, schemas_by_name)
+                _validate_tool_arguments(name, public_arguments, schemas_by_name)
             except ValueError as exc:
                 return _sdk_tool_error(types, str(exc))
             try:
