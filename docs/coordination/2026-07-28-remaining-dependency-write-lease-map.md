@@ -1523,7 +1523,13 @@ The following packages are complete source history, not runnable work:
   handlers raising instead of returning a structured error on empty or
   absent scope. Adds the access-policy checks the scope-sensitive tools
   lacked, consistent protocol-level method errors, and `python -m
-  mnemosyne` through a new `__main__.py`.
+  mnemosyne` through a new `__main__.py`. Two further findings from
+  driving the SDK transport with signed sessions: the SDK adapter
+  validated the bound `session_identity` against the published schema
+  and so refused every signed call to a `session_identity` tool (B15),
+  and working memory had no kind for a turn of conversation (B16) -
+  `conversation_turn` joins the kind set on all three backends, pinned
+  identical by test.
   It is **OPEN/READY** and adds this structured self-record in this map.
   Exclusive File Set:
   `src/mnemosyne/mcp_tools.py`,
@@ -1531,6 +1537,9 @@ The following packages are complete source history, not runnable work:
   `src/mnemosyne/security.py`,
   `src/mnemosyne/cli.py`,
   `src/mnemosyne/__main__.py`,
+  `src/mnemosyne/engine.py`,
+  `src/mnemosyne/sqlite_engine.py`,
+  `src/mnemosyne/postgres_engine.py`,
   `tests/test_mcp_validation_regressions.py`,
   `tests/test_cli_mcp_serve.py`,
   `tests/test_access_policy_enforcement.py`,
