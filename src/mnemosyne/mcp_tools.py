@@ -225,7 +225,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "capture",
-        "description": "Append verbatim evidence to the content-addressed ledger. Returns created=true for a new record and idempotent=true when the cid was already present. tenant_id must not be empty.",
+        "description": "Append verbatim evidence to the content-addressed ledger. created=true only when this call inserted a live row; idempotent=true only when that live row was already present. A blocked erased replay or a deferred write sets both to false. tenant_id must not be empty.",
         "arguments": ["tenant_id", "user_id", "actor", "source_type", "content"],
     },
     {
@@ -750,10 +750,11 @@ class MemoryTools:
             trust_tier=trust_tier,
             access_policy={"tenant": tenant_id},
         )
-        # `append_evidence` is a content-addressed upsert, so it cannot itself say
-        # whether it stored anything. Derive the cid the same way the engine does
-        # and probe for it first, so the caller can tell a new record from a
-        # duplicate instead of always reading `idempotent: true`.
+        # `append_evidence` returns a cid even when it stores nothing. An
+        # erased-replay block and a self-generation budget deferral both hand
+        # back the expected cid and leave no live row; `get_evidence` hides
+        # tombstones, so a pre-write miss plus cid equality is not creation.
+        # Creation is a live row that this call inserted.
         expected_cid = evidence_cid(
             evidence.content,
             tenant_id=evidence.tenant_id,
@@ -765,8 +766,11 @@ class MemoryTools:
         )
         existed_before = self.engine.get_evidence(tenant_id, expected_cid, branch) is not None
         cid = self.engine.append_evidence(evidence, branch=branch)
-        created = not existed_before and cid == expected_cid
-        return {"cid": cid, "branch": branch, "created": created, "idempotent": not created}
+        stored = self.engine.get_evidence(tenant_id, cid, branch) is not None
+        same_cid = cid == expected_cid
+        created = not existed_before and stored and same_cid
+        idempotent = existed_before and stored and same_cid
+        return {"cid": cid, "branch": branch, "created": created, "idempotent": idempotent}
 
     def ingest(
         self,
@@ -1675,9 +1679,15 @@ class MemoryTools:
         )
         per_branch: dict[str, dict[str, Any]] = {}
         erased_branches: list[str] = []
+        # Pointers belonging to copies that were live before this call. A shared
+        # external object is shredded only after every one of those copies has
+        # been approved; shredding on the first success would delete bytes a
+        # later branch can still refuse to erase (min_corroboration_for_delete).
+        live_pointers: dict[str, str | None] = {}
         for target in targets:
             evidence = self.engine.get_evidence(tenant_id, cid, target)
-            content_pointer = evidence.content_pointer if evidence else None
+            if evidence is not None:
+                live_pointers[target] = evidence.content_pointer
             outcome = self.engine.forget(
                 tenant_id=tenant_id,
                 cid=cid,
@@ -1685,13 +1695,23 @@ class MemoryTools:
                 requested_by=requested_by,
                 erasure_mode=mode,
             )
-            if outcome.get("erased") and mode is ErasureMode.HARD_DELETE_LEGAL and content_pointer:
-                outcome["object_shred"] = self.ingestion.object_store.shred(
-                    content_pointer, tenant_id=tenant_id
-                )
             if outcome.get("erased"):
                 erased_branches.append(target)
             per_branch[target] = outcome
+        if (
+            mode is ErasureMode.HARD_DELETE_LEGAL
+            and live_pointers
+            and all(per_branch[name].get("erased") for name in live_pointers)
+        ):
+            shred_reports: dict[str, Any] = {}
+            for name, pointer in live_pointers.items():
+                if not pointer:
+                    continue
+                report = shred_reports.get(pointer)
+                if report is None:
+                    report = self.ingestion.object_store.shred(pointer, tenant_id=tenant_id)
+                    shred_reports[pointer] = report
+                per_branch[name]["object_shred"] = report
         primary = per_branch[branch]
         if erased_branches and not primary.get("erased"):
             # The requested branch held no live copy but another branch did, so the
