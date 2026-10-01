@@ -1807,7 +1807,18 @@ class MemoryTools:
         else:
             result = dict(primary)
         result["erased"] = bool(erased_branches)
-        if erased_branches:
+        # A profile entry belongs to the tenant, not to a branch, so it stands
+        # for as long as ANY branch still holds the record it was built on: a
+        # single-branch forget, or one a branch refused, leaves the evidence
+        # readable there and the entry supported.
+        still_holding = [
+            name
+            for name in self._branches_holding_evidence(tenant_id, cid, branch)
+            if self.engine.get_evidence(tenant_id, cid, name) is not None
+        ]
+        if still_holding:
+            result["branches_still_holding"] = still_holding
+        if erased_branches and not still_holding:
             # Erasure propagates to what was built on the erased words: a profile
             # entry citing this record is retracted, its statement blanked, and
             # the report says so.
