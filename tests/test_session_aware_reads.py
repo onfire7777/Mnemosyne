@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -246,6 +247,38 @@ def test_a_turn_held_in_both_planes_comes_back_once(engine_bundle: tuple[Any, st
     assert cobalt[0]["metadata"]["working_session_id"] == SESSION
     assert "working_memory" in cobalt[0]["channel"].split("+")
     assert result["explain"]["working_memory"]["collapsed_count"] >= 1
+
+
+def test_a_session_search_is_never_served_from_the_result_cache(
+    engine_bundle: tuple[Any, str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MNEMOSYNE_RETRIEVAL_RESULT_CACHE_SIZE", "8")
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    identity, cids = _seed_conversation(tools, tenant, user)
+    ask = {
+        "tenant_id": tenant, "query": "what is the budget for the paddle", "user_id": user, "role": "agent",
+        "session_id": SESSION, "session_identity": identity,
+    }
+
+    before = tools.search(**ask)
+    assert "retrieval_result_cache" not in before["explain"]
+    assert "ninety dollars" not in _texts(before)
+
+    # Seeded after the first answer, and gone two seconds later - by the clock alone.
+    tools.working_seed(
+        **_scope(tenant, user, identity),
+        kind="intermediate_conclusion",
+        content="Notes: the budget for the paddle is ninety dollars.",
+        evidence_ids=[cids[1]],
+        ttl_seconds=2,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    assert "ninety dollars" in _texts(tools.search(**ask))
+    time.sleep(2.2)
+    after = tools.search(**ask)
+    assert "ninety dollars" not in _texts(after)
+    assert "retrieval_result_cache" not in after["explain"]
 
 
 def test_session_search_is_refused_without_proof_of_that_session(engine_bundle: tuple[Any, str, str]) -> None:

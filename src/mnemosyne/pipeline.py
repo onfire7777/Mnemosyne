@@ -204,6 +204,15 @@ def _result_cache_key(
 ) -> tuple[Any, ...] | None:
     if retrieval_result_cache_size() <= 0 or deep or workspace_broadcast.get("applied"):
         return None
+    if _working_route_requested(effective_filter) and not any(
+        parse_dt(effective_filter.get(name)) for name in ("as_of", "evaluated_at", "working_evaluated_at")
+    ):
+        # A session read that names no instant is evaluated at the clock, and
+        # an item leaves working memory when its TTL runs out without anything
+        # in the store changing. Cached, the answer would keep serving the item
+        # after it expired. A read that names its instant carries it in the
+        # filter, so in the key, and is cached as before.
+        return None
     token = _engine_result_cache_token(
         ops,
         tenant_id=tenant_id,
