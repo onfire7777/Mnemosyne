@@ -45,8 +45,9 @@ from mnemosyne.pipeline import (
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.postgres_engine import PostgresEngine
 from mnemosyne.security import SessionIdentity, SessionTokenVerifier
+from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.sqlite_engine import SqliteEngine
-from mnemosyne.user_model import ERASED_STATEMENT
+from mnemosyne.user_model import ERASED_STATEMENT, UserMemoryKind, UserModel, UserModelEntry
 
 SESSION = "voice"
 AGENT = "burnos"
@@ -300,6 +301,8 @@ def test_same_words_is_about_the_line_not_its_labels() -> None:
     assert _same_words("user: yes", "[2026-10-01 09:00:00] User: yes")
     assert not _same_words(NOTE, "Session turn number 0: the harness said the word amber.")
     assert not _same_words("", "anything")
+    # A shorter line is a different memory, even when every token of it sits inside the longer one.
+    assert not _same_words("4411", "the old gate code is 4411")
 
 
 def test_collapse_keeps_a_working_item_that_says_something_else() -> None:
@@ -672,6 +675,99 @@ def test_forget_retracts_the_profile_entry_built_on_the_erased_line(tmp_path: Pa
     # A forget that touches no profile entry reports as it always did.
     unrelated = tools.capture("t", "u", "user", "conversation", "The wall is green.")
     assert "profile_entries" not in (tools.forget("t", unrelated["cid"]).get("propagated") or {})
+
+
+def test_forget_retracts_corrections_that_depend_on_the_erased_evidence(tmp_path: Path) -> None:
+    """A correction cites the entry it replaced; erasure must still reach the live one."""
+
+    state_path = tmp_path / "runtime.json"
+    tools = MemoryTools(
+        LocalMemoryEngine(store_path=tmp_path / "store.json"),
+        runtime_state=RuntimeState(state_path),
+    )
+    line = tools.capture("t", "u", "user", "conversation", "From now on, always call me Captain.")
+    built = tools.profile_record_explicit(
+        "t", "u", "Wants to be called Captain.", source_evidence_cids=[line["cid"]]
+    )
+    once = tools.profile_correct("t", "u", built["id"], "Wants to be called Skipper.")
+    twice = tools.profile_correct("t", "u", once["id"], "Wants to be called Chief.")
+
+    active = tools.user_model.entries[twice["id"]]
+    assert line["cid"] in active.source_evidence_cids
+    assert built["id"] not in active.source_evidence_cids
+
+    forgotten = tools.forget("t", line["cid"])
+
+    assert forgotten["erased"] is True
+    assert _statements(tools, "t", "u") == []
+    for entry_id in (built["id"], once["id"], twice["id"]):
+        entry = tools.user_model.entries[entry_id]
+        assert entry.status != "active"
+        assert entry.statement == ERASED_STATEMENT
+    reloaded = MemoryTools(LocalMemoryEngine(), runtime_state=RuntimeState(state_path))
+    assert _statements(reloaded, "t", "u") == []
+    assert reloaded.user_model.entries[twice["id"]].statement == ERASED_STATEMENT
+
+
+def test_retract_citing_follows_profile_entry_lineage() -> None:
+    model = UserModel()
+    original = UserModelEntry(
+        tenant_id="t", user_id="u", kind=UserMemoryKind.EXPLICIT_PREFERENCE,
+        statement="Call me Captain.", source_evidence_cids=["evidence-1"], status="superseded",
+    )
+    corrected = UserModelEntry(
+        tenant_id="t", user_id="u", kind=UserMemoryKind.EXPLICIT_PREFERENCE,
+        statement="Call me Skipper.", source_evidence_cids=[original.id],
+    )
+    again = UserModelEntry(
+        tenant_id="t", user_id="u", kind=UserMemoryKind.EXPLICIT_PREFERENCE,
+        statement="Call me Chief.", source_evidence_cids=[corrected.id],
+    )
+    for entry in (original, corrected, again):
+        model.entries[entry.id] = entry
+
+    retracted = model.retract_citing("t", "evidence-1")
+
+    assert set(retracted) == {original.id, corrected.id, again.id}
+    assert _no_active_forgotten_text(model)
+
+
+def test_closed_entry_blanking_is_persisted(tmp_path: Path) -> None:
+    state_path = tmp_path / "runtime.json"
+    tools = MemoryTools(
+        LocalMemoryEngine(store_path=tmp_path / "store.json"),
+        runtime_state=RuntimeState(state_path),
+    )
+    line = tools.capture("t", "u", "user", "conversation", "From now on, always call me Captain.")
+    built = tools.profile_record_explicit(
+        "t", "u", "Wants to be called Captain.", source_evidence_cids=[line["cid"]]
+    )
+    tools.profile_retire("t", "u", built["id"])
+
+    forgotten = tools.forget("t", line["cid"])
+
+    assert built["id"] in forgotten["retracted_profile_entries"]
+    reloaded = MemoryTools(LocalMemoryEngine(), runtime_state=RuntimeState(state_path))
+    assert reloaded.user_model.entries[built["id"]].statement == ERASED_STATEMENT
+
+
+def test_profile_correct_rejects_an_entry_that_is_not_active() -> None:
+    tools = MemoryTools(LocalMemoryEngine())
+    old = tools.profile_record_explicit("t", "u", "Prefers temperatures in Celsius.")
+    tools.profile_retire("t", "u", old["id"])
+
+    with pytest.raises(ValueError, match="not active"):
+        tools.profile_correct("t", "u", old["id"], "Prefers temperatures in Fahrenheit.")
+
+    assert _statements(tools, "t", "u") == []
+    assert tools.user_model.entries[old["id"]].statement == "Prefers temperatures in Celsius."
+
+
+def _no_active_forgotten_text(model: UserModel) -> bool:
+    return all(
+        entry.status != "active" and entry.statement == ERASED_STATEMENT
+        for entry in model.entries.values()
+    )
 
 
 def test_a_stated_entry_is_not_retired_by_another_statement_that_merely_differs() -> None:

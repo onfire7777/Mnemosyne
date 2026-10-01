@@ -425,15 +425,16 @@ def _turn_body(text: str) -> str:
 
 
 def _same_words(first: str, second: str) -> bool:
+    """True when two stored lines are the same text once labels are stripped.
+
+    A fragment is a different memory: ``4411`` is not the line
+    ``the old gate code is 4411``.
+    """
+
     body_a, body_b = _turn_body(first), _turn_body(second)
     if not body_a or not body_b:
         return False
-    if body_a.casefold() == body_b.casefold():
-        return True
-    words_a, words_b = frozenset(tokenize(body_a)), frozenset(tokenize(body_b))
-    if not words_a or not words_b:
-        return False
-    return words_a <= words_b or words_b <= words_a
+    return body_a.casefold() == body_b.casefold()
 
 
 def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
