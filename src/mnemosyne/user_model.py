@@ -34,6 +34,19 @@ AUTHORITY_ORDER = {
 ERASED_STATEMENT = "[retracted: the evidence this was built on was erased]"
 
 
+def correction_kind(kind: UserMemoryKind) -> UserMemoryKind:
+    """The kind of the entry that replaces a corrected one.
+
+    A correction is the user stating the thing outright, so the replacement is
+    an explicit preference - unless what it replaces outranks one. A corrected
+    instruction is still an instruction and a corrected identity still an
+    identity: correcting an entry never lowers its authority.
+    """
+
+    explicit = UserMemoryKind.EXPLICIT_PREFERENCE
+    return kind if AUTHORITY_ORDER[kind] > AUTHORITY_ORDER[explicit] else explicit
+
+
 @dataclass(slots=True)
 class UserModelEntry:
     tenant_id: str

@@ -46,7 +46,7 @@ from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier, WriteRole
 from mnemosyne.source_truth import apply_markdown_git_source
 from mnemosyne.text import tokenize
-from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry
+from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry, correction_kind
 
 
 def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
@@ -408,12 +408,12 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "profile_correct",
-        "description": "Record an explicit profile correction. The entry named by id is superseded by the corrected statement and no longer appears in profile_context; weaker inferred entries that differ are superseded too. id must name an existing entry in this tenant/user scope.",
+        "description": "Record an explicit profile correction. The entry named by id is superseded by the corrected statement and no longer appears in profile_context; weaker inferred entries that differ are superseded too. id must name an active entry in this tenant/user scope. The correction keeps that entry's scope unless context is given, and is an explicit preference unless it replaces an instruction or an identity, which stay what they are. The caller's own role and trust decide (bound from a signed session token when one is sent), and correcting a hard instruction needs the authority to give one.",
         "arguments": ["tenant_id", "user_id", "id", "statement"],
     },
     {
         "name": "profile_retire",
-        "description": "Take a profile entry back: it stops being active and no longer appears in profile_context. The record is kept, marked retracted. An unknown id, or one from another tenant or user, is an error.",
+        "description": "Take a profile entry back: it stops being active and no longer appears in profile_context. The record is kept, marked retracted. An unknown id, or one from another tenant or user, is an error. The caller's own role and trust decide (bound from a signed session token when one is sent), and taking back a hard instruction needs the authority to give one.",
         "arguments": ["tenant_id", "user_id", "id"],
     },
     {
@@ -2053,6 +2053,47 @@ class MemoryTools:
             source_trust_tier=int(TrustTier.USER_AUTHORED),
         )
 
+    def _authorize_profile_change(
+        self,
+        operation: str,
+        kind: UserMemoryKind,
+        *,
+        role: WriteRole,
+        source_trust_tier: int | None,
+    ) -> dict[str, Any]:
+        """Authorize replacing or taking back a profile entry of one kind.
+
+        The sink follows the entry, exactly as it does when one is added: a
+        hard instruction is policy and needs the authority policy needs, a
+        preference is a preference, anything else is an ordinary write. Closing
+        an entry takes the authority that creating one of its kind takes -
+        otherwise an agent could take back the instruction it may not give.
+        """
+
+        if kind is UserMemoryKind.HARD_INSTRUCTION:
+            return self._authorize(
+                operation,
+                role=role,
+                source_trust_tier=source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED),
+                target_sink="policy",
+            )
+        if kind in {
+            UserMemoryKind.EXPLICIT_PREFERENCE,
+            UserMemoryKind.INFERRED_PREFERENCE,
+            UserMemoryKind.SITUATIONAL_PREFERENCE,
+        }:
+            return self._authorize(
+                operation,
+                role=role,
+                source_trust_tier=source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED),
+                target_sink="preference",
+            )
+        return self._authorize(
+            operation,
+            role=role,
+            source_trust_tier=source_trust_tier if source_trust_tier is not None else int(TrustTier.NORMAL),
+        )
+
     def profile_correct(
         self,
         tenant_id: str,
@@ -2061,54 +2102,95 @@ class MemoryTools:
         statement: str,
         context: dict[str, Any] | None = None,
         confidence: float = 0.95,
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
         """Correct an active profile entry.
 
         ``id`` must name an active entry in this tenant/user scope. The new
         entry keeps the evidence CIDs the old one was built on, so erasing
-        that evidence retracts the correction too. A closed entry is refused:
+        that evidence retracts the correction too, and it keeps the old
+        entry's scope unless ``context`` is given. It is what the user stated
+        outright - an explicit preference - unless the entry it replaces
+        outranks one: a corrected instruction is still an instruction, a
+        corrected identity still an identity. A closed entry is refused:
         correcting it would put a retired value back into the live profile.
+
+        The caller's own authority decides. With a signed session the transport
+        binds ``role`` and ``source_trust_tier`` from the token, so a read-only
+        principal cannot write, and replacing an entry takes the authority its
+        kind demands: an agent cannot correct away a hard instruction.
         """
 
+        trust = source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED)
+        # A writer at all, before the id is looked at: a refused caller learns
+        # nothing about which ids exist.
+        self._authorize("profile_correct", role=role, source_trust_tier=trust)
         prior = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
         if prior.status != "active":
             raise ValueError("profile entry is not active")
-        result = self.profile_record_explicit(
+        self._authorize_profile_change(
+            "profile_correct", prior.kind, role=role, source_trust_tier=source_trust_tier
+        )
+        result = self.profile_add(
             tenant_id=tenant_id,
             user_id=user_id,
+            # What the user states outright - and never less than it replaces.
+            kind=correction_kind(prior.kind).value,
             statement=statement,
-            scope=context,
+            # Corrected without a context, the statement stays where it applied:
+            # an empty scope would make a project's preference a global one.
+            scope=context if context is not None else dict(prior.scope),
             confidence=confidence,
             source_evidence_cids=self.user_model.originating_evidence_cids(prior),
+            role=role,
+            source_trust_tier=trust,
         )
         # The entry being corrected is replaced, whatever its authority: two
         # explicit preferences used to stay active side by side, the old value
         # and the new, because only a WEAKER entry was ever superseded.
         corrected_at = self.user_model.entries[result["id"]].valid_from
-        superseded = self.user_model.close_entry(
+        if self.user_model.close_entry(
             id, tenant_id=tenant_id, user_id=user_id, status="superseded", at=corrected_at
-        )
-        if superseded:
+        ):
             self._save_user_model()
         result["corrects"] = id
-        result["superseded"] = superseded
+        # True however it was closed: an inference already yields to the
+        # statement that replaces it the moment that statement is added.
+        result["superseded"] = prior.status == "superseded"
         return result
 
-    def profile_retire(self, tenant_id: str, user_id: str, id: str) -> dict[str, Any]:
+    def profile_retire(
+        self,
+        tenant_id: str,
+        user_id: str,
+        id: str,
+        role: WriteRole = "agent",
+        source_trust_tier: int | None = None,
+    ) -> dict[str, Any]:
         """Take a profile entry back.
 
         The entry stops being active and leaves ``profile_context``; the record
         is kept, marked ``retracted``, so the history says it was once held.
-        It carries the authority of the user stating a preference - this is the
-        user saying 'forget that'. An id that is unknown, or that belongs to
-        another tenant or user, is an error.
+        An id that is unknown, or that belongs to another tenant or user, is an
+        error.
+
+        The caller's own authority decides. With a signed session the transport
+        binds ``role`` and ``source_trust_tier`` from the token, so a read-only
+        principal cannot write; and the sink follows the entry's kind, so a
+        hard instruction can only be taken back by whoever may give one.
         """
 
-        decision = self._authorize(
+        # A writer at all, before the id is looked at: a refused caller learns
+        # nothing about which ids exist.
+        self._authorize(
             "profile_retire",
-            role="agent",
-            source_trust_tier=int(TrustTier.USER_AUTHORED),
-            target_sink="preference",
+            role=role,
+            source_trust_tier=source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED),
+        )
+        entry = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
+        decision = self._authorize_profile_change(
+            "profile_retire", entry.kind, role=role, source_trust_tier=source_trust_tier
         )
         retired = self.user_model.close_entry(
             id, tenant_id=tenant_id, user_id=user_id, status="retracted"
