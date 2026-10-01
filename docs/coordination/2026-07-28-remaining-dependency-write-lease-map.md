@@ -1570,6 +1570,9 @@ The following packages are complete source history, not runnable work:
   Exclusive File Set:
   `src/mnemosyne/pipeline.py`,
   `src/mnemosyne/engine.py`,
+  `src/mnemosyne/sqlite_engine.py`,
+  `src/mnemosyne/postgres_engine.py`,
+  `src/mnemosyne/models.py`,
   `src/mnemosyne/mcp_tools.py`,
   `src/mnemosyne/mcp_server.py`,
   `src/mnemosyne/buildinfo.py`,
