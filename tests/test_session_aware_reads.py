@@ -31,7 +31,7 @@ from uuid import uuid4
 
 import pytest
 
-from mnemosyne import buildinfo
+from mnemosyne import buildinfo, pipeline
 from mnemosyne.engine import LocalMemoryEngine, select_working_items
 from mnemosyne.mcp_server import MnemosyneMcpServer, build_sdk_server
 from mnemosyne.mcp_tools import MemoryTools
@@ -39,8 +39,10 @@ from mnemosyne.models import Hit
 from mnemosyne.pipeline import (
     LEAN_HIT_DIAGNOSTIC_KEYS,
     _collapse_session_duplicates,
+    _requested_max_trust_tier,
     _same_words,
     _stamp_hit_origin,
+    _working_memory_route,
     lean_retrieval_payload,
     requested_token_budget,
 )
@@ -1088,3 +1090,81 @@ def test_a_stated_entry_is_not_retired_by_another_statement_that_merely_differs(
     assert set(_statements(tools, "t", "u")) == {"Their name is Jordan.", "Prefers temperatures in Celsius."}
     # An inference still yields to a higher-authority statement in its scope.
     assert tools.user_model.entries[guess["id"]].status == "superseded"
+
+
+def test_a_session_search_applies_the_trust_ceiling_the_caller_asked_for() -> None:
+    """The working route reads the requested ceiling as the durable channels read it.
+
+    ``max_trust_tier`` is the ceiling, ``min_trust_tier`` its legacy alias, and
+    the policy ceiling stands only when neither was named. Passing the policy
+    default down let a working item of lower trust quality than the search
+    allowed into the one ranked list, and from there into confidence and
+    duplicate fusion.
+    """
+
+    policy = OperatingPolicy()
+    assert _requested_max_trust_tier({}, policy) == policy.max_trust_tier
+    assert _requested_max_trust_tier({"max_trust_tier": 1}, policy) == 1
+    assert _requested_max_trust_tier({"min_trust_tier": 2}, policy) == 2
+    assert _requested_max_trust_tier({"min_trust_tier": 4, "max_trust_tier": 1}, policy) == 1
+    # Nothing usable in the filter: the policy ceiling stands, and nothing raises.
+    assert _requested_max_trust_tier({"max_trust_tier": None}, policy) == policy.max_trust_tier
+    assert _requested_max_trust_tier({"max_trust_tier": "tier one"}, policy) == policy.max_trust_tier
+
+    seen: list[int] = []
+
+    def recording(items: Any, **kwargs: Any) -> list[Hit]:
+        seen.append(kwargs["max_trust_tier"])
+        return []
+
+    ops = SimpleNamespace(list_working=lambda tenant_id, session_id, as_of=None: [])
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(pipeline, "working_memory_route_hits", recording)
+        for filt, wanted in (
+            ({"session_id": SESSION}, policy.max_trust_tier),
+            ({"session_id": SESSION, "max_trust_tier": 1}, 1),
+            ({"session_id": SESSION, "min_trust_tier": 2}, 2),
+        ):
+            _, report = _working_memory_route(
+                ops,
+                query=KAYAK,
+                tenant_id="t",
+                branch="main",
+                k=5,
+                effective_filter=dict(filt),
+                policy=policy,
+                evaluated_at=datetime.now(UTC),
+            )
+            assert report["status"] == "applied"
+            assert seen[-1] == wanted
+
+
+def test_an_adapter_supplied_memory_type_does_not_survive_the_origin_stamp() -> None:
+    """``memory_type`` is this store saying which plane a hit is from, not the adapter.
+
+    A command retriever can return any metadata it likes, ``memory_type:
+    working`` on a durable record included. A client that tells volatile
+    session data from durable records by that field would be misled, so the
+    stamp assigns the plane from the kind of the hit every time.
+    """
+
+    def hit(kind: str, claimed: str) -> Hit:
+        return Hit(
+            id="outside-" + kind, kind=kind, tenant_id="t", branch="main",
+            text="from an outside index", score=0.2, channel="command",
+            provenance=["outside-" + kind],
+            metadata={"memory_type": claimed, "created_at": "2026-10-01T09:00:00+00:00"},
+        )
+
+    evidence = hit("evidence", "working")
+    assertion = hit("assertion", "fact")
+    ops = SimpleNamespace(evidence_created_at=lambda tenant_id, cid, branch: None)
+
+    _stamp_hit_origin(ops, [evidence, assertion], tenant_id="t", branch="main")
+
+    assert evidence.metadata["memory_type"] == "evidence"
+    assert assertion.metadata["memory_type"] == "assertion"
+    # A working hit still says working, which is its kind.
+    working = hit("working", "evidence")
+    _stamp_hit_origin(ops, [working], tenant_id="t", branch="main")
+    assert working.metadata["memory_type"] == "working"
