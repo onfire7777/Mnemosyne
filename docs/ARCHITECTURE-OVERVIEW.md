@@ -17,7 +17,7 @@
 > complete. Remaining ~18% = Tier-B *real-infrastructure operational evidence*, not code.
 
 - **Package:** `mnemosyne-memory` v0.1.0 · Python ≥3.12 · Apache-2.0
-- **Entry points:** `mneme` (CLI, 119 subcommands) · `mneme-mcp` (MCP server, 59 tools)
+- **Entry points:** `mneme` (CLI, 119 subcommands) · `mneme-mcp` (MCP server, 60 tools)
 - **Source:** ~71,822 lines across 73 `.py` files in `src/mnemosyne/` (including the `providers/` subpackage)
 - **Wiki:** [Home](https://github.com/onfire7777/Mnemosyne/wiki) ·
   [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) ·
@@ -38,7 +38,7 @@ flowchart TB
     subgraph mneme["Mnemosyne (single process, local-first)"]
         direction TB
         CLI["CLI · <b>mneme</b><br/>119 subcommands"]
-        MCP["MCP Server · <b>mneme-mcp</b><br/>59 tools · 4 transports"]
+        MCP["MCP Server · <b>mneme-mcp</b><br/>60 tools · 4 transports"]
         ENGINE["<b>Memory Engine</b><br/>MemoryEngine Protocol<br/>Local ⟷ Postgres ⟷ Sqlite backend"]
         WORK["<b>Background Workers</b><br/>consolidation · lifecycle<br/>calibration · eval"]
         CLI --> ENGINE
@@ -78,7 +78,7 @@ flowchart TB
     subgraph IF["① Interface layer"]
         cli["cli.py · mneme CLI (119 cmds)"]
         mcps["mcp_server.py · 4 transports<br/>(stdio shim · SDK stdio · SDK<br/>StreamableHTTP · hosted HTTP)"]
-        mcpt["mcp_tools.py · 59 MCP tools facade"]
+        mcpt["mcp_tools.py · 60 MCP tools facade"]
     end
 
     subgraph CORE["② Engine core"]
@@ -762,7 +762,7 @@ capture handoff.
 
 ## 12. MCP transport surface
 
-`mneme-mcp` exposes the same 59 tools over **four** transports (plus a legacy SSE shim):
+`mneme-mcp` exposes the same 60 tools over **four** transports (plus a legacy SSE shim):
 
 | Transport | Flag | Endpoints | Notes |
 |---|---|---|---|
@@ -820,4 +820,4 @@ Mnemosyne session (header `X-Mnemosyne-Session-Token`); `--require-session` enfo
 
 *Generated from a structural read of `/Users/admin/Mnemosyne` @ `main`; reconciled to the merged W3
 prospective-/working-memory planes + W2 signed deletion manifest (PR #39 @ `0784340`). Counts computed from
-code: 119 CLI subcommands, 59 MCP tools, 28 schema tables.*
+code: 119 CLI subcommands, 60 MCP tools, 28 schema tables.*

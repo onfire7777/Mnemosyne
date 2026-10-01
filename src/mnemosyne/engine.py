@@ -890,6 +890,38 @@ _WORKING_MEMORY_KINDS = {
 }
 
 
+def select_working_items(
+    items: list[Any],
+    *,
+    kinds: list[str] | None = None,
+    limit: int | None = None,
+) -> list[Any]:
+    """Narrow an already scoped, newest-first list of working items.
+
+    ``kinds`` keeps only items of those kinds; ``limit`` keeps the first
+    ``limit`` of what is left, which are the newest because every backend's
+    ``list_working`` answers in the shared created-desc/id order. With neither,
+    the list comes back as it went in. Shared by every backend so the reading
+    rule cannot differ between them.
+    """
+
+    selected = list(items)
+    if kinds is not None:
+        if isinstance(kinds, (str, bytes)) or not isinstance(kinds, (list, tuple, set, frozenset)):
+            raise ValueError("kinds must be a list of working-memory kinds")
+        wanted: set[str] = set()
+        for kind in kinds:
+            if type(kind) is not str or kind not in _WORKING_MEMORY_KINDS:
+                raise ValueError(f"unsupported working-memory kind: {kind!r}")
+            wanted.add(kind)
+        selected = [item for item in selected if getattr(item, "kind", None) in wanted]
+    if limit is not None:
+        if type(limit) is not int or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        selected = selected[:limit]
+    return selected
+
+
 @dataclass(slots=True)
 class WorkingMemoryItem:
     """A bounded, data-only item in the local working-memory plane."""
