@@ -388,9 +388,11 @@ class MnemosyneMcpServer:
             return None
         try:
             if method == "initialize":
+                from mnemosyne.buildinfo import build_version
+
                 result = {
                     "protocolVersion": PROTOCOL_VERSION,
-                    "serverInfo": {"name": "mnemosyne-memory", "version": "0.1.0"},
+                    "serverInfo": {"name": "mnemosyne-memory", "version": build_version()},
                     "capabilities": {"tools": {}},
                 }
             elif method == "tools/list":
@@ -552,7 +554,9 @@ class MnemosyneMcpServer:
             if not identity.agent_id:
                 raise PermissionError("session agent identity required")
             self._bind_string_claim(arguments, "agent_id", identity.agent_id, "agent")
-        if "session_id" in parameter_names:
+        if "session_id" in parameter_names and not (
+            name in _SESSION_OPT_IN_TOOLS and arguments.get("session_id") in (None, "")
+        ):
             if not identity.session_id:
                 raise PermissionError("authenticated session has no session identifier")
             self._bind_string_claim(arguments, "session_id", identity.session_id, "session")
@@ -630,6 +634,12 @@ class MnemosyneMcpServer:
                 stdout.flush()
 
 
+#: Read tools on which ``session_id`` is an opt-in argument: a token proves the
+#: session when the caller names it, but is never read as a request for it. A
+#: signed search that does not name a session answers as it always has.
+_SESSION_OPT_IN_TOOLS = frozenset({"search", "deep_search"})
+
+
 @lru_cache(maxsize=1)
 def _argument_schema_patches() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, dict[str, Any]]]]:
     """Numeric bounds and item shapes published in the tool input schemas.
@@ -649,7 +659,39 @@ def _argument_schema_patches() -> tuple[dict[str, dict[str, Any]], dict[str, dic
         "min_trust_tier": {"minimum": int(TrustTier.DIRECT_USER), "maximum": int(TrustTier.UNTRUSTED_EXTERNAL)},
         "max_trust_tier": {"minimum": int(TrustTier.DIRECT_USER), "maximum": int(TrustTier.UNTRUSTED_EXTERNAL)},
     }
+    session_reads: dict[str, dict[str, Any]] = {
+        "session_id": {
+            "description": (
+                "Rank this session's live working memory together with long-term memory. "
+                "Honoured only on a call carrying a valid signed session_token for the same "
+                "session; refused otherwise."
+            )
+        },
+        "token_budget": {
+            "minimum": 1,
+            "description": (
+                "Fit the hits to this many tokens. A value above the policy budget (4096) "
+                "is clamped to it, not refused."
+            ),
+        },
+        "lean": {
+            "description": (
+                "Leave out the explain block and the per-hit diagnostics (standing, "
+                "standing_observability, reality_monitoring, retrieved_text, activation, "
+                "privacy, lifecycle)."
+            )
+        },
+    }
     by_tool: dict[str, dict[str, dict[str, Any]]] = {
+        "working_query": {
+            "limit": {
+                "minimum": 1,
+                "description": "Return only the newest `limit` items after the scope filter.",
+            },
+            "kinds": {"description": "Return only items whose kind is in this list."},
+        },
+        "search": session_reads,
+        "deep_search": session_reads,
         "graph_neighbors": {"k": {"minimum": 1}},
         "graph_query": {"k": {"minimum": 1}, "hops": {"minimum": 1}},
         "outcome_evaluate": {
@@ -869,7 +911,9 @@ def build_sdk_server(**kwargs: Any) -> Any:
     try:
         tool_specs = facade.tool_specs
         schemas_by_name = {item["name"]: item["inputSchema"] for item in tool_specs}
-        server = Server("mnemosyne-memory", version="0.1.0")
+        from mnemosyne.buildinfo import build_version
+
+        server = Server("mnemosyne-memory", version=build_version())
 
         @server.list_tools()
         async def list_tools() -> list[Any]:
@@ -979,9 +1023,12 @@ def build_sdk_streamable_http_app(
         streamable_app = StreamableHTTPASGIApp(session_manager)
 
         async def health(_request: Any) -> Any:
+            from mnemosyne.buildinfo import build_version
+
             return JSONResponse(
                 {
                     "ok": True,
+                    "build": build_version(),
                     "transport": "mcp-sdk-streamable-http",
                     "rpc_path": _normalize_http_path(streamable_http_path),
                     "stateless": bool(manager_stateless),
@@ -1197,11 +1244,14 @@ def build_http_server(
             if path != health_path:
                 self._send_json(404, {"ok": False, "error": "not found"})
                 return
+            from mnemosyne.buildinfo import build_version
+
             self._send_json(
                 200,
                 {
                     "ok": True,
                     "server": "mnemosyne-memory",
+                    "build": build_version(),
                     "protocolVersion": PROTOCOL_VERSION,
                     "transport": "http-json-rpc",
                     "rpc_path": rpc_path,

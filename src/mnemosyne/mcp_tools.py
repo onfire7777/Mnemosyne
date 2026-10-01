@@ -28,6 +28,7 @@ from mnemosyne.engine import (
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
     WorkingMemoryItem,
+    select_working_items,
 )
 from mnemosyne.ids import canonical_json, evidence_cid, new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
@@ -37,6 +38,7 @@ from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier, protected_suite_is_gating, protected_suite_report
+from mnemosyne.pipeline import lean_retrieval_payload
 from mnemosyne.postgres_engine import _stable_uuid as _postgres_stable_uuid
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
@@ -210,7 +212,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "working_query",
-        "description": "List live working-memory items in an explicit authenticated subject scope.",
+        "description": "List live working-memory items in an explicit authenticated subject scope, newest first. limit keeps only the newest `limit` items after the scope filter; kinds keeps only items of those kinds. With neither, every live item of the scope is returned.",
         "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "as_of"],
     },
     {
@@ -311,12 +313,12 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "search",
-        "description": "Fast hybrid retrieval with trust filtering, provenance, confidence, and abstention. Trust tiers are numeric and lower is MORE trusted (0 = direct user, 5 = untrusted external). min_trust_tier and max_trust_tier both name the least-trusted tier still admitted, and max_trust_tier is the one applied when both are given, so a contradictory pair (min above max) is refused rather than silently collapsed.",
+        "description": "Fast hybrid retrieval with trust filtering, provenance, confidence, and abstention. Trust tiers are numeric and lower is MORE trusted (0 = direct user, 5 = untrusted external). min_trust_tier and max_trust_tier both name the least-trusted tier still admitted, and max_trust_tier is the one applied when both are given, so a contradictory pair (min above max) is refused rather than silently collapsed. session_id (honoured only with a valid signed session_token for that session, refused otherwise) ranks that session's live working memory together with long-term memory in the one list, and a working item and the ledger record it cites come back as one hit. token_budget fits the hits to fewer tokens and is clamped, not refused, above the policy budget of 4096. lean leaves out the explain block and the per-hit diagnostics. Every hit's metadata says its memory_type and created_at.",
         "arguments": ["tenant_id", "query"],
     },
     {
         "name": "deep_search",
-        "description": "Expanded retrieval path with graph channel enabled when graph data exists.",
+        "description": "Expanded retrieval path with graph channel enabled when graph data exists. Takes session_id, token_budget and lean exactly as search does.",
         "arguments": ["tenant_id", "query"],
     },
     {
@@ -406,8 +408,13 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "profile_correct",
-        "description": "Record an explicit profile correction that supersedes weaker entries. id must name an existing entry in this tenant/user scope.",
+        "description": "Record an explicit profile correction. The entry named by id is superseded by the corrected statement and no longer appears in profile_context; weaker inferred entries that differ are superseded too. id must name an existing entry in this tenant/user scope.",
         "arguments": ["tenant_id", "user_id", "id", "statement"],
+    },
+    {
+        "name": "profile_retire",
+        "description": "Take a profile entry back: it stops being active and no longer appears in profile_context. The record is kept, marked retracted. An unknown id, or one from another tenant or user, is an error.",
+        "arguments": ["tenant_id", "user_id", "id"],
     },
     {
         "name": "profile_record_mistake",
@@ -635,16 +642,21 @@ class MemoryTools:
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, as_of: str | datetime,
         session_identity: SessionIdentity | None = None,
+        limit: int | None = None, kinds: list[str] | None = None,
     ) -> dict[str, Any]:
         self._authorize_working(
             session_identity, tenant_id=tenant_id, session_id=session_id,
             user_id=user_id, agent_id=agent_id,
         )
         clock = self._working_time(as_of, "as_of")
-        items = [
-            item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
-            if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
-        ]
+        items = select_working_items(
+            [
+                item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
+                if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+            ],
+            kinds=kinds,
+            limit=limit,
+        )
         return {"as_of": clock.isoformat(), "items": [item.to_dict() for item in items]}
 
     def working_promote(
@@ -1252,6 +1264,10 @@ class MemoryTools:
         region: str | None = None,
         break_glass: bool = False,
         lawful_basis: str | list[str] | None = None,
+        session_id: str | None = None,
+        token_budget: int | None = None,
+        lean: bool = False,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         filt = self._read_context(
             tenant_id,
@@ -1270,10 +1286,17 @@ class MemoryTools:
             filt["max_trust_tier"] = max_trust_tier
         elif min_trust_tier is not None:
             filt["min_trust_tier"] = min_trust_tier
+        self._session_read_scope(
+            filt, tenant_id=tenant_id, user_id=user_id,
+            session_id=session_id, session_identity=session_identity,
+        )
+        if token_budget is not None:
+            filt["token_budget"] = token_budget
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
-        self._record_retrieval(result.to_dict(), start)
-        return result.to_dict()
+        payload = result.to_dict()
+        self._record_retrieval(payload, start)
+        return lean_retrieval_payload(payload) if lean else payload
 
     def deep_search(
         self,
@@ -1289,6 +1312,10 @@ class MemoryTools:
         region: str | None = None,
         break_glass: bool = False,
         lawful_basis: str | list[str] | None = None,
+        session_id: str | None = None,
+        token_budget: int | None = None,
+        lean: bool = False,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         start = perf_counter()
         filt = self._read_context(
@@ -1303,9 +1330,16 @@ class MemoryTools:
             break_glass=break_glass,
             lawful_basis=lawful_basis,
         )
+        self._session_read_scope(
+            filt, tenant_id=tenant_id, user_id=user_id,
+            session_id=session_id, session_identity=session_identity,
+        )
+        if token_budget is not None:
+            filt["token_budget"] = token_budget
         result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
-        self._record_retrieval(result.to_dict(), start)
-        return result.to_dict()
+        payload = result.to_dict()
+        self._record_retrieval(payload, start)
+        return lean_retrieval_payload(payload) if lean else payload
 
     def explain(
         self,
@@ -1338,6 +1372,41 @@ class MemoryTools:
         result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
+
+    def _session_read_scope(
+        self,
+        filt: dict[str, Any],
+        *,
+        tenant_id: str,
+        user_id: str | None,
+        session_id: str | None,
+        session_identity: SessionIdentity | None,
+    ) -> None:
+        """Ask the engine's working-memory route for one session, on proof of that session.
+
+        Working memory is session-gated: no working item may reach a caller that
+        holds no valid signed token for its session. So ``session_id`` is
+        refused exactly as the working tools refuse - no verified identity, or
+        one for another tenant, user or session - and what is requested is
+        narrowed to the token's own user and agent. Without ``session_id``
+        nothing is asked for and the read is the long-term one it always was.
+        """
+
+        if session_id is None:
+            return
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError("session_id must be a non-empty string")
+        agent_id = session_identity.agent_id if isinstance(session_identity, SessionIdentity) else None
+        identity = self._authorize_working(
+            session_identity,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=str(user_id or ""),
+            agent_id=str(agent_id or ""),
+        )
+        filt["working_session_id"] = session_id
+        filt["working_user_id"] = identity.user_id
+        filt["working_agent_id"] = str(identity.agent_id)
 
     @staticmethod
     def _read_context(
@@ -1720,6 +1789,18 @@ class MemoryTools:
         else:
             result = dict(primary)
         result["erased"] = bool(erased_branches)
+        if erased_branches:
+            # Erasure propagates to what was built on the erased words: a profile
+            # entry citing this record is retracted, its statement blanked, and
+            # the report says so.
+            retracted = self.user_model.retract_citing(tenant_id, cid)
+            if retracted:
+                self._save_user_model()
+                existing = result.get("propagated")
+                propagated = dict(existing) if isinstance(existing, dict) else {}
+                propagated["profile_entries"] = len(retracted)
+                result["propagated"] = propagated
+                result["retracted_profile_entries"] = retracted
         result["branch"] = branch
         result["branches_searched"] = list(targets)
         result["branches_erased"] = erased_branches
@@ -1986,9 +2067,7 @@ class MemoryTools:
         unknown id is now an error.
         """
 
-        entry = self.user_model.entries.get(id)
-        if entry is None or entry.tenant_id != tenant_id or entry.user_id != user_id:
-            raise ValueError(f"profile entry not found in this tenant/user scope: {id}")
+        self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
         result = self.profile_record_explicit(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1997,8 +2076,48 @@ class MemoryTools:
             confidence=confidence,
             source_evidence_cids=[id],
         )
+        # The entry being corrected is replaced, whatever its authority: two
+        # explicit preferences used to stay active side by side, the old value
+        # and the new, because only a WEAKER entry was ever superseded.
+        corrected_at = self.user_model.entries[result["id"]].valid_from
+        superseded = self.user_model.close_entry(
+            id, tenant_id=tenant_id, user_id=user_id, status="superseded", at=corrected_at
+        )
+        if superseded:
+            self._save_user_model()
         result["corrects"] = id
+        result["superseded"] = superseded
         return result
+
+    def profile_retire(self, tenant_id: str, user_id: str, id: str) -> dict[str, Any]:
+        """Take a profile entry back.
+
+        The entry stops being active and leaves ``profile_context``; the record
+        is kept, marked ``retracted``, so the history says it was once held.
+        It carries the authority of the user stating a preference - this is the
+        user saying 'forget that'. An id that is unknown, or that belongs to
+        another tenant or user, is an error.
+        """
+
+        decision = self._authorize(
+            "profile_retire",
+            role="agent",
+            source_trust_tier=int(TrustTier.USER_AUTHORED),
+            target_sink="preference",
+        )
+        retired = self.user_model.close_entry(
+            id, tenant_id=tenant_id, user_id=user_id, status="retracted"
+        )
+        if retired:
+            self._save_user_model()
+        return {
+            "id": id,
+            "retired": retired,
+            "status": self.user_model.entries[id].status,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "security": decision,
+        }
 
     def profile_record_mistake(
         self,

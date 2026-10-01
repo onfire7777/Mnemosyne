@@ -3894,9 +3894,15 @@ def test_shared_engine_contract_memory_tools_profile_graph_learning_facades(
     assert recorded["security"]["allowed"] is True
     assert inferred["security"]["allowed"] is True
     assert corrected["corrects"] == recorded["id"]
-    assert authoritative_by_id[recorded["id"]]["kind"] == "explicit_preference"
-    assert authoritative_by_id[recorded["id"]]["statement"] == "Prefer shared facade regression tests."
-    assert authoritative_by_id[recorded["id"]]["scope"] == {"surface": "shared-mcp-tools"}
+    # The entry a correction replaces is superseded, not kept beside its
+    # replacement: both used to be returned as authoritative.
+    assert recorded["id"] not in authoritative_by_id
+    assert corrected["superseded"] is True
+    replaced = tools.user_model.entries[recorded["id"]]
+    assert replaced.status == "superseded"
+    assert replaced.kind.value == "explicit_preference"
+    assert replaced.statement == "Prefer shared facade regression tests."
+    assert replaced.scope == {"surface": "shared-mcp-tools"}
     assert authoritative_by_id[corrected["id"]]["kind"] == "explicit_preference"
     assert authoritative_by_id[corrected["id"]]["statement"] == "Prefer shared facade and transport tests together."
     assert authoritative_by_id[corrected["id"]]["scope"] == {"surface": "shared-mcp-tools"}

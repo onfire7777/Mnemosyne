@@ -33,11 +33,12 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import Any, Protocol
+from datetime import datetime, timezone
+from typing import Any, Mapping, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
@@ -328,7 +329,7 @@ def _working_memory_route(
             return [], report
         items = list_working(tenant_id, session_id, as_of=evaluated_at)
         scoped = working_memory_route_hits(
-            list(items or []),
+            _scope_working_items(list(items or []), effective_filter),
             query=query,
             tenant_id=tenant_id,
             session_id=session_id,
@@ -358,6 +359,225 @@ def _working_memory_route(
         }
     )
     return scoped, report
+
+
+#: Reserved retrieval-filter key: the caller's own token budget for the hits.
+TOKEN_BUDGET_FILTER_KEY = "token_budget"
+
+#: Per-hit diagnostics a lean answer leaves out (:func:`lean_retrieval_payload`).
+LEAN_HIT_DIAGNOSTIC_KEYS = (
+    "standing",
+    "standing_observability",
+    "reality_monitoring",
+    "retrieved_text",
+    "activation",
+    "privacy",
+    "lifecycle",
+)
+
+_LEADING_STAMP_RE = re.compile(r"^\s*(?:\[[^\]\n]{1,64}\]\s*)+")
+_LEADING_SPEAKER_RE = re.compile(r"^\s*[^\W\d_][\w-]{0,31}\s*:\s+")
+
+
+def requested_token_budget(effective_filter: Mapping[str, Any], policy: OperatingPolicy) -> int:
+    """The budget the hits are fitted to: the caller's own, never above the policy's.
+
+    A request above ``policy.token_budget`` is clamped to it rather than
+    refused; anything that is not a positive integer is refused.
+    """
+
+    raw = effective_filter.get(TOKEN_BUDGET_FILTER_KEY)
+    if raw is None:
+        return policy.token_budget
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise ValueError("token_budget must be a positive integer")
+    return min(policy.token_budget, raw)
+
+
+def _item_field(item: Any, name: str) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(name)
+    return getattr(item, name, None)
+
+
+def _scope_working_items(items: list[Any], effective_filter: Mapping[str, Any]) -> list[Any]:
+    """Narrow a session's working items to the authenticated subject, when one is named.
+
+    ``working_user_id`` / ``working_agent_id`` are set by a caller that has
+    verified a session identity; without them the route stays session-scoped,
+    exactly as before.
+    """
+
+    scoped = items
+    for key, field_name in (("working_user_id", "user_id"), ("working_agent_id", "agent_id")):
+        wanted = effective_filter.get(key)
+        if isinstance(wanted, str) and wanted.strip():
+            subject = wanted.strip()
+            scoped = [item for item in scoped if str(_item_field(item, field_name) or "") == subject]
+    return scoped
+
+
+def _turn_body(text: str) -> str:
+    """A stored line without a leading ``[timestamp]`` or ``Speaker:`` label."""
+
+    body = _LEADING_STAMP_RE.sub("", text or "", count=1)
+    return _LEADING_SPEAKER_RE.sub("", body, count=1).strip()
+
+
+def _same_words(first: str, second: str) -> bool:
+    body_a, body_b = _turn_body(first), _turn_body(second)
+    if not body_a or not body_b:
+        return False
+    if body_a.casefold() == body_b.casefold():
+        return True
+    words_a, words_b = frozenset(tokenize(body_a)), frozenset(tokenize(body_b))
+    if not words_a or not words_b:
+        return False
+    return words_a <= words_b or words_b <= words_a
+
+
+def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
+    """One turn, one hit.
+
+    A line of conversation is stored twice: verbatim in the ledger, and as a
+    working item that cites that record. When both are candidates they are the
+    same words, so the working copy is folded into the durable record. The
+    record keeps its id (the evidence cid), its trust and its grounding, is
+    scored as ONE candidate found by one more channel (the fused scores add,
+    as reciprocal-rank fusion adds them), and names the working items it
+    absorbed. A working item that cites a record but says something else - a
+    note, a conclusion - is a different memory and stays its own hit.
+    """
+
+    records = {hit.id: index for index, hit in enumerate(hits) if hit.kind == "evidence"}
+    if not records:
+        return hits, 0
+    absorbed: dict[int, int] = {}
+    for index, hit in enumerate(hits):
+        if hit.kind != "working":
+            continue
+        for cid in hit.provenance:
+            target = records.get(cid)
+            if target is not None and _same_words(hit.text, hits[target].text):
+                absorbed[index] = target
+                break
+    if not absorbed:
+        return hits, 0
+    survivors = list(hits)
+    for index, target in absorbed.items():
+        working = hits[index]
+        record = survivors[target]
+        if record is hits[target]:
+            # Never write into a hit another caller may still hold.
+            record = _clone_hit(record)
+            survivors[target] = record
+        record.score = record.score + working.score
+        record.channel = "+".join(sorted({*record.channel.split("+"), *working.channel.split("+")} - {""}))
+        item_ids = record.metadata.setdefault("working_item_ids", [])
+        if working.id not in item_ids:
+            item_ids.append(working.id)
+        session = working.metadata.get("session_id")
+        if session:
+            record.metadata["working_session_id"] = session
+    kept = [survivors[index] for index in range(len(hits)) if index not in absorbed]
+    kept.sort(key=lambda hit: -hit.score)
+    return kept, len(absorbed)
+
+
+def _iso_utc(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        try:
+            value = parse_dt(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    moment = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
+
+
+def _stamp_hit_origin(
+    ops: RetrievalPipelineOps,
+    hits: list[Hit],
+    *,
+    tenant_id: str,
+    branch: str,
+) -> None:
+    """Say, in a stable place, which plane a hit is from and when it was made.
+
+    ``memory_type`` is ``working`` for a working item and otherwise mirrors the
+    hit's kind. ``created_at`` (ISO 8601, UTC) is the record's own time for
+    evidence and working items; a derived hit (assertion, relation,
+    preference) that carries no time of its own takes the time of the first
+    evidence it cites, and says so in ``created_at_source``. A working hit
+    also lists the ``evidence_ids`` it cites.
+    """
+
+    get_evidence = getattr(ops, "get_evidence", None)
+    known: dict[tuple[str, str], str | None] = {}
+
+    def evidence_created_at(cid: str, record_branch: str) -> str | None:
+        key = (cid, record_branch)
+        if key not in known:
+            created = None
+            if cid and callable(get_evidence):
+                try:
+                    record = get_evidence(tenant_id, cid, record_branch)
+                except Exception:  # a missing or unreadable record only costs the date
+                    record = None
+                created = _iso_utc(getattr(record, "created_at", None))
+            known[key] = created
+        return known[key]
+
+    for hit in hits:
+        metadata = hit.metadata
+        metadata.setdefault("memory_type", hit.kind)
+        record_branch = hit.branch or branch
+        source = "record"
+        if hit.kind == "working":
+            metadata["evidence_ids"] = list(hit.provenance)
+            working = metadata.get("working_memory")
+            created = _iso_utc(working.get("created_at")) if isinstance(working, Mapping) else None
+        elif hit.kind == "evidence":
+            created = _iso_utc(metadata.get("created_at")) or evidence_created_at(hit.id, record_branch)
+        else:
+            created = _iso_utc(metadata.get("created_at"))
+            if created is None:
+                for cid in hit.provenance:
+                    created = evidence_created_at(cid, record_branch)
+                    if created is not None:
+                        source = "source_evidence"
+                        break
+        if created is not None:
+            metadata["created_at"] = created
+            metadata["created_at_source"] = source
+
+
+def lean_retrieval_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """A retrieval answer without the ``explain`` block and the per-hit diagnostics.
+
+    The ranking, the budget and the abstention verdict are the full answer's:
+    this only leaves out what a caller that reads five lines does not need.
+    ``abstained``, ``confidence``, ``uncertainty_note``, ``used_tokens`` and
+    every hit's id, kind, text, score, channel, trust tier, provenance and
+    origin metadata stay.
+    """
+
+    lean = {key: value for key, value in payload.items() if key != "explain"}
+    hits: list[Any] = []
+    for hit in payload.get("hits") or []:
+        if not isinstance(hit, Mapping):
+            hits.append(hit)
+            continue
+        trimmed = dict(hit)
+        metadata = hit.get("metadata")
+        if isinstance(metadata, Mapping):
+            trimmed["metadata"] = {
+                key: value for key, value in metadata.items() if key not in LEAN_HIT_DIAGNOSTIC_KEYS
+            }
+        hits.append(trimmed)
+    lean["hits"] = hits
+    return lean
 
 
 class RetrievalPipelineOps(Protocol):
@@ -439,6 +659,7 @@ def _run_global_sensemaking(
     effective_filter: dict[str, Any],
     policy: OperatingPolicy,
     record_access: bool,
+    token_budget: int,
 ) -> RetrievalResult:
     """Project readable RAPTOR nodes through the shared retrieve seam."""
 
@@ -455,7 +676,7 @@ def _run_global_sensemaking(
     candidate_costs: dict[str, int] = {}
     token_fitted: list[Hit] = []
     for hit in hits:
-        individually_fitted, cost = ops._fit_budget([hit], policy.token_budget)
+        individually_fitted, cost = ops._fit_budget([hit], token_budget)
         if individually_fitted:
             token_fitted.append(hit)
             candidate_costs[hit.id] = cost
@@ -469,7 +690,7 @@ def _run_global_sensemaking(
         representative = min(
             members, key=lambda hit: (candidate_costs[hit.id], -hit.score, hit.id)
         )
-        fitted, cost = ops._fit_budget([representative], policy.token_budget - used)
+        fitted, cost = ops._fit_budget([representative], token_budget - used)
         if not fitted:
             continue
         budgeted.append(representative)
@@ -480,7 +701,7 @@ def _run_global_sensemaking(
     # remaining shared budget upgrading each occupied theme slot by relevance.
     for index, representative in enumerate(list(budgeted)):
         root = str(representative.metadata.get("theme_root_cid") or representative.id)
-        available = policy.token_budget - used + candidate_costs[representative.id]
+        available = token_budget - used + candidate_costs[representative.id]
         for candidate in sorted(
             root_groups[root],
             key=lambda hit: (-hit.score, candidate_costs[hit.id], hit.id),
@@ -494,7 +715,7 @@ def _run_global_sensemaking(
         for hit in token_fitted:
             if hit.id in selected_ids:
                 continue
-            fitted, cost = ops._fit_budget([hit], policy.token_budget - used)
+            fitted, cost = ops._fit_budget([hit], token_budget - used)
             if not fitted:
                 continue
             budgeted.append(hit)
@@ -536,6 +757,7 @@ def _run_global_sensemaking(
         coverage_reason = "incomplete_theme_coverage"
         coverage_note = "Global sensemaking omitted at least one RAPTOR theme root under the node budget."
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access
@@ -642,7 +864,7 @@ def _run_global_sensemaking(
         confidence=confidence,
         abstained=abstention_reason is not None,
         uncertainty_note=note,
-        token_budget=policy.token_budget,
+        token_budget=token_budget,
         used_tokens=used,
         explain=explain,
     )
@@ -675,6 +897,7 @@ def run_retrieval_pipeline(
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
+    token_budget = requested_token_budget(effective_filter, policy)
     cache_key = (
         None
         if query_mode == GLOBAL_SENSEMAKING_MODE
@@ -711,6 +934,7 @@ def run_retrieval_pipeline(
             effective_filter=effective_filter,
             policy=policy,
             record_access=record_access,
+            token_budget=token_budget,
         )
         if cache_key is not None:
             current_cache_key = _result_cache_key(
@@ -802,6 +1026,9 @@ def run_retrieval_pipeline(
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
     fused = ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width))
+    collapsed_turns = 0
+    if working:
+        fused, collapsed_turns = _collapse_session_duplicates(fused)
     reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     diversified = ops._mmr(query, reranked, k=max(k, 1))
@@ -816,12 +1043,14 @@ def run_retrieval_pipeline(
         branch=branch,
         policy=policy,
     )
-    budgeted, used = ops._fit_budget(ordered, policy.token_budget)
+    budgeted, used = ops._fit_budget(ordered, token_budget)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)
     if working_requested:
         working_explain["selected_count"] = sum(
             1 for hit in budgeted if hit.metadata.get("memory_type") == "working"
         )
+        working_explain["collapsed_count"] = collapsed_turns
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access
@@ -949,7 +1178,7 @@ def run_retrieval_pipeline(
         confidence=confidence,
         abstained=abstained,
         uncertainty_note=note,
-        token_budget=policy.token_budget,
+        token_budget=token_budget,
         used_tokens=used,
         explain=explain,
     )

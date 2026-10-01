@@ -30,6 +30,9 @@ AUTHORITY_ORDER = {
     UserMemoryKind.INFERRED_PREFERENCE: 1,
 }
 
+#: What is left of a profile statement whose source evidence was erased.
+ERASED_STATEMENT = "[retracted: the evidence this was built on was erased]"
+
 
 @dataclass(slots=True)
 class UserModelEntry:
@@ -194,6 +197,13 @@ class UserModel:
                 and current.user_id == entry.user_id
                 and current.scope == entry.scope
                 and current.status == "active"
+                # Only an INFERENCE yields to a higher-authority statement that
+                # merely differs from it. What the user stated outright - an
+                # identity, an instruction, a preference - is never retired
+                # because they also stated something else: 'Their name is
+                # Jordan' used to retire 'Prefers Celsius'. A stated entry is
+                # replaced by correcting it, or taken back, by id.
+                and current.kind is UserMemoryKind.INFERRED_PREFERENCE
                 and self._conflicts(current.statement, entry.statement)
                 and current.authority() < entry.authority()
             ):
@@ -201,6 +211,60 @@ class UserModel:
                 current.valid_to = entry.valid_from
         self.entries[entry.id] = entry
         return entry.id
+
+    def entry_in_scope(self, entry_id: str, *, tenant_id: str, user_id: str) -> UserModelEntry:
+        """The entry with this id, if it belongs to this tenant and user."""
+
+        entry = self.entries.get(entry_id)
+        if entry is None or entry.tenant_id != tenant_id or entry.user_id != user_id:
+            raise ValueError(f"profile entry not found in this tenant/user scope: {entry_id}")
+        return entry
+
+    def close_entry(
+        self,
+        entry_id: str,
+        *,
+        tenant_id: str,
+        user_id: str,
+        status: str,
+        at: datetime | None = None,
+    ) -> bool:
+        """Take one entry out of the active profile, keeping the record.
+
+        ``status`` is ``superseded`` (a correction replaced it) or ``retracted``
+        (it was taken back). Returns ``False`` when the entry was already
+        closed; an id outside the tenant/user scope is an error.
+        """
+
+        if status not in {"superseded", "retracted"}:
+            raise ValueError("a profile entry closes as 'superseded' or 'retracted'")
+        entry = self.entry_in_scope(entry_id, tenant_id=tenant_id, user_id=user_id)
+        if entry.status != "active":
+            return False
+        entry.status = status
+        entry.valid_to = at or datetime.now(UTC)
+        return True
+
+    def retract_citing(self, tenant_id: str, cid: str, *, at: datetime | None = None) -> list[str]:
+        """Retract every entry built on one evidence record that has been erased.
+
+        Erasure propagates to what was derived from the erased words: each
+        entry of the tenant citing ``cid`` is retracted and its statement
+        blanked, so the forgotten content does not live on in the profile.
+        Returns the ids retracted by this call.
+        """
+
+        moment = at or datetime.now(UTC)
+        retracted: list[str] = []
+        for entry in self.entries.values():
+            if entry.tenant_id != tenant_id or cid not in entry.source_evidence_cids:
+                continue
+            if entry.status == "active":
+                entry.status = "retracted"
+                entry.valid_to = moment
+                retracted.append(entry.id)
+            entry.statement = ERASED_STATEMENT
+        return retracted
 
     def set_latent_profile(self, profile: LatentUserProfile) -> None:
         self.latent_profiles[(profile.tenant_id, profile.user_id)] = profile

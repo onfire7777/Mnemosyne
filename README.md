@@ -45,7 +45,7 @@ source for this repository and depends on no external local path.
 flowchart TD
     subgraph Clients
       CLI["mneme CLI<br/>(119 subcommands)"]
-      MCP["mneme-mcp<br/>(59 MCP tools)"]
+      MCP["mneme-mcp<br/>(60 MCP tools)"]
     end
     CLI --> SEC
     MCP --> SEC
@@ -93,7 +93,7 @@ After `uv sync`, the two console-script entry points are available through
 | Command    | Entry point                  | Purpose                |
 | ---------- | ---------------------------- | ---------------------- |
 | `mneme`    | `mnemosyne.cli:main`         | Memory CLI (119 subcommands) |
-| `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (59 tools)  |
+| `mneme-mcp`| `mnemosyne.mcp_server:main`  | MCP server (60 tools)  |
 
 > The module form `uv run --locked python -m mnemosyne.cli …` is equivalent to `uv run --locked mneme …`.
 
@@ -304,7 +304,7 @@ Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosy
 - [Architecture Overview](https://github.com/onfire7777/Mnemosyne/wiki/Architecture-Overview) — component layers, write/read flows, deployment topology
 - [Getting Started](https://github.com/onfire7777/Mnemosyne/wiki/Getting-Started) — install, first capture, Postgres setup
 - [CLI Reference](https://github.com/onfire7777/Mnemosyne/wiki/CLI-Reference) — all 119 subcommands incl. the memory-plane and operations/preflight suites
-- [MCP Server and Tools](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools) — transports, auth, all 59 tools
+- [MCP Server and Tools](https://github.com/onfire7777/Mnemosyne/wiki/MCP-Server-and-Tools) — transports, auth, all 60 tools
 - [Data Model](https://github.com/onfire7777/Mnemosyne/wiki/Data-Model) — the 28-table schema, RLS, and bitemporal design
 - [Security, Privacy and Provenance](https://github.com/onfire7777/Mnemosyne/wiki/Security-Privacy-and-Provenance) — trust tiers, capabilities, residency, C2PA
 - [Operations and Production Preflight](https://github.com/onfire7777/Mnemosyne/wiki/Operations-and-Production-Preflight) — `provider-check`, `deployment-soak`, `release-audit`, the `*-ops-check` family
@@ -312,7 +312,7 @@ Full reference lives in the [project wiki](https://github.com/onfire7777/Mnemosy
 
 ### MCP tools (illustrative)
 
-`mcp_tools.py` exposes **59** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, the `profile_*` user-model tools, the working-memory tools (`working_seed` / `working_query` / `working_promote` / `working_expire`), and the prospective-memory tools (`schedule_intention` / `update_intention` / `cancel_intention` / `evaluate_intentions` / `list_intentions`).
+`mcp_tools.py` exposes **60** tools. A representative slice: `capture`, `ingest`, `assert_fact`, `search`, `deep_search`, `get`, `explain`, `correct`, `supersede`, `forget`, `export`, `branch` / `merge` / `discard`, `graph_neighbors` / `graph_as_of`, `trajectory_record`, `lesson_induce` / `procedure_promote`, `outcome_evaluate`, `parametric_propose`, the `profile_*` user-model tools, the working-memory tools (`working_seed` / `working_query` / `working_promote` / `working_expire`), and the prospective-memory tools (`schedule_intention` / `update_intention` / `cancel_intention` / `evaluate_intentions` / `list_intentions`).
 
 ### Data model (28 tables)
 
@@ -330,7 +330,7 @@ Mnemosyne/
 │   ├── engine.py            # MemoryEngine contract + LocalMemoryEngine; route() + RoutePlan
 │   ├── postgres_engine.py   # PostgresEngine: RLS, FTS, pgvector, recursive PPR, as-of
 │   ├── sqlite_engine.py     # SqliteEngine: per-tenant WAL file, shared retrieval pipeline
-│   ├── mcp_tools.py         # 59 MCP tool definitions (the TOOL_SPEC facade)
+│   ├── mcp_tools.py         # 60 MCP tool definitions (the TOOL_SPEC facade)
 │   ├── mcp_server.py        # stdio shim · SDK stdio · SDK StreamableHTTP · hosted HTTP
 │   ├── cli.py               # 119-subcommand CLI (mneme)
 │   ├── ingestion.py         # content-addressed ingest, signed provenance, media extract
