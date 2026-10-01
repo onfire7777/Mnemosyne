@@ -303,6 +303,8 @@ def test_same_words_is_about_the_line_not_its_labels() -> None:
     assert not _same_words("", "anything")
     # A shorter line is a different memory, even when every token of it sits inside the longer one.
     assert not _same_words("4411", "the old gate code is 4411")
+    assert not _same_words("[note] the gate code is 4411", "the gate code is 4411")
+    assert _same_words("[2026-10-01 09:00:00] the gate code is 4411", "the gate code is 4411")
 
 
 def test_collapse_keeps_a_working_item_that_says_something_else() -> None:
@@ -491,7 +493,10 @@ def test_the_new_arguments_are_declared_in_closed_schemas(tmp_path: Path) -> Non
         assert "clamped" in schema["properties"]["token_budget"]["description"]
         assert schema["properties"]["lean"]["default"] is False
         assert not {"session_id", "token_budget", "lean"} & set(schema["required"])
-    assert set(schemas["profile_retire"]["required"]) == {"tenant_id", "user_id", "id"}
+    retire = schemas["profile_retire"]
+    assert set(retire["required"]) == {"tenant_id", "user_id", "id"}
+    assert {"role", "source_trust_tier"} <= set(retire["properties"])
+    assert not {"role", "source_trust_tier"} & set(retire["required"])
     assert init["result"]["serverInfo"]["version"] == buildinfo.build_version()
 
 
@@ -635,6 +640,79 @@ def test_profile_correct_replaces_the_entry_it_corrects() -> None:
     with pytest.raises(ValueError, match="profile entry not found"):
         tools.profile_correct("t", "u", "no-such-entry", "ghost")
     assert "ghost" not in _statements(tools, "t", "u")
+
+
+def test_profile_retire_uses_the_callers_authority_and_the_entrys_sink() -> None:
+    tools = MemoryTools(LocalMemoryEngine())
+    preference = tools.profile_add(
+        "t", "u", "explicit_preference", "Likes the window seat.",
+        role="operator", source_trust_tier=0,
+    )
+    instruction = tools.profile_add(
+        "t", "u", "hard_instruction", "Never invent a gate code.",
+        role="operator", source_trust_tier=0,
+    )
+
+    with pytest.raises(PermissionError, match="profile_retire denied"):
+        tools.profile_retire("t", "u", preference["id"], role="reader", source_trust_tier=0)
+    assert tools.user_model.entries[preference["id"]].status == "active"
+
+    with pytest.raises(PermissionError, match="policy"):
+        tools.profile_retire("t", "u", instruction["id"], role="agent", source_trust_tier=0)
+    assert tools.user_model.entries[instruction["id"]].status == "active"
+
+    retired = tools.profile_retire("t", "u", instruction["id"], role="operator", source_trust_tier=0)
+    assert retired["retired"] is True and retired["security"]["allowed"] is True
+    assert tools.user_model.entries[instruction["id"]].status == "retracted"
+
+
+def test_a_reader_session_cannot_retire_a_profile_entry(tmp_path: Path) -> None:
+    tenant, user = "tenant-retire", "user-retire"
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json", session_secret=SECRET)
+    try:
+        preference = server.tools.profile_add(
+            tenant, user, "explicit_preference", "Likes the window seat.",
+            role="operator", source_trust_tier=0,
+        )
+        instruction = server.tools.profile_add(
+            tenant, user, "hard_instruction", "Never invent a gate code.",
+            role="operator", source_trust_tier=0,
+        )
+        verifier = SessionTokenVerifier(SECRET)
+        reader = SessionIdentity(
+            tenant_id=tenant, user_id=user, role="reader", source_trust_tier=0,
+            agent_id=AGENT, session_id=SESSION,
+        )
+        failed, _, text = _rpc(server, "profile_retire", {
+            "tenant_id": tenant, "user_id": user, "id": preference["id"],
+            "role": "operator", "source_trust_tier": 0, "session_token": verifier.sign(reader),
+        })
+        assert failed and "denied" in text
+        assert server.tools.user_model.entries[preference["id"]].status == "active"
+
+        agent = SessionIdentity(
+            tenant_id=tenant, user_id=user, role="agent", source_trust_tier=0,
+            agent_id=AGENT, session_id=SESSION,
+        )
+        failed, _, text = _rpc(server, "profile_retire", {
+            "tenant_id": tenant, "user_id": user, "id": instruction["id"],
+            "session_token": verifier.sign(agent),
+        })
+        assert failed and "policy" in text
+        assert server.tools.user_model.entries[instruction["id"]].status == "active"
+    finally:
+        server.close()
+
+
+def test_profile_correct_keeps_the_prior_scope_when_context_is_omitted() -> None:
+    tools = MemoryTools(LocalMemoryEngine())
+    old = tools.profile_record_explicit("t", "u", "Prefers Celsius.", scope={"room": "lab"})
+
+    fixed = tools.profile_correct("t", "u", old["id"], "Prefers Fahrenheit.")
+
+    assert tools.user_model.entries[fixed["id"]].scope == {"room": "lab"}
+    cleared = tools.profile_correct("t", "u", fixed["id"], "Prefers Kelvin.", context={})
+    assert tools.user_model.entries[cleared["id"]].scope == {}
 
 
 def test_profile_retire_takes_an_entry_back() -> None:
