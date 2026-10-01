@@ -2872,6 +2872,20 @@ class LocalMemoryEngine:
                 return copy.deepcopy(ev)
             return None
 
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+        """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
+
+        Retrieval dates hits from this read. Grounded answering fingerprints
+        ``access_policy`` across ``get_evidence`` calls, so a timestamp lookup
+        must not be one of those observations.
+        """
+
+        with self._lock:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            if ev and not ev.erased:
+                return ev.created_at
+            return None
+
     def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
         """Return unerased RAPTOR summary rows in the caller's tenant/branch."""
 
