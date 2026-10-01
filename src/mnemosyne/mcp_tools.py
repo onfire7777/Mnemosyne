@@ -20,7 +20,7 @@ import base64
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
-from typing import Any, Literal
+from typing import Any, Literal, assert_never
 
 from mnemosyne.engine import (
     Intention,
@@ -537,6 +537,24 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["artifact_uri", "reason", "role", "source_trust_tier", "protected_case_count"],
     },
 ]
+
+
+def _profile_write_sink(kind: UserMemoryKind) -> str | None:
+    """The write sink a profile entry occupies, matching ``profile_add``."""
+
+    match kind:
+        case UserMemoryKind.HARD_INSTRUCTION:
+            return "policy"
+        case (
+            UserMemoryKind.EXPLICIT_PREFERENCE
+            | UserMemoryKind.INFERRED_PREFERENCE
+            | UserMemoryKind.SITUATIONAL_PREFERENCE
+        ):
+            return "preference"
+        case UserMemoryKind.IDENTITY | UserMemoryKind.TEMPORARY_STATE:
+            return None
+        case _:
+            assert_never(kind)
 
 
 class MemoryTools:
@@ -2077,7 +2095,7 @@ class MemoryTools:
             tenant_id=tenant_id,
             user_id=user_id,
             statement=statement,
-            scope=context,
+            scope=prior.scope if context is None else context,
             confidence=confidence,
             source_evidence_cids=self.user_model.originating_evidence_cids(prior),
         )
@@ -2094,21 +2112,30 @@ class MemoryTools:
         result["superseded"] = superseded
         return result
 
-    def profile_retire(self, tenant_id: str, user_id: str, id: str) -> dict[str, Any]:
+    def profile_retire(
+        self,
+        tenant_id: str,
+        user_id: str,
+        id: str,
+        role: WriteRole = "operator",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
+    ) -> dict[str, Any]:
         """Take a profile entry back.
 
         The entry stops being active and leaves ``profile_context``; the record
-        is kept, marked ``retracted``, so the history says it was once held.
-        It carries the authority of the user stating a preference - this is the
-        user saying 'forget that'. An id that is unknown, or that belongs to
-        another tenant or user, is an error.
+        is kept, marked ``retracted``. Authority is the caller's role and trust
+        tier (a signed session overwrites both). A hard instruction is a policy
+        write; a preference is a preference write. An id that is unknown, or
+        that belongs to another tenant or user, is an error.
         """
 
+        entry = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
         decision = self._authorize(
             "profile_retire",
-            role="agent",
-            source_trust_tier=int(TrustTier.USER_AUTHORED),
-            target_sink="preference",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+            target_sink=_profile_write_sink(entry.kind),
         )
         retired = self.user_model.close_entry(
             id, tenant_id=tenant_id, user_id=user_id, status="retracted"
