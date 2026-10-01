@@ -327,9 +327,11 @@ def _working_memory_route(
         if not callable(list_working):
             report.update({"status": "unavailable", "reason": "working_store_not_exposed"})
             return [], report
-        items = list_working(tenant_id, session_id, as_of=evaluated_at)
+        items = _scope_working_items(
+            list(list_working(tenant_id, session_id, as_of=evaluated_at) or []), effective_filter
+        )
         scoped = working_memory_route_hits(
-            _scope_working_items(list(items or []), effective_filter),
+            items,
             query=query,
             tenant_id=tenant_id,
             session_id=session_id,
@@ -340,6 +342,7 @@ def _working_memory_route(
             policy_max_sensitivity=policy.max_sensitivity,
             max_trust_tier=policy.max_trust_tier,
         )
+        _stamp_working_kind(scoped, items)
     except Exception as exc:  # optional route failures must not suppress durable retrieval
         report.update(
             {
@@ -378,7 +381,13 @@ LEAN_HIT_DIAGNOSTIC_KEYS = (
 _LEADING_STAMP_RE = re.compile(
     r"^\s*(?:\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*)+"
 )
+# ``User: `` before a line of conversation: one word, then a colon.
 _LEADING_SPEAKER_RE = re.compile(r"^\s*[^\W\d_][\w-]{0,31}\s*:\s+")
+
+#: The working-memory kind a client uses to mirror a line of conversation.
+CONVERSATION_TURN_KIND = "conversation_turn"
+#: Where a working hit says which kind of working item it is.
+WORKING_KIND_METADATA_KEY = "working_kind"
 
 
 def requested_token_budget(effective_filter: Mapping[str, Any], policy: OperatingPolicy) -> int:
@@ -419,24 +428,48 @@ def _scope_working_items(items: list[Any], effective_filter: Mapping[str, Any]) 
     return scoped
 
 
-def _turn_body(text: str) -> str:
-    """A stored line without a leading ``[timestamp]`` or ``Speaker:`` label."""
+def _stamp_working_kind(hits: list[Hit], items: list[Any]) -> None:
+    """Say on each working hit which kind of working item it is."""
 
-    body = _LEADING_STAMP_RE.sub("", text or "", count=1)
-    return _LEADING_SPEAKER_RE.sub("", body, count=1).strip()
+    kinds: dict[str, str] = {}
+    for item in items:
+        item_id = _item_field(item, "item_id") or _item_field(item, "id")
+        kind = _item_field(item, "kind")
+        if isinstance(item_id, str) and isinstance(kind, str) and kind.strip():
+            kinds[item_id.strip()] = kind.strip()
+    for hit in hits:
+        kind = kinds.get(hit.id)
+        if kind:
+            hit.metadata[WORKING_KIND_METADATA_KEY] = kind
 
 
-def _same_words(first: str, second: str) -> bool:
-    """True when two stored lines are the same text once labels are stripped.
+def _line_readings(text: str, *, spoken: bool) -> set[str]:
+    """What a stored line says, in each form it may have been written in.
+
+    The moment a line was said is not part of its words, so a leading
+    ``[timestamp]`` is set aside. A line of conversation (``spoken``) is also
+    read without its leading ``Speaker:`` label, because either copy of a turn
+    may or may not carry one. Nothing else is set aside: ``[unconfirmed] ...``
+    and, outside a conversation, ``Rumour: ...`` say something the bare line
+    does not.
+    """
+
+    body = _LEADING_STAMP_RE.sub("", text or "", count=1).strip()
+    readings = {body.casefold()}
+    if spoken:
+        readings.add(_LEADING_SPEAKER_RE.sub("", body, count=1).strip().casefold())
+    readings.discard("")
+    return readings
+
+
+def _same_words(first: str, second: str, *, spoken: bool = False) -> bool:
+    """True when two stored lines are the same text.
 
     A fragment is a different memory: ``4411`` is not the line
     ``the old gate code is 4411``.
     """
 
-    body_a, body_b = _turn_body(first), _turn_body(second)
-    if not body_a or not body_b:
-        return False
-    return body_a.casefold() == body_b.casefold()
+    return not _line_readings(first, spoken=spoken).isdisjoint(_line_readings(second, spoken=spoken))
 
 
 def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
@@ -449,7 +482,9 @@ def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
     scored as ONE candidate found by one more channel (the fused scores add,
     as reciprocal-rank fusion adds them), and names the working items it
     absorbed. A working item that cites a record but says something else - a
-    note, a conclusion - is a different memory and stays its own hit.
+    note, a conclusion - is a different memory and stays its own hit. Only a
+    ``conversation_turn`` item is read without its ``Speaker:`` label; an item
+    of any other kind has to say what the record says, as written.
     """
 
     records = {hit.id: index for index, hit in enumerate(hits) if hit.kind == "evidence"}
@@ -459,9 +494,10 @@ def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
     for index, hit in enumerate(hits):
         if hit.kind != "working":
             continue
+        spoken = hit.metadata.get(WORKING_KIND_METADATA_KEY) == CONVERSATION_TURN_KIND
         for cid in hit.provenance:
             target = records.get(cid)
-            if target is not None and _same_words(hit.text, hits[target].text):
+            if target is not None and _same_words(hit.text, hits[target].text, spoken=spoken):
                 absorbed[index] = target
                 break
     if not absorbed:
