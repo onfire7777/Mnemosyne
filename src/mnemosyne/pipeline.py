@@ -37,11 +37,11 @@ import re
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Mapping, Protocol
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
-from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
+from mnemosyne.models import Hit, RetrievalResult, iso_utc, parse_dt, utc_now
 from mnemosyne.policy import OperatingPolicy
 from mnemosyne.retrieval import (
     GLOBAL_SENSEMAKING_CHANNEL,
@@ -484,18 +484,6 @@ def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
     return kept, len(absorbed)
 
 
-def _iso_utc(value: Any) -> str | None:
-    if isinstance(value, str) and value.strip():
-        try:
-            value = parse_dt(value)
-        except ValueError:
-            return None
-    if not isinstance(value, datetime):
-        return None
-    moment = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc).isoformat()
-
-
 def _stamp_hit_origin(
     ops: RetrievalPipelineOps,
     hits: list[Hit],
@@ -506,51 +494,35 @@ def _stamp_hit_origin(
     """Say, in a stable place, which plane a hit is from and when it was made.
 
     ``memory_type`` is ``working`` for a working item and otherwise mirrors the
-    hit's kind. ``created_at`` (ISO 8601, UTC) is the record's own time for
-    evidence and working items; a derived hit (assertion, relation,
-    preference) that carries no time of its own takes the time of the first
-    evidence it cites, and says so in ``created_at_source``. A working hit
-    also lists the ``evidence_ids`` it cites.
+    hit's kind. ``created_at`` (ISO 8601, UTC) is when the record was made: a
+    working item's own time, and for a durable record the time its engine put
+    on the hit when it built it - so saying it costs a search NO extra read.
+    Only an evidence hit that arrives without one (from an external retrieval
+    adapter, which builds its own hits) is looked up by its cid. A hit whose
+    time is not known simply carries none. A working hit also lists the
+    ``evidence_ids`` it cites.
     """
 
     get_evidence = getattr(ops, "get_evidence", None)
-    known: dict[tuple[str, str], str | None] = {}
-
-    def evidence_created_at(cid: str, record_branch: str) -> str | None:
-        key = (cid, record_branch)
-        if key not in known:
-            created = None
-            if cid and callable(get_evidence):
-                try:
-                    record = get_evidence(tenant_id, cid, record_branch)
-                except Exception:  # a missing or unreadable record only costs the date
-                    record = None
-                created = _iso_utc(getattr(record, "created_at", None))
-            known[key] = created
-        return known[key]
-
     for hit in hits:
         metadata = hit.metadata
         metadata.setdefault("memory_type", hit.kind)
-        record_branch = hit.branch or branch
-        source = "record"
         if hit.kind == "working":
             metadata["evidence_ids"] = list(hit.provenance)
             working = metadata.get("working_memory")
-            created = _iso_utc(working.get("created_at")) if isinstance(working, Mapping) else None
-        elif hit.kind == "evidence":
-            created = _iso_utc(metadata.get("created_at")) or evidence_created_at(hit.id, record_branch)
+            created = iso_utc(working.get("created_at")) if isinstance(working, Mapping) else None
         else:
-            created = _iso_utc(metadata.get("created_at"))
-            if created is None:
-                for cid in hit.provenance:
-                    created = evidence_created_at(cid, record_branch)
-                    if created is not None:
-                        source = "source_evidence"
-                        break
+            created = iso_utc(metadata.get("created_at"))
+            if created is None and hit.kind == "evidence" and hit.id and callable(get_evidence):
+                try:
+                    record = get_evidence(tenant_id, hit.id, hit.branch or branch)
+                except Exception:  # a missing or unreadable record only costs the date
+                    record = None
+                created = iso_utc(getattr(record, "created_at", None))
         if created is not None:
             metadata["created_at"] = created
-            metadata["created_at_source"] = source
+        else:
+            metadata.pop("created_at", None)
 
 
 def lean_retrieval_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
