@@ -30,6 +30,22 @@ AUTHORITY_ORDER = {
     UserMemoryKind.INFERRED_PREFERENCE: 1,
 }
 
+#: What is left of a profile statement whose source evidence was erased.
+ERASED_STATEMENT = "[retracted: the evidence this was built on was erased]"
+
+
+def correction_kind(kind: UserMemoryKind) -> UserMemoryKind:
+    """The kind of the entry that replaces a corrected one.
+
+    A correction is the user stating the thing outright, so the replacement is
+    an explicit preference - unless what it replaces outranks one. A corrected
+    instruction is still an instruction and a corrected identity still an
+    identity: correcting an entry never lowers its authority.
+    """
+
+    explicit = UserMemoryKind.EXPLICIT_PREFERENCE
+    return kind if AUTHORITY_ORDER[kind] > AUTHORITY_ORDER[explicit] else explicit
+
 
 @dataclass(slots=True)
 class UserModelEntry:
@@ -194,6 +210,13 @@ class UserModel:
                 and current.user_id == entry.user_id
                 and current.scope == entry.scope
                 and current.status == "active"
+                # Only an INFERENCE yields to a higher-authority statement that
+                # merely differs from it. What the user stated outright - an
+                # identity, an instruction, a preference - is never retired
+                # because they also stated something else: 'Their name is
+                # Jordan' used to retire 'Prefers Celsius'. A stated entry is
+                # replaced by correcting it, or taken back, by id.
+                and current.kind is UserMemoryKind.INFERRED_PREFERENCE
                 and self._conflicts(current.statement, entry.statement)
                 and current.authority() < entry.authority()
             ):
@@ -201,6 +224,109 @@ class UserModel:
                 current.valid_to = entry.valid_from
         self.entries[entry.id] = entry
         return entry.id
+
+    def entry_in_scope(self, entry_id: str, *, tenant_id: str, user_id: str) -> UserModelEntry:
+        """The entry with this id, if it belongs to this tenant and user."""
+
+        entry = self.entries.get(entry_id)
+        if entry is None or entry.tenant_id != tenant_id or entry.user_id != user_id:
+            raise ValueError(f"profile entry not found in this tenant/user scope: {entry_id}")
+        return entry
+
+    def close_entry(
+        self,
+        entry_id: str,
+        *,
+        tenant_id: str,
+        user_id: str,
+        status: str,
+        at: datetime | None = None,
+    ) -> bool:
+        """Take one entry out of the active profile, keeping the record.
+
+        ``status`` is ``superseded`` (a correction replaced it) or ``retracted``
+        (it was taken back). Returns ``False`` when the entry was already
+        closed; an id outside the tenant/user scope is an error.
+        """
+
+        if status not in {"superseded", "retracted"}:
+            raise ValueError("a profile entry closes as 'superseded' or 'retracted'")
+        entry = self.entry_in_scope(entry_id, tenant_id=tenant_id, user_id=user_id)
+        if entry.status != "active":
+            return False
+        entry.status = status
+        entry.valid_to = at or datetime.now(UTC)
+        return True
+
+    def originating_evidence_cids(self, entry: UserModelEntry) -> list[str]:
+        """Evidence CIDs this entry depends on.
+
+        A correction used to record the replaced profile id as its only
+        source. Walk those ids, within the same tenant and user, and return
+        the evidence CIDs at the end of the chain.
+        """
+
+        seen: set[str] = set()
+        evidence: list[str] = []
+        pending = [cid for cid in entry.source_evidence_cids if isinstance(cid, str) and cid]
+        while pending:
+            cid = pending.pop(0)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            cited = self.entries.get(cid)
+            if (
+                cited is not None
+                and cited.tenant_id == entry.tenant_id
+                and cited.user_id == entry.user_id
+                and cited.id != entry.id
+            ):
+                pending.extend(
+                    source for source in cited.source_evidence_cids if isinstance(source, str) and source
+                )
+                continue
+            evidence.append(cid)
+        return evidence
+
+    def retract_citing(self, tenant_id: str, cid: str, *, at: datetime | None = None) -> list[str]:
+        """Retract every entry built on erased evidence, including corrections.
+
+        A correction may cite the profile entry it replaced rather than the
+        original evidence CID. Follow that chain so the live correction is
+        retracted too. Already-closed entries that still quote the forgotten
+        text are blanked. Every id whose statement was blanked, or whose
+        status moved to retracted, is returned so the caller persists closed
+        residue as well as live retractions.
+        """
+
+        moment = at or datetime.now(UTC)
+        dependent: set[str] = set()
+        progressed = True
+        while progressed:
+            progressed = False
+            for entry in self.entries.values():
+                if entry.tenant_id != tenant_id or entry.id in dependent:
+                    continue
+                if cid in entry.source_evidence_cids or any(
+                    source in dependent for source in entry.source_evidence_cids
+                ):
+                    dependent.add(entry.id)
+                    progressed = True
+        changed: list[str] = []
+        for entry in self.entries.values():
+            if entry.id not in dependent:
+                continue
+            mutated = False
+            if entry.status == "active":
+                entry.status = "retracted"
+                entry.valid_to = moment
+                mutated = True
+            if entry.statement != ERASED_STATEMENT:
+                entry.statement = ERASED_STATEMENT
+                mutated = True
+            if mutated:
+                changed.append(entry.id)
+        return changed
 
     def set_latent_profile(self, profile: LatentUserProfile) -> None:
         self.latent_profiles[(profile.tenant_id, profile.user_id)] = profile

@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, Sequence, runtime_checkable
 
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
@@ -52,6 +52,7 @@ from mnemosyne.models import (
     Preference,
     Relation,
     RetrievalResult,
+    iso_utc,
     utc_now,
 )
 from mnemosyne.pipeline import run_retrieval_pipeline
@@ -888,6 +889,38 @@ _WORKING_MEMORY_KINDS = {
     # rather than in a context window of its own.
     "conversation_turn",
 }
+
+
+def select_working_items(
+    items: list[Any],
+    *,
+    kinds: list[str] | None = None,
+    limit: int | None = None,
+) -> list[Any]:
+    """Narrow an already scoped, newest-first list of working items.
+
+    ``kinds`` keeps only items of those kinds; ``limit`` keeps the first
+    ``limit`` of what is left, which are the newest because every backend's
+    ``list_working`` answers in the shared created-desc/id order. With neither,
+    the list comes back as it went in. Shared by every backend so the reading
+    rule cannot differ between them.
+    """
+
+    selected = list(items)
+    if kinds is not None:
+        if isinstance(kinds, (str, bytes)) or not isinstance(kinds, (list, tuple, set, frozenset)):
+            raise ValueError("kinds must be a list of working-memory kinds")
+        wanted: set[str] = set()
+        for kind in kinds:
+            if type(kind) is not str or kind not in _WORKING_MEMORY_KINDS:
+                raise ValueError(f"unsupported working-memory kind: {kind!r}")
+            wanted.add(kind)
+        selected = [item for item in selected if getattr(item, "kind", None) in wanted]
+    if limit is not None:
+        if type(limit) is not int or limit < 1:
+            raise ValueError("limit must be a positive integer")
+        selected = selected[:limit]
+    return selected
 
 
 @dataclass(slots=True)
@@ -2840,6 +2873,36 @@ class LocalMemoryEngine:
                 return copy.deepcopy(ev)
             return None
 
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+        """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
+
+        Retrieval dates hits from this read. Grounded answering fingerprints
+        ``access_policy`` across ``get_evidence`` calls, so a timestamp lookup
+        must not be one of those observations.
+        """
+
+        with self._lock:
+            ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+            if ev and not ev.erased:
+                return ev.created_at
+            return None
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> dict[str, datetime]:
+        """Times of several rows in one read (see ``evidence_created_at``).
+
+        A cid with no live row is absent from the mapping, never ``None``.
+        """
+
+        found: dict[str, datetime] = {}
+        with self._lock:
+            for cid in dict.fromkeys(cids):
+                ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+                if ev and not ev.erased and ev.created_at is not None:
+                    found[cid] = ev.created_at
+        return found
+
     def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
         """Return unerased RAPTOR summary rows in the caller's tenant/branch."""
 
@@ -3576,6 +3639,7 @@ class LocalMemoryEngine:
                         "predicate": relation_fields["predicate"],
                         "target": relation_fields["target"],
                         "confidence": rel.confidence,
+                        "created_at": iso_utc(rel.valid_from),
                         "source_evidence_cids": list(rel.source_evidence_cids),
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
@@ -3635,6 +3699,7 @@ class LocalMemoryEngine:
                             "predicate": relation_fields["predicate"],
                             "target": relation_fields["target"],
                             "confidence": rel.confidence,
+                            "created_at": iso_utc(rel.valid_from),
                             "source_evidence_cids": list(rel.source_evidence_cids),
                             "reality_class": security["reality_class"],
                             "source_evidence_status": security["source_evidence_status"],
@@ -5139,6 +5204,9 @@ class LocalMemoryEngine:
                     metadata={
                         "status": assertion.status,
                         "confidence": assertion.confidence,
+                        # A derived record may cite no evidence at all; its own
+                        # time is what dates the hit.
+                        "created_at": iso_utc(assertion.transaction_time),
                         "reality_class": reality_monitoring["reality_class"],
                         "reality_monitoring": reality_monitoring,
                         "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
@@ -5174,7 +5242,12 @@ class LocalMemoryEngine:
                     provenance=list(pref.source_evidence_cids),
                     trust_tier=0 if pref.explicit else 3,
                     sensitivity=0,
-                    metadata={"category": pref.category, "explicit": pref.explicit, "privacy": privacy_metadata},
+                    metadata={
+                        "category": pref.category,
+                        "explicit": pref.explicit,
+                        "created_at": iso_utc(pref.valid_from),
+                        "privacy": privacy_metadata,
+                    },
                 )
             )
         return hits

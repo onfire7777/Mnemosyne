@@ -33,11 +33,12 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import Any, Protocol
+from datetime import datetime, timezone
+from typing import Any, Mapping, Protocol, Sequence
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
@@ -203,6 +204,15 @@ def _result_cache_key(
 ) -> tuple[Any, ...] | None:
     if retrieval_result_cache_size() <= 0 or deep or workspace_broadcast.get("applied"):
         return None
+    if _working_route_requested(effective_filter) and not any(
+        parse_dt(effective_filter.get(name)) for name in ("as_of", "evaluated_at", "working_evaluated_at")
+    ):
+        # A session read that names no instant is evaluated at the clock, and
+        # an item leaves working memory when its TTL runs out without anything
+        # in the store changing. Cached, the answer would keep serving the item
+        # after it expired. A read that names its instant carries it in the
+        # filter, so in the key, and is cached as before.
+        return None
     token = _engine_result_cache_token(
         ops,
         tenant_id=tenant_id,
@@ -288,6 +298,26 @@ def _working_session_id(effective_filter: dict[str, Any]) -> str | None:
     return raw.strip()
 
 
+def _requested_max_trust_tier(effective_filter: Mapping[str, Any], policy: OperatingPolicy) -> int:
+    """The least-trusted tier this search still admits, as a durable channel reads it.
+
+    ``max_trust_tier`` is the ceiling the caller asked for and ``min_trust_tier``
+    is its legacy alias, honoured only when no ``max_trust_tier`` was given; the
+    policy ceiling stands when the caller named neither. The working route reads
+    the request exactly as the durable channels read it, so a session item can
+    never enter the one ranked list at a trust quality a durable hit was dropped
+    for - and cannot colour confidence or duplicate fusion from there.
+    """
+
+    for key in ("max_trust_tier", "min_trust_tier"):
+        if effective_filter.get(key) is not None:
+            try:
+                return int(effective_filter[key])
+            except (TypeError, ValueError):
+                break
+    return int(policy.max_trust_tier)
+
+
 def _working_memory_route(
     ops: RetrievalPipelineOps,
     *,
@@ -326,9 +356,11 @@ def _working_memory_route(
         if not callable(list_working):
             report.update({"status": "unavailable", "reason": "working_store_not_exposed"})
             return [], report
-        items = list_working(tenant_id, session_id, as_of=evaluated_at)
+        items = _scope_working_items(
+            list(list_working(tenant_id, session_id, as_of=evaluated_at) or []), effective_filter
+        )
         scoped = working_memory_route_hits(
-            list(items or []),
+            items,
             query=query,
             tenant_id=tenant_id,
             session_id=session_id,
@@ -337,8 +369,9 @@ def _working_memory_route(
             limit=k,
             access_context=effective_filter,
             policy_max_sensitivity=policy.max_sensitivity,
-            max_trust_tier=policy.max_trust_tier,
+            max_trust_tier=_requested_max_trust_tier(effective_filter, policy),
         )
+        _stamp_working_kind(scoped, items)
     except Exception as exc:  # optional route failures must not suppress durable retrieval
         report.update(
             {
@@ -358,6 +391,326 @@ def _working_memory_route(
         }
     )
     return scoped, report
+
+
+#: Reserved retrieval-filter key: the caller's own token budget for the hits.
+TOKEN_BUDGET_FILTER_KEY = "token_budget"
+
+#: Per-hit diagnostics a lean answer leaves out (:func:`lean_retrieval_payload`).
+LEAN_HIT_DIAGNOSTIC_KEYS = (
+    "standing",
+    "standing_observability",
+    "reality_monitoring",
+    "retrieved_text",
+    "activation",
+    "privacy",
+    "lifecycle",
+)
+
+_LEADING_STAMP_RE = re.compile(
+    r"^\s*(?:\[\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\]\s*)+"
+)
+# ``User: `` before a line of conversation: one word, then a colon.
+_LEADING_SPEAKER_RE = re.compile(r"^\s*[^\W\d_][\w-]{0,31}\s*:\s+")
+
+#: The working-memory kind a client uses to mirror a line of conversation.
+CONVERSATION_TURN_KIND = "conversation_turn"
+#: Where a working hit says which kind of working item it is.
+WORKING_KIND_METADATA_KEY = "working_kind"
+
+
+def requested_token_budget(effective_filter: Mapping[str, Any], policy: OperatingPolicy) -> int:
+    """The budget the hits are fitted to: the caller's own, never above the policy's.
+
+    A request above ``policy.token_budget`` is clamped to it rather than
+    refused; anything that is not a positive integer is refused.
+    """
+
+    raw = effective_filter.get(TOKEN_BUDGET_FILTER_KEY)
+    if raw is None:
+        return policy.token_budget
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 1:
+        raise ValueError("token_budget must be a positive integer")
+    return min(policy.token_budget, raw)
+
+
+def _item_field(item: Any, name: str) -> Any:
+    if isinstance(item, Mapping):
+        return item.get(name)
+    return getattr(item, name, None)
+
+
+def _scope_working_items(items: list[Any], effective_filter: Mapping[str, Any]) -> list[Any]:
+    """Narrow a session's working items to the authenticated subject, when one is named.
+
+    ``working_user_id`` / ``working_agent_id`` are set by a caller that has
+    verified a session identity; without them the route stays session-scoped,
+    exactly as before.
+    """
+
+    scoped = items
+    for key, field_name in (("working_user_id", "user_id"), ("working_agent_id", "agent_id")):
+        wanted = effective_filter.get(key)
+        if isinstance(wanted, str) and wanted.strip():
+            subject = wanted.strip()
+            scoped = [item for item in scoped if str(_item_field(item, field_name) or "") == subject]
+    return scoped
+
+
+def _stamp_working_kind(hits: list[Hit], items: list[Any]) -> None:
+    """Say on each working hit which kind of working item it is."""
+
+    kinds: dict[str, str] = {}
+    for item in items:
+        item_id = _item_field(item, "item_id") or _item_field(item, "id")
+        kind = _item_field(item, "kind")
+        if isinstance(item_id, str) and isinstance(kind, str) and kind.strip():
+            kinds[item_id.strip()] = kind.strip()
+    for hit in hits:
+        kind = kinds.get(hit.id)
+        if kind:
+            hit.metadata[WORKING_KIND_METADATA_KEY] = kind
+
+
+def _line_readings(text: str, *, spoken: bool) -> set[str]:
+    """What a stored line says, in each form it may have been written in.
+
+    The moment a line was said is not part of its words, so a leading
+    ``[timestamp]`` is set aside. A line of conversation (``spoken``) is also
+    read without its leading ``Speaker:`` label, because either copy of a turn
+    may or may not carry one. Nothing else is set aside: ``[unconfirmed] ...``
+    and, outside a conversation, ``Rumour: ...`` say something the bare line
+    does not.
+    """
+
+    body = _LEADING_STAMP_RE.sub("", text or "", count=1).strip()
+    readings = {body.casefold()}
+    if spoken:
+        readings.add(_LEADING_SPEAKER_RE.sub("", body, count=1).strip().casefold())
+    readings.discard("")
+    return readings
+
+
+def _same_words(first: str, second: str, *, spoken: bool = False) -> bool:
+    """True when two stored lines are the same text.
+
+    A fragment is a different memory: ``4411`` is not the line
+    ``the old gate code is 4411``.
+    """
+
+    return not _line_readings(first, spoken=spoken).isdisjoint(_line_readings(second, spoken=spoken))
+
+
+def _collapse_session_duplicates(hits: list[Hit]) -> tuple[list[Hit], int]:
+    """One turn, one hit.
+
+    A line of conversation is stored twice: verbatim in the ledger, and as a
+    working item that cites that record. When both are candidates they are the
+    same words, so the working copy is folded into the durable record. The
+    record keeps its id (the evidence cid), its trust and its grounding, is
+    scored as ONE candidate found by one more channel (the fused scores add,
+    as reciprocal-rank fusion adds them), and names the working items it
+    absorbed. A working item that cites a record but says something else - a
+    note, a conclusion - is a different memory and stays its own hit. Only a
+    ``conversation_turn`` item is read without its ``Speaker:`` label; an item
+    of any other kind has to say what the record says, as written.
+    """
+
+    records = {hit.id: index for index, hit in enumerate(hits) if hit.kind == "evidence"}
+    if not records:
+        return hits, 0
+    absorbed: dict[int, int] = {}
+    for index, hit in enumerate(hits):
+        if hit.kind != "working":
+            continue
+        spoken = hit.metadata.get(WORKING_KIND_METADATA_KEY) == CONVERSATION_TURN_KIND
+        for cid in hit.provenance:
+            target = records.get(cid)
+            if target is not None and _same_words(hit.text, hits[target].text, spoken=spoken):
+                absorbed[index] = target
+                break
+    if not absorbed:
+        return hits, 0
+    survivors = list(hits)
+    for index, target in absorbed.items():
+        working = hits[index]
+        record = survivors[target]
+        if record is hits[target]:
+            # Never write into a hit another caller may still hold.
+            record = _clone_hit(record)
+            survivors[target] = record
+        record.score = record.score + working.score
+        record.channel = "+".join(sorted({*record.channel.split("+"), *working.channel.split("+")} - {""}))
+        item_ids = record.metadata.setdefault("working_item_ids", [])
+        if working.id not in item_ids:
+            item_ids.append(working.id)
+        session = working.metadata.get("session_id")
+        if session:
+            record.metadata["working_session_id"] = session
+    kept = [survivors[index] for index in range(len(hits)) if index not in absorbed]
+    kept.sort(key=lambda hit: -hit.score)
+    return kept, len(absorbed)
+
+
+def _iso_utc(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        try:
+            value = parse_dt(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    moment = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return moment.astimezone(timezone.utc).isoformat()
+
+
+def _dating_candidates(hits: list[Hit], branch: str) -> dict[str, list[str]]:
+    """The cids whose time each branch may be asked for, in hit order.
+
+    An evidence hit is dated by its own id; a derived hit by the first evidence
+    it cites. A hit that already carries ``created_at`` needs no lookup.
+    """
+
+    wanted: dict[str, list[str]] = {}
+
+    def want(record_branch: str, cid: str) -> None:
+        if cid:
+            wanted.setdefault(record_branch, []).append(cid)
+
+    for hit in hits:
+        if hit.kind == "working" or _iso_utc(hit.metadata.get("created_at")) is not None:
+            continue
+        record_branch = hit.branch or branch
+        if hit.kind == "evidence":
+            want(record_branch, hit.id)
+        else:
+            for cid in hit.provenance:
+                want(record_branch, cid)
+    return wanted
+
+
+def _cited_evidence_times(
+    ops: RetrievalPipelineOps,
+    hits: list[Hit],
+    *,
+    tenant_id: str,
+    branch: str,
+) -> dict[tuple[str, str], str]:
+    """Times for every cid this result may be dated from, in as few reads as possible."""
+
+    wanted = _dating_candidates(hits, branch)
+    if not wanted:
+        return {}
+    lookup_many = getattr(ops, "evidence_created_at_many", None)
+    lookup_one = getattr(ops, "evidence_created_at", None)
+    known: dict[tuple[str, str], str] = {}
+    for record_branch, cids in wanted.items():
+        unique = list(dict.fromkeys(cids))
+        found: Mapping[str, Any] = {}
+        if callable(lookup_many):
+            try:
+                found = lookup_many(tenant_id, unique, record_branch) or {}
+            except Exception:  # an unreadable store only costs the dates
+                found = {}
+        elif callable(lookup_one):
+            resolved: dict[str, Any] = {}
+            for cid in unique:
+                try:
+                    resolved[cid] = lookup_one(tenant_id, cid, record_branch)
+                except Exception:  # a missing or unreadable record only costs the date
+                    continue
+            found = resolved
+        for cid, value in found.items():
+            created = _iso_utc(value)
+            if created is not None:
+                known[(str(cid), record_branch)] = created
+    return known
+
+
+def _stamp_hit_origin(
+    ops: RetrievalPipelineOps,
+    hits: list[Hit],
+    *,
+    tenant_id: str,
+    branch: str,
+) -> None:
+    """Say, in a stable place, which plane a hit is from and when it was made.
+
+    ``memory_type`` is ``working`` for a working item and otherwise mirrors the
+    hit's kind. ``created_at`` (ISO 8601, UTC) is the record's own time for
+    evidence and working items; a derived hit (assertion, relation,
+    preference) that carries no time of its own takes the time of the first
+    evidence it cites, and says so in ``created_at_source``. A hit that cannot
+    be dated carries ``created_at: None`` and ``created_at_source: "unknown"``.
+    A working hit also lists the ``evidence_ids`` it cites.
+
+    The time comes from ``evidence_created_at``, not ``get_evidence``. Grounded
+    answering fingerprints ``access_policy`` across successive ``get_evidence``
+    results and fails closed when they drift; a dating read on that same
+    method would spend the pre-drift observation before the fingerprint.
+
+    Every cid the result names is asked for at once, per branch, through
+    ``evidence_created_at_many`` where the store has it: dating a hit must not
+    cost a connection each.
+    """
+
+    known = _cited_evidence_times(ops, hits, tenant_id=tenant_id, branch=branch)
+
+    def cited_evidence_time(cid: str, record_branch: str) -> str | None:
+        return known.get((cid, record_branch))
+
+    for hit in hits:
+        metadata = hit.metadata
+        metadata["memory_type"] = hit.kind
+        record_branch = hit.branch or branch
+        source = "record"
+        if hit.kind == "working":
+            metadata["evidence_ids"] = list(hit.provenance)
+            working = metadata.get("working_memory")
+            created = _iso_utc(working.get("created_at")) if isinstance(working, Mapping) else None
+        elif hit.kind == "evidence":
+            created = _iso_utc(metadata.get("created_at")) or cited_evidence_time(hit.id, record_branch)
+        else:
+            created = _iso_utc(metadata.get("created_at"))
+            if created is None:
+                for cid in hit.provenance:
+                    created = cited_evidence_time(cid, record_branch)
+                    if created is not None:
+                        source = "source_evidence"
+                        break
+        # Every hit carries both fields. A hit whose origin has no time this
+        # store can vouch for - one a command adapter returned without a valid
+        # timestamp, naming no record held here - says so instead of leaving
+        # the fields out or passing an unreadable value on as a date.
+        metadata["created_at"] = created
+        metadata["created_at_source"] = source if created is not None else "unknown"
+
+
+def lean_retrieval_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """A retrieval answer without the ``explain`` block and the per-hit diagnostics.
+
+    The ranking, the budget and the abstention verdict are the full answer's:
+    this only leaves out what a caller that reads five lines does not need.
+    ``abstained``, ``confidence``, ``uncertainty_note``, ``used_tokens`` and
+    every hit's id, kind, text, score, channel, trust tier, provenance and
+    origin metadata stay.
+    """
+
+    lean = {key: value for key, value in payload.items() if key != "explain"}
+    hits: list[Any] = []
+    for hit in payload.get("hits") or []:
+        if not isinstance(hit, Mapping):
+            hits.append(hit)
+            continue
+        trimmed = dict(hit)
+        metadata = hit.get("metadata")
+        if isinstance(metadata, Mapping):
+            trimmed["metadata"] = {
+                key: value for key, value in metadata.items() if key not in LEAN_HIT_DIAGNOSTIC_KEYS
+            }
+        hits.append(trimmed)
+    lean["hits"] = hits
+    return lean
 
 
 class RetrievalPipelineOps(Protocol):
@@ -392,6 +745,20 @@ class RetrievalPipelineOps(Protocol):
     def list_intentions(self, tenant_id: str) -> list[Any]: ...
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Any: ...
+
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> Any:
+        """Timestamp of one evidence row, never an access-policy snapshot."""
+        ...
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> Mapping[str, Any]:
+        """Timestamps of several evidence rows in one read.
+
+        Dating a result asks for every cid it names at once, so a store that
+        pays per connection answers with one query instead of one each.
+        """
+        ...
 
     def list_working(self, tenant_id: str, session_id: str, *, as_of: Any) -> list[Any]: ...
 
@@ -439,6 +806,7 @@ def _run_global_sensemaking(
     effective_filter: dict[str, Any],
     policy: OperatingPolicy,
     record_access: bool,
+    token_budget: int,
 ) -> RetrievalResult:
     """Project readable RAPTOR nodes through the shared retrieve seam."""
 
@@ -455,7 +823,7 @@ def _run_global_sensemaking(
     candidate_costs: dict[str, int] = {}
     token_fitted: list[Hit] = []
     for hit in hits:
-        individually_fitted, cost = ops._fit_budget([hit], policy.token_budget)
+        individually_fitted, cost = ops._fit_budget([hit], token_budget)
         if individually_fitted:
             token_fitted.append(hit)
             candidate_costs[hit.id] = cost
@@ -469,7 +837,7 @@ def _run_global_sensemaking(
         representative = min(
             members, key=lambda hit: (candidate_costs[hit.id], -hit.score, hit.id)
         )
-        fitted, cost = ops._fit_budget([representative], policy.token_budget - used)
+        fitted, cost = ops._fit_budget([representative], token_budget - used)
         if not fitted:
             continue
         budgeted.append(representative)
@@ -480,7 +848,7 @@ def _run_global_sensemaking(
     # remaining shared budget upgrading each occupied theme slot by relevance.
     for index, representative in enumerate(list(budgeted)):
         root = str(representative.metadata.get("theme_root_cid") or representative.id)
-        available = policy.token_budget - used + candidate_costs[representative.id]
+        available = token_budget - used + candidate_costs[representative.id]
         for candidate in sorted(
             root_groups[root],
             key=lambda hit: (-hit.score, candidate_costs[hit.id], hit.id),
@@ -494,7 +862,7 @@ def _run_global_sensemaking(
         for hit in token_fitted:
             if hit.id in selected_ids:
                 continue
-            fitted, cost = ops._fit_budget([hit], policy.token_budget - used)
+            fitted, cost = ops._fit_budget([hit], token_budget - used)
             if not fitted:
                 continue
             budgeted.append(hit)
@@ -536,6 +904,7 @@ def _run_global_sensemaking(
         coverage_reason = "incomplete_theme_coverage"
         coverage_note = "Global sensemaking omitted at least one RAPTOR theme root under the node budget."
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access
@@ -642,7 +1011,7 @@ def _run_global_sensemaking(
         confidence=confidence,
         abstained=abstention_reason is not None,
         uncertainty_note=note,
-        token_budget=policy.token_budget,
+        token_budget=token_budget,
         used_tokens=used,
         explain=explain,
     )
@@ -675,6 +1044,7 @@ def run_retrieval_pipeline(
     working_requested = _working_route_requested(effective_filter)
     k = policy.deep_top_k if deep else policy.top_k
     graph_k = max(4, k // 2)
+    token_budget = requested_token_budget(effective_filter, policy)
     cache_key = (
         None
         if query_mode == GLOBAL_SENSEMAKING_MODE
@@ -711,6 +1081,7 @@ def run_retrieval_pipeline(
             effective_filter=effective_filter,
             policy=policy,
             record_access=record_access,
+            token_budget=token_budget,
         )
         if cache_key is not None:
             current_cache_key = _result_cache_key(
@@ -802,6 +1173,9 @@ def run_retrieval_pipeline(
         )
     ranked_routes = [dense, lexical, graph, prospective, working]
     fused = ops._rrf(ranked_routes, k=max(k * 2, policy.rerank_width))
+    collapsed_turns = 0
+    if working:
+        fused, collapsed_turns = _collapse_session_duplicates(fused)
     reranked = ops.adapters.reranker.rerank(query, fused, k=max(k * 2, k))
     reranked, schema_fast_path = schema_fast_path_rerank(query, reranked, policy)
     diversified = ops._mmr(query, reranked, k=max(k, 1))
@@ -816,12 +1190,14 @@ def run_retrieval_pipeline(
         branch=branch,
         policy=policy,
     )
-    budgeted, used = ops._fit_budget(ordered, policy.token_budget)
+    budgeted, used = ops._fit_budget(ordered, token_budget)
     budgeted = ops._mark_retrieved_text_as_data(budgeted)
+    _stamp_hit_origin(ops, budgeted, tenant_id=tenant_id, branch=branch)
     if working_requested:
         working_explain["selected_count"] = sum(
             1 for hit in budgeted if hit.metadata.get("memory_type") == "working"
         )
+        working_explain["collapsed_count"] = collapsed_turns
     read_marks = (
         {"assertions": 0, "evidence": 0}
         if not record_access
@@ -949,7 +1325,7 @@ def run_retrieval_pipeline(
         confidence=confidence,
         abstained=abstained,
         uncertainty_note=note,
-        token_budget=policy.token_budget,
+        token_budget=token_budget,
         used_tokens=used,
         explain=explain,
     )
