@@ -38,7 +38,7 @@ import threading
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from mnemosyne.calibration import CalibrationSet, conformal_threshold, should_abstain
 from mnemosyne.models import Hit, RetrievalResult, parse_dt, utc_now
@@ -544,6 +544,69 @@ def _iso_utc(value: Any) -> str | None:
     return moment.astimezone(timezone.utc).isoformat()
 
 
+def _dating_candidates(hits: list[Hit], branch: str) -> dict[str, list[str]]:
+    """The cids whose time each branch may be asked for, in hit order.
+
+    An evidence hit is dated by its own id; a derived hit by the first evidence
+    it cites. A hit that already carries ``created_at`` needs no lookup.
+    """
+
+    wanted: dict[str, list[str]] = {}
+
+    def want(record_branch: str, cid: str) -> None:
+        if cid:
+            wanted.setdefault(record_branch, []).append(cid)
+
+    for hit in hits:
+        if hit.kind == "working" or _iso_utc(hit.metadata.get("created_at")) is not None:
+            continue
+        record_branch = hit.branch or branch
+        if hit.kind == "evidence":
+            want(record_branch, hit.id)
+        else:
+            for cid in hit.provenance:
+                want(record_branch, cid)
+    return wanted
+
+
+def _cited_evidence_times(
+    ops: RetrievalPipelineOps,
+    hits: list[Hit],
+    *,
+    tenant_id: str,
+    branch: str,
+) -> dict[tuple[str, str], str]:
+    """Times for every cid this result may be dated from, in as few reads as possible."""
+
+    wanted = _dating_candidates(hits, branch)
+    if not wanted:
+        return {}
+    lookup_many = getattr(ops, "evidence_created_at_many", None)
+    lookup_one = getattr(ops, "evidence_created_at", None)
+    known: dict[tuple[str, str], str] = {}
+    for record_branch, cids in wanted.items():
+        unique = list(dict.fromkeys(cids))
+        found: Mapping[str, Any] = {}
+        if callable(lookup_many):
+            try:
+                found = lookup_many(tenant_id, unique, record_branch) or {}
+            except Exception:  # an unreadable store only costs the dates
+                found = {}
+        elif callable(lookup_one):
+            resolved: dict[str, Any] = {}
+            for cid in unique:
+                try:
+                    resolved[cid] = lookup_one(tenant_id, cid, record_branch)
+                except Exception:  # a missing or unreadable record only costs the date
+                    continue
+            found = resolved
+        for cid, value in found.items():
+            created = _iso_utc(value)
+            if created is not None:
+                known[(str(cid), record_branch)] = created
+    return known
+
+
 def _stamp_hit_origin(
     ops: RetrievalPipelineOps,
     hits: list[Hit],
@@ -565,22 +628,16 @@ def _stamp_hit_origin(
     answering fingerprints ``access_policy`` across successive ``get_evidence``
     results and fails closed when they drift; a dating read on that same
     method would spend the pre-drift observation before the fingerprint.
+
+    Every cid the result names is asked for at once, per branch, through
+    ``evidence_created_at_many`` where the store has it: dating a hit must not
+    cost a connection each.
     """
 
-    lookup_created_at = getattr(ops, "evidence_created_at", None)
-    known: dict[tuple[str, str], str | None] = {}
+    known = _cited_evidence_times(ops, hits, tenant_id=tenant_id, branch=branch)
 
     def cited_evidence_time(cid: str, record_branch: str) -> str | None:
-        key = (cid, record_branch)
-        if key not in known:
-            created = None
-            if cid and callable(lookup_created_at):
-                try:
-                    created = _iso_utc(lookup_created_at(tenant_id, cid, record_branch))
-                except Exception:  # a missing or unreadable record only costs the date
-                    created = None
-            known[key] = created
-        return known[key]
+        return known.get((cid, record_branch))
 
     for hit in hits:
         metadata = hit.metadata
@@ -671,6 +728,16 @@ class RetrievalPipelineOps(Protocol):
 
     def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> Any:
         """Timestamp of one evidence row, never an access-policy snapshot."""
+        ...
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> Mapping[str, Any]:
+        """Timestamps of several evidence rows in one read.
+
+        Dating a result asks for every cid it names at once, so a store that
+        pays per connection answers with one query instead of one each.
+        """
         ...
 
     def list_working(self, tenant_id: str, session_id: str, *, as_of: Any) -> list[Any]: ...

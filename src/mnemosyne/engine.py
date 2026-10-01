@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, Sequence, runtime_checkable
 
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
@@ -2886,6 +2886,22 @@ class LocalMemoryEngine:
             if ev and not ev.erased:
                 return ev.created_at
             return None
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> dict[str, datetime]:
+        """Times of several rows in one read (see ``evidence_created_at``).
+
+        A cid with no live row is absent from the mapping, never ``None``.
+        """
+
+        found: dict[str, datetime] = {}
+        with self._lock:
+            for cid in dict.fromkeys(cids):
+                ev = self.evidence.get(self._evidence_key(tenant_id, branch, cid))
+                if ev and not ev.erased and ev.created_at is not None:
+                    found[cid] = ev.created_at
+        return found
 
     def list_raptor_summaries(self, tenant_id: str, branch: str = "main") -> list[Evidence]:
         """Return unerased RAPTOR summary rows in the caller's tenant/branch."""

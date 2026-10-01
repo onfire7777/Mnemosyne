@@ -911,6 +911,37 @@ def test_forget_keeps_a_profile_entry_while_another_branch_still_holds_its_evide
     assert _statements(tools, "t", "u") == []
 
 
+def test_a_result_asks_each_branch_for_its_dates_once(engine_bundle: tuple[Any, str, str]) -> None:
+    engine, tenant, user = engine_bundle
+    tools = MemoryTools(engine)
+    _seed_conversation(tools, tenant, user)
+    reads: list[tuple[str, int]] = []
+    one_by_one: list[str] = []
+    batch = type(engine).evidence_created_at_many
+    single = type(engine).evidence_created_at
+
+    def counting_batch(self: Any, tenant_id: str, cids: Any, branch: str = "main") -> Any:
+        cids = list(cids)
+        reads.append((branch, len(cids)))
+        return batch(self, tenant_id, cids, branch)
+
+    def counting_single(self: Any, tenant_id: str, cid: str, branch: str = "main") -> Any:
+        one_by_one.append(cid)
+        return single(self, tenant_id, cid, branch)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(type(engine), "evidence_created_at_many", counting_batch)
+        patch.setattr(type(engine), "evidence_created_at", counting_single)
+        result = tools.search(tenant_id=tenant, query=WIDE, user_id=user, role="agent")
+
+    # Every hit is dated, and the whole result cost one read of the branch it came from.
+    assert result["hits"]
+    assert all(hit["metadata"]["created_at"] for hit in result["hits"])
+    assert [branch for branch, _ in reads] == ["main"]
+    assert reads[0][1] >= 1
+    assert one_by_one == []
+
+
 def test_a_hit_that_cannot_be_dated_says_so() -> None:
     def hit(id: str, metadata: dict[str, Any]) -> Hit:
         return Hit(id=id, kind="evidence", tenant_id="t", branch="main", text="from an outside index",
