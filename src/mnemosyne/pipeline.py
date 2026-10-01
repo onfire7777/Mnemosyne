@@ -557,8 +557,9 @@ def _stamp_hit_origin(
     hit's kind. ``created_at`` (ISO 8601, UTC) is the record's own time for
     evidence and working items; a derived hit (assertion, relation,
     preference) that carries no time of its own takes the time of the first
-    evidence it cites, and says so in ``created_at_source``. A working hit
-    also lists the ``evidence_ids`` it cites.
+    evidence it cites, and says so in ``created_at_source``. A hit that cannot
+    be dated carries ``created_at: None`` and ``created_at_source: "unknown"``.
+    A working hit also lists the ``evidence_ids`` it cites.
 
     The time comes from ``evidence_created_at``, not ``get_evidence``. Grounded
     answering fingerprints ``access_policy`` across successive ``get_evidence``
@@ -600,9 +601,12 @@ def _stamp_hit_origin(
                     if created is not None:
                         source = "source_evidence"
                         break
-        if created is not None:
-            metadata["created_at"] = created
-            metadata["created_at_source"] = source
+        # Every hit carries both fields. A hit whose origin has no time this
+        # store can vouch for - one a command adapter returned without a valid
+        # timestamp, naming no record held here - says so instead of leaving
+        # the fields out or passing an unreadable value on as a date.
+        metadata["created_at"] = created
+        metadata["created_at_source"] = source if created is not None else "unknown"
 
 
 def lean_retrieval_payload(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -40,6 +40,7 @@ from mnemosyne.pipeline import (
     LEAN_HIT_DIAGNOSTIC_KEYS,
     _collapse_session_duplicates,
     _same_words,
+    _stamp_hit_origin,
     lean_retrieval_payload,
     requested_token_budget,
 )
@@ -886,6 +887,48 @@ def test_forget_retracts_the_profile_entry_built_on_the_erased_line(tmp_path: Pa
     # A forget that touches no profile entry reports as it always did.
     unrelated = tools.capture("t", "u", "user", "conversation", "The wall is green.")
     assert "profile_entries" not in (tools.forget("t", unrelated["cid"]).get("propagated") or {})
+
+
+def test_forget_keeps_a_profile_entry_while_another_branch_still_holds_its_evidence(tmp_path: Path) -> None:
+    tools = MemoryTools(LocalMemoryEngine(store_path=tmp_path / "store.json"))
+    line = tools.capture("t", "u", "user", "conversation", "From now on, always call me Captain.")
+    built = tools.profile_record_explicit("t", "u", "Wants to be called Captain.", source_evidence_cids=[line["cid"]])
+    tools.branch("side", role="operator", source_trust_tier=0, tenant_id="t")
+    assert tools.engine.get_evidence("t", line["cid"], "side") is not None
+
+    one_branch = tools.forget("t", line["cid"], all_branches=False)
+
+    # Erased on main, still readable on the side branch: the entry is still supported.
+    assert one_branch["erased"] is True and one_branch["branches_still_holding"] == ["side"]
+    assert "retracted_profile_entries" not in one_branch
+    assert tools.user_model.entries[built["id"]].status == "active"
+    assert _statements(tools, "t", "u") == ["Wants to be called Captain."]
+
+    everywhere = tools.forget("t", line["cid"])
+
+    assert everywhere["erased"] is True and "branches_still_holding" not in everywhere
+    assert everywhere["retracted_profile_entries"] == [built["id"]]
+    assert _statements(tools, "t", "u") == []
+
+
+def test_a_hit_that_cannot_be_dated_says_so() -> None:
+    def hit(id: str, metadata: dict[str, Any]) -> Hit:
+        return Hit(id=id, kind="evidence", tenant_id="t", branch="main", text="from an outside index",
+                   score=0.1, channel="lexical", provenance=[id], metadata=metadata)
+
+    # What a command adapter may return: no record of ours behind the id, and no usable time.
+    undated = hit("outside-1", {})
+    garbled = hit("outside-2", {"created_at": "last Tuesday"})
+    dated = hit("outside-3", {"created_at": "2026-10-01T09:00:00+00:00"})
+    ops = SimpleNamespace(evidence_created_at=lambda tenant_id, cid, branch: None)
+
+    _stamp_hit_origin(ops, [undated, garbled, dated], tenant_id="t", branch="main")
+
+    for unknown in (undated, garbled):
+        assert unknown.metadata["created_at"] is None
+        assert unknown.metadata["created_at_source"] == "unknown"
+    assert dated.metadata["created_at"] == "2026-10-01T09:00:00+00:00"
+    assert dated.metadata["created_at_source"] == "record"
 
 
 def test_forget_retracts_corrections_that_depend_on_the_erased_evidence(tmp_path: Path) -> None:
