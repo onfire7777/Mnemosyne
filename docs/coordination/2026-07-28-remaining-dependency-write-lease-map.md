@@ -1550,6 +1550,40 @@ The following packages are complete source history, not runnable work:
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
+- PR #210: owner-directed maintenance outside the GoalEx lease sweep:
+  session-aware reads for the MCP server, requested by the BurnOS
+  client. `working_query` takes `limit` and `kinds`; `search` and
+  `deep_search` take `session_id` - honoured only with a verified
+  session identity for that session - and rank that session's live
+  working items with long-term memory through the existing
+  working-memory route, fusing a working item and the ledger record it
+  cites into one hit; every hit's metadata says `memory_type` and
+  `created_at`; `token_budget` (clamped to the policy budget) and `lean`
+  give a smaller answer; `serverInfo.version` and `/healthz` report the
+  build. Also the profile fixes that request asks for: a `profile_retire`
+  tool (60 tools), `profile_correct` superseding the entry it corrects,
+  `forget` retracting profile entries built on the erased record, and
+  only inferred entries yielding to a higher-authority statement that
+  merely differs. Additive: a call without the new arguments takes the
+  path it always took, on all three backends.
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `src/mnemosyne/pipeline.py`,
+  `src/mnemosyne/engine.py`,
+  `src/mnemosyne/mcp_tools.py`,
+  `src/mnemosyne/mcp_server.py`,
+  `src/mnemosyne/buildinfo.py`,
+  `src/mnemosyne/user_model.py`,
+  `tests/test_session_aware_reads.py`,
+  `tests/test_shared_engine_contract.py`,
+  `README.md`,
+  `docs/ARCHITECTURE-OVERVIEW.md`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #210 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.
