@@ -63,7 +63,7 @@ import time
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from mnemosyne import text as text_kernels
 from mnemosyne.access_policy import (
@@ -1587,6 +1587,36 @@ class SqliteEngine:
         if ev and not ev.erased:
             return ev.created_at
         return None
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> dict[str, datetime]:
+        """Times of several rows in one statement (see ``evidence_created_at``).
+
+        A cid with no live row is absent from the mapping, never ``None``.
+        """
+
+        wanted = [cid for cid in dict.fromkeys(cids) if cid]
+        if not wanted:
+            return {}
+        conn = self._connect(tenant_id)
+        found: dict[str, datetime] = {}
+        with self._lock:
+            # One statement per batch of 500, so a long result never builds a
+            # statement past SQLITE_MAX_VARIABLE_NUMBER.
+            for start in range(0, len(wanted), 500):
+                chunk = wanted[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    "SELECT cid, created_at FROM evidence "
+                    f"WHERE tenant_id = ? AND branch = ? AND erased = 0 AND cid IN ({placeholders})",
+                    (tenant_id, branch, *chunk),
+                ).fetchall()
+                for row in rows:
+                    created = parse_dt(row["created_at"]) if row["created_at"] is not None else None
+                    if created is not None:
+                        found[str(row["cid"])] = created
+        return found
 
     def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).

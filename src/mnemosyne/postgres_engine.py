@@ -13,7 +13,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
@@ -2079,6 +2079,44 @@ class PostgresEngine:
         if not row or row[0] is None:
             return None
         return parse_dt(row[0])
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> dict[str, datetime]:
+        """Times of several rows in ONE query and one connection.
+
+        Dating a result would otherwise check a connection out of the pool per
+        cid - eight on an ordinary search, twenty-four on a deep one - and run
+        the registry's idempotent DDL each time. A cid with no live row is
+        absent from the mapping, never ``None``.
+        """
+
+        wanted = [cid for cid in dict.fromkeys(cids) if cid]
+        if not wanted:
+            return {}
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        found: dict[str, datetime] = {}
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_entity_registry_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT cid, created_at FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND erased = false AND cid = ANY(%s)
+                    """,
+                    (db_tenant_id, branch, [_cid_to_bytes(cid) for cid in wanted]),
+                )
+                rows = cur.fetchall()
+        by_bytes = {_cid_to_bytes(cid): cid for cid in wanted}
+        for row in rows:
+            created = parse_dt(row[1]) if row[1] is not None else None
+            if created is None:
+                continue
+            cid = by_bytes.get(bytes(row[0])) if row[0] is not None else None
+            if cid is not None:
+                found[cid] = created
+        return found
 
     def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
