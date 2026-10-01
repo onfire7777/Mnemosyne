@@ -40,6 +40,27 @@ def dt_to_json(value: datetime | None) -> str | None:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
+def iso_utc(value: datetime | str | None) -> str | None:
+    """A timestamp as ISO 8601 in UTC with an explicit offset, or ``None``.
+
+    The form a retrieval hit carries for when its record was made. Unlike
+    :func:`dt_to_json` it never raises on something that is not a timestamp:
+    a hit is still a hit without its date.
+    """
+
+    if isinstance(value, str):
+        if not value.strip():
+            return None
+        try:
+            value = parse_dt(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    moment = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return moment.astimezone(UTC).isoformat()
+
+
 @dataclass(slots=True)
 class Evidence:
     tenant_id: str
