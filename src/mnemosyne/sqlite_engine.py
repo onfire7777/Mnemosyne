@@ -1575,6 +1575,19 @@ class SqliteEngine:
                 return ev
             return None
 
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+        """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
+
+        Retrieval dates hits from this read. Grounded answering fingerprints
+        ``access_policy`` across ``get_evidence`` calls, so a timestamp lookup
+        must not be one of those observations.
+        """
+
+        ev = self._fetch_evidence(tenant_id, cid, branch)
+        if ev and not ev.erased:
+            return ev.created_at
+        return None
+
     def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
 

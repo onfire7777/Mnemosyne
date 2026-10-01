@@ -511,21 +511,25 @@ def _stamp_hit_origin(
     preference) that carries no time of its own takes the time of the first
     evidence it cites, and says so in ``created_at_source``. A working hit
     also lists the ``evidence_ids`` it cites.
+
+    The time comes from ``evidence_created_at``, not ``get_evidence``. Grounded
+    answering fingerprints ``access_policy`` across successive ``get_evidence``
+    results and fails closed when they drift; a dating read on that same
+    method would spend the pre-drift observation before the fingerprint.
     """
 
-    get_evidence = getattr(ops, "get_evidence", None)
+    lookup_created_at = getattr(ops, "evidence_created_at", None)
     known: dict[tuple[str, str], str | None] = {}
 
-    def evidence_created_at(cid: str, record_branch: str) -> str | None:
+    def cited_evidence_time(cid: str, record_branch: str) -> str | None:
         key = (cid, record_branch)
         if key not in known:
             created = None
-            if cid and callable(get_evidence):
+            if cid and callable(lookup_created_at):
                 try:
-                    record = get_evidence(tenant_id, cid, record_branch)
+                    created = _iso_utc(lookup_created_at(tenant_id, cid, record_branch))
                 except Exception:  # a missing or unreadable record only costs the date
-                    record = None
-                created = _iso_utc(getattr(record, "created_at", None))
+                    created = None
             known[key] = created
         return known[key]
 
@@ -539,12 +543,12 @@ def _stamp_hit_origin(
             working = metadata.get("working_memory")
             created = _iso_utc(working.get("created_at")) if isinstance(working, Mapping) else None
         elif hit.kind == "evidence":
-            created = _iso_utc(metadata.get("created_at")) or evidence_created_at(hit.id, record_branch)
+            created = _iso_utc(metadata.get("created_at")) or cited_evidence_time(hit.id, record_branch)
         else:
             created = _iso_utc(metadata.get("created_at"))
             if created is None:
                 for cid in hit.provenance:
-                    created = evidence_created_at(cid, record_branch)
+                    created = cited_evidence_time(cid, record_branch)
                     if created is not None:
                         source = "source_evidence"
                         break
@@ -612,6 +616,10 @@ class RetrievalPipelineOps(Protocol):
     def list_intentions(self, tenant_id: str) -> list[Any]: ...
 
     def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Any: ...
+
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> Any:
+        """Timestamp of one evidence row, never an access-policy snapshot."""
+        ...
 
     def list_working(self, tenant_id: str, session_id: str, *, as_of: Any) -> list[Any]: ...
 

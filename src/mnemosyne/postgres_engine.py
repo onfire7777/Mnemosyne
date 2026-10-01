@@ -2054,6 +2054,31 @@ class PostgresEngine:
                 row = cur.fetchone()
         return _row_to_evidence(row, cid) if row else None
 
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+        """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
+
+        Retrieval dates hits from this read. Grounded answering fingerprints
+        ``access_policy`` across ``get_evidence`` calls, so a timestamp lookup
+        must not be one of those observations.
+        """
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_entity_registry_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT created_at FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        return parse_dt(row[0])
+
     def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
 
