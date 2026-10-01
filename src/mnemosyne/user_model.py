@@ -245,26 +245,75 @@ class UserModel:
         entry.valid_to = at or datetime.now(UTC)
         return True
 
-    def retract_citing(self, tenant_id: str, cid: str, *, at: datetime | None = None) -> list[str]:
-        """Retract every entry built on one evidence record that has been erased.
+    def originating_evidence_cids(self, entry: UserModelEntry) -> list[str]:
+        """Evidence CIDs this entry depends on.
 
-        Erasure propagates to what was derived from the erased words: each
-        entry of the tenant citing ``cid`` is retracted and its statement
-        blanked, so the forgotten content does not live on in the profile.
-        Returns the ids retracted by this call.
+        A correction used to record the replaced profile id as its only
+        source. Walk those ids, within the same tenant and user, and return
+        the evidence CIDs at the end of the chain.
+        """
+
+        seen: set[str] = set()
+        evidence: list[str] = []
+        pending = [cid for cid in entry.source_evidence_cids if isinstance(cid, str) and cid]
+        while pending:
+            cid = pending.pop(0)
+            if cid in seen:
+                continue
+            seen.add(cid)
+            cited = self.entries.get(cid)
+            if (
+                cited is not None
+                and cited.tenant_id == entry.tenant_id
+                and cited.user_id == entry.user_id
+                and cited.id != entry.id
+            ):
+                pending.extend(
+                    source for source in cited.source_evidence_cids if isinstance(source, str) and source
+                )
+                continue
+            evidence.append(cid)
+        return evidence
+
+    def retract_citing(self, tenant_id: str, cid: str, *, at: datetime | None = None) -> list[str]:
+        """Retract every entry built on erased evidence, including corrections.
+
+        A correction may cite the profile entry it replaced rather than the
+        original evidence CID. Follow that chain so the live correction is
+        retracted too. Already-closed entries that still quote the forgotten
+        text are blanked. Every id whose statement was blanked, or whose
+        status moved to retracted, is returned so the caller persists closed
+        residue as well as live retractions.
         """
 
         moment = at or datetime.now(UTC)
-        retracted: list[str] = []
+        dependent: set[str] = set()
+        progressed = True
+        while progressed:
+            progressed = False
+            for entry in self.entries.values():
+                if entry.tenant_id != tenant_id or entry.id in dependent:
+                    continue
+                if cid in entry.source_evidence_cids or any(
+                    source in dependent for source in entry.source_evidence_cids
+                ):
+                    dependent.add(entry.id)
+                    progressed = True
+        changed: list[str] = []
         for entry in self.entries.values():
-            if entry.tenant_id != tenant_id or cid not in entry.source_evidence_cids:
+            if entry.id not in dependent:
                 continue
+            mutated = False
             if entry.status == "active":
                 entry.status = "retracted"
                 entry.valid_to = moment
-                retracted.append(entry.id)
-            entry.statement = ERASED_STATEMENT
-        return retracted
+                mutated = True
+            if entry.statement != ERASED_STATEMENT:
+                entry.statement = ERASED_STATEMENT
+                mutated = True
+            if mutated:
+                changed.append(entry.id)
+        return changed
 
     def set_latent_profile(self, profile: LatentUserProfile) -> None:
         self.latent_profiles[(profile.tenant_id, profile.user_id)] = profile

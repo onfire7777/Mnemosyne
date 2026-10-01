@@ -1793,6 +1793,9 @@ class MemoryTools:
             # Erasure propagates to what was built on the erased words: a profile
             # entry citing this record is retracted, its statement blanked, and
             # the report says so.
+            # Closed entries are blanked too. The returned ids are every
+            # entry that changed, so a forget that only blanks residue still
+            # saves.
             retracted = self.user_model.retract_citing(tenant_id, cid)
             if retracted:
                 self._save_user_model()
@@ -2059,22 +2062,24 @@ class MemoryTools:
         context: dict[str, Any] | None = None,
         confidence: float = 0.95,
     ) -> dict[str, Any]:
-        """Correct an existing profile entry, superseding weaker entries.
+        """Correct an active profile entry.
 
-        ``id`` must name a live entry in this tenant/user scope. An unknown id used
-        to be recorded as the correction's provenance anyway, which minted a ghost
-        entry that then showed up in ``profile_context``; like ``supersede``, an
-        unknown id is now an error.
+        ``id`` must name an active entry in this tenant/user scope. The new
+        entry keeps the evidence CIDs the old one was built on, so erasing
+        that evidence retracts the correction too. A closed entry is refused:
+        correcting it would put a retired value back into the live profile.
         """
 
-        self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
+        prior = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
+        if prior.status != "active":
+            raise ValueError("profile entry is not active")
         result = self.profile_record_explicit(
             tenant_id=tenant_id,
             user_id=user_id,
             statement=statement,
             scope=context,
             confidence=confidence,
-            source_evidence_cids=[id],
+            source_evidence_cids=self.user_model.originating_evidence_cids(prior),
         )
         # The entry being corrected is replaced, whatever its authority: two
         # explicit preferences used to stay active side by side, the old value
