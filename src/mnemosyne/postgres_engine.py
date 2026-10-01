@@ -78,6 +78,7 @@ from mnemosyne.models import (
     Relation,
     RetrievalResult,
     dt_to_json,
+    iso_utc,
     parse_dt,
     utc_now,
 )
@@ -2965,7 +2966,7 @@ class PostgresEngine:
                     """
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT e.cid, e.branch, e.content, e.metadata, e.trust_tier, e.sensitivity, e.access_policy,
-                      e.actor, e.source_type,
+                      e.actor, e.source_type, e.created_at,
                       ts_rank_cd(coalesce(e.lexeme, to_tsvector('english', coalesce(e.content, ''))), q.query) AS score
                     FROM evidence e, q
                     WHERE e.tenant_id = %s AND e.branch = %s AND e.erased = false
@@ -3003,6 +3004,7 @@ class PostgresEngine:
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
+                        "created_at": iso_utc(row.get("created_at")),
                         "backend": self.adapters.lexical_backend,
                         "reality_class": self._classify_evidence_row_reality(row, metadata),
                         "privacy": privacy_metadata,
@@ -3182,7 +3184,7 @@ class PostgresEngine:
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
                       trust_tier, sensitivity, access_policy, actor, source_type,
-                      embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
+                      embedding_partition, created_at, 1.0 - (embedding <=> %s::vector) AS score
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -3241,6 +3243,7 @@ class PostgresEngine:
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
+                        "created_at": iso_utc(row.get("created_at")),
                         "backend": self.adapters.embedding.name,
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": True,
@@ -3290,7 +3293,7 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT cid, branch, content, content_pointer, modality, metadata,
-                      trust_tier, sensitivity, access_policy, actor, source_type, embedding_partition
+                      trust_tier, sensitivity, access_policy, actor, source_type, embedding_partition, created_at
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -3369,6 +3372,7 @@ class PostgresEngine:
                     hit_metadata = {
                         "source_type": row["source_type"],
                         "actor": row["actor"],
+                        "created_at": iso_utc(row.get("created_at")),
                         "backend": self.adapters.embedding.name,
                         "embedding_dims": self.adapters.embedding.dims,
                         "stored_embedding": False,
@@ -5685,7 +5689,8 @@ class PostgresEngine:
                 self._set_tenant(cur, db_tenant_id)
                 cur.execute(
                     """
-                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, access_policy, actor, source_type
+                    SELECT cid, tenant_id, branch, content, metadata, trust_tier, sensitivity, access_policy, actor, source_type,
+                      created_at
                     FROM evidence
                     WHERE tenant_id = %s AND branch = %s AND erased = false
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -5722,6 +5727,7 @@ class PostgresEngine:
                         hit_metadata = {
                             "source_type": row["source_type"],
                             "actor": row["actor"],
+                            "created_at": iso_utc(row.get("created_at")),
                             "reality_class": self._classify_evidence_row_reality(row, metadata),
                             "privacy": privacy_metadata,
                         }

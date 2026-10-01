@@ -52,6 +52,7 @@ from mnemosyne.models import (
     Preference,
     Relation,
     RetrievalResult,
+    iso_utc,
     utc_now,
 )
 from mnemosyne.pipeline import run_retrieval_pipeline
@@ -5094,6 +5095,9 @@ class LocalMemoryEngine:
             metadata = {
                 "actor": ev.actor,
                 "source_type": ev.source_type,
+                # When the record was made rides on the hit, so saying it later
+                # costs the retrieval pipeline no extra read.
+                "created_at": iso_utc(ev.created_at),
                 "modality": ev.modality,
                 "content_pointer": ev.content_pointer,
                 "reality_class": self._classify_evidence_reality(ev),
@@ -5171,6 +5175,7 @@ class LocalMemoryEngine:
                     metadata={
                         "status": assertion.status,
                         "confidence": assertion.confidence,
+                        "created_at": iso_utc(assertion.transaction_time),
                         "reality_class": reality_monitoring["reality_class"],
                         "reality_monitoring": reality_monitoring,
                         "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
@@ -5206,7 +5211,12 @@ class LocalMemoryEngine:
                     provenance=list(pref.source_evidence_cids),
                     trust_tier=0 if pref.explicit else 3,
                     sensitivity=0,
-                    metadata={"category": pref.category, "explicit": pref.explicit, "privacy": privacy_metadata},
+                    metadata={
+                        "category": pref.category,
+                        "explicit": pref.explicit,
+                        "created_at": iso_utc(pref.valid_from),
+                        "privacy": privacy_metadata,
+                    },
                 )
             )
         return hits

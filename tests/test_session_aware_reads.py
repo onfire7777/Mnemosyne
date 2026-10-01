@@ -39,6 +39,7 @@ from mnemosyne.pipeline import (
     LEAN_HIT_DIAGNOSTIC_KEYS,
     _collapse_session_duplicates,
     _same_words,
+    _stamp_hit_origin,
     lean_retrieval_payload,
     requested_token_budget,
 )
@@ -216,7 +217,6 @@ def test_search_ranks_the_sessions_working_memory_with_long_term_memory(
         metadata = hit["metadata"]
         assert metadata["memory_type"] == ("working" if hit["kind"] == "working" else hit["kind"])
         assert datetime.fromisoformat(metadata["created_at"]).tzinfo is not None
-        assert metadata["created_at_source"] in {"record", "source_evidence"}
     note = next(hit for hit in with_session["hits"] if "four hundred" in hit["text"])
     assert note["kind"] == "working"
     assert note["metadata"]["evidence_ids"] == [cids[0]]
@@ -290,6 +290,84 @@ def test_session_search_shows_only_the_token_subjects_items(engine_bundle: tuple
 
     assert "four hundred" not in _texts(result)
     assert all(hit["kind"] != "working" for hit in result["hits"])
+
+
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+def test_dating_a_hit_costs_no_extra_storage_read(
+    backend: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The record's time rides on the hit: a search must not read storage again to say it.
+
+    An extra ``get_evidence`` per hit is a cost on every search, and it shifts
+    the reads a caller that re-checks access policy between two reads relies on.
+    """
+
+    engine: Any = LocalMemoryEngine() if backend == "local" else SqliteEngine(tmp_path / "sqlite-store")
+    tools = MemoryTools(engine)
+    tools.capture("t", "u", "user", "conversation", "The kayak is stored in the blue shed.")
+    reads: list[tuple[Any, ...]] = []
+    original = engine.get_evidence
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        reads.append(args)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(engine, "get_evidence", counting)
+
+    result = engine.retrieve(query="where is the kayak stored", tenant_id="t")
+
+    assert result.hits
+    assert all(datetime.fromisoformat(hit.metadata["created_at"]).tzinfo is not None for hit in result.hits)
+    assert all(hit.metadata["memory_type"] == hit.kind for hit in result.hits)
+    assert reads == []
+
+
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+def test_stated_facts_and_preferences_are_dated_too(backend: str, tmp_path: Path) -> None:
+    engine: Any = LocalMemoryEngine() if backend == "local" else SqliteEngine(tmp_path / "sqlite-store")
+    tools = MemoryTools(engine)
+    line = tools.capture("t", "u", "user", "conversation", "I live in Lisbon and I prefer morning flights.")
+    tools.assert_fact("t", "owner", "lives_in", "Lisbon", [line["cid"]], user_id="u")
+    tools.preference("t", "u", "travel", "Prefers morning flights.", explicit=True)
+
+    result = tools.search("t", "owner lives in Lisbon and prefers morning flights", user_id="u")
+
+    kinds = {hit["kind"] for hit in result["hits"]}
+    assert {"evidence", "assertion", "preference"} <= kinds
+    for hit in result["hits"]:
+        assert datetime.fromisoformat(hit["metadata"]["created_at"]).tzinfo is not None
+        assert hit["metadata"]["memory_type"] == hit["kind"]
+
+
+def test_an_undated_evidence_hit_is_looked_up_and_a_derived_one_is_left_alone() -> None:
+    made = datetime(2026, 10, 1, 9, 0, tzinfo=UTC)
+    looked_up: list[str] = []
+
+    class Ops:
+        def get_evidence(self, tenant_id: str, cid: str, branch: str = "main") -> Any:
+            looked_up.append(cid)
+            return SimpleNamespace(created_at=made)
+
+    def hit(kind: str, id: str, metadata: dict[str, Any]) -> Hit:
+        return Hit(id=id, kind=kind, tenant_id="t", branch="main", text="x", score=1.0,
+                   channel="adapter", provenance=["cid-1"], metadata=metadata)
+
+    undated = hit("evidence", "cid-1", {})
+    dated = hit("evidence", "cid-2", {"created_at": "2026-09-30T08:00:00Z"})
+    derived = hit("assertion", "assertion-1", {"created_at": None})
+    working = hit("working", "item-1", {"memory_type": "working", "working_memory": {"created_at": made.isoformat()}})
+
+    _stamp_hit_origin(Ops(), [undated, dated, derived, working], tenant_id="t", branch="main")  # type: ignore[arg-type]
+
+    assert undated.metadata["created_at"] == made.isoformat()
+    assert dated.metadata["created_at"] == "2026-09-30T08:00:00+00:00"
+    # A derived hit with no time of its own carries none - and costs no read.
+    assert "created_at" not in derived.metadata
+    assert working.metadata["created_at"] == made.isoformat() and working.metadata["evidence_ids"] == ["cid-1"]
+    assert looked_up == ["cid-1"]
+    assert [item.metadata["memory_type"] for item in (undated, dated, derived, working)] == [
+        "evidence", "evidence", "assertion", "working",
+    ]
 
 
 def test_same_words_is_about_the_line_not_its_labels() -> None:
