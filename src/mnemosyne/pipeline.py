@@ -298,6 +298,26 @@ def _working_session_id(effective_filter: dict[str, Any]) -> str | None:
     return raw.strip()
 
 
+def _requested_max_trust_tier(effective_filter: Mapping[str, Any], policy: OperatingPolicy) -> int:
+    """The least-trusted tier this search still admits, as a durable channel reads it.
+
+    ``max_trust_tier`` is the ceiling the caller asked for and ``min_trust_tier``
+    is its legacy alias, honoured only when no ``max_trust_tier`` was given; the
+    policy ceiling stands when the caller named neither. The working route reads
+    the request exactly as the durable channels read it, so a session item can
+    never enter the one ranked list at a trust quality a durable hit was dropped
+    for - and cannot colour confidence or duplicate fusion from there.
+    """
+
+    for key in ("max_trust_tier", "min_trust_tier"):
+        if effective_filter.get(key) is not None:
+            try:
+                return int(effective_filter[key])
+            except (TypeError, ValueError):
+                break
+    return int(policy.max_trust_tier)
+
+
 def _working_memory_route(
     ops: RetrievalPipelineOps,
     *,
@@ -349,7 +369,7 @@ def _working_memory_route(
             limit=k,
             access_context=effective_filter,
             policy_max_sensitivity=policy.max_sensitivity,
-            max_trust_tier=policy.max_trust_tier,
+            max_trust_tier=_requested_max_trust_tier(effective_filter, policy),
         )
         _stamp_working_kind(scoped, items)
     except Exception as exc:  # optional route failures must not suppress durable retrieval
@@ -641,7 +661,7 @@ def _stamp_hit_origin(
 
     for hit in hits:
         metadata = hit.metadata
-        metadata.setdefault("memory_type", hit.kind)
+        metadata["memory_type"] = hit.kind
         record_branch = hit.branch or branch
         source = "record"
         if hit.kind == "working":
