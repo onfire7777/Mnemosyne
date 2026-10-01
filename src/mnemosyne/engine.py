@@ -52,6 +52,7 @@ from mnemosyne.models import (
     Preference,
     Relation,
     RetrievalResult,
+    iso_utc,
     utc_now,
 )
 from mnemosyne.pipeline import run_retrieval_pipeline
@@ -3622,6 +3623,7 @@ class LocalMemoryEngine:
                         "predicate": relation_fields["predicate"],
                         "target": relation_fields["target"],
                         "confidence": rel.confidence,
+                        "created_at": iso_utc(rel.valid_from),
                         "source_evidence_cids": list(rel.source_evidence_cids),
                         "reality_class": security["reality_class"],
                         "source_evidence_status": security["source_evidence_status"],
@@ -3681,6 +3683,7 @@ class LocalMemoryEngine:
                             "predicate": relation_fields["predicate"],
                             "target": relation_fields["target"],
                             "confidence": rel.confidence,
+                            "created_at": iso_utc(rel.valid_from),
                             "source_evidence_cids": list(rel.source_evidence_cids),
                             "reality_class": security["reality_class"],
                             "source_evidence_status": security["source_evidence_status"],
@@ -5185,6 +5188,9 @@ class LocalMemoryEngine:
                     metadata={
                         "status": assertion.status,
                         "confidence": assertion.confidence,
+                        # A derived record may cite no evidence at all; its own
+                        # time is what dates the hit.
+                        "created_at": iso_utc(assertion.transaction_time),
                         "reality_class": reality_monitoring["reality_class"],
                         "reality_monitoring": reality_monitoring,
                         "last_accessed": assertion.last_accessed.isoformat() if assertion.last_accessed else None,
@@ -5220,7 +5226,12 @@ class LocalMemoryEngine:
                     provenance=list(pref.source_evidence_cids),
                     trust_tier=0 if pref.explicit else 3,
                     sensitivity=0,
-                    metadata={"category": pref.category, "explicit": pref.explicit, "privacy": privacy_metadata},
+                    metadata={
+                        "category": pref.category,
+                        "explicit": pref.explicit,
+                        "created_at": iso_utc(pref.valid_from),
+                        "privacy": privacy_metadata,
+                    },
                 )
             )
         return hits

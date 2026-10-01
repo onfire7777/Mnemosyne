@@ -770,6 +770,29 @@ def _no_active_forgotten_text(model: UserModel) -> bool:
     )
 
 
+@pytest.mark.parametrize("backend", ["local", "sqlite"])
+def test_a_derived_hit_that_cites_no_evidence_is_still_dated(backend: str, tmp_path: Path) -> None:
+    """An assertion or a preference may cite nothing; its own record time dates the hit.
+
+    Dating a derived hit only through the evidence it cites left one with an
+    empty provenance list carrying no ``created_at`` at all.
+    """
+
+    engine: Any = LocalMemoryEngine() if backend == "local" else SqliteEngine(tmp_path / "sqlite-store")
+    tools = MemoryTools(engine)
+    tools.assert_fact("t", "owner", "lives_in", "Lisbon", [], user_id="u")
+    tools.preference("t", "u", "travel", "Prefers morning flights.", explicit=True)
+
+    result = tools.search("t", "owner lives in Lisbon and prefers morning flights", user_id="u")
+
+    undated_before = [hit for hit in result["hits"] if hit["kind"] in {"assertion", "preference"}]
+    assert {hit["kind"] for hit in undated_before} == {"assertion", "preference"}
+    for hit in result["hits"]:
+        assert datetime.fromisoformat(hit["metadata"]["created_at"]).tzinfo is not None
+        assert hit["metadata"]["created_at_source"] == "record"
+        assert hit["metadata"]["memory_type"] == hit["kind"]
+
+
 def test_a_stated_entry_is_not_retired_by_another_statement_that_merely_differs() -> None:
     tools = MemoryTools(LocalMemoryEngine())
     tools.profile_record_explicit("t", "u", "Prefers temperatures in Celsius.")

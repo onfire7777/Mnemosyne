@@ -78,6 +78,7 @@ from mnemosyne.models import (
     Relation,
     RetrievalResult,
     dt_to_json,
+    iso_utc,
     parse_dt,
     utc_now,
 )
@@ -3062,6 +3063,7 @@ class PostgresEngine:
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence, a.calibration, a.status,
                       a.source_evidence_cids, a.trust_tier, a.sensitivity, a.access_policy, a.last_accessed, a.access_count,
+                      a.transaction_time,
                       ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
                     FROM assertions a, q
                     WHERE a.tenant_id = %s AND a.branch = %s AND a.status IN ('active', 'contested')
@@ -3107,6 +3109,7 @@ class PostgresEngine:
                                 "confidence": float(row["confidence"]),
                                 "reality_class": reality_monitoring["reality_class"],
                                 "reality_monitoring": reality_monitoring,
+                                "created_at": iso_utc(row.get("transaction_time")),
                                 "backend": self.adapters.lexical_backend,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                 "access_count": row["access_count"],
@@ -3138,7 +3141,7 @@ class PostgresEngine:
                     """
                     SELECT id, branch, subject, predicate, object, confidence, calibration, status,
                       source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
-                      embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
+                      transaction_time, embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -3194,6 +3197,7 @@ class PostgresEngine:
                                 "confidence": float(row["confidence"]),
                                 "reality_class": reality_monitoring["reality_class"],
                                 "reality_monitoring": reality_monitoring,
+                                "created_at": iso_utc(row.get("transaction_time")),
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
@@ -3606,6 +3610,7 @@ class PostgresEngine:
                         "predicate": relation_fields["predicate"],
                         "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
+                        "created_at": iso_utc(rel.get("valid_from")),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
@@ -3665,6 +3670,7 @@ class PostgresEngine:
                         "predicate": relation_fields["predicate"],
                         "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
+                        "created_at": iso_utc(rel.get("valid_from")),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
@@ -5777,7 +5783,8 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT id, tenant_id, branch, subject, predicate, object, confidence, calibration, status,
-                      source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count
+                      source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
+                      transaction_time
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -5822,6 +5829,7 @@ class PostgresEngine:
                                     "confidence": float(row["confidence"]),
                                     "reality_class": reality_monitoring["reality_class"],
                                     "reality_monitoring": reality_monitoring,
+                                    "created_at": iso_utc(row.get("transaction_time")),
                                     "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                     "access_count": row["access_count"],
                                     "privacy": privacy_metadata,
