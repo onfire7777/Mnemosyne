@@ -220,6 +220,7 @@ def test_search_ranks_the_sessions_working_memory_with_long_term_memory(
         assert metadata["created_at_source"] in {"record", "source_evidence"}
     note = next(hit for hit in with_session["hits"] if "four hundred" in hit["text"])
     assert note["kind"] == "working"
+    assert note["metadata"]["working_kind"] == "intermediate_conclusion"
     assert note["metadata"]["evidence_ids"] == [cids[0]]
     assert note["provenance"] == [cids[0]]
     # Evidence hits are dated too, without the session.
@@ -296,32 +297,48 @@ def test_session_search_shows_only_the_token_subjects_items(engine_bundle: tuple
 def test_same_words_is_about_the_line_not_its_labels() -> None:
     line = "remember that my favourite colour is green"
 
-    assert _same_words("user: " + line, "[2026-09-30 12:08:46] User: " + line)
-    assert _same_words("assistant: Got it.", "[2026-09-30 12:08:49] Burnos: Got it.")
-    assert _same_words("user: yes", "[2026-10-01 09:00:00] User: yes")
-    assert not _same_words(NOTE, "Session turn number 0: the harness said the word amber.")
-    assert not _same_words("", "anything")
+    assert _same_words("user: " + line, "[2026-09-30 12:08:46] User: " + line, spoken=True)
+    assert _same_words("assistant: Got it.", "[2026-09-30 12:08:49] Burnos: Got it.", spoken=True)
+    assert _same_words("user: yes", "[2026-10-01 09:00:00] User: yes", spoken=True)
+    # Either copy may carry the label, and only one label is ever set aside.
+    assert _same_words("user: Rumour: the gate moved", "Rumour: the gate moved", spoken=True)
+    assert not _same_words("user: Rumour: the gate moved", "the gate moved", spoken=True)
+    assert not _same_words(NOTE, "Session turn number 0: the harness said the word amber.", spoken=True)
+    assert not _same_words("", "anything", spoken=True)
     # A shorter line is a different memory, even when every token of it sits inside the longer one.
-    assert not _same_words("4411", "the old gate code is 4411")
+    assert not _same_words("4411", "the old gate code is 4411", spoken=True)
     assert not _same_words("[note] the gate code is 4411", "the gate code is 4411")
     assert _same_words("[2026-10-01 09:00:00] the gate code is 4411", "the gate code is 4411")
 
 
-def test_collapse_keeps_a_working_item_that_says_something_else() -> None:
-    def hit(kind: str, id: str, text: str, score: float, provenance: list[str]) -> Hit:
-        return Hit(id=id, kind=kind, tenant_id="t", branch="main", text=text, score=score,
-                   channel="working_memory" if kind == "working" else "lexical", provenance=provenance,
-                   metadata={"session_id": SESSION} if kind == "working" else {})
+def test_a_speaker_label_is_only_set_aside_for_a_line_of_conversation() -> None:
+    assert _same_words("user: the gate code is 4411", "the gate code is 4411", spoken=True)
+    # Outside a conversation the first word and its colon are part of what the note says.
+    assert not _same_words("Rumour: the gate code is 4411", "the gate code is 4411")
+    assert not _same_words("user: the gate code is 4411", "the gate code is 4411")
+    # A bracket that is not a timestamp is part of the line in a conversation too.
+    for spoken in (False, True):
+        assert not _same_words("[unconfirmed] the gate code is 4411", "the gate code is 4411", spoken=spoken)
+        assert not _same_words("[draft] User: the gate code is 4411", "user: the gate code is 4411", spoken=spoken)
 
-    record = hit("evidence", "cid-1", "[2026-10-01 09:00:00] User: the gate code is 4411", 0.02, ["cid-1"])
-    turn = hit("working", "item-1", "user: the gate code is 4411", 0.03, ["cid-1"])
-    note = hit("working", "item-2", "Notes: buy a new padlock", 0.01, ["cid-1"])
-    hits = [turn, record, note]
+
+def test_collapse_keeps_a_working_item_that_says_something_else() -> None:
+    def hit(kind: str, id: str, text: str, score: float, working_kind: str = "conversation_turn") -> Hit:
+        return Hit(id=id, kind=kind, tenant_id="t", branch="main", text=text, score=score,
+                   channel="working_memory" if kind == "working" else "lexical", provenance=["cid-1"],
+                   metadata={"session_id": SESSION, "working_kind": working_kind} if kind == "working" else {})
+
+    record = hit("evidence", "cid-1", "[2026-10-01 09:00:00] the gate code is 4411", 0.02)
+    turn = hit("working", "item-1", "user: the gate code is 4411", 0.03)
+    note = hit("working", "item-2", "Notes: buy a new padlock", 0.01, "intermediate_conclusion")
+    # A note ABOUT the line - the same words behind a qualifier - is not a copy of it.
+    doubt = hit("working", "item-3", "Unconfirmed: the gate code is 4411", 0.01, "intermediate_conclusion")
+    hits = [turn, record, note, doubt]
 
     collapsed, count = _collapse_session_duplicates(hits)
 
     assert count == 1
-    assert [item.id for item in collapsed] == ["cid-1", "item-2"]
+    assert [item.id for item in collapsed] == ["cid-1", "item-2", "item-3"]
     assert collapsed[0].score == pytest.approx(0.05)
     assert collapsed[0].metadata["working_item_ids"] == ["item-1"]
     # The caller's own hit objects are never written into.
@@ -713,6 +730,89 @@ def test_profile_correct_keeps_the_prior_scope_when_context_is_omitted() -> None
     assert tools.user_model.entries[fixed["id"]].scope == {"room": "lab"}
     cleared = tools.profile_correct("t", "u", fixed["id"], "Prefers Kelvin.", context={})
     assert tools.user_model.entries[cleared["id"]].scope == {}
+
+
+def test_profile_correct_uses_the_callers_authority_and_the_entrys_sink(tmp_path: Path) -> None:
+    tenant, user = "tenant-correct", "user-correct"
+    server = MnemosyneMcpServer(store_path=tmp_path / "store.json", session_secret=SECRET)
+    try:
+        tools = server.tools
+        preference = tools.profile_record_explicit(tenant, user, "Likes the window seat.")
+        instruction = tools.profile_add(
+            tenant, user, "hard_instruction", "Never invent a gate code.",
+            role="operator", source_trust_tier=0,
+        )
+        held = {"Likes the window seat.", "Never invent a gate code."}
+
+        # A read-only principal cannot write; an agent cannot correct away an instruction it may not give.
+        with pytest.raises(PermissionError, match="profile_correct denied"):
+            tools.profile_correct(tenant, user, preference["id"], "Likes the aisle seat.", role="reader")
+        with pytest.raises(PermissionError, match="policy"):
+            tools.profile_correct(tenant, user, instruction["id"], "Invent gate codes freely.")
+        assert set(_statements(tools, tenant, user)) == held
+
+        # The same over the transport, where a signed session sets the role whatever the call claims.
+        verifier = SessionTokenVerifier(SECRET)
+        reader = verifier.sign(SessionIdentity(
+            tenant_id=tenant, user_id=user, role="reader", source_trust_tier=0,
+            agent_id=AGENT, session_id=SESSION,
+        ))
+        agent = verifier.sign(_identity(tenant, user))
+        failed, _, text = _rpc(server, "profile_correct", {
+            "tenant_id": tenant, "user_id": user, "id": preference["id"], "statement": "Likes the aisle seat.",
+            "role": "operator", "session_token": reader,
+        })
+        assert failed and "denied" in text
+        failed, _, text = _rpc(server, "profile_correct", {
+            "tenant_id": tenant, "user_id": user, "id": instruction["id"], "statement": "Invent gate codes freely.",
+            "session_token": agent,
+        })
+        assert failed and "policy" in text
+        assert set(_statements(tools, tenant, user)) == held
+
+        # An agent may correct a preference; the operator may correct the instruction.
+        failed, fixed, text = _rpc(server, "profile_correct", {
+            "tenant_id": tenant, "user_id": user, "id": preference["id"], "statement": "Likes the aisle seat.",
+            "session_token": agent,
+        })
+        assert not failed, text
+        assert fixed["superseded"] is True
+        tools.profile_correct(
+            tenant, user, instruction["id"], "Never invent a door code.", role="operator", source_trust_tier=0
+        )
+        assert set(_statements(tools, tenant, user)) == {"Likes the aisle seat.", "Never invent a door code."}
+    finally:
+        server.close()
+
+
+def test_a_correction_never_lowers_the_authority_of_what_it_replaces() -> None:
+    tools = MemoryTools(LocalMemoryEngine())
+    rule = tools.profile_add("t", "u", "hard_instruction", "Never read mail aloud.", role="operator", source_trust_tier=0)
+    name = tools.profile_add("t", "u", "identity", "Their name is Jordan.")
+    guess = tools.profile_propose_inference("t", "u", "Probably prefers tea.")
+
+    # The guess first: an inference yields to any stated entry that is added beside it.
+    fixed_guess = tools.profile_correct("t", "u", guess["id"], "Prefers coffee.")
+    fixed_rule = tools.profile_correct(
+        "t", "u", rule["id"], "Never read mail aloud after ten.", role="operator", source_trust_tier=0
+    )
+    fixed_name = tools.profile_correct("t", "u", name["id"], "Their name is Jordon.")
+
+    def kind(made: dict[str, Any]) -> UserMemoryKind:
+        return tools.user_model.entries[made["id"]].kind
+
+    # An instruction stays an instruction and an identity an identity ...
+    assert kind(fixed_rule) is UserMemoryKind.HARD_INSTRUCTION
+    assert kind(fixed_name) is UserMemoryKind.IDENTITY
+    # ... and a guess the user corrects becomes what they said outright.
+    assert kind(fixed_guess) is UserMemoryKind.EXPLICIT_PREFERENCE
+    assert all(fixed["superseded"] is True for fixed in (fixed_guess, fixed_rule, fixed_name))
+    assert set(_statements(tools, "t", "u")) == {
+        "Never read mail aloud after ten.",
+        "Their name is Jordon.",
+        "Prefers coffee.",
+    }
+    assert tools.profile_context("t", "u")["inferred"] == []
 
 
 def test_profile_retire_takes_an_entry_back() -> None:

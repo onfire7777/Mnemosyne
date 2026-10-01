@@ -46,7 +46,7 @@ from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier, WriteRole
 from mnemosyne.source_truth import apply_markdown_git_source
 from mnemosyne.text import tokenize
-from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry
+from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry, correction_kind
 
 
 def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
@@ -408,12 +408,12 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "profile_correct",
-        "description": "Record an explicit profile correction. The entry named by id is superseded by the corrected statement and no longer appears in profile_context; weaker inferred entries that differ are superseded too. id must name an existing entry in this tenant/user scope.",
+        "description": "Record an explicit profile correction. The entry named by id is superseded by the corrected statement and no longer appears in profile_context; weaker inferred entries that differ are superseded too. id must name an active entry in this tenant/user scope. The correction keeps that entry's scope unless context is given, and is an explicit preference unless it replaces an instruction or an identity, which stay what they are. Authority is the caller's role and trust tier (a signed session sets both): correcting a hard instruction is a policy write.",
         "arguments": ["tenant_id", "user_id", "id", "statement"],
     },
     {
         "name": "profile_retire",
-        "description": "Take a profile entry back: it stops being active and no longer appears in profile_context. The record is kept, marked retracted. An unknown id, or one from another tenant or user, is an error.",
+        "description": "Take a profile entry back: it stops being active and no longer appears in profile_context. The record is kept, marked retracted. An unknown id, or one from another tenant or user, is an error. Authority is the caller's role and trust tier (a signed session sets both): taking an entry back is a destructive write, which needs the operator or consolidator role, and a hard instruction is a policy write.",
         "arguments": ["tenant_id", "user_id", "id"],
     },
     {
@@ -2079,37 +2079,61 @@ class MemoryTools:
         statement: str,
         context: dict[str, Any] | None = None,
         confidence: float = 0.95,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
     ) -> dict[str, Any]:
         """Correct an active profile entry.
 
         ``id`` must name an active entry in this tenant/user scope. The new
         entry keeps the evidence CIDs the old one was built on, so erasing
-        that evidence retracts the correction too. A closed entry is refused:
+        that evidence retracts the correction too, and it keeps the old
+        entry's scope unless ``context`` is given. It is what the user stated
+        outright - an explicit preference - unless the entry it replaces
+        outranks one: a corrected instruction is still an instruction, a
+        corrected identity still an identity. A closed entry is refused:
         correcting it would put a retired value back into the live profile.
+
+        Authority is the caller's role and trust tier (a signed session
+        overwrites both), judged against the sink of the entry being replaced
+        as well as the one being written: correcting a hard instruction is a
+        policy write, so an agent cannot correct away an instruction it may
+        not give.
         """
 
         prior = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
         if prior.status != "active":
             raise ValueError("profile entry is not active")
-        result = self.profile_record_explicit(
+        self._authorize(
+            "profile_correct",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink=_profile_write_sink(prior.kind),
+        )
+        result = self.profile_add(
             tenant_id=tenant_id,
             user_id=user_id,
+            # What the user states outright - and never less than it replaces.
+            kind=correction_kind(prior.kind).value,
             statement=statement,
-            scope=prior.scope if context is None else context,
+            # A copy: two entries never share one scope object.
+            scope=dict(prior.scope) if context is None else context,
             confidence=confidence,
             source_evidence_cids=self.user_model.originating_evidence_cids(prior),
+            role=role,
+            source_trust_tier=source_trust_tier,
         )
         # The entry being corrected is replaced, whatever its authority: two
         # explicit preferences used to stay active side by side, the old value
         # and the new, because only a WEAKER entry was ever superseded.
         corrected_at = self.user_model.entries[result["id"]].valid_from
-        superseded = self.user_model.close_entry(
+        if self.user_model.close_entry(
             id, tenant_id=tenant_id, user_id=user_id, status="superseded", at=corrected_at
-        )
-        if superseded:
+        ):
             self._save_user_model()
         result["corrects"] = id
-        result["superseded"] = superseded
+        # True however it was closed: an inference already yields to the
+        # statement that replaces it the moment that statement is added.
+        result["superseded"] = prior.status == "superseded"
         return result
 
     def profile_retire(
