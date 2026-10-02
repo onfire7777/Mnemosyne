@@ -793,6 +793,21 @@ after a merge because no commit can describe its own merge. That terminal
 canonical-state property does not weaken the executable controller-branch
 check below: every controller-branch baseline mismatch is treated as a lapse, and the check fails closed.
 
+The absence of `.goalex` and `.ralphex` is a one-time reset-staging check in
+Task 5 Step 4, before first launch. Fresh runtime state created by the reviewed
+controller is permitted afterward; copied/archived history is never imported.
+The repeatable verification below requires a trusted operator-captured provider
+preflight receipt at `GOALEX_PROVIDER_PREFLIGHT_RECEIPT`. Capture it immediately
+after an authenticated, bounded health probe using the canonical launcher's
+configured planner and dual-review models. Do not manufacture a receipt from
+syntax checks, login status, or configuration inspection. The JSON receipt
+records `provider_preflight_passed:true`, `planner_model:"opus:high"`,
+`review_model:"opus:high"`, `launcher_sha256`, `active_env_sha256`,
+`checked_at_unix`, and the live probe's `exit_code:0`. Retain the probe command,
+provider-confirmed model identity, non-sensitive health result and custody
+alongside that receipt; exclude credentials. Missing, stale, mismatched, failed,
+or unavailable evidence keeps the loop stopped. This check does not launch it.
+
 ```bash
 set -euo pipefail
 test "$(pwd -P)" = "/Users/admin/.codex/worktrees/goalex-reset/Mnemosyne"
@@ -800,11 +815,30 @@ test "$(git branch --show-current)" = "codex/goalex-reset-20260815"
 test -z "$(git status --porcelain)"
 git fetch --prune origin
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-test ! -e .goalex
-test ! -e .ralphex
 test -f "$HOME/.config/rfx/PAUSE"
 grep -q '^export RFX_PRESET=solo-sol-low-goal$' "$HOME/.config/rfx/active.env"
 bash -n "$HOME/.local/bin/goalex"
+python3 - <<'PY'
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import time
+
+receipt = json.loads(Path(os.environ['GOALEX_PROVIDER_PREFLIGHT_RECEIPT']).read_text())
+assert receipt['provider_preflight_passed'] is True
+assert receipt['planner_model'] == receipt['review_model'] == 'opus:high'
+assert type(receipt['exit_code']) is int and receipt['exit_code'] == 0
+checked = receipt['checked_at_unix']
+assert type(checked) in (int, float) and math.isfinite(checked)
+assert 0 <= time.time() - checked <= 900, 'provider preflight is stale or future-dated'
+for field, path in (
+    ('launcher_sha256', Path.home() / '.local/bin/goalex'),
+    ('active_env_sha256', Path.home() / '.config/rfx/active.env'),
+):
+    assert receipt[field] == hashlib.sha256(path.read_bytes()).hexdigest(), field
+PY
 git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
 git merge-base --is-ancestor baf5c1852593885e37eed75da69b02d93e1bff11 main

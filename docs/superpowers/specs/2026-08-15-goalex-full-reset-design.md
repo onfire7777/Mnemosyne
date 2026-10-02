@@ -88,7 +88,7 @@ The reset is complete only when all of the following pass:
 8. `/Users/admin/rfx` is clean and synchronized; its one-line wait-duration fix has a passing test/PR receipt, and installed presets match canonical source.
 9. The Hermes gateway remains unloaded, gateway dispatch remains `0`, and no Mnemosyne-specific Hermes profile, board, requeue script, or backup remains live outside the reset archive.
 10. Unrelated Hermes desktop, Siri bridge, reports dashboard, credentials, databases, profiles, and project state remain unchanged.
-11. The new GoalEx worktree is clean and exactly based on the latest `origin/main`; its reconciled `GOAL.md` runtime contract and executable verification pass before launch readiness is claimed.
+11. The new GoalEx worktree is clean and exactly based on the latest `origin/main`; its reconciled `GOAL.md` runtime contract and executable verification pass before launch readiness is claimed. Runtime-history absence is checked once during inert staging, not after legitimate controller runs. Launch readiness also requires a fresh trusted receipt from authenticated health probes of the configured planner and dual-review models, bound to launcher/configuration hashes as specified in `GOAL.md`; syntax-only checks never substitute for it.
 12. `bash -n ~/.local/bin/goalex` passes and all required executables resolve to one authoritative path.
 13. Canonical `/Users/admin/Mnemosyne` remains on the same branch with the same pre-existing dirty files; the topology-verifier worktree remains untouched.
 
