@@ -2033,10 +2033,10 @@ Quarantine
   its eventual merge remains accounted for by the unchanged lapse detector;
   no success, implementation admission or baseline advancement is claimed.
 
-- PR #198: contributor README history consolidated into PR #212 under the
+- Source PR #198 — contributor README history consolidated into PR #212 under the
   owner's branch-reduction request; preserve current package version and
   readiness caveats. Repository navigation URLs are absolute for PyPI.
-- PR #197: AnyIO 4.14.2 lockfile update history consolidated into PR #212;
+- Source PR #197 — AnyIO 4.14.2 lockfile update history consolidated into PR #212;
   dependency compatibility and combined-head CI remain required before merge.
   These consolidation records do not claim either source PR merged to main.
 
