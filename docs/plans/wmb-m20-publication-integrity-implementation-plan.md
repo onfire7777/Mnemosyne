@@ -45,8 +45,10 @@ its own placement was authorized.
 
 The following list mixes Stage A implementation gates with later publication
 gates. Items 2, 3, 4 (except its public-release clause), and 5 block Stage A;
-item 1 and the public-release clause in item 4 block only Stage B/public
-release. None is discharged merely by writing this file.
+item 1 and the public-release clause in item 4 block only public release,
+not local Stage B registration. Stage B requires completed Stage A and G3;
+registration does not enable publication flags or discharge R2.
+None is discharged merely by writing this file.
 
 1. Spec WMBS-F (`…standard-design.md:1406–1410`): official adapters and
    held-out rounds run only after affected module readiness, PBPP/Register-A
