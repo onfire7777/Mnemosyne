@@ -2025,3 +2025,34 @@ Quarantine
 - Official-upstream, enhanced-successor, exploratory, and development records
   remain separately identified and are never blended into one certified score,
   rank, interval, or headline.
+
+## Owner-directed documentation consolidation — PR #120
+
+On October 1, 2026 the repository owner explicitly requested repairing the
+documentation review findings and consolidating plan-only branches. This is
+one serialized documentation writer on canonical `main@ac440866`, not a
+successor source node or module implementation admission. PR #120 consumes
+the repaired proposed documents from PR #122, PR #123, PR #124, PR #125,
+PR #126 and PR #127 and updates their on-tree inventory atomically.
+
+Exact documentation write scope:
+- `GOAL.md` (reset-staging and trusted provider-preflight verification only);
+- `docs/superpowers/plans/2026-08-15-goalex-full-reset.md`;
+- `docs/superpowers/specs/2026-08-15-goalex-full-reset-design.md`;
+- `docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md`;
+- `docs/plans/wmb-m11-security-isolation-implementation-plan.md`;
+- `docs/plans/wmb-m17-custody-recovery-implementation-plan.md`;
+- `docs/plans/wmb-m18-interoperability-implementation-plan.md`;
+- `docs/plans/wmb-m19-multimodal-memory-implementation-plan.md`;
+- `docs/plans/wmb-m20-publication-integrity-implementation-plan.md`;
+- `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`;
+- this lease map (this scoped record only).
+
+Plan placement is approved for documentation organization; contract freeze,
+implementation leases, G1/G2/G3 and resource/operator gates remain separately
+unadmitted. Every proposed module plan remains NOT CODE-READY. No registry,
+fixture, scorer, product, CI configuration, publication flag, module admission
+or runtime-launch change is authorized by this consolidation. Unknown-lineage
+artifact handling still requires its separate explicit architectural decision.
+Required exact-head CI and review resolution precede merge; superseded plan
+PRs/branches are retired only after their tips are verified contained in main.

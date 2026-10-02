@@ -4,6 +4,13 @@
 `codex/goalex-whole-memory-pilot` controller branch, on 2026-08-03, as Round 0
 of the operator's benchmark directive in `GOAL.md`.
 
+**October 1, 2026 scoped reconciliation:** PR #120 consolidates the repaired
+M09/M11/M17/M18/M19/M20 proposed plan documents from PRs #122–#127 against
+`main@ac440866`. Their paths are now on this candidate tree; landing the
+documents does not freeze their contracts or admit implementation. All six
+remain `PROPOSED` / `NOT CODE-READY`, with the M19 module still `DEFERRED`.
+Historical Round-0 counts and unrelated module receipts are not new evidence.
+
 **This document is documentation only.** It authorizes **no artifact**: no
 module implementation, no fixture, no scorer, no `eval/public/registry.json`
 entry, no adapter, no runner routing, no scoring-profile registration, no
@@ -26,12 +33,12 @@ mapping is its C01–C24 table (same file, lines 502–525).
   whose scope line 9 names M01, M03, M10, M12, M13, M15, and M20 and whose
   per-module disposition table is at lines 67–73.   **Existence is not
   approval.** Only the pilot plan has passed the owner's freeze/approval gate;
-  the four on-main `docs/plans/wmb-m*` plans (M02, M04, M05, M14) are `PROPOSED`
-  planning artifacts, so their cells read `exists, **not approved**`. Open
-  ACCEPT plan PRs for M06 (#116), M07 (#118), M08 (#119), M09 (#122),
-  M11 (#123), M17 (#124), M18 (#125), M19 (#126, DEFERRED), and the M20 v2
-  delta (#127) are likewise `PROPOSED` / NOT CODE-READY and **not approved**;
-  those plan files are not on this tree, so the cells cite the PR and the
+  M02/M04/M05/M14 plans and the consolidated M09/M11/M17/M18/M19/M20
+  documents are `PROPOSED` planning artifacts, not implementation approvals.
+  PRs #122–#127 are historical source PRs consolidated into #120, not missing
+  plan paths. M06 is also on-tree as its row records. Separate proposed plan
+  PRs M07 (#118) and M08 (#119) remain **not approved** and absent here;
+  those two cells cite the PR and the
   intended path in plain text. The inventory pin test can resolve only
   on-tree paths (`tests/test_wmbs_module_inventory.py`); it cannot fetch a
   GitHub PR head. Those rows therefore also backtick the on-main M14 plan as
@@ -62,18 +69,18 @@ mapping is its C01–C24 table (same file, lines 502–525).
 | M06 | C08 — Consolidation and learning | exists, **not approved** — `docs/plans/wmb-m06-consolidation-learning-implementation-plan.md`, `Status: PROPOSED` at its line 3; open PR #116; freeze gate outstanding | yes — `eval/public/fixtures/wmbs-m06-consolidation-development.json` | yes — `eval/public/wmbs_m06.py`; profile `wmbs-m06-v1` at `eval/public/scoring.py:47`, `_score_wmbs_m06` at `eval/public/scoring.py:324`; adapter `run_m06_consolidation_development` at `adapters/whole_memory_reference.py:808` | yes — `tests/test_public_wmbs_m06.py` | yes — `wmbs-m06-development` at `eval/public/registry.json:326` | `PROPOSED`; development cell; `publishable:false`, `pbpp_headline_eligible:false`, `headline_eligible:false`, `upstream_comparable:false`, `independent_external_reproduction:false`; `system_seam: public-cli-subprocess`; not in the first pilot (`…standard-design.md:771`) | Registry-reachable from `run_public_suite`; admission unchanged (`PROPOSED`); publication unchanged (all flags false). Not landed end to end. Stage B is a reachability fix only. Source plan (#116) stays PROPOSED / not approved. Do not claim CAP-007/008 closed. README cell at `eval/public/README.md:428` (`### M06 consolidation and learning`) |
 | M07 | C09 — Retention, rehearsal, and decay | exists via open PR #118, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m07-retention-rehearsal-decay-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED`; not in the first pilot (`…standard-design.md:798`) | Plan exists as PROPOSED / NOT CODE-READY via #118. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
 | M08 | C10 — Reversible forgetting | exists via open PR #119, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m08-reversible-forgetting-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for adapters exposing the hook, else `UNSUPPORTED-BY-SYSTEM` (`…standard-design.md:818`) | Plan exists as PROPOSED / NOT CODE-READY via #119. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
-| M09 | C11 — Declared-surface erasure conformance | exists via open PR #122, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for Local/SQLite declared surfaces (`…standard-design.md:846`) | Plan exists as PROPOSED / NOT CODE-READY via #122. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
+| M09 | C11 — Declared-surface erasure conformance | exists on-tree, **not approved** — `docs/plans/wmb-m09-declared-surface-erasure-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #122 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for Local/SQLite declared surfaces (`…standard-design.md:846`) | Freeze/approval and exact implementation lease remain outstanding. Document placement authorizes no implementation; do not start Stage A |
 | M10 | C12 — Calibration and abstention | yes — pilot plan `…harness-pilots.md:69` | yes — `eval/public/fixtures/wmbs-m10-development.json` | yes — `eval/public/wmbs_m10.py`; profile `wmbs-m10-v1` at `eval/public/scoring.py:39`, `_score_wmbs_m10` at `scoring.py:281`; adapter at `adapters/whole_memory_reference.py:119` | yes — `tests/test_public_wmbs_m10.py` | yes — `wmbs-m10-development` at `eval/public/registry.json:252` | `PROPOSED`; `PILOT-READY-DEV` for the deterministic reader; `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end. Step 4 residue only: model-backed/judged QA and numeric confidence remain out of scope |
-| M11 | C15/C16 — Security and isolation | exists via open PR #123, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m11-security-isolation-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for internal local-principal scope (`…standard-design.md:899`) | Plan exists as PROPOSED / NOT CODE-READY via #123. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A. CAP-004 and RAIL-001/004 still depend on it |
+| M11 | C15/C16 — Security and isolation | exists on-tree, **not approved** — `docs/plans/wmb-m11-security-isolation-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #123 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for internal local-principal scope (`…standard-design.md:899`) | Freeze/approval and exact implementation lease remain outstanding. Authorizes no implementation; do not start Stage A. CAP-004 and RAIL-001/004 still depend on it |
 | M12 | C13 — Prospective action | yes — pilot plan `…harness-pilots.md:70` | yes — `eval/public/fixtures/pm-bench-development.json` and `eval/public/fixtures/triggerbench-development.json` | yes, **inline** — profiles `pm-bench-action-v1` / `triggerbench-action-v1` dispatched at `eval/public/scoring.py:40`, `_score_pm_action` at `scoring.py:336`; no `wmbs_m12.py` | yes — `tests/test_public_pm_bench_triggerbench.py` | yes — `pm-bench-development` at `eval/public/registry.json:134` and `triggerbench-development` at `:150` | `PROPOSED`; `INTERNALLY_MEASURED` development smoke; both suites `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end at development scale. Step 1 for the disclosed gaps: recurrence plumbing, lateness magnitude, calibrated baseline (`eval/public/README.md:48`) |
 | M13 | C14 — Working memory | yes — pilot plan `…harness-pilots.md:71` | yes — `eval/public/fixtures/working-memory-action-development.json` | yes, **inline** — profile `working-memory-action-v1` dispatched at `eval/public/scoring.py:42`, `_score_working_action` in the same module; no `wmbs_m13.py` | yes — `tests/test_public_working_memory_action_probe.py` | yes — `working-memory-action-development` at `eval/public/registry.json:166` | `PROPOSED`; `INTERNALLY_MEASURED` development smoke; `publishable:false`, `pbpp_headline_eligible:false` | Landed end to end at development scale. Step 1 for the disclosed gaps: capacity parameter and promotion control (`eval/public/README.md:57`) |
 | M14 | C07/C08/C23 — Procedural task utility | exists, **not approved** — `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md`, whose own line 3 reads `PLANNING ARTIFACT ONLY — NOT CODE-READY`; freeze gate outstanding | **no** | **no** | **no** | **no** | `PROPOSED`; deferred until the portable-event ABI plus one pilot exist (`…standard-design.md:449`) | Step 2/3: the plan exists, so freeze it and implement fixture + scorer test-first. Cheapest module with a plan but no artifact |
 | M15 | C02/C17 — Determinism and replay | yes — pilot plan `…harness-pilots.md:72` | **no dedicated fixture — by design**: composes the M01/M03/M10 fixtures (`eval/public/bundle.py:43`–`45`) | yes, **inline** — `run_m15_composed_development` at `adapters/whole_memory_reference.py:254`; M15 projection and digest at `eval/public/bundle.py:94` and `:158`; no `wmbs_m15.py` | yes — `tests/test_public_whole_memory_reference.py:2208`, `:2228` | **no — by design**: M15 is a cross-run property, not a suite | `PROPOSED`; `PILOT-READY-DEV` for admitted pilot payloads | Landed as a run property. No registry step exists to take; step 4 residue is coverage of any future payload |
 | M16 | C18/C20 — Backend and transport parity | **no** | **no** | **no** | **no** | **no** | `PROPOSED` for Local/SQLite/local MCP (`…standard-design.md:1026`) | Step 1: author the exact implementation plan. CAP-011 and RAIL-001 depend on it |
-| M17 | C19 — Custody and recovery | exists via open PR #124, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m17-custody-recovery-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for local fault injection (`…standard-design.md:1049`) | Plan exists as PROPOSED / NOT CODE-READY via #124. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
-| M18 | C20 — Interoperability | exists via open PR #125, **not approved** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m18-interoperability-implementation-plan.md (not on this tree); on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED` for internal single-system scope (`…standard-design.md:1071`) | Plan exists as PROPOSED / NOT CODE-READY via #125. Freeze/approval gate outstanding. Authorizes no implementation; do not start Stage A |
-| M19 | C21 — Multimodal memory | exists via open PR #126, **not approved** / **DEFERRED** — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m19-multimodal-memory-implementation-plan.md (not on this tree); module disposition DEFERRED per C21; on-tree pin-test witness only, not this module's plan: `docs/plans/wmb-m14-procedural-task-utility-implementation-plan.md` | **no** | **no** | **no** | **no** | `PROPOSED`; C21 is *currently deferred* (`…standard-design.md:523`) | None. Deferred by the standard; do not start until C21 is undeferred |
-| M20 | C06/C17/C22 — Publication integrity | yes — pilot plan `…harness-pilots.md:73`; v2 delta plan exists via open PR #127 — Status PROPOSED / NOT CODE-READY at docs/plans/wmb-m20-publication-integrity-implementation-plan.md (not on this tree) | **no** | **no benchmark scorer**; substrate implementation exists under `leaderboard/`: `validate.py`, `ledger.py`, `render.py`, `publish.py`, `readiness.py` | yes, of the substrate — `tests/test_leaderboard_result_contract.py`, `_ledger.py`, `_render.py`, `_publish.py`, `_readiness.py`, `_governance_policy.py` | **no** | v2 `admission_state` is `PROPOSED`; the v1 substrate is `evidence_level=IMPLEMENTED` with **no implied v2 admission** (`…standard-design.md:1127`); pilot disposition `CONTRACT-READY` | v2 delta plan exists as PROPOSED / NOT CODE-READY via #127. Freeze/approval gate outstanding. Still lease-blocked behind result-v2 node `N12`; do **not** treat M20 as greenfield implement |
+| M17 | C19 — Custody and recovery | exists on-tree, **not approved** — `docs/plans/wmb-m17-custody-recovery-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #124 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for local fault injection (`…standard-design.md:1049`) | Freeze/approval, exact implementation lease, R6 and R1 remain outstanding. Authorizes no implementation; do not start Stage A |
+| M18 | C20 — Interoperability | exists on-tree, **not approved** — `docs/plans/wmb-m18-interoperability-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #125 in #120 | **no** | **no** | **no** | **no** | `PROPOSED` for internal single-system scope (`…standard-design.md:1071`) | Freeze/approval and exact implementation lease remain outstanding. Authorizes no implementation; do not start Stage A |
+| M19 | C21 — Multimodal memory | exists on-tree, **not approved** / **DEFERRED** — `docs/plans/wmb-m19-multimodal-memory-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #126 in #120; module disposition DEFERRED per C21 | **no** | **no** | **no** | **no** | `PROPOSED`; C21 is *currently deferred* (`…standard-design.md:523`) | None. Deferred by the standard; document placement does not undefer C21 |
+| M20 | C06/C17/C22 — Publication integrity | yes — pilot plan `…harness-pilots.md:73`; v2 delta plan exists on-tree — `docs/plans/wmb-m20-publication-integrity-implementation-plan.md`; PROPOSED / NOT CODE-READY, consolidated from #127 in #120; delta freeze gate outstanding | **no** | **no benchmark scorer**; substrate implementation exists under `leaderboard/`: `validate.py`, `ledger.py`, `render.py`, `publish.py`, `readiness.py` | yes, of the substrate — `tests/test_leaderboard_result_contract.py`, `_ledger.py`, `_render.py`, `_publish.py`, `_readiness.py`, `_governance_policy.py` | **no** | v2 `admission_state` is `PROPOSED`; the v1 substrate is `evidence_level=IMPLEMENTED` with **no implied v2 admission** (`…standard-design.md:1127`); pilot disposition `CONTRACT-READY` | Delta freeze/approval and exact source lease remain outstanding. Consume landed N12 surfaces; do **not** treat M20 as greenfield implement |
 
 ## Corrections to the recorded counts
 
@@ -109,21 +116,24 @@ them").
    modules' suites remain `publishable:false` and `pbpp_headline_eligible:false`.
 
 3. **"per-module implementation plans: M02, M04, M05, M14 — 4 of 20" is
-   correct only for on-main `docs/plans/wmb-m*`.** The owner-landed pilot plan
+   a historical Round-0 on-main count, not the current file count.** The owner-landed pilot plan
    `docs/superpowers/plans/2026-07-28-whole-memory-reference-harness-pilots.md`
    is an approved exact plan and covers M01, M03, M10, M12, M13, M15, and M20
-   (its line 9, with per-module dispositions at lines 67–73). Open ACCEPT
-   plan PRs, each `PROPOSED` / NOT CODE-READY and **not approved**, cover
+   (its line 9, with per-module dispositions at lines 67–73). Source plan
+   proposals, each `PROPOSED` / NOT CODE-READY and **not approved**, cover
    M06 (#116), M07 (#118), M08 (#119), M09 (#122), M11 (#123), M17 (#124),
    M18 (#125), M19 (#126, DEFERRED), and the M20 v2 delta (#127).
-   **Modules with an exact plan of any kind (on-main or open ACCEPT PR) are
+   PR #120 now places the six repaired M09/M11/M17/M18/M19/M20 documents
+   on this tree; M06 is also on-tree. Source PR references record provenance,
+   not a current claim that those files are absent or PRs remain open.
+   **Modules with an exact plan of any kind (on-tree or retained proposal) are
    M01–M15, M17–M20 — 19 of 20.** That figure counts *existence*, not
    approval, and must not be read as authorization.    Only the seven pilot-plan
    modules (M01, M03, M10, M12, M13, M15, M20) carry an **approved** plan.
    The M02, M04, M05, and M14 on-main plans are `PROPOSED` planning artifacts
    whose freeze/approval gate is still outstanding, as the derivation records
    at its §2 plan-status table and line 191 (those four only; that table does
-   not list #116–#127). The open ACCEPT plan PRs (#116, #118, #119, #122,
+   not list #116–#127). The source plan proposals (#116, #118, #119, #122,
    #123, #124, #125, #126, #127) are separately `PROPOSED` / NOT CODE-READY
    per each PR's own Status header, not per that derivation table. M16
    remains the only module with neither an on-main plan nor an open plan PR.
