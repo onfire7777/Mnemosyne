@@ -176,6 +176,11 @@ add a **new** deterministic development fixture:
   and **same** `operation_id` (ENGINE-CONTRACT recovery is keyed by
   `operation_id`) — a fresh ID does not exercise durable resume/idempotency.
   Harmless pre-call-only crashes do not satisfy replay.
+  Terminate the SUT process at each crash boundary and reconstruct it from
+  durable state before the same-ID retry; reuse of a live process is invalid.
+- Negative authorization cases: wrong tenant, wrong user, unauthorized role,
+  and expired identity must return an authorization error and leave protected,
+  same-tenant survivor, and unrelated state byte-identical under trusted probes.
 - Snapshot ordering: for every declared readable snapshot surface, create
   the snapshot **after ingest and before deletion**, run the delete/retry
   sequence, then attempt restore of that pre-erasure snapshot. A
@@ -205,6 +210,11 @@ add a **new** stdlib-only oracle:
 - Path (prospective): `eval/public/wmbs_m09.py`
 - Metrics the spec names: direct residue, semantic leakage, false deletion,
   unrelated mutation, completion SLA, signed receipt validity.
+- Metric-definition freeze residual (NOT CODE-READY): pin observation-to-metric
+  mappings, denominators, normalization, attributable semantic-leakage rules,
+  per-surface and per-operation aggregation, and unavailable/error/result
+  semantics for direct residue, semantic leakage, false deletion, and unrelated
+  mutation before Stage A. Identical traces must yield identical scores.
 - Stage A reports descriptive / finite-corpus-only intervals. It does **not**
   claim zero residue, zero unrelated mutation, 100% receipt validity, or zero
   attributable semantic leakage as an admission bound (that is R1 + scored
@@ -245,8 +255,10 @@ add a **new** stdlib-only oracle:
 - An unprobeable declared readable surface, undisclosed backup scope, or
   unexercisable identity authorization yields **no erasure claim**, not a
   pass and not a zero-as-failure substitute.
-- Anti-gaming (spec L1291): no privileged internal wipe signal; gold,
-  graders, and canaries stay outside the SUT.
+- Anti-gaming (spec L1291): no privileged internal wipe signal; gold values,
+  expected canary digests, and graders stay outside the SUT. Ingest canary-bearing
+  target memories into the SUT before deletion and prove baseline visibility;
+  an absent-before-delete canary cannot earn residue-removal credit.
 
 This paragraph does not create those files.
 
@@ -255,6 +267,8 @@ This paragraph does not create those files.
 - Deterministic local roles: no external dataset, no network, no provider
   (spec L841–842; U-MODULES license/custody). Pin any later dataset at freeze;
   do not invent one here. Docker/P32 stays out until R4 is admitted.
+- Generated Stage A fixture license: `CC0-1.0` (SPDX), recorded with synthetic
+  authorship and generation lineage in the required fixture BOM/custody record.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "erasure certified," certified, or governed label. Passing, if it ever
   happens, is technical conformance for declared surfaces only.
@@ -263,7 +277,7 @@ This paragraph does not create those files.
 
 ```text
 WMBS-B + C11 public contract (R2) + G0/G1/G2 + R3 (probeable surfaces /
-disclosed backup scope / exercisable identity auth, or explicit no-claim path)
+disclosed backup scope / exercisable identity auth; all required)
   -> freeze this plan (GOAL step 2)
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
       -> measured / admitted claims require R1 receipt
