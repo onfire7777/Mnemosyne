@@ -250,9 +250,25 @@ git -C /Users/admin/Mnemosyne worktree add -b codex/goalex-reset-20260815 /Users
 
 Confirm the new worktree is clean, exactly at the fetched `origin/main`, contains `GOAL.md`, has no `.goalex` or `.ralphex` history, has no LaunchAgent/Hermes binding, and `bash -n /Users/admin/.local/bin/goalex` passes. This proves only inert staging, not launch readiness.
 
+Record the initial absence of `.goalex` and `.ralphex` in the reset receipt here,
+before first launch. Do not repeat those absence assertions after legitimate
+controller runs; they would reject freshly generated runtime state. Never copy
+archived runtime history into the new worktree.
+
 - [ ] **Step 5: Reconcile and execute the repository-owned runtime contract**
 
 Update `GOAL.md` through the normal Mnemosyne PR path so its runtime contract names `/Users/admin/.codex/worktrees/goalex-reset/Mnemosyne` and `codex/goalex-reset-20260815`, requires the intentional RFX pause and no copied runtime history, and keeps the existing lifecycle-baseline lapse detector fail-closed. After that PR lands, fast-forward the fresh controller branch to the reviewed `origin/main` and execute the complete fenced `GOAL.md` verification block from the fresh worktree. If the independently owned lifecycle baseline or canonical `main` has not yet been reconciled, record that exact failed assertion and keep GoalEx stopped; do not call the worktree launch-ready.
+
+Before executing that block, the operator must run bounded authenticated health
+probes using the canonical launcher's actual configured planner and dual-review
+provider/model commands. Capture the successful non-sensitive results and command
+identity in a trusted preflight receipt using the exact schema in `GOAL.md`, bind
+it to the launcher and active-environment hashes, and set
+`GOALEX_PROVIDER_PREFLIGHT_RECEIPT` to its path. A receipt is valid for at most
+15 minutes and must be regenerated after either configuration changes. Missing
+authentication, unavailable models, failed probes, or absent custody are blockers;
+`bash -n` alone never proves provider readiness. Do not run the controller or
+clear the intentional pause as part of the probe.
 
 ### Task 6: Final Requirement-by-Requirement Closure Audit
 
