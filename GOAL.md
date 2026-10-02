@@ -827,17 +827,21 @@ from pathlib import Path
 import time
 
 receipt = json.loads(Path(os.environ['GOALEX_PROVIDER_PREFLIGHT_RECEIPT']).read_text())
-assert receipt['provider_preflight_passed'] is True
-assert receipt['planner_model'] == receipt['review_model'] == 'opus:high'
-assert type(receipt['exit_code']) is int and receipt['exit_code'] == 0
+def require(condition, message):
+    if not condition:
+        raise SystemExit(message)
+
+require(receipt['provider_preflight_passed'] is True, 'provider preflight failed')
+require(receipt['planner_model'] == receipt['review_model'] == 'opus:high', 'model mismatch')
+require(type(receipt['exit_code']) is int and receipt['exit_code'] == 0, 'probe failed')
 checked = receipt['checked_at_unix']
-assert type(checked) in (int, float) and math.isfinite(checked)
-assert 0 <= time.time() - checked <= 900, 'provider preflight is stale or future-dated'
+require(type(checked) in (int, float) and math.isfinite(checked), 'invalid timestamp')
+require(0 <= time.time() - checked <= 900, 'provider preflight is stale or future-dated')
 for field, path in (
     ('launcher_sha256', Path.home() / '.local/bin/goalex'),
     ('active_env_sha256', Path.home() / '.config/rfx/active.env'),
 ):
-    assert receipt[field] == hashlib.sha256(path.read_bytes()).hexdigest(), field
+    require(receipt[field] == hashlib.sha256(path.read_bytes()).hexdigest(), field)
 PY
 git merge-base --is-ancestor 661343ce05186e9a7f0f0740d1edef7c23532857 main
 git merge-base --is-ancestor a95fe4d291093253f8ce49adff32ba875a35e884 main
