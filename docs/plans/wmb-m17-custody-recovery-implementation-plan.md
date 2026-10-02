@@ -183,6 +183,9 @@ add a **new** stdlib-only oracle:
   `health` / `queue_state` / `snapshot` / `restore_snapshot`; Stage A harness
   injection must name how those observations are produced without inventing
   ABI ops here.
+- RPO/RTO freeze must specify a harness-owned clock outside the SUT, timestamp
+  precision, deterministic advancement rules, event origins/endpoints, and
+  canonical duration units/rounding. Entrant timestamps cannot control the score.
 - Local results cannot close production rows. Missing retained
   infrastructure, external custody, or an independently recorded expected
   fingerprint yields **no production claim**, not a pass.
@@ -228,7 +231,7 @@ No path below is writable from this document.
 docs/plans/wmb-m17-custody-recovery-implementation-plan.md   (this file only)
 ```
 
-Prospective Stage A (after freeze + G0/G1/G2 + R2 + receipt-schema freeze **and R1**), not now — unleased by this plan:
+Prospective Stage A (after freeze + G0/G1/G2 + R2 + R6 + receipt-schema freeze **and R1**), not now — unleased by this plan:
 
 ```text
 eval/public/wmbs_m17.py                                              (new)
@@ -250,7 +253,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Authorized future action (spec L1252–1259) | `DEFERRED` until M11+M12+M17 are all admitted | `DEFERRED` | `DEFERRED` |
 | Recoverable public evidence (spec L1252–1259) | `DEFERRED` until M15+M16+M17+M20 are all admitted | `DEFERRED` | `DEFERRED` |
 | Publishable / headline | `false` | `false` | `false` |
-| Code lease | none | only if freeze + G1 + R1 admit it | G3 |
+| Code lease | none | only if freeze + G0/G1/G2 + R2 + R6 + receipt-schema freeze + R1 admit it | G3 |
 
 ## 9. Non-goals
 
