@@ -323,6 +323,25 @@
     "track_kind": "ENHANCED-SUCCESSOR",
     "upstream_comparable": false
   },
+  "wmbs-m06-development": {
+    "adapter": "wmbs-m06-reference",
+    "admission_state": "PROPOSED",
+    "dataset_sha256": "7aeff310dc70efb9295f493ea61299eea94304f1b4638244807780dc04f028ed",
+    "family": "whole-memory-development",
+    "fixture": "fixtures/wmbs-m06-consolidation-development.json",
+    "headline_eligible": false,
+    "independent_external_reproduction": false,
+    "interval_method": "descriptive",
+    "license": "CC0-1.0",
+    "pbpp_headline_eligible": false,
+    "publishable": false,
+    "revision": "d36f41c09d183e9845554b66710d767e39f6a284",
+    "scoring_profile": "wmbs-m06-v1",
+    "split_role": "development",
+    "system_seam": "public-cli-subprocess",
+    "track_kind": "ENHANCED-SUCCESSOR",
+    "upstream_comparable": false
+  },
   "wmbs-m10-development": {
     "adapter": "wmbs-m10-reference",
     "admission_state": "PROPOSED",

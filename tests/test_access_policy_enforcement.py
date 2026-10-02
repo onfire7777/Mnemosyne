@@ -419,11 +419,15 @@ def test_caller_context_filter_shape_preserves_legacy_positions(monkeypatch: pyt
         return original_retrieve(*args, **kwargs)
 
     monkeypatch.setattr(engine, "retrieve", record_retrieve)
+    # min_trust_tier and max_trust_tier both name the least-trusted tier admitted,
+    # and max_trust_tier is the one that reaches `filt` -- still asserted below.
+    # The pair must be self-consistent now: `min 3 / max 1` is a contradiction and
+    # is refused instead of silently collapsing to a ceiling of 1.
     tools.search(
         TENANT,
         "caller context",
         "main",
-        3,
+        0,
         1,
         0,
         "agent",

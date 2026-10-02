@@ -1221,12 +1221,369 @@ The following packages are complete source history, not runnable work:
 - PR #191: ordinary documentation receipt recording the merged PR #190
   lease-map lapse (Exact-1 lease-map receipt for receipt #190
   of product #185 @
-  `5a11189c404c8a9b65c48f440be0885c1e49534e`). It is **OPEN/READY**
+  `5a11189c404c8a9b65c48f440be0885c1e49534e`). It is **MERGED** at tip
+  `20c9158d42e6a8bf992326746502e73a0315c023` from Exact HEAD
+  `fc9b05cc10f00ef266869aa7e0421042132eb69c`. It was **OPEN/READY**
   at the `2026-09-20T08:48:00Z` capture and adds only the #190 MERGED
   mark and this structured self-record in this map. Exclusive File Set:
   `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #191 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `20c9158d42e6a8bf992326746502e73a0315c023`.
+- PR #192: ordinary documentation receipt recording the merged PR #191
+  lease-map lapse (Exact-1 lease-map receipt for receipt #191
+  of product #185 @
+  `fc9b05cc10f00ef266869aa7e0421042132eb69c`). It is **MERGED** at tip
+  `4517bf13785a18223865ccc2a6fc6ff908bc8908` from Exact HEAD
+  `ca266e2ba9b6343d8a85d16162b450950a90049f`. It was **OPEN/READY**
+  at the `2026-09-20T09:20:00Z` capture and adds only the #191 MERGED
+  mark and this structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #192 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `4517bf13785a18223865ccc2a6fc6ff908bc8908`.
+- PR #194: ordinary documentation receipt recording the merged PR #192
+  lease-map lapse (Exact-1 lease-map receipt for receipt #192
+  of product #185 @
+  `ca266e2ba9b6343d8a85d16162b450950a90049f`). It is **MERGED** at tip
+  `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a` from Exact HEAD
+  `eb92f3456e3ce71bccbc0a916702cddb6efe324a`. It was **OPEN/READY**
+  at the `2026-09-20T09:53:00Z` capture and adds only the #192 MERGED
+  mark and this structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #194 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a`.
+- PR #193: Exact 3 P15-S5/15-04-04 persona-drift diagnostic
+  `research/activation-memory/persona_drift_eval.py`,
+  `research/activation-memory/reports/phase15-s5-persona-drift.json`,
+  `tests/test_persona_drift_eval.py`
+  (title: feat(research): Exact 3 P15-S5/15-04-04 persona-drift
+  diagnostic)
+  from exact head `60e5150880a9d3931c03b6eb9230b73ee254afa2`; all
+  required exact-head Unit+drift checks passed in run `35504813545`;
+  merge `02b1982f2a6d8010f36a4d38031bcbe65ba5d82c` at
+  `2026-09-20T10:50:24Z`.
+  Prior tip was `bb3ba186e0faa0e21cd5fae3df2588dfc657e69a` (PR #194).
+  Post-main tip Unit+drift will FAIL on CI `35506179082`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #193 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 3):
+  `research/activation-memory/persona_drift_eval.py`,
+  `research/activation-memory/reports/phase15-s5-persona-drift.json`,
+  `tests/test_persona_drift_eval.py`.
+  Purpose: P15-S5/15-04-04 persona-drift diagnostic
+  (research-only diagnostic; no product write/model-import);
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #193 was code). This receipt does not invent M16;
+  the M14 freeze is unchanged. This receipt changes no benchmark
+  result or admission state, admits no successor source node, and
+  does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #195: ordinary documentation receipt recording the merged PR #193
+  lease-map lapse (Exact-1 lease-map receipt for product #193
+  P15-S5/15-04-04 persona-drift diagnostic @
+  `60e5150880a9d3931c03b6eb9230b73ee254afa2`; folds the #194 MERGED
+  receipt and voids stale Exact-1 HEAD
+  `2ad9879c82349894ae4c16ee66149a73a801f810`). It is **MERGED** at tip
+  `511171b8910b155dd3c445a9f46f6440a7279b4a` from Exact HEAD
+  `a495f70700015c2cbd838bd7c2df7427c444fce1`. It was **OPEN/READY**
+  at the `2026-09-20T10:53:16Z` capture and adds the #193 MERGED
+  mark, the #194 MERGED mark, and this structured self-record in
+  this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #195 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `511171b8910b155dd3c445a9f46f6440a7279b4a`.
+- PR #196: ordinary documentation receipt recording the merged PR #195
+  lease-map lapse (Exact-1 lease-map receipt for receipt #195
+  of product #193 @
+  `a495f70700015c2cbd838bd7c2df7427c444fce1`). It is **MERGED** at tip
+  `097bd6828c190e28261d799f4b57c4b3d038ec52` from Exact HEAD
+  `f58d536e4dac3f42290e6f07fcae953f4f25d2d0`. It was **OPEN/READY**
+  at the `2026-09-20T11:25:00Z` capture and adds only the #195 MERGED
+  mark and this structured self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #196 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `097bd6828c190e28261d799f4b57c4b3d038ec52`.
+- PR #199: Exact 2 P15-S5/15-04-05 go/no-go closure
+  `research/activation-memory/README.md`,
+  `research/activation-memory/GO-NO-GO.md`
+  (title: Exact 2 · 15-04-05 P15-S5 go/no-go closure)
+  from exact head `6a835ffe055633524475588f5ff9e384dbb91c6d`; all
+  required exact-head Unit+drift checks passed in run `36196910526`;
+  merge `118f1e51d60fbaeda3a1b4e706d8983967c29040` at
+  `2026-09-25T22:49:37Z`.
+  Prior tip was `097bd6828c190e28261d799f4b57c4b3d038ec52` (PR #196).
+  Post-main tip Unit+drift failed on CI `36198508216`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #199 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 2):
+  `research/activation-memory/README.md`,
+  `research/activation-memory/GO-NO-GO.md`.
+  Purpose: P15-S5/15-04-05 go/no-go closure
+  (research-only closure; no product adoption, public claim, or
+  write/trust/mutation authority);
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #199 was research documentation). This receipt does
+  not invent M16; the M14 freeze is unchanged. This receipt changes
+  no benchmark result or admission state, admits no successor source
+  node, and does not recompute the canonical baseline (baseline stays
+  `main@f688c747`).
+- PR #200: ordinary documentation receipt recording the merged PR #199
+  lease-map lapse (Exact-1 lease-map receipt for product #199
+  P15-S5/15-04-05 go/no-go closure @
+  `6a835ffe055633524475588f5ff9e384dbb91c6d`). It is **MERGED** at tip
+  `ba48dc89c6de8663e02d7bb576dd0cc94b8ef334` from Exact HEAD
+  `1f42bcebae5ffaaf46ec8ffd717a983ffced38e7`. It was **OPEN/READY**
+  at the `2026-09-25T23:20:09Z` capture and adds the PR #199
+  merged-baseline bullet, the #196 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #200 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `ba48dc89c6de8663e02d7bb576dd0cc94b8ef334`.
+- PR #202: Exact 15-05-01 · WMBS M06 Stage A development cell
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`,
+  `eval/public/README.md`,
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`
+  (title: Exact 15-05-01 · WMBS M06 Stage A development cell)
+  from exact head `a3c1890c8103896f1ad4db0a3636b9db6ee14cd6`; all
+  required exact-head Unit+drift checks passed in run `36259034748`;
+  merge `cff84192f271e5ecdc9d72a3e139ed69e544b10f` at
+  `2026-09-26T17:56:50Z`.
+  Prior tip was `d374be71314252d35f02323143da279b94a5446e` (PR #201 plan).
+  Post-main tip Unit+drift failed on CI `36260812674`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #202 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Plan `15-05-PLAN.md` / Exact Exclusive-3
+  authorized only:
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`
+  (README/inventory forbidden by plan).
+  Mid-cascade, after tip-aligned Unit+drift FAILURE on inventory cells
+  for the Stage A artifacts, CoS authorized an expansion beyond plan
+  Exclusive-3 to also lease `eval/public/README.md` and
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`
+  (Lease-5). That expansion is a recorded deviation; plan Exclusive-3
+  otherwise unchanged; Stage B still blocked; publication closed; no
+  harness/registry registration.
+  Shipped paths remain the five listed above:
+  `eval/public/wmbs_m06.py`,
+  `eval/public/fixtures/wmbs-m06-consolidation-development.json`,
+  `tests/test_public_wmbs_m06.py`,
+  `eval/public/README.md`,
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+  Purpose: WMBS M06 Stage A development cell
+  (stdlib descriptive oracle + fixture + contract tests +
+  inventory/README disclosure).
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #202 shipped those five paths; README and inventory
+  are the recorded Lease-5 deviation from plan Exclusive-3, not an
+  authorized Exclusive-3 lease). This receipt
+  does not invent M16; the M14 freeze is unchanged. This receipt
+  changes no benchmark result or admission state, admits no successor
+  source node, and does not recompute the canonical baseline
+  (baseline stays `main@f688c747`).
+- PR #203: ordinary documentation receipt recording the merged PR #202
+  lease-map lapse (Exact-1 lease-map receipt for product #202
+  Exact 15-05-01 WMBS M06 Stage A development cell @
+  `a3c1890c8103896f1ad4db0a3636b9db6ee14cd6`). It is **MERGED** at tip
+  `7727ee4ec4a50454aeb5db6d6db4c644d3d9155b` from Exact HEAD
+  `7b06155b106438f8a5ae156346958967ca168702` (amended GO HEAD).
+  Post-main CI SUCCESS run `36266686905`. It was **OPEN/READY**
+  at the `2026-09-26T18:27:47Z` capture and adds the PR #202
+  merged-baseline bullet, the #200 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #203 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `7727ee4ec4a50454aeb5db6d6db4c644d3d9155b`.
+- PR #204: docs: add 15-06 Exact plan for WMBS M06 Stage B reachability
+  `.planning/phases/15-security-calibration-performance-and-scale-columns/15-06-PLAN.md`
+  (title: docs: add 15-06 Exact plan for WMBS M06 Stage B reachability)
+  from exact head `22616ffb5dd0516d617156547502944813db5e30`; all
+  required exact-head Unit+drift checks passed in run `36357084597`;
+  merge `d82f401703f2ab8755772d8b2e885b86edc7bcc9` at
+  `2026-09-27T23:29:59Z`.
+  Prior tip was `7727ee4ec4a50454aeb5db6d6db4c644d3d9155b` (PR #203 Exact-1).
+  Post-main tip Unit+drift failed on CI `36358892337`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #204 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact 1):
+  `.planning/phases/15-security-calibration-performance-and-scale-columns/15-06-PLAN.md`.
+  Purpose: Exact plan bar for WMBS M06 Stage B reachability (15-06).
+  Docs-only plan; no product harness edit in #204.
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #204 was a docs-only plan). This receipt does not
+  invent M16; the M14 freeze is unchanged. This receipt changes no
+  benchmark result, admission state, or publication claim, admits no
+  successor source node, and does not recompute the canonical baseline
+  (baseline stays `main@f688c747`).
+- PR #206: ordinary documentation receipt recording the merged PR #204
+  lease-map lapse (Exact-1 lease-map receipt for product #204
+  15-06 Exact plan for WMBS M06 Stage B reachability @
+  `22616ffb5dd0516d617156547502944813db5e30`). It is **MERGED** at tip
+  `e270a90cc231c64f05084439b3346eb98f77e327` from Exact HEAD
+  `e7da24a4dab1729841bc308f9b950169a230449d`.
+  Post-main CI SUCCESS run `36362670329`. It was **OPEN/READY**
+  at the `2026-09-28T00:01:02Z` capture and adds the PR #204
+  merged-baseline bullet, the #203 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  PR #206 changes no benchmark result or admission state and does
+  not recompute the canonical baseline. Delivery is MERGED at tip
+  `e270a90cc231c64f05084439b3346eb98f77e327`.
+- PR #205: Exact 15-06-01 · WMBS M06 Stage B reachability
+  (title: Exact 15-06-01: WMBS M06 Stage B reachability)
+  from exact head `d20cad69bd0cd1ffcfeaf1b3f4b2c458aae2e917`; all
+  required exact-head Unit+drift checks passed in run `36367066800`;
+  merge `74f23509215461adb8cd06107a23008273d4aa75` at
+  `2026-09-28T02:20:21Z`.
+  Prior tip was `e270a90cc231c64f05084439b3346eb98f77e327` (PR #206 Exact-1).
+  Post-main tip Unit+drift failed on CI `36369440257`
+  solely at
+  `tests/test_planning_traceability.py::test_canonical_baseline_is_identical_across_the_three_lifecycle_files`
+  because PR #205 is absent from this lease-map (baseline
+  `main@f688c747`); this receipt repairs that bookkeeping
+  like prior Exact-1 receipts. Exclusive File Set (Exact Exclusive-7):
+  `eval/public/registry.json`,
+  `eval/public/runner.py`,
+  `eval/public/scoring.py`,
+  `eval/public/adapters/whole_memory_reference.py`,
+  `eval/public/README.md`,
+  `tests/test_public_wmbs_m06.py`,
+  `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+  Purpose: Exact 15-06-01 WMBS M06 Stage B reachability under frozen plan
+  `.planning/phases/15-security-calibration-performance-and-scale-columns/15-06-PLAN.md`.
+  Suite `wmbs-m06-development` / adapter `wmbs-m06-reference` / profile
+  `wmbs-m06-v1` / seam `public-cli-subprocess`; all publication flags false.
+  Adapter maps ingest/retrieve → capture, assert_fact, search; does not call
+  `MnemoCLI.answer`; empty `answer_text` when model-free payload has no
+  string; never copies gold. Does not invent M16; M14 freeze unchanged.
+  Changes no admission/publication claim beyond the leased Exact
+  reachability; admits no successor source node; does not recompute the
+  canonical baseline (baseline stays `main@f688c747`).
+  docs-only privacy for THIS receipt PR is Exact-1 lease-map only
+  (the recorded #205 shipped the Exclusive-7 product paths above).
+- PR #207: ordinary documentation receipt recording the merged PR #205
+  lease-map lapse (Exact-1 lease-map receipt for product #205
+  Exact 15-06-01 WMBS M06 Stage B reachability @
+  `d20cad69bd0cd1ffcfeaf1b3f4b2c458aae2e917`). It is **OPEN/READY**
+  at the `2026-09-28T02:50:30Z` capture and adds the PR #205
+  merged-baseline bullet, the #206 MERGED mark, and this structured
+  self-record in this map. Exclusive File Set:
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
   Because this record changes the branch head, no exact final head,
-  merge SHA/time, or post-main CI is claimed here. PR #191 changes
+  merge SHA/time, or post-main CI is claimed here. PR #207 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
+- PR #208: owner-directed maintenance outside the GoalEx lease sweep:
+  Windows MAX_PATH-safe `ParametricArtifactStore` writes, the POSIX-only
+  infra-tooling suites skipped on Windows through `pytest.importorskip`,
+  an optional `resource` import in the provider bake-off, and the
+  `jsonschema` development dependency the scheduled Public regression job
+  needs (its `--group dev` sync stopped run `36445311486` at collection).
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `pyproject.toml`,
+  `uv.lock`,
+  `src/mnemosyne/parametric.py`,
+  `eval/provider_bakeoff/run.py`,
+  `tests/test_runtime_exclusive_lock.py`,
+  `tests/test_production_evidence_preflight.py`,
+  `tests/test_production_mcp_client_cert_rotator.py`,
+  `tests/test_production_blackbox_probe.py`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #208 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
+- PR #209: owner-directed maintenance outside the GoalEx lease sweep:
+  the MCP validation sweep across all 59 `TOOL_SPEC` tools moved from
+  14 `FAIL` to `FAIL 0`/`CRASH 0` (`PASS` 219 -> 233, `INFO` 125 steady,
+  59/59 tools exercised). Corrected schema/handler drift where tools
+  advertised parameters no handler read, `min_trust_tier` and
+  `max_trust_tier` treated as two independent filters rather than aliases
+  of one range, argument coercion rejecting valid JSON-typed input, and
+  handlers raising instead of returning a structured error on empty or
+  absent scope. Adds the access-policy checks the scope-sensitive tools
+  lacked, consistent protocol-level method errors, and `python -m
+  mnemosyne` through a new `__main__.py`. Two further findings from
+  driving the SDK transport with signed sessions: the SDK adapter
+  validated the bound `session_identity` against the published schema
+  and so refused every signed call to a `session_identity` tool (B15),
+  and working memory had no kind for a turn of conversation (B16) -
+  `conversation_turn` joins the kind set on all three backends, pinned
+  identical by test.
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `src/mnemosyne/mcp_tools.py`,
+  `src/mnemosyne/mcp_server.py`,
+  `src/mnemosyne/security.py`,
+  `src/mnemosyne/cli.py`,
+  `src/mnemosyne/__main__.py`,
+  `src/mnemosyne/engine.py`,
+  `src/mnemosyne/sqlite_engine.py`,
+  `src/mnemosyne/postgres_engine.py`,
+  `tests/test_mcp_validation_regressions.py`,
+  `tests/test_cli_mcp_serve.py`,
+  `tests/test_access_policy_enforcement.py`,
+  `tests/test_cli_runtime_tools.py`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #209 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
+- PR #210: owner-directed maintenance outside the GoalEx lease sweep:
+  session-aware reads for the MCP server, requested by the BurnOS
+  client. `working_query` takes `limit` and `kinds`; `search` and
+  `deep_search` take `session_id` - honoured only with a verified
+  session identity for that session - and rank that session's live
+  working items with long-term memory through the existing
+  working-memory route, fusing a working item and the ledger record it
+  cites into one hit; every hit's metadata says `memory_type` and
+  `created_at`; `token_budget` (clamped to the policy budget) and `lean`
+  give a smaller answer; `serverInfo.version` and `/healthz` report the
+  build. Also the profile fixes that request asks for: a `profile_retire`
+  tool (60 tools), `profile_correct` superseding the entry it corrects,
+  `forget` retracting profile entries built on the erased record, and
+  only inferred entries yielding to a higher-authority statement that
+  merely differs. Additive: a call without the new arguments takes the
+  path it always took, on all three backends.
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `src/mnemosyne/pipeline.py`,
+  `src/mnemosyne/engine.py`,
+  `src/mnemosyne/sqlite_engine.py`,
+  `src/mnemosyne/postgres_engine.py`,
+  `src/mnemosyne/models.py`,
+  `src/mnemosyne/mcp_tools.py`,
+  `src/mnemosyne/mcp_server.py`,
+  `src/mnemosyne/buildinfo.py`,
+  `src/mnemosyne/user_model.py`,
+  `tests/test_session_aware_reads.py`,
+  `tests/test_shared_engine_contract.py`,
+  `README.md`,
+  `docs/ARCHITECTURE-OVERVIEW.md`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #210 changes
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.

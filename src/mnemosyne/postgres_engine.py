@@ -13,7 +13,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from mnemosyne.access_policy import (
@@ -78,6 +78,7 @@ from mnemosyne.models import (
     Relation,
     RetrievalResult,
     dt_to_json,
+    iso_utc,
     parse_dt,
     utc_now,
 )
@@ -123,6 +124,7 @@ _WORKING_MEMORY_KINDS = {
     "tool_result",
     "recent_tool_result",
     "intermediate_conclusion",
+    "conversation_turn",
 }
 
 
@@ -2053,6 +2055,69 @@ class PostgresEngine:
                 row = cur.fetchone()
         return _row_to_evidence(row, cid) if row else None
 
+    def evidence_created_at(self, tenant_id: str, cid: str, branch: str = "main") -> datetime | None:
+        """The row's own time, without the access-policy snapshot ``get_evidence`` returns.
+
+        Retrieval dates hits from this read. Grounded answering fingerprints
+        ``access_policy`` across ``get_evidence`` calls, so a timestamp lookup
+        must not be one of those observations.
+        """
+
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_entity_registry_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT created_at FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND cid = %s AND erased = false
+                    """,
+                    (db_tenant_id, branch, _cid_to_bytes(cid)),
+                )
+                row = cur.fetchone()
+        if not row or row[0] is None:
+            return None
+        return parse_dt(row[0])
+
+    def evidence_created_at_many(
+        self, tenant_id: str, cids: Sequence[str], branch: str = "main"
+    ) -> dict[str, datetime]:
+        """Times of several rows in ONE query and one connection.
+
+        Dating a result would otherwise check a connection out of the pool per
+        cid - eight on an ordinary search, twenty-four on a deep one - and run
+        the registry's idempotent DDL each time. A cid with no live row is
+        absent from the mapping, never ``None``.
+        """
+
+        wanted = [cid for cid in dict.fromkeys(cids) if cid]
+        if not wanted:
+            return {}
+        db_tenant_id = _stable_uuid("tenant", tenant_id)
+        found: dict[str, datetime] = {}
+        with self.connect() as conn:
+            with conn.cursor() as cur:
+                self._ensure_entity_registry_schema(cur)
+                self._set_tenant(cur, db_tenant_id)
+                cur.execute(
+                    """
+                    SELECT cid, created_at FROM evidence
+                    WHERE tenant_id = %s AND branch = %s AND erased = false AND cid = ANY(%s)
+                    """,
+                    (db_tenant_id, branch, [_cid_to_bytes(cid) for cid in wanted]),
+                )
+                rows = cur.fetchall()
+        by_bytes = {_cid_to_bytes(cid): cid for cid in wanted}
+        for row in rows:
+            created = parse_dt(row[1]) if row[1] is not None else None
+            if created is None:
+                continue
+            cid = by_bytes.get(bytes(row[0])) if row[0] is not None else None
+            if cid is not None:
+                found[cid] = created
+        return found
+
     def evidence_is_erased(self, tenant_id: str, cid: str, branch: str = "main") -> bool:
         """Engine-neutral tombstone probe (see ``MemoryEngine.evidence_is_erased``).
 
@@ -3036,6 +3101,7 @@ class PostgresEngine:
                     WITH q AS (SELECT plainto_tsquery('english', %s) AS query)
                     SELECT a.id, a.branch, a.subject, a.predicate, a.object, a.confidence, a.calibration, a.status,
                       a.source_evidence_cids, a.trust_tier, a.sensitivity, a.access_policy, a.last_accessed, a.access_count,
+                      a.transaction_time,
                       ts_rank_cd(coalesce(a.lexeme, to_tsvector('english', concat_ws(' ', a.subject, a.predicate, a.object))), q.query) AS score
                     FROM assertions a, q
                     WHERE a.tenant_id = %s AND a.branch = %s AND a.status IN ('active', 'contested')
@@ -3081,6 +3147,7 @@ class PostgresEngine:
                                 "confidence": float(row["confidence"]),
                                 "reality_class": reality_monitoring["reality_class"],
                                 "reality_monitoring": reality_monitoring,
+                                "created_at": iso_utc(row.get("transaction_time")),
                                 "backend": self.adapters.lexical_backend,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                 "access_count": row["access_count"],
@@ -3112,7 +3179,7 @@ class PostgresEngine:
                     """
                     SELECT id, branch, subject, predicate, object, confidence, calibration, status,
                       source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
-                      embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
+                      transaction_time, embedding_partition, 1.0 - (embedding <=> %s::vector) AS score
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -3168,6 +3235,7 @@ class PostgresEngine:
                                 "confidence": float(row["confidence"]),
                                 "reality_class": reality_monitoring["reality_class"],
                                 "reality_monitoring": reality_monitoring,
+                                "created_at": iso_utc(row.get("transaction_time")),
                                 "backend": self.adapters.embedding.name,
                                 "embedding_dims": self.adapters.embedding.dims,
                                 "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
@@ -3580,6 +3648,7 @@ class PostgresEngine:
                         "predicate": relation_fields["predicate"],
                         "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
+                        "created_at": iso_utc(rel.get("valid_from")),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
@@ -3639,6 +3708,7 @@ class PostgresEngine:
                         "predicate": relation_fields["predicate"],
                         "target": relation_fields["target"],
                         "confidence": float(rel["confidence"]),
+                        "created_at": iso_utc(rel.get("valid_from")),
                         "source_evidence_cids": _bytes_list_to_cids(rel["source_evidence_cids"]),
                         "backend": self.adapters.graph_backend,
                         "reality_class": security["reality_class"],
@@ -5751,7 +5821,8 @@ class PostgresEngine:
                 cur.execute(
                     """
                     SELECT id, tenant_id, branch, subject, predicate, object, confidence, calibration, status,
-                      source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count
+                      source_evidence_cids, trust_tier, sensitivity, access_policy, last_accessed, access_count,
+                      transaction_time
                     FROM assertions
                     WHERE tenant_id = %s AND branch = %s AND status IN ('active', 'contested')
                       AND trust_tier <= %s AND sensitivity <= %s
@@ -5796,6 +5867,7 @@ class PostgresEngine:
                                     "confidence": float(row["confidence"]),
                                     "reality_class": reality_monitoring["reality_class"],
                                     "reality_monitoring": reality_monitoring,
+                                    "created_at": iso_utc(row.get("transaction_time")),
                                     "last_accessed": row["last_accessed"].isoformat() if row["last_accessed"] else None,
                                     "access_count": row["access_count"],
                                     "privacy": privacy_metadata,
