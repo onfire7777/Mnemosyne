@@ -1587,6 +1587,32 @@ The following packages are complete source history, not runnable work:
   no benchmark result or admission state, does not recompute the
   canonical baseline, and must pass fresh exact-head review,
   security, and CI before merge.
+- PR #211: owner-directed maintenance outside the GoalEx lease sweep:
+  one version for the package, the tag and the healthcheck. The first
+  release cut on this repository is tagged `v1.0.1` while the package
+  still declared `0.1.0`, so `serverInfo.version` and `/healthz`
+  reported a version no release matched. `pyproject.toml` and the
+  `uv.lock` entry for the local package now declare `1.0.1`,
+  `buildinfo._FALLBACK_VERSION` follows it, a test pins that fallback to
+  the version declared in `pyproject.toml` so the two cannot drift apart
+  again, and `README.md` and `docs/ARCHITECTURE-OVERVIEW.md` name the
+  same version. No runtime behaviour changes: the build string still
+  comes from the installed distribution metadata plus the commit when it
+  is known.
+  It is **OPEN/READY** and adds this structured self-record in this map.
+  Exclusive File Set:
+  `pyproject.toml`,
+  `uv.lock`,
+  `src/mnemosyne/buildinfo.py`,
+  `tests/test_session_aware_reads.py`,
+  `README.md`,
+  `docs/ARCHITECTURE-OVERVIEW.md`,
+  `docs/coordination/2026-07-28-remaining-dependency-write-lease-map.md`.
+  Because this record changes the branch head, no exact final head,
+  merge SHA/time, or post-main CI is claimed here. PR #211 changes
+  no benchmark result or admission state, does not recompute the
+  canonical baseline, and must pass fresh exact-head review,
+  security, and CI before merge.
 
 The following is the historical `T10` reservation snapshot from
 `2026-08-15T05:54:05Z`, retained to preserve its immutable-anchor evidence.

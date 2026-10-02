@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -668,6 +669,25 @@ def test_build_version_prefers_the_environment_and_ignores_garbage(monkeypatch: 
     assert buildinfo._clean_commit("not a commit") is None
     assert buildinfo._clean_commit("abc") is None
     assert buildinfo._clean_commit(None) is None
+
+
+def test_the_fallback_version_matches_the_packaged_one() -> None:
+    """One version, declared once, so a copy with no metadata names a real release.
+
+    ``package_version()`` falls back to ``_FALLBACK_VERSION`` whenever the
+    distribution metadata is missing - a source tree on ``sys.path``, a bundle
+    copied file by file - and a stale fallback would have such a server report
+    a version nobody ever released. This pins the two together.
+    """
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    if not pyproject.is_file():  # an installed run has nothing to compare against
+        pytest.skip("pyproject.toml is not part of an installed copy")
+    declared = re.search(
+        r'(?m)^version = "([^"]+)"', pyproject.read_text(encoding="utf-8")
+    )
+    assert declared is not None
+    assert buildinfo._FALLBACK_VERSION == declared.group(1)
 
 
 # ---------------------------------------------------------------------------

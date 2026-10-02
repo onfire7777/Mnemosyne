@@ -9,7 +9,7 @@
 ![Backend](https://img.shields.io/badge/backends-local%20%7C%20sqlite%20%7C%20postgres-informational)
 ![Protocol](https://img.shields.io/badge/MCP-stdio%20%7C%20HTTP%20%7C%20SDK-blueviolet)
 
-Mnemosyne (`mnemosyne-memory`, v0.1.0) implements the **Mnemosyne v2 build blueprint**: agent memory as a *compiler*, not a vector dump. Every write lands first in an append-only, content-addressed **evidence** ledger; typed **projections** (assertions, entities, relations, preferences, procedures, lessons) are derived from that ledger and can be rebuilt deterministically. Beliefs are **bitemporal** (valid-time + transaction-time), retrieval is **hybrid** (lexical + dense + graph, reranked), confidence is **conformally calibrated** so the system *abstains* rather than guess, and a warm-loop **consolidation** pipeline promotes new beliefs only through a protected regression gate guarded by seven non-negotiable invariant rails.
+Mnemosyne (`mnemosyne-memory`, v1.0.1) implements the **Mnemosyne v2 build blueprint**: agent memory as a *compiler*, not a vector dump. Every write lands first in an append-only, content-addressed **evidence** ledger; typed **projections** (assertions, entities, relations, preferences, procedures, lessons) are derived from that ledger and can be rebuilt deterministically. Beliefs are **bitemporal** (valid-time + transaction-time), retrieval is **hybrid** (lexical + dense + graph, reranked), confidence is **conformally calibrated** so the system *abstains* rather than guess, and a warm-loop **consolidation** pipeline promotes new beliefs only through a protected regression gate guarded by seven non-negotiable invariant rails.
 
 ---
 
