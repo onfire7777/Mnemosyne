@@ -2028,6 +2028,26 @@ Quarantine
 
 ## Owner-directed documentation consolidation — PR #120
 
+- PR #212: receipt repair, contributor README and AnyIO lockfile consolidation;
+  pending exact-head CI and review before merge. Records this follow-up so
+  its eventual merge remains accounted for by the unchanged lapse detector;
+  no success, implementation admission or baseline advancement is claimed.
+
+- Source PR #198 — contributor README history consolidated into PR #212 under the
+  owner's branch-reduction request; preserve current package version and
+  readiness caveats. Repository navigation URLs are absolute for PyPI.
+- Source PR #197 — AnyIO 4.14.2 lockfile update history consolidated into PR #212;
+  dependency compatibility and combined-head CI remain required before merge.
+  These consolidation records do not claim either source PR merged to main.
+
+- PR #120: MERGED on October 2, 2026 at 00:54:50 UTC; merge commit
+  `a7b95e9bc93a7eecd97c0bdf51a508e4487d1459`, reviewed head
+  `4f5d4fcfd51ac35beea0fbad1ceb3f622f8f51a5`, exact-head CI
+  `36945970613` SUCCESS. All six repaired source heads from PR #122–127
+  are ancestors of this merge; GitHub marked those PRs MERGED and retired
+  their branches. This is a documentation-placement receipt only, not
+  implementation admission, runtime readiness or architectural approval.
+
 On October 1, 2026 the repository owner explicitly requested repairing the
 documentation review findings and consolidating plan-only branches. This is
 one serialized documentation writer on canonical `main@ac440866`, not a
