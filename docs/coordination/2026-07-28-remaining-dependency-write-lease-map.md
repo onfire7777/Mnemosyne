@@ -2028,6 +2028,14 @@ Quarantine
 
 ## Owner-directed documentation consolidation — PR #120
 
+- PR #120: MERGED on October 2, 2026 at 00:54:50 UTC; merge commit
+  `a7b95e9bc93a7eecd97c0bdf51a508e4487d1459`, reviewed head
+  `4f5d4fcfd51ac35beea0fbad1ceb3f622f8f51a5`, exact-head CI
+  `36945970613` SUCCESS. All six repaired source heads from PR #122–127
+  are ancestors of this merge; GitHub marked those PRs MERGED and retired
+  their branches. This is a documentation-placement receipt only, not
+  implementation admission, runtime readiness or architectural approval.
+
 On October 1, 2026 the repository owner explicitly requested repairing the
 documentation review findings and consolidating plan-only branches. This is
 one serialized documentation writer on canonical `main@ac440866`, not a
