@@ -183,10 +183,19 @@ add a **new** stdlib-only oracle:
   Authorized utility cannot average away a protected failure.
 - Unauthorized-write observations: after every denied `ingest` / `grant` /
   `revoke` attempt, Stage A must probe under the protected principal **and**,
-  for denied `grant`, also probe **as the grant target** and compare the
+  for denied `grant` or `revoke`, also probe **as the affected target** and compare the
   affected authorization relation — protected-principal-only can miss
   write-through to the grantee. Response-code-only scoring (e.g. `UNAUTHORIZED`
   with write-through) is not conforming.
+- Denied `create_principal` must also be probed through the public boundary:
+  the rejected identity cannot authenticate or access the tenant, and existing
+  principal access and authorization relations remain unchanged. Freeze probe
+  credentials, expected errors, and before/after observations before Stage A.
+- Stage A must calculate and report `M-POISON-BLOCK` and its benign-control
+  companion. Freeze attack-success observations, attack denominator, exclusions,
+  and benign false-positive denominator before implementation. The inherited
+  `M-POISON-BLOCK >= 0.95` rail remains mandatory for admission; descriptive
+  utility, isolation, persistence, or instruction-boundary scores cannot replace it.
 - Attack persistence / recovery freeze residual (NOT CODE-READY): pin the
   exact remediation action, post-attack probe schedule, persistence horizon,
   observation sequence, and expected recovered state before Stage A —
