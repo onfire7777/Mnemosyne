@@ -169,6 +169,17 @@ add a **new** stdlib-only oracle:
 - Wire freeze residual (NOT CODE-READY): concrete export/import request,
   response, receipt, envelope-version, and error/idempotency schemas must be
   frozen before Stage A or a second adapter — do not invent them here.
+- C24 reporting is mandatory in every Stage A result (spec L525, L1137–1145):
+  the harness owns latency, wall time, tokens, API calls, storage, peak RSS,
+  cost, and profile observations; the oracle carries their validated report.
+  Freeze units, scope, timing, provenance, and unsupported/error semantics.
+  Report genuine zero use explicitly; unavailable measurements are unsupported,
+  never fabricated zeroes or omitted fields.
+- Receipt-protocol freeze (NOT CODE-READY): before public claims, bind each R1
+  receipt to exact adapter/SUT versions and digests, the same frozen protocol,
+  fixture digest, profile, and measurement procedure. A trusted harness verifier
+  must validate custody and measurement evidence and demonstrate two distinct
+  independent implementations; two files from one implementation do not qualify.
 - A single-system round-trip is an internal result. Missing a second
   independently implemented adapter yields **no public interoperability
   claim**, not a pass.
@@ -184,6 +195,14 @@ This paragraph does not create those files.
 - Generated Stage A fixture license: `CC0-1.0` (synthetic; same pin as
   M02/M05/M08). Pin any later non-synthetic dataset at freeze; do not invent
   one here.
+- Before Stage A, freeze a machine-readable fixture BOM and custody record
+  under a named harness validation owner. Include stable identifier, source URI,
+  version/commit, content digest, SPDX declared/concluded license, attribution,
+  derivation lineage, transformation-script digest, generation method and creator,
+  intended use, redistribution/commercial limits, personal-data status,
+  authority/consent basis, de-identification, retention, deletion/takedown process,
+  and jurisdiction restrictions (spec L1307–1315). Bind and validate these records
+  against the generated fixture digest; inapplicable fields need explicit reasons.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "interop certified," certified, or governed label. Passing, if it ever
   happens, is an internal single-system round-trip only. Public
@@ -195,15 +214,18 @@ This paragraph does not create those files.
 WMBS-E + C20 public contract (R2) + G0/G1/G2 + frozen envelope (R4)
   -> freeze this plan (GOAL step 2)
     -> Stage A  descriptive oracle + fixture + tests   [unadmitted; R1 not required]
-      -> public interoperability claim / certification requires R1 receipts + R5 second adapter
+      -> public interoperability claim requires frozen receipt protocol + verified R1 receipts + R5 second adapter + human claim approval
+      -> certification remains unavailable until global governance/core/evidence gates permit it
       -> Stage B  public-harness registration          [unadmitted; G3]
 ```
 
 R4 (frozen versioned portable envelope / export-import wire schemas) is a
 **Stage A prerequisite** so fixtures and oracle have a stable wire format.
 R1 (two independent measured receipts) gates **public interoperability
-claims only** — not descriptive Stage A. Public certification stays behind
-R5. Do not invent M16. Do not write GOAL.md, STATE.md, or the lease-map.
+claims only** — not descriptive Stage A. R1/R5 do not enable certification:
+the global governance, frozen mandatory-core, independent/held-out evidence, and
+human-approval gates remain mandatory (spec L1336–1342, L1369–1372, L1425–1428).
+Do not invent M16. Do not write GOAL.md, STATE.md, or the lease-map.
 
 ## 7. Exact future write lease (unadmitted)
 
@@ -229,7 +251,7 @@ Prospective Stage B is not designed here. Do not invent runner/registry rows.
 | Item | After this file | After a future Stage A | After a future Stage B |
 |---|---|---|---|
 | M18 single-system round-trip | `PROPOSED` | `PROPOSED` | `PROPOSED` |
-| Public interoperability certification | `DEFERRED` | `DEFERRED` | `DEFERRED` until R1+R5 |
+| Public interoperability certification | `DEFERRED` | `DEFERRED` | `DEFERRED`; R1/R5 never replace global certification and human-approval gates |
 | Spec required-field / unknown-critical bounds | `DEFERRED` (R1/R4) | `DEFERRED` | `DEFERRED` until receipt |
 | Semantic delta as admission | `DEFERRED` (R3) | `DEFERRED` | `DEFERRED` until calibrated |
 | "Interop certified" | never claimed | never claimed | never claimed |
@@ -256,21 +278,27 @@ or writing any other path.
 
 ## 11. Locked public-harness cell (do not write README from this PR)
 
-The block below is the only allowed future `eval/public/README.md` cell for
+The block below is the Stage A `eval/public/README.md` cell for
 this module. Place it as a peer of the M02, M03, M07, M08, M09, M11, and
 M17 cells, not under the M02/M04/M05 Stage-A oracles heading. This PR does
 not write `eval/public/README.md`. Frontend has not filed an M18 cell rec
 yet; this block is spec-derived only.
+After verified Stage B registration, the integration owner must replace the
+no-registry/not-runnable statements with the actual registered suite and command,
+while retaining the claim gates and false publication flags. This is not authority
+to edit README or register a suite from this PR.
 
 Do not add a `uv run --suite` line until a registry row exists.
 
 ```markdown
 ### M18 interoperability
 
-PROPOSED for internal single-system round-trip. Public certification is
-DEFERRED until a frozen envelope, a second independently implemented
-adapter (**R5**), **and** two-implementation measured receipts (**R1**)
-exist — R5 alone is insufficient. All publication flags false. A
+PROPOSED for internal single-system round-trip. Public interoperability claims
+require a frozen envelope and receipt-verification protocol, a second independently
+implemented adapter (**R5**), verified two-implementation measured receipts (**R1**),
+and human claim approval. Certification remains DEFERRED behind the global
+governance, mandatory-core, and independent/held-out evidence gates; R1+R5 do not
+enable it. All publication flags false. A
 single-system round-trip is an internal result, not a public
 interoperability claim.
 
