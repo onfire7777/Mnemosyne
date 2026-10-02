@@ -44,6 +44,8 @@ def score_profile(profile: str, labels: list[dict[str, Any]], traces: list[dict[
         return _score_wmbs_m04(labels, traces)
     if profile == "wmbs-m05-v1":
         return _score_wmbs_m05(labels, traces)
+    if profile == "wmbs-m06-v1":
+        return _score_wmbs_m06(labels, traces)
     if profile == "wmbs-m10-v1":
         return _score_wmbs_m10(labels, traces)
     if profile in {"pm-bench-action-v1", "triggerbench-action-v1"}:
@@ -316,6 +318,40 @@ def _score_wmbs_m05(
     measured["family"] = "whole-memory-development"
     measured["profile"] = "wmbs-m05-v1"
     measured["interval"] = {"method": "descriptive"}
+    return measured
+
+
+def _score_wmbs_m06(
+    labels: list[dict[str, Any]], traces: list[dict[str, Any]]
+) -> dict[str, Any]:
+    from eval.public import wmbs_m06 as m06
+
+    fixture = None
+    if labels and isinstance(labels[0], dict) and isinstance(labels[0].get("fixture"), dict):
+        fixture = labels[0]["fixture"]
+    else:
+        fixture = m06.generate_fixture(m06.SEEDS[0])
+    cases = []
+    for row in traces:
+        if not isinstance(row, dict):
+            continue
+        cycles = []
+        for cycle in row.get("cycles") or []:
+            if not isinstance(cycle, dict):
+                continue
+            cycles.append(
+                {
+                    "operations": cycle.get("operations"),
+                    "answer_text": cycle.get("answer_text"),
+                }
+            )
+        cases.append({"case_id": row.get("case_id"), "cycles": cycles})
+    measured = m06.score(fixture, {"control": "no-memory", "cases": cases})
+    measured["family"] = "whole-memory-development"
+    measured["profile"] = "wmbs-m06-v1"
+    interval = dict(measured["interval"])
+    interval["method"] = "descriptive"
+    measured["interval"] = interval
     return measured
 
 

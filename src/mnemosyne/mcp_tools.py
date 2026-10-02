@@ -1,11 +1,26 @@
-"""MCP-compatible tool facade for agents."""
+"""MCP-compatible tool facade for agents.
+
+Write authority
+---------------
+Every write runs through :meth:`MemoryTools._authorize` into
+``SecurityPolicy.authorize_write``, which needs the ``agent`` role or stronger:
+``reader`` holds no write authority on any sink.
+
+On a server started WITHOUT ``--require-session``, ``role`` and
+``source_trust_tier`` are ordinary tool arguments, so the CLIENT chooses what
+authority it claims and the policy can only check that claim for internal
+consistency. Run with ``--require-session`` and signed session tokens for the
+role and trust tier to be bound to a verified identity instead; the working-memory
+and prospective-memory tools already refuse to act without one.
+"""
 
 from __future__ import annotations
 
 import base64
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
-from typing import Any
+from typing import Any, Literal, assert_never
 
 from mnemosyne.engine import (
     Intention,
@@ -13,8 +28,9 @@ from mnemosyne.engine import (
     ProspectiveOperatingPoint,
     TriggerEvaluationContext,
     WorkingMemoryItem,
+    select_working_items,
 )
-from mnemosyne.ids import canonical_json, new_id
+from mnemosyne.ids import canonical_json, evidence_cid, new_id
 from mnemosyne.ingestion import IngestRequest, IngestionPipeline
 from mnemosyne.gate import Candidate, GATING_CASE_ORIGINS, GateResult, PromotionGate, RegressionCase
 from mnemosyne.learning import LearningSystem, Trajectory, counterfactual_replay_score
@@ -22,13 +38,15 @@ from mnemosyne.media_limits import DEFAULT_MAX_INGEST_BYTES, enforce_byte_limit
 from mnemosyne.models import Assertion, Evidence, Preference, Relation, parse_dt
 from mnemosyne.observability import MetricsRegistry
 from mnemosyne.parametric import ParametricTier, protected_suite_is_gating, protected_suite_report
+from mnemosyne.pipeline import lean_retrieval_payload
 from mnemosyne.postgres_engine import _stable_uuid as _postgres_stable_uuid
 from mnemosyne.prefetch import AnticipatoryPrefetcher, PrefetchCandidate
 from mnemosyne.privacy import ErasureMode
 from mnemosyne.runtime_state import RuntimeState
 from mnemosyne.security import SecurityPolicy, SessionIdentity, TrustTier, WriteRole
 from mnemosyne.source_truth import apply_markdown_git_source
-from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry
+from mnemosyne.text import tokenize
+from mnemosyne.user_model import UserMemoryKind, UserMistakeEvent, UserModel, UserModelEntry, correction_kind
 
 
 def _parse_prospective_datetime(value: str, *, field: str) -> datetime:
@@ -55,6 +73,137 @@ def _parse_valid_from(value: str | None) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
+#: The outcomes a trajectory may carry. Mirrors ``learning.Trajectory.outcome``;
+#: published as a schema enum so a client cannot store an unmodelled outcome.
+TrajectoryOutcome = Literal["success", "failure"]
+TRAJECTORY_OUTCOMES: tuple[str, ...] = ("success", "failure")
+
+
+def _require_trajectory_outcome(value: Any) -> str:
+    """Reject an outcome the ``Trajectory`` model does not model.
+
+    The facade used to cast whatever arrived straight onto ``Trajectory.outcome``
+    (``# type: ignore[arg-type]``), so a string like ``meltdown`` was stored and
+    then read back by ``outcome_evaluate``.
+    """
+
+    if not isinstance(value, str) or value not in TRAJECTORY_OUTCOMES:
+        raise ValueError(f"outcome must be one of {list(TRAJECTORY_OUTCOMES)} (got {value!r})")
+    return value
+
+#: Branch names the engines own. ``main`` always exists, so "creating" it from
+#: itself silently did nothing useful; callers must not name it as a new branch.
+RESERVED_BRANCH_NAMES: frozenset[str] = frozenset({"main"})
+
+#: Ceiling on the candidate pool ``graph_query`` asks the engine for when it has
+#: to cover every edge on a branch to make hop limiting exact.
+_GRAPH_QUERY_MAX_POOL = 4096
+
+
+def _require_text(value: Any, *, field: str) -> str:
+    """Reject an absent, non-string or blank identifier."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a non-empty string")
+    return value
+
+
+def _require_unit_interval(value: Any, *, field: str) -> float:
+    """Reject a confidence/probability outside the closed interval 0.0..1.0."""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a number between 0.0 and 1.0")
+    numeric = float(value)
+    if not 0.0 <= numeric <= 1.0:
+        raise ValueError(f"{field} must be between 0.0 and 1.0 (got {numeric})")
+    return numeric
+
+
+def _require_count(value: Any, *, field: str, minimum: int = 0) -> int:
+    """Reject a count below ``minimum`` or of the wrong type."""
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be an integer >= {minimum}")
+    if value < minimum:
+        raise ValueError(f"{field} must be >= {minimum} (got {value})")
+    return value
+
+
+def _require_branch_name(value: Any, *, field: str = "name", allow_reserved: bool = False) -> str:
+    """Reject an empty, reserved, padded or path-like branch name.
+
+    Branch names reach the storage layer and (on some backends) a filesystem, so
+    a name carrying a path separator or a ``..`` segment is refused outright.
+    ``allow_reserved`` is for a *source* branch, where ``main`` is legitimate.
+    """
+
+    name = _require_text(value, field=field)
+    if name != name.strip():
+        raise ValueError(f"{field} must not start or end with whitespace")
+    if not allow_reserved and name in RESERVED_BRANCH_NAMES:
+        raise ValueError(f"{field} {name!r} is reserved and already exists; choose another branch name")
+    if "/" in name or "\\" in name:
+        raise ValueError(f"{field} must not contain a path separator")
+    if name in {".", ".."} or ".." in name:
+        raise ValueError(f"{field} must not contain a path traversal segment")
+    return name
+
+
+def _require_trust_tier(value: Any, *, field: str) -> int:
+    """Reject a trust tier outside the blueprint scale."""
+
+    tier = _require_count(value, field=field, minimum=int(TrustTier.DIRECT_USER))
+    if tier > int(TrustTier.UNTRUSTED_EXTERNAL):
+        raise ValueError(
+            f"{field} must be between {int(TrustTier.DIRECT_USER)} and "
+            f"{int(TrustTier.UNTRUSTED_EXTERNAL)} (got {tier})"
+        )
+    return tier
+
+
+def _validate_trust_range(
+    min_trust_tier: int | None, max_trust_tier: int | None
+) -> tuple[int | None, int | None]:
+    """Validate a trust-tier filter.
+
+    Trust tiers are numeric and run the blueprint's *lower-is-more-trusted* way:
+    0 (``DIRECT_USER``) is the most trusted and ``UNTRUSTED_EXTERNAL`` (5) the
+    least. Both arguments therefore name the SAME thing -- a ceiling on the tier
+    number, i.e. the least-trusted tier still admitted -- and retrieval applies
+    ``max_trust_tier`` when both are given.
+
+    That makes a pair like ``min_trust_tier=5, max_trust_tier=1`` a contradiction:
+    a caller writing it believes the two form a window, and got a ceiling of 1
+    silently instead. Refuse the contradiction rather than guess which half was
+    meant, and refuse a tier off the scale at the same time.
+    """
+
+    if min_trust_tier is not None:
+        min_trust_tier = _require_trust_tier(min_trust_tier, field="min_trust_tier")
+    if max_trust_tier is not None:
+        max_trust_tier = _require_trust_tier(max_trust_tier, field="max_trust_tier")
+    if min_trust_tier is not None and max_trust_tier is not None and min_trust_tier > max_trust_tier:
+        raise ValueError(
+            f"min_trust_tier ({min_trust_tier}) must not exceed max_trust_tier ({max_trust_tier}); "
+            "tier 0 is the most trusted, so the window is empty"
+        )
+    return min_trust_tier, max_trust_tier
+
+
+def _require_mapping_field(mapping: Any, key: str, *, label: str) -> Any:
+    """Read ``key`` from a caller-supplied dict, naming what is missing.
+
+    Indexing these dicts directly raised a bare ``KeyError``, which reached the
+    client as the unhelpful message ``'id'``.
+    """
+
+    if not isinstance(mapping, dict):
+        raise ValueError(f"{label} must be an object")
+    if key not in mapping:
+        raise ValueError(f"{label} is missing the required field {key!r}")
+    return mapping[key]
+
+
 TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "working_seed",
@@ -63,7 +212,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "working_query",
-        "description": "List live working-memory items in an explicit authenticated subject scope.",
+        "description": "List live working-memory items in an explicit authenticated subject scope, newest first. limit keeps only the newest `limit` items after the scope filter; kinds keeps only items of those kinds. With neither, every live item of the scope is returned.",
         "arguments": ["tenant_id", "session_id", "user_id", "agent_id", "task_id", "branch", "as_of"],
     },
     {
@@ -78,7 +227,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "capture",
-        "description": "Append verbatim evidence to the content-addressed ledger.",
+        "description": "Append verbatim evidence to the content-addressed ledger. created=true only when this call inserted a live row; idempotent=true only when that live row was already present. A blocked erased replay or a deferred write sets both to false. tenant_id must not be empty.",
         "arguments": ["tenant_id", "user_id", "actor", "source_type", "content"],
     },
     {
@@ -109,7 +258,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "relation",
-        "description": "Add a temporal relation edge for graph retrieval.",
+        "description": "Add a temporal relation edge for graph retrieval. Without source_evidence_cids a self-attested evidence record is minted so the edge is still retrievable, and the result carries a warning: such an edge earns no independent corroboration and is graded at the lowest visible trust tier.",
         "arguments": ["tenant_id", "source", "predicate", "target"],
     },
     {
@@ -164,17 +313,17 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "search",
-        "description": "Fast hybrid retrieval with trust filtering, provenance, confidence, and abstention.",
+        "description": "Fast hybrid retrieval with trust filtering, provenance, confidence, and abstention. Trust tiers are numeric and lower is MORE trusted (0 = direct user, 5 = untrusted external). min_trust_tier and max_trust_tier both name the least-trusted tier still admitted, and max_trust_tier is the one applied when both are given, so a contradictory pair (min above max) is refused rather than silently collapsed. session_id (honoured only with a valid signed session_token for that session, refused otherwise) ranks that session's live working memory together with long-term memory in the one list, and a working item and the ledger record it cites come back as one hit. token_budget fits the hits to fewer tokens and is clamped, not refused, above the policy budget of 4096. lean leaves out the explain block and the per-hit diagnostics. Every hit's metadata says its memory_type and created_at.",
         "arguments": ["tenant_id", "query"],
     },
     {
         "name": "deep_search",
-        "description": "Expanded retrieval path with graph channel enabled when graph data exists.",
+        "description": "Expanded retrieval path with graph channel enabled when graph data exists. Takes session_id, token_budget and lean exactly as search does.",
         "arguments": ["tenant_id", "query"],
     },
     {
         "name": "get",
-        "description": "Fetch one memory record by id or cid from the tenant export surface.",
+        "description": "Fetch one CURRENTLY VALID memory record by id or cid from the tenant export surface. History is deliberately out of scope: a superseded, retracted or erased record is reported as not found. The ledger still retains a superseded assertion (status=superseded, with valid_to set), and its earlier value is read with graph_as_of at a timestamp inside its validity window.",
         "arguments": ["tenant_id", "id"],
     },
     {
@@ -204,7 +353,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "forget",
-        "description": "Erase evidence content and propagate retraction or provenance trimming.",
+        "description": "Erase evidence content on EVERY branch holding the cid and propagate retraction or provenance trimming. Reports branches_erased; pass all_branches=false to erase only the named branch.",
         "arguments": ["tenant_id", "cid"],
     },
     {
@@ -219,7 +368,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "branch",
-        "description": "Create a branch from an existing branch.",
+        "description": "Create a branch from an existing branch. The name must be non-empty, must not be the reserved name 'main', and must not be path-like.",
         "arguments": ["name"],
     },
     {
@@ -259,8 +408,13 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "profile_correct",
-        "description": "Record an explicit profile correction that supersedes weaker entries.",
+        "description": "Record an explicit profile correction. The entry named by id is superseded by the corrected statement and no longer appears in profile_context; weaker inferred entries that differ are superseded too. id must name an active entry in this tenant/user scope. The correction keeps that entry's scope unless context is given, and is an explicit preference unless it replaces an instruction or an identity, which stay what they are. Authority is the caller's role and trust tier (a signed session sets both): correcting a hard instruction is a policy write.",
         "arguments": ["tenant_id", "user_id", "id", "statement"],
+    },
+    {
+        "name": "profile_retire",
+        "description": "Take a profile entry back: it stops being active and no longer appears in profile_context. The record is kept, marked retracted. An unknown id, or one from another tenant or user, is an error. Authority is the caller's role and trust tier (a signed session sets both): taking an entry back is a destructive write, which needs the operator or consolidator role, and a hard instruction is a policy write.",
+        "arguments": ["tenant_id", "user_id", "id"],
     },
     {
         "name": "profile_record_mistake",
@@ -279,12 +433,12 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "graph_neighbors",
-        "description": "Run tenant- and branch-scoped graph PPR over relation seeds.",
+        "description": "Run tenant- and branch-scoped graph PPR over relation seeds. k is the number of hits and must be at least 1.",
         "arguments": ["tenant_id", "seeds"],
     },
     {
         "name": "graph_query",
-        "description": "Blueprint alias for graph neighbor query over relation seeds.",
+        "description": "Graph neighbour query over relation seeds, limited to edges whose both endpoints lie within hops edges of a seed. hops and k must each be at least 1.",
         "arguments": ["tenant_id", "seeds"],
     },
     {
@@ -299,12 +453,12 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "trajectory_log",
-        "description": "Persist a trajectory for procedural/corrective learning.",
+        "description": "Persist a trajectory for procedural/corrective learning. outcome must be 'success' or 'failure'.",
         "arguments": ["tenant_id", "user_id", "session_id", "task", "steps", "outcome", "reward", "memory_version"],
     },
     {
         "name": "trajectory_record",
-        "description": "Blueprint alias for persisting a trajectory.",
+        "description": "Blueprint alias for persisting a trajectory. outcome must be 'success' or 'failure'.",
         "arguments": ["tenant_id", "user_id", "session_id", "task", "steps", "outcome", "reward", "memory_version"],
     },
     {
@@ -334,7 +488,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     },
     {
         "name": "lesson_promote",
-        "description": "Promote a lesson through protected regression cases.",
+        "description": "Promote a lesson through protected regression cases. Requires at least one regression case, like working_promote.",
         "arguments": ["lesson_id", "cases", "role", "source_trust_tier"],
     },
     {
@@ -383,6 +537,24 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "arguments": ["artifact_uri", "reason", "role", "source_trust_tier", "protected_case_count"],
     },
 ]
+
+
+def _profile_write_sink(kind: UserMemoryKind) -> str | None:
+    """The write sink a profile entry occupies, matching ``profile_add``."""
+
+    match kind:
+        case UserMemoryKind.HARD_INSTRUCTION:
+            return "policy"
+        case (
+            UserMemoryKind.EXPLICIT_PREFERENCE
+            | UserMemoryKind.INFERRED_PREFERENCE
+            | UserMemoryKind.SITUATIONAL_PREFERENCE
+        ):
+            return "preference"
+        case UserMemoryKind.IDENTITY | UserMemoryKind.TEMPORARY_STATE:
+            return None
+        case _:
+            assert_never(kind)
 
 
 class MemoryTools:
@@ -488,16 +660,21 @@ class MemoryTools:
         self, tenant_id: str, session_id: str, user_id: str, agent_id: str,
         task_id: str, branch: str, as_of: str | datetime,
         session_identity: SessionIdentity | None = None,
+        limit: int | None = None, kinds: list[str] | None = None,
     ) -> dict[str, Any]:
         self._authorize_working(
             session_identity, tenant_id=tenant_id, session_id=session_id,
             user_id=user_id, agent_id=agent_id,
         )
         clock = self._working_time(as_of, "as_of")
-        items = [
-            item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
-            if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
-        ]
+        items = select_working_items(
+            [
+                item for item in self.engine.list_working(tenant_id, session_id, as_of=clock)
+                if self._working_matches(item, user_id=user_id, agent_id=agent_id, task_id=task_id, branch=branch)
+            ],
+            kinds=kinds,
+            limit=limit,
+        )
         return {"as_of": clock.isoformat(), "items": [item.to_dict() for item in items]}
 
     def working_promote(
@@ -585,27 +762,45 @@ class MemoryTools:
         session_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        _require_text(tenant_id, field="tenant_id")
         enforce_byte_limit(
             content.encode("utf-8"),
             limit=getattr(self.ingestion, "max_ingest_bytes", DEFAULT_MAX_INGEST_BYTES),
             label="capture content",
         )
-        cid = self.engine.append_evidence(
-            Evidence(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                actor=actor,  # type: ignore[arg-type]
-                source_type=source_type,
-                source_identity=source_identity,
-                session_id=session_id,
-                content=content,
-                metadata=metadata or {},
-                trust_tier=trust_tier,
-                access_policy={"tenant": tenant_id},
-            ),
-            branch=branch,
+        evidence = Evidence(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            actor=actor,  # type: ignore[arg-type]
+            source_type=source_type,
+            source_identity=source_identity,
+            session_id=session_id,
+            content=content,
+            metadata=metadata or {},
+            trust_tier=trust_tier,
+            access_policy={"tenant": tenant_id},
         )
-        return {"cid": cid, "branch": branch, "idempotent": True}
+        # `append_evidence` returns a cid even when it stores nothing. An
+        # erased-replay block and a self-generation budget deferral both hand
+        # back the expected cid and leave no live row; `get_evidence` hides
+        # tombstones, so a pre-write miss plus cid equality is not creation.
+        # Creation is a live row that this call inserted.
+        expected_cid = evidence_cid(
+            evidence.content,
+            tenant_id=evidence.tenant_id,
+            user_id=evidence.user_id,
+            source_type=evidence.source_type,
+            content_pointer=evidence.content_pointer,
+            modality=evidence.modality,
+            sensitivity=int(evidence.sensitivity),
+        )
+        existed_before = self.engine.get_evidence(tenant_id, expected_cid, branch) is not None
+        cid = self.engine.append_evidence(evidence, branch=branch)
+        stored = self.engine.get_evidence(tenant_id, cid, branch) is not None
+        same_cid = cid == expected_cid
+        created = not existed_before and stored and same_cid
+        idempotent = existed_before and stored and same_cid
+        return {"cid": cid, "branch": branch, "created": created, "idempotent": idempotent}
 
     def ingest(
         self,
@@ -691,6 +886,7 @@ class MemoryTools:
             source_trust_tier=source_trust_tier if source_trust_tier is not None else trust_tier,
             target_sink="belief",
         )
+        confidence = _require_unit_interval(confidence, field="confidence")
         normalized_valid_from = _parse_valid_from(valid_from)
         assertion = Assertion(
             tenant_id=tenant_id,
@@ -757,6 +953,39 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="belief",
         )
+        confidence = _require_unit_interval(confidence, field="confidence")
+        evidence_cids = [str(cid) for cid in (source_evidence_cids or []) if cid]
+        warning: str | None = None
+        if not evidence_cids:
+            # A relation carries no trust of its own: the graph security lookup grades
+            # an edge through its supporting evidence and DROPS an edge that has none,
+            # so an unevidenced relation was a silent dead edge -- stored, exportable,
+            # and invisible to graph_neighbors / graph_query / graph_timeline. Mint an
+            # explicit self-attested provenance record instead, so the edge is
+            # retrievable and honestly graded: written at the least-trusted tier that
+            # is still visible, it classifies as `externally_suggested` and earns no
+            # independent corroboration. The caller's claimed trust is deliberately
+            # NOT used here, because nothing outside the claim supports the edge.
+            warning = (
+                "relation stored without source_evidence_cids: a self-attested evidence record was "
+                "minted for it, so the edge is retrievable but carries no independent corroboration "
+                "and is graded at the lowest visible trust tier. Pass source_evidence_cids to ground it."
+            )
+            evidence_cids = [
+                self.engine.append_evidence(
+                    Evidence(
+                        tenant_id=tenant_id,
+                        user_id="",
+                        actor="system",  # type: ignore[arg-type]
+                        source_type="relation_self_attested",
+                        content=f"{source} {predicate} {target}",
+                        metadata={"relation_self_attested": True},
+                        trust_tier=int(TrustTier.LOW),
+                        access_policy={"tenant": tenant_id},
+                    ),
+                    branch=branch,
+                )
+            ]
         relation_id = self.engine.add_relation(
             Relation(
                 tenant_id=tenant_id,
@@ -764,12 +993,20 @@ class MemoryTools:
                 predicate=predicate,
                 target=target,
                 confidence=confidence,
-                source_evidence_cids=source_evidence_cids or [],
+                source_evidence_cids=evidence_cids,
                 access_policy={"tenant": tenant_id},
             ),
             branch=branch,
         )
-        return {"id": relation_id, "branch": branch, "security": decision}
+        result: dict[str, Any] = {
+            "id": relation_id,
+            "branch": branch,
+            "source_evidence_cids": evidence_cids,
+            "security": decision,
+        }
+        if warning is not None:
+            result["warning"] = warning
+        return result
 
     def preference(
         self,
@@ -791,6 +1028,7 @@ class MemoryTools:
             source_trust_tier=trust,
             target_sink="preference",
         )
+        confidence = _require_unit_interval(confidence, field="confidence")
         preference_id = self.engine.add_preference(
             Preference(
                 tenant_id=tenant_id,
@@ -1044,6 +1282,10 @@ class MemoryTools:
         region: str | None = None,
         break_glass: bool = False,
         lawful_basis: str | list[str] | None = None,
+        session_id: str | None = None,
+        token_budget: int | None = None,
+        lean: bool = False,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         filt = self._read_context(
             tenant_id,
@@ -1057,14 +1299,22 @@ class MemoryTools:
             break_glass=break_glass,
             lawful_basis=lawful_basis,
         )
+        min_trust_tier, max_trust_tier = _validate_trust_range(min_trust_tier, max_trust_tier)
         if max_trust_tier is not None:
             filt["max_trust_tier"] = max_trust_tier
         elif min_trust_tier is not None:
             filt["min_trust_tier"] = min_trust_tier
+        self._session_read_scope(
+            filt, tenant_id=tenant_id, user_id=user_id,
+            session_id=session_id, session_identity=session_identity,
+        )
+        if token_budget is not None:
+            filt["token_budget"] = token_budget
         start = perf_counter()
         result = self.engine.retrieve(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
-        self._record_retrieval(result.to_dict(), start)
-        return result.to_dict()
+        payload = result.to_dict()
+        self._record_retrieval(payload, start)
+        return lean_retrieval_payload(payload) if lean else payload
 
     def deep_search(
         self,
@@ -1080,6 +1330,10 @@ class MemoryTools:
         region: str | None = None,
         break_glass: bool = False,
         lawful_basis: str | list[str] | None = None,
+        session_id: str | None = None,
+        token_budget: int | None = None,
+        lean: bool = False,
+        session_identity: SessionIdentity | None = None,
     ) -> dict[str, Any]:
         start = perf_counter()
         filt = self._read_context(
@@ -1094,9 +1348,16 @@ class MemoryTools:
             break_glass=break_glass,
             lawful_basis=lawful_basis,
         )
+        self._session_read_scope(
+            filt, tenant_id=tenant_id, user_id=user_id,
+            session_id=session_id, session_identity=session_identity,
+        )
+        if token_budget is not None:
+            filt["token_budget"] = token_budget
         result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
-        self._record_retrieval(result.to_dict(), start)
-        return result.to_dict()
+        payload = result.to_dict()
+        self._record_retrieval(payload, start)
+        return lean_retrieval_payload(payload) if lean else payload
 
     def explain(
         self,
@@ -1129,6 +1390,41 @@ class MemoryTools:
         result = self.engine.deep_search(query=query, tenant_id=tenant_id, branch=branch, filt=filt)
         self._record_retrieval(result.to_dict(), start)
         return result.to_dict()
+
+    def _session_read_scope(
+        self,
+        filt: dict[str, Any],
+        *,
+        tenant_id: str,
+        user_id: str | None,
+        session_id: str | None,
+        session_identity: SessionIdentity | None,
+    ) -> None:
+        """Ask the engine's working-memory route for one session, on proof of that session.
+
+        Working memory is session-gated: no working item may reach a caller that
+        holds no valid signed token for its session. So ``session_id`` is
+        refused exactly as the working tools refuse - no verified identity, or
+        one for another tenant, user or session - and what is requested is
+        narrowed to the token's own user and agent. Without ``session_id``
+        nothing is asked for and the read is the long-term one it always was.
+        """
+
+        if session_id is None:
+            return
+        if not isinstance(session_id, str) or not session_id.strip():
+            raise ValueError("session_id must be a non-empty string")
+        agent_id = session_identity.agent_id if isinstance(session_identity, SessionIdentity) else None
+        identity = self._authorize_working(
+            session_identity,
+            tenant_id=tenant_id,
+            session_id=session_id,
+            user_id=str(user_id or ""),
+            agent_id=str(agent_id or ""),
+        )
+        filt["working_session_id"] = session_id
+        filt["working_user_id"] = identity.user_id
+        filt["working_agent_id"] = str(identity.agent_id)
 
     @staticmethod
     def _read_context(
@@ -1178,6 +1474,19 @@ class MemoryTools:
         break_glass: bool = False,
         lawful_basis: str | list[str] | None = None,
     ) -> dict[str, Any]:
+        """Fetch one currently valid record by id or cid.
+
+        Scope decision (history is NOT retrievable here): ``get`` reads the
+        caller-scoped export surface, which shows only what is valid and readable
+        now. A superseded or retracted assertion, and erased evidence, are
+        therefore reported as not found rather than returned with a validity
+        window -- the id alone does not say which version the caller meant, and an
+        erased record must never come back. The ledger still RETAINS a superseded
+        assertion (``status="superseded"`` with ``valid_to`` set); its earlier value
+        is read through ``graph_as_of``, which takes the timestamp that disambiguates
+        which version was meant and returns the record valid at that moment.
+        """
+
         exported = self.export(
             tenant_id,
             role=role,
@@ -1314,9 +1623,14 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="belief_correction",
         )
+        confidence = _require_unit_interval(confidence, field="confidence")
         for field in ("valid_from", "valid_to", "transaction_time"):
             if field in new:
                 raise ValueError(f"supersede new.{field} is system-owned")
+        if isinstance(new, dict) and "confidence" in new:
+            _require_unit_interval(new["confidence"], field="new.confidence")
+        if isinstance(new, dict) and "trust_tier" in new:
+            _require_trust_tier(new["trust_tier"], field="new.trust_tier")
         normalized_valid_from = _parse_valid_from(valid_from)
         existing = self.get(tenant_id, id, branch=branch)
         if existing["kind"] != "assertion":
@@ -1368,6 +1682,7 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="belief_correction",
         )
+        confidence = _require_unit_interval(confidence, field="confidence")
         assertion_id = self.engine.correct(
             tenant_id=tenant_id,
             user_id=user_id,
@@ -1380,6 +1695,43 @@ class MemoryTools:
         )
         return {"id": assertion_id, "branch": branch, "security": decision}
 
+    def _branches_holding_evidence(self, tenant_id: str, cid: str, first: str) -> list[str]:
+        """Every branch of ``tenant_id`` that still holds a live copy of ``cid``.
+
+        ``first`` is always returned first, so the caller's requested branch is
+        the one whose engine result shapes the response. Candidates come from the
+        engine's branch registry plus the branch of every exported row, because
+        ``branch``/``propose`` copy evidence verbatim onto the new branch and the
+        registry alone can miss a branch an engine created implicitly.
+        ``get_evidence`` masks erased rows, so an already-erased copy is skipped.
+        """
+
+        names: list[str] = [first]
+        seen: set[str] = {first}
+
+        def add(name: Any) -> None:
+            if isinstance(name, str) and name and name not in seen:
+                seen.add(name)
+                names.append(name)
+
+        registry = getattr(self.engine, "branches", None)
+        if isinstance(registry, dict):
+            for name in registry:
+                add(name)
+        try:
+            exported = self.engine.export_tenant(tenant_id)
+        except Exception:  # pragma: no cover - a backend without export_tenant
+            exported = {}
+        for collection in ("evidence", "assertions", "relations"):
+            for item in exported.get(collection, []) or []:
+                if isinstance(item, dict):
+                    add(item.get("branch"))
+        return [
+            name
+            for name in names
+            if name == first or self.engine.get_evidence(tenant_id, cid, name) is not None
+        ]
+
     def forget(
         self,
         tenant_id: str,
@@ -1389,7 +1741,19 @@ class MemoryTools:
         role: WriteRole = "operator",
         source_trust_tier: int = int(TrustTier.USER_AUTHORED),
         erasure_mode: str = "tombstone_recompute",
+        all_branches: bool = True,
     ) -> dict[str, Any]:
+        """Erase ``cid`` and its derived footprint from EVERY branch that holds it.
+
+        The engines scope their cascade to a single branch (the shipped
+        Local/SQLite/Postgres parity contract). ``branch`` and ``propose`` copy
+        evidence verbatim, so a single-branch erasure left the text readable
+        through ``get`` with no branch and through ``get``/``search`` on any other
+        branch -- the erasure-propagates immutable rail broken by a copy. This
+        facade therefore fans the erasure out over every branch holding the cid.
+        Pass ``all_branches=False`` for the old single-branch behaviour.
+        """
+
         decision = self._authorize(
             "forget",
             role=role,
@@ -1397,17 +1761,82 @@ class MemoryTools:
             destructive=True,
         )
         mode = ErasureMode(erasure_mode)
-        evidence = self.engine.get_evidence(tenant_id, cid, branch)
-        content_pointer = evidence.content_pointer if evidence else None
-        result = self.engine.forget(
-            tenant_id=tenant_id,
-            cid=cid,
-            branch=branch,
-            requested_by=requested_by,
-            erasure_mode=mode,
+        targets = (
+            self._branches_holding_evidence(tenant_id, cid, branch) if all_branches else [branch]
         )
-        if result.get("erased") and mode is ErasureMode.HARD_DELETE_LEGAL and content_pointer:
-            result["object_shred"] = self.ingestion.object_store.shred(content_pointer, tenant_id=tenant_id)
+        per_branch: dict[str, dict[str, Any]] = {}
+        erased_branches: list[str] = []
+        # Pointers belonging to copies that were live before this call. A shared
+        # external object is shredded only after every one of those copies has
+        # been approved; shredding on the first success would delete bytes a
+        # later branch can still refuse to erase (min_corroboration_for_delete).
+        live_pointers: dict[str, str | None] = {}
+        for target in targets:
+            evidence = self.engine.get_evidence(tenant_id, cid, target)
+            if evidence is not None:
+                live_pointers[target] = evidence.content_pointer
+            outcome = self.engine.forget(
+                tenant_id=tenant_id,
+                cid=cid,
+                branch=target,
+                requested_by=requested_by,
+                erasure_mode=mode,
+            )
+            if outcome.get("erased"):
+                erased_branches.append(target)
+            per_branch[target] = outcome
+        if (
+            mode is ErasureMode.HARD_DELETE_LEGAL
+            and live_pointers
+            and all(per_branch[name].get("erased") for name in live_pointers)
+        ):
+            shred_reports: dict[str, Any] = {}
+            for name, pointer in live_pointers.items():
+                if not pointer:
+                    continue
+                report = shred_reports.get(pointer)
+                if report is None:
+                    report = self.ingestion.object_store.shred(pointer, tenant_id=tenant_id)
+                    shred_reports[pointer] = report
+                per_branch[name]["object_shred"] = report
+        primary = per_branch[branch]
+        if erased_branches and not primary.get("erased"):
+            # The requested branch held no live copy but another branch did, so the
+            # cid IS erased; do not report the primary's "evidence_not_found".
+            result = dict(per_branch[erased_branches[0]])
+        else:
+            result = dict(primary)
+        result["erased"] = bool(erased_branches)
+        # A profile entry belongs to the tenant, not to a branch, so it stands
+        # for as long as ANY branch still holds the record it was built on: a
+        # single-branch forget, or one a branch refused, leaves the evidence
+        # readable there and the entry supported.
+        still_holding = [
+            name
+            for name in self._branches_holding_evidence(tenant_id, cid, branch)
+            if self.engine.get_evidence(tenant_id, cid, name) is not None
+        ]
+        if still_holding:
+            result["branches_still_holding"] = still_holding
+        if erased_branches and not still_holding:
+            # Erasure propagates to what was built on the erased words: a profile
+            # entry citing this record is retracted, its statement blanked, and
+            # the report says so.
+            # Closed entries are blanked too. The returned ids are every
+            # entry that changed, so a forget that only blanks residue still
+            # saves.
+            retracted = self.user_model.retract_citing(tenant_id, cid)
+            if retracted:
+                self._save_user_model()
+                existing = result.get("propagated")
+                propagated = dict(existing) if isinstance(existing, dict) else {}
+                propagated["profile_entries"] = len(retracted)
+                result["propagated"] = propagated
+                result["retracted_profile_entries"] = retracted
+        result["branch"] = branch
+        result["branches_searched"] = list(targets)
+        result["branches_erased"] = erased_branches
+        result["branch_results"] = per_branch
         result["security"] = decision
         return result
 
@@ -1500,6 +1929,13 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="branch",
         )
+        # A branch name is an identity in the ledger and, on some backends, part of
+        # a path. An empty name, a padded one, `main` (which already exists, so the
+        # call was a silent no-op) and anything path-like are all refused.
+        name = _require_branch_name(name, field="name")
+        from_branch = _require_branch_name(from_branch, field="from_branch", allow_reserved=True)
+        if tenant_id is not None:
+            _require_text(tenant_id, field="tenant_id")
         self._engine_branch(name, from_branch, kind, tenant_id=tenant_id)
         return {
             "branch": name,
@@ -1557,6 +1993,7 @@ class MemoryTools:
         role: WriteRole = "agent",
         source_trust_tier: int | None = None,
     ) -> dict[str, Any]:
+        confidence = _require_unit_interval(confidence, field="confidence")
         memory_kind = UserMemoryKind(kind)
         if memory_kind is UserMemoryKind.HARD_INSTRUCTION:
             trust = source_trust_tier if source_trust_tier is not None else int(TrustTier.USER_AUTHORED)
@@ -1653,17 +2090,101 @@ class MemoryTools:
         statement: str,
         context: dict[str, Any] | None = None,
         confidence: float = 0.95,
+        role: WriteRole = "agent",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
     ) -> dict[str, Any]:
-        result = self.profile_record_explicit(
+        """Correct an active profile entry.
+
+        ``id`` must name an active entry in this tenant/user scope. The new
+        entry keeps the evidence CIDs the old one was built on, so erasing
+        that evidence retracts the correction too, and it keeps the old
+        entry's scope unless ``context`` is given. It is what the user stated
+        outright - an explicit preference - unless the entry it replaces
+        outranks one: a corrected instruction is still an instruction, a
+        corrected identity still an identity. A closed entry is refused:
+        correcting it would put a retired value back into the live profile.
+
+        Authority is the caller's role and trust tier (a signed session
+        overwrites both), judged against the sink of the entry being replaced
+        as well as the one being written: correcting a hard instruction is a
+        policy write, so an agent cannot correct away an instruction it may
+        not give.
+        """
+
+        prior = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
+        if prior.status != "active":
+            raise ValueError("profile entry is not active")
+        self._authorize(
+            "profile_correct",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            target_sink=_profile_write_sink(prior.kind),
+        )
+        result = self.profile_add(
             tenant_id=tenant_id,
             user_id=user_id,
+            # What the user states outright - and never less than it replaces.
+            kind=correction_kind(prior.kind).value,
             statement=statement,
-            scope=context,
+            # A copy: two entries never share one scope object.
+            scope=dict(prior.scope) if context is None else context,
             confidence=confidence,
-            source_evidence_cids=[id],
+            source_evidence_cids=self.user_model.originating_evidence_cids(prior),
+            role=role,
+            source_trust_tier=source_trust_tier,
         )
+        # The entry being corrected is replaced, whatever its authority: two
+        # explicit preferences used to stay active side by side, the old value
+        # and the new, because only a WEAKER entry was ever superseded.
+        corrected_at = self.user_model.entries[result["id"]].valid_from
+        if self.user_model.close_entry(
+            id, tenant_id=tenant_id, user_id=user_id, status="superseded", at=corrected_at
+        ):
+            self._save_user_model()
         result["corrects"] = id
+        # True however it was closed: an inference already yields to the
+        # statement that replaces it the moment that statement is added.
+        result["superseded"] = prior.status == "superseded"
         return result
+
+    def profile_retire(
+        self,
+        tenant_id: str,
+        user_id: str,
+        id: str,
+        role: WriteRole = "operator",
+        source_trust_tier: int = int(TrustTier.USER_AUTHORED),
+    ) -> dict[str, Any]:
+        """Take a profile entry back.
+
+        The entry stops being active and leaves ``profile_context``; the record
+        is kept, marked ``retracted``. Authority is the caller's role and trust
+        tier (a signed session overwrites both). A hard instruction is a policy
+        write; a preference is a preference write. An id that is unknown, or
+        that belongs to another tenant or user, is an error.
+        """
+
+        entry = self.user_model.entry_in_scope(id, tenant_id=tenant_id, user_id=user_id)
+        decision = self._authorize(
+            "profile_retire",
+            role=role,
+            source_trust_tier=source_trust_tier,
+            destructive=True,
+            target_sink=_profile_write_sink(entry.kind),
+        )
+        retired = self.user_model.close_entry(
+            id, tenant_id=tenant_id, user_id=user_id, status="retracted"
+        )
+        if retired:
+            self._save_user_model()
+        return {
+            "id": id,
+            "retired": retired,
+            "status": self.user_model.entries[id].status,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "security": decision,
+        }
 
     def profile_record_mistake(
         self,
@@ -1760,8 +2281,11 @@ class MemoryTools:
             tenant_id,
             [
                 PrefetchCandidate(
-                    query=str(candidate["query"]),
-                    probability=float(candidate["probability"]),
+                    query=str(_require_mapping_field(candidate, "query", label="prefetch candidate")),
+                    probability=_require_unit_interval(
+                        _require_mapping_field(candidate, "probability", label="prefetch candidate"),
+                        field="candidate probability",
+                    ),
                     reason=str(candidate.get("reason", "agent supplied")),
                     metadata=dict(candidate.get("metadata") or {}),
                 )
@@ -1779,13 +2303,89 @@ class MemoryTools:
         branch: str = "main",
         k: int = 8,
     ) -> dict[str, Any]:
+        k = _require_count(k, field="k", minimum=1)
         hits = self.engine.graph_ppr(seeds, k, tenant_id=tenant_id, branch=branch)
         return {"hits": [hit.to_dict() for hit in hits]}
 
+    def _hop_limited_relation_ids(
+        self, tenant_id: str, seeds: list[str], branch: str, hops: int
+    ) -> tuple[set[str], int]:
+        """Relation ids with BOTH endpoints within ``hops`` edges of a seed.
+
+        Returns the id set and the number of relation rows on the branch, so the
+        caller can size its candidate pool to cover every edge and make the hop
+        filter exact instead of dependent on where the ranked pool was cut. Seed
+        matching mirrors the engine's own ``matches_seed`` (exact lowercase name or
+        a shared token). Topology only: which of these edges the caller may
+        actually see is still decided by the engine's security lookups.
+        """
+
+        adjacency: dict[str, set[str]] = defaultdict(set)
+        edges: list[tuple[str, str, str]] = []
+        try:
+            exported = self.engine.export_tenant(tenant_id)
+        except Exception:  # pragma: no cover - a backend without export_tenant
+            return set(), 0
+        for row in exported.get("relations", []) or []:
+            if not isinstance(row, dict) or str(row.get("branch", "main")) != branch:
+                continue
+            source = str(row.get("source", "")).lower()
+            target = str(row.get("target", "")).lower()
+            identifier = str(row.get("id", ""))
+            if not source or not target or not identifier:
+                continue
+            adjacency[source].add(target)
+            adjacency[target].add(source)
+            edges.append((identifier, source, target))
+        seed_set = {str(seed).lower() for seed in seeds}
+
+        def matches_seed(node: str) -> bool:
+            return node in seed_set or bool(set(tokenize(node)) & seed_set)
+
+        horizon = {node for node in adjacency if matches_seed(node)} | seed_set
+        frontier = set(horizon)
+        for _ in range(max(hops, 0)):
+            nxt: set[str] = set()
+            for node in frontier:
+                nxt |= adjacency.get(node, set())
+            nxt -= horizon
+            if not nxt:
+                break
+            horizon |= nxt
+            frontier = nxt
+        return (
+            {
+                identifier
+                for identifier, source, target in edges
+                if source in horizon and target in horizon
+            },
+            len(edges),
+        )
+
     def graph_query(self, tenant_id: str, seeds: list[str], branch: str = "main", hops: int = 1, k: int = 8) -> dict[str, Any]:
-        result = self.graph_neighbors(tenant_id, seeds, branch=branch, k=k)
-        result["hops"] = hops
-        return result
+        """Graph PPR over ``seeds``, restricted to edges within ``hops`` of a seed.
+
+        ``hops`` used to be accepted and echoed back unused, so every depth
+        returned the same neighbourhood. An edge is returned when BOTH of its
+        endpoints are within ``hops`` edges of a seed; ``k`` then caps how many of
+        those ranked edges come back.
+        """
+
+        k = _require_count(k, field="k", minimum=1)
+        hops = _require_count(hops, field="hops", minimum=1)
+        allowed_ids, edge_count = self._hop_limited_relation_ids(tenant_id, seeds, branch, hops)
+        pool = min(max(k, edge_count), _GRAPH_QUERY_MAX_POOL)
+        hits = [
+            hit.to_dict()
+            for hit in self.engine.graph_ppr(seeds, pool, tenant_id=tenant_id, branch=branch)
+        ]
+        limited = [hit for hit in hits if str(hit.get("id", "")) in allowed_ids]
+        return {
+            "hits": limited[:k],
+            "hops": hops,
+            "k": k,
+            "beyond_hop_limit": len(hits) - len(limited),
+        }
 
     def graph_timeline(
         self,
@@ -1854,10 +2454,11 @@ class MemoryTools:
         session_id: str,
         task: str,
         steps: list[dict[str, Any]],
-        outcome: str,
+        outcome: TrajectoryOutcome,
         reward: float,
         memory_version: str,
     ) -> dict[str, Any]:
+        validated_outcome = _require_trajectory_outcome(outcome)
         trajectory_id = self.learning.log_trajectory(
             Trajectory(
                 tenant_id=tenant_id,
@@ -1865,7 +2466,7 @@ class MemoryTools:
                 session_id=session_id,
                 task=task,
                 steps=steps,
-                outcome=outcome,  # type: ignore[arg-type]
+                outcome=validated_outcome,  # type: ignore[arg-type]
                 reward=reward,
                 memory_version=memory_version,
             )
@@ -1880,7 +2481,7 @@ class MemoryTools:
         session_id: str,
         task: str,
         steps: list[dict[str, Any]],
-        outcome: str,
+        outcome: TrajectoryOutcome,
         reward: float,
         memory_version: str,
     ) -> dict[str, Any]:
@@ -1922,17 +2523,25 @@ class MemoryTools:
             source_trust_tier=source_trust_tier,
             target_sink="branch_promotion",
         )
-        lesson = self.learning.lessons[lesson_id]
+        # Consistent with working_promote, which refuses the same input: promoting a
+        # lesson with no regression cases would pass a gate that tested nothing.
+        if not cases:
+            raise ValueError("lesson promotion requires explicit regression cases")
+        lesson = self.learning.lessons.get(lesson_id)
+        if lesson is None:
+            raise ValueError(f"lesson not found: {lesson_id}")
         regression_cases = [
             RegressionCase(
-                id=str(case["id"]),
-                signature=str(case["signature"]),
-                query=str(case["query"]),
-                expected_substring=str(case["expected_substring"]),
+                id=str(_require_mapping_field(case, "id", label=f"cases[{index}]")),
+                signature=str(_require_mapping_field(case, "signature", label=f"cases[{index}]")),
+                query=str(_require_mapping_field(case, "query", label=f"cases[{index}]")),
+                expected_substring=str(
+                    _require_mapping_field(case, "expected_substring", label=f"cases[{index}]")
+                ),
                 tier=str(case.get("tier", "smoke")),  # type: ignore[arg-type]
                 protected=bool(case.get("protected", True)),
             )
-            for case in cases
+            for index, case in enumerate(cases)
         ]
         result = self.learning.promote_lesson(lesson, regression_cases)
         self._save_learning()
@@ -2023,7 +2632,9 @@ class MemoryTools:
         total_cases: int | None = None,
     ) -> dict[str, Any]:
         if trajectory_id:
-            trajectory = self.learning.trajectories[trajectory_id]
+            trajectory = self.learning.trajectories.get(trajectory_id)
+            if trajectory is None:
+                raise ValueError(f"trajectory not found: {trajectory_id}")
             return {
                 "trajectory_id": trajectory.id,
                 "outcome": trajectory.outcome,
@@ -2033,6 +2644,15 @@ class MemoryTools:
             }
         if before_successes is None or after_successes is None or total_cases is None:
             raise ValueError("outcome_evaluate requires trajectory_id or before/after/total counts")
+        # A replay score is only meaningful over a real, consistent case set: a zero
+        # total silently scored 0.0, and successes above the total (or negative)
+        # produced scores outside [-1, 1].
+        total_cases = _require_count(total_cases, field="total_cases", minimum=1)
+        before_successes = _require_count(before_successes, field="before_successes", minimum=0)
+        after_successes = _require_count(after_successes, field="after_successes", minimum=0)
+        for label, value in (("before_successes", before_successes), ("after_successes", after_successes)):
+            if value > total_cases:
+                raise ValueError(f"{label} ({value}) must not exceed total_cases ({total_cases})")
         return {
             "counterfactual_replay_score": counterfactual_replay_score(before_successes, after_successes, total_cases),
             "before_successes": before_successes,

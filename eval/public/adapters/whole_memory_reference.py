@@ -762,6 +762,109 @@ def run_m05_provenance_development(
     return traces, {"backend": getattr(cli, "backend", "local")}
 
 
+def _m06_bind_fixture(benchmark: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept a unit fixture. The public suite loads the full family matrix."""
+    from eval.public import wmbs_m06 as m06
+
+    if not isinstance(benchmark, Mapping):
+        raise ValueError("M06 consolidation development requires a fixture mapping")
+    cases = benchmark.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("M06 consolidation development requires a non-empty case list")
+    identities = {
+        "fixture_id": m06.FIXTURE_ID,
+        "generator_id": m06.GENERATOR_ID,
+        "generator_version": m06.GENERATOR_VERSION,
+    }
+    for field_name, expected in identities.items():
+        if field_name in benchmark and benchmark[field_name] != expected:
+            raise ValueError(f"M06 fixture {field_name} does not match {expected!r}")
+    declared = benchmark.get("dataset_sha256")
+    if isinstance(declared, str) and len(declared) == 64 and set(declared) <= set("0123456789abcdef"):
+        bound = m06.canonical_sha256(
+            {key: value for key, value in benchmark.items() if key != "dataset_sha256"}
+        )
+        if declared != bound:
+            raise ValueError("M06 dataset_sha256 does not bind the fixture bytes")
+    full_matrix = len(cases) == len(m06.FAMILIES) * len(m06.SEEDS) and all(
+        isinstance(case, Mapping) and len(case.get("cycles") or []) == m06.CYCLES_PER_CASE
+        for case in cases
+    )
+    if full_matrix:
+        return dict(m06.validate_fixture(benchmark))
+    return dict(benchmark)
+
+
+def _m06_answer_text(payload: object) -> str:
+    """Record a CLI answer string. Never copy fixture gold into the trace."""
+    if isinstance(payload, Mapping):
+        for key in ("answer_text", "answer"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+    return ""
+
+
+def run_m06_consolidation_development(
+    benchmark: dict[str, Any], cli: MnemoCLI
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Exercise the proposed M06 consolidation cell through the public CLI only."""
+    if cli is None:
+        raise ValueError("M06 consolidation development requires a live MnemoCLI")
+    fixture = _m06_bind_fixture(benchmark)
+    traces: list[dict[str, Any]] = []
+    for case in fixture["cases"]:
+        if not isinstance(case, Mapping):
+            raise ValueError("M06 case must be a mapping")
+        case_id = str(case["case_id"])
+        tenant = f"wmbs-m06-{case_id}"
+        cycles: list[dict[str, Any]] = []
+        for cycle in case.get("cycles") or []:
+            if not isinstance(cycle, Mapping):
+                raise ValueError("M06 cycle must be a mapping")
+            for event in cycle.get("events") or []:
+                if not isinstance(event, Mapping):
+                    raise ValueError("M06 event must be a mapping")
+                actor = event.get("actor_label")
+                if not isinstance(actor, str) or not actor.strip():
+                    raise ValueError("M06 event is missing actor_label")
+                event_id = str(event.get("event_id") or actor)
+                captured = cli.capture(
+                    tenant,
+                    actor,
+                    str(event["content"]),
+                    source_identity=event_id,
+                ) or {}
+                cid = captured.get("cid") if isinstance(captured, Mapping) else None
+                evidence = (cid,) if isinstance(cid, str) and cid.strip() else ()
+                cli.assert_fact(
+                    tenant,
+                    event_id,
+                    "source",
+                    str(event["content"]),
+                    user=actor,
+                    evidence_cids=evidence,
+                )
+            retrieve = cycle.get("retrieve")
+            if not isinstance(retrieve, Mapping) or not isinstance(retrieve.get("query"), str):
+                raise ValueError("M06 retrieve query is missing")
+            search_payload = cli.search(tenant, retrieve["query"]) or {}
+            cycles.append(
+                {
+                    "operations": ["ingest", "retrieve", "answer"],
+                    "answer_text": _m06_answer_text(search_payload),
+                }
+            )
+        traces.append(
+            {
+                "case_id": case_id,
+                "scoring_family": "whole-memory-development",
+                "cycles": cycles,
+            }
+        )
+    return traces, {"backend": getattr(cli, "backend", "local")}
+
+
 def run_m03_valid_time_development(
     benchmark: dict[str, Any], cli: MnemoCLI
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
