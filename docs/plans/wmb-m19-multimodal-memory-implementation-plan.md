@@ -53,7 +53,7 @@ All of the following are blocking. None is discharged by writing this file.
 3. Spec M19 resource prerequisite (`…standard-design.md:1090–1091`): a
    measured receipt for an admitted profile. None exists. No local
    generative model is assumed.
-4. Spec M19 acceptance (`…standard-design.md:1086–1089`): public comparison
+4. Spec M19 acceptance (`…standard-design.md:1085–1087`): public comparison
    has no quality-based admission floor; improvement claims require a
    positive paired confidence-interval lower bound; provenance and erasure
    claims inherit M05/M09 gates unchanged. No preregistered paired-CI
@@ -195,9 +195,12 @@ This paragraph does not create those files.
 
 ## 5. Custody, licence, and claim constraints
 
-- Deterministic local roles: no external dataset, no network, no provider
-  until R5 (spec L1092–1093; U-MODULES license/custody). Pin any later
-  dataset and rights contract at freeze; do not invent one here.
+- Deterministic local roles use no external dataset, network, or provider.
+  Any later external fixture needs frozen redistribution rights and custody
+  under R3, and an official multimodal variant additionally requires R4.
+  R5 applies specifically to EMemBench and provider-backed extraction
+  (spec L1092–1093), not every external fixture. Pin the applicable data/model
+  and rights contracts at freeze; do not invent them here.
 - Publication flags stay `false`. No `PILOT-READY-DEV`. No headline.
 - No "media certified," certified, or governed label. The module
   disposition stays `DEFERRED` until R3. Text-only remains
