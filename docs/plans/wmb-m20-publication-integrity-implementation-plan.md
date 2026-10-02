@@ -36,10 +36,11 @@ It is **not**:
 
 ### 0.1 This document's own write-lease status
 
-`docs/plans/` is the GoalEx owner's exclusive surface. Until that owner grants
-a write slot for this exact path, this document is an **unadmitted draft
-occupying a leased path** (same G0 as the M02 plan §0.1). Nothing here claims
-its own placement was authorized.
+`docs/plans/` remains a serialized GoalEx documentation surface. The repository
+owner approved this exact document's placement and review repair in the October 1,
+2026 PR #120 consolidation, recorded in the coordination lease map. That G0
+placement authorization does not freeze this proposed contract, admit module
+implementation, grant an `eval/public/*` write lease, or discharge G1/G2/G3.
 
 ### 0.2 Why this plan is NOT CODE-READY
 
@@ -130,7 +131,7 @@ license to flip it. This plan never labels a run "publication certified."
 
 | ID | Gate | Owner | Status (plan-authored base `f688c747`; tip-discharged notes where marked) |
 |---|---|---|---|
-| G0 | Write slot for this path, or relocate off `docs/plans/` | GoalEx | Open |
+| G0 | Documentation placement for this exact path | GoalEx documentation writer | Granted for PR #120 owner-directed consolidation only; no implementation lease. |
 | G1 | Lease map recomputed; M20 admitted with an exact lease | GoalEx | Open. This file does not edit the lease map. |
 | G2 | Align with owner-landed pilot plan (M20 is in the first reference-harness pilot) | GoalEx | Open. This file is a v2/N12 delta **inside** the authorized pilot (no exclusion). Do not edit the pilots file here. |
 | G3 | Public-harness integration slot (Stage B only) | Public-harness | Not reached. |
