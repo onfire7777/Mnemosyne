@@ -16,6 +16,23 @@ progress:
 
 # Project State
 
+## Current local integration checkpoint — 2026-10-04
+
+At `4a0e4c4c`, the Mnemetric comparison/coverage/attempt surfaces and real local
+retrieval preview are implemented; the single retrieval run has an exact
+nine-file clean-checkout reproduction. It is nonpublishable and not an official
+QA or multi-system comparison. Local combined platform/BurnOS/bundle regression
+checks passed 452 tests; the isolated LoCoMo checks passed 102 tests.
+
+LoCoMo ingestion, scoring, non-RAG prompt construction and a verified tokenizer
+are components, not a complete native Mnemosyne adapter. The
+[neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
+separates upstream model baselines from public memory-system execution and lists
+the remaining bundle, resource and admission gates. Dataset rights/admission,
+grounded-model preflight, official measurements and broader original acceptance
+criteria remain open. Current development commits await GitHub synchronization
+and validation; no phase counter or measured-acceptance status changes here.
+
 ## Benchmark-platform scope reaffirmed — 2026-10-04
 
 The owner's primary website objective is the full multi-system benchmark

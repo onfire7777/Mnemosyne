@@ -6,6 +6,7 @@ inputs. Full protocol parity, runnable adapter, dataset admission and measuremen
 remain open. Sections below retain the evidence at each implementation stage;
 later sections supersede earlier descriptions of missing component work.
 Parent: [W4 neutral benchmark suite](../superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md).
+Next integration contract: [separate upstream baselines from native memory-system evaluation](locomo-neutral-integration-contract-2026-10-04.md).
 
 ## Source custody
 
