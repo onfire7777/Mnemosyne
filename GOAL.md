@@ -11,6 +11,12 @@ in this chat: all subagents and scheduled continuation have been canceled.
 It supersedes the older prohibition on plan edits below. Preserve
 specification requirements and truthful evidence gates while updating status.
 
+BurnOS compatibility is a binding constraint: preserve its signed-session
+MCP/SDK calls, conversation-turn working memory, session-scoped search,
+lean/token-budget responses and profile lifecycle. Run the existing BurnOS
+regressions before each integration that can affect those surfaces; never
+remove or reinterpret its arguments as part of roadmap completion.
+
 
 ## Status reconciliation — 2026-10-04
 
