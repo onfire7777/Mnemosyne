@@ -116,8 +116,9 @@ def test_lost_operation_responses_recover_through_public_cli(
         ("status", "unknown"),
     ],
 )
+@pytest.mark.parametrize("include_schedule", [False, True])
 def test_inspection_rejects_misbound_provider_state(
-    tmp_path, monkeypatch, field, value
+    tmp_path, monkeypatch, field, value, include_schedule
 ):
     def run(self, command, *args, **kwargs):
         if command == "capture":
@@ -135,6 +136,13 @@ def test_inspection_rejects_misbound_provider_state(
             "revision": "a" * 64,
             "status": "scheduled",
             "action": {"ref": "action"},
+            "trigger_type": "exact_time",
+            "trigger_expression": {"at": "2030-01-01T00:00:00Z"},
+            "due_at": "2030-01-01T00:00:00Z",
+            "dependencies": [],
+            "evidence_ids": ["origin"],
+            "recurrence_policy": {"type": "none"},
+            "recurrence_state": {"occurrence": 0},
         }
         row[field] = value
         return SimpleNamespace(json={"intentions": [row]})
@@ -159,7 +167,7 @@ def test_inspection_rejects_misbound_provider_state(
         },
     )
     with pytest.raises(ActionCLIError):
-        adapter.run("task.inspect", scope, {"task_id": "task"})
+        adapter.run("task.inspect", scope, {"task_id": "task", "include_schedule": include_schedule})
 
 
 def test_keyed_task_binding_and_cancel_preconditions_fail_before_writes(

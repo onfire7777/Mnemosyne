@@ -158,7 +158,7 @@ def run_case(case, *, provider, actions, scope, emit):
         prefix = public_turn(case, index)
         call('clock.inject', {'now': prefix['turns'][-1]['now']}, index)
         call('evidence.capture', {'content': _canonical(prefix).decode('utf-8')}, index)
-        current = [call('task.inspect', {'task_id': task}, index) for task in sorted(tasks)]
+        current = [call('task.inspect', {'task_id': task, 'include_schedule': True}, index) for task in sorted(tasks)]
         request = {'schema': 'm12-formation-request/v1', 'conversation': prefix,
                    'current_tasks': current, 'prior_responses': deepcopy(prior_responses),
                    'response_contract': {'fields': ['operations', 'clarification'],
@@ -188,7 +188,7 @@ def run_case(case, *, provider, actions, scope, emit):
             if operation['command'] == 'task.create':
                 tasks.add(operation['payload']['task_id'])
         prior_responses.append(response)
-        snapshot = [call('task.inspect', {'task_id': task}, index) for task in sorted(tasks)]
+        snapshot = [call('task.inspect', {'task_id': task, 'include_schedule': True}, index) for task in sorted(tasks)]
         emit({'stage': 'turn_completed', 'case_id': case_id, 'turn': index,
               'tasks': deepcopy(snapshot), 'clarification': response['clarification']})
     return {'case_id': case_id, 'status': 'completed', 'turns': len(prior_responses),

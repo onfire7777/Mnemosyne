@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Formation execution now retains complete opt-in public schedule inspection and
+per-turn stored-state diagnostics. Extra/missing schedules, duplicate intentions,
+wrong timing and premature firing remain visible; clarification presence is not
+clarification quality. The execution artifact is v2 and the full benchmark remains
+unscored. No real-model formation result or downstream firing result is claimed.
+
 The formation development runner now accepts an explicitly configured bounded
 command provider and applies only allowed operations through the public action
 adapter. It retains incremental requests, raw responses, public outcomes and

@@ -29,6 +29,15 @@ def test_real_command_and_public_cli_retained_without_claiming_model_quality(tmp
     assert result['firing_evaluation'] == 'not-run'
     assert len(result['cases']) == 1
     assert result['cases'][0]['turns'] == 2
+    diagnostic = json.loads((output / 'formation-state.json').read_text())
+    assert diagnostic['ranking_eligible'] is False
+    turns = diagnostic['cases'][0]['turns']
+    # Always asking a question must not look like successful formation.
+    assert turns[0]['false_negatives'] == 1
+    assert turns[0]['state_exact_match'] is False
+    assert turns[0]['clarification_expected'] is False
+    assert turns[0]['clarification_present'] is True
+    assert turns[1]['state_exact_match'] is True
     status = json.loads((output / 'status.json').read_text())
     assert status['status'] == 'completed'
     records = [json.loads(row) for row in (output / 'operations.jsonl').read_text().splitlines()]
@@ -54,3 +63,4 @@ def test_provider_failure_keeps_partial_log_and_no_success_artifact(tmp_path, mo
     records = [json.loads(row) for row in (output / 'operations.jsonl').read_text().splitlines()]
     assert any(r['stage'] == 'formation_response' for r in records)
     assert not (output / 'execution.json').exists()
+    assert not (output / 'formation-state.json').exists()
