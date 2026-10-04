@@ -25,6 +25,10 @@ remain separate from source completion.
 
 - Work only on the isolated branch; preserve unrelated changes.
 - Reuse existing CLI, scoring, registry, and bundle contracts.
+- Preserve BurnOS compatibility: signed-session MCP/SDK calls, conversation-turn
+  working memory, session-scoped search, lean/token-budget responses and profile
+  lifecycle remain backward-compatible. Verify `test_session_aware_reads.py`
+  and `test_mcp_validation_regressions.py` alongside relevant transport tests.
 - Write a failing regression first for each behavior change, then implement the
   smallest correct fix and run relevant integration tests.
 - Continue directly in this chat without subagents or scheduled work. Preserve
