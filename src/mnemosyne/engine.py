@@ -681,6 +681,77 @@ def _signal_cursor_key(signal: dict[str, Any]) -> tuple[datetime, str]:
     return (_parse_aware_iso(signal["observed_at"], field="signal.observed_at"), signal["condition_id"])
 
 
+def _authorize_intention_update(current: Intention, *, user_id: str, agent_id: str, session_id: str) -> None:
+    if type(session_id) is not str or not session_id.strip():
+        raise ValueError("session_id must be a non-empty string")
+    if user_id != current.user_id or agent_id != current.agent_id:
+        raise PermissionError("only the owning user and agent may update an intention")
+    if current.session_id is not None and session_id != current.session_id:
+        raise PermissionError("intention session does not match authenticated session")
+
+
+def validate_intention_idempotency_key(key: str | None) -> None:
+    if (type(key) is not str or not 1 <= len(key) <= 128
+            or any(not 33 <= ord(char) <= 126 for char in key)):
+        raise ValueError("idempotency_key must contain 1-128 printable non-space ASCII characters")
+
+
+def intention_revision(intention: Intention) -> str:
+    """Content revision (ETag), not a monotonic edit counter."""
+    return content_cid("prospective_intention_state/v1", intention.to_dict())
+
+
+def prepare_intention_update(
+    current: Intention, *, user_id: str, agent_id: str, session_id: str,
+    due_at: datetime | None, action: dict[str, Any] | None,
+    recurrence_policy: dict[str, Any] | None, expected_revision: str | None,
+    idempotency_key: str | None, previous_diffs: list[dict[str, Any]],
+) -> tuple[Intention, dict[str, str] | None, bool]:
+    """Validate a patch or recognize its receipt while the backend holds its lock.
+
+    A recognized retry returns current state, including terminal state. The caller
+    must still check live provenance before returning and atomically audit any new
+    receipt alongside the mutation (even for a keyed no-op).
+    """
+    _authorize_intention_update(current, user_id=user_id, agent_id=agent_id, session_id=session_id)
+    receipt = None
+    if idempotency_key is not None or expected_revision is not None:
+        validate_intention_idempotency_key(idempotency_key)
+        if (type(expected_revision) is not str or len(expected_revision) != 64
+                or any(char not in "0123456789abcdef" for char in expected_revision)):
+            raise ValueError("expected_revision must be a 64-character lowercase SHA-256 token")
+        if due_at is not None and (not isinstance(due_at, datetime) or due_at.tzinfo is None):
+            raise ValueError("due_at must be timezone-aware")
+        scope = dict(tenant_id=current.tenant_id, intention_id=current.intention_id,
+                     user_id=user_id, agent_id=agent_id, session_id=session_id)
+        key_digest = content_cid("intention_update_key/v1", {**scope, "key": idempotency_key})
+        request_digest = content_cid("intention_update_request/v1", {
+            **scope, "expected_revision": expected_revision,
+            "due_at": due_at.astimezone(UTC).isoformat() if due_at is not None else None,
+            "action": action, "recurrence_policy": recurrence_policy,
+        })
+        matching = [diff["update_request"] for diff in previous_diffs
+                    if isinstance(diff.get("update_request"), dict)
+                    and diff["update_request"].get("key_digest") == key_digest]
+        if matching:
+            if (len(matching) != 1 or matching[0].get("request_digest") != request_digest
+                    or set(matching[0]) != {"key_digest", "request_digest", "result_revision"}
+                    or type(matching[0]["result_revision"]) is not str
+                    or len(matching[0]["result_revision"]) != 64
+                    or any(char not in "0123456789abcdef" for char in matching[0]["result_revision"])):
+                raise ValueError("intention update idempotency conflict")
+            return copy.deepcopy(current), None, True
+        if expected_revision != intention_revision(current):
+            raise ValueError("intention revision conflict")
+        receipt = {"key_digest": key_digest, "request_digest": request_digest}
+    updated = _updated_intention(current, user_id=user_id, agent_id=agent_id,
+                                 session_id=session_id, due_at=due_at, action=action,
+                                 recurrence_policy=recurrence_policy)
+    if receipt is not None:
+        receipt["result_revision"] = intention_revision(updated)
+    return updated, receipt, False
+
+
 def _updated_intention(
     current: Intention,
     *,
@@ -692,12 +763,7 @@ def _updated_intention(
     recurrence_policy: dict[str, Any] | None,
 ) -> Intention:
     """Validate and build one detached scheduled-intention mutation."""
-    if type(session_id) is not str or not session_id.strip():
-        raise ValueError("session_id must be a non-empty string")
-    if user_id != current.user_id or agent_id != current.agent_id:
-        raise PermissionError("only the owning user and agent may update an intention")
-    if current.session_id is not None and session_id != current.session_id:
-        raise PermissionError("intention session does not match authenticated session")
+    _authorize_intention_update(current, user_id=user_id, agent_id=agent_id, session_id=session_id)
     if current.status != "scheduled":
         raise ValueError("only scheduled intentions may be updated")
     if due_at is None and action is None and recurrence_policy is None:
@@ -1781,6 +1847,7 @@ class MemoryEngine(Protocol):
         due_at: datetime | None = None,
         action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> Intention:
         raise NotImplementedError
 
@@ -2168,23 +2235,32 @@ class LocalMemoryEngine:
         self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
         session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> Intention:
         with self._lock:
             key = (tenant_id, intention_id)
             current = self.intentions.get(key)
             if current is None:
                 raise KeyError(intention_id)
-            updated = _updated_intention(current, user_id=user_id, agent_id=agent_id,
-                                         session_id=session_id, due_at=due_at, action=action,
-                                         recurrence_policy=recurrence_policy)
+            previous_diffs = ([row["diff"] for row in self.audit_log
+                               if row.get("tenant_id") == tenant_id
+                               and row.get("target_id") == intention_id and row.get("op") == "update_intention"]
+                              if idempotency_key is not None else [])
+            updated, receipt, replay = prepare_intention_update(
+                current, user_id=user_id, agent_id=agent_id,
+                session_id=session_id, due_at=due_at, action=action, recurrence_policy=recurrence_policy,
+                expected_revision=expected_revision, idempotency_key=idempotency_key,
+                previous_diffs=previous_diffs,
+            )
             provenance = self._intention_provenance(updated)
-            if updated == current:
+            if replay or (updated == current and receipt is None):
                 return copy.deepcopy(current)
             trust_tier, capability_tags = intention_audit_context(provenance)
             with self._prospective_transaction():
                 self.intentions[key] = updated
                 self._audit(tenant_id, user_id, "update_intention", intention_id,
-                            intention_audit_diff(updated, status="scheduled"),
+                            {**intention_audit_diff(updated, status="scheduled"),
+                             **({"update_request": receipt} if receipt is not None else {})},
                             source="prospective_memory", trust_tier=trust_tier,
                             capability_tags=capability_tags)
                 self._persist()

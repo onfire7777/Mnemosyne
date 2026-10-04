@@ -49,7 +49,7 @@ oracle.
 five-method surface with byte-identical signatures:
 
 - `schedule_intention(self, intention: Intention, *, idempotent: bool = False) -> str`
-- `update_intention(self, tenant_id, intention_id, *, user_id, agent_id, session_id, due_at=None, action=None, recurrence_policy=None) -> Intention`
+- `update_intention(self, tenant_id, intention_id, *, user_id, agent_id, session_id, due_at=None, action=None, recurrence_policy=None, expected_revision=None, idempotency_key=None) -> Intention`
 - `cancel_intention(self, tenant_id, intention_id, *, cancelled_by, session_id) -> None`
 - `evaluate_due_intentions(self, tenant_id, *, evaluated_at, trigger_context, operating_point) -> list[Intention]`
 - `list_intentions(self, tenant_id) -> list[Intention]`
@@ -93,8 +93,34 @@ a guarantee of replay after deletion of the underlying records. Calls without
 a key keep creating distinct intentions. Low-level engine duplicates still
 raise unless the caller explicitly requests idempotence.
 
-This contract covers creation only. Update request revisions/idempotency and
-the full M12 benchmark admission criteria remain separate work.
+**Update retries and content revisions.** Request `include_revision=true` on
+MCP `list_intentions`, or use CLI `intention-list --include-revision`. Each
+returned intention then includes a `revision` token for its complete current
+canonical state. This is a content ETag, not a monotonic edit counter: returning
+to byte-identical state returns the same token. It does not prove that no
+intervening edit occurred. Default list responses remain unchanged.
+
+Pass both `expected_revision` and `idempotency_key` to `update_intention` (CLI:
+`--expected-revision TOKEN --idempotency-key KEY`). A new request must match
+current state under the engine's lock/transaction. A stale token fails before
+mutation. The same key rules apply as for creation, scoped additionally to the
+intention and update operation. Reuse the original revision and patch when
+retrying; do not replace the revision with a freshly read one under the same
+key. A changed patch or revision under that key is a conflict.
+
+The update and receipt commit together, including a receipt for an accepted
+no-op. The audit stores key/request digests and the resulting revision, without
+another copy of the action payload. An identical retry checks current authority
+and provenance, performs no mutation and returns **current state**, including
+its `revision`. It may therefore differ from the first response after a later
+edit, cancellation or firing. This differs deliberately from the creation
+acknowledgement: update returns a state snapshot, not a replayed response body.
+Erased intentions cannot be recreated by update retries. Calls without the new
+arguments retain their existing behavior and response fields.
+
+These are opt-in public operation contracts. Their use in a registered M12
+workload, live backend validation, recovery and full benchmark admission remain
+separate evidence requirements.
 
 **Session-auth contract.** Scheduling does not itself require a session token: the
 optional `Intention.session_id`, when present, must be a non-empty string and

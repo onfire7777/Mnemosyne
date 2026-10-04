@@ -96,7 +96,7 @@ from mnemosyne.engine import (
     _advance_intention_after_fire,
     _cancelled_intention,
     _is_replayed_evaluation,
-    _updated_intention,
+    prepare_intention_update,
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
@@ -4472,6 +4472,7 @@ class SqliteEngine:
         self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
         session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> Intention:
         with self._lock:
             conn = self._connect(tenant_id)
@@ -4484,13 +4485,21 @@ class SqliteEngine:
                 if row is None:
                     raise KeyError(intention_id)
                 current = Intention.from_dict(json.loads(row["record"]))
-                updated = _updated_intention(
+                previous_diffs = []
+                if idempotency_key is not None:
+                    previous_diffs = [record["diff"] for item in conn.execute(
+                        "SELECT record FROM audit_log WHERE tenant_id = ?", (tenant_id,))
+                        for record in [json.loads(item["record"])]
+                        if record.get("op") == "update_intention" and record.get("target_id") == intention_id]
+                updated, receipt, replay = prepare_intention_update(
                     current, user_id=user_id,
                     agent_id=agent_id, session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
+                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    previous_diffs=previous_diffs,
                 )
                 provenance = self._intention_provenance_rows(conn, updated)
-                if updated == current:
+                if replay or (updated == current and receipt is None):
                     conn.commit()
                     return copy.deepcopy(current)
                 trust_tier, capability_tags = intention_audit_context(provenance)
@@ -4503,7 +4512,8 @@ class SqliteEngine:
                     raise RuntimeError("intention update lost its scheduled transition")
                 self._audit_row(
                     conn, tenant_id, user_id, "update_intention", intention_id,
-                    intention_audit_diff(updated, status="scheduled"),
+                    {**intention_audit_diff(updated, status="scheduled"),
+                     **({"update_request": receipt} if receipt is not None else {})},
                     source="prospective_memory", trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )
