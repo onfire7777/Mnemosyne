@@ -11,11 +11,11 @@ replace the original specification or promote development evidence to admission.
 | Typed scheduling, revision, authorization, idempotency and virtual tick | Public action adapter; revision-keyed recovery workload; public authorization and retry regression tests | Bind exact adapter/runtime identity into registered multi-system runs; do not infer authorization coverage from happy-path scheduling |
 | Exact-time, window, event, condition and dependency cases | Retained five-trigger, five-seed four-week capture; 525 operations | Incorporate in registered full corpus with pinned reference behavior |
 | Recurrence, cancellation and negative controls | Five-trigger capture includes recurring schedules, cancellation and unmatched/expired controls | Preserve these controls in the full corpus, including failures under load |
-| Implicit cases | Frozen 220-conversation corpus; public formation bridge, state/firing diagnostics, saved-trace checks; failed 0.6B attempts and controlled 1.7B prompt/decoding diagnostics retained | Complete actual-provider full-corpus execution with identity/custody, broaden language/dependency coverage, and establish held-out evaluation; never insert gold schedules on a candidate’s behalf |
-| Overloaded-trigger cases | Versioned bounded fan-out generator: 2/4/8/16 actions per explicit type; full run from c7a9d05a completed/replayed with 750 expected firings | Define actual overload behavior and resource envelope; bounded fan-out is not saturation evidence |
+| Implicit cases | Frozen 220-conversation original and 100-conversation dependency corpora; public runners, state/firing diagnostics and saved-trace checks; failed actual-provider attempts and controlled prompt/decoding diagnostics retained | Complete actual-provider full-corpus execution with identity/custody, broaden language/dependency coverage, and establish held-out evaluation; never insert gold schedules on a candidate’s behalf |
+| Overloaded-trigger cases | Bounded fan-out capture with 750 firings; complete clock-driven CLI pressure capture from 04f99824: 207/320 valid firings, 113 missed windows, exact-time backlog recovered | Measure identical pressure through the long-lived public service and establish native saturation/resource behavior; CLI pressure and bounded fan-out do not close full overload acceptance |
 | Every firing targets harness-owned idempotent sink | Retained full trigger-sink and recovery-sink captures; exact annex replay | Integrate sink into the admitted full corpus and every candidate adapter; no external payload execution |
 | Recovery and retry correctness | 360-operation capture: 50 response losses, 50 adapter resets, 10 eligible firings, 10 cancelled controls; 10 sink receipts and 10 deliberate duplicate deliveries | Local response loss is not arbitrary crash recovery or external-service exactly-once behavior |
-| Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer and per-case/per-load reports; sink attempt records | Provider token/time counters are now reported for one 22-call formation diagnostic; full-corpus and end-to-end cost remain unmeasured. Extend reports without pooling away load-specific failures |
+| Precision, recall, F1, false alarms, misses, lateness, duplicate execution, cancellation correctness and cost | Window scorer, full-offered-work pressure metrics and per-case/per-load reports; sink attempt records | Provider token/time counters are now reported for one 22-call formation diagnostic; full-corpus and end-to-end cost remain unmeasured. Extend reports without pooling away load-specific failures |
 | Zero duplicate and cancelled-intention executions | No violations in retained development captures | Verify on full registered corpus; finite local success is not universal certification |
 | Preregistered absolute floor and non-inferiority to exact reference | Draft independent explicit-action reference with retained explicit, fan-out and durable recovery executions plus paired replay diagnostics; no calibrated/admitted baseline claim | Resolve the verified nested-condition policy difference and complete broader semantic/recovery validation; calibrate on disjoint development data; freeze floor/margin before candidate ranking |
 | At least five virtual-week seeds | Five-seed, four-week explicit and recovery captures | Retain same repeat/replay guarantees across full workload and adapters |
@@ -212,8 +212,24 @@ rename the existing fan-out evidence as overload completion.
 
 The [dependency extension](m12-dependency-formation-development-2026-10-04.md)
 now supplies a separate frozen 100-conversation corpus with evaluator-only
-prerequisite identities and firing expectations. Ten corpus/projection/fixture
-checks pass, including preservation of the original 220-case fixture. This
-closes corpus source availability only. Dependency-aware scorer, executable
-observation bridge and saved-trace integration remain next; no candidate
-execution, cost or acceptance result is claimed for the extension.
+prerequisite identities and firing expectations. The dependency-aware scorer, executable observation bridge and saved-trace
+verifier are implemented. A real Qwen3 1.7B attempt completed one case, failed
+on task-ID rebinding in the second, and left 98 unattempted. The completed case
+missed an expected firing. Full-corpus model execution and acceptance remain
+open; source availability is not substituted for measured quality.
+
+
+## Clock-driven pressure result
+
+The [retained full workload](../../eval/reports/m12-clocked-pressure-2026-10-04/README.md)
+measures wall-clock-paced evaluation through the synchronous public CLI. All
+five seeds completed: 207 valid firings from 320 live intentions, 113 missed
+50 ms windows, no duplicate or cancelled firings, and full exact-time drain
+recovery. The full-workload denominator includes windows never visited by a
+poll. Historical tick-conditional scores remain separate.
+
+Normal pressure and 97,271,808 maximum sampled RSS bytes support feasibility of
+this specific 71.889-second run on this Mac. They do not establish peak limits,
+native saturation, admission or performance of a long-lived service. The next
+step is that identical public-service comparison, not changing the stress
+parameters or discounting the misses. Full M12 and original plan gates remain.

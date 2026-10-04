@@ -1,0 +1,111 @@
+{
+  "replay": "passed",
+  "cases": [
+    {
+      "case_id": "seed-7",
+      "metrics": {
+        "true_positives": 42,
+        "false_positives": 0,
+        "false_negatives": 22,
+        "precision": 1.0,
+        "recall": 0.65625,
+        "f1": 0.7924528301886793
+      },
+      "recovered": true,
+      "missed_windows": 22,
+      "peak_pending_exact": 8,
+      "ticks": 12
+    },
+    {
+      "case_id": "seed-19",
+      "metrics": {
+        "true_positives": 42,
+        "false_positives": 0,
+        "false_negatives": 22,
+        "precision": 1.0,
+        "recall": 0.65625,
+        "f1": 0.7924528301886793
+      },
+      "recovered": true,
+      "missed_windows": 22,
+      "peak_pending_exact": 8,
+      "ticks": 12
+    },
+    {
+      "case_id": "seed-41",
+      "metrics": {
+        "true_positives": 42,
+        "false_positives": 0,
+        "false_negatives": 22,
+        "precision": 1.0,
+        "recall": 0.65625,
+        "f1": 0.7924528301886793
+      },
+      "recovered": true,
+      "missed_windows": 22,
+      "peak_pending_exact": 8,
+      "ticks": 12
+    },
+    {
+      "case_id": "seed-73",
+      "metrics": {
+        "true_positives": 40,
+        "false_positives": 0,
+        "false_negatives": 24,
+        "precision": 1.0,
+        "recall": 0.625,
+        "f1": 0.7692307692307693
+      },
+      "recovered": true,
+      "missed_windows": 24,
+      "peak_pending_exact": 8,
+      "ticks": 12
+    },
+    {
+      "case_id": "seed-101",
+      "metrics": {
+        "true_positives": 41,
+        "false_positives": 0,
+        "false_negatives": 23,
+        "precision": 1.0,
+        "recall": 0.640625,
+        "f1": 0.780952380952381
+      },
+      "recovered": true,
+      "missed_windows": 23,
+      "peak_pending_exact": 8,
+      "ticks": 12
+    }
+  ],
+  "monitor": {
+    "argv": [
+      ".superpowers/sdd/completion-2026-10-04/verified-venv/bin/python",
+      "-m",
+      "eval.public.action_pressure",
+      "/Users/admin/.local/state/mnemosyne/pressure-runs/2026-10-04-04f99824/workload"
+    ],
+    "benchmark_verified": false,
+    "cwd": "/Users/admin/Documents/Codex/2026-09-30/we-just-set-up-a-new/work/Mnemosyne",
+    "elapsed_seconds": 71.88880087499274,
+    "finished_at": "2026-10-04T22:22:18.434057+00:00",
+    "pid": 87707,
+    "poll_seconds": 1.0,
+    "reason": "process-exited",
+    "resource_diagnostics": {
+      "admission_verified": false,
+      "disk_roots": [
+        "/Users/admin/.local/state/mnemosyne/pressure-runs/2026-10-04-04f99824"
+      ],
+      "max_sampled_logical_file_bytes": 1524312,
+      "max_sampled_rss_bytes": 97271808,
+      "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+      "peak_rss_verified": false,
+      "samples": 71
+    },
+    "returncode": 0,
+    "schema": "mnemosyne.monitored-command.v1",
+    "started_at": "2026-10-04T22:21:06.546625+00:00",
+    "status": "succeeded",
+    "wall_seconds": 1800.0
+  }
+}

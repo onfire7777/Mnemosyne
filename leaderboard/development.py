@@ -10,6 +10,10 @@ from pathlib import Path, PurePosixPath
 import zipfile
 
 CAPTURES = (
+    ('m12-clocked-pressure-2026-10-04', 'Clocked trigger pressure', 'Completed development workload',
+     'Five seeds, 320 live intentions: 207 fired correctly and 113 short-window triggers were missed. '
+     'All 160 exact-time intentions recovered; no duplicate or cancelled firings. '
+     'This measures the public CLI path, not intrinsic engine capacity.'),
     ('m12-dependency-attempt-2026-10-04', 'Dependency formation', 'Failed full-corpus attempt',
      '1 of 100 cases completed. The next case failed on task-ID reuse; 98 were not attempted. '
      'The completed case missed one expected firing. No full-corpus score.'),

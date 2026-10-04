@@ -118,3 +118,34 @@ def test_failed_setup_retains_request_and_no_completed_report(tmp_path, monkeypa
     records = [json.loads(line) for line in (output/'operations.jsonl').read_text().splitlines()]
     assert records[-1]['kind'] == 'request' and records[-1]['command'] == 'task.create'
     assert 'private provider detail' not in (output/'status.json').read_text()
+
+
+def test_command_duration_cannot_exceed_observed_response_interval():
+    case = pressure.make_plan()['cases'][0]
+    records = [tick(case, 700_000_000, 900_000_000), tick(case, 1_640_000_000, 1_700_000_000)]
+    records[0]['response']['evaluation_wall_ms'] = 250
+    with pytest.raises(ValueError):
+        pressure.score_case(case, records)
+
+
+def test_retained_full_capture_hashes_and_stricter_timing_validation():
+    import hashlib
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]/'eval/reports/m12-clocked-pressure-2026-10-04'
+    manifest = json.loads((root/'manifest.json').read_text())
+    for relative, digest in manifest['files'].items():
+        assert hashlib.sha256((root/relative).read_bytes()).hexdigest() == digest
+    source = json.loads((root/'workload/source.json').read_text())
+    assert source['source_dirty'] is False
+    assert hashlib.sha256((root/'source/action_pressure.py.txt').read_bytes()).hexdigest() == source['harness_files']['eval/public/action_pressure.py']
+    plan = json.loads((root/'workload/plan.json').read_text())
+    assert plan == pressure.make_plan()
+    timings = [json.loads(line) for line in (root/'workload/timings.jsonl').read_text().splitlines()]
+    expected = json.loads((root/'workload/reports.json').read_text())
+    for case, saved in zip(plan['cases'], expected['cases'], strict=True):
+        rows = [{k:v for k,v in row.items() if k not in ('case_id','index')}
+                for row in timings if row['case_id']==case['case_id']]
+        assert pressure.score_case(case, rows) == saved
+    assert sum(row['full_workload_metrics']['false_negatives'] for row in expected['cases']) == 113
+    assert all(row['exact_drain_recovered'] for row in expected['cases'])
