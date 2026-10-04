@@ -233,3 +233,14 @@ this specific 71.889-second run on this Mac. They do not establish peak limits,
 native saturation, admission or performance of a long-lived service. The next
 step is that identical public-service comparison, not changing the stress
 parameters or discounting the misses. Full M12 and original plan gates remain.
+
+
+### Paired public-transport pressure follow-up
+
+The [v2 capture](../../eval/reports/m12-transport-pressure-2026-10-04/README.md)
+replays both clean-source runs: persistent MCP stdio 320/320 correct; CLI 200/320,
+120 missed short windows. Every exact-time intention recovered, and neither
+transport produced duplicate or cancelled firings. Fixed sequential order and
+one run per transport limit inference. Explicit preloaded triggers do not close
+natural-language formation, native saturation, calibration, resource admission,
+or cross-system comparison gates. Historical v1 evidence remains unchanged.

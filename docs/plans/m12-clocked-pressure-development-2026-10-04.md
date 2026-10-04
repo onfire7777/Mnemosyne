@@ -108,5 +108,20 @@ monitored case directory. This is MCP stdio, not an HTTP measurement.
 Source receipts identify the transport and bind both transport implementation
 files. Replay retains the same ordered inputs, full-workload denominator and
 sink database checks. Translation, authentication, persistence, cleanup and both
-profile paths have live integration checks. Full paired measurements are the
-next step; transport source alone proves no latency improvement or admission.
+profile paths have live integration checks. Full paired measurements are now retained below; transport source alone is not
+measurement or admission evidence.
+
+## Completed paired v2 measurement
+
+[Full raw capture and reproduction instructions](../../eval/reports/m12-transport-pressure-2026-10-04/README.md)
+retain both clean-source runs at `d59949ed`. MCP stdio fired 320/320 correctly;
+CLI fired 200/320 and missed 120 short-window intentions. Neither produced false
+positives, duplicates or cancelled firings; both drained all exact-time work.
+Complete elapsed times including setup were 12.374 s and 78.113 s respectively.
+Both full source-bound saved-trace and durable-sink replays passed.
+
+This fixed-order pair supports a transport-dependent explanation, but does not
+isolate startup from serialization, caching or persistent process state. It is
+not an independent repeated experiment, native capacity limit, HTTP/BurnOS
+measurement, natural-language formation result or competitor comparison. Full
+M12 overload acceptance, calibration and admission remain open.

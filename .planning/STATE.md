@@ -18,14 +18,20 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
-A full five-seed clock-driven public-CLI pressure workload is retained from
-`04f99824`: 207/320 live intentions fired correctly; 113 short-window intentions
-were missed. All 160 exact-time intentions recovered; no duplicate or cancelled
-firings were observed. Ordered source-bound replay and durable sink comparison
-passed. The run completed in 71.889 seconds under normal sampled pressure.
-The benchmark website exposes its raw evidence. Next: identical workload through
-a long-lived authenticated public service. Native saturation, calibration and
-M12 admission remain open; phase completion counters are unchanged.
+The paired v2 public-transport pressure capture at `d59949ed` completed and
+passed full source-bound replay: MCP stdio 320/320 correct, CLI 200/320 with
+120 missed short windows. Both recovered every exact-time intention and had
+no duplicate or cancelled firings. Total elapsed with setup: 12.374 s / 78.113 s;
+normal sampled pressure. Raw traces, sink databases and reproduction script are
+available on the website. The earlier v1 CLI result remains separately retained.
+This is programmed-trigger development evidence, not natural-language quality,
+competitor superiority, HTTP/BurnOS performance or native capacity acceptance.
+Next: broader overload/admission and calibrated reference evidence, alongside
+the unresolved actual-provider formation quality and original phase gates.
+Phase completion counters are unchanged.
+107 targeted pressure, sink, renderer/export and BurnOS HTTP compatibility
+checks passed; lint passed and the refreshed page was verified without
+horizontal overflow at the current 495 px viewport.
 
 The observatory UI refresh is committed at `327ba016`, with grid/list benchmark
 browsing and direct development-evidence navigation. Fifty-eight renderer/export

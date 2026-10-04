@@ -1,0 +1,227 @@
+{
+  "publishable": false,
+  "ranking_eligible": false,
+  "same_offered_workload": true,
+  "schema": "m12-transport-pressure-comparison/v1",
+  "source_commit": "d59949edacaaaddc6ae6ae7313d4343a6d45873f",
+  "transports": {
+    "cli": {
+      "cases": [
+        {
+          "case_id": "seed-7",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1834.1332089912612,
+          "exact_drain_recovered": true,
+          "expired_windows": 25,
+          "max_pending_exact": 8,
+          "metrics": {
+            "f1": 0.7572815533980582,
+            "false_negatives": 25,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 0.609375,
+            "true_positives": 39
+          },
+          "offered_live": 64,
+          "ticks": 11
+        },
+        {
+          "case_id": "seed-19",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1851.5147079888266,
+          "exact_drain_recovered": true,
+          "expired_windows": 24,
+          "max_pending_exact": 8,
+          "metrics": {
+            "f1": 0.7692307692307693,
+            "false_negatives": 24,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 0.625,
+            "true_positives": 40
+          },
+          "offered_live": 64,
+          "ticks": 11
+        },
+        {
+          "case_id": "seed-41",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1844.4887100486085,
+          "exact_drain_recovered": true,
+          "expired_windows": 25,
+          "max_pending_exact": 8,
+          "metrics": {
+            "f1": 0.7572815533980582,
+            "false_negatives": 25,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 0.609375,
+            "true_positives": 39
+          },
+          "offered_live": 64,
+          "ticks": 11
+        },
+        {
+          "case_id": "seed-73",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1837.1132069732994,
+          "exact_drain_recovered": true,
+          "expired_windows": 23,
+          "max_pending_exact": 9,
+          "metrics": {
+            "f1": 0.780952380952381,
+            "false_negatives": 23,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 0.640625,
+            "true_positives": 41
+          },
+          "offered_live": 64,
+          "ticks": 11
+        },
+        {
+          "case_id": "seed-101",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1840.679335000459,
+          "exact_drain_recovered": true,
+          "expired_windows": 23,
+          "max_pending_exact": 9,
+          "metrics": {
+            "f1": 0.780952380952381,
+            "false_negatives": 23,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 0.640625,
+            "true_positives": 41
+          },
+          "offered_live": 64,
+          "ticks": 11
+        }
+      ],
+      "elapsed_with_setup_seconds": 78.11325716698775,
+      "false_positives": 0,
+      "missed_triggers": 120,
+      "sampled_resources": {
+        "admission_verified": false,
+        "disk_roots": [
+          "/Users/admin/.local/state/mnemosyne/pressure-runs/2026-10-04-d59949ed/cli"
+        ],
+        "max_sampled_logical_file_bytes": 1530817,
+        "max_sampled_rss_bytes": 98320384,
+        "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+        "peak_rss_verified": false,
+        "samples": 77
+      },
+      "valid_firings": 200
+    },
+    "mcp-stdio": {
+      "cases": [
+        {
+          "case_id": "seed-7",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1517.2081389464438,
+          "exact_drain_recovered": true,
+          "expired_windows": 0,
+          "max_pending_exact": 1,
+          "metrics": {
+            "f1": 1.0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positives": 64
+          },
+          "offered_live": 64,
+          "ticks": 357
+        },
+        {
+          "case_id": "seed-19",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1519.3835829559248,
+          "exact_drain_recovered": true,
+          "expired_windows": 0,
+          "max_pending_exact": 1,
+          "metrics": {
+            "f1": 1.0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positives": 64
+          },
+          "offered_live": 64,
+          "ticks": 364
+        },
+        {
+          "case_id": "seed-41",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1516.2924541218672,
+          "exact_drain_recovered": true,
+          "expired_windows": 0,
+          "max_pending_exact": 1,
+          "metrics": {
+            "f1": 1.0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positives": 64
+          },
+          "offered_live": 64,
+          "ticks": 363
+        },
+        {
+          "case_id": "seed-73",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1520.34770193859,
+          "exact_drain_recovered": true,
+          "expired_windows": 0,
+          "max_pending_exact": 1,
+          "metrics": {
+            "f1": 1.0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positives": 64
+          },
+          "offered_live": 64,
+          "ticks": 367
+        },
+        {
+          "case_id": "seed-101",
+          "duplicate_observations": 0,
+          "evaluation_wall_ms_sum": 1512.8392418264411,
+          "exact_drain_recovered": true,
+          "expired_windows": 0,
+          "max_pending_exact": 1,
+          "metrics": {
+            "f1": 1.0,
+            "false_negatives": 0,
+            "false_positives": 0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "true_positives": 64
+          },
+          "offered_live": 64,
+          "ticks": 353
+        }
+      ],
+      "elapsed_with_setup_seconds": 12.374089290999109,
+      "false_positives": 0,
+      "missed_triggers": 0,
+      "sampled_resources": {
+        "admission_verified": false,
+        "disk_roots": [
+          "/Users/admin/.local/state/mnemosyne/pressure-runs/2026-10-04-d59949ed/mcp-stdio"
+        ],
+        "max_sampled_logical_file_bytes": 3335045,
+        "max_sampled_rss_bytes": 102547456,
+        "measurement": "sampled-process-group-rss-and-logical-regular-file-bytes",
+        "peak_rss_verified": false,
+        "samples": 13
+      },
+      "valid_firings": 320
+    }
+  }
+}
