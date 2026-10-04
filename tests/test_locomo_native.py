@@ -6,7 +6,7 @@ import pytest
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.adapters.locomo import LoCoMoError
-from eval.public.adapters.locomo_native import captured_conversations
+from eval.public.adapters.locomo_native import captured_conversations, project_native_response
 
 
 def sample(identity):
@@ -46,3 +46,44 @@ def test_native_capture_rejects_invalid_receipts_before_yield(monkeypatch, resul
         with captured_conversations([sample("one")], MnemoCLI(store=str(tmp_path / "unused")),
                                     caption_policy="exclude-caption"):
             pytest.fail("invalid receipt must not reach caller")
+
+
+def response(answer="violet", abstained=False, reader=None):
+    return {"answer": answer, "abstained": abstained,
+            "reader": {"grounded_reader": {"provider": "synthetic"}} if reader is None else reader,
+            "hops": [{"retrieved_cids": ["cid", "cid"]}]}
+
+
+def test_native_timeout_cannot_become_correct_abstention():
+    raw = response(None, True, {})
+    result = project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+    assert result["status"] == "incomplete-reader-execution"
+    assert result["decoded_prediction"] is None
+    assert result["raw_response"] == raw
+    assert result["retrieved_dialog_ids"] == ["D1:1"]
+
+
+def test_native_explicit_abstention_conversion_is_disclosed_and_raw_retained():
+    raw = response(None, True)
+    result = project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
+    assert result["decoded_prediction"] == "No information available"
+    assert result["projection_policy"] == "native-explicit-abstention-v1"
+    assert not result["runtime_custody_verified"]
+    raw["reader"].clear()
+    assert result["raw_response"]["reader"]
+
+
+def test_native_category5_uses_recorded_option_mapping():
+    annotation = {"question": "Synthetic?", "answer": "distractor", "category": 5}
+    result = project_native_response(response("(b)"), annotation, {"cid": {"dialog_id": "D1:1"}},
+                                     choice_draw=0.75)
+    assert result["decoded_prediction"] == "Not mentioned in the conversation"
+    assert result["raw_response"]["answer"] == "(b)"
+
+
+@pytest.mark.parametrize("raw", [response("contradiction", True), response("", False),
+                                  {**response(), "abstained": 1},
+                                  {**response(), "hops": [{"retrieved_cids": ["foreign"]}]}])
+def test_native_projection_rejects_ambiguous_answers_and_foreign_evidence(raw):
+    with pytest.raises(LoCoMoError):
+        project_native_response(raw, sample("one")["qa"][0], {"cid": {"dialog_id": "D1:1"}})
