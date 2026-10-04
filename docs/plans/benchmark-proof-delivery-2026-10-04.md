@@ -2,6 +2,14 @@
 
 ## Owner priority and present evidence
 
+The primary website product is the **multi-system benchmark platform**, not
+only a Mnemosyne proof page. The owner's further clarification is reconciled
+against the original Plans A/B, W1–W5, current phase plans and all M01–M20
+module plans in the [full-scope audit](benchmark-platform-scope-audit-2026-10-04.md).
+The 24-capability/20-module whole-memory standard and the complete external
+benchmark slate remain in scope. A single retrieval run and an educational
+comparison page are intermediate deliverables, not completion of that scope.
+
 This document organizes execution only. It does not replace, narrow or amend
 the original Plans A and B, accepted specifications, roadmap deliverables or
 acceptance criteria. The owner reaffirmed on 2026-10-04 that all original plans
@@ -63,6 +71,14 @@ items; no generic claim that all real benchmarking is externally blocked.
 
 ## 3. Prepare the visible proof site
 
+- Complete the detailed benchmark-platform interaction and data-projection
+  contract required by WMBS §9.5. The main experience must let readers explore
+  systems, benchmark versions and compatible results, compare systems side by
+  side, and inspect all 24 capabilities / 20 modules with honest evidence states.
+  Methods, failed attempts, limitations and the operator's own losses must be
+  accessible from that experience. Mnemosyne is one disclosed entrant.
+- Preserve the full original upstream slate and separately versioned enhanced
+  tracks. A six-project editorial survey is not the platform's coverage limit.
 - Exercise `leaderboard.render` with validated inputs and inspect the actual
   rendered pages. Keep any synthetic demonstration unmistakably labeled and
   separate from real results; never use it to fill an empty leaderboard.
@@ -77,6 +93,12 @@ items; no generic claim that all real benchmarking is externally blocked.
   disclosure labels, escaping and deterministic output before deployment.
 
 ## 4. Produce real, reproducible measurements
+
+Complete dependency-ready benchmark contracts and objective graders while
+preparing real runs. Close the partial modules and implement missing M07–M09,
+M11, M14 and M17–M19 under their actual technical prerequisites; complete M20
+operational evidence and the six joint scenarios. Deferred hardware, rights or
+interface requirements remain explicit rather than disappearing from the plan.
 
 Freeze a clean candidate and explicit experiment registration before scoring.
 Use the existing public harness, approved dataset pins, isolated scorer labels,
