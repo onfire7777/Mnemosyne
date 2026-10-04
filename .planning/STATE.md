@@ -36,7 +36,9 @@ regression checks passed). Development result assembly now binds one atomic QA
 record to exact artifact bytes and a fully replayed report; retrieval summaries
 remain in that report. Its 13 checks passed in both production-to-scorer and
 isolated environments; the preceding combined isolated suite passed 157 checks.
-Registered native bundle writing/verification and runner admission remain open.
+An on-disk development package writer/verifier now preserves those artifact bytes
+and reconstructs the result through replay; 24 package/assembly checks passed.
+Registered native bundle integration and runner admission remain open.
 These remain components, not an admitted complete native benchmark runner. The
 [neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
 separates upstream model baselines from public memory-system execution and lists

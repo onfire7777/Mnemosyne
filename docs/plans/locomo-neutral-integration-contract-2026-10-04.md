@@ -673,3 +673,33 @@ interpreter calling that scorer. Ruff and diff whitespace checks passed. These
 responses are synthetic transport stubs, not live reader execution. The common
 bundle verifier still requires canonical registry anchoring; no dispatch or
 registry admission was relaxed to make this development path pass.
+
+## On-disk development evidence packages
+
+`eval/public/native_bundle.py` persists the existing assembler artifacts plus
+`result.json` and verifies that saved record by reconstructing it from exact
+artifact bytes and isolated replay. It reuses the common bundle secret scan,
+JSON parser and canonical encoder. It bounds each file to 16 MiB, the package
+to 64 MiB and 64 entries, rejects links/non-files and detects identity/content
+changes during reads. The writer validates before exclusive directory creation,
+never overwrites an existing destination and removes its partial package if a
+write raises. A process interruption can still leave an incomplete directory;
+only successful verification establishes a valid development package.
+
+The returned receipt explicitly says unregistered, model execution unverified
+and publication unauthorized. This is not a new admitted registry track or a
+replacement for `verify_bundle`/`reproduce_bundle`. The common verifier rejects
+these packages until its separate registration contract is implemented. The
+package retains retrieval summaries in the same native replay artifact, rather
+than inventing a second attempt record. No dataset or model run was performed.
+
+CI now preserves the isolated Python 3.11 executable, then creates the locked
+production environment for disk-package checks. This avoids adding production
+dependencies to the reference scorer. Registered dispatch, candidate/runtime
+admission, resource feasibility and complete execution remain open.
+
+Validation: 24 package/assembly checks passed, including byte-preserving disk
+round trips, no-overwrite, common-verifier rejection, result/trace/inventory
+tampering, symlinks, secret-like data, bounded reads and failed-write cleanup.
+Ruff, diff whitespace and workflow YAML parsing passed. GitHub CI on the new
+head is still required; no native Windows disk-package result is claimed.
