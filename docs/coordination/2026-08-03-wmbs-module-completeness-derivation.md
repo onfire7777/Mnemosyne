@@ -1,5 +1,10 @@
 # WMBS M01–M20 completeness — recomputation derivation notes
 
+> Historical derivation, scope clarified 2026-10-04. The source inspection
+> below belongs to the named Round-0 baseline. Later deliveries and current
+> counts are reconciled in `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md`.
+> Do not use historical missing-plan/source statements here as current status.
+
 **Recomputed from the tree** at canonical `main@b8673031` plus the unpushed
 controller branch `codex/goalex-whole-memory-pilot`. **Documentation only.**
 This file authorizes no artifact: no module implementation, no scorer or

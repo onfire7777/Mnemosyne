@@ -34,6 +34,11 @@ precondition for M05 code; it is not itself an admission of that code.
 
 ---
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. M05 now has its fixture, scorer, tests and registry-reachable development adapter. See `docs/coordination/2026-08-03-wmbs-module-completeness-inventory.md` for exact paths. Original missing-source and pre-Stage-B statements are historical. Full module admission remains PROPOSED, publication flags remain false, and remaining official/custody/measurement requirements are not discharged by development reachability.
+
 ## 0. Authority
 
 Resolved in this order. Where this document conflicts with anything above it,

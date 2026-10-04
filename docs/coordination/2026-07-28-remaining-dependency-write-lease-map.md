@@ -1,6 +1,33 @@
 # Remaining Dependency and Write-Lease Map
 
-Updated: 2026-09-05 (P13-C discharge and obsolete signed-publication lease release)
+## Status reconciliation — 2026-10-04
+
+Source inspected at `3c21be5d`. This dated reconciliation supersedes older
+prospective status statements below; historical receipts and candidate SHAs
+remain unchanged. Source delivery is distinct from measured acceptance.
+
+- N12 result-v2 dispatch landed in PR #139 (`4af5b20c`); REPRO-001 bundle
+  standard landed in PR #144 (`54dea434`). REPRO-002 remains evidence-blocked.
+- Phase 15 S2 source/development closure landed through PR #160 (`cccc2700`),
+  S3 through #162/#164 (`7db0c810`, `8691bbd6`), S4 report through #177
+  (`336d34b4`), and S5 research-only go/no-go through #199 (`118f1e51`).
+  These deliveries do not satisfy official security/calibration, real provider,
+  protected QA, exact-scale, or physical Windows/Linux 8 GiB acceptance.
+- M06 Stage A landed in #202 (`cff84192`) and Stage B registry reachability
+  in #205 (`74f23509`). The development cell remains PROPOSED, non-publishable,
+  and does not establish whole-memory capability or public admission.
+- Phase 12 protected QA, official dataset/provider evidence, REPRO-002,
+  physical 8 GiB acceptance, and publication/launch gates remain open.
+
+Evidence sources: `eval/public/bundle.py`, `leaderboard/validate.py`,
+`eval/public/security_calibration.py`, `eval/public/wmbs_m06.py`,
+`eval/reports/phase-15-s2-capabilities.md`,
+`eval/reports/phase-15-s4-performance-scale.md`, and
+`research/activation-memory/GO-NO-GO.md`. Existing contract tests are evidence
+of implementation coverage, not a new execution or measurement receipt.
+
+
+Updated: 2026-10-04 (source-delivery reconciliation; historical baseline retained)
 Baseline: `main@f688c74757365a9d946100687a04288cde12a7fc`
 
 This is the checkout-resident admission map for the remaining Mnemosyne v2.0
@@ -1869,13 +1896,13 @@ exact lease, shared owner/integration edge, and external gate.
 | P13-C | DISCHARGED | First real weekly cron receipt; consumes merged fixed workflow, whose cron is `23 7 * * 1` (Mondays 07:23 UTC) | Retained scheduled-cadence receipt for BENCH-007 | No code lease | Real `schedule` run `30807305055` succeeded on `b8673031a80158c49d552a4b3647829d213243bd` on 2026-08-03; job `91665545558` and its fixed public-contract test step succeeded. Metadata and scope are retained in the P13-C discharge section; no official benchmark or publication claim |
 | P13-O | EXTERNAL/PLAN BLOCKED | Official MemoryAgentBench and BEAM; consumes P12-E plus pinned upstream revisions/protocols | BENCH-006 conforming upstream evidence | No admitted lease; a future exact plan must name every source/evidence path | Rights/license, provider/model/judge disclosure, capacity, operator admission |
 | SBOX | QUARANTINED | Development sandbox/external-meter candidate; consumes the common ABI and local reviewed sandbox commits | Only development-source isolation receipts until enforcement is proven | Current local source/test lease: `eval/public/sandbox.py`, `eval/public/sandbox/Dockerfile`, `tests/test_public_sandbox.py`; public-harness owner for any later shared integration | No push/PR/merge until immutable image, daemon probe, filesystem/network/write-boundary enforcement, SBOM, provenance, and resource receipts exist |
-| N12 | READY FOR ADMISSION | Additive result-v2 and M20 publication-integrity dispatch; consumes result-v1, signed ledger, renderer/publisher/readiness, official/enhanced lineage, atomic attempt identities | Compatible result-v2 projections, visible safety failures, cross-version supersession | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; result-v2 owner only | Obsolete protected reservation released by the 2026-09-05 owner confirmation; effective after this receipt lands. Assign one owner and recheck current main/exact leases before implementation; result-v1 bytes and behavior remain immutable |
-| P14-B | BLOCKED on N12 | REPRO-001 implementation; consumes N12, existing bundle/reproduce lifecycle, M15 replay, signed ledger, static renderer | Neutral reproducibility-bundle v1 schema and one clean-checkout reproduction command | Exactly `eval/public/schema/reproducibility-bundle-v1.schema.json`, `eval/public/bundle.py`, `eval/public/README.md`, `tests/test_public_reproducibility.py`; one integration owner | N12 merged, protected lease released, result-v1 golden compatibility green |
+| N12 | SOURCE DELIVERED (#139) | Additive result-v2 and M20 publication-integrity dispatch; consumes result-v1, signed ledger, renderer/publisher/readiness, official/enhanced lineage, atomic attempt identities | Compatible result-v2 projections, visible safety failures, cross-version supersession | `leaderboard/schema/result-v2.schema.json`; `leaderboard/validate.py`; `leaderboard/ledger.py`; `leaderboard/render.py`; `leaderboard/publish.py`; `leaderboard/readiness.py`; `eval/provider_bakeoff/README.md`; `tests/test_leaderboard_result_contract.py`; `tests/test_leaderboard_ledger.py`; `tests/test_leaderboard_render.py`; `tests/test_leaderboard_publish.py`; result-v2 owner only | Obsolete protected reservation released by the 2026-09-05 owner confirmation; effective after this receipt lands. Assign one owner and recheck current main/exact leases before implementation; result-v1 bytes and behavior remain immutable |
+| P14-B | SOURCE DELIVERED (#144) | REPRO-001 implementation; consumes N12, existing bundle/reproduce lifecycle, M15 replay, signed ledger, static renderer | Neutral reproducibility-bundle v1 schema and one clean-checkout reproduction command | Exactly `eval/public/schema/reproducibility-bundle-v1.schema.json`, `eval/public/bundle.py`, `eval/public/README.md`, `tests/test_public_reproducibility.py`; one integration owner | N12 merged, protected lease released, result-v1 golden compatibility green |
 | P14-R | EVIDENCE BLOCKED | REPRO-002; consumes P14-B and a headline-eligible official result | Clean-checkout reproduction receipt | Evidence-only future lease | Official result, public bundle, custody, disclosed judge, human approval |
-| P15-S2 | BLOCKED on P14-B | CAP-007/008 capability work; consumes Phase 14 and existing consolidation/queue/retrieval rails | Cadence tiers, bounded sleep consolidation, global sensemaking, surprise-gated writes | Exact `files_modified` list in `15-01-PLAN.md`; shared lifecycle files excluded | Phase 14 implementation and fresh Worktrunk lease check |
-| P15-S3 | BLOCKED on P15-S2 | CAP-004/005 security and calibration development evidence | Separate attack-family hard failures and calibration/abstention diagnostics | Stage A new-file lease, then serialized Stage B integration lease in `15-02-PLAN.md` | Dataset/model/judge rights and protected-suite controls remain external |
-| P15-S4 | BLOCKED on P15-S3 | CAP-006/011 performance, scale, provider, and 8 GiB closure | Warm/concurrent, provider, 100k, compact-host receipts kept separate | Task-specific exact leases in `15-03-PLAN.md`; one measurement owner | Real 100k/production backfill and physical Windows/Linux 8 GiB evidence are operator/resource gated |
-| P15-S5 | BLOCKED on P15-S4 | CAP-009/010 research closure | Cartridge A/B, reduced activation-memory diagnostics, explicit go/no-go | Task-specific exact leases in `15-04-PLAN.md`; no product write path | Model/tool/license/hardware/custody admission; research never grants authority |
+| P15-S2 | SOURCE DELIVERED (#160) | CAP-007/008 capability work; consumes Phase 14 and existing consolidation/queue/retrieval rails | Cadence tiers, bounded sleep consolidation, global sensemaking, surprise-gated writes | Exact `files_modified` list in `15-01-PLAN.md`; shared lifecycle files excluded | Phase 14 implementation and fresh Worktrunk lease check |
+| P15-S3 | DEVELOPMENT SOURCE DELIVERED (#164) | CAP-004/005 security and calibration development evidence | Separate attack-family hard failures and calibration/abstention diagnostics | Stage A new-file lease, then serialized Stage B integration lease in `15-02-PLAN.md` | Dataset/model/judge rights and protected-suite controls remain external |
+| P15-S4 | SOURCE DELIVERED; MEASUREMENTS OPEN | CAP-006/011 performance, scale, provider, and 8 GiB closure | Warm/concurrent, provider, 100k, compact-host receipts kept separate | Task-specific exact leases in `15-03-PLAN.md`; one measurement owner | Real 100k/production backfill and physical Windows/Linux 8 GiB evidence are operator/resource gated |
+| P15-S5 | RESEARCH ARTIFACT DELIVERED (#199) | CAP-009/010 research closure | Cartridge A/B, reduced activation-memory diagnostics, explicit go/no-go | Task-specific exact leases in `15-04-PLAN.md`; no product write path | Model/tool/license/hardware/custody admission; research never grants authority |
 | P16-L | HUMAN/EVIDENCE BLOCKED | Open leaderboard launch; consumes N12, P14-R, PBPP, custody, and accepted official evidence | Public activation only after all launch gates; optional Register B/neutral review enables only the `neutral` label | No admitted source lease | Human approval, evidence sufficiency, custody, rollback and publication gates |
 | U-MODULES | SPEC UNSTABLE | Module implementation for M02, M04-M09, M11, M14, M16-M19 — **excluding** the development-only M02/M04/M05 evaluation oracles already delivered by PR #96 | No artifact authorized | No lease | Each needs an approved exact plan, protocol, scorer, license/custody, and dependency placement before code. PR #96's oracles are development-only: they authorize no module implementation, protocol, scorer admission, or publication claim, so these IDs remain SPEC UNSTABLE for module work |
 

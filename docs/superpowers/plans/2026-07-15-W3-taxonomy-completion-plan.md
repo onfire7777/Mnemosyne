@@ -5,6 +5,11 @@
 **Requirements introduced:** CAP-012 (prospective memory), CAP-013 (working memory) — to be added to `.planning/REQUIREMENTS.md` with traceability tests.
 **Depends on:** W1 substrate fix landing (retrieval must work before these planes are measured). May be *built* in parallel with W1; *measured* only after W1.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. Prospective and working-memory planes landed across Local/Postgres/SQLite via PR #39 (`0784340`); CAP-012 and CAP-013 are complete in `.planning/REQUIREMENTS.md`. `pm_bench_triggerbench.py` and `working_memory_action_probe.py` are present with development registry suites. The original no-plane baseline statements below are historical; this adds no official/headline result.
+
 ## Goal
 
 Close the two verified capability gaps (spec §2.2 G1, G2): add a **deterministic

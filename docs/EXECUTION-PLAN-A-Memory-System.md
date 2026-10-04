@@ -1,4 +1,15 @@
 # Mnemosyne — Execution Plan A: The Memory System
+
+## Status reconciliation — 2026-10-04
+
+Current delivery and acceptance are tracked in `.planning/ROADMAP.md`.
+N12 and REPRO-001 are delivered (#139/#144); Phase 15 S2–S5 source and
+research artifacts are delivered (through #160/#164/#177/#199). M06 Stage A/B
+are delivered (#202/#205), development-only and PROPOSED. Earlier status
+paragraphs below are historical snapshots. Protected QA, official benchmarks,
+provider evidence, physical 8 GiB acceptance, REPRO-002 and publication remain
+open; development fixtures do not close those gates.
+
 ## Goal: the world's best-performing AI memory system
 
 **Version:** 1.3 · **Date:** 2026-07-13 · **Status:** In Progress (approved)
@@ -156,13 +167,13 @@ Anthropic's 2025–26 interpretability line is directly usable — with strict *
 
 ### Definition-of-Done checklist (Plan A)
 - [ ] Multi-hop QA ≥ 0.85 with grounded per-hop traces (S1).
-- [ ] Multi-timescale consolidation + async sleep job + freshness/expiry live (S2).
-- [ ] Global map-reduce query mode + surprise-gated writes shipped (S2).
+- [ ] Multi-timescale consolidation + async sleep job + freshness/expiry live (S2). Source implementation landed in PR #160; live acceptance is separate.
+- [x] Global map-reduce query mode + surprise-gated writes shipped in source (S2; PR #160).
 - [ ] Adversarial corpus expanded; attack-success-under-defense capability ready for publication (S3.1).
 - [ ] Calibration reliability artifacts hold vs public labels (S3.2).
 - [ ] §11 measurement-gap register closed: concurrent+warm P95, 100k cells, provider default (S4).
 - [ ] Compact grounded-QA stack passes physical 8 GiB Windows/Linux acceptance with unchanged quality/custody gates (S4.5).
-- [ ] Activation-memory research spike + go/no-go note (S5).
+- [x] Activation-memory research spike + go/no-go note (S5; PR #199, research-only).
 - [ ] All §31 rails and §33 classes green throughout.
 
 ---

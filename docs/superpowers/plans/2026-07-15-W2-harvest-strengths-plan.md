@@ -5,6 +5,11 @@
 **Requirements:** BENCH (new adapter families), CAP-002 (provenance/abstention), the forgetting/supersession rails already built.
 **Depends on:** W1 substrate fix landing (retrieval must work before these adapters produce headline-eligible numbers). Adapters may be *built* in parallel with W1; *measured for record* after W1.
 
+
+## Status reconciliation — 2026-10-04
+
+Source inspection at `3c21be5d`; historical instructions below describe the original execution contract, not a request to repeat landed work. The signed deletion-manifest capability landed with PR #39. Full Memora/FAMA and AFTER/STATE-Bench adapter files named below are still absent; their benchmark targets and full production deletion-residue evidence remain open. Existing temporal and provenance development modules are not substitutes for those official acceptance criteria.
+
 ## Goal
 
 Measure three capabilities Mnemosyne already implements but does not yet
