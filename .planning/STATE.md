@@ -20,8 +20,10 @@ progress:
 
 The formation runner now retains twelve fixed public-input virtual probes per
 conversation and scoped inert receipts for every observed firing. No actual
-model run or firing correctness score is claimed. Eligibility scoring and
-independent trace replay remain the next evaluation gaps.
+model run is claimed. Evaluator-only timing diagnostics now score complete
+probe sequences against labeled eligibility, retaining misses, false alarms,
+duplicates and cancellation violations. Independent trace replay and actual
+provider measurements remain open.
 
 Formation execution now retains complete opt-in public schedule inspection and
 per-turn stored-state diagnostics. Extra/missing schedules, duplicate intentions,

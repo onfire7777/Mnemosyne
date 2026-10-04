@@ -65,7 +65,8 @@ underlying memory system cannot participate in a larger agent stack.
 
 - Validate the development response bridge and incremental runner below with
   an actual pinned formation provider, isolated contexts and retained responses.
-- Evaluate firing behavior, cancellation and recurrence after formation through
+- Run the implemented development timing diagnostic on actual provider outputs,
+  evaluating firing behavior, cancellation and recurrence after formation through
   virtual observations and the same inert sink; formation labels alone cannot
   establish successful prospective action.
 - Define scoring for clarification and semantic schedule equivalence before
@@ -226,7 +227,7 @@ ordered trace is retained, but an independent trace-replay verifier is still
 required before admission. A scripted-provider integration check that only asks
 questions correctly produces a missing intended schedule on the first turn.
 
-No real-model run is claimed. Firing correctness scoring, clarification quality,
+No real-model run is claimed. Independent timing replay, clarification quality,
 broader semantic policy, cost, resource admission and calibrated comparisons
 remain unfinished.
 
@@ -244,9 +245,14 @@ rather than moving the virtual clock backward.
 Every public probe request is retained before execution; responses and errors are
 retained in `operations.jsonl`. Each observed firing is delivered to `sink.sqlite3`
 and retried once through the existing scoped inert sink. `observations.json`
-contains raw ticks and receipt snapshots. Execution schema v3 labels these
-`observed-unscored`: no eligibility score, model-quality result, admission or rank
-is implied. Full firing correctness scoring and independent replay remain open.
+contains raw ticks and receipt snapshots. Execution schema v4 also produces
+`formation-timing.json`, an evaluator-only diagnostic against the final labeled
+schedule (or the cancelled original schedule). It requires every fixed probe,
+retains misses, false alarms, duplicates, due-date drift and per-trigger timing,
+and treats event/condition eligibility as the matching stimulus tick only.
+Negative and ambiguous cases have no expected firings; extra outputs remain
+false positives. Three recurrence occurrences are scored individually. No
+model-quality result, admission or rank is implied. Independent replay remains open.
 There is no actual model run associated with this implementation. Tests use an
 explicitly scripted command or manually created intention to validate plumbing.
 The fixed schedule is specific to corpus v1 and must be revised together with any

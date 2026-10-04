@@ -26,7 +26,7 @@ def test_real_command_and_public_cli_retained_without_claiming_model_quality(tmp
     result = action_formation_run.run_development(output, provider)
     assert result['scored'] is result['publishable'] is False
     assert result['model_quality'] == 'not-evaluated'
-    assert result['firing_evaluation'] == 'observed-unscored'
+    assert result['firing_evaluation'] == 'development-timing-diagnostic'
     observed = json.loads((output / 'observations.json').read_text())
     assert len(observed['cases'][0]['ticks']) == 12
     assert all(not tick['firing_observations'] for tick in observed['cases'][0]['ticks'])
