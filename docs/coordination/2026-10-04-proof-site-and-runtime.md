@@ -513,3 +513,15 @@ The public parser already disables option abbreviations. Four regression cases
 verify no command runs and the original store remains byte-identical.
 All 37 native tests and Ruff passed after the isolation fix. No product API or
 BurnOS integration code changed in this increment.
+
+
+## Native candidate/runtime artifact verification
+
+Added optional artifact verification before saved native report replay. Bounded
+JSON files must match configuration references; the candidate must match a clean
+exact HEAD and reader policy, and installed runtime files must match candidate
+Git content. Symlink paths, changed references, dirty source and forged/rehashed
+runtime files are rejected. Resource-file hash verification remains separate
+from resource preflight, and no model execution/publication claim is promoted.
+The 29 runtime-installation, cross-interpreter replay and reader/configuration
+checks passed; Ruff passed. No model or protected-data execution occurred.

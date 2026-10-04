@@ -33,14 +33,14 @@ Category 5's source-answer distractor belongs only in the registered question
 transformation, never in ingested memory. Category-specific scoring remains
 the pinned scorer, with missing predictions and recall applicability explicit.
 
-## Current integration audit — native configuration binding update
+## Current integration audit — native artifact verification update
 
 This table supersedes the original sequence's prospective descriptions below;
 it does not close W4 or any measured acceptance requirement.
 
 | Original step | Current implementation evidence | Remaining acceptance work |
 |---|---|---|
-| 1. Freeze track/configuration | Optional native configuration binds full and normalized source hashes, replay policy, reader/choice policies, CLI settings and runtime/resource artifact references. Its digest is retained in each answer and the replay report. | Authenticate and admit the referenced candidate/runtime/resource artifacts, effective model/provider/tokenizer/context settings and preregistered choice policy; a matching declaration is not runtime or resource proof. |
+| 1. Freeze track/configuration | Optional native configuration binds full and normalized source hashes, replay policy, reader/choice policies, CLI settings and runtime/resource artifact references. Its digest is retained in each answer and the replay report. | Candidate/installed-runtime file checks are available through the optional artifact verifier. Admit the resource artifact, effective model/provider/tokenizer/context settings and preregistered choice policy, then integrate these gates into registered execution; file consistency is not execution or resource proof. |
 | 2. Native public adapter | `iter_native_answers` validates the population first, captures one isolated conversation at a time, invokes public read-only answers, retains command options and cleans stores. Public capture tests exercise actual subprocesses. | Full admitted population under the registered runtime and resource envelope; signed attempt persistence. |
 | 3. Response conversion | Raw outputs, missing reader execution, explicit abstention, category-5 decoding, citations, spans, answer rendering and opt-in synthesis derivations are retained/validated. The independent derivation checker does not call the product synthesizer. | Optional candidate-bound reader policy now checks exact model, prompt, serializer and decoding disclosures and is retained in offline replay. Authenticate that candidate and actual runtime through the registered bundle path; a matching disclosure is not proof of provider execution. |
 | 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across the production and pinned scorer interpreters; missing questions and absent categories remain visible. | Connect these components to the existing bundle inventory, configuration anchors, result schema and verifier without changing generic QA semantics. |
@@ -71,8 +71,8 @@ The current `eval/public/bundle.py` has two separate verification contracts:
   candidate/runtime verification code where its invariants apply, while keeping
   native preprocessing and per-category scoring distinct.
 
-Next implementation order: authenticate the native configuration’s referenced runtime/resource
-artifacts through existing custody checks; add coordinated bundle/result metric projection and
+Next implementation order: complete effective provider/context and resource admission,
+then integrate the existing candidate/runtime artifact checks with coordinated bundle/result metric projection and
 verification using the existing isolated replay worker; then add gated runner
 and registry dispatch. The production interpreter must validate registry,
 candidate, runtime and artifact custody before invoking the minimal scorer
@@ -531,3 +531,31 @@ passed, and the expanded 15-test reader/configuration suite passed. Coverage
 includes a real public capture path with a synthetic empty-reader response,
 cross-interpreter configured replay, changed artifact/input bindings, pre-capture
 CLI drift rejection and malformed declarations. Ruff passed.
+
+
+## Referenced native artifact verification
+
+`verify_native_artifacts` now reads bounded regular JSON files for the candidate,
+installed runtime manifest and resource artifact, rejects symlink paths, and
+checks their raw bytes against the configuration references. The candidate must
+match the current clean Git HEAD and its exact reader policy. The existing
+`grounded_runtime_environment` verifier checks the installed tree against that
+candidate’s committed source, so a forged runtime with fresh file hashes still
+fails. Referenced files are checked again for changes before returning.
+
+`verify_report_in_environment(..., runtime_artifacts={"candidate": path,
+"runtime": path, "resource": path})` applies this optional artifact gate before
+starting isolated score replay. It does not alter the worker’s report or promote
+its runtime/publication flags. Standalone file-verification receipts distinguish
+`runtime_files_verified` and `resource_artifact_hash_verified` from the still-false
+`resource_preflight_verified`, `model_execution_verified` and
+`publication_authorized`. No provider command or network/model call is executed.
+
+A synthetic Git repository and installed runtime test proves valid file custody,
+rejects changed resource bytes, symlink references, dirty candidate source and
+forged runtime files even after rehashing. A deliberately failed resource JSON
+artifact remains only hash-verified, never a passing resource gate. The saved-
+report entry point rejects changed artifacts before the scorer starts. All 29
+runtime-installation, cross-interpreter replay and reader/configuration checks
+passed together; Ruff passed. Effective provider/model loading, context coverage,
+resource admission, signed attempts and registered neutral bundles remain open.
