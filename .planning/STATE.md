@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The M12 exact-time diagnostic now has a [saved five-seed public-CLI execution](../eval/reports/m12-exact-time-development-2026-10-04/README.md)
+from clean harness source `82311010`: 145 operations, complete operation logs
+and exact report recomputation. Twenty runner/scorer checks passed. Delayed
+polling observations remain visible; this does not close M12 admission or
+full timing/cost/baseline requirements.
+
 M12 now has an [exact-time development diagnostic](../eval/reports/m12-exact-time-diagnostic-2026-10-04.md)
 with opt-in public firing/timing observations, independent expected-schedule
 scoring and real-CLI coverage over five seeded four-week timelines. The

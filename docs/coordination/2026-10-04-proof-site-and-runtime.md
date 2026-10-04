@@ -5,6 +5,18 @@ preparation; it does not close those deliverables or replace Plans A/B.
 
 ## Implemented and checked
 
+Latest persisted-execution continuation: the preceding `97bb84c7` turn made
+progress with public observations and scoring. `82311010` adds the deterministic
+five-seed runner, partial-failure retention and operation-bound replay. Twenty
+tests passed, followed by a separate committed-source CLI run and replay. Its
+[raw development evidence](../../eval/reports/m12-exact-time-development-2026-10-04/README.md)
+is retained with all 145 operations and the deliberately late observations.
+Source delivery and this bounded development execution do not close M12's
+registered corpus, other trigger families, calibrated baseline, full sink,
+cost/resource or publication gates. Only `main` and `codex/development` are
+named local branches. CI `37225669534` was rechecked and remains live in
+unit/drift; later local work has not superseded that run.
+
 Latest timing continuation: the prior `5882d192` turn made progress by fixing
 duplicate-observation suppression. The next [M12 diagnostic implementation](../../eval/reports/m12-exact-time-diagnostic-2026-10-04.md)
 adds opt-in public firing observations and an independent descriptive

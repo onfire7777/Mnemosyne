@@ -79,6 +79,12 @@ The initial runner/scorer validation passed 20 tests in 13.49 seconds, including
 a real local run, report recomputation, overwrite refusal, artifact mutations
 and a deliberately failed test-double run retaining its partial operation log.
 
+A subsequent [committed-source capture](../../eval/reports/m12-exact-time-development-2026-10-04/README.md)
+completed all 145 operations and reproduced its reports exactly from saved
+observations. It retains 22 deliberately late observations, eight on-time
+firings and ten unfired cancelled occurrences. This is inspectable development
+evidence, not registration, resource admission or a quality ranking.
+
 Five seeded four-week regressions now feed real public CLI observations into
 this scorer: weekly recurrences; 0, 60, 300 and 86,400-second injected poll
 delays; before-due negative polls; same-time retries; midstream cancellation;
