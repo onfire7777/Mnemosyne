@@ -5,6 +5,17 @@ preparation; it does not close those deliverables or replace Plans A/B.
 
 ## Implemented and checked
 
+Latest sink continuation: the previous `82311010`/`857372cb` turn made progress
+by retaining a replayable timing execution. `d2af156a` adds the durable inert
+sink, concurrent/reopen/rollback checks and the optional replayed sink annex.
+The [committed-source execution](../../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
+retains 30 records and 60 attempts without hidden retries. Thirty-four tests
+passed, followed by 12 sink tests after snapshot transaction tightening.
+Public operation idempotency and remaining full M12 acceptance are not closed.
+CI `37225669534` was rechecked: unit/drift is still live, with no observed
+failure on that job. The elapsed run was only about eleven minutes at the
+18:56:57 UTC clock check; no restart or inference of a hang is justified.
+
 Latest persisted-execution continuation: the preceding `97bb84c7` turn made
 progress with public observations and scoring. `82311010` adds the deterministic
 five-seed runner, partial-failure retention and operation-bound replay. Twenty
