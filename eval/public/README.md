@@ -110,6 +110,16 @@ production-runtime custody or grant benchmark admission. Fresh executions may
 have different intention IDs and command wall times. This directory is not a
 registered `eval-public` bundle and supplies no publication eligibility.
 
+Add `--sink` when creating a new diagnostic run to deliver every observed
+firing to a durable, inert SQLite sink and retry each delivery once. The
+`sink.json` annex retains both candidate observations and deliberate harness
+retries; `sink.sqlite3` is the local durable store. One receipt is committed
+per run/case/principal/intention/occurrence identity. Changed action content
+for that identity is a conflict, not a successful retry. No external action
+payload executes. The normal `--recompute` command checks the JSON annex by
+replaying deliveries into a temporary sink; it does not authenticate or
+certify the original database. Older captures without an annex still replay.
+
 ### M13 working memory
 
 **PROPOSED.**
