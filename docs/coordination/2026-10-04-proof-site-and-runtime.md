@@ -641,3 +641,33 @@ idempotency. Full M12 calibration, trigger/cost/resource and admission work
 remains. CI run 37225669534 at the earlier 762f12c8 head remains in progress;
 none of its results certify this new source, and no merge is authorized by
 partial checks.
+
+## Public intention update retries and content preconditions
+
+Extended the opt-in operation contract to updates. Clients obtain a content
+revision through `intention-list --include-revision` / MCP `include_revision`;
+new keyed updates require that revision to match under the backend transaction.
+The token hashes complete canonical current state and is explicitly an ETag,
+not a monotonic counter or proof that no intervening edit occurred. Existing
+unkeyed calls and default response fields remain unchanged.
+
+Keyed updates atomically record key/request digests and resulting revision in
+the existing update audit; no second copy of the action payload is retained.
+A matching retry rechecks authority/provenance and returns current state without
+reapplying a mutation. An accepted no-op also records its key, so it cannot later
+be repurposed. Changed payload/revision under the same key and fresh requests
+with stale state are rejected. A deliberately injected failure after the audit
+write rolls back both receipt and intention, allowing a subsequent clean retry.
+
+The combined prospective-memory, CLI/MCP, validation, BurnOS HTTP and
+session-read run passed 424 tests with 37 prerequisite skips in 6.98s. The
+new combined create/update test module includes 28 PostgreSQL cases; those
+remain pending live CI rather than being claimed as locally run. Ruff and
+whitespace checks passed. CLI-to-MCP retries, concurrent competing updates,
+reopening, terminal-state replay, no-op receipts, rollback, authority and
+erasure behavior are covered by the local/SQLite checks.
+
+Updated the engine contract, current state, M12 protocol, scope audit and site
+catalog. Registered retry/recovery workloads and full M12 admission still
+require completion. The older CI run 37225669534 remained active at inspection;
+its earlier head does not certify this increment.

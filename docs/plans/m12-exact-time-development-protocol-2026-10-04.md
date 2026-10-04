@@ -54,10 +54,10 @@ and injected transaction failure are covered by regressions. The JSON annex
 is checked against saved firing observations using a temporary sink during
 recomputation. This is not cryptographic database authentication, power-loss
 certification or proof of external side-effect delivery. The original
-SQLite file remains local evidence. Public creation retries now have an
+SQLite file remains local evidence. Public creation/update retries and content revisions now have an
 [opt-in contract](../ENGINE-CONTRACT.md#prospective-memory-contract) and local/SQLite
-regressions; live PostgreSQL validation is pending CI. Update request revisions
-and idempotency, calibrated baselines, full trigger coverage and admission
+regressions; live PostgreSQL validation is pending CI. Registered retry/recovery
+workload integration, calibrated baselines, full trigger coverage and admission
 remain separate unmet requirements.
 
 ### Timing formulas
@@ -126,7 +126,7 @@ cover missed/pending, early/late, duplicate, cancelled and unexpected firings,
 due-date drift, malformed evidence and missing provider watermarks.
 
 This is not a complete M12 benchmark. The registered multiweek fixture,
-full trigger-family timing definitions, update revision/idempotency contract,
+full trigger-family timing definitions, registered revision/retry/recovery evidence,
 cost/resource measurements, calibrated baseline,
 absolute recall/F1 floors, reproducible admitted bundles and publication
 requirements remain open. The adapter's existing synthetic operating-point

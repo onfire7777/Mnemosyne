@@ -264,3 +264,204 @@ def test_recurring_creation_retry_does_not_rewind_occurrence(setup):
     assert engine.list_intentions(tenant)[0].recurrence_state["occurrence"] == 1
     assert _schedule(setup, recurrence_policy=policy) == original
     assert engine.export_tenant(tenant) == before
+
+
+def _update_arguments(state):
+    original = _schedule(state)
+    identity = state["arguments"]["session_identity"]
+    tools = MemoryTools(state["engine"])
+    assert (
+        "revision"
+        not in tools.list_intentions(state["tenant"], identity)["intentions"][0]
+    )
+    snapshot = tools.list_intentions(state["tenant"], identity, include_revision=True)[
+        "intentions"
+    ][0]
+    return dict(
+        tenant_id=state["tenant"],
+        intention_id=original["intention_id"],
+        user_id="owner",
+        agent_id="agent",
+        session_identity=identity,
+        action={"kind": "notify", "message": "Revised"},
+        expected_revision=snapshot["revision"],
+        idempotency_key="update-1",
+    )
+
+
+def test_concurrent_update_retries_are_durable_and_audit_only_digests(setup):
+    arguments = _update_arguments(setup)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(
+            pool.map(
+                lambda _: MemoryTools(setup["engine"]).update_intention(**arguments),
+                range(8),
+            )
+        )
+    assert all(item == results[0] for item in results)
+    assert results[0]["revision"] != arguments["expected_revision"]
+    before = setup["engine"].export_tenant(setup["tenant"])
+    updates = [row for row in before["audit_log"] if row["op"] == "update_intention"]
+    assert len(updates) == 1
+    receipt = updates[0]["diff"]["update_request"]
+    assert set(receipt) == {"key_digest", "request_digest", "result_revision"}
+    assert all(len(value) == 64 for value in receipt.values())
+    setup["close"](setup["engine"])
+    setup["engine"] = setup["factory"]()
+    assert MemoryTools(setup["engine"]).update_intention(**arguments) == results[0]
+    assert setup["engine"].export_tenant(setup["tenant"]) == before
+
+
+def test_concurrent_different_updates_cannot_both_use_stale_revision(setup):
+    arguments = _update_arguments(setup)
+
+    def attempt(number):
+        try:
+            return MemoryTools(setup["engine"]).update_intention(
+                **{
+                    **arguments,
+                    "idempotency_key": f"update-{number}",
+                    "action": {"kind": "notify", "message": f"Winner {number}"},
+                }
+            )
+        except ValueError as error:
+            assert "revision conflict" in str(error)
+            return None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(attempt, range(4)))
+    winners = [result for result in results if result is not None]
+    assert len(winners) == 1
+    assert (
+        setup["engine"].list_intentions(setup["tenant"])[0].action
+        == winners[0]["action"]
+    )
+
+
+@pytest.mark.parametrize("later", ["update", "cancel", "fire"])
+def test_old_update_retry_returns_current_state_without_reapplying(setup, later):
+    arguments = _update_arguments(setup)
+    tools = MemoryTools(setup["engine"])
+    tools.update_intention(**arguments)
+    engine, tenant = setup["engine"], setup["tenant"]
+    if later == "update":
+        tools.update_intention(
+            **{
+                **arguments,
+                "idempotency_key": None,
+                "expected_revision": None,
+                "action": {"kind": "notify", "message": "Later edit"},
+            }
+        )
+    elif later == "cancel":
+        engine.cancel_intention(
+            tenant,
+            arguments["intention_id"],
+            cancelled_by="owner",
+            session_id="session",
+        )
+    else:
+        engine.evaluate_due_intentions(
+            tenant,
+            evaluated_at=datetime(2026, 10, 4, 13, tzinfo=UTC),
+            trigger_context=TriggerEvaluationContext(
+                tenant_id=tenant,
+                infrastructure_available=True,
+                events=[],
+                conditions={},
+            ),
+            operating_point=ProspectiveOperatingPoint(
+                operating_point_id="test",
+                threshold=0.5,
+                measured_precision=0.9,
+                measured_recall=0.9,
+                measurement_cid="test-only",
+            ),
+        )
+    before = engine.export_tenant(tenant)
+    expected = tools.list_intentions(
+        tenant, arguments["session_identity"], include_revision=True
+    )["intentions"][0]
+    assert tools.update_intention(**arguments) == expected
+    assert engine.export_tenant(tenant) == before
+    with pytest.raises(ValueError, match="idempotency conflict"):
+        tools.update_intention(
+            **{**arguments, "action": {"kind": "notify", "message": "Forged retry"}}
+        )
+    with pytest.raises(PermissionError):
+        tools.update_intention(
+            **{
+                **arguments,
+                "session_identity": replace(
+                    arguments["session_identity"], session_id="wrong"
+                ),
+            }
+        )
+
+
+def test_keyed_noop_gets_durable_receipt_and_rejects_repurposed_key(setup):
+    arguments = _update_arguments(setup)
+    arguments["action"] = setup["engine"].list_intentions(setup["tenant"])[0].action
+    tools = MemoryTools(setup["engine"])
+    result = tools.update_intention(**arguments)
+    assert result["revision"] == arguments["expected_revision"]
+    before = setup["engine"].export_tenant(setup["tenant"])
+    assert (
+        len([row for row in before["audit_log"] if row["op"] == "update_intention"])
+        == 1
+    )
+    assert tools.update_intention(**arguments) == result
+    with pytest.raises(ValueError, match="idempotency conflict"):
+        tools.update_intention(
+            **{**arguments, "action": {"kind": "notify", "message": "Changed"}}
+        )
+    assert setup["engine"].export_tenant(setup["tenant"]) == before
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"expected_revision": None},
+        {"idempotency_key": None},
+        {"expected_revision": "invalid"},
+        {"idempotency_key": "space key"},
+    ],
+)
+def test_update_retry_requires_both_valid_key_and_revision(setup, overrides):
+    arguments = _update_arguments(setup)
+    before = setup["engine"].export_tenant(setup["tenant"])
+    with pytest.raises(ValueError):
+        MemoryTools(setup["engine"]).update_intention(**{**arguments, **overrides})
+    assert setup["engine"].export_tenant(setup["tenant"]) == before
+
+
+def test_failed_update_rolls_back_state_and_receipt_then_allows_retry(
+    setup, monkeypatch
+):
+    arguments = _update_arguments(setup)
+    engine, tenant = setup["engine"], setup["tenant"]
+    before = engine.export_tenant(tenant)
+    method = "_audit_row" if isinstance(engine, SqliteEngine) else "_audit"
+    original = getattr(engine, method)
+
+    def fail_after_audit(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError("injected before commit")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(engine, method, fail_after_audit)
+        with pytest.raises(RuntimeError, match="injected before commit"):
+            MemoryTools(engine).update_intention(**arguments)
+    assert engine.export_tenant(tenant) == before
+    result = MemoryTools(engine).update_intention(**arguments)
+    assert result["action"] == arguments["action"]
+
+
+def test_update_retry_rechecks_erased_provenance(setup):
+    arguments = _update_arguments(setup)
+    tools = MemoryTools(setup["engine"])
+    tools.update_intention(**arguments)
+    setup["engine"].forget(setup["tenant"], setup["arguments"]["evidence_ids"][0])
+    with pytest.raises((KeyError, ValueError)):
+        tools.update_intention(**arguments)
+    assert setup["engine"].list_intentions(setup["tenant"]) == []

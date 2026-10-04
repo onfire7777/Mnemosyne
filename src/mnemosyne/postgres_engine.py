@@ -53,7 +53,7 @@ from mnemosyne.engine import (
     _advance_intention_after_fire,
     _cancelled_intention,
     _is_replayed_evaluation,
-    _updated_intention,
+    prepare_intention_update,
     canonicalize_intention,
     intention_audit_context,
     intention_audit_diff,
@@ -6320,6 +6320,7 @@ class PostgresEngine:
         self, tenant_id: str, intention_id: str, *, user_id: str, agent_id: str,
         session_id: str, due_at: datetime | None = None, action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
+        expected_revision: str | None = None, idempotency_key: str | None = None,
     ) -> Intention:
         db_tenant_id = _stable_uuid("tenant", tenant_id)
         with self.connect() as conn:
@@ -6344,15 +6345,25 @@ class PostgresEngine:
                     # external user id; keep accepting the owner's real
                     # external principal by mapping it through the stable UUID.
                     principal_user_id = current.user_id
-                updated = _updated_intention(
+                previous_diffs = []
+                if idempotency_key is not None:
+                    cur.execute(
+                        "SELECT diff FROM audit_log WHERE tenant_id = %s AND op = 'update_intention' "
+                        "AND (target_id = %s OR diff->>'target_id' = %s)",
+                        (db_tenant_id, _uuid_or_none(intention_id), intention_id),
+                    )
+                    previous_diffs = [item["diff"] for item in cur.fetchall()]
+                updated, receipt, replay = prepare_intention_update(
                     current, user_id=principal_user_id, agent_id=agent_id,
                     session_id=session_id, due_at=due_at, action=action,
                     recurrence_policy=recurrence_policy,
+                    expected_revision=expected_revision, idempotency_key=idempotency_key,
+                    previous_diffs=previous_diffs,
                 )
                 provenance = self._intention_provenance_rows(
                     cur, db_tenant_id=db_tenant_id, intention=updated
                 )
-                if updated == current:
+                if replay or (updated == current and receipt is None):
                     return copy.deepcopy(current)
                 trust_tier, capability_tags = intention_audit_context(provenance)
                 cur.execute(
@@ -6374,7 +6385,8 @@ class PostgresEngine:
                     raise RuntimeError("intention update lost its scheduled transition")
                 self._audit(
                     cur, db_tenant_id, user_id, "update_intention", intention_id,
-                    intention_audit_diff(updated, status="scheduled"),
+                    {**intention_audit_diff(updated, status="scheduled"),
+                     **({"update_request": receipt} if receipt is not None else {})},
                     source="prospective_memory", trust_tier=trust_tier,
                     capability_tags=capability_tags,
                 )

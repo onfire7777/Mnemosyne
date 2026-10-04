@@ -259,7 +259,7 @@
     {
       "id": "M12",
       "name": "Prospective action",
-      "status": "Development probes, four-week recurrence/timing diagnostics and an inert delivery sink exist; creation retry support is locally tested with PostgreSQL CI pending; update revisions/idempotency, registered full-trigger corpus, calibrated baseline, full timing/cost and admission remain."
+      "status": "Development probes, four-week recurrence/timing diagnostics and an inert delivery sink exist; creation/update retry support and content revisions are locally tested with PostgreSQL CI pending; registered full-trigger corpus, calibrated baseline, full timing/cost and admission remain."
     },
     {
       "id": "M13",

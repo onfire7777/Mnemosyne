@@ -8759,6 +8759,7 @@ def cmd_intention_update(args: argparse.Namespace) -> None:
         action=parse_json_arg(args.action, None) if args.action is not None else None,
         recurrence_policy=(parse_json_arg(args.recurrence_policy, None)
                            if args.recurrence_policy is not None else None),
+        expected_revision=args.expected_revision, idempotency_key=args.idempotency_key,
         **_intention_auth_kwargs(args),
     ))
 
@@ -8778,7 +8779,8 @@ def cmd_intention_evaluate(args: argparse.Namespace) -> None:
 
 def cmd_intention_list(args: argparse.Namespace) -> None:
     tools = load_tools(args)
-    emit(tools.list_intentions(tenant_id=args.tenant, **_intention_auth_kwargs(args)))
+    emit(tools.list_intentions(tenant_id=args.tenant, include_revision=args.include_revision,
+                              **_intention_auth_kwargs(args)))
 
 
 def cmd_outcome_evaluate(args: argparse.Namespace) -> None:
@@ -20068,6 +20070,8 @@ def build_parser() -> argparse.ArgumentParser:
     intention_update.add_argument("--due-at")
     intention_update.add_argument("--action")
     intention_update.add_argument("--recurrence-policy")
+    intention_update.add_argument("--expected-revision")
+    intention_update.add_argument("--idempotency-key")
     intention_update.set_defaults(func=cmd_intention_update)
 
     intention_evaluate = sub.add_parser("intention-evaluate")
@@ -20079,6 +20083,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     intention_list = sub.add_parser("intention-list")
     intention_list.add_argument("--tenant", required=True)
+    intention_list.add_argument("--include-revision", action="store_true")
     intention_list.set_defaults(func=cmd_intention_list)
 
     outcome_evaluate = sub.add_parser("outcome-evaluate")

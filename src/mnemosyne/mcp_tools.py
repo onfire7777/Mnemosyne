@@ -30,6 +30,8 @@ from mnemosyne.engine import (
     TriggerEvaluationContext,
     WorkingMemoryItem,
     canonicalize_intention,
+    intention_revision,
+    validate_intention_idempotency_key,
     select_working_items,
 )
 from mnemosyne.ids import canonical_json, evidence_cid, new_id
@@ -292,7 +294,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
         "description": "Reschedule or replace the data-only action for an authenticated subject intention.",
         "arguments": [
             "tenant_id", "intention_id", "user_id", "agent_id", "due_at",
-            "action", "recurrence_policy",
+            "action", "recurrence_policy", "expected_revision", "idempotency_key",
         ],
     },
     {
@@ -312,7 +314,7 @@ TOOL_SPEC: list[dict[str, Any]] = [
     {
         "name": "list_intentions",
         "description": "List prospective-memory intentions owned by the authenticated subject.",
-        "arguments": ["tenant_id"],
+        "arguments": ["tenant_id", "include_revision"],
     },
     {
         "name": "search",
@@ -1078,9 +1080,7 @@ class MemoryTools:
             )
         intention_id = new_id()
         if idempotency_key is not None:
-            if (type(idempotency_key) is not str or not 1 <= len(idempotency_key) <= 128
-                    or any(not 33 <= ord(char) <= 126 for char in idempotency_key)):
-                raise ValueError("idempotency_key must contain 1-128 printable non-space ASCII characters")
+            validate_intention_idempotency_key(idempotency_key)
             intention_id = str(uuid5(NAMESPACE_URL, canonical_json([
                 "mnemosyne/schedule-intention/v1",
                 authorization.tenant_id or tenant_id,
@@ -1123,6 +1123,8 @@ class MemoryTools:
         action: dict[str, Any] | None = None,
         recurrence_policy: dict[str, Any] | None = None,
         session_identity: SessionIdentity | None = None,
+        expected_revision: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         authorization = self._authorize_prospective(
             "update", session_identity, tenant_id=tenant_id, actor_id=user_id,
@@ -1138,8 +1140,11 @@ class MemoryTools:
             session_id=session_identity.session_id,
             due_at=(_parse_prospective_datetime(due_at, field="due_at") if due_at is not None else None),
             action=action, recurrence_policy=recurrence_policy,
+            **({"expected_revision": expected_revision, "idempotency_key": idempotency_key}
+               if expected_revision is not None or idempotency_key is not None else {}),
         )
-        return updated.to_dict()
+        return {**updated.to_dict(), **({"revision": intention_revision(updated)}
+                                       if idempotency_key is not None else {})}
 
     def cancel_intention(
         self,
@@ -1248,6 +1253,7 @@ class MemoryTools:
         self,
         tenant_id: str,
         session_identity: SessionIdentity | None = None,
+        include_revision: bool = False,
     ) -> dict[str, Any]:
         authorization = self._authorize_prospective(
             "read",
@@ -1255,12 +1261,17 @@ class MemoryTools:
             tenant_id=tenant_id,
             owner_id=session_identity.user_id if isinstance(session_identity, SessionIdentity) else None,
         )
+        if type(include_revision) is not bool:
+            raise ValueError("include_revision must be a boolean")
         intentions = [
             intention
             for intention in self.engine.list_intentions(authorization.tenant_id or tenant_id)
             if intention.user_id == authorization.owner_id
         ]
-        return {"intentions": [intention.to_dict() for intention in intentions]}
+        return {"intentions": [
+            {**intention.to_dict(), **({"revision": intention_revision(intention)} if include_revision else {})}
+            for intention in intentions
+        ]}
 
     def _authorize_prospective(
         self,
