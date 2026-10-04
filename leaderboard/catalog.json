@@ -259,7 +259,7 @@
     {
       "id": "M12",
       "name": "Prospective action",
-      "status": "Development probes, four-week recurrence regressions and an exact-time lateness diagnostic exist; registered multiweek corpus, calibrated baseline, full trigger timing/cost and admission remain."
+      "status": "Development probes, four-week recurrence/timing diagnostics and an inert delivery sink exist; public operation idempotency, registered full-trigger corpus, calibrated baseline, full timing/cost and admission remain."
     },
     {
       "id": "M13",

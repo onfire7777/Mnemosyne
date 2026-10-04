@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+M12 now also has a [sink-enabled development capture](../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
+from `d2af156a`: 30 inert records and 60 attempts, with all 30 deliberate
+retries identified without extra records. Reports and the sink annex replay
+exactly; earlier capture compatibility is retained. Public operation
+idempotency, full trigger coverage, calibration, cost/resource and admission
+remain open.
+
 The M12 exact-time diagnostic now has a [saved five-seed public-CLI execution](../eval/reports/m12-exact-time-development-2026-10-04/README.md)
 from clean harness source `82311010`: 145 operations, complete operation logs
 and exact report recomputation. Twenty runner/scorer checks passed. Delayed

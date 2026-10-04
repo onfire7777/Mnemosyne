@@ -125,7 +125,13 @@ due-date drift, malformed evidence and missing provider watermarks.
 
 This is not a complete M12 benchmark. The registered multiweek fixture,
 full trigger-family timing definitions, revision/idempotency contract,
-independent sink evidence, cost/resource measurements, calibrated baseline,
+cost/resource measurements, calibrated baseline,
 absolute recall/F1 floors, reproducible admitted bundles and publication
 requirements remain open. The adapter's existing synthetic operating-point
 values remain development controls, not newly measured calibration evidence.
+
+The [sink-enabled committed-source capture](../../eval/reports/m12-inert-sink-development-2026-10-04/README.md)
+now supplies development evidence for the harness-owned inert sink: 30 records,
+60 retained attempts, and 30 correctly identified deliberate retries. The
+timing reports and sink annex replayed exactly. This does not establish
+external side-effect delivery or admit the full M12 benchmark.
