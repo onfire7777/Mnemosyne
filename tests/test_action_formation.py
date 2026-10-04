@@ -71,6 +71,7 @@ def test_scripted_responses_drive_real_public_creation_and_revision_keyed_cancel
 
 @pytest.mark.parametrize('alter', [
     lambda op: op.update(command='shell.execute'),
+    lambda op: op.update(command='evidence.capture'),
     lambda op: op['payload'].update(store='/another/tenant.json'),
     lambda op: op['payload'].update(action_id='not-offered'),
 ])
@@ -97,7 +98,7 @@ def test_duplicate_json_keys_and_clarification_with_writes_are_rejected():
 def test_failed_provider_output_is_retained_without_scheduling():
     class ClockOnly:
         def run(self, command, *_args):
-            assert command == 'clock.inject'
+            assert command in ('clock.inject', 'evidence.capture')
             return {}
 
     raw = b'provider returned an error, not a valid plan'
@@ -141,7 +142,7 @@ def test_partial_public_failure_retains_prior_success_and_failed_attempt():
 def test_failure_to_record_model_response_prevents_writes():
     class ClockOnly:
         def run(self, command, *_args):
-            assert command == 'clock.inject'
+            assert command in ('clock.inject', 'evidence.capture')
             return {}
 
     def emit(record):

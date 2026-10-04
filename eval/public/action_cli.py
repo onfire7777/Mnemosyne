@@ -16,6 +16,11 @@ data-only action IDs; the opt-in observation also returns public firing timing
 and identity fields. It never sees or forwards
 fixture gold, and it never executes an observation payload — the narrative and
 channel observations are treated as inert data.
+
+The opt-in ``evidence.capture`` command captures caller-supplied source text via
+the public CLI and binds subsequent creations to its CID. Existing callers keep
+the generic probe evidence. Known keyed creations retain their original CID on
+retry even when later evidence has been captured in the same adapter session.
 """
 
 from __future__ import annotations
@@ -114,6 +119,7 @@ class _ScopeState:
     conditions: dict[str, dict[str, Any]] = field(default_factory=dict)
     intention_by_task: dict[str, str] = field(default_factory=dict)
     creation_key_by_task: dict[str, str] = field(default_factory=dict)
+    creation_evidence_by_task: dict[str, str] = field(default_factory=dict)
 
 
 class ActionCLI:
@@ -138,6 +144,7 @@ class ActionCLI:
             "task.create": self._task_create,
             "task.update": self._task_update,
             "task.inspect": self._task_inspect,
+            "evidence.capture": self._evidence_capture,
             "clock.inject": self._clock_inject,
             "event.inject": self._event_inject,
             "intention.query": self._intention_query,
@@ -189,7 +196,8 @@ class ActionCLI:
         self._scopes[store] = state
         return state
 
-    def _capture_evidence(self, cli: MnemoCLI, tenant_id: str) -> str:
+    def _capture_evidence(self, cli: MnemoCLI, tenant_id: str,
+                          content: str = "inert prospective-memory scheduling evidence") -> str:
         captured = cli.run(
             "capture",
             "--tenant", tenant_id,
@@ -197,7 +205,7 @@ class ActionCLI:
             "--actor", "user",
             "--source-type", "public-action-probe",
             "--source-identity", "public-action-probe",
-            "--content", "inert prospective-memory scheduling evidence",
+            "--content", content,
         ).json
         cid = captured.get("cid") if isinstance(captured, Mapping) else None
         if not isinstance(cid, str) or not cid:
@@ -205,6 +213,16 @@ class ActionCLI:
         return cid
 
     # ---- symbolic command handlers -------------------------------------
+
+    def _evidence_capture(self, state: _ScopeState, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if set(payload) != {"content"}:
+            raise ActionCLIError("evidence capture requires only content")
+        content = _require_str(payload.get("content"), "evidence content")
+        if len(content.encode("utf-8")) > 256 * 1024:
+            raise ActionCLIError("evidence content exceeds 256 KiB")
+        cid = self._capture_evidence(state.cli, state.tenant_id, content)
+        state.evidence_cid = cid
+        return {"evidence_cid": cid, "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
 
     def _task_create(self, state: _ScopeState, task: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _require_str(task.get("task_id"), "task_id")
@@ -233,6 +251,8 @@ class ActionCLI:
         )
         retry_args = (["--idempotency-key", _require_str(task["idempotency_key"], "idempotency_key")]
                       if "idempotency_key" in task else [])
+        evidence_cid = (state.creation_evidence_by_task.get(task_id, state.evidence_cid)
+                        if creation_key is not None else state.evidence_cid)
         result = state.cli.run(
             "intention-schedule",
             "--tenant", state.tenant_id,
@@ -242,7 +262,7 @@ class ActionCLI:
             "--trigger-expression", _json(expression),
             "--action", _json({"ref": action_id}),
             "--due-at", due_at,
-            "--evidence-cid", state.evidence_cid,
+            "--evidence-cid", evidence_cid,
             *dependency_args,
             *recurrence_args,
             *retry_args,
@@ -253,6 +273,7 @@ class ActionCLI:
         state.intention_by_task[task_id] = intention_id
         if creation_key is not None:
             state.creation_key_by_task[task_id] = creation_key
+            state.creation_evidence_by_task[task_id] = evidence_cid
         return {}
 
     def _task_update(self, state: _ScopeState, update: Mapping[str, Any]) -> dict[str, Any]:

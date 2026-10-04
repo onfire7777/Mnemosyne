@@ -159,6 +159,26 @@ public CLI calls, including revision-keyed cancellation. That proves plumbing,
 not natural-language understanding. No real formation-provider run has been
 retained. Full state-equivalence scoring, downstream firing/sink evaluation,
 resource/cost capture, provider pinning and calibrated comparisons remain open.
-The reused action adapter still captures generic probe scheduling evidence;
-binding natural-language source turns to intention evidence CIDs also remains
-required before claiming complete formation provenance.
+The formation runner now calls the opt-in public `evidence.capture` seam before
+each provider request. It captures the canonical conversation prefix through
+the authenticated public CLI, records the returned CID and exact content hash,
+and binds subsequent new intentions to that CID. Neither evaluator labels nor
+future turns enter the captured content. Existing non-formation callers keep
+their generic probe evidence and unchanged command responses.
+Evidence capture is harness-controlled: the provider operation allowlist still
+contains only `task.create` and `task.update`, never `evidence.capture`.
+
+Within one adapter session, a recognized keyed creation retains its original
+evidence CID across later captures. Reconstructing an adapter for a creation
+retry still requires replaying the original evidence before the original keyed
+request; the in-memory association is not a durable recovery mechanism. A
+capture failure does not replace the prior binding, and the formation runner
+stops rather than creating from stale evidence after that failure.
+
+Updates and cancellations preserve the backend's original creation evidence;
+their available source context is linked by the ordered per-turn evidence and
+operation records. The current public mutation API has no replacement-evidence
+argument. This change does not claim that mutation evidence is independently
+bound inside each backend intention record or that provenance admission is
+complete. Public-CLI regressions inspect the returned intention evidence IDs,
+including a creation retry after a later source capture.

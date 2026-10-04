@@ -125,6 +125,7 @@ The natural-language development path now has an opt-in bounded command
 transport, a public-action bridge and a sequential execution runner with raw
 stdout, operation outcomes and failed-attempt retention. Scripted test providers
 exercise real public creation and revision-keyed cancellation; these tests are
-not model quality measurements. Actual provider identity/custody, evidence-CID
-binding, filesystem isolation, state-equivalence scoring and downstream firing
-remain unverified or unfinished. No formation score has been admitted.
+not model quality measurements. New creations now bind to public CIDs of their available conversation prefixes;
+mutation provenance remains in ordered per-turn records. Actual provider
+identity/custody, complete provenance admission, filesystem isolation,
+state-equivalence scoring and downstream firing remain unverified or unfinished. No formation score has been admitted.
