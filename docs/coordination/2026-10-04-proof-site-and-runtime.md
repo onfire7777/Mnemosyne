@@ -424,3 +424,7 @@ Added replay reports bound to source and decoded-prediction digests, preserving 
 ## LoCoMo asset admission evidence
 
 Verified the pinned 2,805,274-byte raw dataset against its Git blob SHA and recorded SHA-256 `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4`. Streamed only for hashes, with no retained or parsed payload. The current asset validator rejected its actual `CC-BY-NC-4.0` license; retained exact rejection in the tracked intake receipt. No license relabeling, allowlist expansion, runtime registry entry or scored run occurred. LoCoMo real-data admission is a specific remaining gate; other implementation work remains possible.
+
+## Isolated scorer CI gate
+
+Added a ten-minute, synthetic-only LoCoMo conformance job to the existing CI workflow. It installs the complete hash-locked scorer/test dependency set into its own Python 3.11 environment and requires the pinned runtime before pytest, preventing skip-only success. Production dependencies and the existing workflow schedule are unchanged. Local hash-locked reinstall, runtime preflight and all 59 scorer/ingestion tests passed; all 40 planning-traceability tests passed. The new job is not claimed green on GitHub until the pending batch is pushed and executed.

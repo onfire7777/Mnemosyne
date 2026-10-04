@@ -179,7 +179,7 @@ these functions on that population, not an upstream model run or held-out score.
 To execute the focused tests after creating a separate Python 3.11 environment:
 
 ```sh
-uv pip install --python /path/to/scorer/bin/python -r eval/public/requirements-locomo.txt pytest==9.1.1
+uv pip install --python /path/to/scorer/bin/python --require-hashes -r eval/public/requirements-locomo-test.lock
 /path/to/scorer/bin/python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py -q
 ```
 
@@ -236,3 +236,19 @@ work may continue; full LoCoMo measurement cannot be claimed from those tests.
 The existing bundle writer also requires admitted suite/scoring contracts and
 QA reader custody. Do not wrap the standalone replay report in an existing
 retrieval bundle or generic QA profile to bypass those requirements.
+
+## Continuous scorer conformance
+
+The `LoCoMo scorer conformance` job in the existing CI workflow uses a separate
+Python 3.11 environment, hash-locked test dependencies and a ten-minute timeout.
+It runs only synthetic ingestion/scoring checks; no held-out assets, model
+weights, API credentials or NLTK datasets are downloaded. An explicit pinned
+runtime preflight runs before pytest so missing optional dependencies cannot
+turn this job into a successful skip-only run. The regular production test
+environment remains unchanged. No new scheduled automation was created.
+
+`requirements-locomo-test.in` composes the upstream scorer requirements with
+the pinned test runner; `requirements-locomo-test.lock` pins all resolved
+transitive dependencies with hashes. Local verification reinstalled that lock,
+passed the runtime preflight and executed all 59 tests successfully. The new
+GitHub job still requires its own successful run after this batch is pushed.
