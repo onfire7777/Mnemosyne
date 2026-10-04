@@ -1,0 +1,6 @@
+{
+  "source_commit": "30184aebf550681f260b34cc181414ec80faf213",
+  "purpose": "one diagnostic repeat of failed HTTP input with error retention; not a benchmark retry",
+  "input_sha256": "10b662fa809f90f74cd12623f5eeb6c0914c38d04f2c50337e421fc6dc62fce0",
+  "publishable": false
+}

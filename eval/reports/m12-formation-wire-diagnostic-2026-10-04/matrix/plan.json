@@ -1,0 +1,28 @@
+{
+  "source_commit": "a927ee4ebd3de8c176dc3216a643684f795f1993",
+  "profiles": [
+    {
+      "model": "qwen3:0.6b",
+      "digest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+      "wire_order": "canonical"
+    },
+    {
+      "model": "qwen3:0.6b",
+      "digest": "7df6b6e09427a769808717c0a93cadc4ae99ed4eb8bf5ca557c90846becea435",
+      "wire_order": "declared"
+    },
+    {
+      "model": "qwen3:1.7b",
+      "digest": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "wire_order": "canonical"
+    },
+    {
+      "model": "qwen3:1.7b",
+      "digest": "8f68893c685c3ddff2aa3fffce2aa60a30bb2da65ca488b61fff134a4d1730e7",
+      "wire_order": "declared"
+    }
+  ],
+  "input_sha256": "10b662fa809f90f74cd12623f5eeb6c0914c38d04f2c50337e421fc6dc62fce0",
+  "purpose": "four prespecified single-input diagnostic cells; not benchmark results",
+  "publishable": false
+}

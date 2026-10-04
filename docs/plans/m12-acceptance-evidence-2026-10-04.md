@@ -161,3 +161,11 @@ completed 21 cases before an HTTP error. It issued no task writes and missed
 this loss; no full-corpus, engine-quality or resource-admission claim follows.
 The HTTP error cause is unknown because the old wrapper omitted status/body.
 New source records bounded HTTP error detail for future attempts.
+
+
+A [single-input wire-order diagnostic](../../eval/reports/m12-formation-wire-diagnostic-2026-10-04/README.md)
+shows an adapter effect: both compact models changed from clarification to an
+incorrect exact-time proposal when schema key order changed. Future comparisons
+must bind actual request bytes and adapter order, not just semantically equal
+JSON. This finding does not replace the failed full attempts or establish correct
+formation. The original HTTP cause remains unresolved after one successful repeat.

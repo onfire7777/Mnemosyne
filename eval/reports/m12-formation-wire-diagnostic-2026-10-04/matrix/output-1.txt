@@ -1,0 +1,24 @@
+{
+  "operations": [
+    {
+      "command": "task.create",
+      "payload": {
+        "task_id": "3dfcbaae405855b0",
+        "action_id": "3dfcbaae405855b0",
+        "trigger": {
+          "type": "exact_time",
+          "payload": {
+            "at": "2030-12-05T01:00:00Z"
+          }
+        },
+        "dependency_ids": [],
+        "recurrence_policy": {
+          "type": "interval",
+          "interval_seconds": 1,
+          "max_occurrences": 1
+        }
+      }
+    }
+  ],
+  "clarification": null
+}
