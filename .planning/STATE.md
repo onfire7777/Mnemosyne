@@ -32,7 +32,11 @@ disclosure matching, explicit/seeded option ordering, native configuration bindi
 and isolated scorer replay with optional candidate/runtime artifact checks.
 Development-only category summaries now preserve absent/incomplete/inapplicable
 measurements in result-v2 and comparison/rendering surfaces (558 combined
-regression checks passed); full native result/bundle assembly remains open.
+regression checks passed). Development result assembly now binds one atomic QA
+record to exact artifact bytes and a fully replayed report; retrieval summaries
+remain in that report. Its 13 checks passed in both production-to-scorer and
+isolated environments; the preceding combined isolated suite passed 157 checks.
+Registered native bundle writing/verification and runner admission remain open.
 These remain components, not an admitted complete native benchmark runner. The
 [neutral integration contract](../docs/plans/locomo-neutral-integration-contract-2026-10-04.md)
 separates upstream model baselines from public memory-system execution and lists
