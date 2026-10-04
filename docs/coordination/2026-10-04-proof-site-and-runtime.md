@@ -64,7 +64,7 @@ is Infra Technologies, Inc. The service binds to `127.0.0.1:11434`.
 | Canonical scale gate | Evaluator and unprotected `qa_scale_dev_v1` exist. Exact candidate/runtime-bound 24-case passing receipt still needed before protected execution. |
 | Real comparisons | Current-version registered runs under the same protocol, budgets and supported adapters; retain failed attempts and disclose absent systems. |
 | L2 completion | Public versioned data, permanent URLs, deployed site, data mirror and at least one real fully browsable system remain unverified. |
-| L3 completion | The reading guide is a start. Primary-source-reviewed system architecture explainers and full transparent methodology remain to publish. |
+| L3 completion | Reading guide and architecture summaries for the eight planned entries are prepared and linked locally. Public deployment and the full transparent methodology remain unfinished. |
 | Launch | Register A real evidence, methods paper, populated adversarial report and operational public dispute channel remain open. |
 
 `BOARD-STATUS.md` now distinguishes implemented tools from missing launch
@@ -102,3 +102,21 @@ Continue ordinary code tests locally and existing CI checks. Before model
 benchmarks, obtain a successful monitored preflight at the required settings
 with sufficient headroom, or use a suitable separately authorized compute host.
 Do not close the user's other applications or launch paid compute implicitly.
+
+## Architecture explainer follow-up
+
+`leaderboard/explainers.py` supplies a source-owned `systems.html` page linked
+from the methods guide. It covers Mem0, Graphiti/Zep, Letta, Cognee, MemOS,
+Supermemory, HippoRAG and Mnemosyne. Summaries were checked against their linked
+official documentation/repositories on 2026-10-04, using the historical market
+research as a starting inventory rather than copying its dated feature or
+performance claims. Each entry links its source; the Mnemosyne link is pinned
+to the inspected commit. Hosted products and open-source variants are not
+treated as interchangeable. No vendor score is imported as a measured result.
+
+The renderer remains offline: these source links are fixed editorial links,
+not fetches or URLs supplied by result records. Its prior result/trace URL
+validation remains unchanged. Ruff and 89 relevant render/publication/policy
+tests passed. The actual browser path from Methods to the eight-entry guide
+was inspected. This prepares L3 content but does not establish its public
+publication or close the methods-paper requirement.
