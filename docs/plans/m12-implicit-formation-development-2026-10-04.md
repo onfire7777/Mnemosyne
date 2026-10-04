@@ -282,3 +282,40 @@ engine execution, independent implementation, ranking eligibility and publicatio
 unverified/false. Failed and partial captures remain diagnostic evidence and are
 not accepted as completed runs. Actual model measurement, independent custody,
 clarification quality, broader semantics and calibration remain open.
+
+
+## Opt-in local Ollama formation role
+
+`eval.public.action_formation_ollama` implements the command protocol with an
+explicit model selector and required server-reported digest. It checks the local
+inventory before and after one nonstreaming chat request. It never downloads a
+model, follows redirects, uses environment proxies or contacts a non-loopback
+origin. Temperature/seed, context/output budgets, two CPU threads and immediate
+unload are explicit. The complete public request is sent without truncation;
+a conservative byte-based context guard rejects oversized inputs. That guard
+is not exact tokenizer or template custody.
+
+The role uses [Ollama's chat API](https://docs.ollama.com/api/chat) with JSON output,
+thinking disabled and `keep_alive: 0`. The system prompt describes the public
+operation contract, not any corpus answer. Per-invocation exclusive JSONL files
+retain the prompt/source hashes, HTTP request bodies, exact raw responses,
+server-reported token/timing fields and failure status. Provider content passes
+unchanged to the formation bridge; invalid JSON is not repaired. Incomplete
+responses or a changed model digest fail rather than producing a success.
+The saved-trace verifier covers the formation trace and derived reports; these
+additional HTTP evidence files are not yet independently authenticated or replayed.
+
+Example provider command (use an installed model's actual 64-character digest):
+
+```sh
+python -m eval.public.action_formation_ollama \
+  --model MODEL --digest SHA256 --evidence-dir /new/run/provider-http
+```
+
+This is an agent-plus-memory formation role for development, distinct from the
+frozen grounded-reader model in existing registered protocols. Installing a
+smaller model for local feasibility does not change those protocols. The
+[Qwen3 0.6B package](https://ollama.com/library/qwen3:0.6b) is approximately 523 MB;
+its resource and quality suitability must be measured, not inferred from size.
+The outer Mac memory-pressure guard still applies. Its process-group RSS does
+not include the separately running Ollama server or prove total model memory.
