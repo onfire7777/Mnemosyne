@@ -401,7 +401,7 @@ pub fn parse_request(body: &[u8]) -> Result<Request, ApiError> {
     Ok(request)
 }
 
-fn validate_request(request: &Request) -> Result<(), ApiError> {
+pub(crate) fn validate_request(request: &Request) -> Result<(), ApiError> {
     let (protocol_version, expected_identity, query, evidence, rank_width) = match request {
         Request::Embed {
             protocol_version,
