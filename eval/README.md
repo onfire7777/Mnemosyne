@@ -177,3 +177,14 @@ repeated ticks. The runner binds every ordered operation before scoring.
 See the [versioned workload contract](../docs/plans/m12-trigger-window-development-2026-10-04.md).
 This is a development diagnostic, not a calibrated reference comparison,
 independent reproduction or admitted benchmark result.
+
+### Public operation response-loss recovery
+
+`python -m eval.public.action_recovery_run OUTPUT` runs the separate four-week,
+five-seed development recovery workload. It withholds selected responses only
+after real CLI writes succeed, rebuilds the adapter, and retries with the
+original keys and revisions. Add `--recompute` to check complete operation logs,
+resolved revisions, recovered identities, terminal states and firing metrics.
+This measures response-loss recovery, not process/power-loss recovery or an
+admitted comparative benchmark. See the
+[recovery contract](../docs/plans/m12-trigger-window-development-2026-10-04.md#versioned-operation-response-loss-recovery).

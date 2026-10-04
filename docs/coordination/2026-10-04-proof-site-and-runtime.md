@@ -788,3 +788,21 @@ including overload, implicit formation, calibrated references, registered
 mutation/recovery and resource/admission remains open. The next extension is
 versioned revision-keyed mutation/recovery and overload workloads, followed by
 reference comparison; do not substitute this small development result for them.
+
+## Operation recovery runner implementation
+
+The preceding `2618294d` turn made progress with the retained five-trigger
+execution. This continuation adds a separate versioned response-loss recovery
+runner over five seeded four-week timelines. It preserves original keyed
+creation/update/cancel requests across adapter resets, resolves revisions from
+specific earlier inspections and retains those resolved requests in the log.
+The validator binds recovered identity, action, terminal state, fault outcome,
+clock and firing identity; omitted/modified operations fail replay.
+
+The fault injector waits for a real successful CLI exit before discarding the
+response. It does not simulate a process crash or power failure. Unexpected
+errors preserve a partial log and type-only failure record. The first combined
+recovery/timing check passed 55 tests; an added partial-failure/overwrite check
+also passed in the final 15-test recovery suite. A clean-source execution
+receipt will follow separately. CI `37225669534` remains live in unit/drift;
+no later local commit is certified by that earlier head.

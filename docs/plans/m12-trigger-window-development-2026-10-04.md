@@ -104,3 +104,40 @@ calibrated reference comparison, measured resource/cost gates and admission rema
 open. The earlier public retry integration tests cover mutation response loss
 separately; they are not silently included in this workload's result. The
 existing exact-time captures and registered benchmark formats remain unchanged.
+
+## Versioned operation response-loss recovery
+
+`python -m eval.public.action_recovery_run OUTPUT` runs the separate
+`m12-operation-recovery-run/v1` development workload. Five seeded dates each
+span four virtual weeks. Every week creates an explicit intention, updates its
+action, loses the first successful creation and update responses, rebuilds the
+adapter and retries the identical requests. Alternate weeks also cancel the
+intention and lose the first successful cancellation response. Two evaluations
+at the due time detect repeat firing; replaying the original update after the
+terminal state must preserve that state.
+
+The fault driver calls the real public subprocess first. Only after successful
+exit does it withhold the response from the adapter. It never substitutes a
+successful write, kills the memory process, or claims to simulate power loss.
+An adapter reset clears its in-memory task mapping and virtual clock; the plan
+reconstructs task identity by replaying the original keyed creation and later
+reinjects the clock. These are response-loss and client-state recovery cases,
+not arbitrary crash recovery or lost event-delivery certification.
+
+Each update/cancel precondition refers to an earlier inspection's revision.
+Both the symbolic reference and exact resolved request are retained in the log.
+Replay requires the original revision, not the latest available revision. It
+also checks task identity, expected action and terminal state, changed content
+revisions, planned fault outcomes and firing identity against inspected
+intentions. The complete sequence and every raw observation remain available.
+A complete sequence with no firings still reports false negatives.
+
+The plan has 10 injected response losses and 10 adapter resets per seed. Its
+four intentions include two scheduled-to-fire and two cancelled controls.
+Gold and inspection assertions are consumed by the evaluator, never passed to
+the memory system. Recompute verifies this development trace but does not
+authenticate logs or establish independent custody. Source hashes and dirty
+state are disclosed. Registered recovery admission, overload, implicit
+formation, calibrated reference systems and full resource/cost gates remain
+open; the five-trigger workload and existing registered fixture bytes remain
+unchanged.
