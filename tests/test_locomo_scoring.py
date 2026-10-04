@@ -137,9 +137,10 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
 
     sample = {"sample_id": "synthetic", "conversation": {
         "session_1_date_time": "Synthetic date", "session_1": [
-            {"speaker": "A", "text": "violet kite", "dia_id": "D1:1"}]},
+            {"speaker": "A", "text": "violet kite", "dia_id": "D1:1"},
+            {"speaker": "B", "text": "violet balloon", "dia_id": "D1:2"}]},
         "qa": [{"question": "Synthetic question?", "answer": "violet", "category": category,
-                "evidence": ["D1:1"] if category != 5 else []} for category in range(1, 6)]}
+                "evidence": ["D1:2"] if category != 5 else []} for category in range(1, 6)]}
     source = [sample]
     questions = split_samples(source)["questions"]
     tenant = "locomo:" + sha256(b"synthetic").hexdigest()
@@ -151,8 +152,12 @@ def test_native_population_replays_missingness_empty_retrieval_and_tampering(tmp
 
     def answer(cli, path):
         request = json.loads(Path(path).read_text())
+        cid = next(iter(evidence))
+        start = evidence[cid]["capture"]["content"].index("violet")
+        claim = {"text": "violet", "evidence_cids": [cid], "spans": [{"cid": cid,
+                 "start": start, "end": start + 6, "slice_sha256": sha256(b"violet").hexdigest()}]}
         return {"results": [{"question_id": request["question_id"], "answer": "violet",
-                             "abstained": False, "claims": [], "hops": [],
+                             "abstained": False, "claims": [claim], "hops": [{"retrieved_cids": [cid]}],
                              "reader": {"grounded_reader": {"provider": "synthetic"}}}]}
 
     monkeypatch.setattr(MnemoCLI, "eval_answer_batch", answer)

@@ -345,3 +345,30 @@ Python 3.11 scorer. Ruff and diff checks passed. Remote CI at `046f08a8` now
 successfully executes the LoCoMo scorer job and lint; the full suite/platform
 jobs were still running at this checkpoint. This local policy change waits
 for that run to finish before another push.
+
+## Answer rendering and synthesis boundary
+
+Native projection now enforces the public output's structural guarantees:
+non-abstaining answers require claims and must render their ordered text exactly;
+claims require nonempty bounded text, unique citations, ordered span/citation
+agreement, valid span hashes and non-overlapping ranges. Up to 20 claims and
+16 spans per claim preserve the product's synthesis capacity. Abstentions may
+not retain claims. The previous synthetic transports that supplied successful
+answers without claims were corrected to supply real source-bound quotations.
+
+Inspection of `src/mnemosyne/answering.py` showed a necessary distinction:
+`AnswerClaim` retains text, CIDs and spans but not the synthesis operation that
+produced derived text. Requiring all claim text to equal joined quotations
+would reject legitimate deterministic synthesis and misrepresent native memory
+behavior. Projection therefore records per-claim `claim_text_custody` as either
+`exact-quoted-spans` or `derived-text-unverified`, preserving both answer types.
+The latter proves citation structure only, not the derivation. Completing
+native derivation replay needs versioned public synthesis provenance; it must
+not infer a missing operation or import private engine state as evidence.
+
+Validation: 32 native tests passed, including malformed rendering/citations and
+preservation of derived output. All 110 isolated scoring/tokenizer/replay tests
+passed. The native recall test now uses a valid quoted answer from a different
+source turn than the annotated gold evidence, retaining the zero-recall case
+without constructing an impossible successful answer with no claims. No
+product API, BurnOS contract, quality target or publication gate was changed.

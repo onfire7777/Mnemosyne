@@ -100,16 +100,25 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
     reader, hops, claims = response.get("reader"), response.get("hops"), response.get("claims")
     if not isinstance(reader, dict) or not isinstance(hops, list) or not isinstance(claims, list):
         raise LoCoMoError("native response requires reader, hop and claim records")
+    if len(claims) > 20:
+        raise LoCoMoError("native response exceeds the public claim limit")
+    claim_text_custody = []
     for claim in claims:
-        if (not isinstance(claim, dict) or not isinstance(claim.get("text"), str)
+        if (not isinstance(claim, dict) or set(claim) != {"text", "evidence_cids", "spans"}
+                or not isinstance(claim.get("text"), str) or not claim["text"].strip()
+                or len(claim["text"]) > 2000
                 or not isinstance(claim.get("evidence_cids"), list)
                 or not isinstance(claim.get("spans"), list)):
             raise LoCoMoError("native claim is malformed")
         cited = claim["evidence_cids"]
         if any(not isinstance(cid, str) or cid not in evidence for cid in cited):
             raise LoCoMoError("native claim references unregistered evidence")
+        if not cited or len(cited) != len(set(cited)) or not 1 <= len(claim["spans"]) <= 16:
+            raise LoCoMoError("native claim requires unique citations and bounded spans")
+        quoted, span_cids, occupied = [], [], {}
         for span in claim["spans"]:
-            if not isinstance(span, dict) or not isinstance(span.get("cid"), str) or span["cid"] not in cited:
+            if (not isinstance(span, dict) or set(span) != {"cid", "start", "end", "slice_sha256"}
+                    or not isinstance(span.get("cid"), str) or span["cid"] not in cited):
                 raise LoCoMoError("native span must refer to the claim's registered evidence")
             content = evidence[span["cid"]].get("capture", {}).get("content")
             start, end = span.get("start"), span.get("end")
@@ -117,6 +126,19 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
                     or not 0 <= start < end <= len(content)
                     or span.get("slice_sha256") != sha256(content[start:end].encode()).hexdigest()):
                 raise LoCoMoError("native span does not match captured content")
+            ranges = occupied.setdefault(span["cid"], [])
+            if any(start < right and left < end for left, right in ranges):
+                raise LoCoMoError("native claim spans overlap")
+            ranges.append((start, end))
+            quoted.append(content[start:end])
+            if span["cid"] not in span_cids:
+                span_cids.append(span["cid"])
+        if cited != span_cids:
+            raise LoCoMoError("native citations do not match ordered spans")
+        # Public AnswerClaim omits the synthesis operation: retain the result,
+        # but never describe its derivation as replay-verified from spans alone.
+        claim_text_custody.append("exact-quoted-spans" if claim["text"] == " ".join(quoted)
+                                  else "derived-text-unverified")
     retrieved = []
     retrieved_cids = set()
     for hop in hops:
@@ -132,6 +154,7 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
     if any(cid not in retrieved_cids for claim in claims for cid in claim["evidence_cids"]):
         raise LoCoMoError("native claim cites evidence absent from retrieval trace")
     result = {"raw_response": deepcopy(response), "question_transformation": prepared,
+              "claim_text_custody": claim_text_custody,
               "retrieved_dialog_ids": retrieved, "decoded_prediction": None,
               "projection_policy": "native-explicit-abstention-v1",
               "status": "incomplete-reader-execution", "runtime_custody_verified": False}
@@ -139,12 +162,14 @@ def project_native_response(response: dict, annotation: dict, evidence: dict, *,
         return result
     answer = response.get("answer")
     if response["abstained"]:
-        if answer not in (None, ""):
+        if answer not in (None, "") or claims:
             raise LoCoMoError("native abstention contradicts nonempty answer")
         decoded = "No information available"
     else:
         if not isinstance(answer, str) or not answer.strip():
             raise LoCoMoError("native non-abstention requires an answer")
+        if not claims or answer != "\n".join(claim["text"] for claim in claims):
+            raise LoCoMoError("native answer must render its ordered claims")
         decoded = (decode_upstream_category5(answer, prepared["answer_key"])["decoded_prediction"]
                    if prepared["category"] == 5 else answer.strip())
     result.update(status="projected", decoded_prediction=decoded)
