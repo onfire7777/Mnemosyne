@@ -148,7 +148,9 @@ def test_renders_one_validated_result_and_its_public_bundle_trace(
     assert "Stored context/evidence" in trace_page
     assert "doc-1" in trace_page
     assert "Retrieved context/evidence" in trace_page
-    assert "Final answer" in trace_page
+    assert "Retrieval output" in trace_page
+    assert "not a generated answer" in trace_page
+    assert "Final answer" not in trace_page
     assert "../../results/" in trace_page
 
 
@@ -157,6 +159,7 @@ def test_renders_qa_evidence_fields_that_exist_in_the_source_trace(
 ) -> None:
     results = _write_json(tmp_path / "results.json", _result())
     trace = _trace()
+    trace["scoring_family"] = "qa"
     trace.pop("ranked_retrieved_hits")
     trace.pop("stored_records")
     trace["authorized_retrieval_hops"] = [
@@ -177,6 +180,24 @@ def test_renders_qa_evidence_fields_that_exist_in_the_source_trace(
     assert "authorized_retrieval_hops" in page
     assert "fact &lt;one&gt;" in page
     assert "final &lt;answer&gt;" in page
+    assert "Final answer" in page
+    assert "Retrieval output" not in page
+
+
+@pytest.mark.parametrize("family", [None, "unknown", [], {}])
+def test_unrecognized_trace_family_does_not_claim_generated_answer(
+    tmp_path: Path, family: object,
+) -> None:
+    results = _write_json(tmp_path / "results.json", _result())
+    trace = _trace()
+    trace["scoring_family"] = family
+    traces = _write_traces(tmp_path / "traces.jsonl", [trace])
+    output = tmp_path / "site"
+    render_site(results, {"result-001": traces}, output)
+    page = next((output / "traces").rglob("*.html")).read_text()
+    assert "Recorded output" in page
+    assert "Final answer" not in page
+    assert "Retrieval output" not in page
 
 
 def test_output_is_deterministic_for_logically_identical_input_orderings(
