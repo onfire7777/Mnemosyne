@@ -18,6 +18,11 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The formation runner now retains twelve fixed public-input virtual probes per
+conversation and scoped inert receipts for every observed firing. No actual
+model run or firing correctness score is claimed. Eligibility scoring and
+independent trace replay remain the next evaluation gaps.
+
 Formation execution now retains complete opt-in public schedule inspection and
 per-turn stored-state diagnostics. Extra/missing schedules, duplicate intentions,
 wrong timing and premature firing remain visible; clarification presence is not

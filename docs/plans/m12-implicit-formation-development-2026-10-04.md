@@ -157,7 +157,7 @@ No unchanged failed eight-billion-parameter reader probe is repeated here.
 Validation currently uses explicitly identified scripted test doubles and real
 public CLI calls, including revision-keyed cancellation. That proves plumbing,
 not natural-language understanding. No real formation-provider run has been
-retained. Broader state-equivalence policy, downstream firing/sink evaluation,
+retained. Broader state-equivalence policy, downstream firing scoring,
 resource/cost capture, provider pinning and calibrated comparisons remain open.
 The formation runner now calls the opt-in public `evidence.capture` seam before
 each provider request. It captures the canonical conversation prefix through
@@ -226,6 +226,28 @@ ordered trace is retained, but an independent trace-replay verifier is still
 required before admission. A scripted-provider integration check that only asks
 questions correctly produces a missing intended schedule on the first turn.
 
-No real-model run is claimed. Firing/sink evaluation, clarification quality,
+No real-model run is claimed. Firing correctness scoring, clarification quality,
 broader semantic policy, cost, resource admission and calibrated comparisons
 remain unfinished.
+
+
+## Downstream observation and inert delivery
+
+The formation runner now writes a fixed `observation-plan.json` before executing
+providers, then observes the same public ActionCLI store after each conversation.
+The version-one plan derives only from the public conversation origin, never gold
+labels or candidate schedules. Twelve probes exercise early timing, a nonmatching
+and matching delivery/condition signal, window expiry, rescheduled time, three
+weekly occurrences and a fourth-week control. Overlapping conversation turns fail
+rather than moving the virtual clock backward.
+
+Every public probe request is retained before execution; responses and errors are
+retained in `operations.jsonl`. Each observed firing is delivered to `sink.sqlite3`
+and retried once through the existing scoped inert sink. `observations.json`
+contains raw ticks and receipt snapshots. Execution schema v3 labels these
+`observed-unscored`: no eligibility score, model-quality result, admission or rank
+is implied. Full firing correctness scoring and independent replay remain open.
+There is no actual model run associated with this implementation. Tests use an
+explicitly scripted command or manually created intention to validate plumbing.
+The fixed schedule is specific to corpus v1 and must be revised together with any
+change in that corpus's timing; it is not a general natural-language time parser.

@@ -7,13 +7,15 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import uuid
 
 from eval.harness.cli_driver import MnemoCLI
 from eval.public.action_cli import ActionCLI
 from eval.public.action_formation import CommandFormationProvider, run_case
 from eval.public.action_formation_scoring import score_case
+from eval.public.action_formation_observe import observation_plan, observe_case
 from eval.public.action_implicit_plan import make_corpus, public_case
-from eval.public.action_timing_run import _source_receipt, _write
+from eval.public.action_timing_run import _source_receipt, _write, _sink_for
 from eval.public.bundle import _canonical
 
 
@@ -28,12 +30,17 @@ def run_development(output, provider):
         'argv': list(provider.argv), 'timeout_seconds': provider.timeout_seconds,
         'filesystem_isolation_verified': False, 'publishable': False,
     })
-    source = _source_receipt(False)
+    source = _source_receipt(True)
     for name in ('action_formation.py', 'action_formation_run.py', 'action_implicit_plan.py',
-                 'action_formation_scoring.py'):
+                 'action_formation_scoring.py', 'action_formation_observe.py'):
         source['harness_files']['eval/public/' + name] = hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
     _write(output / 'source.json', source)
-    completed, diagnostics, snapshots, records = [], [], [], 0
+    completed, diagnostics, snapshots, observations, records = [], [], [], [], 0
+    run_id = str(uuid.uuid4())
+    _write(output / 'observation-plan.json', {
+        'schema': 'm12-formation-probes/v1', 'cases': [
+            {'case_id': case['public']['case_id'], 'probes': observation_plan(case)}
+            for case in corpus['cases']]})
     try:
         with (output / 'operations.jsonl').open('xb') as log, \
                 tempfile.TemporaryDirectory(prefix='m12-formation-') as temp:
@@ -52,12 +59,17 @@ def run_development(output, provider):
                 # Isolate harness task maps and stores per case. This does not
                 # attest isolation inside the separately configured provider.
                 actions = ActionCLI(MnemoCLI(store='unused', timeout_s=30))
-                completed.append(run_case(
+                scope = {'store': str(Path(temp) / (identity + '.json')),
+                         'tenant_id': identity, 'session_id': 'formation'}
+                formation = run_case(
                     case, provider=provider, actions=actions,
-                    scope={'store': str(Path(temp) / (identity + '.json')),
-                           'tenant_id': identity, 'session_id': 'formation'}, emit=emit,
-                ))
+                    scope=scope, emit=emit,
+                )
                 diagnostics.append(score_case(case, snapshots))
+                observations.append(observe_case(
+                    case, actions=actions, scope=scope,
+                    sink=_sink_for(output / 'sink.sqlite3', run_id, identity, 'formation'), emit=emit))
+                completed.append(formation)
     except BaseException as error:
         _write(output / 'status.json', {
             'status': 'failed', 'exception_type': type(error).__name__,
@@ -69,9 +81,12 @@ def run_development(output, provider):
         'schema': 'm12-formation-state-report/v1', 'publishable': False,
         'ranking_eligible': False, 'cases': diagnostics,
     })
-    result = {'schema': 'm12-formation-execution/v2', 'track': 'DEVELOPMENT',
+    _write(output / 'observations.json', {
+        'schema': 'm12-formation-observations/v1', 'run_id': run_id,
+        'scored': False, 'publishable': False, 'cases': observations})
+    result = {'schema': 'm12-formation-execution/v3', 'track': 'DEVELOPMENT',
               'publishable': False, 'scored': False, 'cases': completed,
-              'firing_evaluation': 'not-run', 'model_quality': 'not-evaluated',
+              'firing_evaluation': 'observed-unscored', 'observations': 'observations.json', 'model_quality': 'not-evaluated',
               'formation_state_diagnostics': 'formation-state.json',
               'scoring_scope': 'descriptive-active-state-only; full benchmark unscored',
               'filesystem_isolation_verified': False}
