@@ -331,3 +331,26 @@ leakage, multi-hop contamination, full erase coverage, five seeded corpora or
 restore correctness. No public restore operation is exercised or implied. The
 C10 mapping and the full M08 fixture/scorer remain unresolved. No persistent
 user store, model, external service or protected dataset was used.
+
+## Reversible-delete implementation boundary — 2026-10-04
+
+Further source review of `MnemosyneEngine.forget` confirms that the
+`tombstone_recompute` branch blanks `ev.content`, marks the evidence erased,
+and applies the same treatment to erased derived evidence. The tombstone
+retains identity as a replay blocklist; it is not merely a reversible visibility
+flag. The public two-cycle test confirms that identical ingestion does not
+restore it. The existing `hard_delete_legal` mode remains a separate destructive
+operation. No adapter may relabel either operation as proven reversible
+forgetting without a new, explicit capability contract and evidence.
+
+The implementation sequence must therefore resolve the product boundary before
+claiming C10: define the authorized reversible operation and retained-data
+policy; keep it distinct from hard deletion; specify tenant/branch scope and
+receipt identity; define how later hard deletion removes any recovery material;
+and define whether authorized restoration is offered. If restoration is
+offered, it must preserve relevant provenance and avoid resurrecting subsequent
+corrections, legal erasures or another tenant's data. Freeze these semantics
+with the module-local or shared ABI before Stage B. This is retained work, not
+an exemption from the original M08 requirement. Until implemented, report the
+current adapter as lacking a demonstrated reversible-delete operation rather
+than assign it a zero-quality score or a passing tombstone proxy.
