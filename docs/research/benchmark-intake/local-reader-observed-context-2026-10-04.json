@@ -1,0 +1,44 @@
+{
+  "configured_max_output_tokens": 512,
+  "context_shift_enabled": true,
+  "full_context_coverage_verified": false,
+  "input_sha256": "dfd8d31db70a6059a9d7dfc533164875bf09f74f23f9ce2ccb4535b6af4ec083",
+  "log_excerpt": [
+    {
+      "line": 539,
+      "text": "time=2026-10-04T11:26:50.264-07:00 level=INFO source=llama_server.go:436 msg=\"starting llama-server\" cmd=\"/Users/admin/Applications/Ollama.app/Contents/Resources/llama-server --model /Users/admin/.ollama/models/blobs/sha256-a3de86cd1c132c822487ededd47a324c50491393e6565cd14bafa40d0b8e686f --port 51630 --host 127.0.0.1 --no-webui --offline -c 4096 -np 1 --log-verbosity 4 --no-log-prefix --no-log-timestamps --no-jinja --chat-template chatml --flash-attn auto -b 512 -ub 512 --context-shift --keep 4\""
+    },
+    {
+      "line": 713,
+      "text": "llama_context: n_ctx                 = 4096"
+    },
+    {
+      "line": 714,
+      "text": "llama_context: n_ctx_seq             = 4096"
+    },
+    {
+      "line": 725,
+      "text": "llama_context: n_ctx_seq (4096) < n_ctx_train (40960) -- the full capacity of the model will not be utilized"
+    },
+    {
+      "line": 791,
+      "text": "slot   operator(): id  0 | task 0 | new prompt, n_ctx_slot = 4096, n_keep = 4, task.n_tokens = 4035"
+    },
+    {
+      "line": 793,
+      "text": "[GIN] 2026/10/04 - 11:26:53 | 500 |  3.523212917s |       127.0.0.1 | POST     \"/api/chat\""
+    }
+  ],
+  "log_snapshot_bytes": 57807,
+  "log_snapshot_sha256": "d8156a4a1eeaaed8daae06c64ac13b86033dfb08c75e9b666bb4bf1feb252295",
+  "max_output_fits_without_context_shift": false,
+  "new_generation_performed": false,
+  "observed_attempt_start_utc": "2026-10-04T18:26:50.126433+00:00",
+  "observed_attempt_status": "aborted-memory-pressure",
+  "pre_runner_input_truncation_verified": false,
+  "remaining_tokens_before_output": 61,
+  "runner_context_tokens": 4096,
+  "runner_prompt_tokens": 4035,
+  "schema": "mnemosyne.retained-context-observation/v1",
+  "scope": "Historical aborted probe only; not current default or full raw-input token count."
+}
