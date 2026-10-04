@@ -321,7 +321,8 @@ class ActionCLI:
         fired = result.get("intentions") if isinstance(result, Mapping) else None
         if not isinstance(fired, list):
             raise ActionCLIError("intention-evaluate omitted fired intentions")
-        action_ids = sorted({_fired_action_id(intention) for intention in fired})
+        # Preserve multiplicity so the benchmark can reject duplicate firings.
+        action_ids = sorted(_fired_action_id(intention) for intention in fired)
         # Each occurrence fires once; per-step signals are consumed with it.
         state.events = []
         state.conditions = {}
@@ -340,7 +341,7 @@ class ActionCLI:
         candidates = payload.get("candidate_action_ids", [])
         if not isinstance(candidates, list):
             raise ActionCLIError("action.select candidate_action_ids must be a list")
-        selected = sorted(set(candidates) & available)
+        selected = sorted(candidate for candidate in candidates if candidate in available)
         return {"action_ids": selected}
 
 

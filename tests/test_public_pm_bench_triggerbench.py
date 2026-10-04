@@ -802,3 +802,37 @@ def test_action_cli_represents_pm_bench_lifecycle_and_ticks_without_forwarding_r
         "stale_preupdate_action": 0,
         "dependency_violation": 0,
     }
+
+
+def test_action_cli_preserves_duplicate_firings_for_benchmark_rejection(tmp_path, monkeypatch):
+    """The translator must not hide a provider's duplicate execution evidence."""
+    def fake_run(self, command, *args, **kwargs):
+        if command == "capture":
+            return SimpleNamespace(json={"cid": "origin"})
+        if command == "intention-schedule":
+            return SimpleNamespace(json={"intention_id": "scheduled"})
+        if command in {"intention-cancel", "intention-update"}:
+            return SimpleNamespace(json={})
+        if command == "intention-evaluate":
+            return SimpleNamespace(json={"intentions": [
+                {"action": {"ref": "action-0"}},
+                {"action": {"ref": "action-0"}},
+            ]})
+        raise AssertionError(command)
+
+    monkeypatch.setattr(MnemoCLI, "run", fake_run)
+    adapter = ActionCLI(MnemoCLI(store=str(tmp_path / "unused.json")))
+    with pytest.raises(ActionProbeError, match="duplicated action IDs"):
+        run(_load_committed_fixture("pm-bench-development.json"), adapter)
+
+
+def test_action_selection_does_not_deduplicate_candidate_evidence(tmp_path, monkeypatch):
+    monkeypatch.setattr(MnemoCLI, "run", lambda *a, **k: SimpleNamespace(json={"cid": "origin"}))
+    adapter = ActionCLI(MnemoCLI(store=str(tmp_path / "unused.json")))
+    result = adapter.run("action.select", {
+        "store": str(tmp_path / "case.json"), "tenant_id": "t", "session_id": "s",
+    }, {
+        "candidate_action_ids": ["allowed", "excluded", "allowed"],
+        "available_actions": [{"action_id": "allowed"}],
+    })
+    assert result["action_ids"] == ["allowed", "allowed"]

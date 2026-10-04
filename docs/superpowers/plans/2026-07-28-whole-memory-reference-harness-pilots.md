@@ -109,6 +109,13 @@ PR #84 delivered the dependent M15 development slice, as recorded below.
 
 ## M12/M13 delivery checkpoint
 
+2026-10-04 continuation: [action observation integrity regressions](../../../eval/reports/m12-action-observation-integrity-2026-10-04.md)
+repair duplicate suppression in `ActionCLI` and exercise real public-CLI
+recurrence across five seeded four-week timelines, including delayed polls and
+midstream cancellation. This is source/regression evidence, not an expanded
+registered fixture or M12 admission. The lateness/cost, calibrated-baseline,
+idempotent-sink and full benchmark-corpus requirements remain open.
+
 On 2026-07-30, PR #82 merged final candidate
 `a3ca8108c22de350810dc3f574931a0d85810ed5` to
 `main@7e9cd01feb2a31cbba96252943697245a4edd024`. Exact-head CI run
