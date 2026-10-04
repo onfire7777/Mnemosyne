@@ -40,6 +40,16 @@ end-to-end parity remain open. Corpus decontamination, model bakeoffs,
 quantization and physical acceptance remain open. No protected data or learned
 weights were used, and candidate v19 / BurnOS behavior is unchanged.
 
+### TRAIN preparation checkpoint — 2026-10-04
+
+The fixed-pinned raw intake and exact-source row staging now run locally without
+loading a model. 220,744 retained rows and 194,069 spans passed an independent
+raw-parquet audit; 22 malformed Hotpot support references are rejected with
+source hashes. See `eval/reports/compact-train-staging-2026-10-04`. These counts
+are neither benchmark results nor training admission. Entity/document grouping,
+pre/post protected-overlap checks, whole-cluster exclusion, frozen partitions
+and complete attribution custody remain open before any model work.
+
 ## Goal
 
 Build the compact grounded-answering plane — embedder + cross-encoder reranker +

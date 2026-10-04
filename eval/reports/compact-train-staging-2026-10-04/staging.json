@@ -1,0 +1,61 @@
+{
+  "schema": "mnemosyne.compact-train-staging.v1",
+  "sources": [
+    {
+      "repository": "rajpurkar/squad_v2",
+      "revision": "3ffb306f725f7d2ce8394bc1873b24868140c412",
+      "path": "README.md",
+      "sha256": "7a6726352072e8517318959fe0438d4f45880affc041ced6da3bf2e4dec94c68"
+    },
+    {
+      "repository": "rajpurkar/squad_v2",
+      "revision": "3ffb306f725f7d2ce8394bc1873b24868140c412",
+      "path": "squad_v2/train-00000-of-00001.parquet",
+      "sha256": "f6da32ffb482ff463ad056477740d1bb284b96a45db3a08bee6a225ca6abf291"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "path": "README.md",
+      "sha256": "3cfab003a856275d3198b031c6b2ac46c63178fb462a4123705f652b71b22813"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "path": "distractor/train-00000-of-00002.parquet",
+      "sha256": "76d3bb3048a7cc73c1958107c0c5872a00d7e7d00c105b81e92f6769e7822e68"
+    },
+    {
+      "repository": "hotpotqa/hotpot_qa",
+      "revision": "1908d6afbbead072334abe2965f91bd2709910ab",
+      "path": "distractor/train-00001-of-00002.parquet",
+      "sha256": "713661628434fbb19fff7392e2e321e4ed107e3c7c7784d0690946e5f722763f"
+    }
+  ],
+  "transform_sha256": "69dd5810f9fb4585da3797c1d96aba9b55b543b14b7a5706b9a9eaa675cd78b0",
+  "normalizer": "nfkc-casefold-whitespace-v1",
+  "pyarrow": "23.0.1",
+  "counts": {
+    "squad/input": 130319,
+    "squad/span": 86821,
+    "squad/null": 43498,
+    "hotpot/input": 90447,
+    "hotpot/span": 84910,
+    "hotpot/ranking-only": 5515,
+    "hotpot/rejected": 22
+  },
+  "files": {
+    "rows.jsonl": {
+      "sha256": "45d68704c5ca60491c735e1ea4ad33cf016e98622395750f88aaee6f8e3e0baf",
+      "bytes": 1485442547
+    },
+    "rejected.jsonl": {
+      "sha256": "33eaa02cc19ab8dfe9b92ccdd4a90086bb687f732237e5dd2fadab89463c7142",
+      "bytes": 7876
+    }
+  },
+  "training_admitted": false,
+  "overlap_verdict": "unchecked",
+  "partition_status": "unassigned",
+  "entity_clustering": "not-performed"
+}

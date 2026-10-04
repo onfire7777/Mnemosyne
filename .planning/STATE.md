@@ -18,6 +18,14 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+Exact-source TRAIN staging at `19b9e0b9` processed 220,766 upstream rows:
+220,744 retained, 22 rejected for invalid Hotpot support indices. The independent
+raw-source audit checked every retained row and 194,069 exact spans. Evidence:
+`eval/reports/compact-train-staging-2026-10-04`. This advances row provenance and
+span validation only; all records remain quarantined with unchecked overlap.
+Next: document/entity clusters, pre/post protected-overlap policy and matcher,
+cluster-wide exclusions and frozen grouped TRAIN-derived partitions.
+
 Authorized TRAIN intake now retains five hash-verified raw assets (348,175,076
 bytes), outside Git. `eval/reports/compact-train-intake-2026-10-04` records exact
 pins, independent rehashing and an original receipt source-identity defect fixed
