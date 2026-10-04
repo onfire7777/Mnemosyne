@@ -33,7 +33,55 @@ Category 5's source-answer distractor belongs only in the registered question
 transformation, never in ingested memory. Category-specific scoring remains
 the pinned scorer, with missing predictions and recall applicability explicit.
 
-## Remaining implementation sequence
+## Current integration audit — source `5f95fdb9`
+
+This table supersedes the original sequence's prospective descriptions below;
+it does not close W4 or any measured acceptance requirement.
+
+| Original step | Current implementation evidence | Remaining acceptance work |
+|---|---|---|
+| 1. Freeze track/configuration | Native replay identifies its separate scoring policy, upstream revision, dependency pins, eight replay-source hashes, caption policy and explicit category-5 choices. | Bind a registered SUT candidate, actual model/provider/runtime manifests, declared resource/context budget and option-order generation policy. The replay policy alone is not this run configuration. |
+| 2. Native public adapter | `iter_native_answers` validates the population first, captures one isolated conversation at a time, invokes public read-only answers, retains command options and cleans stores. Public capture tests exercise actual subprocesses. | Full admitted population under the registered runtime and resource envelope; signed attempt persistence. |
+| 3. Response conversion | Raw outputs, missing reader execution, explicit abstention, category-5 decoding, citations, spans, answer rendering and opt-in synthesis derivations are retained/validated. The independent derivation checker does not call the product synthesizer. | Match reader disclosures to the registered model/prompt/runtime policy. A mathematically correct derivation or matching disclosure is not proof of provider execution. |
+| 4. Neutral bundle/replay | Full-population offline scoring and exact saved-report replay work across the production and pinned scorer interpreters; missing questions and absent categories remain visible. | Connect these components to the existing bundle inventory, configuration anchors, result schema and verifier without changing generic QA semantics. |
+| 5. Registry/scoring dispatch | No real LoCoMo registry entry or runnable official suite has been added. | Dedicated native scoring profile plus coordinated runner/verifier dispatch; resolve dataset rights/admission before real data enters the registry. |
+| 6. Model/resource preflight | Two retained synthetic reader probes stopped at warning memory pressure; the latest receipt is linked in project state. | Required-setting feasibility and complete context coverage, then the original scale gate. Tokenizer/scorer success does not discharge this requirement. |
+| 7. Registered run/public evidence | No real LoCoMo run or ranking is claimed. | Pre-execution registration, retained attempts, full execution, reproducible bundle and accurate website presentation. |
+
+### Exact bundle integration boundaries
+
+The current `eval/public/bundle.py` has two separate verification contracts:
+
+- `verify_bundle` uses `_REGISTERED_SCORING_PROFILES`, `_scoring_labels` and the
+  canonical registry anchor. Generic traces normally require one metric total
+  per trace; native missing answers require the full source denominator instead.
+  Do not add LoCoMo to `qa-em-f1-v1` or turn missing predictions into blank
+  successful outputs to satisfy that counter.
+- Its reproducibility-v1 branch calls `_bound_repro_scoring_profile` and
+  `_recompute_repro_metrics`, which currently admit only `smoke-hit-at-k-v1` and
+  a single Wilson hit-at-k metric. A valid native report is not yet a valid
+  reproducibility-v1 bundle. Its multiple category scores and native evidence
+  recall need dedicated metric projection and recomputation together.
+- `reproduce_bundle` currently re-executes `run_public_suite` and compares files.
+  Offline score replay is a different operation: retain that distinction rather
+  than copying saved responses and calling it another model execution.
+- `run_public_suite` gates candidate/runtime manifests and attempt claiming on
+  the QA family. A new native family must preserve those gates explicitly;
+  adding only a family/profile name would otherwise bypass them. Reuse the
+  candidate/runtime verification code where its invariants apply, while keeping
+  native preprocessing and per-category scoring distinct.
+
+Next implementation order: define the dedicated native run configuration and
+reader-policy binding; add coordinated bundle/result metric projection and
+verification using the existing isolated replay worker; then add gated runner
+and registry dispatch. The production interpreter must validate registry,
+candidate, runtime and artifact custody before invoking the minimal scorer
+worker. The worker verifies source/records/report consistency, not rights,
+model execution, signatures or publication. Acceptance tests must cover altered
+source/config/model identity, missing answers, both category-5 orders, synthesis,
+wrong-category metrics, missing runtime custody and failed/partial attempts.
+
+## Original implementation sequence (scope retained)
 
 1. Freeze the selected track and its versioned configuration schema. Include
    source/normalized-input hashes, caption policy, all model and tokenizer pins,
