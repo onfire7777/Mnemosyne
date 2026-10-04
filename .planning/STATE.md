@@ -18,6 +18,13 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+A real Qwen3 1.7B dependency attempt from `1fbaa7de` is retained: one case
+completed, the second failed on keyed task rebinding, and 98 were not attempted.
+Four responses are retained. The completed case failed final state comparison
+and missed one expected firing. Normal sampled pressure and cleanup are recorded;
+this is not full-corpus completion or host infeasibility. Capture hash and partial
+diagnostic recomputation checks pass. No acceptance counters changed.
+
 Dependency saved-trace verification now reconstructs the full frozen protocol,
 state/timing reports and inert sink rows without invoking provider or public CLI.
 Both protocols share a bounded interpreter with explicit protocol functions.
