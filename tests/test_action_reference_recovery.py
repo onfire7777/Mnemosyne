@@ -51,3 +51,16 @@ def test_reference_recovery_requires_distinct_identity_and_sink(tmp_path):
     path.write_text(json.dumps(source))
     with pytest.raises(ValueError, match='identity and sink'):
         recovery.recompute(output)
+
+
+def test_retained_committed_reference_recovery_capture_replays():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / 'eval/reports/m12-reference-recovery-development-2026-10-04'
+    result = recovery.recompute(root)
+    cases = result['workload']['cases']
+    assert sum(c['injected_response_losses'] for c in cases) == 50
+    assert sum(c['adapter_resets'] for c in cases) == 50
+    assert sum(c['report']['metrics']['true_positives'] for c in cases) == 10
+    assert all(c['report']['metrics']['false_positives'] == c['report']['metrics']['false_negatives'] == 0 for c in cases)
+    assert result['baseline_admitted'] is result['publishable'] is False
