@@ -18,6 +18,12 @@ progress:
 
 ## Current local integration checkpoint — 2026-10-04
 
+The 100-case dependency extension now has a complete bounded-provider runner
+retaining public inputs, source identity, partial failures, state/timing reports
+and inert receipts. Four runner checks passed, including a scripted command
+provider through actual public dependency creation and firing. This is pipeline
+conformance only. Saved-trace replay and real-model full-corpus execution remain.
+
 Dependency cases now have public-only timed observation, durable inert receipts
 and evaluator-only timing diagnostics. All five scenario integration tests use
 explicit golden setup, not model formation. Twenty-three dependency checks pass,
