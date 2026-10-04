@@ -12,6 +12,42 @@ from eval.public.custody import capture_cid
 from .locomo import LoCoMoError, decode_upstream_category5, normalize_dialogs, prepare_upstream_question
 
 
+def answer_captured_question(conversation: dict, question: dict, annotation: dict, *,
+                             choice_draw: float | None = None) -> dict:
+    """Invoke the public ephemeral answer path and retain exact request custody.
+
+    The caller owns dataset/run admission and provider/resource configuration.
+    CLI exceptions propagate to that caller's attempt ledger; they are never
+    converted to successful abstention. This function does not admit a run.
+    """
+    if (question.get("sample_id") != conversation["sample_id"]
+            or not isinstance(question.get("question_id"), str) or not question["question_id"]
+            or question.get("query") != annotation.get("question")):
+        raise LoCoMoError("native question does not match its conversation and annotation")
+    prepared = prepare_upstream_question(annotation, choice_draw=choice_draw)
+    cli = conversation["cli"]
+    if not isinstance(cli, MnemoCLI) or not Path(cli.store).is_file():
+        raise LoCoMoError("native question requires a live captured store")
+    request = {"question_id": question["question_id"], "question": prepared["query"],
+               "context": {"tenant_id": conversation["tenant_id"], "user_id": "locomo", "role": "reader"}}
+    raw_request = json.dumps(request, sort_keys=True, ensure_ascii=False, separators=(",", ":")) + "\n"
+    read_only = replace(cli, global_flags=[*cli.global_flags, "--evaluation-read-only"])
+    with TemporaryDirectory(prefix="mneme-locomo-question-") as directory:
+        path = Path(directory) / "request.jsonl"
+        path.write_text(raw_request, encoding="utf-8")
+        payload = read_only.eval_answer_batch(path)
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if (not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], dict)
+            or results[0].get("question_id") != question["question_id"]):
+        raise LoCoMoError("native answer result does not match requested question")
+    projection = project_native_response(results[0], annotation, conversation["evidence"],
+                                         choice_draw=choice_draw)
+    return {**projection, "question_id": question["question_id"],
+            "request": request, "request_jsonl": raw_request,
+            "request_sha256": sha256(raw_request.encode()).hexdigest(),
+            "raw_batch_response": deepcopy(payload)}
+
+
 def project_native_response(response: dict, annotation: dict, evidence: dict, *,
                             choice_draw: float | None = None) -> dict:
     """Project a public response without treating execution failure as abstention.
