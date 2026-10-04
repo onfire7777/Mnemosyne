@@ -412,3 +412,7 @@ Implemented separate conversation, query and annotation lanes with stable per-sa
 ## LoCoMo replayable question components
 
 Implemented caller-recorded category-5 choice draws and option mappings, the category-2 date instruction, and a raw-preserving upstream category-5 decoder. All 34 focused tests passed. Verified source hash and isolated-function parity matched on 209 synthetic decoder cases, without importing upstream model code or inspecting held-out data. Ruff passed. These components do not claim complete scorer, prompt or runnable-suite parity.
+
+## LoCoMo per-case scoring parity
+
+Implemented the category-specific scorer in an isolated optional evaluation environment, preserving upstream normalization, stemming, category rules and rounding. Missing context/evidence now retains upstream fallback recall separately from a null measured-recall field. All 52 ingestion/scoring tests executed and passed; 2,000 synthetic cases matched the hash-verified upstream pure scoring functions exactly. No held-out data or model was run. Production dependencies and BurnOS contracts are unchanged. Full adapter, aggregate reporting, asset admission and actual evaluation remain open.

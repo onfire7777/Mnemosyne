@@ -142,3 +142,47 @@ reviewed pure `get_cat_5_answer` function, and compared 209 synthetic inputs; al
 matched. No module imports, model calls or dataset examples were executed by
 that parity check. The receipt is retained locally as `locomo-decoder-parity.json`.
 Full scoring parity, resource preflight and suite admission remain unverified.
+
+## Per-case scorer and measured-recall distinction
+
+`eval/public/adapters/locomo_scoring.py::score_case` implements category-specific
+upstream token normalization, Porter stemming, multi-answer matching, category-3
+reference truncation, adversarial phrase scoring and three-decimal reporting.
+It requires the exact versions in `eval/public/requirements-locomo.txt`; these
+are isolated evaluation dependencies, not additions to the production package.
+The verified local environment uses Python 3.11.16; Mnemosyne itself continues
+to require Python >=3.12 and is not installed into this scorer environment.
+No NLTK data download, model weight or upstream generation package is required.
+
+The return value retains unrounded score, rounded upstream score, upstream
+recall and rounded upstream recall. `measured_recall` is null and
+`recall_applicable` false when the upstream value came from absent context or
+empty evidence. A supplied empty context with nonempty evidence is rejected
+because upstream would index its nonexistent first element. Category-level
+aggregation must preserve its separately reviewed denominators; this function
+does not yet perform aggregate reporting or claim full suite parity.
+
+Validation: 52 tests across ingestion and scoring passed in the isolated
+environment (34 ingestion/transformation plus 18 scoring tests). Those new
+scoring tests explicitly require the pinned optional environment and skip in
+a default environment without it; the 52-pass result is from their actual
+execution, not a skip-only default run. Ruff and diff checks passed.
+
+A local parity run verified the original `evaluation.py` SHA-256, extracted
+only its reviewed normalization/F1/QA functions, and compared 2,000 synthetic
+cases across all categories, punctuation/stems, empty strings, adversarial
+responses, absent contexts, dialog IDs and session IDs. Scores, upstream recall
+and reported rounding matched exactly. `locomo-scorer-parity.json` retains the
+source hash, Python version and all installed dependency versions. This verifies
+these functions on that population, not an upstream model run or held-out score.
+
+To execute the focused tests after creating a separate Python 3.11 environment:
+
+```sh
+uv pip install --python /path/to/scorer/bin/python -r eval/public/requirements-locomo.txt pytest==9.1.1
+/path/to/scorer/bin/python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py -q
+```
+
+Remaining: source-complete prompt/retrieval contract, aggregate reporting,
+pinned dataset admission, adapter/runner/bundle integration, permitted runtime
+and resource preflight, then registered actual evaluation and reproduction.
