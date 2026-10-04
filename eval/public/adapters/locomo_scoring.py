@@ -171,7 +171,8 @@ def score_prediction_set(samples: list[dict], predictions: list[dict]) -> dict:
 
 
 def replay_native_population(samples: list[dict], records: list[dict], *,
-                             caption_policy: str, choice_draws: dict[str, float], reader_policy: dict | None = None) -> dict:
+                             caption_policy: str, choice_draws: dict[str, float] | None = None,
+                             reader_policy: dict | None = None, choice_seed: int | None = None) -> dict:
     """Verify native records and report every source question without ranking.
 
     QA scoring retains the pinned category scorer. Native evidence recall is
@@ -181,7 +182,7 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
     """
     from hashlib import sha256
     import json
-    from .locomo import prepare_upstream_question, split_samples
+    from .locomo import native_choice_policy, split_samples
     from .locomo_native import _prepare_native_replay, _verify_prepared_native_record
 
     _runtime()
@@ -195,11 +196,8 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
     annotations = {row["question_id"]: row for row in source["annotations"]}
     contexts = {row["sample_id"]: _prepare_native_replay(row, caption_policy=caption_policy)
                 for row in samples}
-    required_draws = {qid for qid, row in annotations.items() if row["annotation"]["category"] == 5}
-    if not isinstance(choice_draws, dict) or set(choice_draws) != required_draws:
-        raise LoCoMoError("native replay requires exactly the category-5 choice draws")
-    for qid in required_draws:
-        prepare_upstream_question(annotations[qid]["annotation"], choice_draw=choice_draws[qid])
+    choice_policy = native_choice_policy(samples, choice_draws=choice_draws, choice_seed=choice_seed)
+    choice_draws = choice_policy["draws"]
     if not isinstance(records, list):
         raise LoCoMoError("native replay records must be a list")
     verified = {}
@@ -253,6 +251,7 @@ def replay_native_population(samples: list[dict], records: list[dict], *,
             "absent_categories": absent_categories,
             "source_sha256": digest(samples), "records_sha256": digest(sorted(records, key=lambda r: r["question_id"])),
             "caption_policy": caption_policy, "choice_draws": dict(choice_draws),
+            "choice_policy": choice_policy,
             "publication_authorized": False, "runtime_custody_verified": False,
             "scope": "native-memory structural replay; not an unchanged upstream run"}
 
