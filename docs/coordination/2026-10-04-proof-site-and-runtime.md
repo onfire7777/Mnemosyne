@@ -246,3 +246,18 @@ benchmark catalog were verified. At a 390px viewport both pages had 390px
 document width, with the 24 rows and 20 module cards present. The temporary
 viewport override was reset. The local screenshot is retained as
 `whole-memory-coverage-preview.png` in the ignored completion evidence directory.
+
+## Projection shape enforcement
+
+The runtime projection validator now enforces the already published closed
+projection-v1 field contract: identifiers, filter object, exclusion strings,
+finite numeric numerator/denominator, integer outcome counts, boolean safety
+visibility and the closed optional weighting object. Previously 21 malformed
+cases passed runtime validation despite violating the declared shape. All 21
+regressions failed before the change and now pass; 274 contract, renderer,
+publication and policy checks passed together, with Ruff and diff checks clean.
+
+This is shape enforcement, not proof that a declared numerator, denominator or
+uncertainty calculation is scientifically valid. No result schema, scorer,
+BurnOS interface or public benchmark result changed. Dataset/model/resource
+comparison metadata and reproducible grouping remain the next platform work.
