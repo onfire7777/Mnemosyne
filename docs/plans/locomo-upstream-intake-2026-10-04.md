@@ -1,6 +1,10 @@
 # LoCoMo adapter intake — pinned source review
 
-Status: initial source review and ingestion boundary implemented; full protocol parity, runnable adapter, dataset admission and measurement remain open.
+Status: source review, label separation, dialog normalization, question transformation,
+per-case scoring and category replay reporting implemented and tested with synthetic
+inputs. Full protocol parity, runnable adapter, dataset admission and measurement
+remain open. Sections below retain the evidence at each implementation stage;
+later sections supersede earlier descriptions of missing component work.
 Parent: [W4 neutral benchmark suite](../superpowers/plans/2026-07-15-W4-neutral-adapter-suite-plan.md).
 
 ## Source custody
@@ -37,8 +41,8 @@ generic exact-match score and not an LLM judge:
 - Normalization removes punctuation and the words `a`, `an`, `the`, `and`.
   A substitute generic QA normalizer would change the protocol.
 - The runner rounds per-case QA scores to three decimals before its statistics
-  step. The statistics implementation still needs review before selecting an
-  aggregate or claiming exact parity.
+  step. The subsequent statistics review and category replay implementation are
+  documented below; full end-to-end protocol parity remains unproven.
 - Retrieval recall has separate session-ID and dialog-ID paths. Critically,
   the scorer supplies recall 1 when context/evidence is absent. Such fallback
   values must not be represented as observed successful retrieval. Preserve
@@ -183,7 +187,7 @@ uv pip install --python /path/to/scorer/bin/python --require-hashes -r eval/publ
 /path/to/scorer/bin/python -m pytest tests/test_locomo_scoring.py tests/test_locomo_ingestion.py -q
 ```
 
-Remaining: source-complete prompt/retrieval contract, aggregate reporting,
+Remaining after the per-case stage: source-complete prompt/retrieval contract, aggregate reporting,
 pinned dataset admission, adapter/runner/bundle integration, permitted runtime
 and resource preflight, then registered actual evaluation and reproduction.
 
@@ -252,3 +256,32 @@ the pinned test runner; `requirements-locomo-test.lock` pins all resolved
 transitive dependencies with hashes. Local verification reinstalled that lock,
 passed the runtime preflight and executed all 59 tests successfully. The new
 GitHub job still requires its own successful run after this batch is pushed.
+
+## Structured dialog normalization
+
+`normalize_dialogs` produces a separate, label-free record population with stable
+sample/session/dialog identity, original turn order and verbatim source timestamps.
+Sessions are ordered numerically rather than lexicographically. Duplicate dialog
+IDs within a conversation, malformed/orphan session keys, absent dates and invalid
+turn fields fail closed. The same source dialog ID in separate conversations is
+valid and produces distinct record IDs. Sparse session numbers are preserved;
+no missing conversation is manufactured.
+
+The caller must explicitly choose `include-source-caption` or `exclude-caption`.
+Included captions remain identified as source caption text; image URLs are never
+fetched or treated as evaluated image content. Only the declared dialog fields
+enter these records: source QA annotations, generated observations/summaries and
+arbitrary extra dialog fields are excluded. Source timestamps are not parsed,
+rewritten into an assumed timezone or represented as an advancing virtual clock.
+
+This is a structured ingestion component, not the upstream prompt renderer,
+tokenization/truncation policy, retrieval encoder or a registered adapter. Record
+identity remains stable across caption policies; a future run must bind the actual
+record bytes and caption policy in its immutable preprocessing configuration.
+The original dataset rights/admission gate is unchanged.
+
+Validation: 73 ingestion/scoring tests passed in the isolated pinned scorer
+environment, including numerical session ordering, stable scoped identity, caption
+policy, label/URL exclusion, input immutability and malformed-input rejection.
+Ruff passed. The existing focused CI job includes these tests, but remote validation
+of this unpushed batch remains pending.

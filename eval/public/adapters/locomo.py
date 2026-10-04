@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 import json
+import re
 
 UPSTREAM_REVISION = "3eb6f2c585f5e1699204e3c3bdf7adc5c28cb376"
 INPUT_SCHEMA = "mnemosyne.locomo-input/v1"
@@ -11,6 +12,67 @@ INPUT_SCHEMA = "mnemosyne.locomo-input/v1"
 
 class LoCoMoError(ValueError):
     """A source sample cannot be separated into unambiguous inputs and labels."""
+
+
+def normalize_dialogs(samples: object, *, caption_policy: str) -> dict:
+    """Build label-free dialog records; not an upstream prompt or admitted run.
+
+    Source timestamps remain verbatim: interpreting them or advancing a clock
+    belongs to the registered adapter. Only an explicit caption policy controls
+    whether supplied BLIP text enters memory. Image URLs are never fetched.
+    """
+    if caption_policy not in ("include-source-caption", "exclude-caption"):
+        raise LoCoMoError("an explicit supported caption_policy is required")
+    separated = split_samples(samples)
+    records = []
+    for entry in separated["conversations"]:
+        sample_id, conversation = entry["sample_id"], entry["conversation"]
+        if any(not isinstance(key, str) for key in conversation):
+            raise LoCoMoError("conversation keys must be strings")
+        sessions = sorted(int(key[8:]) for key in conversation
+                          if re.fullmatch(r"session_[1-9][0-9]*", key))
+        if not sessions:
+            raise LoCoMoError("conversation has no numbered sessions")
+        valid_session_keys = {f"session_{number}{suffix}" for number in sessions
+                              for suffix in ("", "_date_time")}
+        if any(key.startswith("session_") and key not in valid_session_keys
+               for key in conversation):
+            raise LoCoMoError("malformed session key or orphan timestamp")
+        seen_dialogs = set()
+        for number in sessions:
+            session_id = f"session_{number}"
+            timestamp = conversation.get(session_id + "_date_time")
+            dialogs = conversation[session_id]
+            if not isinstance(timestamp, str) or not timestamp.strip():
+                raise LoCoMoError("session requires a source timestamp")
+            if not isinstance(dialogs, list) or not dialogs:
+                raise LoCoMoError("session requires a non-empty dialog list")
+            for position, dialog in enumerate(dialogs):
+                if not isinstance(dialog, dict):
+                    raise LoCoMoError("dialog must be an object")
+                for field in ("dia_id", "speaker", "text"):
+                    if not isinstance(dialog.get(field), str) or not dialog[field].strip():
+                        raise LoCoMoError(f"dialog requires non-empty {field}")
+                dialog_id = dialog["dia_id"]
+                if dialog_id in seen_dialogs:
+                    raise LoCoMoError("duplicate dialog ID within conversation")
+                seen_dialogs.add(dialog_id)
+                caption = dialog.get("blip_caption")
+                if "blip_caption" in dialog and not isinstance(caption, str):
+                    raise LoCoMoError("source caption must be a string")
+                identity = json.dumps([sample_id, session_id, dialog_id],
+                                      ensure_ascii=True, separators=(",", ":"))
+                records.append({
+                    "record_id": "locomo-dialog:" + sha256(identity.encode()).hexdigest(),
+                    "sample_id": sample_id, "session_id": session_id,
+                    "dialog_id": dialog_id, "position": position,
+                    "source_timestamp": timestamp, "speaker": dialog["speaker"],
+                    "text": dialog["text"],
+                    "caption": caption if caption_policy == "include-source-caption" else None,
+                })
+    return {"schema_version": "mnemosyne.locomo-dialogs/v1",
+            "upstream_revision": UPSTREAM_REVISION, "caption_policy": caption_policy,
+            "records": records}
 
 
 def split_samples(samples: object) -> dict:

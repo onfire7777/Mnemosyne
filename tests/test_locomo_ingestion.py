@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from eval.public.adapters.locomo import LoCoMoError, split_samples
+from eval.public.adapters.locomo import LoCoMoError, normalize_dialogs, split_samples
 
 
 def sample(sample_id="synthetic"):
@@ -15,6 +15,68 @@ def sample(sample_id="synthetic"):
             "qa": [{"question": "Synthetic question?", "category": c, "answer": "SCORER_SECRET",
                     "evidence": ["(D1:1)"] if c != 5 else [], "extra_annotation": "KEEP_LABEL"}
                    for c in range(1, 6)]}
+
+
+def test_dialog_normalization_preserves_order_dates_and_label_boundary():
+    source = sample()
+    conversation = source["conversation"]
+    conversation["session_10"] = [{"dia_id": "D10:1", "speaker": "B", "text": "Later."}]
+    conversation["session_10_date_time"] = "another source date"
+    conversation["session_2"] = [{"dia_id": "D2:1", "speaker": "A", "text": "Middle."}]
+    conversation["session_2_date_time"] = "middle source date"
+    dialog = conversation["session_1"][0]
+    dialog.update(blip_caption="Synthetic caption", img_url="https://invalid.example/image",
+                  answer="DIALOG_LABEL_SECRET", evidence="EVIDENCE_SECRET")
+    before = deepcopy(source)
+    included = normalize_dialogs([source], caption_policy="include-source-caption")
+    assert [r["session_id"] for r in included["records"]] == ["session_1", "session_2", "session_10"]
+    assert [r["source_timestamp"] for r in included["records"]] == [
+        "test date", "middle source date", "another source date"]
+    assert included["records"][0]["caption"] == "Synthetic caption"
+    serialized = json.dumps(included)
+    for hidden in ("SCORER_SECRET", "DIALOG_LABEL_SECRET", "EVIDENCE_SECRET", "invalid.example",
+                   "GENERATED_NOT_INPUT", "SUMMARY_NOT_INPUT"):
+        assert hidden not in serialized
+    excluded = normalize_dialogs([source], caption_policy="exclude-caption")
+    assert all(row["caption"] is None for row in excluded["records"])
+    assert [r["record_id"] for r in included["records"]] == [r["record_id"] for r in excluded["records"]]
+    assert included == normalize_dialogs([source], caption_policy="include-source-caption")
+    assert source == before
+
+
+def test_dialog_ids_are_conversation_scoped_and_turn_order_is_preserved():
+    first, second = sample("first"), sample("second")
+    first["conversation"]["session_1"].append({"dia_id": "D1:2", "speaker": "B", "text": "Reply."})
+    rows = normalize_dialogs([first, second], caption_policy="exclude-caption")["records"]
+    assert [r["position"] for r in rows] == [0, 1, 0]
+    assert len({r["record_id"] for r in rows}) == 3
+    first["conversation"]["session_1"].append(deepcopy(first["conversation"]["session_1"][0]))
+    with pytest.raises(LoCoMoError, match="duplicate dialog"):
+        normalize_dialogs([first], caption_policy="exclude-caption")
+
+
+@pytest.mark.parametrize("key,value", [
+    ("session_1", []), ("session_1", [None]), ("session_1_date_time", None),
+    ("session_1_date_time", ""), ("session_01", []), ("session_2_date_time", "orphan"), (1, "bad key"),
+])
+def test_dialog_normalization_rejects_ambiguous_sessions(key, value):
+    source = sample()
+    source["conversation"][key] = value
+    with pytest.raises(LoCoMoError):
+        normalize_dialogs([source], caption_policy="exclude-caption")
+
+
+@pytest.mark.parametrize("key,value", [("dia_id", ""), ("speaker", None), ("text", " "), ("blip_caption", [])])
+def test_dialog_normalization_rejects_bad_turns(key, value):
+    source = sample()
+    source["conversation"]["session_1"][0][key] = value
+    with pytest.raises(LoCoMoError):
+        normalize_dialogs([source], caption_policy="exclude-caption")
+
+
+def test_dialog_normalization_requires_explicit_caption_policy():
+    with pytest.raises(LoCoMoError, match="caption_policy"):
+        normalize_dialogs([sample()], caption_policy="automatic")
 
 
 def test_separates_inputs_without_rewriting_or_dropping_source_annotations():
