@@ -125,3 +125,26 @@ its final state. Creation and mutation idempotency namespaces are separate.
 These in-memory receipts are a prerequisite for reference recovery, not durable
 recovery evidence. Recurrence-policy mutations and non-exact rescheduling remain
 explicitly unsupported by this draft. Existing reference captures still replay.
+
+## Durable draft reference journal
+
+`DurableActionReference` in `eval/public/action_reference_store.py` binds a
+request journal to run/case/tenant/session identity in a separate SQLite database.
+Each call obtains a write transaction, validates and replays the existing scoped
+journal, applies the new request and commits its request/response record before
+acknowledging it. A fresh process reconstructs mutation receipts and terminal
+state without relying on the previous Python object. Concurrent calls serialize.
+
+Every record is size-bounded, journals have a per-scope count bound, and an ordered
+hash chain binds request/response bytes to their scope. Replayed responses must
+match exactly. Failed commands roll back and add no row. Database application
+identity/version checks reject unrelated stores. These are accidental corruption
+and semantic-drift checks, not signatures or defenses against a malicious writer
+who can replace the database and recompute every hash.
+
+Tests cover fresh-process recovery, deliberately discarded mutation responses,
+concurrent creation/evaluation, scope separation, moved/modified rows, failed
+command rollback and unchanged foreign databases. This does not yet constitute
+the full registered recovery workload or arbitrary power-loss certification.
+Replaying the bounded journal on every call favors auditability over throughput;
+it is reference infrastructure, not a proposed production storage replacement.
