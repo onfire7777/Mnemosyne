@@ -149,3 +149,21 @@ def test_retained_full_capture_hashes_and_stricter_timing_validation():
         assert pressure.score_case(case, rows) == saved
     assert sum(row['full_workload_metrics']['false_negatives'] for row in expected['cases']) == 113
     assert all(row['exact_drain_recovered'] for row in expected['cases'])
+
+
+@pytest.mark.parametrize('transport', ['cli','mcp-stdio'])
+def test_service_profile_preserves_workload_and_replays(tmp_path,monkeypatch,transport):
+    plan = pressure.make_service_plan()
+    original = pressure.make_plan()
+    assert plan['cases']==original['cases']
+    assert plan['max_ticks']==4096 and plan['schema']!='m12-clocked-pressure/v1'
+    plan['cases']=plan['cases'][:1]
+    case=plan['cases'][0]
+    keep={row['action_id'] for row in case['expected'][:2]}
+    case['expected']=[r for r in case['expected'] if r['action_id'] in keep]
+    case['setup']=[op for op in case['setup'] if op['payload'].get('task_id') in keep or op['command']=='clock.inject']
+    monkeypatch.setattr(pressure,'make_service_plan',lambda:deepcopy(plan))
+    output=tmp_path/transport
+    result=pressure.run_development(output,transport=transport)
+    assert pressure.recompute(output)==result
+    assert result['cases'][0]['exact_drain_recovered'] is True

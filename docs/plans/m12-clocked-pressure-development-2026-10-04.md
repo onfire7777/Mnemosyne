@@ -86,3 +86,27 @@ Next work is an identical workload through a long-lived authenticated public
 service, to separate CLI process startup from native evaluation behavior. The
 current result is not native saturation, a complete overload acceptance gate,
 a calibrated deadline requirement or a competitor comparison.
+
+## Paired persistent-service profile
+
+The `m12-clocked-pressure/v2` profile keeps every offered intention, cancellation,
+release interval, window width and drain horizon unchanged. Both CLI and MCP
+stdio use a 4096-evaluation safety ceiling instead of v1's 64, so faster service
+is not aborted solely because it can poll more often. The ten-second dispatch
+limit and ten-second per-command timeout remain. V1 inputs and historical
+measurements are preserved; v2 results require a fresh run of both transports.
+
+`python -m eval.public.action_pressure OUTPUT --transport cli` or
+`--transport mcp-stdio` selects v2. The persistent path uses a separate production
+MCP process per isolated store, reusing the same signed-session symbolic action
+adapter. Only the command subset is translated into public tool requests; no
+engine APIs are imported by the adapter. The existing bounded child transport
+handles response limits/timeouts. Each case's child is closed before the next,
+and cleanup also closes children on failure. Object storage remains within the
+monitored case directory. This is MCP stdio, not an HTTP measurement.
+
+Source receipts identify the transport and bind both transport implementation
+files. Replay retains the same ordered inputs, full-workload denominator and
+sink database checks. Translation, authentication, persistence, cleanup and both
+profile paths have live integration checks. Full paired measurements are the
+next step; transport source alone proves no latency improvement or admission.
