@@ -55,3 +55,15 @@ def test_undefined_rates_stay_undefined_and_difference_is_signed():
     assert result['metrics']['false_positives']['difference'] == 2
     assert result['metrics']['precision']['difference'] < 0
     assert result['metrics']['recall']['difference'] is None
+
+
+@pytest.mark.parametrize('name,candidate', [
+    ('explicit', 'm12-trigger-sink-development-2026-10-04'),
+    ('fanout', 'm12-fanout-sink-development-2026-10-04'),
+])
+def test_retained_paired_reports_reproduce_exact_bytes(name, candidate):
+    from eval.public.bundle import _canonical
+
+    result = action_comparison.compare(REPORTS / candidate,
+                                       REPORTS / f'm12-reference-{name}-development-2026-10-04')
+    assert _canonical(result) == (REPORTS / 'm12-paired-development-2026-10-04' / f'{name}.json').read_bytes()
