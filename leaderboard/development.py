@@ -10,6 +10,10 @@ from pathlib import Path, PurePosixPath
 import zipfile
 
 CAPTURES = (
+    ('m12-transport-pressure-2026-10-04', 'Same workload, different transport', 'Completed paired development workload',
+     'Persistent MCP stdio: 320/320 correct firings. CLI: 200/320, with 120 missed short windows. '
+     'Both recovered every exact-time intention; no duplicate or cancelled firings. '
+     'Programmed triggers only: this does not measure natural-language memory quality or competitor performance.'),
     ('m12-clocked-pressure-2026-10-04', 'Clocked trigger pressure', 'Completed development workload',
      'Five seeds, 320 live intentions: 207 fired correctly and 113 short-window triggers were missed. '
      'All 160 exact-time intentions recovered; no duplicate or cancelled firings. '

@@ -167,3 +167,26 @@ def test_service_profile_preserves_workload_and_replays(tmp_path,monkeypatch,tra
     result=pressure.run_development(output,transport=transport)
     assert pressure.recompute(output)==result
     assert result['cases'][0]['exact_drain_recovered'] is True
+
+
+def test_retained_paired_transport_evidence_replays_and_preserves_failures():
+    import hashlib
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]/'eval/reports/m12-transport-pressure-2026-10-04'
+    manifest = json.loads((root/'manifest.json').read_text())
+    for relative, digest in manifest['files'].items():
+        assert hashlib.sha256((root/relative).read_bytes()).hexdigest() == digest
+    summary = json.loads((root/'comparison.json').read_text())
+    assert summary['ranking_eligible'] is False
+    plans = []
+    for transport, expected_missed in [('cli', 120), ('mcp-stdio', 0)]:
+        output = root/transport/'workload'
+        plans.append(json.loads((output/'plan.json').read_text()))
+        report = pressure.recompute(output)
+        assert report == json.loads((output/'reports.json').read_text())
+        missed = sum(c['full_workload_metrics']['false_negatives'] for c in report['cases'])
+        assert missed == expected_missed == summary['transports'][transport]['missed_triggers']
+        assert all(c['exact_drain_recovered'] for c in report['cases'])
+        assert all(c['full_workload_metrics']['false_positives'] == 0 for c in report['cases'])
+    assert plans[0] == plans[1] == pressure.make_service_plan()

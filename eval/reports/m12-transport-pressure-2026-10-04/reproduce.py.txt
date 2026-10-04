@@ -1,0 +1,38 @@
+"""Run from the pinned source checkout; print a deterministic paired summary."""
+import json
+from pathlib import Path
+import sys
+
+from eval.public.action_pressure import recompute
+
+root = Path(sys.argv[1])
+reports = {name:recompute(root/name/'workload') for name in ('mcp-stdio','cli')}
+plans = [json.loads((root/name/'workload/plan.json').read_text()) for name in reports]
+sources = {name:json.loads((root/name/'workload/source.json').read_text()) for name in reports}
+if plans[0] != plans[1] or len({s['source_commit'] for s in sources.values()}) != 1:
+    raise ValueError('paired inputs or source differ')
+if any(s['source_dirty'] or s['transport'] != name for name,s in sources.items()):
+    raise ValueError('paired transport identity differs')
+result = {'schema':'m12-transport-pressure-comparison/v1','source_commit':sources['cli']['source_commit'],
+          'same_offered_workload':True,'publishable':False,'ranking_eligible':False,'transports':{}}
+for name, report in reports.items():
+    rows = []
+    for case in report['cases']:
+        rows.append({'case_id':case['case_id'],'offered_live':case['offered_live'],
+            'metrics':case['full_workload_metrics'],
+            'expired_windows':case['samples'][-1]['expired_unobserved_windows'],
+            'exact_drain_recovered':case['exact_drain_recovered'],
+            'ticks':len(case['samples']),
+            'max_pending_exact':max(s['pending_exact'] for s in case['samples']),
+            'duplicate_observations':case['tick_conditional']['duplicate_observations'],
+            'evaluation_wall_ms_sum':case['tick_conditional']['evaluation_command_wall_ms']})
+    monitor = json.loads((root/name/'monitor/terminal.json').read_text())
+    if monitor['status']!='succeeded' or monitor['returncode']!=0:
+        raise ValueError('transport did not complete')
+    result['transports'][name] = {'cases':rows,
+        'valid_firings':sum(c['metrics']['true_positives'] for c in rows),
+        'missed_triggers':sum(c['metrics']['false_negatives'] for c in rows),
+        'false_positives':sum(c['metrics']['false_positives'] for c in rows),
+        'elapsed_with_setup_seconds':monitor['elapsed_seconds'],
+        'sampled_resources':monitor['resource_diagnostics']}
+print(json.dumps(result,sort_keys=True,indent=2))
